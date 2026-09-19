@@ -1366,18 +1366,62 @@ university host was dropped from the export with nothing said about it. Four of
 the five above fail this question; `fs01n5.sends` passes it and is held back by
 the corroboration rule instead, which is the true reason and the one recorded.
 
-One function writes a STIX pattern for a network endpoint —
-`stix_renderer.network_pattern` — and one answers whether this run may publish
-one: `network_publish_reason`, which dispatches to the domain, address or URL
-rule. Every minting path asks it: the network block's own rows and the string
-rows that reach the bundle through `static.interesting_strings`. It was three
-rules on four paths, and the fourth — a
-`StringIOC` of kind `ip`, which the deterministic IOC extractor produces on
+One function writes a STIX pattern for anything this platform mints —
+`stix_renderer.indicator_pattern` — and one answers whether this run may
+publish it: `indicator_publish_reason`. Every minting path asks it: the network
+block's own rows and the string rows that reach the bundle through
+`static.interesting_strings`. It was three rules on four paths, and the fourth
+— a `StringIOC` of kind `ip`, which the deterministic IOC extractor produces on
 every sample — asked none of them, so `6.0.0.0` was refused by the network block
 and exported by the string scan two sections later, typed `malicious-activity`.
+
+**The rule answers for every kind the sweep produces**, not only the three
+network ones: `url`, `domain`, `ip`, `email`, `path`, `registry`, `mutex`,
+`command`, `secret`, `crypto_wallet` and `other` — the set `STRING_IOC_KINDS`
+names, which mirrors `StringIOC.kind`. The other kinds used to fall past the
+predicate into the cap's file-name band and be exported with nothing asked, so
+a run that concluded a signed PuTTY is Benign published ten SSH algorithm
+identifiers as `malicious-activity` e-mail indicators, and a PE run published a
+third party's address lifted out of embedded library source. Two halves, in
+this order:
+
+* **Could it be the thing it claims to be.** A host that could exist
+  (`host_is_public`); a mailbox whose syntax is an address and whose domain part
+  passes that same host rule (`email_is_publishable`); a path that names a file
+  rather than a directory or a root (`path_names_a_file`). `secret` and
+  `crypto_wallet` have no STIX object and so no pattern; they stay in the
+  consolidated IOC table.
+* **Does anything but the sample's own byte image know it.** A `domain` asks the
+  network block's own answer; every other kind asks the run's corroborating
+  record — what a sandbox watched (the process tree, the registry
+  modifications, the file operations, the notable APIs), what a persistence
+  mechanism names, and what an analyst established in an artefact or a finding
+  section. The report's own tool sections are deliberately not in it: they are
+  the string sweep arriving under another heading, and a haystack holding them
+  would answer yes to everything.
+
+**What a minted indicator claims** is one function, `minted_indicator_type`,
+for every kind. The sample's own hash indicator is the verdict's word exactly
+(`indicator_type_for`); everything else is `anomalous-activity` unless the row
+itself was flagged suspicious *and* the run's verdict is Malware, in which case
+it is `malicious-activity`. `benign` is the sample's own word and is not lent
+to anything else — a host a benign sample talked to is not thereby a benign
+host. So a corroborated string-derived artefact is `anomalous-activity` under
+Malware, under Suspicious and under Benign alike. Nothing is
+`malicious-activity` by default; a URL used to be, whatever the run concluded.
+
+**An address a person owns never leaves the report.** A string-derived e-mail
+row that nothing corroborates is in the report's own indicator-strings table
+and in the consolidated IOC table, and in nothing else: not the STIX bundle,
+not `/reports/{id}/iocs` (which serves the hashes and the network block), not
+an enrichment lookup (which reads the network block's domains and addresses),
+and not an event — a string sweep's row is declined silently, because a report
+carrying forty unresolved findings nobody can act on buries the ones somebody
+can.
+
 `tests/unit/reporting/test_one_network_publish_rule.py` walks the tree for a
-literal that *builds* one of the four patterns and fails if a second place
-starts doing it.
+literal that *builds* any of those patterns and fails if a second place starts
+doing it.
 
 The judge does not mint patterns, it writes them, and its own indicator
 objects are asked the host question and not the corroboration one. The judge's
@@ -1401,6 +1445,29 @@ may carry it. A syntactically routable address the judge invented passes this
 question by design; whether any evidence holds it up is
 `stix.ungrounded_indicator`'s question, and that check is asked of every
 indicator the judge writes.
+
+The same validity questions reach the judge's other kinds. An `email-addr`
+pattern is asked whether it is a mailbox at all and whether its domain part
+could exist; a `file:name` pattern is asked whether it names a file rather than
+a directory or a root — both declined as `stix.unpublishable_artefact` when
+they are not. A `file:hashes` comparison is asked whether the literal is a
+digest of the algorithm it is written under, by length and alphabet
+(`HASH_HEX_LENGTHS`), and declined as `stix.malformed_hash` when it is not: one
+run exported sixteen of the thirty-two characters of an MD5, a value a consumer
+matching on MD5 can never match. The grounding check asks the same question
+first and then matches a digest as a *whole token*, never as the prefix of a
+longer run of hexadecimal, because a truncated digest is not "present in the
+evidence" however the substring search answers. An algorithm the table does not
+name is left alone.
+
+Two rows that mean one path are one row. `reporting.dedupe.canonical_path`
+normalises the separators, collapses runs of them, drops a trailing one and
+folds the case of a Windows path — Windows filesystems are case-insensitive, a
+POSIX one is not — and `pattern_fingerprint` uses it for `file:name`,
+`directory:path` and `windows-registry-key:key`. The first row is kept with the
+union of the sources, as every merge in this project works. One recorded bundle
+carried the same directory twice, once with the trailing slash and once
+without.
 
 Whether an endpoint that *could* exist is published stays
 `corroboration_reason`'s decision. A URL or a name the host question refuses is

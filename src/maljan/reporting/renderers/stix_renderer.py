@@ -27,11 +27,13 @@ from typing import Any
 from maljan.agents._indicator_denylists import (
     COMPILE_ARTIFACT_RE,
     FOREIGN_CLASS_REF_RE,
+    HASH_HEX_LENGTHS,
     IOC_FILE_EXTENSIONS,
     IOC_OS_RESOURCE_PREFIXES,
     MAX_FILE_NAME_INDICATORS,
     MAX_TOTAL_INDICATORS,
     URL_DENY_HOSTS,
+    malformed_hash_in,
 )
 from maljan.core.logger import logger
 from maljan.extractors.network_extractor import (
@@ -73,6 +75,11 @@ _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 MALWARE_UNDER_BENIGN_CODE = "stix.malware_object_under_benign"
 UNPUBLISHABLE_URL_CODE = "stix.unpublishable_url"
 UNPUBLISHABLE_DOMAIN_CODE = "stix.unpublishable_domain"
+# An indicator over something that is not an endpoint: a mailbox that is not
+# one, a file name that names a directory or a root.
+UNPUBLISHABLE_ARTEFACT_CODE = "stix.unpublishable_artefact"
+# A digest literal that is not a digest of the algorithm it is written under.
+MALFORMED_HASH_CODE = "stix.malformed_hash"
 
 # The sources whose rows are worth a recorded decline. Something a sandbox
 # watched, an agent wrote down or the judge asserted is an observation, and a
@@ -129,7 +136,7 @@ _PATTERN_LITERALS_RE = re.compile(r"'([^']*)'")
 # does not carry meaning in a STIX object path, and a judge writes
 # ``[URL:value = ...]`` often enough that reading it as a kind this question is
 # not about would be a hole rather than a nicety.
-_OBJECT_PATH_RE = re.compile(r"([a-z0-9-]+):[a-z_.]+", re.IGNORECASE)
+_OBJECT_PATH_RE = re.compile(r"([a-z0-9-]+):([a-z_.]+)", re.IGNORECASE)
 
 # Comparison operators whose right-hand side is not an endpoint: a regular
 # expression, a wildcard shape, a subnet. The value cannot be asked the host
@@ -137,9 +144,29 @@ _OBJECT_PATH_RE = re.compile(r"([a-z0-9-]+):[a-z_.]+", re.IGNORECASE)
 # that would be untrue of it.
 _UNREADABLE_OPERATORS = ("matches", "like", "issubset", "issuperset")
 
-# The object types whose value is an endpoint a consumer would act on, which is
-# what the host question is asked about.
-_NETWORK_OBJECT_TYPES = ("url", "domain-name", "ipv4-addr", "ipv6-addr")
+# The object types whose value this export can ask a validity question about:
+# the four endpoints a consumer would act on, the mailbox and the file name.
+# A pattern over anything else is carried as the judge wrote it — there is no
+# true question to ask of it, and inventing one would decline an object for a
+# reason that is not so.
+_CHECKED_OBJECT_TYPES = ("url", "domain-name", "ipv4-addr", "ipv6-addr", "email-addr", "file")
+
+# What each of them is called in a recorded decline, and which code the decline
+# is filed under.
+_OBJECT_TYPE_WORDS = {
+    "url": "URL",
+    "domain-name": "domain",
+    "email-addr": "e-mail address",
+    "file": "file name",
+}
+_DECLINE_CODES = {
+    "url": UNPUBLISHABLE_URL_CODE,
+    "domain-name": UNPUBLISHABLE_DOMAIN_CODE,
+    "ipv4-addr": UNPUBLISHABLE_DOMAIN_CODE,
+    "ipv6-addr": UNPUBLISHABLE_DOMAIN_CODE,
+    "email-addr": UNPUBLISHABLE_ARTEFACT_CODE,
+    "file": UNPUBLISHABLE_ARTEFACT_CODE,
+}
 
 
 def _indicator_band(pattern: str) -> int:
@@ -215,6 +242,37 @@ def unreadable_endpoint_sentence(value: str, kind_words: str, whose: str) -> str
     )
 
 
+def not_an_address_sentence(value: str) -> str:
+    """The recorded sentence for a mailbox that is not one, left where it is."""
+    return (
+        f"the e-mail indicator for {safe_finding_value(value)!r} is not in the exported bundle: "
+        f"it is not a mailbox — either its syntax is not an address, or its domain part is not a "
+        f"name anything outside the analysed network could answer for. It is unchanged in the "
+        f"judge's own bundle."
+    )
+
+
+def not_a_file_sentence(value: str) -> str:
+    """The recorded sentence for a file name that names a place, not a file."""
+    return (
+        f"the file indicator for {safe_finding_value(value)!r} is not in the exported bundle: it "
+        f"names a directory or a root rather than a file, and a consumer matching on file:name "
+        f"cannot act on one. It is unchanged in the judge's own bundle."
+    )
+
+
+def malformed_hash_sentence(algorithm: str, value: str) -> str:
+    """The recorded sentence for a digest that is not one of its algorithm."""
+    expected = HASH_HEX_LENGTHS.get(str(algorithm).strip().upper())
+    length = f"{expected} hexadecimal characters" if expected else "the algorithm's own length"
+    named = safe_finding_value(algorithm)
+    return (
+        f"the {named} indicator for {safe_finding_value(value)!r} is not in the exported "
+        f"bundle: {named} is {length}, and a consumer matching on it will never match this "
+        f"value. It is unchanged in the judge's own bundle."
+    )
+
+
 def unpublishable_domain_sentence(fqdn: str) -> str:
     """The recorded sentence for a name somebody watched that no export may carry."""
     return (
@@ -222,6 +280,30 @@ def unpublishable_domain_sentence(fqdn: str) -> str:
         "is a name that does not resolve outside the analysed network. The report's network block "
         "keeps the row with the source that saw it."
     )
+
+
+def minted_indicator_type(verdict: Any, *, suspicious: bool = False) -> str:
+    """What one indicator this pipeline mints claims, for the verdict published.
+
+    One function for every kind, because the answer is one answer: an endpoint
+    or an artefact found in a run is a claim about that run, and a run that
+    concluded the sample is benign publishes no indicator saying otherwise. The
+    sample's own hash indicator is the verdict's word exactly
+    (:func:`indicator_type_for`); everything else is that word softened by one
+    step unless the row itself was flagged, because nothing but the verdict
+    entitles this export to say "malicious activity".
+
+    ``malicious-activity`` used to be the default for a URL and for every
+    string row, so a Benign export told every blocklist that ten SSH algorithm
+    identifiers were malicious.
+
+    ``benign`` is the sample's own word and is not lent to anything else: a
+    host a benign sample talked to is not thereby a benign host, and this
+    export has no standing to say it is.
+    """
+    if suspicious and indicator_type_for(verdict) == "malicious-activity":
+        return "malicious-activity"
+    return "anomalous-activity"
 
 
 def _observed(source: Any) -> bool:
@@ -245,6 +327,7 @@ def _pattern_endpoints(pattern: str) -> list[tuple[str, str, str]]:
     """
     found: list[tuple[str, str, str]] = []
     kind = ""
+    prop = ""
     operator = ""
     for index, chunk in enumerate(pattern.split("'")):
         if index % 2 == 0:
@@ -253,8 +336,12 @@ def _pattern_endpoints(pattern: str) -> list[tuple[str, str, str]]:
             paths = list(_OBJECT_PATH_RE.finditer(chunk))
             if paths:
                 kind = paths[-1].group(1).lower()
+                prop = paths[-1].group(2).lower()
                 operator = chunk[paths[-1].end() :].strip().lower()
-        elif kind in _NETWORK_OBJECT_TYPES:
+        elif kind in _CHECKED_OBJECT_TYPES and not (kind == "file" and prop != "name"):
+            # A ``file:hashes.'MD5'`` comparison quotes the algorithm as well
+            # as the digest, and neither is a file name. Hashes are asked their
+            # own question, by length and alphabet, outside this loop.
             found.append((kind, chunk, operator))
     return found
 
@@ -265,16 +352,21 @@ def _endpoint_is_readable(operator: str) -> bool:
 
 
 def _endpoint_is_publishable(kind: str, literal: str) -> bool:
-    """Whether an export could carry this endpoint at all, whoever wrote it down.
+    """Whether an export could carry this value at all, whoever wrote it down.
 
-    The host question only — could anything outside the analysed network ever
-    answer for this. Who recorded the row is the corroboration question's
-    business and is not asked here.
+    The validity question only — could this be the thing it claims to be. Who
+    recorded the row is the corroboration question's business and is not asked
+    here; the judge's own assertion is a source, and asking it would answer
+    trivially.
     """
     if kind == "url":
         return host_is_public(url_host(literal))
     if kind == "domain-name":
         return host_is_public(literal)
+    if kind == "email-addr":
+        return email_is_publishable(literal)
+    if kind == "file":
+        return path_names_a_file(literal)
     # The judge asserting an address is somebody observing it, so a private one
     # it cites out of the sandbox's own evidence is lateral movement and stays.
     # Loopback, unspecified, documentation, multicast and broadcast never are.
@@ -299,16 +391,25 @@ def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
     endpoint up is ``stix.ungrounded_indicator``'s question, and it is asked of
     every indicator the judge writes.
     """
-    for kind, literal, operator in _pattern_endpoints(indicator.pattern or ""):
+    pattern = indicator.pattern or ""
+    malformed = malformed_hash_in(pattern)
+    if malformed is not None:
+        algorithm, literal = malformed
+        return (MALFORMED_HASH_CODE, malformed_hash_sentence(algorithm, literal))
+    for kind, literal, operator in _pattern_endpoints(pattern):
         readable = _endpoint_is_readable(operator)
         if readable and _endpoint_is_publishable(kind, literal):
             continue
-        code = UNPUBLISHABLE_URL_CODE if kind == "url" else UNPUBLISHABLE_DOMAIN_CODE
-        words = {"url": "URL", "domain-name": "domain"}.get(kind, "address")
+        code = _DECLINE_CODES.get(kind, UNPUBLISHABLE_DOMAIN_CODE)
+        words = _OBJECT_TYPE_WORDS.get(kind, "address")
         if not readable:
             return (code, unreadable_endpoint_sentence(literal, words, "the judge's own bundle"))
         if kind == "url":
             return (code, impossible_host_sentence(literal, "the judge's own bundle"))
+        if kind == "email-addr":
+            return (code, not_an_address_sentence(literal))
+        if kind == "file":
+            return (code, not_a_file_sentence(literal))
         return (code, unpublishable_endpoint_sentence(literal, words, "the judge's own bundle"))
     return None
 
@@ -509,7 +610,7 @@ class ExtendedSTIXRenderer:
         #    keeping is the one that carries the observation.
         if report.network is not None:
             for ip in report.network.ips[:40]:
-                ip_ind = _indicator_for_ip(ip)
+                ip_ind = _indicator_for_ip(ip, report.verdict)
                 if ip_ind is not None:
                     _queue(ip_ind, _BAND_NETWORK, ip.source)
             for url in report.network.urls[:40]:
@@ -532,7 +633,7 @@ class ExtendedSTIXRenderer:
                         )
                     )
             for domain in report.network.domains[:40]:
-                dom_ind = _indicator_for_domain(domain)
+                dom_ind = _indicator_for_domain(domain, report.verdict)
                 if dom_ind is not None:
                     _queue(dom_ind, _BAND_NETWORK, domain.source)
                     continue
@@ -550,11 +651,15 @@ class ExtendedSTIXRenderer:
 
         # 6) StringIOC → Indicator.
         #
-        # Which names this run may publish at all. One rule, read once, and
-        # every path that mints a domain indicator asks it: the network block
-        # above, and the string rows here, which are the same names arriving
-        # by a second road.
+        # Which values this run may publish at all. One rule, read once, and
+        # every path that mints an indicator asks it: the network block above,
+        # and the string rows here, which are the same values arriving by a
+        # second road. A row here is string-derived by construction, so what it
+        # needs is a second source, and these two sets are where one is found —
+        # the network block's own answer for a name, and everything some other
+        # producer in this run wrote down for every other kind.
         publishable_domains = _publishable_domains(report)
+        corroborating = _corroborating_values(report)
 
         # Apply the same acceptance-based filter
         # used by the judge bundle postprocess so deterministic
@@ -568,26 +673,29 @@ class ExtendedSTIXRenderer:
                 pattern = _stix_pattern_for_string_ioc(ioc)
                 if pattern is None:
                     continue
-                if not _accept_string_ioc(ioc, pattern, file_name_kept, publishable_domains):
+                if not _accept_string_ioc(
+                    ioc, pattern, file_name_kept, publishable_domains, corroborating
+                ):
                     continue
-                is_file_name = pattern.lstrip().startswith("[file:name")
-                if is_file_name:
+                if pattern.lstrip().startswith("[file:name"):
                     file_name_kept += 1
                 ind = Indicator(
                     name=f"{ioc.kind} {ioc.value[:32]}",
                     pattern=pattern,
                     pattern_type="stix",
-                    # file:name string IOCs are the FP-prone kind (heavily
-                    # capped/filtered upstream); mark them anomalous-activity so
-                    # consumers can weight them below high-confidence hash/C2 IOCs.
-                    indicator_types=(
-                        ["anomalous-activity"] if is_file_name else ["malicious-activity"]
-                    ),
+                    # What the row claims follows the verdict the run
+                    # publishes, like every other indicator this renderer
+                    # mints. A string-derived artefact is nobody's observation
+                    # of activity, so it is never the suspicious reading: under
+                    # Malware and Suspicious it is anomalous, under Benign it
+                    # is benign. It used to be minted ``malicious-activity``
+                    # whatever the run concluded.
+                    indicator_types=[minted_indicator_type(report.verdict)],
                 )
                 # String-derived by construction, and only here at all because
-                # a second source knew the name; the band reads the pattern and
-                # the rank reads that origin, so it never outranks a row the
-                # sandbox watched.
+                # a second source knew the value; the band reads the pattern
+                # and the rank reads that origin, so it never outranks a row
+                # the sandbox watched.
                 _queue(ind, _indicator_band(pattern), "strings")
 
         # 6.5) The judge's own indicators, banded by their patterns. They are
@@ -890,42 +998,130 @@ def _escape_stix(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
-# The network kinds, and the one place a pattern for any of them is written.
-# Nothing else in the tree builds one: a path that wrote its own would be a
-# path that had not asked :func:`network_publish_reason`, which is how a
-# version number out of a strings table came to be exported as malicious
-# infrastructure two sections after the network block had refused the same
-# address. ``tests/unit/reporting/test_one_network_publish_rule.py`` fails if a
-# second place starts writing one.
+# The network kinds, and the kinds the string sweep types a row as. The second
+# tuple mirrors ``StringIOC.kind``: a kind added there with no answer in
+# :func:`indicator_publish_reason` is a kind that falls past the publish rule,
+# which is how ten SSH algorithm identifiers left a Benign run as e-mail
+# addresses typed ``malicious-activity``.
 NETWORK_KINDS: tuple[str, ...] = ("domain", "ip", "url")
+STRING_IOC_KINDS: tuple[str, ...] = (
+    "url",
+    "domain",
+    "ip",
+    "email",
+    "path",
+    "registry",
+    "mutex",
+    "command",
+    "secret",
+    "crypto_wallet",
+    "other",
+)
 
 
-def network_pattern(kind: str, value: str) -> str | None:
-    """The STIX pattern for one network endpoint, or ``None`` for another kind."""
+def indicator_pattern(kind: str, value: str) -> str | None:
+    """The STIX pattern for one indicator value, or ``None`` for a kind with none.
+
+    The one place in the tree a pattern is written. A path that wrote its own
+    would be a path that had not asked :func:`indicator_publish_reason` first,
+    which is how a version number out of a strings table came to be exported as
+    malicious infrastructure two sections after the network block had refused
+    the same address, and how the e-mail rows were exported with no rule asked
+    at all. ``tests/unit/reporting/test_one_network_publish_rule.py`` fails if a
+    second place starts writing one.
+
+    "secret" and "crypto_wallet" are deliberately not patterned. STIX 2.1 has
+    no SCO for a leaked credential or a wallet address, and inventing a custom
+    object would produce a bundle that no consumer can ingest — worse than
+    omitting it, because it looks importable and is not. Both kinds are carried
+    in the consolidated IOC table instead, where they are typed and readable.
+    """
     quoted = _escape_stix(value)
     if kind == "url":
         return f"[url:value = '{quoted}']"
     if kind == "domain":
         return f"[domain-name:value = '{quoted}']"
+    if kind == "email":
+        return f"[email-addr:value = '{quoted}']"
+    if kind == "mutex":
+        return f"[mutex:name = '{quoted}']"
+    if kind == "registry":
+        return f"[windows-registry-key:key = '{quoted}']"
+    if kind == "path":
+        return f"[file:name = '{quoted}']"
     if kind != "ip":
         return None
     try:
-        family = "ipv6-addr" if ipaddress.ip_address(quoted).version == 6 else "ipv4-addr"
+        family = "ipv6-addr" if ipaddress.ip_address(value.strip()).version == 6 else "ipv4-addr"
     except ValueError:
         family = "ipv4-addr"
     return f"[{family}:value = '{quoted}']"
 
 
-def network_publish_reason(
-    kind: str, value: str, source: Any, reputation: Any = None
-) -> str | None:
-    """Why this run may publish one network endpoint, or ``None``.
+# A mailbox: a local part, one ``@``, and a domain part. Deliberately the
+# syntax and nothing more — whether anything could answer for the domain is the
+# host rule's question, asked separately below, and whether anybody but the
+# sample's own bytes knows the address is the corroboration question's.
+_EMAIL_RE = re.compile(r"^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]{1,64}@([A-Za-z0-9.\-]{1,255})$")
 
-    One rule for the three kinds, and every path that can mint a network
-    indicator asks it: the network block's own rows, the string rows that reach
-    the bundle through ``static.interesting_strings``, and the judge's own
-    indicator objects. It used to be three rules on four paths, and the path
-    nobody had named published what the other three refused.
+
+def email_is_publishable(value: Any) -> bool:
+    """Whether this literal is an address at all, and one that could exist.
+
+    A string sweep reads any run of bytes with an ``@`` in it as a mailbox:
+    ``aes128-gcm@openssh.com`` is an SSH algorithm identifier and
+    ``z@D.setdefault`` is a fragment of Python source. The syntax question
+    catches what is not an address; the domain part goes through the same host
+    rule a domain indicator does, so a mailbox at a name nothing outside the
+    analysed network could answer for is refused the way that name would be.
+    """
+    text = str(value or "").strip()
+    match = _EMAIL_RE.match(text)
+    if match is None:
+        return False
+    local = text.rsplit("@", 1)[0]
+    if local.startswith(".") or local.endswith(".") or ".." in local:
+        return False
+    return host_is_public(match.group(1))
+
+
+def path_names_a_file(value: Any) -> bool:
+    """Whether this literal names a file rather than a directory or a root.
+
+    ``/Users/``, ``C:\\`` and a bare drive letter name a place, not a file, and
+    a consumer matching on ``file:name`` can do nothing with one. A trailing
+    separator is the tell every one of them carries.
+    """
+    text = str(value or "").strip()
+    if not text or text.endswith(("/", "\\")):
+        return False
+    last = re.split(r"[\\/]", text)[-1]
+    return bool(last) and re.fullmatch(r"[A-Za-z]:", last) is None
+
+
+def indicator_publish_reason(
+    kind: str,
+    value: str,
+    source: Any,
+    reputation: Any = None,
+    *,
+    corroborated_by: str = "",
+) -> str | None:
+    """Why this run may publish one indicator of ``kind``, or ``None``.
+
+    One rule for every kind the platform mints, and every minting path asks it:
+    the network block's own rows, the string rows that reach the bundle through
+    ``static.interesting_strings``, and the judge's own indicator objects. It
+    used to answer for the three network kinds only, and everything else — an
+    e-mail address, a file name, a registry key, a mutex — fell past it into
+    the cap's file-name band and was exported with no question asked.
+
+    Two halves, in this order. Could this value be the thing it claims to be:
+    a host that could exist, a mailbox, a path naming a file. And does anything
+    but the sample's own byte image know it: a sandbox observation, an analyst
+    claim citing evidence that holds it, a reputation record. ``source`` is who
+    recorded the row, and ``corroborated_by`` is what a caller found for a row
+    whose source is by construction the string sweep.
     """
     if kind == "domain":
         if not host_is_public(value):
@@ -935,28 +1131,19 @@ def network_publish_reason(
         return ip_corroboration_reason(value, source, reputation)
     if kind == "url":
         return url_corroboration_reason(value, source, reputation)
-    return None
+    if kind == "email" and not email_is_publishable(value):
+        return None
+    if kind == "path" and not path_names_a_file(value):
+        return None
+    if kind not in STRING_IOC_KINDS or indicator_pattern(kind, value) is None:
+        return None
+    if str(source or "").strip().lower() not in ("", "strings"):
+        return str(source)
+    return corroborated_by or None
 
 
 def _stix_pattern_for_string_ioc(ioc: StringIOC) -> str | None:
-    value = _escape_stix(ioc.value)
-    if ioc.kind in NETWORK_KINDS:
-        return network_pattern(ioc.kind, ioc.value)
-    if ioc.kind == "email":
-        return f"[email-addr:value = '{value}']"
-    if ioc.kind == "mutex":
-        return f"[mutex:name = '{value}']"
-    if ioc.kind == "registry":
-        return f"[windows-registry-key:key = '{value}']"
-    if ioc.kind == "path":
-        return f"[file:name = '{value}']"
-    # "secret" and "crypto_wallet" reach here and are deliberately not patterned.
-    # STIX 2.1 has no SCO for a leaked credential or a wallet address, and
-    # inventing a custom object would produce a bundle that no consumer can
-    # ingest — worse than omitting it, because it looks importable and is not.
-    # Both kinds are carried in the consolidated IOC table instead, where they
-    # are typed and readable.
-    return None
+    return indicator_pattern(ioc.kind, ioc.value)
 
 
 def _publishable_domains(report: Any) -> frozenset[str]:
@@ -976,9 +1163,61 @@ def _publishable_domains(report: Any) -> frozenset[str]:
         domain.fqdn.strip().lower().rstrip(".")
         for domain in network.domains
         if domain.fqdn
-        and network_publish_reason("domain", domain.fqdn, domain.source, domain.reputation)
+        and indicator_publish_reason("domain", domain.fqdn, domain.source, domain.reputation)
         is not None
     )
+
+
+# Where a second source for a string row is looked for. A section built from
+# an analyst's own artefact or finding is a claim that cites evidence; a
+# section built from a tool's output is the string sweep's own table arriving
+# under another heading, and reading those would let every string corroborate
+# itself.
+_ANALYST_SECTION_SOURCES = ("artifact:", "finding", "agent")
+
+
+def _corroborating_values(report: Any) -> str:
+    """Everything some producer other than the string sweep wrote down, lowercased.
+
+    One haystack, searched by containment, and deliberately narrow about what
+    goes into it: what a sandbox watched, what a persistence mechanism names,
+    and what an analyst established in an artefact or a finding. The report's
+    own string tables are not in it — they are the thing being corroborated,
+    and a haystack holding them would answer yes to everything.
+    """
+    parts: list[str] = []
+    dynamic = getattr(report, "dynamic", None)
+    if dynamic is not None:
+        for node in list(getattr(dynamic, "process_tree", None) or []):
+            parts.extend(_process_text(node))
+        for mod in list(getattr(dynamic, "registry_mods", None) or []):
+            parts.extend(str(getattr(mod, field, "") or "") for field in ("key", "value", "data"))
+        for operation in list(getattr(dynamic, "file_operations", None) or []):
+            if isinstance(operation, dict):
+                parts.extend(str(value) for value in operation.values())
+        for api in list(getattr(dynamic, "notable_apis", None) or []):
+            if isinstance(api, dict):
+                parts.extend(str(value) for value in api.values())
+    for mechanism in list(getattr(report, "persistence", None) or []):
+        parts.append(str(getattr(mechanism, "target", "") or ""))
+        parts.append(str(getattr(mechanism, "payload", "") or ""))
+    for section in list(getattr(report, "sections", None) or []):
+        origin = str(getattr(section, "source", "") or "").strip().lower()
+        if not origin.startswith(_ANALYST_SECTION_SOURCES):
+            continue
+        parts.append(str(getattr(section, "text", "") or ""))
+        parts.extend(str(item) for item in (getattr(section, "items", None) or []))
+        for row in getattr(section, "rows", None) or []:
+            parts.extend(str(cell) for cell in row)
+    return " ".join(part for part in parts if part).lower()
+
+
+def _process_text(node: Any) -> list[str]:
+    """One process node's name and command line, and its children's."""
+    out = [str(getattr(node, "name", "") or ""), str(getattr(node, "command_line", "") or "")]
+    for child in list(getattr(node, "children", None) or []):
+        out.extend(_process_text(child))
+    return out
 
 
 def _accept_string_ioc(
@@ -986,6 +1225,7 @@ def _accept_string_ioc(
     pattern: str,
     file_name_kept: int,
     publishable_domains: frozenset[str] = frozenset(),
+    corroborating: str = "",
 ) -> bool:
     """Gate StringIOC → Indicator emission.
 
@@ -995,28 +1235,30 @@ def _accept_string_ioc(
     is nobody to hand a violation back to: the gate is the whole check. Mocking
     out the LLM (or any judge bundle path) no longer means the bundle ships with
     NDK build paths / bundled bytecode class refs / random short strings.
+
+    Every kind asks the one publish rule as ``strings``, because that is what
+    every row here is. A domain asks it through the network block's own answer,
+    which is where the same name's reputation and its stronger source live; the
+    others ask it directly, with whatever second source this run recorded. The
+    addresses used to fall past all of this to a bare ``return True``, so a
+    version number written with dots in it was exported as malicious
+    infrastructure while the network block was refusing the very same address —
+    and every kind that is not a network kind still did, which is how ten SSH
+    algorithm identifiers left a Benign run as e-mail indicators.
     """
     stripped = pattern.lstrip()
     value = (ioc.value or "").strip()
 
-    # Every network kind asks the one publish rule, and every row here came out
-    # of the string scan, so every one of them asks it as ``strings``. A domain
-    # asks it through the network block's own answer, which is where the same
-    # name's reputation and its stronger source live; the other two ask it
-    # directly. The addresses used to fall past all of this to ``return True``
-    # below, so a version number written with dots in it was exported as
-    # malicious infrastructure while the network block was refusing the very
-    # same address.
-    if ioc.kind in NETWORK_KINDS:
-        if ioc.kind == "domain":
-            return value.lower().rstrip(".") in publishable_domains
-        if ioc.kind == "url":
-            host = _extract_url_host(value)
-            if host and any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
-                return False
-        return network_publish_reason(ioc.kind, value, "strings") is not None
+    if ioc.kind == "domain":
+        return value.lower().rstrip(".") in publishable_domains
+    if ioc.kind == "url":
+        host = _extract_url_host(value)
+        if host and any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
+            return False
 
-    # file:name: acceptance-based admission + per-report cap.
+    # file:name: acceptance-based admission + per-report cap, asked before the
+    # publish rule because its answer is about the shape of the value and the
+    # budget, not about who saw it.
     if stripped.startswith("[file:name"):
         if file_name_kept >= MAX_FILE_NAME_INDICATORS:
             return False
@@ -1026,9 +1268,16 @@ def _accept_string_ioc(
             return False
         if FOREIGN_CLASS_REF_RE.match(value):
             return False
-        return _looks_like_real_path(value)
+        if not _looks_like_real_path(value):
+            return False
 
-    return True
+    corroborated = (
+        "a second source in this run records it" if value and value.lower() in corroborating else ""
+    )
+    return (
+        indicator_publish_reason(ioc.kind, value, "strings", corroborated_by=corroborated)
+        is not None
+    )
 
 
 def _extract_url_host(raw_url: str) -> str | None:
@@ -1056,7 +1305,7 @@ def _looks_like_real_path(value: str) -> bool:
     return False
 
 
-def _indicator_for_domain(domain: NetworkDomain) -> Indicator | None:
+def _indicator_for_domain(domain: NetworkDomain, verdict: Any = "") -> Indicator | None:
     """The name as an indicator, or ``None`` when this run may not publish it.
 
     Two ways to be refused, and they are different facts: a name nothing but
@@ -1068,7 +1317,7 @@ def _indicator_for_domain(domain: NetworkDomain) -> Indicator | None:
     fqdn = domain.fqdn.strip()
     if not fqdn:
         return None
-    admitted = network_publish_reason("domain", fqdn, domain.source, domain.reputation)
+    admitted = indicator_publish_reason("domain", fqdn, domain.source, domain.reputation)
     if admitted is None:
         # A run of bytes that has the shape of a hostname is not an
         # observation of infrastructure. One PE's string sweep put fifteen
@@ -1077,13 +1326,13 @@ def _indicator_for_domain(domain: NetworkDomain) -> Indicator | None:
         # network block, labelled with where they came from; they are not
         # offered to the world until a second source knows the name.
         return None
-    pattern = network_pattern("domain", fqdn)
+    pattern = indicator_pattern("domain", fqdn)
     assert pattern is not None  # noqa: S101 - a domain always has one
     return Indicator(
         name=f"Domain {fqdn}",
         pattern=pattern,
         pattern_type="stix",
-        indicator_types=["malicious-activity"] if domain.is_suspicious else ["anomalous-activity"],
+        indicator_types=[minted_indicator_type(verdict, suspicious=domain.is_suspicious)],
         # Only the surprising admission is spelled out. A name the sandbox
         # resolved needs no explanation, and adding one would rewrite the
         # description of every domain in every bundle; a Tor address reaches a
@@ -1101,7 +1350,7 @@ def _indicator_for_domain(domain: NetworkDomain) -> Indicator | None:
     )
 
 
-def _indicator_for_ip(ip: NetworkIP) -> Indicator | None:
+def _indicator_for_ip(ip: NetworkIP, verdict: Any = "") -> Indicator | None:
     """The address as an indicator, or ``None`` when this run may not publish it.
 
     The same rule the domains and the URLs go through. The addresses were the
@@ -1113,16 +1362,16 @@ def _indicator_for_ip(ip: NetworkIP) -> Indicator | None:
     address = ip.address.strip()
     if not address:
         return None
-    admitted = network_publish_reason("ip", address, ip.source, ip.reputation)
+    admitted = indicator_publish_reason("ip", address, ip.source, ip.reputation)
     if admitted is None:
         return None
-    pattern = network_pattern("ip", address)
+    pattern = indicator_pattern("ip", address)
     assert pattern is not None  # noqa: S101 - an address always has one
     return Indicator(
         name=f"IP {address}",
         pattern=pattern,
         pattern_type="stix",
-        indicator_types=["malicious-activity"] if ip.is_suspicious else ["anomalous-activity"],
+        indicator_types=[minted_indicator_type(verdict, suspicious=ip.is_suspicious)],
         # As for a domain, only the surprising admission is spelled out: an
         # address a sandbox watched needs no explanation, and one the file's
         # own bytes carried reaches a bundle on a reputation record alone.
@@ -1148,16 +1397,18 @@ def _indicator_for_url(url: NetworkURL, report: Any = None) -> Indicator | None:
     # "unrecorded" is how one of them ends up publishing what the other ranks
     # as noise. Only a row persisted before the field existed reaches this.
     source = url.source or "strings"
-    admitted = network_publish_reason("url", url.url, source, _host_reputation(report, host))
+    admitted = indicator_publish_reason("url", url.url, source, _host_reputation(report, host))
     if admitted is None:
         return None
-    pattern = network_pattern("url", url.url)
+    pattern = indicator_pattern("url", url.url)
     assert pattern is not None  # noqa: S101 - a URL always has one
     return Indicator(
         name=f"URL {url.url[:48]}",
         pattern=pattern,
         pattern_type="stix",
-        indicator_types=["malicious-activity"],
+        # A URL used to be minted ``malicious-activity`` whatever the run
+        # concluded, which is the one network kind that never asked.
+        indicator_types=[minted_indicator_type(getattr(report, "verdict", ""), suspicious=True)],
         # As for a domain, only the surprising admission is spelled out.
         description=admitted if source == "strings" else None,
     )

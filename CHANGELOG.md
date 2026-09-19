@@ -2255,6 +2255,39 @@ change landed on `main`.
   per-stage durations are printed beside it from `run_summary.stages`, the
   list the console's stage headers are drawn from. Stored reports keep the
   figure they were written with.
+- **One publish rule for every indicator the platform mints, not only the
+  network ones.** The predicate covered `url`, `domain` and `ip`; every other
+  kind the string sweep produces fell past it into the cap's file-name band and
+  was exported with nothing asked. A run that concluded a signed PuTTY is
+  Benign published ten SSH algorithm identifiers (`aes128-gcm@openssh.com` and
+  its kind) as `malicious-activity` e-mail indicators, and a PE run published a
+  third party's address lifted out of embedded library source.
+  `indicator_publish_reason` now answers for every kind in `STRING_IOC_KINDS`:
+  the value has to be the thing it claims to be — a host that could exist, a
+  mailbox whose domain part passes the host rule, a path that names a file
+  rather than a directory — and something other than the sample's own bytes has
+  to know it: a sandbox observation, a persistence mechanism, an analyst's
+  artefact or finding, a reputation record. `indicator_pattern` is the one
+  place any of those patterns is written, and the guard test fails on a second.
+  An uncorroborated address a person owns stays in the report and reaches
+  neither the bundle, nor `/reports/{id}/iocs`, nor an enrichment lookup, nor
+  an event.
+- **Nothing the platform mints is `malicious-activity` by default.** One
+  function, `minted_indicator_type`, decides for every kind: the sample's own
+  hash indicator is the verdict's word, and every other row is
+  `anomalous-activity` unless it was flagged suspicious under a Malware
+  verdict. A URL used to claim malicious activity whatever the run concluded.
+- **A digest is its algorithm's length, a file name names a file, and one path
+  is one row.** A run exported `[file:hashes.'MD5' = '32066ff6369a7bd7']`,
+  sixteen of thirty-two characters, because the grounding check found the
+  truncated prefix inside the real digest; it now matches a digest as a whole
+  token and asks the length question first, and the export declines a
+  malformed one as `stix.malformed_hash`. A `file:name` naming a directory or
+  a root (`/Users/`) is declined as `stix.unpublishable_artefact`, as is an
+  `email-addr` that is not a mailbox. The judge's own objects are declined and
+  recorded, never rewritten; the platform mints none of them. Dedupe compares
+  normalised paths — separators, runs of them, a trailing one, and the case of
+  a Windows path — so the same directory written twice is one indicator.
 
 ### Removed
 

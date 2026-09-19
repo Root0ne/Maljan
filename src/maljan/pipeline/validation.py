@@ -1810,6 +1810,35 @@ def _runtime_paths(evidence_corpus: set[str] | None) -> set[str]:
     return found
 
 
+# A run of hexadecimal on its own, and the lengths a digest this project can
+# name comes in. Anything else quoted in a pattern is asked the corpus question
+# as it always was.
+_HEX_TOKEN_RE = re.compile(r"^[0-9a-fA-F]+$")
+_DIGEST_LENGTHS = frozenset({32, 40, 56, 64, 96, 128})
+
+# What separates one token from the next in the evidence corpus. A digest is
+# found when it stands alone between two of them, never when it is the first
+# half of a longer one.
+_TOKEN_BOUNDARY_RE = re.compile(r"[0-9a-f]", re.IGNORECASE)
+
+
+def _whole_token_in(literal: str, haystack: str, own: set[str]) -> bool:
+    """Whether ``literal`` appears in the corpus as a value rather than a prefix."""
+    lowered = literal.lower()
+    if lowered in own:
+        return True
+    start = haystack.find(lowered)
+    while start != -1:
+        before = haystack[start - 1] if start else ""
+        after = haystack[start + len(lowered) : start + len(lowered) + 1]
+        if not _TOKEN_BOUNDARY_RE.match(before or " ") and not _TOKEN_BOUNDARY_RE.match(
+            after or " "
+        ):
+            return True
+        start = haystack.find(lowered, start + 1)
+    return False
+
+
 def _indicator_problem(
     pattern: str, haystack: str, runtime_paths: set[str], identity: Iterable[str] = ()
 ) -> str:
@@ -1829,9 +1858,11 @@ def _indicator_problem(
     from maljan.agents._indicator_denylists import (
         COMPILE_ARTIFACT_RE,
         FOREIGN_CLASS_REF_RE,
+        HASH_HEX_LENGTHS,
         IOC_FILE_EXTENSIONS,
         IOC_OS_RESOURCE_PREFIXES,
         URL_DENY_HOSTS,
+        malformed_hash_in,
     )
 
     if not pattern.strip():
@@ -1849,6 +1880,33 @@ def _indicator_problem(
         return literal.lower() in haystack or literal.lower() in own
 
     stripped = pattern.lstrip()
+
+    # A hash literal answers to its algorithm before it answers to the corpus.
+    # Sixteen of the thirty-two characters of an MD5 are a prefix of one, and a
+    # substring search over the evidence finds a prefix every time — one run
+    # exported ``32066ff6369a7bd7`` as an indicator no consumer matching on MD5
+    # can ever match. The length question is asked first because a truncated
+    # digest is not "present in the evidence" whatever the haystack says.
+    malformed = malformed_hash_in(pattern)
+    if malformed is not None:
+        algorithm, literal = malformed
+        named = safe_finding_value(algorithm)
+        expected = HASH_HEX_LENGTHS.get(algorithm)
+        return (
+            f"{safe_finding_value(literal)!r} is not a {named} digest: "
+            f"{named} is {expected} hexadecimal characters."
+        )
+    for literal in literals:
+        if _HEX_TOKEN_RE.match(literal) and len(literal) in _DIGEST_LENGTHS:
+            # A whole token, never a prefix of a longer run of hex: the same
+            # reason, asked of a digest the pattern did not name an algorithm
+            # for.
+            if not _whole_token_in(literal, haystack, own):
+                return (
+                    f"the indicator pattern names {safe_finding_value(literal)}, which appears "
+                    "nowhere in the evidence this run collected as a value of its own."
+                )
+            return ""
 
     if stripped.startswith("[url:value"):
         for literal in literals:

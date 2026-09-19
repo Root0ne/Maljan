@@ -1,4 +1,4 @@
-"""One publish rule for every network kind, and one place a pattern is written.
+"""One publish rule for every kind the platform mints, and one place a pattern is written.
 
 The rule was applied on the network block's own rows and on the string rows
 for domains and URLs — and not on the string rows for addresses, which fell
@@ -7,10 +7,17 @@ past every branch to a bare ``return True``. So the network block refused
 the same address was exported as ``malicious-activity``. The one predicate was
 one predicate on three of four paths.
 
-A pattern for a network kind is now written in exactly one function and every
-minting path asks ``network_publish_reason`` before it is. The scan at the
-bottom is what keeps that true: a fifth path that writes its own pattern fails
-it.
+It was also a predicate for the network kinds only, and every other kind the
+string sweep produces — an e-mail address, a file name, a registry key, a
+mutex — reached the bundle with no question asked at all: a Benign PuTTY run
+exported ten SSH algorithm identifiers as ``malicious-activity`` e-mail
+indicators, and a PE run exported a third party's address lifted from embedded
+library source.
+
+A pattern for any of those kinds is now written in exactly one function and
+every minting path asks ``indicator_publish_reason`` before it is. The scan at
+the bottom is what keeps that true: a second path that writes its own pattern
+fails it.
 """
 
 from __future__ import annotations
@@ -25,26 +32,34 @@ from maljan.reporting.ledger_projection import network_from_ledger, static_from_
 from maljan.reporting.models import MalwareReport, StaticAnalysis, StringIOC
 from maljan.reporting.renderers.stix_renderer import (
     NETWORK_KINDS,
+    STRING_IOC_KINDS,
     ExtendedSTIXRenderer,
-    network_pattern,
-    network_publish_reason,
+    indicator_pattern,
+    indicator_publish_reason,
 )
 from maljan.schemas.evidence import build_entry
 
 SRC = pathlib.Path(__file__).resolve().parents[3] / "src" / "maljan"
 
-# The prefixes a STIX pattern for a network endpoint begins with.
+# The prefixes a STIX pattern this platform mints begins with: the four
+# endpoints and every other kind the string sweep types a row as. The sample's
+# own hash is deliberately not here — it is minted from the identity block the
+# router established, not from a row anybody has to be asked about.
 NETWORK_PREFIXES = (
     "[ipv4-addr:value",
     "[ipv6-addr:value",
     "[domain-name:value",
     "[url:value",
+    "[email-addr:value",
+    "[mutex:name",
+    "[windows-registry-key:key",
+    "[file:name",
 )
 
 # The one function that may write one. Everything else reads a pattern that
 # already exists — the cap's banding, the grounding check, the dedupe's
 # fingerprint — and a read is a literal with no value in it.
-THE_ONE_BUILDER = "network_pattern"
+THE_ONE_BUILDER = "indicator_pattern"
 
 
 def _entry(seq: int, tool: str, payload: dict[str, Any]) -> Any:
@@ -159,7 +174,7 @@ class TestThePredicateAnswersEveryKind:
             ("domain", "c2.example.com"),
             ("url", "http://c2.example.com/gate"),
         ):
-            assert network_publish_reason(kind, value, "strings") is None, kind
+            assert indicator_publish_reason(kind, value, "strings") is None, kind
 
     def test_an_observed_endpoint_is_published(self) -> None:
         for kind, value in (
@@ -167,7 +182,7 @@ class TestThePredicateAnswersEveryKind:
             ("domain", "c2.example.com"),
             ("url", "http://c2.example.com/gate"),
         ):
-            assert network_publish_reason(kind, value, "sandbox") == "sandbox", kind
+            assert indicator_publish_reason(kind, value, "sandbox") == "sandbox", kind
 
     def test_a_host_that_could_not_exist_is_refused_whoever_saw_it(self) -> None:
         for kind, value in (
@@ -175,15 +190,42 @@ class TestThePredicateAnswersEveryKind:
             ("domain", "fileserver.corp.internal"),
             ("url", "http://localho"),
         ):
-            assert network_publish_reason(kind, value, "sandbox") is None, kind
+            assert indicator_publish_reason(kind, value, "sandbox") is None, kind
 
     def test_a_kind_it_does_not_know_publishes_nothing(self) -> None:
-        assert network_publish_reason("mutex", "Global\\x", "sandbox") is None
-        assert network_pattern("mutex", "Global\\x") is None
+        assert indicator_publish_reason("pcap", "capture.pcap", "sandbox") is None
+        assert indicator_pattern("pcap", "capture.pcap") is None
 
     def test_the_pattern_function_answers_every_kind_it_names(self) -> None:
         for kind in NETWORK_KINDS:
-            assert network_pattern(kind, "8.8.8.8") is not None, kind
+            assert indicator_pattern(kind, "8.8.8.8") is not None, kind
+
+    def test_every_string_kind_has_an_answer(self) -> None:
+        """A kind with no answer is a kind that falls past the rule."""
+        for kind in STRING_IOC_KINDS:
+            assert indicator_publish_reason(kind, "whatever", "strings") is None, kind
+
+    def test_an_observed_artefact_of_any_kind_is_published(self) -> None:
+        for kind, value in (
+            ("email", "operator@example.org"),
+            ("mutex", "Global\\Zararli"),
+            ("registry", "HKLM\\Software\\Run\\x"),
+            ("path", "C:\\Windows\\Temp\\dropper.exe"),
+        ):
+            assert indicator_publish_reason(kind, value, "sandbox") == "sandbox", kind
+
+    def test_a_string_derived_artefact_needs_a_second_source(self) -> None:
+        for kind, value in (
+            ("email", "operator@example.org"),
+            ("mutex", "Global\\Zararli"),
+            ("registry", "HKLM\\Software\\Run\\x"),
+            ("path", "C:\\Windows\\Temp\\dropper.exe"),
+        ):
+            assert indicator_publish_reason(kind, value, "strings") is None, kind
+            assert (
+                indicator_publish_reason(kind, value, "strings", corroborated_by="the sandbox")
+                == "the sandbox"
+            ), kind
 
 
 class TestOnlyOnePlaceWritesOne:
