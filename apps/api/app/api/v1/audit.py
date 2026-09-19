@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -32,6 +33,34 @@ router = APIRouter(prefix="/audit", tags=["Audit & API Keys"])
 # ---------------------------------------------------------------------------
 # Audit Log endpoints (admin only)
 # ---------------------------------------------------------------------------
+
+
+async def _actor_names(db: AsyncSession, logs: Sequence[AuditLog]) -> dict[uuid.UUID, str]:
+    """Each row's actor, named, in one query for the whole page.
+
+    The name is what the admin users list already shows an admin, so this
+    discloses nothing the console could not read there; the e-mail's local part
+    stands in when an account has no name, because an id is not an answer to
+    "who did this". A user who has since been deleted is absent from the map
+    rather than resurrected from an audit row.
+    """
+    ids = {log.user_id for log in logs if log.user_id is not None}
+    if not ids:
+        return {}
+    rows = (
+        await db.execute(select(User.id, User.full_name, User.email).where(User.id.in_(ids)))
+    ).all()
+    named: dict[uuid.UUID, str] = {}
+    for user_id, full_name, email in rows:
+        label = str(full_name or "").strip() or str(email or "").split("@")[0]
+        if label:
+            named[user_id] = label
+    return named
+
+
+def _with_actor(log: AuditLog, named: dict[uuid.UUID, str]) -> AuditLogResponse:
+    entry = AuditLogResponse.model_validate(log)
+    return entry.model_copy(update={"actor": named.get(log.user_id) if log.user_id else None})
 
 
 @router.get("/logs", response_model=AuditLogListResponse)
@@ -63,6 +92,7 @@ async def list_audit_logs(
     query = query.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(query)
     logs = result.scalars().all()
+    named = await _actor_names(db, logs)
 
     logger.debug(
         f"Admin {log_safe(admin.id)} listed audit logs: "
@@ -71,7 +101,7 @@ async def list_audit_logs(
     )
 
     return {
-        "items": logs,
+        "items": [_with_actor(log, named) for log in logs],
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -83,7 +113,7 @@ async def get_audit_log(
     log_id: uuid.UUID,
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
-) -> AuditLog:
+) -> AuditLogResponse:
     """Get a single audit log entry (admin only)."""
     result = await db.execute(select(AuditLog).where(AuditLog.id == log_id))
     log_entry = result.scalar_one_or_none()
@@ -92,7 +122,7 @@ async def get_audit_log(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Audit log entry not found",
         )
-    return log_entry
+    return _with_actor(log_entry, await _actor_names(db, [log_entry]))
 
 
 # ---------------------------------------------------------------------------

@@ -148,6 +148,49 @@ test.describe("tool servers and the REST sandbox", () => {
     });
   });
 
+  /* The API passes a built-in the environment names its sidecar cannot run
+   * without whatever the stored registry says, so the editor must not offer
+   * them as lines to delete: a deletion was accepted, put back on save, and
+   * reported as saved. They are drawn above the box, and the box holds the
+   * rest of the list, which is the admin's. */
+  test("a built-in's fixed environment names are shown apart from the ones an admin owns", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(MCP_PATH);
+
+    await page.locator('[data-server="network"]').click();
+    const detail = page.locator('[data-server-detail="network"]');
+    await expect(
+      detail.getByText("Always passed: MALJAN_STAGING_DIR, MALJAN_SAMPLE_ROOTS")
+    ).toBeVisible();
+    const box = detail.getByLabel("network env allow");
+    await expect(box).toHaveValue("");
+
+    await box.fill("MY_OWN_VARIABLE");
+
+    const patches: unknown[] = [];
+    await page.route("**/api/v1/settings", (r) => {
+      if (r.request().method() === "PATCH") {
+        patches.push(r.request().postDataJSON());
+        return r.fulfill({ json: { applied: ["core.mcp.servers"], applies: { next_job: 1 } } });
+      }
+      return r.fallback();
+    });
+    await page.getByRole("button", { name: "Review" }).click();
+    await page.getByRole("button", { name: "Confirm and apply" }).click();
+
+    const body = patches[0] as {
+      changes: Record<string, Record<string, { env_allow: string[] }>>;
+    };
+    // What is sent is what the API stores and what the child is started with:
+    // the fixed names, then the typed one.
+    expect(body.changes["core.mcp.servers"].network.env_allow).toEqual([
+      "MALJAN_STAGING_DIR",
+      "MALJAN_SAMPLE_ROOTS",
+      "MY_OWN_VARIABLE",
+    ]);
+  });
+
   /* B6 (dev audit 2026-09-06): a probe result outlived the configuration it
    * described — the green "3 tools: …" line stayed up while the command it had
    * dialled was edited out from under it. */
@@ -172,17 +215,19 @@ test.describe("tool servers and the REST sandbox", () => {
     await expect(detail.getByText("3 tools: open_file, analyze, list_imports")).toHaveCount(0);
   });
 
-  test("a built-in offers disable rather than remove, and one PATCH disables it while its key and other fields survive", async ({
+  test("a built-in is turned off by its own switch and never removed, and one PATCH disables it while its key and other fields survive", async ({
     authenticatedPage: page,
   }) => {
     await page.goto(MCP_PATH);
 
     await page.locator('[data-server="threatintel"]').click();
     const detail = page.locator('[data-server-detail="threatintel"]');
-    await expect(detail.getByRole("button", { name: "Disable" })).toBeVisible();
+    // Neither Remove nor the "Disable" that used to sit beside the switch:
+    // two controls for one state, worded in opposite directions.
     await expect(detail.getByRole("button", { name: "Remove" })).toHaveCount(0);
+    await expect(detail.getByRole("button", { name: "Disable" })).toHaveCount(0);
 
-    await detail.getByRole("button", { name: "Disable" }).click();
+    await detail.getByLabel("threatintel enabled").uncheck();
     await expect(detail.getByLabel("threatintel enabled")).not.toBeChecked();
     await expect(page.getByTestId("changes-count")).toHaveText("1 change");
 

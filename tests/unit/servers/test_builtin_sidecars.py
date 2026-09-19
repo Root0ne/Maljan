@@ -77,6 +77,7 @@ def test_the_analysis_golden_carries_the_whole_sample_delivery_convention() -> N
 def test_the_knowledge_golden_carries_the_reference_lookups() -> None:
     tools = set(_golden("knowledge")["tools"])
     assert tools == {
+        "capabilities",
         "resolve_technique",
         "attck_lookup",
         "attck_validate",
@@ -148,9 +149,20 @@ def test_the_sidecar_is_registered_as_a_built_in_with_the_launch_parameters_it_n
 
 def test_only_the_analysis_sidecar_is_allowed_to_see_the_staging_directory() -> None:
     """The staging variables say where uploads land and how long they are
-    kept, and no other built-in has any business reading either."""
+    kept, and no other built-in has any business reading either.
+
+    ``MALJAN_SAMPLE_ROOTS`` is the exception both file-reading sidecars need:
+    it is the list of directories they may read a path argument in, and a
+    server that cannot see it reads only what it staged itself. The knowledge
+    sidecar takes no path at all, so it still sees nothing.
+    """
     from maljan.core.config import Settings
 
     servers = Settings(_env_file=None).mcp.servers
-    assert servers["analysis"].env_allow == ["MALJAN_STAGING_DIR", "MALJAN_STAGING_TTL_HOURS"]
+    assert servers["analysis"].env_allow == [
+        "MALJAN_STAGING_DIR",
+        "MALJAN_STAGING_TTL_HOURS",
+        "MALJAN_SAMPLE_ROOTS",
+    ]
+    assert servers["network"].env_allow == ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"]
     assert servers["knowledge"].env_allow == []

@@ -17,7 +17,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.agents.judge_agent import JudgeAgent
+from maljan.agents.judge_agent import (
+    VERDICT_FALLBACK_CODE,
+    VERDICT_FALLBACK_REASON,
+    VERDICT_TIMEOUT_CODE,
+    VERDICT_TIMEOUT_REASON,
+    JudgeAgent,
+)
 from maljan.pipeline.validation import FEEDBACK_PREAMBLE
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
@@ -25,6 +31,7 @@ from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 def _bundle_json(
     *,
     severity: str = "High",
+    verdict: str | None = "Malware",
     indicators: list[str] | None = None,
     family: dict[str, Any] | None = None,
     attack_patterns: list[dict[str, Any]] | None = None,
@@ -51,6 +58,8 @@ def _bundle_json(
         "severity": {"rating": severity, "rationale": "it does harm"},
         "malware_category": "loader",
     }
+    if verdict is not None:
+        assessment["verdict"] = verdict
     if family is not None:
         assessment["family"] = family
     return json.dumps(
@@ -119,13 +128,14 @@ class TestWhatReachesThePrompt:
         assert "Weigh your confidence accordingly" in prompt
 
     @pytest.mark.asyncio
-    async def test_the_prompt_asks_for_severity_category_and_family(self) -> None:
+    async def test_the_prompt_asks_for_the_verdict_severity_category_and_family(self) -> None:
         judge, llm = _judge(_bundle_json())
 
         await judge.give_verdict(reports=REPORTS, history=[])
 
         prompt = _prompt_text(llm)
         assert "x_maljan_assessment" in prompt
+        assert '"verdict": "Malware" | "Suspicious" | "Benign"' in prompt
         assert "malware_category" in prompt
         assert "evidence_ids" in prompt
 
@@ -232,7 +242,11 @@ class TestFamilyAttribution:
 class TestTheAnswerStillDegradesGracefully:
     @pytest.mark.asyncio
     async def test_a_non_json_answer_falls_back_to_a_text_bundle(self) -> None:
-        judge, _llm = _judge("The sample is malware. No JSON for you.")
+        """After the one retry: the judge is asked again for a bundle first."""
+        judge, _llm = _judge(
+            "The sample is malware. No JSON for you.",
+            "Still malware, still no JSON.",
+        )
 
         verdict = await judge.give_verdict(
             reports=REPORTS,
@@ -259,6 +273,17 @@ def _attack_pattern(external_id: str, source_name: str = "mitre-attack") -> dict
 
 
 class TestUnknownTechniqueIds:
+    @pytest.fixture(autouse=True)
+    def _real_catalogue(self, real_attck_index: None) -> None:
+        """This asks the real ATT&CK catalogue for names and descriptions.
+
+        The unit tree holds the corpus download shut, and these are the tests
+        that want what is behind it. They read the loader's own disk cache when
+        one is there and fetch when it is not, which is what they did before
+        the door existed; the opt-out is here so the list of tests that pay
+        that cost is a list somebody can read.
+        """
+
     """The case the violation exists for: well-formed, and imaginary.
 
     It was unreachable while ``_filter_invalid_technique_ids`` dropped the
@@ -290,14 +315,18 @@ class TestUnknownTechniqueIds:
         assert (verdict.retries, len(llm.calls)) == (0, 1)
 
     @pytest.mark.asyncio
-    async def test_a_sigma_reference_does_not_trigger_the_check(self) -> None:
-        judge, llm = _judge(
-            _bundle_json(attack_patterns=[_attack_pattern("5f1c6b0d-1e1a", source_name="sigma")])
+    async def test_a_sigma_reference_is_not_read_as_a_technique_id(self) -> None:
+        """It is not asked about the catalogue — there is no ATT&CK id to look
+        up — it is asked for one, once, and the answer it gives stands."""
+        answer = _bundle_json(
+            attack_patterns=[_attack_pattern("5f1c6b0d-1e1a", source_name="sigma")]
         )
+        judge, llm = _judge(answer, answer)
 
         verdict = await judge.give_verdict(reports=REPORTS, history=[])
 
-        assert (verdict.retries, verdict.violations, len(llm.calls)) == (0, [], 1)
+        assert [v.code for v in verdict.violations] == ["attck.missing_id"]
+        assert (verdict.retries, len(llm.calls)) == (1, 2)
 
     @pytest.mark.asyncio
     async def test_the_object_is_reported_rather_than_dropped_before_the_judge_sees_it(
@@ -310,3 +339,131 @@ class TestUnknownTechniqueIds:
 
         assert [v.code for v in verdict.violations] == ["stix.unknown_technique"]
         assert any(getattr(o, "type", "") == "attack-pattern" for o in verdict.bundle.objects)
+
+
+class TestAnAnswerThatIsNotABundle:
+    """The live run's judge answered "<tool_call>begin_of_header>" and the
+    fallback extraction accepted it silently: the run summary said no retries
+    and no unresolved findings while the malware object carried no severity at
+    all."""
+
+    @pytest.mark.asyncio
+    async def test_garbage_is_asked_again_and_the_second_answer_is_kept(self) -> None:
+        judge, llm = _judge("<tool_call>begin_of_header>", _bundle_json(severity="High"))
+
+        verdict = await judge.give_verdict(reports=REPORTS, history=[])
+
+        assert verdict.retries == 1
+        assert verdict.violations == []
+        assert verdict.bundle.x_maljan_assessment is not None
+        assert verdict.bundle.x_maljan_assessment.severity is not None
+        assert verdict.bundle.x_maljan_assessment.severity.rating == "High"
+
+    @pytest.mark.asyncio
+    async def test_the_feedback_asks_for_the_bundle_alone(self) -> None:
+        judge, llm = _judge("<tool_call>begin_of_header>", _bundle_json())
+
+        await judge.give_verdict(reports=REPORTS, history=[])
+
+        feedback = str(llm.calls[1][-1].content)
+        assert "verdict.not_json" in feedback
+        assert "Return the JSON bundle only, no tool calls, no prose." in feedback
+
+    @pytest.mark.asyncio
+    async def test_garbage_twice_falls_back_and_says_so(self) -> None:
+        judge, llm = _judge("<tool_call>begin_of_header>", "still not a bundle")
+
+        verdict = await judge.give_verdict(reports=REPORTS, history=[])
+
+        assert verdict.retries == 1
+        assert len(llm.calls) == 2
+        # Both: the answer that was not a bundle, which the model was shown and
+        # did not fix, and what this pipeline did about it. The conversation
+        # published the first as survived, so a summary without it would
+        # disagree with the feed.
+        assert [v.code for v in verdict.violations] == ["verdict.not_json", VERDICT_FALLBACK_CODE]
+        assert verdict.violations[-1].message == VERDICT_FALLBACK_REASON
+        assert verdict.bundle.objects, "the fallback bundle is still built"
+
+    @pytest.mark.asyncio
+    async def test_an_empty_answer_carrying_tool_calls_is_not_an_answer(self) -> None:
+        """The judge binds no tools on this path, so a tool call is the local
+        model emitting control tokens rather than saying anything."""
+        llm = _Llm(_bundle_json())
+        judge = JudgeAgent(llm=llm)  # type: ignore[arg-type]
+        empty = MagicMock(content="", tool_calls=[{"name": "identify_file", "args": {}}])
+
+        async def _first_then_queue(messages: list[Any]) -> Any:
+            llm.calls.append(list(messages))
+            if len(llm.calls) == 1:
+                return empty
+            return MagicMock(content=llm._answers.pop(0))
+
+        llm.ainvoke = _first_then_queue  # type: ignore[method-assign]
+
+        verdict = await judge.give_verdict(reports=REPORTS, history=[])
+
+        assert verdict.retries == 1
+        assert verdict.violations == []
+
+    @pytest.mark.asyncio
+    async def test_the_unresolved_fallback_reaches_the_run_summary(self) -> None:
+        from maljan.pipeline.validation import validation_metrics
+
+        judge, _llm = _judge("not json", "not json either")
+        verdict = await judge.give_verdict(reports=REPORTS, history=[])
+
+        metrics = validation_metrics(verdict.retries, [("judge", v) for v in verdict.violations])
+
+        assert metrics["retries"] == 1
+        assert [row["code"] for row in metrics["unresolved"]] == [
+            "verdict.not_json",
+            VERDICT_FALLBACK_CODE,
+        ]
+
+
+class TestAJudgeThatNeverAnswered:
+    """A timeout produces the same fallback bundle as garbage does, and asking
+    again would cost a second full judge timeout for the same answer. So it is
+    not asked again — but the verdict in the report is the analysts' text, not
+    the judge's, and the run summary used to show a clean validation block
+    beside it."""
+
+    @pytest.mark.asyncio
+    async def test_the_timeout_is_recorded_unresolved(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.agents import judge_agent as module
+
+        async def _timeout(coro: Any, *args: Any, **kwargs: Any) -> Any:
+            coro.close()
+            raise TimeoutError("the judge did not answer")
+
+        monkeypatch.setattr(module, "run_on_agent_loop", _timeout)
+
+        judge, llm = _judge()
+        verdict = await judge.give_verdict(reports=REPORTS, history=[])
+
+        assert [v.code for v in verdict.violations] == [VERDICT_TIMEOUT_CODE]
+        assert verdict.violations[0].message == VERDICT_TIMEOUT_REASON
+        assert verdict.retries == 0, "a second full judge timeout buys nothing"
+
+    @pytest.mark.asyncio
+    async def test_it_reaches_the_run_summary(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from maljan.agents import judge_agent as module
+        from maljan.pipeline.validation import validation_metrics
+
+        async def _timeout(coro: Any, *args: Any, **kwargs: Any) -> Any:
+            coro.close()
+            raise TimeoutError("the judge did not answer")
+
+        monkeypatch.setattr(module, "run_on_agent_loop", _timeout)
+
+        judge, _llm = _judge()
+        verdict = await judge.give_verdict(reports=REPORTS, history=[])
+
+        metrics = validation_metrics(
+            verdict.retries, [("judge", v) for v in verdict.violations], verdict.fed_back
+        )
+
+        assert [row["code"] for row in metrics["unresolved"]] == [VERDICT_TIMEOUT_CODE]

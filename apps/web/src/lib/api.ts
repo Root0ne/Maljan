@@ -1,4 +1,5 @@
-import type { TranscriptRow } from "@/lib/transcript";
+import type { TranscriptRow } from "@/lib/conversation";
+import type { JobRoster } from "@/types/events";
 import type { EvidenceListResponse, EvidenceQuery } from "@/types/evidence";
 import type {
   EnrichTriggerResponse,
@@ -14,6 +15,7 @@ import type {
   ProbeResult,
   SettingsSchema,
   SettingsValues,
+  VirustotalRegistration,
 } from "@/types/settings";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -51,6 +53,11 @@ export interface JobDTO {
   completed_at: string | null;
   duration_seconds: number | null;
   error_message: string | null;
+  /** Who can speak in this run, with the label an operator gave each agent
+   *  and the stages it takes part in. Present on `GET /jobs/{id}`, which is
+   *  where a non-admin reader gets names for the speakers without the
+   *  admin-only settings endpoint; absent from a listing. */
+  roster?: JobRoster | null;
 }
 
 export interface SandboxReportDTO {
@@ -68,7 +75,9 @@ export interface ReportSummaryDTO {
   job_id: string;
   sample_filename: string;
   verdict: string;
-  overall_confidence: number;
+  /** `null` when nothing assessed one: a verdict the pipeline wrote
+   *  because the judge never answered has no confidence. */
+  overall_confidence: number | null;
   malware_category: string | null;
   created_at: string;
   techniques_count: number;
@@ -85,15 +94,34 @@ export interface AgentFindingDTO {
   // Lifecycle status the worker derives
   // from the ISR shape. Defaults server-side to ``"complete"`` for legacy
   // rows so this is non-optional on the wire.
-  status: "complete" | "no_data" | "failed" | "timeout";
+  status: "complete" | "no_data" | "no_claims" | "failed" | "timeout";
   status_reason?: string | null;
 }
+
+/**
+ * How a run's verdict was arrived at.
+ *
+ * `stated` is the judge's own word. `unrecognised` is a judge that wrote
+ * something this pipeline could not read, `unstated` a judge that wrote
+ * nothing and left the bundle's objects to answer, `fallback` an answer that
+ * was not a bundle at all. The last three all publish the inconclusive
+ * verdict, which is one of the same three words a judge may state — so the
+ * value beside `verdict` is the only thing that tells "the judge concluded
+ * Suspicious" from "the judge's conclusion could not be read".
+ *
+ * Absent on a report stored before the field existed, and a reader that finds
+ * none draws nothing new.
+ */
+export type VerdictReading = "stated" | "unrecognised" | "unstated" | "fallback";
 
 export interface ReportDetailDTO {
   id: string;
   job_id: string;
   verdict: string;
-  overall_confidence: number;
+  verdict_reading?: VerdictReading | null;
+  /** `null` when nothing assessed one: a verdict the pipeline wrote
+   *  because the judge never answered has no confidence. */
+  overall_confidence: number | null;
   malware_category: string | null;
   stix_bundle: Record<string, unknown> | null;
   mitre_techniques: unknown[] | null;
@@ -125,13 +153,22 @@ export interface SystemStatusDTO {
   app_version: string;
   mock_mode_allowed: boolean;
   enrichment_enabled: boolean;
+  /** Where enrichment runs and whether anything is there to run it:
+   *  `not_required` when it is queued beside the analyses, `up` when its own
+   *  worker is reading its queue, `down` when that worker is expected and
+   *  absent, `unknown` when the queue could not be read. Absent from an API
+   *  older than the field. */
+  enrichment_worker?: string;
   has_virustotal_key: boolean;
   has_abuseipdb_key: boolean;
 }
 
 export interface AuditLogDTO {
   id: string;
-  user_id: string;
+  /** Null for the security events that have no authenticated principal. */
+  user_id: string | null;
+  /** Who that id belongs to, as the admin users list shows them. */
+  actor: string | null;
   action: string;
   resource_type: string | null;
   resource_id: string | null;
@@ -240,11 +277,45 @@ const _JOB_SCHEMA: Record<string, ExpectedShape> = {
   error_message: "string?",
 };
 
+/** One row of the `/iocs` feed. `source` says where the value came from —
+ *  `sandbox` for something the sample resolved, reached or requested,
+ *  `analyst` for something an agent put in an artefact, `strings` for a run of
+ *  bytes in the file that has the shape of one — and `published` says whether
+ *  the platform's publish rule would offer it to a consumer that blocks on it.
+ *  The API declared neither, so `response_model` dropped the source the
+ *  service had attached and a name only the sample's bytes knew shipped
+ *  looking exactly like one the sandbox watched. */
+export interface IOCRow {
+  kind: string;
+  value: string;
+  is_suspicious?: boolean;
+  notes?: string | null;
+  source?: string | null;
+  published?: boolean;
+}
+
+export interface IOCListResponse {
+  items: IOCRow[];
+  total: number;
+}
+
+const _IOC_ROW_SCHEMA: Record<string, ExpectedShape> = {
+  kind: "string",
+  value: "string",
+  is_suspicious: "boolean?",
+  notes: "string?",
+  source: "string?",
+  published: "boolean?",
+};
+
 const _SYSTEM_STATUS_SCHEMA: Record<string, ExpectedShape> = {
   app_name: "string",
   app_version: "string",
   mock_mode_allowed: "boolean",
   enrichment_enabled: "boolean",
+  // Optional: an API older than the field answers without it, and the console
+  // draws nothing rather than warning about a shape nobody broke.
+  enrichment_worker: "string?",
   has_virustotal_key: "boolean",
   has_abuseipdb_key: "boolean",
 };
@@ -540,6 +611,19 @@ class ApiClient {
     );
   }
 
+  /**
+   * Register this deployment with VirusTotal and store the agent token.
+   *
+   * Takes nothing: the agent family and version are constants of the build,
+   * and the token the call returns is stored server-side, encrypted, and
+   * never sent to the browser. What comes back is the server's new state.
+   */
+  registerVirustotal() {
+    return this.request<VirustotalRegistration>("/api/v1/settings/virustotal/register", {
+      method: "POST",
+    });
+  }
+
   /** Resolve one agent definition, staged values included. Spends no tokens. */
   probeAgent(name: string, values: Record<string, unknown>) {
     return this.request<ProbeResult>(
@@ -683,21 +767,29 @@ class ApiClient {
   }
 
   /**
-   * Replay historical pipeline events for a job from the Redis stream.
-   * Used by the Live tab on mount to back-fill events that fired before
-   * the WebSocket subscribed.
+   * Replay a job's pipeline events, in sequence order.
+   *
+   * Used on mount to back-fill what fired before the WebSocket subscribed,
+   * and on return to a run with `since` set to the last `seq` already held —
+   * which costs the events that were missed rather than a re-read of the
+   * whole window. The server reads the Redis stream first and the
+   * `job_events` table second, so a run whose stream has expired replays the
+   * same recording.
    */
-  getJobEvents(jobId: string, limit = 500) {
+  getJobEvents(jobId: string, limit = 500, since?: number) {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (since !== undefined) params.set("since", String(since));
     return this.request<{
       job_id: string;
       events: Array<{
         type: string;
         data: Record<string, unknown>;
-        ts: string;
-        stream_id: string;
+        ts: string | null;
+        /** Present only on an event the Redis stream answered. */
+        stream_id?: string;
       }>;
       count: number;
-    }>(`/api/v1/jobs/${jobId}/events?limit=${limit}`);
+    }>(`/api/v1/jobs/${jobId}/events?${params.toString()}`);
   }
 
   /**
@@ -739,11 +831,24 @@ class ApiClient {
   }
 
   /** Every IOC the report holds, flat. The endpoint existed long before
-   *  anything in the UI reached it. */
-  getReportIOCs(reportId: string) {
-    return this.request<Record<string, unknown>>(
-      `/api/v1/reports/${reportId}/iocs`
+   *  anything in the UI reached it.
+   *
+   *  `include` defaults to `all` here and not to the route's own default: an
+   *  operator exporting the IOCs is reading them rather than feeding them to
+   *  something that blocks, and a download that silently dropped the withheld
+   *  rows would hide the very distinction the `source` column exists to show.
+   *  Each row carries its `source` and its `published` flag. */
+  async getReportIOCs(
+    reportId: string,
+    include: "published" | "unpublished" | "all" = "all"
+  ) {
+    const data = await this.request<IOCListResponse>(
+      `/api/v1/reports/${reportId}/iocs?include=${include}`
     );
+    for (const row of data?.items ?? []) {
+      assertShape("getReportIOCs.item", row, _IOC_ROW_SCHEMA);
+    }
+    return data;
   }
 
   getReportMitre(reportId: string) {

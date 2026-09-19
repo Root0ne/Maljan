@@ -61,6 +61,39 @@ class JobCreateRequest(BaseModel):
         return value
 
 
+class RosterAgent(BaseModel):
+    """One participant of a run: its key, the label it is drawn under, its
+    role, the stages it speaks in, and who can task it.
+
+    A specialist that no stage names — the agents a lead reaches through its
+    ``ask_<key>`` tools — has an empty ``stages`` and a ``via`` naming the
+    agents that can task it. An agent a stage names carries no ``via``:
+    nothing had to ask it to be there.
+    """
+
+    key: str
+    label: str
+    role: str
+    stages: list[str] = []
+    via: list[str] | None = None
+
+
+class RosterStage(BaseModel):
+    """One step of the team, and who takes part in it."""
+
+    key: str
+    label: str
+    kind: str
+    agents: list[str] = []
+
+
+class JobRoster(BaseModel):
+    """Everyone who can speak in one run, and the stages they speak in."""
+
+    agents: list[RosterAgent] = []
+    stages: list[RosterStage] = []
+
+
 class JobResponse(BaseModel):
     """Analysis job status response."""
 
@@ -79,6 +112,11 @@ class JobResponse(BaseModel):
     completed_at: datetime | None
     duration_seconds: float | None
     error_message: str | None
+    # Who can speak in this run, with the label an operator gave each agent
+    # and the stages it takes part in. Filled on the single-job endpoint,
+    # where the team can be resolved; ``None`` in a listing, which is a page
+    # of rows rather than a run somebody is watching.
+    roster: JobRoster | None = None
 
     model_config = {"from_attributes": True}
 
@@ -172,9 +210,17 @@ class AgentMessageResponse(BaseModel):
     frontend maps a replayed conversation and a live one through the same code
     path — which is the point of storing the broadcast rather than
     reconstructing it from ``agent_findings``.
+
+    ``seq`` is the number the publisher gave the message when it went out, and
+    is the identity a client collapses a stored row onto its live twin with.
+    It is ``None`` for a run recorded before the publisher numbered anything:
+    such a row carries its old position within the report, which is a
+    different number from the same run's live events, and sending it would
+    have a client draw every line of that run twice. The endpoint tells the
+    two apart from the rows themselves — see ``app.api.v1.reports._is_numbered``.
     """
 
-    seq: int
+    seq: int | None = None
     speaker: str
     role: str
     round: int
@@ -185,6 +231,16 @@ class AgentMessageResponse(BaseModel):
     confidence: float | None = None
     claims: list | None = None
     dissent: list | None = None
+    # The agent this line was said to, or ``None`` for a line said to the room.
+    addressed_to: str | None = None
+    # What the line is, the stage it was said in and the operator's label for
+    # its speaker. ``None`` on a run recorded before the columns existed, and
+    # the client is required to fall back rather than read the absence as a
+    # value: a missing ``kind`` is a kind that was never written down, not a
+    # ``says``.
+    kind: str | None = None
+    stage: str | None = None
+    display_name: str | None = None
     ts: datetime | None = None
 
     model_config = {"from_attributes": True}
@@ -196,7 +252,19 @@ class ReportDetailResponse(BaseModel):
     id: uuid.UUID
     job_id: uuid.UUID
     verdict: str
-    overall_confidence: float
+    # How the verdict above was read, as one word: ``stated`` when the judge
+    # wrote it, ``unrecognised`` when it wrote something this pipeline could
+    # not read, ``unstated`` when it wrote nothing and the bundle's objects
+    # answered, ``fallback`` when the answer was not a bundle at all. The two
+    # middle readings publish the inconclusive verdict, which is one of the
+    # same three words a judge may state — so without this a client cannot
+    # tell "the judge concluded Suspicious" from "the judge's conclusion could
+    # not be read", and the difference lives only in a free-text degradation
+    # sentence. ``None`` for a report stored before the field existed.
+    verdict_reading: str | None = None
+    # ``None`` when nothing assessed one. A client shows "not assessed" for it
+    # rather than 0, which is a confidence and a different statement.
+    overall_confidence: float | None
     malware_category: str | None
     stix_bundle: dict | None
     mitre_techniques: list | None
@@ -225,6 +293,17 @@ class IOCEntry(BaseModel):
     value: str
     is_suspicious: bool = False
     notes: str | None = None
+    # Where the row came from: ``sandbox`` for something the sample resolved,
+    # reached or requested, ``analyst`` for something an agent put in an
+    # artefact, ``strings`` for a run of bytes in the file that has the shape
+    # of one. The service has always attached it and this model did not declare
+    # it, so ``response_model`` dropped it and a name only the sample's own
+    # bytes knew shipped looking exactly like one the sandbox watched.
+    source: str | None = None
+    # Whether the publish rule would publish this row — the same rule the STIX
+    # bundle is built with. A feed another system consumes returns only these
+    # by default; ``include`` widens it.
+    published: bool = True
 
 
 class IOCListResponse(BaseModel):

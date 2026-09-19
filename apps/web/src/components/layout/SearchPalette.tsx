@@ -4,13 +4,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { JobDTO, ReportSummaryDTO, SampleDTO } from "@/lib/api";
+import { analysisRows } from "@/lib/analyses";
+import { timeAgo } from "@/lib/report-utils";
 import { verdictBucket, verdictLabel } from "@/lib/verdict";
 import { getErrorMessage } from "@/lib/errors";
 import type { VerdictBucket } from "@/lib/verdict";
 
 /* ── Types ─────────────────────────────────────────────── */
 
-type ResultGroup = "samples" | "jobs" | "reports";
+/* Two groups, because there are two kinds of thing to find: a file, and what
+ * was concluded about it. A report used to be a third group whose rows linked
+ * exactly where the job rows linked — the same analysis, offered twice, one
+ * above the other. */
+type ResultGroup = "samples" | "analyses";
 
 interface ResultItem {
   group: ResultGroup;
@@ -22,6 +28,11 @@ interface ResultItem {
   href: string;
 }
 
+/** The DOM id of one result row, which is what `aria-activedescendant` names. */
+export function optionId(key: string): string {
+  return `search-result-${key}`;
+}
+
 interface SearchPaletteProps {
   open: boolean;
   query: string;
@@ -31,6 +42,15 @@ interface SearchPaletteProps {
    * Lets the parent clear the input value if it chooses to.
    */
   onSelect?: () => void;
+  /**
+   * The id of the row the arrow keys are on, or `null` when there is none.
+   *
+   * The combobox is on the header's input, not here, and `aria-activedescendant`
+   * has to sit on the element that holds the focus — so the palette reports the
+   * highlight and the input announces it. Without this the arrow keys moved a
+   * background colour and told a screen reader nothing (WCAG 4.1.2).
+   */
+  onActiveChange?: (id: string | null) => void;
 }
 
 /* ── Helpers ───────────────────────────────────────────── */
@@ -45,9 +65,16 @@ const VERDICT_CLASS: Record<VerdictBucket, string> = {
   unknown: "text-text-muted",
 };
 
-function verdictClass(verdict: string): string {
-  return VERDICT_CLASS[verdictBucket(verdict)];
+function verdictClass(verdict: string | null): string {
+  return VERDICT_CLASS[verdictBucket(verdict ?? "")];
 }
+
+/** How a run that has not produced a verdict yet is badged. */
+const STATUS_CLASS: Record<string, string> = {
+  completed: "text-status-green",
+  failed: "text-status-red",
+  running: "text-status-orange",
+};
 
 function ci(haystack: string | null | undefined, needle: string): boolean {
   if (!haystack) return false;
@@ -61,6 +88,7 @@ export default function SearchPalette({
   query,
   onClose,
   onSelect,
+  onActiveChange,
 }: SearchPaletteProps) {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -166,9 +194,6 @@ export default function SearchPalette({
     const q = debouncedQuery.toLowerCase();
     if (!q) return [];
 
-    const sampleById = new Map<string, SampleDTO>();
-    samples.forEach((s) => sampleById.set(s.id, s));
-
     const sampleMatches: ResultItem[] = samples
       .filter(
         (s) =>
@@ -185,69 +210,50 @@ export default function SearchPalette({
         href: `/samples?sample=${encodeURIComponent(s.id)}`,
       }));
 
-    const jobMatches: ResultItem[] = jobs
+    /* The job knows the status and the run knows the verdict, so a row is
+     * searchable by either: type "ransomware" or "failed" and the same list
+     * answers. */
+    const analysisMatches: ResultItem[] = analysisRows(jobs, reports)
       .filter(
-        (j) =>
-          ci(j.id, q) ||
-          ci(j.sample_id, q) ||
-          // Jobs were only findable by UUID even though
-          // the API returns the sample's filename and hash.
-          ci(j.sample_filename, q) ||
-          ci(j.sample_sha256, q)
+        (row) =>
+          ci(row.id, q) ||
+          ci(row.sampleId, q) ||
+          ci(row.sample, q) ||
+          ci(row.verdict, q) ||
+          ci(verdictLabel(row.verdict), q) ||
+          ci(row.malwareCategory, q) ||
+          ci(row.status, q),
       )
       .slice(0, 8)
-      .map((j) => ({
-        group: "jobs",
-        key: `job-${j.id}`,
-        primary:
-          j.sample_filename ||
-          (j.sample_sha256 ? `${j.sample_sha256.slice(0, 16)}…` : "") ||
-          j.sample_id.slice(0, 12),
-        secondary: `job ${j.id.slice(0, 12)}...`,
-        badge: j.status,
-        badgeClass:
-          j.status === "completed"
-            ? "text-status-green"
-            : j.status === "failed"
-            ? "text-status-red"
-            : j.status === "running"
-            ? "text-status-orange"
-            : "text-text-muted",
-        href: `/analysis/${j.id}`,
+      .map((row) => ({
+        group: "analyses",
+        key: `analysis-${row.id}`,
+        primary: row.sample,
+        // The verdict is the badge. Eight runs of one file were eight
+        // identical rows, each stating its verdict twice — once in grey
+        // mixed case and once in colour, uppercase — with nothing to tell
+        // one run from another. What differs is when it ran and which run
+        // it is, so that is what the secondary line carries.
+        secondary: [
+          row.createdAt ? timeAgo(row.createdAt) : "",
+          row.malwareCategory,
+          row.id.slice(0, 8),
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        badge: row.verdict ? verdictLabel(row.verdict) : row.status,
+        badgeClass: row.verdict ? verdictClass(row.verdict) : STATUS_CLASS[row.status] ?? "text-text-muted",
+        href: `/analysis/${row.id}`,
       }));
 
-    const reportMatches: ResultItem[] = reports
-      .filter((r) => {
-        if (ci(r.verdict, q)) return true;
-        // The UI shows "Malicious" but the stored
-        // verdict is "Malware" — typing what you see found nothing.
-        if (ci(verdictLabel(r.verdict), q)) return true;
-        if (ci(r.malware_category, q)) return true;
-        if (ci(r.sample_filename, q)) return true;
-        return false;
-      })
-      .slice(0, 8)
-      .map((r) => ({
-        group: "reports",
-        key: `report-${r.id}`,
-        primary: r.sample_filename || r.id,
-        secondary: r.malware_category
-          ? `${verdictLabel(r.verdict)} · ${r.malware_category}`
-          : verdictLabel(r.verdict),
-        badge: verdictLabel(r.verdict),
-        badgeClass: verdictClass(r.verdict),
-        href: `/analysis/${r.job_id}`,
-      }));
-
-    return [...sampleMatches, ...jobMatches, ...reportMatches];
+    return [...sampleMatches, ...analysisMatches];
   }, [debouncedQuery, samples, jobs, reports]);
 
   /* Group result rows for rendering. */
   const grouped = useMemo(() => {
     const out: Record<ResultGroup, ResultItem[]> = {
       samples: [],
-      jobs: [],
-      reports: [],
+      analyses: [],
     };
     for (const r of results) out[r.group].push(r);
     return out;
@@ -280,6 +286,12 @@ export default function SearchPalette({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, results, activeIndex, onClose]);
 
+  /* Tell the combobox which row it is pointing at. */
+  useEffect(() => {
+    const active = open ? results[activeIndex] : undefined;
+    onActiveChange?.(active ? optionId(active.key) : null);
+  }, [open, results, activeIndex, onActiveChange]);
+
   /* Click outside closes. */
   useEffect(() => {
     if (!open) return;
@@ -296,11 +308,10 @@ export default function SearchPalette({
 
   /* Compute the absolute index for each row for highlighting. */
   let runningIndex = -1;
-  const groupOrder: ResultGroup[] = ["samples", "jobs", "reports"];
+  const groupOrder: ResultGroup[] = ["samples", "analyses"];
   const groupLabel: Record<ResultGroup, string> = {
     samples: "Samples",
-    jobs: "Jobs",
-    reports: "Reports",
+    analyses: "Analyses",
   };
 
   const hasResults = results.length > 0;
@@ -317,7 +328,7 @@ export default function SearchPalette({
     >
       {showEmpty && (
         <div className="px-3 py-3 text-xs text-text-muted">
-          Type to search across samples, jobs, and reports.
+          Type to search samples and analyses.
         </div>
       )}
 
@@ -353,6 +364,7 @@ export default function SearchPalette({
                   return (
                     <button
                       key={r.key}
+                      id={optionId(r.key)}
                       type="button"
                       role="option"
                       aria-selected={isActive}
@@ -362,7 +374,7 @@ export default function SearchPalette({
                         e.preventDefault();
                       }}
                       onClick={() => handleSelect(r)}
-                      className={`w-full h-8 flex items-center gap-3 px-3 text-left transition-colors ${
+                      className={`w-full h-8 flex items-center gap-3 px-3 text-left ${
                         isActive ? "bg-bg-hover" : ""
                       }`}
                     >

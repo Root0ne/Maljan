@@ -3,10 +3,13 @@
 import { getErrorMessage } from "@/lib/errors";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { FileText } from "lucide-react";
 import { api } from "@/lib/api";
 import type { DashboardStatsDTO, JobDTO, SystemStatusDTO } from "@/lib/api";
+import { sampleLabel } from "@/lib/analyses";
 import { formatDuration, timeAgo } from "@/lib/report-utils";
 import { verdictBucket } from "@/lib/verdict";
+import { enrichmentWorkerNotice } from "./enrichmentNotice";
 import {
   PieChart,
   Pie,
@@ -33,6 +36,11 @@ const VERDICT_COLORS: Record<string, string> = {
   benign: "var(--status-green)",
 };
 
+/* Five, because this is a way in rather than a list. The full list is one
+ * click away and pages properly; restating ten of its rows here made the
+ * dashboard a second, worse copy of it. */
+const LATEST_RUNS = 5;
+
 const STATUS_STYLES: Record<string, string> = {
   completed: "text-status-green",
   running: "text-status-blue",
@@ -40,18 +48,6 @@ const STATUS_STYLES: Record<string, string> = {
   failed: "text-status-red",
   cancelled: "text-text-muted",
 };
-
-/* Every recent-analysis row rendered the same
-   `sample_id` UUID prefix, so the ten rows were indistinguishable. Prefer the
-   readable identity the API already returns — same precedence as the analysis
-   header (analysis/[id]/layout.tsx). */
-function sampleLabel(job: JobDTO): string {
-  return (
-    job.sample_filename ||
-    (job.sample_sha256 ? `${job.sample_sha256.slice(0, 16)}…` : "") ||
-    job.sample_id.slice(0, 12)
-  );
-}
 
 function StatCard({
   label,
@@ -122,13 +118,13 @@ export default function DashboardPage() {
       try {
         const [s, j, sys] = await Promise.all([
           api.getDashboardStats(),
-          api.getJobs(1, 10),
+          api.getJobs(1, LATEST_RUNS),
           // System status is best-effort: failure here must not block the
           // rest of the dashboard from rendering.
           api.getSystemStatus().catch(() => null),
         ]);
         setStats(mapApiStats(s));
-        setJobs(j.items.slice(0, 10));
+        setJobs(j.items.slice(0, LATEST_RUNS));
         setSystemStatus(sys);
       } catch (err) {
         setError(getErrorMessage(err) || "Failed to load dashboard data.");
@@ -141,14 +137,14 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <div>
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <StatCardSkeleton />
           <StatCardSkeleton />
           <StatCardSkeleton />
           <StatCardSkeleton />
         </div>
-        <div className="grid grid-cols-3 gap-4">
-          <div className="col-span-2 bg-bg-surface border border-border rounded animate-pulse">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 bg-bg-surface border border-border rounded animate-pulse">
             <div className="h-10 border-b border-border" />
             <div className="p-4 space-y-3">
               {Array.from({ length: 5 }).map((_, i) => (
@@ -189,8 +185,14 @@ export default function DashboardPage() {
     VERDICT_COLORS.benign,
   ];
 
+  const enrichment = enrichmentWorkerNotice(systemStatus?.enrichment_worker);
+
   return (
     <div>
+      {/* The page's own name. Visually hidden because the rail already says
+          where the reader is; an outline that starts at h2 does not. */}
+      <h1 className="sr-only">Dashboard</h1>
+
       {/* Mock-mode banner: operators
           frequently miss the worker log line announcing mock mode. Red
           banner makes the configuration impossible to overlook. */}
@@ -210,8 +212,25 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* Enrichment queued for a worker that is not there. Said in words
+          rather than left to a colour, and only in the one state an operator
+          can do something about; the rest of what the field can say is the
+          system working. */}
+      {enrichment && (
+        <div
+          role="status"
+          className="mb-4 flex flex-wrap items-start gap-x-3 gap-y-1 rounded border border-status-orange/40 bg-status-orange/10 p-3 text-sm"
+        >
+          <span className="font-semibold text-status-orange">{enrichment.label}</span>
+          <span className="text-text-secondary">{enrichment.detail}</span>
+          <span className="text-text-muted">
+            Setting: <code>{enrichment.setting}</code>
+          </span>
+        </div>
+      )}
+
       {/* Stats Row */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard label="Total Analyses" value={stats?.total_jobs ?? 0} />
         <StatCard
           label="Completed"
@@ -229,40 +248,34 @@ export default function DashboardPage() {
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Recent Analyses */}
-        <div className="col-span-2 bg-bg-surface border border-border rounded">
+        <div className="lg:col-span-2 bg-bg-surface border border-border rounded">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              Recent Analyses
+              Latest runs
             </h2>
             <Link
               href="/jobs"
               className="text-xs text-accent-strong hover:underline"
             >
-              View all
+              Every analysis
             </Link>
           </div>
           <div className="divide-y divide-border-light">
             {jobs.length === 0 ? (
               <div className="px-4 py-6 text-center text-xs text-text-muted">
-                No recent analyses found.
+                Nothing has been analysed yet.
               </div>
             ) : (
               jobs.map((job) => (
                 <Link
                   key={job.id}
                   href={`/analysis/${job.id}`}
-                  className="flex items-center justify-between px-4 py-3 hover:bg-bg-hover transition-colors"
+                  className="flex items-center justify-between px-4 py-3 hover:bg-bg-hover"
                 >
                   <div className="flex items-center gap-3">
-                    <svg
-                      width="14" height="14" viewBox="0 0 24 24" fill="none"
-                      stroke="var(--text-secondary)" strokeWidth="1.5"
-                    >
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-                      <path d="M14 2v6h6" />
-                    </svg>
+                    <FileText size={16} aria-hidden="true" className="text-text-secondary" />
                     <div>
                       <p className="text-sm text-text-primary">
                         {sampleLabel(job)}
@@ -307,7 +320,10 @@ export default function DashboardPage() {
                     .join(", ")}`}
                 >
                 <ResponsiveContainer width="100%" height={180}>
-                  <PieChart>
+                  {/* The labelled wrapper above is the chart's one node in the
+                      accessibility tree; Recharts' own surface and pie would
+                      otherwise be two more tab stops with no name. */}
+                  <PieChart accessibilityLayer={false} tabIndex={-1} role="presentation">
                     <Pie
                       data={verdictData}
                       cx="50%"
@@ -316,6 +332,7 @@ export default function DashboardPage() {
                       outerRadius={70}
                       dataKey="value"
                       strokeWidth={0}
+                      tabIndex={-1}
                     >
                       {verdictData.map((_, i) => (
                         <Cell key={i} fill={verdictColors[i]} />

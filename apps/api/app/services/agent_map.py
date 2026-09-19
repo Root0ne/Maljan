@@ -15,11 +15,16 @@ from typing import Any
 from maljan.core.config import (
     AGENT_KEY_PATTERN,
     BUILTIN_PROFILES,
+    PROMPT_ROLES,
+    PROVIDER_REFERENCE_RULE,
     REPORTER_AGENT_KEY,
     AgentDefinition,
     ProfileDefinition,
     _builtin_definitions,
     _builtin_profiles,
+    _without_the_empty_builtin_tool_list,
+    agent_reference_problems,
+    convert_builtin_profile_document,
 )
 from maljan.core.settings_overrides import build_settings
 from maljan.pipeline.conditions import validate_condition
@@ -130,7 +135,18 @@ def validate_definitions(
         # not "also blank out the label", and without this the identity
         # check below would see a bare-default label and refuse an edit the
         # operator never made.
-        candidate = {**seed, **entry} if seed is not None else entry
+        #
+        # ``_without_the_empty_builtin_tool_list`` is part of that same merge
+        # and was missing here, which is the whole of the console defect the
+        # audit found: a database written before the tool sidecars holds
+        # ``tools: []`` on every built-in, the Settings layer reads that as
+        # "not set" and the seed's tools apply, and this layer read it as an
+        # edit. Every save touching the agent map was then refused with
+        # "'judge' is built in; clone it to change it" on the four built-ins
+        # whose seed has tools -- reporter's is empty, so it alone passed.
+        candidate = (
+            {**seed, **_without_the_empty_builtin_tool_list(entry)} if seed is not None else entry
+        )
         try:
             model = AgentDefinition.model_validate(candidate)
         except ValidationError as exc:
@@ -153,19 +169,16 @@ def validate_definitions(
         if model.role == "judge" and name != "judge":
             errors[name] = f"{name!r}: only the built-in judge may have role judge"
             continue
-        if model.role == "generic" and not (model.prompt or "").strip():
-            errors[f"{name}.prompt"] = "a generic agent needs a prompt"
+        if model.role in PROMPT_ROLES and not (model.prompt or "").strip():
+            errors[f"{name}.prompt"] = f"a {model.role} agent needs a prompt"
         if model.static_provider and model.static_provider not in provider_ids:
             errors[f"{name}.static_provider"] = (
                 f"unknown static provider {model.static_provider!r}. "
                 f"Available: {', '.join(sorted(provider_ids))}"
             )
         has_provider_ref = any(ref.kind == "provider" for ref in model.tools)
-        if has_provider_ref and model.role != "generic":
-            errors[name] = (
-                f"{name!r}: provider tool references are only valid on generic "
-                "definitions; built-in roles open their provider themselves"
-            )
+        if has_provider_ref and model.role not in PROMPT_ROLES:
+            errors[name] = f"{name!r}: {PROVIDER_REFERENCE_RULE}"
             continue
         for ref in model.tools:
             if ref.kind != "mcp":
@@ -182,13 +195,22 @@ def validate_definitions(
                 break
         out[name] = dumped
 
-    if errors:
-        raise AgentMapError(_qualified(AGENT_DEFINITIONS_KEY, errors))
-
     # A built-in the body left out is re-seeded rather than removed, exactly as
     # the settings model would do on the next load.
     for name, seed in seeds.items():
         out.setdefault(name, seed)
+
+    # An agent reference points into the map, so it is checked against the map
+    # as it will be stored, seeds included, once every entry has a shape.
+    if not errors:
+        typed = {name: AgentDefinition.model_validate(entry) for name, entry in out.items()}
+        for name, definition in typed.items():
+            problems = agent_reference_problems(name, definition, typed)
+            if problems:
+                errors[f"{name}.tools"] = f"{name!r}: {problems[0]}"
+
+    if errors:
+        raise AgentMapError(_qualified(AGENT_DEFINITIONS_KEY, errors))
     return out
 
 
@@ -290,7 +312,7 @@ def validate_profiles(
             errors.update(shape_errors)
             continue
         try:
-            model = ProfileDefinition.model_validate(entry)
+            model = ProfileDefinition.model_validate(convert_builtin_profile_document(name, entry))
         except ValidationError as exc:
             for err in exc.errors():
                 location = ".".join(str(p) for p in err["loc"])
@@ -379,6 +401,8 @@ def _stage_member_errors(
             errors[f"{field}.agents"] = (
                 "a debate stage names no agent; it argues over the analysis stages upstream of it"
             )
+        elif stage.kind == "triage" and stage.agents:
+            errors[f"{field}.agents"] = "a triage stage names no agent; the pipeline runs it"
     return errors
 
 

@@ -46,7 +46,10 @@ def client() -> TestClient:
     app.dependency_overrides[require_admin] = lambda: MagicMock(
         id="00000000-0000-0000-0000-000000000001"
     )
-    app.dependency_overrides[get_db] = lambda: MagicMock()
+    # A session the route may commit: the probe routes end their read
+    # transaction before the probe, so the stand-in has to answer ``commit``
+    # the way a session does.
+    app.dependency_overrides[get_db] = lambda: MagicMock(commit=AsyncMock())
     return TestClient(app)
 
 

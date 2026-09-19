@@ -40,6 +40,24 @@ def _merge_dicts[V](left: dict[str, V], right: dict[str, V]) -> dict[str, V]:
     return merged
 
 
+def _merge_budget_records(
+    left: dict[str, list[dict[str, Any]]], right: dict[str, list[dict[str, Any]]]
+) -> dict[str, list[dict[str, Any]]]:
+    """Per agent, the rows of both sides in order: a revision adds a loop, never replaces one."""
+    merged = {key: list(rows) for key, rows in (left or {}).items()}
+    for key, rows in (right or {}).items():
+        merged[key] = [*merged.get(key, []), *list(rows or [])]
+    return merged
+
+
+def _merge_counts(left: dict[str, int], right: dict[str, int]) -> dict[str, int]:
+    """LangGraph reducer for a per-code counter: add, never replace."""
+    merged = dict(left)
+    for key, value in right.items():
+        merged[key] = merged.get(key, 0) + int(value)
+    return merged
+
+
 def _merge_stage_results(
     left: dict[str, dict[str, Any]], right: dict[str, dict[str, Any]]
 ) -> dict[str, dict[str, Any]]:
@@ -59,6 +77,12 @@ def _merge_stage_results(
             merged[key] = dict(entry)
             continue
         agents = list(dict.fromkeys([*existing.get("agents", []), *entry.get("agents", [])]))
+        # Per-agent skip reasons: each member of a parallel stage writes its
+        # own, so they merge rather than the last writer winning.
+        agent_reasons = {
+            **(existing.get("agent_reasons") or {}),
+            **(entry.get("agent_reasons") or {}),
+        }
         techniques = list(
             dict.fromkeys([*existing.get("technique_ids", []), *entry.get("technique_ids", [])])
         )
@@ -81,6 +105,7 @@ def _merge_stage_results(
                 else int(existing.get("duration_ms") or 0) + int(entry.get("duration_ms") or 0)
             ),
             "agents": agents,
+            **({"agent_reasons": agent_reasons} if agent_reasons else {}),
             "technique_ids": techniques,
         }
     return merged
@@ -94,6 +119,13 @@ class AnalysisState(TypedDict):
     file_name: str | None
     sample_path: str | None
     sandbox_report: dict[str, Any] | None
+
+    # When this run began, as a Unix timestamp. The worker's own clock when it
+    # has one, the pipeline's entry otherwise, and it is what the report's
+    # elapsed time is measured from: the summary used to start its clock inside
+    # the judge node and print the verdict stage's duration as the run's, which
+    # on a 473 s job read 66 s.
+    run_started_at: float
 
     # file_type + canonical platform inferred at pipeline bootstrap. Read by
     # the report's identity block and the FP linter's platform checks.
@@ -188,6 +220,15 @@ class AnalysisState(TypedDict):
     # a quietly successful run.
     report_error: str | None
 
+    # Set by the judge node when its own body raised, so the report node knows
+    # the verdict it is rendering was written by the pipeline rather than
+    # decided by a model. Carries the failure's class (never its message) and
+    # the decision the fallback chose. ``None`` on every run whose judge
+    # answered, which is the only state in which a confidence may be derived.
+    # A declared channel like every other node-to-node key here: an undeclared
+    # one is dropped by ``StateGraph(AnalysisState)`` between nodes.
+    verdict_fallback: dict[str, Any] | None
+
     # Set by the judge node when a run produced no corroborated technique, or
     # when an analyst failed, or when the sandbox was unreachable. It is put to
     # the judge in the verdict prompt so the confidence it sets already
@@ -197,15 +238,14 @@ class AnalysisState(TypedDict):
 
     # F10 (2026-07-05): attribution side-channels written by the judge node
     # (``make_judge_node``) and read back by the report node to populate
-    # ``FamilyAttribution.function_hash_matches`` / ``family_rag_candidates``
-    # / ``attck_case_candidates``. These MUST be declared channels — a
+    # ``FamilyAttribution.function_hash_matches`` / ``family_rag_candidates``.
+    # These MUST be declared channels — a
     # ``StateGraph(AnalysisState)`` only persists keys present in this
     # TypedDict, so an undeclared write is dropped between nodes and the
     # report node's ``state.get(...)`` always saw ``[]`` (silent data loss
     # on enriched runs with real function-hash / RAG overlap).
     function_hash_matches: list[dict[str, Any]]
     family_rag_candidates: list[dict[str, Any]]
-    attck_case_candidates: list[dict[str, Any]]
 
     # What each analyst was told was wrong with its answer and did not fix,
     # after its one retry (``pipeline.validation``). Per agent, so the run
@@ -221,6 +261,35 @@ class AnalysisState(TypedDict):
     # rather than per key because a parallel stage has several of them.
     stage_results: Annotated[dict[str, dict[str, Any]], _merge_stage_results]
 
+    # What the triage pack established and how it went: the four facts a
+    # stage condition reads (``conditions.TriageFacts``), the entry and
+    # failure counts and the wall clock the run summary reports, and the
+    # degradation reasons the judge carries forward. Written once by the
+    # triage node; empty on a run whose team has no triage stage.
+    triage_facts: dict[str, Any]
+
+    # Which analysts had their final-answer nudge sent another way than the
+    # plain one, and which way. Written by the analyst nodes, merged per agent,
+    # read by the judge into ``run_summary.nudge``.
+    nudge_retry_modes: Annotated[dict[str, str], _merge_dicts]
+
+    # The budget meter's rows, per agent: one per tool loop the agent ran,
+    # with its steps against the cap, its seconds against the limit and the
+    # cap that ended it when one did. Written by the nodes that drain an
+    # agent, merged per agent, read by the judge into ``run_summary.budget``.
+    budget_records: Annotated[dict[str, list[dict[str, Any]]], _merge_budget_records]
+
     # How many feedback retries the run spent, across every producer.
     # Append-only: two analysts running in parallel each add their own.
     validation_retries: Annotated[int, operator.add]
+
+    # The checks that could not run on this run, by code — the validity
+    # check on a box with no ATT&CK catalogue. Append-only; the judge reads
+    # the distinct codes into ``run_summary.validation.not_run``.
+    validation_not_run: Annotated[list[str], operator.add]
+
+    # Every violation a producer was *shown*, by code. A violation the retry
+    # fixed leaves no other trace on the run, and ``by_code`` built from the
+    # leftovers alone reported ``{}`` beside a non-zero retry count. Counts
+    # add across the analysts that ran in parallel.
+    validation_fed_back: Annotated[dict[str, int], _merge_counts]

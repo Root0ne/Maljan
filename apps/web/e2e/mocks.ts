@@ -189,6 +189,7 @@ export const MOCK_EVIDENCE = [
     seq: 4,
     args: { min_length: 6 },
     output: "",
+    truncated: true,
     structured: null,
     created_at: "2026-09-01T10:03:00Z",
   },
@@ -218,6 +219,9 @@ export const MOCK_SYSTEM_STATUS = {
   app_version: "0.1.0",
   mock_mode_allowed: false,
   enrichment_enabled: true,
+  // What a single-process install answers: the enrichment is queued beside the
+  // analyses, so there is no second worker to be missing.
+  enrichment_worker: "not_required",
   has_virustotal_key: true,
   has_abuseipdb_key: false,
 };
@@ -258,6 +262,7 @@ export const MOCK_REPORT_SUMMARY = {
 export const MOCK_AUDIT_LOG = {
   id: "log-1",
   user_id: "user-1",
+  actor: "Ada Lovelace",
   action: "job.create",
   resource_type: "job",
   resource_id: "job-1abc2def-0000-0000-0000-000000000000",
@@ -811,9 +816,13 @@ export const MOCK_SETTINGS_VALUES = {
     "core.mcp.servers": {
       value: {
         network: {
+          // A built-in's required names are in every map the API answers with:
+          // it puts them back on load and on save, so a fixture without them
+          // describes a response the API cannot produce.
           enabled: true, transport: "stdio", command: "python",
           args: ["services/network-mcp/server.py"], env: {}, cwd: "services/network-mcp",
-          env_allow: [], url: "", auth_token: "", auth_token_source: "default",
+          env_allow: ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"],
+          url: "", auth_token: "", auth_token_source: "default",
           tools: null, agents: ["network"], label: "Network MCP",
         },
         threatintel: {
@@ -1347,7 +1356,8 @@ export const MOCK_SETTINGS_VALUES_FULL: SettingsValues = {
         network: {
           enabled: true, transport: "stdio", command: "python",
           args: ["services/network-mcp/server.py"], env: {}, cwd: "services/network-mcp",
-          env_allow: [], url: "", auth_token: "", auth_token_source: "default",
+          env_allow: ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"],
+          url: "", auth_token: "", auth_token_source: "default",
           tools: null, agents: ["network"], label: "Network MCP",
         },
       },
@@ -1388,7 +1398,7 @@ export const MOCK_SETTINGS_VALUES_FULL: SettingsValues = {
 export interface MockOptions {
   /**
    * Handler for `**​/ws/analysis/**`. The default accepts the connection and
-   * stays silent, which is enough for pages that merely mount `useWebSocket`.
+   * stays silent, which is enough for a page that merely subscribes to a run.
    * Pass `null` to leave the socket unrouted so the spec can install its own —
    * explicit, rather than relying on which `routeWebSocket` registration wins.
    */
@@ -1520,8 +1530,8 @@ export async function installApiMocks(
   await page.route("**/api/v1/reports/job/*", (route) =>
     json(route, { detail: "Report not found" }, 404)
   );
-  // Sub-resources. Timeline, STIX and MITRE are fetched on mount by the
-  // /process and /detection tabs; signatures and enrich are button-driven.
+  // Sub-resources. STIX and MITRE are fetched on mount by the /detection and
+  // /capabilities tabs; signatures and enrich are button-driven.
   await page.route("**/api/v1/reports/*/timeline", (route) =>
     json(route, { rounds: [], confidence_series: [] })
   );

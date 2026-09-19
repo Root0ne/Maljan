@@ -28,6 +28,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from maljan.analysis.corroboration import (
+    corroboration_row,
+    corroboration_sources,
+    published_count,
+    technique_label,
+)
+
 # ---------------------------------------------------------------------------
 # Sub-components
 # ---------------------------------------------------------------------------
@@ -80,6 +87,13 @@ class ISRAgentStats:
     # the starved analysts out of a static-only run. A new reason string would
     # have made every such run record an unexplained incidental degradation.
     no_data: bool = False
+    # What the analyst says about its own answer, when the claim count cannot
+    # say it: ``no_claims`` for one that read its data and whose model ended
+    # without a structured report. Without it this row showed such an analyst
+    # as ``no_data: false`` with zero claims — the one view an operator and the
+    # judge's degradation note read, and the one that could not tell "nothing
+    # to read" from "never answered". Empty for an analyst that just answered.
+    status: str = ""
 
 
 @dataclass
@@ -94,6 +108,9 @@ class ValidationMetrics:
     retries: int = 0
     by_code: dict[str, int] = field(default_factory=dict)
     unresolved: list[dict[str, str]] = field(default_factory=list)
+    # The checks that could not run at all, by code. A check that ran and
+    # found nothing and a check that never ran are different facts.
+    not_run: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -146,6 +163,25 @@ class TruncationMetrics:
         return bool(
             self.tool_output_over_limit or self.react_step_cap_hits or self.judge_token_cap_hits
         )
+
+
+def stage_duration_lines(stages: Any) -> list[str]:
+    """How long each stage that ran took, as the lines beside the elapsed time.
+
+    Read from the stage rollup, which is the same list the console's stage
+    headers are drawn from, so the two cannot disagree about where a run spent
+    its time. A stage that did not run contributes nothing: an absent row and a
+    zero are different facts, and the rollup's own ``reason`` says which.
+    """
+    rows = [
+        (str(row.get("key") or ""), float(row.get("duration_ms") or 0.0))
+        for row in (stages or [])
+        if isinstance(row, dict) and row.get("ran") and float(row.get("duration_ms") or 0.0) > 0
+    ]
+    if not rows:
+        return []
+    spent = ", ".join(f"{key} {ms / 1000.0:.1f}s" for key, ms in rows if key)
+    return [f"**Per stage**: {spent}  "] if spent else []
 
 
 def _attribution_layers() -> list[str]:
@@ -208,7 +244,9 @@ class RunSummary:
     agent_stats: list[ISRAgentStats]
     validation: ValidationMetrics | None
     elapsed_seconds: float
-    corroboration: dict[str, list[str]] = field(default_factory=dict)
+    # Per technique id, ``{asserted_by: [deterministic sources], claimed_by:
+    # [agents]}``. Two flat lists and no score.
+    corroboration: dict[str, dict[str, list[str]]] = field(default_factory=dict)
     tokens: TokenUsageMetrics | None = None
     truncation: TruncationMetrics | None = None
     timestamp: float = field(default_factory=time.time)
@@ -223,10 +261,36 @@ class RunSummary:
     # a skipped row mean different things and a reader has to be able to tell
     # them apart.
     stages: list[dict[str, Any]] = field(default_factory=list)
+    # What the triage pack did: ``{entries, failed, duration_ms}``. ``None``
+    # on a run whose team has no triage stage or whose pack declined to run,
+    # which a reader has to be able to tell from a pack that wrote nothing.
+    triage: dict[str, Any] | None = None
+    # How the final-answer nudge had to be sent, per analyst, when the plain
+    # way failed: ``{"retry_mode": {"static": "invalid_tool_calls_dropped"}}``.
+    # ``None`` when no analyst needed a different way.
+    nudge: dict[str, Any] | None = None
+    # The budget meter, per agent: ``{loops, steps_used, max_steps,
+    # elapsed_s, timeout_s, delegated_steps, caps}`` summed over the agent's
+    # loops, ``caps`` being the caps that ended one of them (``steps``,
+    # ``time``, ``repeats``, ``budget_seconds``). ``None`` on a run that
+    # recorded no loop.
+    budget: dict[str, Any] | None = None
+    # ``dedupe`` is deliberately not a field here. What the report folded is
+    # counted while the report's sections are built, which happens after this
+    # object exists, so the report builder writes ``dedupe`` onto the summary
+    # *dict* it was handed (``reporting.builder``). A field nothing could ever
+    # set would read as a summary that folded nothing on every run.
 
     # ------------------------------------------------------------------
     # Rendering
     # ------------------------------------------------------------------
+
+    def __post_init__(self) -> None:
+        # A summary read back from storage may carry the flat rows written
+        # before the two lists; every reader below assumes the current shape.
+        self.corroboration = {
+            tid: corroboration_row(row) for tid, row in (self.corroboration or {}).items()
+        }
 
     def to_markdown(self) -> str:
         """Render the full run summary as a human-readable Markdown report."""
@@ -241,6 +305,7 @@ class RunSummary:
             f"**Verdict**: {self.final_decision}  ",
             f"**STIX objects**: {self.stix_object_count}  ",
             f"**Elapsed**: {self.elapsed_seconds:.1f}s  ",
+            *stage_duration_lines(self.stages),
             "",
         ]
 
@@ -301,19 +366,30 @@ class RunSummary:
 
         # Corroboration
         if self.corroboration:
+            published = published_count(self.corroboration)
             lines += [
                 "## Corroboration",
                 "",
-                "Which sources named each technique. A count of sources, not a combined",
-                "confidence: nothing here multiplies one layer's number by another's.",
+                "Which sources named each technique: the deterministic sources that carry",
+                "their own ATT&CK ids, and the agents. Two lists, not a combined confidence:",
+                "nothing here multiplies one layer's number by another's. A row that names",
+                "a technique this run did not publish says so, with the reason.",
                 "",
-                "| Technique | Sources |",
-                "|---|---|",
+                f"**{len(self.corroboration)} claimed, {published} published.**",
+                "",
+                "| Technique | Asserted by | Claimed by | Catalogue |",
+                "|---|---|---|---|",
             ]
             for tid, sources in sorted(
-                self.corroboration.items(), key=lambda item: (-len(item[1]), item[0])
+                self.corroboration.items(),
+                key=lambda item: (-len(corroboration_sources(item[1])), item[0]),
             ):
-                lines.append(f"| {tid} | {', '.join(sources)} |")
+                asserted = ", ".join(sources.get("asserted_by") or []) or "—"
+                claimed = ", ".join(sources.get("claimed_by") or []) or "—"
+                associated = ", ".join(sources.get("associated_by") or []) or "—"
+                lines.append(
+                    f"| {technique_label(tid, sources)} | {asserted} | {claimed} | {associated} |"
+                )
             lines.append("")
             if self.techniques_by_layer:
                 lines.append("**Per-source attribution:**")
@@ -439,11 +515,14 @@ class RunSummary:
                     "technique_ids": s.technique_ids,
                     "has_dissent": s.has_dissent,
                     "no_data": s.no_data,
+                    "status": s.status,
                 }
                 for s in self.agent_stats
             ],
             "validation": None,
-            "corroboration": {k: list(v) for k, v in sorted(self.corroboration.items())},
+            "corroboration": {
+                k: corroboration_row(v) for k, v in sorted(self.corroboration.items())
+            },
             "tokens": None,
             "degraded_mode": self.degraded_mode,
             "degradation_reasons": list(self.degradation_reasons),
@@ -451,6 +530,9 @@ class RunSummary:
             "techniques_by_layer": dict(self.techniques_by_layer),
             "profile": dict(self.profile) if self.profile else None,
             "stages": [dict(row) for row in self.stages],
+            "triage": dict(self.triage) if self.triage else None,
+            "nudge": dict(self.nudge) if self.nudge else None,
+            "budget": dict(self.budget) if self.budget else None,
         }
 
         if self.validation:
@@ -458,6 +540,7 @@ class RunSummary:
                 "retries": self.validation.retries,
                 "by_code": dict(sorted(self.validation.by_code.items())),
                 "unresolved": [dict(row) for row in self.validation.unresolved],
+                "not_run": list(self.validation.not_run),
             }
 
         if self.tokens:
@@ -521,7 +604,7 @@ class RunSummaryBuilder:
         self._negotiation: NegotiationMetrics | None = None
         self._agent_stats: list[ISRAgentStats] = []
         self._validation: ValidationMetrics | None = None
-        self._corroboration: dict[str, list[str]] = {}
+        self._corroboration: dict[str, dict[str, list[str]]] = {}
         self._degraded_mode: bool = False
         self._degradation_reasons: list[str] = []
         self._failed_analysts: list[str] = []
@@ -530,6 +613,59 @@ class RunSummaryBuilder:
         self._truncation: TruncationMetrics | None = None
         self._profile: dict[str, Any] | None = None
         self._stages: list[dict[str, Any]] = []
+        self._triage: dict[str, Any] | None = None
+        self._nudge: dict[str, Any] | None = None
+        self._budget: dict[str, Any] | None = None
+
+    def set_budget(self, records: dict[str, list[dict[str, Any]]] | None) -> RunSummaryBuilder:
+        """What each agent spent, summed over its loops, and the caps that ended them.
+
+        ``records`` is the state channel the nodes write: per agent, one row
+        per loop as ``BaseAnalyst`` recorded it. Summed here rather than kept
+        as rows because the summary is read per agent; the caps are kept as
+        the distinct list, in the order they were hit.
+        """
+        out: dict[str, Any] = {}
+        for agent, rows in (records or {}).items():
+            loops = [row for row in (rows or []) if isinstance(row, dict)]
+            if not loops:
+                continue
+            caps: list[str] = []
+            for row in loops:
+                cap = row.get("cap")
+                if cap and str(cap) not in caps:
+                    caps.append(str(cap))
+            out[str(agent)] = {
+                "loops": len(loops),
+                "steps_used": sum(int(row.get("steps_used") or 0) for row in loops),
+                "max_steps": max(int(row.get("max_steps") or 0) for row in loops),
+                "elapsed_s": round(sum(float(row.get("elapsed_s") or 0.0) for row in loops), 1),
+                "timeout_s": max(float(row.get("timeout_s") or 0.0) for row in loops),
+                "delegated_steps": sum(int(row.get("delegated_steps") or 0) for row in loops),
+                "caps": caps,
+            }
+        self._budget = out or None
+        return self
+
+    def set_nudge(self, retry_modes: dict[str, str] | None) -> RunSummaryBuilder:
+        """Which analysts needed the nudge sent another way, and which way."""
+        modes = {str(k): str(v) for k, v in (retry_modes or {}).items() if v}
+        self._nudge = {"retry_mode": modes} if modes else None
+        return self
+
+    def set_triage(self, facts: dict[str, Any] | None) -> RunSummaryBuilder:
+        """The pack's three counts, out of the state channel the triage node wrote.
+
+        Only the counts: the four facts are for the stage conditions and the
+        prompts, and the ledger holds the entries themselves.
+        """
+        if facts and "entries" in facts:
+            self._triage = {
+                "entries": int(facts.get("entries") or 0),
+                "failed": int(facts.get("failed") or 0),
+                "duration_ms": int(facts.get("duration_ms") or 0),
+            }
+        return self
 
     def set_degraded_mode(
         self, degraded: bool, reasons: list[str] | None = None
@@ -685,6 +821,10 @@ class RunSummaryBuilder:
         can tell them from the ones that analysed their data and claimed
         nothing. Optional, and empty by default: every caller that does not know
         the difference reports what it always did.
+
+        The third case is the analyst's own: an ISR that carries a ``status``
+        had data, read it, and its model ended without a report. That is
+        neither of the other two and the row now says so.
         """
         starved = no_data or set()
         stats: list[ISRAgentStats] = []
@@ -700,6 +840,7 @@ class RunSummaryBuilder:
                     technique_ids=list(dict.fromkeys(technique_ids)),  # deduplicate, preserve order
                     has_dissent=bool(isr.dissent_items),
                     no_data=isr.agent_id in starved,
+                    status=str(getattr(isr, "status", "") or ""),
                 )
             )
         self._agent_stats = stats
@@ -713,15 +854,22 @@ class RunSummaryBuilder:
             retries=int(metrics.get("retries") or 0),
             by_code=dict(metrics.get("by_code") or {}),
             unresolved=[dict(row) for row in metrics.get("unresolved") or []],
+            not_run=[str(code) for code in metrics.get("not_run") or []],
         )
         return self
 
-    def set_corroboration(self, corroboration: dict[str, list[str]] | None) -> RunSummaryBuilder:
-        """Record which sources named each technique, and count them per source."""
-        self._corroboration = {tid: list(sources) for tid, sources in (corroboration or {}).items()}
+    def set_corroboration(self, corroboration: dict[str, Any] | None) -> RunSummaryBuilder:
+        """Record who asserted and who claimed each technique, and count per source.
+
+        A flat list of sources — the shape stored before the two lists — is
+        read as claimed by all of them, so an older summary still builds.
+        """
+        self._corroboration = {
+            tid: corroboration_row(row) for tid, row in (corroboration or {}).items()
+        }
         counts: dict[str, int] = {}
-        for sources in self._corroboration.values():
-            for source in sources:
+        for row in self._corroboration.values():
+            for source in corroboration_sources(row):
                 counts[str(source)] = counts.get(str(source), 0) + 1
         self._techniques_by_layer = counts
         return self
@@ -756,6 +904,9 @@ class RunSummaryBuilder:
             techniques_by_layer=self._techniques_by_layer,
             profile=self._profile,
             stages=self._stages,
+            triage=self._triage,
+            nudge=self._nudge,
+            budget=self._budget,
         )
 
 

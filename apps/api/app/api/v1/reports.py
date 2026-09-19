@@ -10,12 +10,18 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import HTMLResponse, PlainTextResponse
+from maljan.core.settings_overrides import redact_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import get_current_user, require_active_user
 from app.models.user import User
-from app.schemas.job import IOCEntry, IOCListResponse, ReportDetailResponse
+from app.schemas.job import (
+    AgentMessageResponse,
+    IOCEntry,
+    IOCListResponse,
+    ReportDetailResponse,
+)
 from app.services.report_service import EnrichmentEnqueueError, ReportService
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
@@ -36,6 +42,60 @@ async def list_reports(
     return await svc.list_reports(user=user, page=page, page_size=page_size)
 
 
+def _is_numbered(transcript: list[AgentMessageResponse]) -> bool:
+    """Whether these rows carry publisher numbers or the old positions.
+
+    Read off the rows themselves. The publisher counts the whole run's events
+    from 1 and the conversation is a subset of them, so the largest ``seq`` of
+    a numbered run is at least the number of rows; the old numbering was
+    ``enumerate`` from zero, so its largest is exactly one less than the
+    number of rows. The two cannot be confused, including for a single row:
+    a numbered one is at least 1 and a positioned one is 0.
+
+    The one shape it reads wrong is a run the publisher numbered but mostly
+    failed to stamp: a line it never reached is stored as ``0``, so a
+    transcript of ``[0, 0, 1]`` has a maximum below its count and is served as
+    pre-release. That needs the event loop to have been closing for most of
+    the conversation, and the cost is the identity and the ordering of a run
+    that had almost no feed to begin with.
+
+    This used to ask whether the job had any ``job_events`` row. That is the
+    same fact only until the retention sweep removes those rows — after
+    ``core.events.retention_days`` every finished run would have looked
+    pre-release, and its conversation would have lost both the identity that
+    collapses a line onto its live twin and the ordering that separates two
+    analysts inside one round. The rows outlive the feed; the answer has to
+    come from them.
+    """
+    if not transcript:
+        return False
+    return max(int(line.seq or 0) for line in transcript) >= len(transcript)
+
+
+async def _detail(svc: ReportService, report: Any) -> ReportDetailResponse:
+    """One report, with the transcript numbered only if this run was numbered.
+
+    ``seq`` on a stored line means the number the publisher gave it, which is
+    what a console collapses the line onto its live twin with. A run recorded
+    before the publisher numbered anything carries its old position within the
+    report instead — a different number for the same message — so those lines
+    go out with no ``seq`` at all and the client falls back to the identity the
+    two sources had in common then. See ``_is_numbered``.
+    """
+    detail = ReportDetailResponse.model_validate(report)
+    # How the verdict was read, lifted out of the run summary the pipeline
+    # already writes rather than derived here a second time. A stored report
+    # without it keeps ``None``, and a client that finds none draws nothing.
+    reading = (report.run_summary or {}).get("verdict_reading")
+    if isinstance(reading, str) and reading:
+        detail = detail.model_copy(update={"verdict_reading": reading})
+    if detail.transcript and not _is_numbered(detail.transcript):
+        detail = detail.model_copy(
+            update={"transcript": [m.model_copy(update={"seq": None}) for m in detail.transcript]}
+        )
+    return detail
+
+
 @router.get("/{report_id}", response_model=ReportDetailResponse)
 async def get_report(
     report_id: uuid.UUID,
@@ -46,7 +106,7 @@ async def get_report(
     report = await svc.get_report(report_id, user)
     if not report:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
-    return report
+    return await _detail(svc, report)
 
 
 @router.get("/job/{job_id}", response_model=ReportDetailResponse)
@@ -61,7 +121,7 @@ async def get_report_by_job_id(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Report not found for this job"
         )
-    return report
+    return await _detail(svc, report)
 
 
 @router.get("/{report_id}/stix")
@@ -238,11 +298,21 @@ async def get_full_malware_report_iocs(
         default=None,
         description="Filter to one of: hash, domain, ip, url, user_agent, ja3, ja3s",
     ),
+    include: str = Query(
+        default="published",
+        pattern="^(published|unpublished|all)$",
+        description=(
+            "Which rows to return. 'published' (the default) is what the platform's "
+            "publish rule would publish, which is what another system should act on; "
+            "'unpublished' is only the rows it withholds, and 'all' is both. Every row "
+            "carries its source and a published flag."
+        ),
+    ),
     user: User = Depends(get_current_user),
     svc: ReportService = Depends(_get_service),
 ) -> IOCListResponse:
-    """Flat list of every IOC the report holds, optionally filtered by kind."""
-    items = await svc.get_malware_report_iocs(report_id, user, kind=kind)
+    """Flat list of the IOCs the report holds, filtered by kind and by publication."""
+    items = await svc.get_malware_report_iocs(report_id, user, kind=kind, include=include)
     if items is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -322,7 +392,8 @@ async def enqueue_enrichment_job(
     except EnrichmentEnqueueError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Enrichment queue unavailable: {exc}",
+            # arq's failures name the Redis DSN they were configured with.
+            detail=redact_url(f"Enrichment queue unavailable: {exc}"),
         ) from exc
     return {
         "status": "queued" if job_id else "already_queued",

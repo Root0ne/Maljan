@@ -126,8 +126,57 @@ def _safe_telfhash(path: str, blob: bytes) -> str | None:
     return str(digest) if digest else None
 
 
-def signing_info(path: str) -> dict[str, Any]:
-    """Whether the file carries a code signature, per format.
+# The one code-signing scheme each routed format has, by the routing label
+# the pipeline uses. A format that is not here has none that this tool looks
+# for, which is a fact about the format rather than about the sample.
+_SIGNING_SCHEMES: dict[str, str] = {
+    "pe": "authenticode",
+    "apk": "apk",
+    "mach-o": "macho",
+    "macho": "macho",
+}
+
+
+def _routed_scheme(file_type: str | None, target: Path, blob: bytes) -> tuple[str, str | None]:
+    """The format this sample was routed as, and the scheme it is signed under.
+
+    The caller's routing answer decides, because it is the answer the rest of
+    the run is built on. Only when there is none does the tool read the bytes
+    itself — an agent may call this directly, with nothing but a path.
+    """
+    routed = (file_type or "").strip().lower()
+    if routed:
+        return routed, _SIGNING_SCHEMES.get(routed)
+    if blob[:2] == b"MZ":
+        return "pe", "authenticode"
+    if blob[:4] in _MACHO_THIN_MAGICS or blob[:4] == _MACHO_FAT_MAGIC:
+        return "mach-o", "macho"
+    if _looks_like_an_apk(target):
+        return "apk", "apk"
+    return "unknown", None
+
+
+def _looks_like_an_apk(target: Path) -> bool:
+    """A zip is not an APK. A zip holding an Android manifest is."""
+    if not zipfile.is_zipfile(target):
+        return False
+    try:
+        with zipfile.ZipFile(target) as archive:
+            names = {name.lower() for name in archive.namelist()}
+    except Exception:  # noqa: BLE001 — a broken zip is a fact, not a failure
+        return False
+    return "androidmanifest.xml" in names or "classes.dex" in names
+
+
+def signing_info(path: str, file_type: str | None = None) -> dict[str, Any]:
+    """Whether the file carries a code signature, for the format it was routed as.
+
+    One answer, about this sample. The three schemes used to be reported
+    together, so a PE carried "apk present=no" and "macho present=no" beside
+    the one row that was about it — two statements about what this tool
+    looks for, read by every consumer as two findings about the sample. A
+    format with no signing scheme this tool checks says so with
+    ``applicable: False`` rather than with three absences.
 
     Presence only, and deliberately so. Verifying an Authenticode chain, an
     APK v2 block or a Mach-O signature each needs a trust store this process
@@ -138,22 +187,22 @@ def signing_info(path: str) -> dict[str, Any]:
     if not target.is_file():
         return {"error": f"no such file: {path}", "tool": "signing_info"}
     blob = target.read_bytes()
-    out: dict[str, Any] = {
-        "authenticode": {"present": False},
-        "apk": {"present": False, "schemes": []},
-        "macho": {"present": False},
-    }
-    if blob[:2] == b"MZ":
+    routed, scheme = _routed_scheme(file_type, target, blob)
+    out: dict[str, Any] = {"format": routed}
+    if scheme == "authenticode":
         info = _extract_signing(blob)
         out["authenticode"] = {
             "present": bool(info.is_signed),
             "subject": info.signer_subject,
             "issuer": info.signer_issuer,
+            "thumbprint": info.signer_thumbprint,
         }
-    if zipfile.is_zipfile(target):
+    elif scheme == "apk":
         out["apk"] = _apk_signing(target, blob)
-    if blob[:4] in _MACHO_THIN_MAGICS or blob[:4] == _MACHO_FAT_MAGIC:
+    elif scheme == "macho":
         out["macho"] = _macho_signing(blob)
+    else:
+        out["applicable"] = False
     return out
 
 
@@ -179,9 +228,16 @@ def _apk_signing(target: Path, blob: bytes) -> dict[str, Any]:
 def _apk_block_schemes(blob: bytes) -> list[str]:
     """Scheme ids inside the APK Signing Block, if there is one.
 
-    The block ends with its own size and the 16-byte magic, immediately before
-    the zip central directory. Finding the magic from the tail is enough to
-    locate it without parsing the whole archive.
+    The block opens with its own size, then the id-value pairs, then that same
+    size again and the 16-byte magic, immediately before the zip central
+    directory. Finding the magic from the tail is enough to locate it without
+    parsing the whole archive.
+
+    The size counts everything after the leading size field, so the first pair
+    begins eight bytes past the block's start. Reading it at the start instead
+    means the leading size field is taken for a pair length, the walk falls out
+    of step and no scheme id is ever recognised — which reports every APK
+    signed only with v2/v3, that is to say every modern APK, as unsigned.
     """
     marker = blob.rfind(_APK_SIG_BLOCK_MAGIC)
     if marker < 24:
@@ -193,14 +249,24 @@ def _apk_block_schemes(blob: bytes) -> list[str]:
     start = marker + len(_APK_SIG_BLOCK_MAGIC) - 8 - int(block_size)
     if start < 8 or start >= marker:
         return []
+    try:
+        declared = struct.unpack_from("<Q", blob, start)[0]
+    except struct.error:
+        return []
+    if declared != block_size:
+        # The two size fields are one number written twice. When they
+        # disagree, the magic was not a block footer and there is nothing
+        # here to read.
+        return []
+    pairs_end = marker - 8
     found: list[str] = []
-    cursor = start
-    while cursor + 12 <= marker - 8:
+    cursor = start + 8
+    while cursor + 12 <= pairs_end:
         try:
             pair_len, pair_id = struct.unpack_from("<QI", blob, cursor)
         except struct.error:
             break
-        if pair_len < 4 or cursor + 8 + pair_len > len(blob):
+        if pair_len < 4 or cursor + 8 + pair_len > pairs_end:
             break
         name = _APK_SCHEME_IDS.get(int(pair_id))
         if name and name not in found:

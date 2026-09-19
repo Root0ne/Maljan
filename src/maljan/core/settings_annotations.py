@@ -48,6 +48,7 @@ GROUP_ORDER: list[tuple[str, str]] = [
     ("chunking", "Chunking"),
     ("reporting", "Reporting"),
     ("agents", "Agents"),
+    ("events", "Live events"),
     ("tracing", "Tracing"),
     ("enrichment", "Enrichment / threat intelligence"),
     ("api", "API"),
@@ -79,6 +80,10 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     "chunking": "How large inputs are split before they reach a model.",
     "reporting": "What the final report contains and the metadata stamped on it.",
     "agents": "The analysts Maljan can run, the profile that selects them, and the ReAct limits.",
+    "events": (
+        "The live conversation the console draws a running analysis from, and how long the "
+        "record of one is kept against the job."
+    ),
     "tracing": "LangSmith tracing of every model call.",
     "enrichment": "Threat-intelligence lookups for the indicators a report names.",
     "api": "Request limits and login protection of the HTTP API; changes take effect immediately.",
@@ -98,6 +103,9 @@ _PREFIX_GROUPS: list[tuple[str, str]] = [
     ("sandbox", "sandbox"),
     ("analysis", "analysis"),
     ("preprocessing", "analysis"),
+    ("triage", "analysis"),
+    ("validation", "analysis"),
+    ("events", "events"),
     ("static", "static"),
     ("mcp", "mcp"),
     ("reporting", "reporting"),
@@ -376,6 +384,17 @@ ANNOTATIONS: dict[str, Annotation] = {
         "probe": "llm",
         "subgroup": "Google Gemini",
     },
+    "llm.require_probe": {
+        "title": "Require a passing model probe",
+        "description": (
+            "Refuse a job whose agents name a model no probe has reached at the "
+            "endpoint they would use. The probe result is stored against that "
+            "endpoint and model, so changing either asks for it again. Turn this "
+            "off for an air-gapped batch run, where the endpoint is known good "
+            "and nobody is at the console to press the button."
+        ),
+        "probe": "llm",
+    },
     "llm.judge_max_tokens": {
         "title": "Judge max output tokens",
         "description": (
@@ -406,6 +425,18 @@ ANNOTATIONS: dict[str, Annotation] = {
         "probe": "llm",
         "subgroup": "Ollama",
     },
+    "llm.ollama.disable_thinking": {
+        "title": "Ollama disable thinking",
+        "description": (
+            "When true, sends think=false to Ollama so a reasoning model spends its "
+            "output budget on the answer instead of on its own chain of thought. "
+            "Leave it off for models that do not reason: Ollama refuses the field "
+            "for a model that does not support it."
+        ),
+        "probe": "llm",
+        "subgroup": "Ollama",
+        "advanced": True,
+    },
     "llm.ollama.keep_alive": {
         "title": "Ollama keep-alive",
         "description": (
@@ -424,6 +455,16 @@ ANNOTATIONS: dict[str, Annotation] = {
             "silently truncates the oldest context."
         ),
         "subgroup": "Ollama",
+    },
+    "llm.openai.context_size": {
+        "title": "Context window (tokens)",
+        "description": (
+            "Context window the server behind the base URL was started with, in tokens. "
+            "0 leaves it unknown. It sizes the salvage conversation a ReAct loop is "
+            "asked to synthesise from when it runs out of steps."
+        ),
+        "subgroup": "OpenAI",
+        "advanced": True,
     },
     "llm.openai.api_key": {
         "title": "OpenAI API key",
@@ -446,6 +487,21 @@ ANNOTATIONS: dict[str, Annotation] = {
         "probe": "llm",
         "subgroup": "OpenAI",
     },
+    "llm.openai.compat": {
+        "title": "OpenAI endpoint dialect",
+        "description": (
+            "Which dialect the endpoint behind base_url speaks. llama_cpp sends the "
+            "llama.cpp-only request extras (repetition penalty, the n_predict echo of "
+            "the output cap, chat_template_kwargs); standard sends OpenAI-standard "
+            "fields only, which is what a hosted OpenAI-compatible API accepts — it "
+            "returns 400 Unsupported parameter otherwise. auto reads the base URL "
+            "host: loopback, link-local and private addresses are treated as a local "
+            "llama.cpp server, everything else as a hosted API."
+        ),
+        "probe": "llm",
+        "subgroup": "OpenAI",
+        "advanced": True,
+    },
     "llm.openai.disable_thinking": {
         "title": "OpenAI disable thinking",
         "description": (
@@ -455,6 +511,7 @@ ANNOTATIONS: dict[str, Annotation] = {
             "constrained local hosts, where thinking otherwise consumes the whole "
             "output budget; has no effect on vanilla OpenAI."
         ),
+        "probe": "llm",
         "subgroup": "OpenAI",
         "advanced": True,
     },
@@ -618,46 +675,6 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Reference data",
     },
-    "preprocessing.api_behaviour_map_path": {
-        "title": "API behaviour map path",
-        "description": (
-            "Path to the API-behaviour-map catalog JSON used when use_api_behaviour_map "
-            "is enabled. Build it with scripts/knowledge/build_api_capability_db.py."
-        ),
-        "subgroup": "Reference data",
-    },
-    "preprocessing.attck_case_corpus_path": {
-        "title": "ATT&CK case corpus path",
-        "description": (
-            "Path to the ATT&CK case-prior corpus JSON used when use_attck_case_rag is "
-            "enabled. Build it with scripts/knowledge/build_attck_case_kb.py against a populated "
-            "Qdrant long-term-memory store."
-        ),
-        "subgroup": "Reference data",
-    },
-    "preprocessing.attck_case_rag_max_techniques": {
-        "title": "ATT&CK case-RAG max techniques",
-        "description": (
-            "Maximum number of technique IDs surfaced in the ATT&CK case-prior candidate list."
-        ),
-        "subgroup": "Thresholds and limits",
-    },
-    "preprocessing.attck_case_rag_min_score": {
-        "title": "ATT&CK case-RAG min score",
-        "description": (
-            "Minimum similarity score for a case-prior RAG match to be kept. Currently "
-            "inert in practice — measured production queries all score 0.78-0.90 "
-            "regardless of content, so nothing is filtered — but kept rather than "
-            "raised to a value that would appear to work."
-        ),
-        "subgroup": "Thresholds and limits",
-        "advanced": True,
-    },
-    "preprocessing.attck_case_rag_top_k": {
-        "title": "ATT&CK case-RAG top-K",
-        "description": ("Number of prior cases retrieved per query for ATT&CK case-prior RAG."),
-        "subgroup": "Thresholds and limits",
-    },
     "preprocessing.attck_index_backend": {
         "title": "ATT&CK index backend",
         "description": (
@@ -799,29 +816,6 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Feature switches",
     },
-    "preprocessing.use_api_behaviour_map": {
-        "title": "Use API behaviour map",
-        "description": (
-            "Enables the data-driven Windows-API behaviour catalog (~680 API names "
-            "across 13 behaviour categories) in place of the small hardcoded "
-            "suspicious-imports table. On by default and fail-safe: a missing or "
-            "malformed catalog falls back to the built-in table."
-        ),
-        "subgroup": "Feature switches",
-    },
-    "preprocessing.use_attck_case_rag": {
-        "title": "Use ATT&CK case-prior RAG",
-        "description": (
-            "Enables cross-sample ATT&CK case-prior retrieval: the sample's profile is "
-            "matched against behaviourally-similar prior cases from long-term memory, "
-            "and their technique IDs are aggregated into a ranked candidate list for "
-            "the LLM. Stays off by default — measured evaluation found the production "
-            "query text does not actually reach the corpus effectively (retrieval F1 "
-            "0.111 vs a 0.123 frequency-prior baseline), so enabling it would look like "
-            "corroboration without being one."
-        ),
-        "subgroup": "Feature switches",
-    },
     "preprocessing.use_claim_consistency_gate": {
         "title": "Use claim-consistency gate",
         "description": (
@@ -890,6 +884,119 @@ ANNOTATIONS: dict[str, Annotation] = {
             "malicious core. Fails safe to no hint on error or a stripped binary."
         ),
         "subgroup": "Feature switches",
+    },
+    "triage.enabled": {
+        "title": "Run the triage pack",
+        "description": (
+            "Before any analyst starts, the pipeline runs the deterministic tools "
+            "over the sample (identification, hashes, signature, format facts, "
+            "strings, IoCs, YARA, capa, Sigma, catalogue lookups, the sandbox "
+            "summary, one reputation lookup) and writes each result to the "
+            "evidence ledger as facts of the run. Off leaves the stage in every "
+            "team and makes it decline with that reason."
+        ),
+        "subgroup": "Triage pack",
+    },
+    "triage.strings_head": {
+        "title": "Triage strings head",
+        "description": (
+            "How many printable runs of at least six characters the triage pack "
+            "records from the sample. The full string table stays reachable by "
+            "tool call; this bounds the one open-ended entry in the pack."
+        ),
+        "subgroup": "Triage pack",
+    },
+    "triage.reputation": {
+        "title": "Triage reputation lookup",
+        "description": (
+            "'auto' asks the enabled reputation server once for the sample hash: "
+            "VirusTotal's own server when it is enabled, else the threat-intel "
+            "sidecar. 'off' records a skipped entry instead. The call goes through "
+            "the tool server like any agent's call and is recorded under that "
+            "server."
+        ),
+        "subgroup": "Triage pack",
+    },
+    "triage.budget_seconds": {
+        "title": "Triage pack budget (seconds)",
+        "description": (
+            "How long the whole triage pack may take. capa and YARA carry their own "
+            "budgets; this one is checked between steps, and a step that would start "
+            "after it is spent is recorded as not run rather than started."
+        ),
+        "subgroup": "Triage pack",
+    },
+    "events.stream_deltas": {
+        "title": "Stream partial answers",
+        "description": (
+            "Publish an agent's text while its loop is still running, so the "
+            "conversation fills in as the agent works instead of arriving whole "
+            "at the end. What is published is one model turn's text as the loop "
+            "produces it, not a token at a time. Off leaves every finished "
+            "message exactly as it is."
+        ),
+        "applies": "next_job",
+    },
+    "events.retention_days": {
+        "title": "Keep the live feed for (days)",
+        "description": (
+            "How long a finished run's moment-by-moment feed stays on the job "
+            "before the worker's nightly sweep removes it. The transcript, the "
+            "agent findings and the evidence ledger are kept by the report and "
+            "the job and are not touched by this."
+        ),
+        "applies": "live",
+    },
+    "validation.alignment_gate": {
+        "title": "Technique alignment gate",
+        "description": (
+            "Whether an analyst's technique claims are ranked against the ATT&CK index "
+            "as a check ('auto') or not at all ('off'). 'auto' runs the check only when "
+            "this worker has already built the index; the result is a violation the "
+            "analyst answers once and a ranking the judge and the report see. No id is "
+            "ever replaced."
+        ),
+        "subgroup": "Technique check",
+    },
+    "validation.alignment_gate_build": {
+        "title": "Build the ATT&CK index for the gate",
+        "description": (
+            "Lets the first run that needs the alignment gate build the ATT&CK index in "
+            "the background, once per worker; that run skips the gate and the runs after "
+            "it have it. Off leaves the gate to workers that built the index for another "
+            "reason. The build takes seconds and hundreds of megabytes."
+        ),
+        "subgroup": "Technique check",
+    },
+    "validation.alignment_threshold": {
+        "title": "Alignment gate threshold",
+        "description": (
+            "The TF-IDF gate score below which a claimed technique may be questioned. "
+            "The paper's gate. It questions nothing on its own: the ranking also has to "
+            "disagree with the claim by the alignment margin."
+        ),
+        "subgroup": "Technique check",
+    },
+    "validation.alignment_margin": {
+        "title": "Alignment gate margin",
+        "description": (
+            "How far a candidate technique from the sample's own ATT&CK domain, and from "
+            "another tactic than the claimed id, must beat the claimed id's gate score "
+            "before the claim is questioned. The index scores correct ids near zero, so "
+            "without a margin nearly every claim is questioned and every batch costs a "
+            "model turn."
+        ),
+        "subgroup": "Technique check",
+    },
+    "validation.weak_alignment": {
+        "title": "Question weakly aligned techniques",
+        "description": (
+            "Whether the alignment ranking may question an analyst's technique id, at the "
+            "cost of one correction turn per batch. Off: the ranking is recorded on the "
+            "claim and shown to the judge, and nothing is asked again. No id is ever "
+            "replaced either way."
+        ),
+        "subgroup": "Technique check",
     },
     "react_agent_max_steps": {
         "title": "ReAct agent default max steps",
@@ -1517,7 +1624,10 @@ ANNOTATIONS.update(
             "order": -1,
         },
         "agents.profiles": {
-            "title": "Teams",
+            # Not "Teams": the console's page for this leaf is already called
+            # Teams, and the two headings sat on top of each other. The
+            # agents leaf beside it is "Agent definitions" for the same reason.
+            "title": "Team definitions",
             "description": (
                 "Named teams, each an ordered list of stages: an analysis stage "
                 "runs the agents it names, a debate stage argues over the "
@@ -1531,6 +1641,38 @@ ANNOTATIONS.update(
             "group": "agents",
             "editor": "stages",
             "order": -1,
+        },
+        "agents.delegation_depth": {
+            "title": "Delegation depth",
+            "description": (
+                "How far one agent's ask of another may nest. A stage's agent "
+                "asking a specialist is depth 1; that specialist asking another "
+                "is depth 2; an ask that would go deeper is refused with a "
+                "message the model reads. It bounds the nesting, never how many "
+                "times an agent may ask."
+            ),
+            "group": "agents",
+        },
+        "agents.delegation_steps": {
+            "title": "Steps one ask gets",
+            "description": (
+                "How many graph steps a delegated agent may spend answering one "
+                "ask — about five tool rounds and an answer at the default. It is "
+                "the ask's own budget, not a share of the caller's: a callee that "
+                "inherited what its caller had left ran out before it had made a "
+                "tool call. The caller's own step budget is not reduced by what "
+                "its specialists spend; its wall clock is."
+            ),
+            "group": "agents",
+        },
+        "agents.delegation_timeout_seconds": {
+            "title": "Seconds one ask gets",
+            "description": (
+                "How long a delegated agent may take over one ask. An ask is also "
+                "bounded by the time its caller has left, so the caller's own "
+                "stage timeout is what decides how many asks fit in one loop."
+            ),
+            "group": "agents",
         },
         "agents.definitions": {
             "title": "Agent definitions",

@@ -161,6 +161,30 @@ export function outputPreview(
   return { text: body.slice(0, limit), hidden: body.length - limit };
 }
 
+/**
+ * What to say about an output that is empty, when anything is known.
+ *
+ * An empty output has more than one cause, and only the entry itself can tell
+ * them apart. A call trimmed to keep its agent inside its byte budget says so
+ * with `truncated`; a call that failed carries `error` and is drawn as a
+ * failure in its own right; a call that simply answered with nothing is
+ * neither. Reading the emptiness as a trim — which is what this view did
+ * before the flag was persisted — printed the budget sentence under a failure
+ * row, stating a cause that had not happened.
+ *
+ * A row from before the column exists carries no flag, so it falls to the
+ * neutral sentence: what is not recorded is not asserted.
+ */
+export function emptyOutputNote(entry: EvidenceEntry): string {
+  if (entry.truncated) {
+    return (
+      "The output was dropped to keep this agent inside its byte budget. " +
+      "The call, its arguments and its outcome stand."
+    );
+  }
+  return "This call recorded no output.";
+}
+
 /** A duration in the units a reader of a tool call thinks in. */
 export function formatCallDuration(ms: number): string {
   const value = Number(ms) || 0;

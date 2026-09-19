@@ -22,6 +22,11 @@ from maljan.enrichment.abuseipdb_client import AbuseIPDBClient
 from maljan.enrichment.virustotal_client import VirusTotalClient
 from maljan.enrichment.whois_client import WhoisClient
 from maljan.extractors.attribution import populate_similar_samples
+from maljan.extractors.network_extractor import (
+    domain_is_corroborated,
+    host_is_private_use,
+    ip_corroboration_reason,
+)
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
@@ -93,20 +98,11 @@ def _is_public_ip(address: str) -> bool:
     )
 
 
-_PRIVATE_SUFFIXES = (
-    ".local",
-    ".localhost",
-    ".internal",
-    ".lan",
-    ".home",
-    ".corp",
-    ".intranet",
-    ".test",
-    ".example",
-    ".invalid",
-    ".onion",
-    ".arpa",
-)
+# A hidden service is the one name this refuses that the export does not. The
+# export publishes a valid Tor address because its own checksum stands in for
+# the second source no sandbox can ever give it; no reputation provider can
+# resolve one, so asking about it spends quota on a certain "unknown".
+_TOR_SUFFIX = ".onion"
 
 
 def _is_public_fqdn(name: str) -> bool:
@@ -114,7 +110,9 @@ def _is_public_fqdn(name: str) -> bool:
 
     IP literals, single-label names and the special-use suffixes are internal
     infrastructure: sending them to VirusTotal leaks the operator's naming and
-    costs quota for an answer that is always "unknown".
+    costs quota for an answer that is always "unknown". The suffixes are the
+    ones the export holds back, read from the one list, so a name this pipeline
+    will not publish is not one it posts to somebody else either.
     """
     host = name.strip().rstrip(".").lower().strip("[]")
     if not host or ".." in host or "." not in host:
@@ -124,7 +122,7 @@ def _is_public_fqdn(name: str) -> bool:
         return False
     except ValueError:
         pass
-    return not any(host.endswith(suffix) for suffix in _PRIVATE_SUFFIXES)
+    return not host.endswith(_TOR_SUFFIX) and not host_is_private_use(host)
 
 
 async def enrich_malware_report(
@@ -180,17 +178,17 @@ async def enrich_malware_report(
         if vt is None and abuse is None:
             logger.warning("enrich: no provider API keys available; reputation fields left null.")
 
-        private_domains_skipped = await _enrich_domains(domains, vt=vt, cap=max_lookups_per_kind)
+        domains_skipped = await _enrich_domains(domains, vt=vt, cap=max_lookups_per_kind)
         await _enrich_ips(ips, vt=vt, abuse=abuse, whois=whois, cap=max_lookups_per_kind)
     finally:
         if own_client:
             await client.aclose()
 
     logger.info(
-        "enrich: completed (domains=%d, ips=%d, private_domains_skipped=%d).",
+        "enrich: completed (domains=%d, ips=%d, domains_not_looked_up=%d).",
         len(domains),
         len(ips),
-        private_domains_skipped,
+        domains_skipped,
     )
     return malware_report
 
@@ -204,15 +202,28 @@ async def _enrich_domains(
     skipped = 0
     if vt is None:
         return skipped
-    for dom in domains[:cap]:
-        if _has_successful_rep(dom):
-            continue
+    askable: list[dict[str, Any]] = []
+    for dom in domains:
         fqdn = dom.get("fqdn")
         if not isinstance(fqdn, str) or not fqdn:
             continue
         if not _is_public_fqdn(fqdn):
             skipped += 1
             continue
+        if not domain_is_corroborated(dom.get("source"), dom.get("reputation"), fqdn):
+            # A name only the sample's byte image knows. One PE's twenty-five
+            # string-derived "domains" held the single enrichment slot for
+            # 452 s, and fifteen of them were fragments of longer names.
+            skipped += 1
+            continue
+        askable.append(dom)
+    # The cap is applied to what is worth asking about, not to the raw list:
+    # a page of string noise at the front used to spend the whole budget
+    # before the first name anything else had seen.
+    for dom in askable[:cap]:
+        if _has_successful_rep(dom):
+            continue
+        fqdn = str(dom["fqdn"])
         rep = await vt.domain_reputation(fqdn)
         if rep is not None:
             _annotate_reputation_age(rep)
@@ -233,7 +244,8 @@ async def _enrich_ips(
     whois: WhoisClient,
     cap: int,
 ) -> None:
-    for ip in ips[:cap]:
+    askable: list[dict[str, Any]] = []
+    for ip in ips:
         address = ip.get("address")
         if not isinstance(address, str) or not address:
             continue
@@ -241,6 +253,19 @@ async def _enrich_ips(
         # they are not real infrastructure — saves API budget and avoids noise.
         if not _is_public_ip(address):
             continue
+        if ip_corroboration_reason(address, ip.get("source"), ip.get("reputation")) is None:
+            # A run of digits the string sweep read as an address, or one no
+            # second source knows. The same answer the domains get, for the
+            # same reason: an endpoint only the sample's own byte image knows
+            # is not worth a paid lookup, and one live run spent its whole
+            # enrichment budget on twenty-five of them.
+            continue
+        askable.append(ip)
+    # The cap is applied to what is worth asking about, as it is for the
+    # domains: a page of string noise at the front used to spend the budget
+    # before the first address anything else had seen.
+    for ip in askable[:cap]:
+        address = str(ip["address"])
         if not _has_successful_rep(ip):
             rep: dict[str, Any] | None = None
             if vt is not None:

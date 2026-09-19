@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import ipaddress
 import math
+import re
 import unicodedata
 from dataclasses import dataclass
+from typing import Any
 
 # Domains we never want to flag as suspicious — common SaaS / OS update
 # infrastructure. Extend rather than replace.
@@ -59,7 +61,51 @@ _RESERVED_DOMAIN_SUFFIXES: tuple[str, ...] = (
     ".invalid",
     ".arpa",
 )
+
+# The suffixes a private network names its own machines with. Publishing one is
+# a low-value indicator in a shared bundle and a small disclosure of how the
+# analysis network is named, so no export carries one — but that is an export
+# decision and not a projection one. A sandbox that resolved
+# ``fileserver.corp.internal`` watched the sample resolve it, which is the
+# thing an analyst reading a lateral-movement case most needs to see, and the
+# report's network block keeps the row with its source. ``host_is_private_use``
+# is the one reader of these, and it is asked where an indicator is minted and
+# where a name is about to be sent to a reputation provider.
+#
+# ``.internal``, ``.alt`` and ``.home.arpa`` are reserved for the purpose. The
+# rest are not reserved by anybody and are used for it anyway, and none of the
+# four has ever been delegated, so a name under one cannot be looked up from
+# outside the network that invented it.
+_PRIVATE_USE_SUFFIXES: tuple[str, ...] = (
+    ".internal",
+    ".alt",
+    ".home.arpa",
+    ".lan",
+    ".home",
+    ".corp",
+    ".intranet",
+)
 _RESERVED_DOMAIN_NAMES: frozenset[str] = frozenset({"localhost", "localhost.localdomain"})
+
+
+def host_is_private_use(host: Any) -> bool:
+    """Whether this name belongs to a private network rather than to the internet.
+
+    One list, two readers. The export asks it before minting an indicator and
+    the enrichment asks it before sending a name to a reputation provider, and
+    the two answering differently is how ``x.alt`` and
+    ``localhost.localdomain`` were held out of one bundle and posted to a
+    public provider in the same run.
+    """
+    name = str(host or "").strip().rstrip(".").lower()
+    if not name:
+        return True
+    if name in _RESERVED_DOMAIN_NAMES:
+        return True
+    return any(
+        name.endswith(suffix) for suffix in _RESERVED_DOMAIN_SUFFIXES + _PRIVATE_USE_SUFFIXES
+    )
+
 
 # Substrings that strongly suggest C2 / commodity-malware infra.
 _SUSPICIOUS_DOMAIN_TOKENS: tuple[str, ...] = (
@@ -516,6 +562,244 @@ def _is_emittable_ip(ip: str) -> bool:
     ):
         return False
     return str(addr) != "255.255.255.255"
+
+
+# A v3 onion address is the base32 of a 32-byte key, a 2-byte checksum over
+# it and a version byte; v2 is sixteen base32 characters and carries no
+# checksum, so length and alphabet are all there is to check.
+_TOR_SUFFIX = ".onion"
+_TOR_V3_LENGTH = 56
+_TOR_V2_LENGTH = 16
+_TOR_ALPHABET = frozenset("abcdefghijklmnopqrstuvwxyz234567")
+_TOR_V3_VERSION = 3
+_TOR_CHECKSUM_SALT = b".onion checksum"
+
+
+def tor_hidden_service(fqdn: Any) -> bool:
+    """Whether ``fqdn`` is a syntactically valid Tor onion address.
+
+    Checked rather than assumed: a v3 address carries its own checksum, so
+    fifty-six characters of the right alphabet are not enough — the last three
+    bytes have to check out against the first thirty-two, which is what makes
+    the name impossible to produce by accident.
+    """
+    import base64
+    import hashlib
+
+    name = str(fqdn or "").strip().lower().rstrip(".")
+    if not name.endswith(_TOR_SUFFIX):
+        return False
+    label = name[: -len(_TOR_SUFFIX)].rsplit(".", 1)[-1]
+    if not label or set(label) - _TOR_ALPHABET:
+        return False
+    if len(label) == _TOR_V2_LENGTH:
+        return True
+    if len(label) != _TOR_V3_LENGTH:
+        return False
+    try:
+        # Fifty-six base32 characters are exactly thirty-five bytes, so the
+        # encoding needs no padding and adding any would corrupt it.
+        decoded = base64.b32decode(label.upper())
+    except Exception:  # noqa: BLE001 — a name that will not decode is not one
+        return False
+    if len(decoded) != 35 or decoded[34] != _TOR_V3_VERSION:
+        return False
+    public_key, checksum = decoded[:32], decoded[32:34]
+    expected = hashlib.sha3_256(
+        _TOR_CHECKSUM_SALT + public_key + bytes([_TOR_V3_VERSION])
+    ).digest()[:2]
+    return checksum == expected
+
+
+def corroboration_reason(source: Any, reputation: Any, fqdn: Any = "") -> str | None:
+    """Why this name may be published, or ``None`` when nothing says it may.
+
+    Named rather than left implicit because one of the answers is surprising:
+    a Tor address is published on the strength of its own syntax, and a reader
+    finding it in a bundle beside no sandbox observation is owed the reason.
+    """
+    if source != "strings":
+        return str(source) if source else "recorded without a source"
+    if tor_hidden_service(fqdn):
+        return "tor hidden service address, valid on its own syntax"
+    if isinstance(reputation, dict):
+        for key in ("malicious", "suspicious"):
+            try:
+                if int(reputation.get(key) or 0) > 0:
+                    return "a reputation provider has a record of it"
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def url_host(raw_url: Any) -> str:
+    """The host of a URL, lowercased, or ``""`` when it has none."""
+    from urllib.parse import urlparse
+
+    try:
+        return (urlparse(str(raw_url or "")).hostname or "").strip().lower().rstrip(".")
+    except (ValueError, TypeError):
+        return ""
+
+
+# One DNS label: letters, digits and hyphens, not starting or ending with a
+# hyphen, at most sixty-three characters. The internet's own rule, which is the
+# only rule that can be applied to a name nobody has tried to resolve.
+_LABEL_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+
+# The last label of a name that could exist: two or more letters, or a
+# punycode label. Deliberately a shape and not a list — a 136-entry list of
+# TLDs omits `gov`, `edu`, `mobi`, every punycode TLD and most African and
+# Middle-Eastern ccTLDs, and a sandbox-observed request to a university host is
+# not a string sweep's cut-off.
+_PUBLIC_SUFFIX_RE = re.compile(r"^(?:[a-z]{2,}|xn--[a-z0-9-]+)$")
+
+
+def host_is_public(host: Any) -> bool:
+    """Whether ``host`` is a name or address that could exist on the internet.
+
+    A string sweep cuts hostnames wherever the surrounding bytes end, and the
+    pieces are shaped like URLs: ``http://localho``, ``https://q``,
+    ``http://3271``. Five of them were published as STIX indicators in one live
+    run, each one something a consumer would block on.
+
+    This asks one question only — could anything ever answer for this host —
+    and it is deliberately the weakest question in the chain. Whether an
+    endpoint that *could* exist is published is
+    :func:`corroboration_reason`'s decision, not this one, so a plausible name
+    the file's bytes alone know about is still held back for want of a second
+    source rather than for the shape of its name.
+
+    A Tor address is first, and for the reason it is first everywhere else:
+    ``.onion`` never resolves, its own checksum is the only thing that can
+    confirm it, and holding it to any other rule makes the strongest
+    string-derived indicator there is unpublishable by every path.
+    """
+    name = str(host or "").strip().lower().rstrip(".")
+    if not name:
+        return False
+    if name.endswith(_TOR_SUFFIX):
+        # The suffix is reserved for hidden services and nothing else can ever
+        # answer under it, so the checksum is the whole question: a valid
+        # address is a host, and a name that merely ends in ``.onion`` is not.
+        return tor_hidden_service(name)
+    try:
+        address = ipaddress.ip_address(name.strip("[]"))
+    except ValueError:
+        pass
+    else:
+        return not (address.is_loopback or address.is_unspecified or address.is_link_local)
+    if not _is_emittable_domain(name) or host_is_private_use(name):
+        return False
+    labels = name.split(".")
+    if not all(_LABEL_RE.match(label) for label in labels):
+        return False
+    return bool(_PUBLIC_SUFFIX_RE.match(labels[-1]))
+
+
+def url_corroboration_reason(raw_url: Any, source: Any, reputation: Any = None) -> str | None:
+    """Why this URL may be published, or ``None`` when nothing says it may.
+
+    The same rule the domains go through, asked of the URL's host, plus the
+    syntactic question above — which no source can answer for: a cut-off host
+    is not an endpoint whoever recorded it meant, whatever recorded it.
+    """
+    host = url_host(raw_url)
+    if not host_is_public(host):
+        return None
+    return corroboration_reason(source, reputation, host)
+
+
+# The addresses a document, a specification or an example reserves. Python reads
+# them as private, which is not the same answer: a private address a sandbox
+# really watched is lateral traffic worth publishing, and one of these is
+# nobody's infrastructure whoever recorded it.
+_DOCUMENTATION_NETWORKS = (
+    ipaddress.ip_network("192.0.2.0/24"),
+    ipaddress.ip_network("198.51.100.0/24"),
+    ipaddress.ip_network("203.0.113.0/24"),
+    ipaddress.ip_network("2001:db8::/32"),
+)
+
+# The shared address space a carrier puts between its subscribers and the
+# internet. It is somebody's infrastructure the way a private range is — the
+# sandbox can really reach one — and it is nobody's the way a version number
+# is, so it belongs beside the private ranges rather than among the addresses
+# that are never published. Named rather than reached through ``is_private``,
+# which answers False for it.
+_SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
+
+# The address every reader of the report would recognise as not an endpoint.
+_BROADCAST_ADDRESS = "255.255.255.255"
+
+
+def address_is_publishable(address: Any, source: Any = None) -> bool:
+    """Whether this address could be infrastructure somebody should act on.
+
+    The classes that are never an indicator, whoever recorded them: loopback,
+    unspecified, link-local, multicast, the broadcast address, anything the
+    registries reserve, and the ranges a document or an example is written
+    with. A private address is the one that depends on who saw it — a sandbox
+    watching a sample reach 10.0.0.5 is lateral movement and worth publishing,
+    while the same run of digits out of a string sweep is a version number
+    somebody typed with dots in it.
+    """
+    try:
+        parsed = ipaddress.ip_address(str(address or "").strip().strip("[]"))
+    except ValueError:
+        return False
+    if (
+        parsed.is_loopback
+        or parsed.is_multicast
+        or parsed.is_link_local
+        or parsed.is_unspecified
+        or parsed.is_reserved
+        or str(parsed) == _BROADCAST_ADDRESS
+    ):
+        return False
+    if any(parsed in network for network in _DOCUMENTATION_NETWORKS):
+        return False
+    if parsed.is_private or parsed in _SHARED_ADDRESS_SPACE:
+        return str(source or "").strip().lower() not in ("", "strings")
+    return True
+
+
+def ip_corroboration_reason(address: Any, source: Any, reputation: Any = None) -> str | None:
+    """Why this address may be published, or ``None`` when nothing says it may.
+
+    The predicate the domains and the URLs already go through, asked of an
+    address, so the three network kinds answer one rule rather than three. A
+    string sweep turns any run of digits with dots in it into an "IP" — one
+    live bundle published ``6.0.0.0``, a version number out of the strings
+    table — and until this the IPs were the one kind with no gate at all.
+    """
+    if not address_is_publishable(address, source):
+        return None
+    return corroboration_reason(source, reputation, str(address))
+
+
+def domain_is_corroborated(source: Any, reputation: Any, fqdn: Any = "") -> bool:
+    """Whether anything but the sample's own byte image knows this name.
+
+    A string sweep turns any run of bytes shaped like a hostname into a
+    "domain": a truncated resource left `rosoft.com` beside `microsoft.com`,
+    an identifier table left `jector.SA`. Those are strings, and the report
+    prints them as strings. Publishing them as indicators, or spending a paid
+    reputation lookup on each, states something no one observed.
+
+    Corroboration is a second source: the sandbox resolved the name, an
+    analyst put it in an artefact, or a reputation provider has a record that
+    names it. A source this layer does not know about is left alone — only
+    ``strings`` is held back.
+
+    A Tor address is the exception, and it has to be: `.onion` does not
+    resolve, so no sandbox can ever confirm one, and holding it to this rule
+    made the strongest string-derived indicator there is unpublishable by any
+    path. Its own syntax is the second source. It stays labelled ``strings``
+    and it is still never sent to a paid provider, which has no record of a
+    hidden service either.
+    """
+    return corroboration_reason(source, reputation, fqdn) is not None
 
 
 def _is_emittable_domain(fqdn: str) -> bool:

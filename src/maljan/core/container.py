@@ -31,12 +31,13 @@ import asyncio
 import os
 import threading
 import weakref
+from contextlib import suppress
 from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from maljan.agents.registry import AgentRegistry
-from maljan.core.config import REPORTER_AGENT_KEY, Settings
+from maljan.core.config import PROMPT_ROLES, REPORTER_AGENT_KEY, Settings
 from maljan.core.exceptions import ConfigurationError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger
@@ -81,27 +82,70 @@ _RETIREMENT_HOOK_REGISTERED = threading.Event()
 
 
 def _drop_llm_caches_on_retirement(loop: object) -> None:
-    """Forget every cached chat model when an agent loop is retired.
+    """Forget the retired loop's cached chat models.
 
     A LangChain chat model lazily builds an httpx async pool bound to the loop
     that first awaits it — the single-loop invariant ``base_agent`` documents.
     After a retirement those pools belong to a loop nothing will run again, and
     reusing one on the fresh loop parks on a future that can never complete, so
-    the caches are emptied and the next call rebuilds. Which loop a given model
-    was bound to is not knowable from here, so all of them go: rebuilding is
-    cheap and a stale one is a hang.
+    that loop's partition is dropped and the next call rebuilds.
 
-    Deliberately narrow: agents, providers and server handles are *not* dropped
-    here. Handles are handled at their own site (``providers.servers``), and an
-    agent holds only a reference to the model it was built with, which its next
-    call refreshes through ``get_agent_llm``.
+    Two partitions go, not all of them: the retired loop's own, and the
+    ``None`` partition, whose models are used by the analyst tool loop — which
+    is the loop being retired. Every other loop's models are still bound to a
+    loop that is still running, and discarding them would throw away exactly
+    the precision ``PerLoopModels`` was added for.
+
+    Deliberately narrow: providers and server handles are *not* dropped here.
+    Handles are handled at their own site (``providers.servers``), and an
+    analyst holds only a reference to the model it was built with, which its
+    next call refreshes through ``get_agent_llm``. The narrative agent and the
+    report composer are dropped, because unlike an analyst they hold their
+    model for their whole lifetime and never ask for it again.
+    """
+    from maljan.llm.openai_provider import clear_shared_httpx_clients
+
+    for container in list(_LIVE_CONTAINERS):
+        with container._lock:
+            for cache in (
+                container._expert_llm_cache,
+                container._judge_llm_cache,
+                container._reporter_llm_cache,
+                container._summarizer_llm_cache,
+                container._agent_llm_cache,
+            ):
+                cache.drop(loop)
+                cache.drop(None)
+            container._function_summarizer_cache = None
+            container._narrative_agent_cache = None
+            container._report_composer_cache = None
+    # Dropping the models is not enough on its own: ``langchain_openai``
+    # caches its httpx clients with an ``lru_cache`` keyed on the endpoint, so
+    # a rebuilt model was handed the same pool, still bound to the retired
+    # loop, and the rebuild cleared nothing. Models this provider builds now
+    # own their pools, and this clears any that were built elsewhere.
+    clear_shared_httpx_clients()
+
+
+def _swap_healed_llm(replaced: object, healed: object) -> None:
+    """Put the self-healed model where the one it replaced was cached.
+
+    The 400 self-heal rebuilds a model without the llama.cpp extras the
+    endpoint rejected. The model that raised is of no further use against that
+    endpoint, and the container hands out one model per loop for the life of a
+    job, so leaving it cached means every later caller reaches the endpoint
+    through a wrapper that has already had to heal once.
     """
     for container in list(_LIVE_CONTAINERS):
         with container._lock:
-            container._expert_llm_cache = None
-            container._judge_llm_cache = None
-            container._reporter_llm_cache = None
-            container._agent_llm_cache.clear()
+            for cache in (
+                container._expert_llm_cache,
+                container._judge_llm_cache,
+                container._reporter_llm_cache,
+                container._summarizer_llm_cache,
+                container._agent_llm_cache,
+            ):
+                cache.replace(replaced, healed)
 
 
 def _register_retirement_hook() -> None:
@@ -109,9 +153,97 @@ def _register_retirement_hook() -> None:
     if _RETIREMENT_HOOK_REGISTERED.is_set():
         return
     from maljan.agents.base_agent import on_agent_loop_retired
+    from maljan.llm.openai_provider import on_model_healed
 
     on_agent_loop_retired(_drop_llm_caches_on_retirement)
+    on_model_healed(_swap_healed_llm)
     _RETIREMENT_HOOK_REGISTERED.set()
+
+
+def _current_loop() -> Any | None:
+    """The event loop the caller is running on, or ``None`` outside one."""
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+
+
+class PerLoopModels:
+    """Chat models, partitioned by the event loop that will use them.
+
+    A model's httpx connection pool belongs to the first event loop that awaits
+    it, and this process makes LLM calls on two — the shared agent loop and the
+    worker's own. One model handed to both fails inside httpx with "bound to a
+    different event loop", which the openai SDK reports as a bare
+    ``APIConnectionError("Connection error.")``.
+
+    Keyed on the loop *object*, weakly, rather than on ``id(loop)``: CPython
+    reuses the address of a collected loop, so an id key silently hands a fresh
+    loop the dead one's model — measured, not feared, in the first version of
+    this. A weak key cannot be confused with its successor and lets a finished
+    loop's models go on their own.
+
+    ``None`` is a partition of its own: a synchronous caller has no loop to be
+    keyed by, and the model it builds is used by the analyst tool loop, which
+    runs on the shared agent loop and nowhere else.
+    """
+
+    def __init__(self) -> None:
+        self._by_loop: weakref.WeakKeyDictionary[Any, dict[str, Any]] = weakref.WeakKeyDictionary()
+        self._without_loop: dict[str, Any] = {}
+
+    def _slot(self, loop: Any | None) -> dict[str, Any]:
+        if loop is None:
+            return self._without_loop
+        slot = self._by_loop.get(loop)
+        if slot is None:
+            slot = {}
+            self._by_loop[loop] = slot
+        return slot
+
+    def lookup(self, loop: Any | None, name: str = "") -> Any | None:
+        """The model cached for this loop under this name, or ``None``.
+
+        Not called ``get``: a plain ``dict`` answers ``get(loop, name)`` with
+        ``name`` itself, so a stand-in that was a dict returned the agent's
+        name as its model and the failure read as nonsense rather than as a
+        missing partition.
+        """
+        return self._slot(loop).get(name)
+
+    def put(self, loop: Any | None, name: str, value: Any) -> None:
+        self._slot(loop)[name] = value
+
+    def replace(self, old: Any, new: Any) -> int:
+        """Swap one cached model for another wherever it is held.
+
+        For the 400 self-heal: the model that raised is never usable against
+        that endpoint again, so leaving it in the cache means every later
+        caller starts from the wrapper that has already healed once. Returns
+        how many slots were swapped, which is what a test can assert on.
+        """
+        swapped = 0
+        for slot in [self._without_loop, *self._by_loop.values()]:
+            for name, value in list(slot.items()):
+                if value is old:
+                    slot[name] = new
+                    swapped += 1
+        return swapped
+
+    def clear(self) -> None:
+        self._by_loop = weakref.WeakKeyDictionary()
+        self._without_loop = {}
+
+    def drop(self, loop: Any | None) -> None:
+        """Forget one loop's partition, leaving every other loop's alone."""
+        if loop is None:
+            self._without_loop = {}
+            return
+        with suppress(KeyError, TypeError):
+            del self._by_loop[loop]
+
+    def __len__(self) -> int:
+        return len(self._without_loop) + sum(len(slot) for slot in self._by_loop.values())
 
 
 class ServiceContainer:
@@ -123,9 +255,14 @@ class ServiceContainer:
         mock: bool = False,
         samples_dir: str = "data/samples",
         event_sink: EventSink | None = None,
+        job_id: str = "",
     ) -> None:
         self.config = config
         self.mock = mock
+        # The identity of the job this container serves, as the caller that
+        # queued it knows it. Empty for the CLI and for tests, which run one
+        # analysis per process and have no such id to give.
+        self.job_id = str(job_id or "")
         # Progress feed for the live transcript UI. ``None`` outside the API
         # worker (CLI, tests), which makes every emit a no-op — see
         # maljan.pipeline.events.
@@ -160,10 +297,18 @@ class ServiceContainer:
         self._lock = threading.RLock()
 
         # --- Caches ---
-        self._expert_llm_cache: BaseChatModel | None = None
-        self._judge_llm_cache: BaseChatModel | None = None
-        self._reporter_llm_cache: BaseChatModel | None = None
-        self._agent_llm_cache: dict[str, BaseChatModel] = {}
+        # Every chat-model cache is keyed by the event loop the caller is on
+        # (see ``PerLoopModels``). A model's httpx pool belongs to the first loop
+        # that awaits it, and this process runs LLM calls on two loops — the
+        # shared agent loop and the worker's own — so one cached model handed
+        # to both is the "bound to a different event loop" failure that cost
+        # the judge its first verdict request and the narrative round its
+        # first attempt on every run.
+        self._expert_llm_cache = PerLoopModels()
+        self._judge_llm_cache = PerLoopModels()
+        self._reporter_llm_cache = PerLoopModels()
+        self._summarizer_llm_cache = PerLoopModels()
+        self._agent_llm_cache = PerLoopModels()
         self._agent_cache: dict[str, BaseAnalyst] = {}
         self._judge_agent_cache: dict[str, Any] = {}
         self._data_cache: dict[tuple[str, str], str] = {}
@@ -265,18 +410,21 @@ class ServiceContainer:
     def get_expert_llm(self) -> BaseChatModel:
         if self._llm_registry is None:
             raise ConfigurationError("Cannot build LLM in mock mode.")
+        loop = _current_loop()
         with self._lock:
-            if self._expert_llm_cache is None:
-                self._expert_llm_cache = self._llm_registry.build_model(
-                    role="expert", **self._expert_token_cap()
-                )
-            return self._expert_llm_cache
+            cached = self._expert_llm_cache.lookup(loop)
+            if cached is None:
+                cached = self._llm_registry.build_model(role="expert", **self._expert_token_cap())
+                self._expert_llm_cache.put(loop, "", cached)
+            return cached
 
     def get_judge_llm(self) -> BaseChatModel:
         if self._llm_registry is None:
             raise ConfigurationError("Cannot build LLM in mock mode.")
+        loop = _current_loop()
         with self._lock:
-            if self._judge_llm_cache is None:
+            cached = self._judge_llm_cache.lookup(loop)
+            if cached is None:
                 # Bound the verdict generation so a degenerate decode can't
                 # consume the full wall-clock timeout (see LLMConfig.judge_max_tokens).
                 extra: dict[str, Any] = {}
@@ -291,10 +439,11 @@ class ServiceContainer:
                 # the per-agent default of 0.1 rather than the role's 0.0 —
                 # deliberate (the entry is an analyst-shaped override and is
                 # read as one), and said out loud in the setting's help text.
-                self._judge_llm_cache = self._llm_registry.build_model_for_agent(
+                cached = self._llm_registry.build_model_for_agent(
                     "judge", fallback_role="judge", **extra
                 )
-            return self._judge_llm_cache
+                self._judge_llm_cache.put(loop, "", cached)
+            return cached
 
     def get_reporter_llm(self) -> BaseChatModel:
         """The model the report stage's narrative and composer rounds run on.
@@ -306,22 +455,47 @@ class ServiceContainer:
         """
         if self._llm_registry is None:
             raise ConfigurationError("Cannot build LLM in mock mode.")
+        loop = _current_loop()
         with self._lock:
-            if self._reporter_llm_cache is None:
+            cached = self._reporter_llm_cache.lookup(loop)
+            if cached is None:
                 extra: dict[str, Any] = {}
                 cap = self.config.llm.judge_max_tokens
                 if cap and cap > 0:
                     extra["max_tokens"] = cap
-                self._reporter_llm_cache = self._llm_registry.build_model_for_agent(
+                cached = self._llm_registry.build_model_for_agent(
                     REPORTER_AGENT_KEY, fallback_role="judge", **extra
                 )
-            return self._reporter_llm_cache
+                self._reporter_llm_cache.put(loop, "", cached)
+            return cached
+
+    def get_summarizer_llm(self) -> BaseChatModel:
+        """The model the function summariser runs on, per loop like the rest.
+
+        It has its own provider/model overrides, so it is its own accessor
+        rather than the expert one with arguments; what it shares with the
+        others is that its pool belongs to the loop that first awaits it.
+        """
+        if self._llm_registry is None:
+            raise ConfigurationError("Cannot build FunctionSummarizer LLM in mock mode.")
+        loop = _current_loop()
+        with self._lock:
+            cached = self._summarizer_llm_cache.lookup(loop)
+            if cached is None:
+                cached = self._llm_registry.build_model(
+                    role="expert",
+                    provider_override=self.config.preprocessing.summarizer_provider,
+                    model_override=self.config.preprocessing.summarizer_model,
+                )
+                self._summarizer_llm_cache.put(loop, "", cached)
+            return cached
 
     def get_agent_llm(self, agent_name: str) -> BaseChatModel:
         if self._llm_registry is None:
             raise ConfigurationError("Cannot build LLM in mock mode.")
+        loop = _current_loop()
         with self._lock:
-            cached = self._agent_llm_cache.get(agent_name)
+            cached = self._agent_llm_cache.lookup(loop, agent_name)
             if cached is None:
                 # Analysts share the expert budget cap — this is the path the
                 # static/dynamic/network ReAct loops and their forced-synthesis
@@ -329,7 +503,7 @@ class ServiceContainer:
                 cached = self._llm_registry.build_model_for_agent(
                     agent_name, **self._expert_token_cap()
                 )
-                self._agent_llm_cache[agent_name] = cached
+                self._agent_llm_cache.put(loop, agent_name, cached)
             return cached
 
     # ------------------------------------------------------------------
@@ -482,6 +656,27 @@ class ServiceContainer:
         entries.sort(key=lambda entry: getattr(entry, "seq", 0))
         return entries
 
+    def drain_all_judge_budget_records(self) -> list[dict[str, Any]]:
+        """Every budget row the judge agents' loops left, from each cached role.
+
+        Drained beside the ledger and for the same reason: the judge is cached
+        per role, only some of those instances run a tool loop, and a meter
+        that is never drained reports nothing for the one loop with a hard
+        wall-clock timeout.
+        """
+        with self._lock:
+            judges = list(self._judge_agent_cache.values())
+        rows: list[dict[str, Any]] = []
+        for judge in judges:
+            drain = getattr(judge, "drain_budget_records", None)
+            if drain is None:
+                continue
+            try:
+                rows.extend(drain() or [])
+            except Exception as exc:  # noqa: BLE001 — the meter never fails a run
+                logger.debug("budget drain skipped for a judge agent: %s", exc)
+        return rows
+
     # ------------------------------------------------------------------
     # Composition accessors
     # ------------------------------------------------------------------
@@ -517,13 +712,22 @@ class ServiceContainer:
             raise KeyError(f"No agent definition named {key!r}. Available: {available}")
         return str(definition.role)
 
+    def job_key(self) -> str:
+        """The job identity handed to every resolver and every handle.
+
+        One key per job: the handles' same-job short circuit compares it, so a
+        container that answered differently for two of its agents would close
+        and reopen every server between them.
+        """
+        return self.job_id or "job"
+
     def get_agent(self, name: str) -> BaseAnalyst:
         """The agent definition ``name`` names, instantiated and wired.
 
         A built-in role runs its own class under the definition's key — a clone
         ``static_r2`` is a ``StaticAnalyst`` named ``static_r2`` — because
         those classes carry the provider-specific ISR extraction the goldens
-        pin. A ``generic`` role runs ``ConfigurableAnalyst``. Both get the
+        pin. A ``generic`` or ``lead`` role runs ``ConfigurableAnalyst``. Both get the
         per-run ledgers, a way back to this container, and their
         ``ResolvedAgent``, so nothing below re-derives a prompt or a tool set.
         """
@@ -536,9 +740,9 @@ class ServiceContainer:
             from maljan.agents.configurable_analyst import ConfigurableAnalyst
 
             role = self.agent_role(name)
-            resolved = resolve_agent(name, self)
+            resolved = resolve_agent(name, self, self.job_key())
             llm = cast(BaseChatModel, resolved.llm)
-            if role == "generic":
+            if role in PROMPT_ROLES:
                 agent: BaseAnalyst = ConfigurableAnalyst(name, resolved, llm)
             else:
                 agent = self.agent_registry.create(role, llm)
@@ -554,6 +758,9 @@ class ServiceContainer:
                 # as ``...static.static`` instead of ``...static``.
                 if name != role:
                     agent.logger = agent.logger.getChild(name.lower())
+            # Every attach in this job asks for the same key, so a handle
+            # already open for it is reused rather than torn down and reopened.
+            agent._job_id = self.job_key()
             agent.token_ledger = getattr(self, "_token_ledger", None)
             agent.truncation_ledger = getattr(self, "_truncation_ledger", None)
             agent.evidence_counter = getattr(self, "_evidence_counter", None)
@@ -579,6 +786,7 @@ class ServiceContainer:
                     # every provider — see _supports_structured_output.
                     config=self.config,
                 )
+                cached._job_id = self.job_key()
                 cached.token_ledger = getattr(self, "_token_ledger", None)
                 cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
                 cached.evidence_counter = getattr(self, "_evidence_counter", None)
@@ -723,6 +931,12 @@ class ServiceContainer:
         structured-output prompts so no new provider build is needed. Callers
         receive ``None`` in mock mode and must fall back to the deterministic
         narrative template.
+
+        One instance per container, holding the model it was built with, which
+        is the shape the per-loop model store exists to avoid. It is safe
+        because of the call site rather than because of this cache: the report
+        node is the only caller and it runs on one loop. A second caller on
+        another loop would need this to be per-loop as well.
         """
         if self.is_mock:
             return None
@@ -744,7 +958,9 @@ class ServiceContainer:
 
         ``None`` in mock mode or when ``composer_enabled`` is
         off (callers then simply skip the professional spine). Runs on the
-        reporter's model like the NarrativeAgent.
+        reporter's model like the NarrativeAgent, and pins it for the same
+        reason and under the same condition: the report node is the one
+        caller, on one loop.
         """
         if self.is_mock or not self.config.reporting.composer_enabled:
             return None
@@ -882,7 +1098,7 @@ class ServiceContainer:
         "sample.chunks"]`` would hand a detonated sample both instead of one.
         """
         role = self.agent_role(agent_name)
-        if role == "generic":
+        if role in PROMPT_ROLES:
             static_context = self.load_chunked(file_hash, agent_name)
             sandbox_chunks: list[TextChunk] = []
             if sandbox_report:
@@ -906,11 +1122,7 @@ class ServiceContainer:
 
                 if self._llm_registry is None:
                     raise ConfigurationError("Cannot build FunctionSummarizer LLM in mock mode.")
-                summarizer_llm = self._llm_registry.build_model(
-                    role="expert",
-                    provider_override=self.config.preprocessing.summarizer_provider,
-                    model_override=self.config.preprocessing.summarizer_model,
-                )
+                summarizer_llm = self.get_summarizer_llm()
                 self._function_summarizer_cache = FunctionSummarizer(
                     llm=summarizer_llm,
                     max_summary_words=self.config.preprocessing.summarizer_max_words,

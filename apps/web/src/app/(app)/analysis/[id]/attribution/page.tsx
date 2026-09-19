@@ -3,11 +3,9 @@
 import { useState } from "react";
 
 import { useReport } from "../layout";
-import { api } from "@/lib/api";
 import { copyToClipboard, truncateMiddle } from "@/lib/report-utils";
-import { getErrorMessage } from "@/lib/errors";
 import Field from "@/components/ui/Field";
-import { ENRICH_STATUS_MESSAGE, ENRICH_BUTTON_LABEL } from "@/lib/enrichment";
+import { attributionSaysSomething } from "@/components/analysis/analysisTabs";
 import type { FamilyAttribution } from "@/types/malware-report";
 
 type SimilarSample = {
@@ -21,8 +19,6 @@ type SimilarSample = {
 
 export default function AttributionTab() {
   const { report, loading } = useReport();
-  const [enrichBusy, setEnrichBusy] = useState(false);
-  const [enrichMsg, setEnrichMsg] = useState<string | null>(null);
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
@@ -30,30 +26,17 @@ export default function AttributionTab() {
 
   const attribution: FamilyAttribution | undefined =
     report?.malware_report?.attribution;
-  if (!attribution) {
+  /* The same rule the tab bar applies: the block is on every report, so its
+   * presence says nothing — what it named does. A direct link to this tab on
+   * a run that named nothing gets the sentence written for it rather than a
+   * card of "(unknown)"s. */
+  if (!attribution || !attributionSaysSomething(report?.malware_report ?? null)) {
     return (
       <div className="p-8 text-center text-sm text-text-secondary">
-        No attribution payload available for this report.
+        This run named no family, actor or campaign.
       </div>
     );
   }
-
-  const reportId = report?.id;
-  const triggerEnrich = async () => {
-    if (!reportId || enrichBusy) return;
-    setEnrichBusy(true);
-    setEnrichMsg(null);
-    try {
-      // Report the actual endpoint status rather than
-      // promising a refresh for every outcome.
-      const res = await api.enrichReport(reportId);
-      setEnrichMsg(ENRICH_STATUS_MESSAGE[res.status] ?? ENRICH_STATUS_MESSAGE.queued);
-    } catch (e) {
-      setEnrichMsg(`Failed to queue enrichment: ${getErrorMessage(e)}`);
-    } finally {
-      setEnrichBusy(false);
-    }
-  };
 
   const familyConfidencePct = Math.round(attribution.family_confidence * 100);
   const malwareCategory = report?.malware_report?.malware_category;
@@ -61,7 +44,6 @@ export default function AttributionTab() {
   // Absent on every report written before these fields existed, hence the fallbacks.
   const hashMatches = attribution.function_hash_matches ?? [];
   const ragCandidates = attribution.family_rag_candidates ?? [];
-  const casePriors = attribution.attck_case_candidates ?? [];
   // An ungrounded family is one the judge named without citing the evidence
   // ids it read the name from. It is kept — a flagged attribution is more
   // useful than a deleted one — and rendered muted + struck through +
@@ -85,7 +67,7 @@ export default function AttributionTab() {
             Family Attribution
           </h2>
         </div>
-        <div className="p-4 grid grid-cols-3 gap-4">
+        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <Field
             label="Family"
             value={familyDisplay}
@@ -107,9 +89,16 @@ export default function AttributionTab() {
                 : "-"
             }
           />
-          <Field label="Actor" value={attribution.actor || "(unknown)"} />
-          <Field label="Campaign" value={attribution.campaign || "(unknown)"} />
+          {attribution.actor && <Field label="Actor" value={attribution.actor} />}
+          {attribution.campaign && <Field label="Campaign" value={attribution.campaign} />}
         </div>
+        {/* A row whose value is "(unknown)" is a field the schema has rather
+            than a fact about the sample. */}
+        {!attribution.actor && !attribution.campaign && (
+          <p className="px-4 pb-3 -mt-2 text-[11px] text-text-muted">
+            No actor and no campaign were named.
+          </p>
+        )}
         {!attribution.family && (
           <div className="px-4 pb-3 -mt-2 text-[11px] text-text-muted">
             No specific malware family was attributed. The behavioural{" "}
@@ -162,51 +151,24 @@ export default function AttributionTab() {
         />
       )}
 
-      {casePriors.length > 0 && (
-        <EvidenceTable
-          title={`ATT&CK Case Priors (${casePriors.length})`}
-          note="Techniques that recur in behaviourally-similar prior cases from Maljan's own memory. Advisory only — these describe past runs, not this sample."
-          headers={["Technique", "Support", "Similarity"]}
-          columnClass={["font-mono text-status-blue", "font-mono", "font-mono"]}
-          rows={casePriors.map((c, i) => ({
-            key: `${c.technique_id}-${i}`,
-            cells: [c.technique_id, c.support ?? "-", fmt(c.similarity, 3)],
-          }))}
-        />
-      )}
-
-      <div className="bg-bg-surface border border-border rounded">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3 flex-wrap">
-          <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-            Similar Samples ({similars.length})
-          </h2>
-          <button
-            onClick={triggerEnrich}
-            disabled={enrichBusy || !reportId}
-            className="px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted transition-colors disabled:text-text-disabled disabled:cursor-not-allowed"
-          >
-            {enrichBusy ? "queueing..." : ENRICH_BUTTON_LABEL}
-          </button>
-        </div>
-        {enrichMsg && (
-          <div className="px-4 py-2 text-xs text-text-secondary bg-bg-active border-b border-border">
-            {enrichMsg}
+      {/* The nearest-neighbour cases, when the run found some. The button that
+        * fills this list is the run's one enrichment action, on SUMMARY —
+        * there was a copy of it here and another on NETWORK, both queueing the
+        * same endpoint. */}
+      {similars.length > 0 && (
+        <div className="bg-bg-surface border border-border rounded">
+          <div className="px-4 py-3 border-b border-border">
+            <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+              Similar Samples ({similars.length})
+            </h2>
           </div>
-        )}
-        {similars.length === 0 ? (
-          <div className="p-8 text-center text-sm text-text-muted">
-            No nearest-neighbour cases recorded yet. Run the threat-intel
-            enrichment step (button above) to populate this list from Maljan&apos;s
-            long-term memory of previously analysed samples.
-          </div>
-        ) : (
           <div className="divide-y divide-border-light">
             {similars.map((s, i) => (
               <SimilarSampleCard key={`${s.sample_id ?? "row"}-${i}`} sample={s} />
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -264,7 +226,7 @@ function EvidenceTable({
           <thead>
             <tr className="text-left text-text-muted border-b border-border-light">
               {headers.map((h) => (
-                <th key={h} className="px-4 py-2 font-medium">
+                <th key={h} scope="col" className="px-4 py-2 font-medium">
                   {h}
                 </th>
               ))}
@@ -311,7 +273,7 @@ function SimilarSampleCard({ sample }: { sample: SimilarSample }) {
                   setTimeout(() => setCopied(false), 1500);
                 }
               }}
-              className="text-[11px] px-1.5 py-0.5 border border-border rounded text-text-secondary hover:text-text-primary hover:border-text-muted transition-colors"
+              className="text-[11px] px-1.5 py-0.5 border border-border rounded text-text-secondary hover:text-text-primary hover:border-text-muted"
             >
               {copied ? "copied" : "copy"}
             </button>

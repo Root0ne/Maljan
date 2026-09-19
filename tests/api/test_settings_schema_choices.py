@@ -21,7 +21,9 @@ def client() -> TestClient:
     app.dependency_overrides[require_admin] = lambda: MagicMock(
         id="00000000-0000-0000-0000-000000000001"
     )
-    app.dependency_overrides[get_db] = lambda: MagicMock()
+    # The probe routes end their read transaction before the probe runs, so
+    # the stand-in session answers ``commit`` the way a session does.
+    app.dependency_overrides[get_db] = lambda: MagicMock(commit=AsyncMock())
     return TestClient(app)
 
 
@@ -43,7 +45,14 @@ def test_the_schema_carries_registry_ids_and_the_current_server_keys(client):
     assert "rest" in entries["core.sandbox.provider"]["choices"]
     generic = entries["core.static.generic.server"]
     assert generic["choices_from"] == "mcp_servers"
-    assert generic["choices"] == ["", "analysis", "knowledge", "network", "threatintel"]
+    assert generic["choices"] == [
+        "",
+        "analysis",
+        "knowledge",
+        "network",
+        "threatintel",
+        "virustotal",
+    ]
     assert entries["core.mcp.servers"]["editor"] == "server_map"
 
 

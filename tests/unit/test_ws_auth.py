@@ -108,18 +108,24 @@ async def test_ws_rejects_invalid_job_id(mock_ws: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
-async def test_ws_rejects_nonexistent_job(mock_ws: MagicMock) -> None:
+async def test_ws_rejects_nonexistent_job(mock_ws: MagicMock, valid_token_payload: dict) -> None:
     job_id = str(uuid.uuid4())
     mock_ws.headers = _subprotocol_headers("tok")
 
+    # Two reads, in the order the route makes them: the account, which is
+    # open, and then the job, which is not there.
+    account = MagicMock()
+    account.is_active = True
+    user_result = MagicMock()
+    user_result.scalar_one_or_none.return_value = account
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = None
 
     mock_session = AsyncMock()
-    mock_session.execute = AsyncMock(return_value=mock_result)
+    mock_session.execute = AsyncMock(side_effect=[user_result, mock_result])
 
     with (
-        patch("app.api.ws.decode_token", return_value={"sub": "user-1", "type": "access"}),
+        patch("app.api.ws.decode_token", return_value=valid_token_payload),
         patch("app.api.ws.async_session_factory") as mock_factory,
     ):
         mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)

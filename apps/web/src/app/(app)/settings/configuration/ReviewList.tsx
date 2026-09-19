@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import type { ChangeLine } from "./describeChange";
+import { comparableSaved } from "./agentStaging";
 import { describeChange } from "./describeChange";
 import { groupsBySection, pathForKey } from "./sections";
+import { countLabel } from "@/lib/report-utils";
 import { APPLIES_SENTENCE } from "./vocabulary";
 import type { CatalogEntry, SettingValue, SettingsSchema } from "@/types/settings";
 
@@ -12,19 +14,20 @@ export interface ReviewItem extends ChangeLine {
   href: string;
   sectionTitle: string;
   groupTitle: string;
-  error?: string;
+  /** Empty when the server accepted this key. */
+  errors: string[];
 }
 
 /** All validation errors that belong to a staged key: an exact match for a
  *  scalar leaf, or `${key}.<field>` for a composite one (the server map, the
  *  agent definitions, ...) — the same prefix rule the composite editors use
- *  to place a card error. Joined so one review row can show every field the
- *  server rejected. */
-function errorFor(key: string, errors: Record<string, string>): string | undefined {
-  const matches = Object.entries(errors)
+ *  to place a card error. A list rather than one joined sentence: a composite
+ *  leaf can be refused on five fields at once, and semicolons between them
+ *  made a screen reader recite one run-on paragraph. */
+function errorsFor(key: string, errors: Record<string, string>): string[] {
+  return Object.entries(errors)
     .filter(([k]) => k === key || k.startsWith(`${key}.`))
     .map(([, v]) => v);
-  return matches.length > 0 ? matches.join("; ") : undefined;
 }
 
 /** The slice of `SettingsContextValue` `buildReviewItems` reads — named
@@ -61,7 +64,14 @@ export function buildReviewItems(ctx: ReviewSource): ReviewItem[] {
   for (const entry of schema.groups.flatMap((g) => g.entries)) {
     const key = entry.key;
     if (!(key in pending)) continue;
-    const line = describeChange(entriesByKey[key] ?? entry, values[key]?.value, pending[key]);
+    const line = describeChange(
+      entriesByKey[key] ?? entry,
+      // The stored value in the shape the staged one is sent in: for the agent
+      // map those differ, and comparing them raw named five untouched
+      // built-ins as changed.
+      comparableSaved(key, values[key]?.value),
+      pending[key],
+    );
     const href = pathForKey(schema, key);
     const titles = titlesByPath.get(href) ?? { sectionTitle: "", groupTitle: "" };
     items.push({
@@ -70,10 +80,49 @@ export function buildReviewItems(ctx: ReviewSource): ReviewItem[] {
       href,
       sectionTitle: titles.sectionTitle,
       groupTitle: titles.groupTitle,
-      error: errorFor(key, errors),
+      errors: errorsFor(key, errors),
     });
   }
   return items;
+}
+
+/** Every field the server refused, across the rows on screen. */
+export function reviewErrors(lines: ReviewItem[]): string[] {
+  return lines.flatMap((line) => line.errors);
+}
+
+/** "3 fields need attention", and the one exception English makes. */
+export function attentionLine(count: number): string {
+  return `${countLabel(count, "field")} ${count === 1 ? "needs" : "need"} attention`;
+}
+
+/**
+ * What the server refused, said once and announced once.
+ *
+ * The messages used to be joined with semicolons into a single `role="alert"`,
+ * which a screen reader read as one run-on sentence; splitting them into a
+ * list fixed the sentence and lost the announcement, so a reader was told
+ * "2 fields need attention" and never which two. The list stays visible and
+ * unannounced, and a status node beside it carries the count and the messages
+ * politely — one region rather than one per message, which is what produced
+ * the run-on in the first place.
+ */
+export function ReviewErrorSummary({ lines }: { lines: ReviewItem[] }) {
+  const messages = reviewErrors(lines);
+  return (
+    <>
+      {messages.length > 0 && (
+        <p className="text-xs text-status-red mb-2">{attentionLine(messages.length)}</p>
+      )}
+      {/* Rendered whether or not there is anything in it. A live region that
+          arrives in the DOM together with its first content is announced by
+          NVDA and not by VoiceOver; one that is already there when the text
+          lands is announced by both. */}
+      <p role="status" className="sr-only">
+        {messages.length > 0 ? [attentionLine(messages.length), ...messages].join(". ") : ""}
+      </p>
+    </>
+  );
 }
 
 interface GroupBucket {
@@ -133,10 +182,12 @@ export function ReviewList({ lines }: { lines: ReviewItem[] }) {
                 <div className="text-xs text-text-muted">
                   <em>{APPLIES_SENTENCE[item.applies]}</em>
                 </div>
-                {item.error && (
-                  <div className="text-xs text-status-red" role="alert">
-                    {item.error}
-                  </div>
+                {item.errors.length > 0 && (
+                  <ul className="text-xs text-status-red">
+                    {item.errors.map((message, i) => (
+                      <li key={i}>{message}</li>
+                    ))}
+                  </ul>
                 )}
               </li>
             ))}

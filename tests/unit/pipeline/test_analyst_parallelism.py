@@ -49,18 +49,25 @@ def fake_container() -> Any:
     return container
 
 
+# The one node that runs before the analysts: the triage pack, which writes the
+# deterministic facts every analyst then reads. It fans out to all of them at
+# once, so it is where the parallel contract is measured from.
+PACK = "triage_pack"
+
+
 def test_start_fans_out_to_every_analyst(fake_container: Any) -> None:
-    """Every analyst node must be a direct successor of START."""
+    """Every analyst node must be a direct successor of the pack, which START feeds."""
     from langgraph.graph import START
 
     from maljan.pipeline.builder import build_graph
 
     graph = build_graph(fake_container)
     edge_set = _edges(graph)
+    assert (START, PACK) in edge_set
 
     start_targets: set[str] = set()
     for source, target in edge_set:
-        if source == START:
+        if source == PACK:
             start_targets.add(target)
     expected = {"static_analyst", "dynamic_analyst", "network_analyst"}
     assert expected.issubset(start_targets), (
@@ -70,9 +77,7 @@ def test_start_fans_out_to_every_analyst(fake_container: Any) -> None:
 
 
 def test_no_serialising_router_between_start_and_analysts(fake_container: Any) -> None:
-    """No analyst node should be reachable from START only via another analyst."""
-    from langgraph.graph import START
-
+    """No analyst node should be reachable from the pack only via another analyst."""
     from maljan.pipeline.builder import build_graph
 
     graph = build_graph(fake_container)
@@ -86,11 +91,11 @@ def test_no_serialising_router_between_start_and_analysts(fake_container: Any) -
 
     for analyst in ("static_analyst", "dynamic_analyst", "network_analyst"):
         preds = predecessors.get(analyst, set())
-        # The only allowed predecessor is START. Anything else (e.g. a
+        # The only allowed predecessor is the pack. Anything else (e.g. a
         # router or another analyst) would force serial execution.
-        assert preds == {START}, (
+        assert preds == {PACK}, (
             f"Analyst {analyst} has unexpected predecessors {preds}; "
-            "must be {START} only to preserve parallelism."
+            "must be the triage pack only to preserve parallelism."
         )
 
 
@@ -126,10 +131,11 @@ def test_sequential_mode_chains_analysts(sequential_container: Any) -> None:
     graph = build_graph(sequential_container)
     edge_set = _edges(graph)
 
-    # START hits only the first analyst.
-    start_targets = {tgt for src, tgt in edge_set if src == START}
+    # START hits the pack, and the pack hits only the first analyst.
+    assert {tgt for src, tgt in edge_set if src == START} == {PACK}
+    start_targets = {tgt for src, tgt in edge_set if src == PACK}
     assert start_targets == {"static_analyst"}, (
-        f"Expected START → static_analyst only, got {start_targets}."
+        f"Expected {PACK} → static_analyst only, got {start_targets}."
     )
     # The chain links each analyst to the next.
     assert ("static_analyst", "dynamic_analyst") in edge_set

@@ -30,6 +30,72 @@ def _elf(machine: int = 0x3E) -> bytes:
     return ident + struct.pack("<HHI", 2, machine, 1) + b"\x00" * 512
 
 
+def _pe(import_rva: int = 0x1000, delay: bool = True, delay_rva: int = 0x2000) -> bytes:
+    """A 32-bit PE with one real import and, optionally, one delay-load import.
+
+    Hand-built rather than checked in as a fixture: the point of the damaged
+    case is that the import directory RVA is wrong and everything else is
+    right, and that is one argument here instead of a second binary nobody can
+    read in a diff.
+    """
+    idata = bytearray(0x200)
+    idata[0x00:0x14] = struct.pack("<IIIII", 0x1028, 0, 0, 0x1060, 0x1030)
+    idata[0x28:0x30] = struct.pack("<II", 0x1040, 0)
+    idata[0x30:0x38] = struct.pack("<II", 0x1040, 0)
+    idata[0x40:0x4E] = struct.pack("<H", 0) + b"CreateFileA\x00"
+    idata[0x60:0x6D] = b"KERNEL32.dll\x00"
+
+    didat = bytearray(0x200)
+    didat[0x00:0x20] = struct.pack("<IIIIIIII", 1, 0x2080, 0x2090, 0x2048, 0x2040, 0, 0, 0)
+    didat[0x40:0x48] = struct.pack("<II", 0x2060, 0)
+    didat[0x48:0x50] = struct.pack("<II", 0x2060, 0)
+    didat[0x60:0x73] = struct.pack("<H", 0) + b"HttpSendRequestA\x00"
+    didat[0x80:0x8C] = b"WININET.dll\x00"
+
+    sections = 2 if delay else 1
+    opt = bytearray()
+    opt += struct.pack("<HBB", 0x10B, 14, 29)
+    opt += struct.pack("<III", 0x200, 0, 0)
+    opt += struct.pack("<III", 0x1000, 0x1000, 0x1000)
+    opt += struct.pack("<III", 0x400000, 0x1000, 0x200)
+    opt += struct.pack("<HHHHHH", 6, 0, 0, 0, 6, 0)
+    opt += struct.pack("<I", 0)
+    opt += struct.pack("<II", 0x1000 * (sections + 1), 0x200)
+    # Subsystem 3 (console), DllCharacteristics = DYNAMIC_BASE | NX_COMPAT |
+    # NO_SEH | TERMINAL_SERVER_AWARE.
+    opt += struct.pack("<IHH", 0, 3, 0x8140)
+    opt += struct.pack("<IIII", 0x100000, 0x1000, 0x100000, 0x1000)
+    opt += struct.pack("<II", 0, 16)
+    directories = [(0, 0)] * 16
+    directories[1] = (import_rva, 40)
+    if delay:
+        directories[13] = (delay_rva, 64)
+    for rva, size in directories:
+        opt += struct.pack("<II", rva, size)
+
+    # Characteristics = EXECUTABLE_IMAGE | 32BIT_MACHINE.
+    file_header = struct.pack("<HHIIIHH", 0x14C, sections, 0x5F5E0FF, 0, 0, len(opt), 0x0102)
+    headers = bytearray(0x200)
+    headers[0:2] = b"MZ"
+    headers[0x3C:0x40] = struct.pack("<I", 0x40)
+    at = 0x40
+    headers[at : at + 4] = b"PE\x00\x00"
+    at += 4
+    headers[at : at + len(file_header)] = file_header
+    at += len(file_header)
+    headers[at : at + len(opt)] = opt
+    at += len(opt)
+
+    def _section(name: bytes, rva: int, raw: int) -> bytes:
+        return struct.pack("<8sIIIIIIHHI", name, 0x200, rva, 0x200, raw, 0, 0, 0, 0, 0xC0000040)
+
+    headers[at : at + 40] = _section(b".idata\x00\x00", 0x1000, 0x200)
+    at += 40
+    if delay:
+        headers[at : at + 40] = _section(b".didat\x00\x00", 0x2000, 0x400)
+    return bytes(headers) + bytes(idata) + (bytes(didat) if delay else b"")
+
+
 class TestPeInfo:
     def test_a_file_without_the_mz_magic_is_refused_by_name(self, tmp_path: Path) -> None:
         target = tmp_path / "s.bin"
@@ -39,6 +105,90 @@ class TestPeInfo:
 
     def test_a_missing_file_is_an_error_and_not_an_exception(self) -> None:
         assert tool.pe_info("/nonexistent/s.exe")["tool"] == "pe_info"
+
+    def test_a_healthy_pe_reports_its_header_facts(self, tmp_path: Path) -> None:
+        pytest.importorskip("pefile")
+        target = tmp_path / "clean.exe"
+        target.write_bytes(_pe())
+
+        result = tool.pe_info(str(target))
+
+        assert result["warnings"] == []
+        assert result["import_table_damaged"] is False
+        assert [row["function"] for row in result["imports"]] == ["CreateFileA"]
+        assert result["characteristics"] == [
+            "IMAGE_FILE_EXECUTABLE_IMAGE",
+            "IMAGE_FILE_32BIT_MACHINE",
+        ]
+        assert "IMAGE_DLLCHARACTERISTICS_NX_COMPAT" in result["dll_characteristics"]
+        assert result["linker_version"] == "14.29"
+        assert result["rich_header_present"] is False
+
+    def test_a_damaged_import_table_is_said_out_loud(self, tmp_path: Path) -> None:
+        """The live sample's import directory RVA pointed nowhere and the tool
+        answered ``imports: []`` — indistinguishable from a binary that imports
+        nothing at all."""
+        pytest.importorskip("pefile")
+        target = tmp_path / "damaged.exe"
+        target.write_bytes(_pe(import_rva=0x9000))
+
+        result = tool.pe_info(str(target))
+
+        assert result["imports"] == []
+        assert result["import_table_damaged"] is True
+        assert any("import directory" in w for w in result["warnings"])
+
+    def test_a_benign_import_warning_is_not_a_damaged_table(self, tmp_path: Path) -> None:
+        """A healthy binary whose delay-load descriptor pefile cannot walk still
+        has a perfectly good import table. Matching the bare word "import" in
+        the warning list called that a damaged one."""
+        pytest.importorskip("pefile")
+        target = tmp_path / "delay-broken.exe"
+        target.write_bytes(_pe(delay_rva=0x9000))
+
+        result = tool.pe_info(str(target))
+
+        assert [row["function"] for row in result["imports"]] == ["CreateFileA"]
+        assert any("import" in w.lower() for w in result["warnings"]), result["warnings"]
+        assert result["import_table_damaged"] is False
+
+    def test_delay_load_imports_are_reported_too(self, tmp_path: Path) -> None:
+        pytest.importorskip("pefile")
+        target = tmp_path / "delay.exe"
+        target.write_bytes(_pe())
+
+        result = tool.pe_info(str(target))
+
+        (row,) = result["delay_imports"]
+        assert (row["dll"], row["function"]) == ("WININET.dll", "HttpSendRequestA")
+
+    def test_an_import_row_carries_the_table_s_facts_and_no_label(self, tmp_path: Path) -> None:
+        """A row that called BitBlt "keylogging" was the tool doing the analysis,
+        and an analyst wrote the label up as its first claim on a signed binary.
+        What an API is used for is the knowledge server's question."""
+        pytest.importorskip("pefile")
+        target = tmp_path / "sample.exe"
+        target.write_bytes(_pe())
+
+        result = tool.pe_info(str(target))
+
+        for row in [*result["imports"], *result["delay_imports"]]:
+            assert set(row) == {"dll", "function", "ordinal", "hint", "address"}
+        (row,) = result["imports"]
+        assert (row["function"], row["hint"]) == ("CreateFileA", 0)
+        assert isinstance(row["address"], int)
+
+    def test_the_import_blocks_are_omitted_when_imports_are_not_asked_for(
+        self, tmp_path: Path
+    ) -> None:
+        pytest.importorskip("pefile")
+        target = tmp_path / "clean.exe"
+        target.write_bytes(_pe())
+
+        result = tool.pe_info(str(target), imports=False)
+
+        assert "imports" not in result
+        assert "delay_imports" not in result
 
 
 class TestPackerSectionMatches:
@@ -125,15 +275,51 @@ class TestApkInfo:
         assert result["abis"] == ["arm64-v8a"]
         assert result["cert_files"] == ["META-INF/CERT.RSA"]
 
-    def test_without_androguard_the_missing_library_is_named(self, tmp_path: Path) -> None:
+    def test_without_androguard_the_answer_is_a_success_that_says_what_is_missing(
+        self, tmp_path: Path
+    ) -> None:
+        """The zip facts were returned beside an `error` key, so the ledger
+        recorded the call as failed and the pack showed none of them. The
+        degraded subset is an answer; what it could not add is said in
+        `degraded`, with the remedy."""
         try:
             import androguard  # noqa: F401
         except ImportError:
             result = tool.apk_info(str(self._apk(tmp_path)))
-            assert result["error"] == "androguard is not installed"
-            assert result["degraded"] == "zip-level facts only"
+            assert "error" not in result
+            assert result["manifest_present"] is True
+            assert result["dex_count"] == 2
+            assert "androguard is not installed" in result["degraded"]
+            assert "uv sync --extra tools" in result["remediation"]
         else:
             pytest.skip("androguard is installed; the degraded path is not the one taken")
+
+    def test_a_parse_failure_does_not_tell_the_operator_to_install_what_is_installed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The remedy belongs to the reason: a library that refused a file is
+        not fixed by installing it again."""
+        import sys
+        import types
+
+        module = types.ModuleType("androguard.core.apk")
+
+        class _Refuses:
+            def __init__(self, _path: str) -> None:
+                raise ValueError("not a manifest")
+
+        module.APK = _Refuses  # type: ignore[attr-defined]
+        package = types.ModuleType("androguard")
+        core = types.ModuleType("androguard.core")
+        monkeypatch.setitem(sys.modules, "androguard", package)
+        monkeypatch.setitem(sys.modules, "androguard.core", core)
+        monkeypatch.setitem(sys.modules, "androguard.core.apk", module)
+
+        result = tool.apk_info(str(self._apk(tmp_path)))
+
+        assert "androguard parse failed" in result["degraded"]
+        assert "remediation" not in result
+        assert result["manifest_present"] is True
 
     def test_a_file_that_is_not_a_zip_is_refused(self, tmp_path: Path) -> None:
         target = tmp_path / "s.bin"
@@ -249,15 +435,69 @@ class TestDocumentInfo:
 
 
 class TestCarvePayloads:
+    """The private carver: the destination is the caller's, and it is made private."""
+
     def test_a_file_with_nothing_embedded_carves_nothing(self, tmp_path: Path) -> None:
         target = tmp_path / "s.bin"
         target.write_bytes(_elf())
         out = tmp_path / "carved"
 
-        result = tool.carve_payloads(str(target), str(out))
+        result = tool._carve_into(str(target), out)
 
         assert result == {"payloads": [], "count": 0}
         assert out.is_dir(), "the output directory is created even when nothing lands in it"
+        assert out.stat().st_mode & 0o777 == 0o700
 
     def test_a_missing_file_is_an_error_and_not_an_exception(self, tmp_path: Path) -> None:
-        assert tool.carve_payloads("/nonexistent/s.bin", str(tmp_path))["tool"] == "carve_payloads"
+        assert tool._carve_into("/nonexistent/s.bin", tmp_path)["tool"] == "carve_payloads"
+
+    def test_the_module_offers_no_model_facing_carver(self) -> None:
+        """The sidecar decides where carved files land; nothing here takes a
+        directory from a caller that could be a model."""
+        assert not hasattr(tool, "carve_payloads")
+
+
+class TestWhichImportWarningMeansDamage:
+    """pefile writes "Error parsing the import table" both for a walk it had to
+    abandon and for one thunk it could not read, so the words "directory" and
+    "table" do not separate them. Each sentence is classified by what it does
+    to the parse: a truncated import list presented as a complete one is the
+    claim worth flagging."""
+
+    @pytest.mark.parametrize(
+        "warning",
+        [
+            "Error parsing the import directory at RVA: 0x9000",
+            "Too many errors parsing the import directory. Invalid import data at RVA: 0x1000",
+            "Damaged Import Table information. ILT and/or IAT appear to be broken. "
+            "OriginalFirstThunk: 0x0 FirstThunk: 0x0",
+            "Error parsing the import table. Entries go beyond bounds.",
+            "Error parsing the import table. AddressOfData overlaps with THUNK_DATA "
+            "for THUNK at RVA 0x2040",
+        ],
+    )
+    def test_a_walk_that_stopped_is_damage(self, warning: str) -> None:
+        assert tool._import_table_damaged([warning]) is True
+
+    @pytest.mark.parametrize(
+        "warning",
+        [
+            "Error parsing the import directory. Invalid Import data at RVA: 0x1000 (bad)",
+            "Error parsing the import table. Invalid data at RVA: 0x1040",
+            "Error parsing the Delay import directory at RVA: 0x9000",
+            "Error parsing the Delay import directory. Invalid import data at RVA: 0x2000",
+        ],
+    )
+    def test_one_bad_entry_is_not(self, warning: str) -> None:
+        assert tool._import_table_damaged([warning]) is False
+
+    def test_a_bad_entry_repeated_across_the_table_is(self) -> None:
+        repeated = [
+            f"Error parsing the import table. Invalid data at RVA: 0x{rva:x}"
+            for rva in (0x1040, 0x1048, 0x1050)
+        ]
+        assert tool._import_table_damaged(repeated) is True
+        assert tool._import_table_damaged(repeated[:2]) is False
+
+    def test_no_warnings_at_all(self) -> None:
+        assert tool._import_table_damaged([]) is False

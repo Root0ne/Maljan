@@ -1,10 +1,14 @@
 "use client";
 
+import { probeDetail } from "@/lib/probeDetail";
 import { useState } from "react";
+import { Server } from "lucide-react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import type { CatalogEntry, McpServerEntry, ProbeResult, SettingValue } from "@/types/settings";
+import { unavailableTools } from "@/types/settings";
 import Dot from "./Dot";
+import { addedEnvNames, requiredEnvNames, withRequiredEnvNames } from "./envAllow";
 import { deepEqual, mapKeyError, putEntry, removeEntry } from "./mapEditorHelpers";
 import SecretField, { type SecretStatus } from "./SecretField";
 
@@ -12,13 +16,20 @@ const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
 
 /** Built-ins are re-seeded by the settings model, so they disable rather than delete. */
-const BUILTIN = new Set(["network", "threatintel"]);
+const BUILTIN = new Set(["network", "threatintel", "virustotal"]);
 const ROLES = ["static", "dynamic", "network", "judge"] as const;
-/** Mirrors `RESERVED_SERVER_KEYS` in `src/maljan/core/config.py`. Two of these
- *  (`network`, `threatintel`) are also pre-populated built-ins and never reach
- *  `add()`; `ghidra` and `cape` are reserved but not pre-populated, so without
- *  this check they would pass client validation and fail only on apply. */
-export const RESERVED_SERVER_KEYS = new Set(["network", "threatintel", "ghidra", "cape"]);
+/** Mirrors `RESERVED_SERVER_KEYS` in `src/maljan/core/config.py`. Three of
+ *  these (`network`, `threatintel`, `virustotal`) are also pre-populated
+ *  built-ins and never reach `add()`; `ghidra` and `cape` are reserved but not
+ *  pre-populated, so without this check they would pass client validation and
+ *  fail only on apply. */
+export const RESERVED_SERVER_KEYS = new Set([
+  "network",
+  "threatintel",
+  "virustotal",
+  "ghidra",
+  "cape",
+]);
 /** What a set token looks like from outside; identical to the API's mask. */
 const TOKEN_MASK = "**********";
 
@@ -125,6 +136,59 @@ function EnvMapField({
           Invalid environment map: {bad}
         </div>
       )}
+    </label>
+  );
+}
+
+/**
+ * The names a stdio child inherits from the worker's own environment.
+ *
+ * A built-in's required names are drawn above the box rather than in it. The
+ * API passes them whatever the stored registry says (`envAllow.ts`), so a line
+ * an admin deleted here used to be accepted, put back on save, and reported as
+ * saved — a server that looked narrowed and was not. What stays editable is
+ * the rest of the list, which is theirs.
+ *
+ * The typed text is local state for the reason the environment map's is: a
+ * half-typed name is not reformatted under the cursor, and what is staged is
+ * always the fixed names plus the typed ones.
+ */
+function EnvAllowField({
+  serverKey,
+  envAllow,
+  onChange,
+}: {
+  serverKey: string;
+  envAllow: string[];
+  onChange: (envAllow: string[]) => void;
+}) {
+  const required = requiredEnvNames(serverKey);
+  const [text, setText] = useState(() => addedEnvNames(serverKey, envAllow).join("\n"));
+
+  const stage = (next: string) => {
+    setText(next);
+    onChange(withRequiredEnvNames(serverKey, next.split("\n").filter((name) => name !== "")));
+  };
+
+  return (
+    <label className="block">
+      <span className="text-text-muted">
+        {required.length > 0
+          ? "Other environment names passed through (one per line)"
+          : "Environment names passed through (one per line)"}
+      </span>
+      {required.length > 0 && (
+        <p className="text-[11px] text-text-secondary" data-required-env={serverKey}>
+          Always passed: <span className="font-mono text-text-primary">{required.join(", ")}</span>
+        </p>
+      )}
+      <textarea
+        className={input}
+        rows={2}
+        aria-label={`${serverKey} env allow`}
+        value={text}
+        onChange={(e) => stage(e.target.value)}
+      />
     </label>
   );
 }
@@ -244,18 +308,17 @@ export function ServerDetail({
     onChange(putEntry(value, key, next));
   };
 
-  const remove = (key: string) => {
-    if (BUILTIN.has(key)) {
-      put(key, { enabled: false });
-      return;
-    }
-    onChange(removeEntry(value, key));
-  };
+  /** Only a custom server has a Remove; a built-in is turned off instead. */
+  const remove = (key: string) => onChange(removeEntry(value, key));
 
   if (!server) return null;
 
   const result = probe.result;
   const manifest = result && result !== "running" ? result.tools : null;
+  /* Read once: the list is derived from the probe result and this component
+     re-renders on every keystroke in the editor beside it. */
+  const unavailable =
+    result && result !== "running" ? unavailableTools(result) : [];
   const allowed = server.tools;
   const detailError = Object.entries(errors).find(
     ([k]) => k === `${entryKey}.${serverKey}` || k.startsWith(`${entryKey}.${serverKey}.`)
@@ -284,8 +347,23 @@ export function ServerDetail({
           className={`text-[11px] ${result.ok ? "text-status-green" : "text-status-red"}`}
           role="status"
         >
-          {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {result.detail}
+          {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {probeDetail(result.detail)}
         </p>
+      )}
+      {/* What the server cannot do on its host, said before any run: each
+          tool the manifest marks unavailable, with the reason and the remedy. */}
+      {unavailable.length > 0 && (
+        <ul className="text-[11px] text-text-secondary space-y-0.5" aria-label="unavailable tools">
+          {unavailable.map((cell) => (
+            <li key={cell.name}>
+              <span className="font-mono text-status-orange">{cell.name}</span>
+              {" — "}
+              {cell.reason ?? "unavailable"}
+              {cell.without ? ` (still answers ${cell.without})` : ""}
+              {cell.remediation ? `; ${cell.remediation}` : ""}
+            </li>
+          ))}
+        </ul>
       )}
       {detailError && (
         <p className="text-[11px] text-status-red" role="alert">
@@ -304,7 +382,10 @@ export function ServerDetail({
       {showHeader && (
         <>
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-sm text-text-primary font-mono">{serverKey}</span>
+            <span className="flex items-center gap-2 text-sm text-text-primary font-mono">
+              <Server size={16} aria-hidden="true" className="text-text-muted" />
+              {serverKey}
+            </span>
             <div className="flex items-center gap-3">
               <label className="text-xs text-text-secondary flex items-center gap-1">
                 <input
@@ -323,13 +404,17 @@ export function ServerDetail({
               >
                 Test
               </button>
-              <button
-                type="button"
-                className="text-xs text-text-secondary"
-                onClick={() => remove(serverKey)}
-              >
-                {BUILTIN.has(serverKey) ? "Disable" : "Remove"}
-              </button>
+              {/* A built-in server has no Remove, and the switch two
+                  controls to the left is already how it is turned off. */}
+              {!BUILTIN.has(serverKey) && (
+                <button
+                  type="button"
+                  className="text-xs text-text-secondary"
+                  onClick={() => remove(serverKey)}
+                >
+                  Remove
+                </button>
+              )}
             </div>
           </div>
 
@@ -401,22 +486,11 @@ export function ServerDetail({
                   env={server.env ?? {}}
                   onChange={(env) => put(serverKey, { env })}
                 />
-                <label className="block">
-                  <span className="text-text-muted">
-                    Environment names passed through (one per line)
-                  </span>
-                  <textarea
-                    className={input}
-                    rows={2}
-                    aria-label={`${serverKey} env allow`}
-                    value={server.env_allow.join("\n")}
-                    onChange={(e) =>
-                      put(serverKey, {
-                        env_allow: e.target.value.split("\n").filter((a) => a !== ""),
-                      })
-                    }
-                  />
-                </label>
+                <EnvAllowField
+                  serverKey={serverKey}
+                  envAllow={server.env_allow}
+                  onChange={(env_allow) => put(serverKey, { env_allow })}
+                />
               </>
             ) : (
               <>
@@ -673,11 +747,19 @@ export default function ServerMapEditor({
                     label={item.enabled ? "enabled" : "disabled"}
                     className={item.enabled ? "bg-status-green" : "bg-border"}
                   />
-                  <span className="text-sm font-mono text-text-primary truncate">{key}</span>
+                  {/* Label first, key after it, which is how the sibling
+                      agents list reads. This one showed the key alone while
+                      its own detail pane held "Network MCP". */}
+                  <span className="text-sm text-text-primary truncate">
+                    {item.label?.trim() || key}
+                  </span>
                   {changed && <Dot label="changed" className="bg-accent-strong" />}
                   {errorFor(key) && <Dot label="invalid" className="bg-status-red" />}
                 </div>
                 <div className="flex items-center gap-2 text-[11px] text-text-muted pl-3.5">
+                  {item.label?.trim() && item.label.trim() !== key && (
+                    <span className="font-mono">{key}</span>
+                  )}
                   <span>{item.transport}</span>
                   {verdict && (
                     <span

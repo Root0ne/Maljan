@@ -29,6 +29,13 @@ class OllamaProvider:
         # global one, so two agents can be served by two different Ollama hosts.
         base_url = kwargs.pop("base_url", None) or self._config.llm.ollama.base_url
 
+        # ``reasoning=False`` is how langchain spells Ollama's ``think: false``.
+        # Only sent when the deployment asked for it: a model with no thinking
+        # mode is refused the field by Ollama, so "leave it alone" and "turn it
+        # off" are different requests and the default is to leave it alone.
+        if self._config.llm.ollama.disable_thinking:
+            kwargs.setdefault("reasoning", False)
+
         return ChatOllama(
             model=model,
             base_url=base_url,

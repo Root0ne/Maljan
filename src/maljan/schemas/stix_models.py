@@ -294,13 +294,24 @@ class ObservedData(STIXObject):
 
 
 class Note(STIXObject):
-    """STIX 2.1 Note — wraps the LLM-generated executive summary."""
+    """STIX 2.1 Note — wraps the LLM-generated executive summary.
+
+    It also carries the fallback record of a bundle with no ``malware`` object.
+    The two ``x_maljan_`` properties are the same ones :class:`Malware` carries
+    and they say the same things: that this bundle came off the degraded path,
+    and which technique ids appeared in the model's raw text and in no evidence
+    claim, recorded and not emitted. A verdict that is not Malware has no
+    malware object to hang them on, and dropping them there would have made the
+    record depend on the verdict.
+    """
 
     type: Literal["note"] = "note"
     id: str = Field(default_factory=lambda: f"note--{_generate_uuid()}")
     abstract: str | None = None
     content: str
     object_refs: list[str] = Field(default_factory=list)
+    x_maljan_degraded_path: bool | None = None
+    x_maljan_model_only_technique_ids: list[str] | None = None
 
 
 class Report(STIXObject):
@@ -337,6 +348,21 @@ _BundleObject = (
 )
 
 
+class FallbackVerdict(_SpecConformantModel):
+    """The verdict a bundle carries when the judge did not express one.
+
+    ``source`` is the whole point. ``extracted`` means the judge answered with
+    text and this decision was read out of that text, so it is still the
+    model's word. ``pipeline`` means there was no answer to read — a timeout —
+    and the decision is this pipeline's own conservative one. Either way the
+    bundle's object set follows the decision rather than deciding it, which is
+    how a judge that never answered came to produce "Malware".
+    """
+
+    decision: str
+    source: Literal["extracted", "pipeline"]
+
+
 class Bundle(_SpecConformantModel):
     """STIX 2.1 Bundle container for transferring multiple objects.
 
@@ -354,6 +380,11 @@ class Bundle(_SpecConformantModel):
     # set is defined by STIX 2.1 and a validator reads it strictly. ``None``
     # when the judge did not produce one, which the report prints as such.
     x_maljan_assessment: JudgeAssessment | None = None
+    # Set only on a bundle this pipeline built because the judge's answer was
+    # not a bundle. ``None`` on every bundle a judge actually produced, and a
+    # reader that wants the verdict asks ``pipeline.outcome.decide_from_bundle``
+    # rather than counting objects.
+    x_maljan_fallback_verdict: FallbackVerdict | None = None
 
     def confidence_annotated_relationships(self) -> list[ConfidenceAnnotatedRelationship]:
         """Return only the ConfidenceAnnotatedRelationship objects in this bundle."""
@@ -368,3 +399,34 @@ class Bundle(_SpecConformantModel):
         if not annotated:
             return None
         return sum(r.x_maljan_confidence for r in annotated) / len(annotated)
+
+
+def _bundle_object_types() -> frozenset[str]:
+    """Every ``type`` the union above accepts, read off the union itself.
+
+    Read rather than listed, so a member added to ``_BundleObject`` is known
+    here without anybody remembering to say so twice. The caller is the pass
+    that sets aside an object the Bundle cannot hold, and a stale list there
+    would throw away an object the schema would have taken.
+    """
+    import typing
+
+    found: set[str] = set()
+    for member in typing.get_args(_BundleObject):
+        field = member.model_fields.get("type")
+        if field is None:
+            continue
+        found.update(str(value) for value in typing.get_args(field.annotation))
+    return frozenset(found)
+
+
+# The STIX types a ``Bundle`` can hold. Anything else inside ``objects`` fails
+# the whole bundle, which is why one misplaced extension object used to cost a
+# judge's twenty-five-object answer.
+BUNDLE_OBJECT_TYPES: frozenset[str] = _bundle_object_types()
+
+# The bundle's own extension property, and the only ``type`` value the lift
+# pass recognises as something that belongs beside ``objects`` rather than in
+# it. The judge is asked for it at the top level and writes it inside the list
+# often enough to have cost two live runs their bundles.
+ASSESSMENT_PROPERTY = "x_maljan_assessment"

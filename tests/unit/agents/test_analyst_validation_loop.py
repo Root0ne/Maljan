@@ -175,8 +175,11 @@ class TestWhatTheNodeDrains:
         analyst = _Analyst(_isr(_claim("T1699")), [_STUBBORN_ANSWER])
         analyst.safe_analyze_isr("raw data")
 
-        rows, retries = analyst.drain_validation_findings()
+        rows, retries, fed_back = analyst.drain_validation_findings()
 
         assert [row["code"] for row in rows] == ["attck.unknown_id"]
         assert retries == 1
-        assert analyst.drain_validation_findings() == ([], 0)
+        # And what the retry was for, which the leftovers alone cannot say
+        # once the analyst goes on to fix it.
+        assert fed_back == {"attck.unknown_id": 1}
+        assert analyst.drain_validation_findings() == ([], 0, {})

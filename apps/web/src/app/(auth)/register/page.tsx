@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
 
 const AUTH_DISABLED =
@@ -42,9 +43,7 @@ export default function RegisterPage() {
   return (
     <div className="w-full max-w-sm">
       <div className="flex items-center justify-center mb-8">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--status-blue)" strokeWidth="2">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
-        </svg>
+        <ShieldCheck size={18} aria-hidden="true" className="text-status-blue" />
         <span className="ml-3 text-lg font-semibold text-text-primary tracking-wide">MALJAN</span>
       </div>
 
@@ -98,7 +97,7 @@ export default function RegisterPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full h-8 text-xs font-medium bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50"
+            className="w-full h-8 text-xs font-medium bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
           >
             {loading ? "Creating account..." : "Create account"}
           </button>

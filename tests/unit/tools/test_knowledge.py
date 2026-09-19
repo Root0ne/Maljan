@@ -48,6 +48,93 @@ class TestApiCapability:
     def test_an_empty_list_is_an_empty_answer(self) -> None:
         assert knowledge.api_capability([]) == {"capabilities": []}
 
+    def test_a_rule_fires_over_the_whole_set_and_each_api_it_matched_cites_it(self) -> None:
+        """Every rule in the vendored map needs two or more APIs. Matched one
+        name at a time no rule can fire, which is how the pack's entry came to
+        list no technique on any sample; the set is matched once."""
+        result = knowledge.api_capability(
+            ["VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread", "RegQueryValueExA"]
+        )
+        by_api = {row["api"]: row for row in result["capabilities"]}
+        cited = by_api["WriteProcessMemory"]["techniques"]
+        assert [c["technique_id"] for c in cited] == ["T1055"]
+        assert set(cited[0]["matched"]) >= {"WriteProcessMemory", "CreateRemoteThread"}
+        assert len(cited[0]["matched"]) >= cited[0]["min_apis"]
+        assert by_api["CreateRemoteThread"]["techniques"][0]["technique_id"] == "T1055"
+        # An API the rule did not match does not carry it.
+        assert by_api["RegQueryValueExA"]["techniques"] == []
+
+    def test_one_api_alone_clears_no_rule(self) -> None:
+        row = knowledge.api_capability(["WriteProcessMemory"])["capabilities"][0]
+        assert row["techniques"] == []
+
+
+# The GDI and message-pump calls a Win32 program makes to put a window on the
+# screen and read its events. Nothing here is evidence of anything; a signed
+# SSH client imports every one of them.
+_A_GUI_PROGRAM_IMPORTS = [
+    "BitBlt",
+    "CreateCompatibleBitmap",
+    "CreateCompatibleDC",
+    "GetDC",
+    "GetDIBits",
+    "SelectObject",
+    "GetMessageA",
+    "PeekMessageA",
+    "DispatchMessageA",
+    "TranslateMessage",
+]
+
+
+class TestDrawingAWindowIsNotKeylogging:
+    """The catalogue called the GDI blit calls keylogging and tiered them high.
+
+    On a signed SSH client that made sixteen imports read as suspicious, and
+    the one analyst that spoke cited the entry behind a Malware verdict. The
+    calls stay in the catalogue and keep their ATT&CK association — screen
+    capture really is what a screenshot is made of — but the association is
+    not a finding, and the catalogue now says what would turn it into one.
+    """
+
+    def test_the_gdi_capture_calls_are_catalogued_as_screen_capture(self) -> None:
+        rows = knowledge.api_capability(
+            ["BitBlt", "CreateCompatibleBitmap", "CreateCompatibleDC", "GetDC", "GetDIBits"]
+        )["capabilities"]
+        assert {row["category"] for row in rows} == {"screen_capture"}
+
+    def test_the_screen_capture_group_flags_nothing_on_its_own(self) -> None:
+        rows = knowledge.api_capability(["BitBlt", "GetDC", "GetDIBits"])["capabilities"]
+        assert all(row["catalog_flags"] == [] for row in rows)
+
+    def test_the_group_names_what_would_corroborate_it(self) -> None:
+        row = knowledge.api_capability(["BitBlt"])["capabilities"][0]
+        assert row["corroborated_by"]
+        assert "SetWindowsHookExA" in row["corroborated_by"]
+        assert "GetRawInputData" in row["corroborated_by"]
+        assert "GetClipboardData" in row["corroborated_by"]
+
+    def test_a_named_corroborator_is_still_catalogued_as_keylogging(self) -> None:
+        row = knowledge.api_capability(["GetAsyncKeyState"])["capabilities"][0]
+        assert row["category"] == "keylogging"
+        assert row["catalog_flags"] == ["suspicious"]
+
+    def test_the_association_survives_the_relabelling(self) -> None:
+        """T1113 is what these calls are for; it is shown, never asserted."""
+        rows = knowledge.api_capability(["BitBlt", "CreateCompatibleDC", "GetDC", "GetDIBits"])[
+            "capabilities"
+        ]
+        cited = {t["technique_id"] for row in rows for t in row["techniques"]}
+        assert "T1113" in cited
+
+    def test_a_benign_gui_import_set_raises_no_flag_from_these_groups(self) -> None:
+        rows = knowledge.api_capability(_A_GUI_PROGRAM_IMPORTS)["capabilities"]
+        flagged = {row["api"]: row["category"] for row in rows if row["catalog_flags"]}
+        assert flagged == {}
+
+    def test_an_api_with_no_corroboration_list_does_not_carry_the_key(self) -> None:
+        row = knowledge.api_capability(["WriteProcessMemory"])["capabilities"][0]
+        assert "corroborated_by" not in row
+
 
 class TestLolbinLookup:
     def test_a_scriptlet_rundll32_invocation_maps_to_its_technique(self) -> None:
@@ -81,6 +168,17 @@ class TestLolbinLookup:
 
 
 class TestAttckLookup:
+    @pytest.fixture(autouse=True)
+    def _real_catalogue(self, real_attck_index: None) -> None:
+        """This asks the real ATT&CK catalogue for names and descriptions.
+
+        The unit tree holds the corpus download shut, and these are the tests
+        that want what is behind it. They read the loader's own disk cache when
+        one is there and fetch when it is not, which is what they did before
+        the door existed; the opt-out is here so the list of tests that pay
+        that cost is a list somebody can read.
+        """
+
     def test_a_real_technique_is_valid_and_carries_its_domain_and_platforms(self) -> None:
         result = knowledge.attck_lookup("T1055")
         assert result["valid"] is True
@@ -103,6 +201,17 @@ class TestAttckLookup:
 
 
 class TestAttckValidate:
+    @pytest.fixture(autouse=True)
+    def _real_catalogue(self, real_attck_index: None) -> None:
+        """This asks the real ATT&CK catalogue for names and descriptions.
+
+        The unit tree holds the corpus download shut, and these are the tests
+        that want what is behind it. They read the loader's own disk cache when
+        one is there and fetch when it is not, which is what they did before
+        the door existed; the opt-out is here so the list of tests that pay
+        that cost is a list somebody can read.
+        """
+
     def test_only_the_invalid_ids_come_back(self) -> None:
         result = knowledge.attck_validate(["T1055", "T9999.001", "T1547.001"])
         assert [row["id"] for row in result["invalid"]] == ["T9999.001"]
@@ -197,3 +306,33 @@ class TestDegradation:
         assert knowledge.function_matches([], qdrant_url="http://unreachable:6333") == {
             "matches": []
         }
+
+
+class TestTheCitationIsTheSameInEveryProcess:
+    _NAMES = ["RegCreateKeyExA", "RegCreateKeyExW", "RegSetValueExA", "RegSetValueExW"]
+
+    def _run(self, seed: str) -> dict:
+        import json
+        import os
+        import subprocess
+        import sys
+
+        code = (
+            "import json; from maljan.tools import knowledge; "
+            f"print(json.dumps(knowledge.api_capability({self._NAMES!r})))"
+        )
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        out = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, env=env, check=True
+        ).stdout
+        return json.loads(out.strip().splitlines()[-1])
+
+    def test_two_hash_seeds_cite_the_same_apis(self) -> None:
+        """Set iteration order changes with the seed; the record must not."""
+        first, second = self._run("1"), self._run("5")
+        assert first == second
+        cited = {row["api"]: row["techniques"] for row in first["capabilities"]}
+        for name in self._NAMES:
+            assert cited[name], f"{name} cites nothing"
+        # Both spellings of a pair cite the rule, with the same matched list.
+        assert cited["RegCreateKeyExA"] == cited["RegCreateKeyExW"]

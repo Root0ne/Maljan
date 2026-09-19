@@ -1,3 +1,4 @@
+import type { CorroborationRow } from "@/types/malware-report";
 /**
  * The ATT&CK matrix, derived from whatever technique list the report carries.
  *
@@ -82,6 +83,10 @@ export interface Technique {
   /** `false` when the ATT&CK catalog has no entry for the id and the producer
    *  kept it after being told. */
   valid: boolean;
+  /** Why this run did not publish the technique, in words, and empty when it
+   *  did. A producer named it and the report keeps the claim; the card says
+   *  the claim was not published rather than drawing it as a capability. */
+  notPublished: string;
 }
 
 export interface Tactic {
@@ -94,6 +99,20 @@ export interface Tactic {
 /** A technique stands on more than one independent observation. */
 export function isCorroborated(technique: Technique): boolean {
   return technique.corroborating.length >= 2;
+}
+
+/**
+ * What a tactic column's header counts, in the same shape the run summary uses.
+ *
+ * A column that reads "3 techniques" over three the run declined to publish
+ * says the same thing "TTPs: 3 named" said before it became "3 claimed, 0
+ * published". The published ones are the count; the rest are named beside it.
+ */
+export function tacticHeaderCount(techniques: Technique[]): string {
+  const published = techniques.filter((t) => !t.notPublished).length;
+  const head = `${published} technique${published === 1 ? "" : "s"}`;
+  const claimed = techniques.length - published;
+  return claimed > 0 ? `${head} · ${claimed} claimed, not published` : head;
 }
 
 /**
@@ -132,6 +151,9 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
     // Absent on rows persisted before the flag existed, and those rows meant
     // "valid" — only an explicit ``false`` marks a row.
     const valid = t.technique_id_valid !== false;
+    // Only a capability cell carries this; a published mapping and a /mitre
+    // row never do, which reads as published, which they are.
+    const notPublished = String(t.not_published ?? "");
 
     // Canonical Enterprise display name wins for any KNOWN tactic id. This
     // covers two cases: (a) the mapping only carried the TA-id (TTPMapping has
@@ -165,6 +187,7 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
       existing.sources = [...new Set([...existing.sources, ...sources])];
       existing.corroborating = existing.sources.filter((source) => !isJudge(source));
       existing.valid = existing.valid && valid;
+      existing.notPublished = existing.notPublished || notPublished;
     } else {
       tactic.techniques.push({
         id: techId,
@@ -173,12 +196,26 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
         sources,
         corroborating: sources.filter((source) => !isJudge(source)),
         valid,
+        notPublished,
       });
       tactic.technique_count++;
     }
   }
 
   return Array.from(tacticMap.values());
+}
+
+/**
+ * Whether these rows produce a matrix at all.
+ *
+ * The tab rule asks this before offering ATT&CK, and the tab draws what the
+ * same parser keeps, so the two cannot disagree about whether there is a
+ * mapping: a row that is not an object, or a list of rows that parses to no
+ * technique, is not a mapping however long the array is.
+ */
+export function hasMappedTechniques(raw: unknown[] | null | undefined): boolean {
+  if (!Array.isArray(raw) || raw.length === 0) return false;
+  return parseTechniques(raw).some((tactic) => tactic.techniques.length > 0);
 }
 
 /** The columns, in canonical Enterprise matrix order. */
@@ -194,8 +231,44 @@ export function orderedTactics(tactics: Tactic[]): Tactic[] {
  * rather than conflated. Shown on the card that names the technique.
  */
 export function corroborationSources(
-  corroboration: Record<string, string[]> | null | undefined,
+  corroboration: Record<string, CorroborationRow | string[]> | null | undefined,
   techniqueId: string
 ): string[] {
-  return corroboration?.[techniqueId] ?? [];
+  const lists = corroborationLists(corroboration, techniqueId);
+  return [...lists.asserted_by, ...lists.claimed_by];
+}
+
+/**
+ * The two lists behind one technique: who asserted it (a deterministic
+ * source carrying its own ATT&CK id) and who claimed it (an agent). A summary
+ * stored as a flat list is read as claimed by all of them.
+ */
+export function corroborationLists(
+  corroboration: Record<string, CorroborationRow | string[]> | null | undefined,
+  techniqueId: string
+): CorroborationRow {
+  const row = corroboration?.[techniqueId];
+  if (!row) return { asserted_by: [], claimed_by: [] };
+  if (Array.isArray(row)) return { asserted_by: [], claimed_by: row };
+  return { asserted_by: row.asserted_by ?? [], claimed_by: row.claimed_by ?? [] };
+}
+
+/** The ATT&CK release that retired the id, when the run's corroboration row says so. */
+export function retiredIn(
+  corroboration: Record<string, CorroborationRow | string[]> | null | undefined,
+  techniqueId: string
+): string | null {
+  const row = corroboration?.[techniqueId];
+  if (!row || Array.isArray(row)) return null;
+  return row.retired_in ?? null;
+}
+
+/** The API catalogue's association for the id, shown apart from the sources. */
+export function associatedBy(
+  corroboration: Record<string, CorroborationRow | string[]> | null | undefined,
+  techniqueId: string
+): string[] {
+  const row = corroboration?.[techniqueId];
+  if (!row || Array.isArray(row)) return [];
+  return row.associated_by ?? [];
 }

@@ -7,7 +7,12 @@
  * file stops looking like a second, stale source of truth.
  */
 
-export type AgentFindingStatus = "complete" | "no_data" | "failed" | "timeout";
+export type AgentFindingStatus =
+  | "complete"
+  | "no_data"
+  | "no_claims"
+  | "failed"
+  | "timeout";
 
 export interface AgentFinding {
   agent_name: string;
@@ -24,32 +29,8 @@ export interface AgentFinding {
 }
 
 /* ── WebSocket Events ────────────────────────────────── */
-export type WSEventType =
-  | "status_change"
-  | "pipeline_started"
-  | "agent_progress"
-  /* One transcript line from a pipeline node — an analyst's findings, a
-   * mediator's ruling, a revision, the judge's verdict. Carries a ``role``
-   * discriminator rather than one event type per speaker, so a new
-   * participant needs no client change. See maljan/pipeline/events.py. */
-  | "agent_message"
-  | "phase_change"
-  /* One stage of the team announcing itself, exactly once each: `started`
-   * from its first node, `skipped` instead when its condition is false, and
-   * `finished` from the one node that runs after everything in it is done.
-   * See maljan/pipeline/nodes.py. */
-  | "stage_started"
-  | "stage_skipped"
-  | "stage_finished"
-  | "completed"
-  | "enrichment_complete"
-  | "error"
-  | "cancelled"
-  | "heartbeat"
-  | "pong";
 
-export interface WSEvent {
-  type: WSEventType;
-  data: Record<string, unknown>;
-  ts: string;
-}
+/* The event wire format lives in `./events`, beside the payload shape of each
+ * type. Re-exported here because every consumer imports it from `@/types` and
+ * one spelling of an event type is the point. */
+export * from "./events";

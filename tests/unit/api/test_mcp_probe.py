@@ -183,3 +183,129 @@ async def test_the_r2_probe_speaks_the_same_handshake(monkeypatch):
     assert result.ok is True and result.tools == ["open_file", "analyze", "list_imports"]
     assert _Handle.made[-1].config.command == "r2mcp"
     assert handshake_tools is not None
+
+
+class TestTheVirustotalServer:
+    """The probe names the one state a fresh VirusTotal built-in is in.
+
+    An unauthenticated handshake against VirusTotal's endpoint fails as a
+    transport error whose text says nothing about credentials, so the probe
+    answers the question the operator is actually asking before it dials.
+    """
+
+    @pytest.mark.asyncio
+    async def test_without_a_token_it_reports_that_no_agent_is_registered(self):
+        from maljan.core.config import Settings
+
+        entry = Settings(_env_file=None).mcp.servers["virustotal"].model_dump(mode="json")
+        result = await probe_mcp({"name": "virustotal", "entry": entry})
+
+        assert result.ok is False
+        assert "no agent token" in result.detail
+        assert not _Handle.made, "nothing is dialled without a credential"
+
+    @pytest.mark.asyncio
+    async def test_with_a_token_it_dials_the_endpoint_like_any_other_server(self):
+        from maljan.core.config import Settings
+
+        entry = Settings(_env_file=None).mcp.servers["virustotal"].model_dump(mode="json")
+        entry["auth_token"] = "vtai_" + "c" * 43
+
+        result = await probe_mcp({"name": "virustotal", "entry": entry})
+
+        assert result.ok is True
+        assert _Handle.made[-1].config.url == "https://ai.virustotal.com/mcp"
+
+
+class _HandleWithManifest(_Handle):
+    """A server that also answers ``capabilities``, as the registry keeps it."""
+
+    async def aopen(self, job_id, **kw):
+        from maljan.tools.capabilities import ServerCapabilities
+
+        self.capabilities = ServerCapabilities.from_payload(
+            self.name,
+            {
+                "server": self.name,
+                "version": "1.0",
+                "tools": [
+                    {"name": "open_file", "available": True, "reason": None},
+                    {
+                        "name": "analyze",
+                        "available": False,
+                        "reason": "olefile is not installed",
+                        "remediation": "uv sync --extra tools",
+                    },
+                ],
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_the_probe_returns_the_manifest_and_counts_the_unavailable(monkeypatch):
+    monkeypatch.setattr("app.services.settings_probes.ServerHandle", _HandleWithManifest)
+    result = await probe_mcp({"name": "analysis", "entry": {"enabled": True, "command": "x"}})
+    assert result.ok is True
+    assert result.details is not None
+    manifest = result.details["capabilities"]
+    assert manifest["version"] == "1.0"
+    assert [c["name"] for c in manifest["tools"] if not c["available"]] == ["analyze"]
+    assert "1 unavailable on this host" in result.detail
+
+
+@pytest.mark.asyncio
+async def test_a_server_without_a_manifest_has_no_details():
+    result = await probe_mcp({"name": "r2custom", "entry": {"enabled": True, "command": "r2mcp"}})
+    assert result.ok is True and result.details is None
+
+
+@pytest.mark.asyncio
+async def test_a_built_in_is_probed_with_the_environment_names_it_cannot_run_without():
+    """A row stored before a sidecar gained a variable must not make the
+    connection test launch a different server than the run launches."""
+    from maljan.core.config import Settings
+    from maljan.tools.roots import SAMPLE_ROOTS_ENV
+
+    stored = Settings(_env_file=None).mcp.servers["analysis"].model_dump(mode="json")
+    stored.pop("auth_token", None)
+    stored["env_allow"] = [n for n in stored["env_allow"] if n != SAMPLE_ROOTS_ENV]
+
+    result = await run_mcp_probe("analysis", {}, {"core.mcp.servers": {"analysis": stored}})
+
+    assert result.ok is True
+    assert SAMPLE_ROOTS_ENV in _Handle.made[-1].config.env_allow
+
+
+@pytest.mark.asyncio
+async def test_a_server_the_operator_added_is_probed_with_exactly_its_own_names():
+    from maljan.tools.roots import SAMPLE_ROOTS_ENV
+
+    result = await run_mcp_probe(
+        "r2custom",
+        {},
+        {
+            "core.mcp.servers": {
+                "r2custom": {"enabled": True, "command": "r2mcp", "env_allow": ["R2_HOME"]}
+            }
+        },
+    )
+
+    assert result.ok is True
+    assert _Handle.made[-1].config.env_allow == ["R2_HOME"]
+    assert SAMPLE_ROOTS_ENV not in _Handle.made[-1].config.env_allow
+
+
+@pytest.mark.asyncio
+async def test_a_built_in_is_probed_without_a_shipped_name_an_admin_took_away():
+    """The console tests the server a run gets, and a run gets no intel key
+    once the admin has emptied that list."""
+    from maljan.core.config import Settings
+
+    stored = Settings(_env_file=None).mcp.servers["threatintel"].model_dump(mode="json")
+    stored.pop("auth_token", None)
+    stored["env_allow"] = []
+
+    result = await run_mcp_probe("threatintel", {}, {"core.mcp.servers": {"threatintel": stored}})
+
+    assert result.ok is True
+    assert _Handle.made[-1].config.env_allow == []

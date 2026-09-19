@@ -26,6 +26,7 @@ showing fewer.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from typing import Any
 
@@ -43,6 +44,20 @@ from maljan.schemas.tool_evidence import (
 # observed, and fixed width means the ids sort lexically in the order they
 # were issued.
 _ID_DIGITS = 4
+
+
+# An entry id wherever one is written: in a claim's evidence line, in a
+# findings block, in a tool result the recorder stamped. Spelled once, beside
+# the function that issues them, because two copies of it disagreed on case
+# for ids that one counter produces. The counter issues lowercase; a model
+# that writes ``EV_0002`` back is citing the same entry, and a false flag
+# here costs a full analyst feedback turn.
+ENTRY_ID_RE = re.compile(r"\bev_\d{3,}\b", re.IGNORECASE)
+
+
+def entry_ids_in(text: str) -> set[str]:
+    """The entry ids written in ``text``, in the spelling the counter issues."""
+    return {found.lower() for found in ENTRY_ID_RE.findall(text)}
 
 
 def format_entry_id(seq: int) -> str:
@@ -116,14 +131,33 @@ class LedgerEntry(BaseModel):
     symbol: str | None = Field(
         default=None, description="Human label for the call target, parsed from the arguments."
     )
-    ok: bool = Field(default=True, description="Whether the call returned rather than raised.")
+    ok: bool = Field(
+        default=True,
+        description="Whether the call answered rather than raised or returned an error.",
+    )
     error: str | None = Field(default=None, description="Failure text when ok is false.")
+    remediation: str | None = Field(
+        default=None,
+        description="What would make the call succeed, when the tool said; only with an error.",
+    )
     output: str = Field(default="", description="Result text, trimmed.")
     structured: dict[str, Any] | list[Any] | None = Field(
         default=None, description="Parsed result when the tool returned JSON."
     )
     truncated: bool = Field(
         default=False, description="Output dropped because the agent's byte budget was spent."
+    )
+    repeated_of: str | None = Field(
+        default=None,
+        description="Id of the earlier identical call this one was answered from.",
+    )
+    args_repaired: bool = Field(
+        default=False,
+        description="Whether the model's arguments were closed off before the call ran.",
+    )
+    args_raw: str | None = Field(
+        default=None,
+        description="The arguments as the model wrote them, kept when they were repaired.",
     )
     started_at: float = Field(default=0.0, description="Unix timestamp the call started at.")
     duration_ms: int = Field(default=0, description="Wall-clock duration of the call.")
@@ -176,10 +210,49 @@ def build_entry(
     duration_ms: int = 0,
     stage: str = "analysis",
     max_chars: int = MAX_OUTPUT_CHARS,
+    repeated_of: str | None = None,
+    remediation: str | None = None,
+    args_repaired: bool = False,
+    args_raw: str | None = None,
 ) -> LedgerEntry:
-    """One entry, with the output trimmed and parsed the same way every time."""
+    """One entry, with the output trimmed and parsed the same way every time.
+
+    A tool that *returned* an error answered, and the entry says so the same
+    way it would for one that raised: ``ok`` false, ``error`` the message and
+    ``remediation`` the remedy when the tool authored one
+    (``maljan.tools.errors``). A caller that already decided ``ok`` and
+    ``error`` keeps its decision; only an entry handed in as a success is
+    read for a returned error.
+
+    ``structured`` is parsed from the whole result and ``output`` is the text
+    cut at ``max_chars``: the cut is for what a model reads, and a reader of
+    the record — corroboration, the projections, the evidence sections — needs
+    the result the tool gave, not the first six thousand characters of it.
+    What bounds the stored size is the per-agent evidence byte budget
+    (``apply_budget``).
+
+    ``repeated_of`` names the earlier call this one repeats. Such an entry
+    carries the note the model was given rather than a tool result, so it is
+    never parsed into ``structured``: nothing downstream should read a
+    reference to another entry as data.
+
+    ``args_repaired`` says the model's arguments were truncated and were
+    closed off before the call ran (``agents.evidence_recorder``), and
+    ``args_raw`` keeps them as the model wrote them. Both so a reader can see
+    that a call was made on repaired arguments and check the repair against
+    what arrived.
+    """
     safe_args = dict(args) if isinstance(args, dict) else {}
-    text = trim_output(str(output or ""), max_chars)
+    full = str(output or "")
+    text = trim_output(full, max_chars)
+    if ok and error is None and not repeated_of:
+        from maljan.tools.errors import error_parts
+
+        returned = error_parts(full)
+        if returned is not None:
+            _code, message, hint = returned
+            ok, error = False, message
+            remediation = remediation or hint
     return LedgerEntry(
         id=entry_id,
         stage=stage,
@@ -190,12 +263,34 @@ def build_entry(
         symbol=_symbol_from_args(safe_args),
         ok=ok,
         error=error,
+        remediation=remediation if error else None,
         output=text,
-        structured=parse_structured(text),
+        structured=None if repeated_of else parse_structured(full),
+        repeated_of=repeated_of,
+        args_repaired=bool(args_repaired),
+        args_raw=args_raw if args_repaired else None,
         started_at=started_at,
         duration_ms=max(0, int(duration_ms)),
         seq=seq,
     )
+
+
+def stored_bytes(entry: LedgerEntry) -> int:
+    """What the entry keeps: the full parsed result when there is one, else the text.
+
+    The row persists both columns, so what is written is their sum; what the
+    budget charges is the larger of the two, because the text is a prefix of
+    the result's JSON and charging it twice would halve the budget for
+    nothing.
+    """
+    text = len(entry.output.encode("utf-8", errors="ignore"))
+    if entry.structured is None:
+        return text
+    try:
+        parsed = len(json.dumps(entry.structured, ensure_ascii=False).encode("utf-8"))
+    except (TypeError, ValueError):
+        return text
+    return max(text, parsed)
 
 
 def apply_budget(
@@ -217,7 +312,7 @@ def apply_budget(
     spent = max(0, already_spent)
     trimmed = 0
     for entry in entries:
-        size = len(entry.output.encode("utf-8", errors="ignore"))
+        size = stored_bytes(entry)
         if spent + size <= budget_bytes:
             spent += size
             continue

@@ -238,20 +238,23 @@ class CapaYaraStaticProvider(StaticProvider):
         )
 
     def collect_evidence(self, sample_path: str) -> StaticEvidenceBundle | None:
+        """capa and YARA over the sample, for a run whose triage pack did not run them.
+
+        When a triage stage ran, the pack is the producer: its ``capa`` and
+        ``yara_scan`` entries are already in the ledger and the report node
+        does not call this (``triage_pack.rules_already_recorded``).
+        """
         capa_result = self._run_capa(sample_path)
         yara_hits = self._run_yara(sample_path)
         if capa_result is None and not yara_hits:
             return None
 
-        capabilities: dict[str, int] = {}
         hits: list[dict[str, Any]] = []
         rows: list[dict[str, str]] = []
         capa_rows: list[dict[str, Any]] = []
         for name, rule in ((capa_result or {}).get("rules") or {}).items():
             meta = rule.get("meta") or {}
             namespace = str(meta.get("namespace") or "")
-            top = namespace.split("/", 1)[0] if namespace else "uncategorised"
-            capabilities[top] = capabilities.get(top, 0) + 1
             rows.append({"rule": str(name), "namespace": namespace})
             capa_rows.append(
                 {
@@ -287,7 +290,6 @@ class CapaYaraStaticProvider(StaticProvider):
             evidence["yara"] = _render_yara(yara_hits)
 
         return StaticEvidenceBundle(
-            api_capabilities=capabilities,
             technique_hits=hits,
             strings=[],
             technical_evidence=evidence,

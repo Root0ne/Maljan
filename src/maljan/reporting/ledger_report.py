@@ -18,12 +18,26 @@ Agents contribute two more shapes. ``artifacts`` are the tables an analyst
 established itself, grouped by their ``kind``; ``findings`` are its conclusions,
 collected into one table that carries the techniques and the ids each was drawn
 from. Both cite ledger ids the analyst was shown, so the same rule holds.
+
+Two of those tables say the same thing twice often enough to be worth folding:
+an indicator two tools both recovered and a finding two analysts both reached.
+``reporting.dedupe`` says what makes two of them one, and a fold only ever
+grows the set-shaped cells — the ids and the agents — leaving every word and
+every number the first occurrence carried exactly as it was written.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from maljan.analysis.technique_ids import sigma_technique_ids
+from maljan.reporting.dedupe import (
+    MergeTally,
+    finding_fingerprint,
+    indicator_fingerprint,
+    merge_cell,
+)
 from maljan.reporting.models import EvidenceSection
 
 if TYPE_CHECKING:
@@ -49,10 +63,14 @@ class _Sections:
     it twice would read as two findings.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, merges: MergeTally | None = None) -> None:
         self._by_key: dict[str, EvidenceSection] = {}
         self._order: list[str] = []
         self._seen: dict[str, set[tuple[str, ...]]] = {}
+        # Where a merged row's index lives, per section, for the two kinds of
+        # row whose identity is not the whole row: an indicator and a finding.
+        self._merged: dict[str, dict[tuple[str, str], int]] = {}
+        self.merges = merges if merges is not None else MergeTally()
 
     def get(
         self,
@@ -101,6 +119,37 @@ class _Sections:
             return
         seen.add(fingerprint)
         section.rows.append(row)
+
+    def merge_row(
+        self,
+        section: EvidenceSection,
+        fingerprint: tuple[str, str],
+        row: list[str],
+        *,
+        sets: tuple[int, ...] = (),
+        counted: Callable[[], None],
+    ) -> None:
+        """Append ``row``, or fold it into the row that says the same thing.
+
+        ``sets`` names the columns that are a set written down — ledger ids,
+        agent names — and those are the only cells a merge touches. Every
+        other cell is the first occurrence's, untouched: the text belongs to
+        whoever wrote it, and a confidence or a severity is never merged,
+        averaged or raised.
+        """
+        index = self._merged.setdefault(section.key, {})
+        at = index.get(fingerprint)
+        if at is None:
+            if len(section.rows) >= MAX_ROWS:
+                return
+            index[fingerprint] = len(section.rows)
+            section.rows.append(row)
+            return
+        kept = section.rows[at]
+        for column in sets:
+            if column < len(kept) and column < len(row):
+                kept[column] = merge_cell(kept[column], row[column])
+        counted()
 
     def add_item(self, section: EvidenceSection, item: str) -> None:
         if item and item not in section.items and len(section.items) < MAX_ROWS:
@@ -164,6 +213,42 @@ def _identity(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     acc.credit(section, entry)
 
 
+# The three schemes ``signing_info`` can answer under. Read in this order so
+# an older entry — one recorded when the tool answered about all three at once
+# — still puts Authenticode first, which is the order that report was written
+# in.
+_SIGNING_SCHEMES = ("authenticode", "apk", "macho")
+
+
+def _signing(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
+    """The signature row, for the format the sample was routed as.
+
+    One row, and only when there is a scheme to report one under. The payload
+    also carries the routed ``format`` and, for a format with no code-signing
+    scheme at all, ``applicable: False`` — neither is a fact about the sample:
+    the first repeats what ``identify_file`` already says two rows above, and
+    the second is a statement about what this tool looks for, printed under the
+    heading that exists for what was found. A sample whose format has no
+    signing scheme therefore gets no signing row, which is what the table said
+    before the tool reported all three schemes at once.
+
+    A row per scheme rather than a sentence, because the sentence is the
+    console's to build (``identitySection.signingSentence``) and the export
+    keeps the tool's own words.
+    """
+    rows = [
+        [scheme, _text(data[scheme])]
+        for scheme in _SIGNING_SCHEMES
+        if data.get(scheme) not in (None, "", [], {})
+    ]
+    if not rows:
+        return
+    section = acc.get("identity", "Sample identity", "kv", columns=["Field", "Value"])
+    for row in rows:
+        acc.add_row(section, row)
+    acc.credit(section, entry)
+
+
 def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     """The structural facts of a PE, ELF, Mach-O or APK, one table per shape."""
     prefix = entry.tool.split("_")[0]
@@ -220,15 +305,12 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
             f"{prefix}_imports",
             f"{prefix.upper()} imports",
             "table",
-            columns=["Library", "Function", "Category"],
+            columns=["Library", "Function"],
         )
         for row in imports[:MAX_ROWS]:
             if not isinstance(row, dict):
                 continue
-            acc.add_row(
-                table,
-                [_text(row.get("dll")), _text(row.get("function")), _text(row.get("category"))],
-            )
+            acc.add_row(table, [_text(row.get("dll")), _text(row.get("function"))])
         acc.credit(table, entry)
 
     exports = data.get("exports")
@@ -271,14 +353,24 @@ def _iocs(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     if not isinstance(rows, list) or not rows:
         return
     table = acc.get(
-        "iocs", "Indicators recovered from the sample", "table", columns=["Kind", "Value", "Notes"]
+        "iocs",
+        "Indicators recovered from the sample",
+        "table",
+        columns=["Kind", "Value", "Notes", "Evidence"],
     )
     for row in rows[:MAX_ROWS]:
         if not isinstance(row, dict):
             continue
-        acc.add_row(
+        # Fingerprinted rather than compared whole: the same endpoint read by
+        # two tools arrives with two sets of notes and, defanged by one of
+        # them, two spellings. The first occurrence's notes are what the row
+        # keeps; what the second brings is the id of the call it came from.
+        acc.merge_row(
             table,
-            [_text(row.get("kind")), _text(row.get("value")), _text(row.get("notes"))],
+            indicator_fingerprint(row.get("kind"), row.get("value")),
+            [_text(row.get("kind")), _text(row.get("value")), _text(row.get("notes")), entry.id],
+            sets=(3,),
+            counted=acc.merges.indicator,
         )
     acc.credit(table, entry)
 
@@ -336,7 +428,7 @@ def _sigma(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
             [
                 _text(row.get("title") or row.get("rule") or row.get("id")),
                 _text(row.get("level") or meta.get("level")),
-                _text(row.get("technique_ids") or meta.get("technique_ids")),
+                _text(sigma_technique_ids(row)),
                 _text(row.get("matched_fields")),
             ],
         )
@@ -502,7 +594,7 @@ def _sandbox_apis(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> N
         "sandbox_api_calls",
         "API calls observed",
         "table",
-        columns=["API", "Calls", "Category", "First arguments"],
+        columns=["API", "Calls", "Processes", "First arguments"],
     )
     for row in rows[:MAX_ROWS]:
         if not isinstance(row, dict):
@@ -512,7 +604,7 @@ def _sandbox_apis(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> N
             [
                 _text(row.get("api")),
                 _text(row.get("count")),
-                _text(row.get("category")),
+                _text(row.get("processes")),
                 _text(row.get("first_args")),
             ],
         )
@@ -598,7 +690,7 @@ def _functions_examined(acc: _Sections, entry: LedgerEntry, _data: Any) -> None:
 _BUILDERS: dict[str, Any] = {
     "identify_file": _identity,
     "hashes": _identity,
-    "signing_info": _identity,
+    "signing_info": _signing,
     "pe_info": _binary_info,
     "elf_info": _binary_info,
     "macho_info": _binary_info,
@@ -754,7 +846,37 @@ def _artifact_sections(acc: _Sections, isrs: dict[str, Any]) -> None:
                 acc.cite(section, str(entry_id))
 
 
-def _findings_section(acc: _Sections, isrs: dict[str, Any]) -> None:
+# What the Techniques column writes beside an id this run did not publish. The
+# reason itself is under the ATT&CK matrix, where every unpublished id is named
+# with the check's own sentence; here there is room for the fact only, and
+# printing the fact in words is the point — a run that published none of the
+# three enterprise-only ids it printed said nothing at all.
+NOT_PUBLISHED_MARKER = "claimed, not published"
+
+
+def _technique_cell(technique_ids: Any, published: frozenset[str] | None) -> str:
+    """The Techniques cell for one finding, marking what is not published.
+
+    ``None`` is a caller with no published list to compare against, which is
+    not a claim either way and marks nothing. An empty set is a run that
+    published no technique at all, and every id it printed is marked — which is
+    the run this exists for.
+    """
+    written: list[str] = []
+    for raw in technique_ids or []:
+        tid = str(raw or "").strip()
+        if not tid:
+            continue
+        if published is None or tid.upper() in published:
+            written.append(tid)
+        else:
+            written.append(f"{tid} ({NOT_PUBLISHED_MARKER})")
+    return ", ".join(written)
+
+
+def _findings_section(
+    acc: _Sections, isrs: dict[str, Any], published: frozenset[str] | None = None
+) -> None:
     """Every analyst finding in one table, with what each was drawn from."""
     section: EvidenceSection | None = None
     for agent, isr in (isrs or {}).items():
@@ -767,15 +889,26 @@ def _findings_section(acc: _Sections, isrs: dict[str, Any]) -> None:
                     columns=["Agent", "Finding", "Techniques", "Confidence", "Evidence"],
                     source="finding",
                 )
-            acc.add_row(
+            # Two analysts reaching the same conclusion about the same
+            # technique is one finding with two names against it, not two
+            # findings. The confidence stays the first one's: agreement is
+            # something a reader draws from the agent list, never something
+            # this arithmetic asserts by raising a number nobody wrote.
+            acc.merge_row(
                 section,
+                finding_fingerprint(
+                    getattr(finding, "technique_ids", []) or [],
+                    getattr(finding, "title", ""),
+                ),
                 [
                     str(agent),
                     _text(getattr(finding, "title", "")),
-                    _text(getattr(finding, "technique_ids", []) or []),
+                    _technique_cell(getattr(finding, "technique_ids", []) or [], published),
                     f"{float(getattr(finding, 'confidence', 0.0) or 0.0):.2f}",
                     _text(getattr(finding, "evidence_ids", []) or []),
                 ],
+                sets=(0, 4),
+                counted=acc.merges.finding,
             )
             for entry_id in getattr(finding, "evidence_ids", None) or []:
                 acc.cite(section, str(entry_id))
@@ -791,14 +924,23 @@ def build_sections(
     isrs: dict[str, AgentISR] | None = None,
     file_type: str = "unknown",
     platform: str = "unknown",
+    merges: MergeTally | None = None,
+    published_techniques: frozenset[str] | None = None,
 ) -> list[EvidenceSection]:
     """Every section this run's evidence supports, in the order it was gathered.
 
     ``file_type`` and ``platform`` are the routing minimum, carried so a run
     that identified nothing still says what it was working on rather than
-    opening with an empty identity block.
+    opening with an empty identity block. ``merges`` is filled in with what
+    the indicator and finding tables folded, for the run summary to state.
+
+    ``published_techniques`` is the validated ``ttp_mappings``, so the Findings
+    table can say which of the ids it prints this run did not publish. ``None``
+    is a caller with no such list to compare against, which is not a claim
+    either way and marks nothing; an empty set is a run that published no
+    technique at all, and every id it prints is marked.
     """
-    acc = _Sections()
+    acc = _Sections(merges)
 
     identity = acc.get("identity", "Sample identity", "kv", columns=["Field", "Value"])
     identity.source = "routing"
@@ -825,5 +967,5 @@ def build_sections(
         _fallback(acc, entry)
 
     _artifact_sections(acc, isrs or {})
-    _findings_section(acc, isrs or {})
+    _findings_section(acc, isrs or {}, published_techniques)
     return acc.result()

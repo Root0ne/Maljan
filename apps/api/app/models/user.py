@@ -10,7 +10,20 @@ from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class UserRole(enum.StrEnum):
-    """Allowed roles for a platform user."""
+    """Allowed roles for a platform user.
+
+    Two of them decide anything. ``admin`` gates the whole configuration
+    surface, the audit log and API-key management; ``analyst`` is what a
+    registration gets and is what every other route accepts.
+
+    ``READONLY`` is enforced nowhere: no route in ``app.api.v1`` distinguishes
+    it from ``ANALYST``, so an account holding it can upload a sample, submit a
+    job and cancel its own. It is a label on the row, not a permission — see
+    the Roles section of ``docs/security.md``. Kept rather than removed because
+    a stored row carrying the value would not load against an enum without it,
+    and because dropping it silently would widen those accounts rather than
+    narrow them.
+    """
 
     ADMIN = "admin"
     ANALYST = "analyst"

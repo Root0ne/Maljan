@@ -162,16 +162,17 @@ class TestToolRoutingMechanism:
             mock_executor = MagicMock()
             mock_create.return_value = mock_executor
 
-            # Make ainvoke return a result with messages
+            # The loop reads the executor's state as it streams, so it can end
+            # early and still hand the conversation to the salvage.
 
-            async def fake_ainvoke(messages_dict, config=None):
-                return {
+            async def fake_astream(messages_dict, config=None, stream_mode="values"):
+                yield {
                     "messages": [
                         AIMessage(content="Analysis complete: process injection detected.")
                     ]
                 }
 
-            mock_executor.ainvoke = fake_ainvoke
+            mock_executor.astream = fake_astream
 
             result = agent.analyze("Analyze this binary for malware behavior.")
 
@@ -193,8 +194,8 @@ class TestToolRoutingMechanism:
             mock_executor = MagicMock()
             mock_create.return_value = mock_executor
 
-            async def fake_ainvoke(messages_dict, config=None):
-                return {
+            async def fake_astream(messages_dict, config=None, stream_mode="values"):
+                yield {
                     "messages": [
                         AIMessage(content="Thinking..."),
                         AIMessage(content="Tool called."),
@@ -202,7 +203,7 @@ class TestToolRoutingMechanism:
                     ]
                 }
 
-            mock_executor.ainvoke = fake_ainvoke
+            mock_executor.astream = fake_astream
 
             result = agent.analyze("test")
             assert result == "Final verdict: Malware."

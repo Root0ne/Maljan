@@ -144,7 +144,7 @@ def test_a_provider_tool_reference_on_a_built_in_role_is_refused():
             _defs(strings={"role": "static", "tools": [{"kind": "provider"}]}), stored={}
         )
     assert exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.strings"] == (
-        "'strings': provider tool references are only valid on generic "
+        "'strings': provider tool references are only valid on generic and lead "
         "definitions; built-in roles open their provider themselves"
     )
 
@@ -780,3 +780,52 @@ def _profile_warnings_for_the_seeds():
         definitions=effective_definitions(overrides),
         overrides=overrides,
     )
+
+
+def test_an_agent_reference_to_a_defined_agent_is_accepted():
+    out = validate_agent_map(
+        _defs(
+            boss={"role": "lead", "prompt": "lead", "tools": [{"kind": "agent", "agent": "static"}]}
+        ),
+        stored={},
+    )
+    assert out[AGENT_DEFINITIONS_KEY]["boss"]["tools"] == [
+        {"kind": "agent", "server": None, "name": None, "agent": "static"}
+    ]
+
+
+def test_an_agent_reference_to_an_unknown_agent_is_reported_on_the_tools_field():
+    with pytest.raises(AgentMapError) as exc:
+        validate_agent_map(
+            _defs(
+                boss={
+                    "role": "lead",
+                    "prompt": "lead",
+                    "tools": [{"kind": "agent", "agent": "nobody"}],
+                }
+            ),
+            stored={},
+        )
+    message = exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.boss.tools"]
+    assert "unknown agent 'nobody'" in message
+
+
+def test_an_agent_may_not_reference_itself_through_the_api_either():
+    with pytest.raises(AgentMapError) as exc:
+        validate_agent_map(
+            _defs(
+                boss={
+                    "role": "lead",
+                    "prompt": "lead",
+                    "tools": [{"kind": "agent", "agent": "boss"}],
+                }
+            ),
+            stored={},
+        )
+    assert "cannot ask itself" in exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.boss.tools"]
+
+
+def test_a_lead_without_a_prompt_is_reported_on_its_prompt_field():
+    with pytest.raises(AgentMapError) as exc:
+        validate_agent_map(_defs(boss={"role": "lead", "prompt": ""}), stored={})
+    assert exc.value.errors[f"{AGENT_DEFINITIONS_KEY}.boss.prompt"] == "a lead agent needs a prompt"

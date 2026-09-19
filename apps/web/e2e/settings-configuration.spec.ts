@@ -70,7 +70,7 @@ test.describe("Settings → Configuration (admin)", () => {
     // The visible badge is aria-hidden; the accessible name carries the
     // sr-only count text instead, so a screen reader hears "1 unsaved
     // changes" rather than a bare digit.
-    await expect(link).toHaveAccessibleName(/1 unsaved changes/);
+    await expect(link).toHaveAccessibleName(/1 unsaved change/);
   });
 
   test("stages a change, shows the pending bar, and Review → Confirm sends one PATCH with the applies summary", async ({
@@ -169,7 +169,7 @@ test.describe("Settings → Configuration (admin)", () => {
   }) => {
     await page.goto(PROVIDERS_PATH);
 
-    await page.getByRole("button", { name: "Clear" }).click();
+    await page.getByRole("button", { name: "Clear on apply" }).click();
     await expect(page.getByText("will be cleared")).toBeVisible();
 
     const patches: unknown[] = [];
@@ -835,7 +835,7 @@ test.describe("Settings → Configuration (admin)", () => {
      * what is stored, and the rule above must not swallow it. */
     await page.goto(PROVIDERS_PATH);
 
-    await page.getByRole("button", { name: "Clear" }).click();
+    await page.getByRole("button", { name: "Clear on apply" }).click();
     await expect(page.getByText("will be cleared")).toBeVisible();
     await expect(page.getByTestId("changes-count")).toHaveText("1 change");
   });
@@ -942,14 +942,24 @@ test.describe("Settings → Configuration (stale stored override)", () => {
 });
 
 test.describe("Settings → Configuration (non-admin)", () => {
-  test("the tab is disabled with 'Admin role required' and cannot be opened", async ({
-    authenticatedPage: page,
-  }) => {
+  test("the admin tabs are not offered at all", async ({ authenticatedPage: page }) => {
+    /* They used to be drawn disabled, with an "Admin role required" tooltip:
+     * two permanently dead entries on every visit by a reader who can never
+     * use either. */
     await page.goto("/settings/profile");
 
-    const tab = page.getByText("Configuration", { exact: true });
-    await expect(tab).toHaveAttribute("aria-disabled", "true");
-    await expect(tab).toHaveAttribute("title", "Admin role required");
+    await expect(page.getByRole("link", { name: "Profile" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "API keys" })).toBeVisible();
+    await expect(page.getByText("Configuration", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Setup guides", { exact: true })).toHaveCount(0);
     await expect(page.locator("#settings-search")).toHaveCount(0);
+  });
+
+  test("the route itself still says who it is for", async ({ authenticatedPage: page }) => {
+    await page.goto("/settings/configuration");
+
+    await expect(
+      page.getByRole("alert").filter({ hasText: "admin role required" }),
+    ).toBeVisible();
   });
 });

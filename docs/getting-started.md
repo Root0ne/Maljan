@@ -129,6 +129,35 @@ Connection tests are available on the settings that have a probe. An instance
 that is already configured can be reproduced with a JSON export instead; see
 [configuration.md](configuration.md).
 
+### A smaller model, when the machine has less memory
+
+The default model is unchanged and is what every number in the paper rests on.
+For a machine that cannot hold it, `gemma4:12b` behind Ollama is a documented
+option, with one setting it requires:
+
+```
+core.llm.provider                   = ollama
+core.llm.ollama.expert_model        = gemma4:12b
+core.llm.ollama.judge_model         = gemma4:12b
+core.llm.ollama.disable_thinking    = true
+core.llm.ollama.num_ctx             = 32768
+```
+
+`disable_thinking` is not optional for it. At the shipped default the
+connection test reports that the model *answered nothing* — the reasoning went
+into the thinking channel and the answer came back empty — and with
+`core.llm.require_probe` on, the API refuses every job until the setting is
+turned on. With it on, the same test passes in a quarter of a second.
+
+What was measured, on a 30 GB laptop with an 8 GB card, one sample at a time:
+three samples, the same verdicts as the default model on the two that matter
+(Benign for a signed utility, Malware for a PE loader) and one step milder on
+the third; about **13.6 GB of memory still free at the worst moment**, against
+**8.4 GB** for the default model on the same three; roughly a fifth faster over
+the set; and **fewer techniques named** — two in total against seven, which is
+the cost. Three samples are not a benchmark, and this does not change the
+default.
+
 ## First analysis, with the default team
 
 Upload a sample from the console and start an analysis, or drive the API:
@@ -147,9 +176,11 @@ curl -X POST http://localhost:8000/api/v1/jobs \
 ```
 
 Progress streams over the WebSocket at `/ws/analysis/{job_id}`, which is what
-the console's analysis page subscribes to. The **PROCESS** tab draws the run as
-the stages the team has, each one filling in as it starts and finishes; the
-**EVIDENCE** tab is the ledger of every tool call the run made. When the run
+the console's analysis page subscribes to. The **CONVERSATION** tab draws the
+run as the exchange it is — every agent's messages, its tool calls and the
+verdict — while the analysis header draws the stages the team has, each one
+filling in as it starts and finishes; the **EVIDENCE** tab is the ledger of
+every tool call the run made. See [console.md](console.md). When the run
 finishes, the report appears under the analysis detail page, and the same
 content is available as Markdown, HTML, PDF, STIX 2.1 and a MITRE view under
 `/api/v1/reports/{report_id}/...` — see [api.md](api.md).
@@ -189,7 +220,7 @@ runs.
 and `dynamic`, then the debate, the verdict and the report. Upload an APK and run
 it under `profile: "mobile"`.
 
-Two things are worth watching on the PROCESS tab. The `android_static` stage
+Two things are worth watching on the stage strip. The `android_static` stage
 runs only when the sample really is an APK or a DEX (`when: file_type in
 ("apk", "dex")`), and the `dynamic` stage only when a sandbox report reached
 the run. Submit a PE under the same team and the Android stage appears as a row

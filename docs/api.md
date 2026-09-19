@@ -92,14 +92,44 @@ into a bounded Redis stream and served by `GET /jobs/{job_id}/events` for a tab
 that opens mid-run; the stream expires after 24 hours, after which
 `run_summary.stages` is the record.
 
+The socket is held to the same account checks an HTTP route is. The handshake
+reads the account the token names and closes with 1008 when it is missing or
+deactivated, before it says anything about the job; while the socket streams,
+it reads that account again every minute and closes with 1008 the moment it is
+deactivated, rather than letting the feed run until the access token expires.
+Every string on the feed is scrubbed by the publisher — credential shapes
+replaced, URLs cut to scheme and host, host paths cut to file names — and a
+published failure names the kind of exception it was, never its message.
+
 ### Reports
 
 One report is reachable by its own id or by the job that produced it, and the
 same content is offered in several renderings under
 `/reports/{report_id}/...`: `markdown`, `html`, `pdf`, `stix`, `mitre`,
-`full`, `iocs`, `signatures/{kind}` and `timeline`. `POST
-/reports/{report_id}/enrich` queues threat-intelligence enrichment and answers
-202 — the lookups run as their own job so they never delay a verdict.
+`full`, `iocs`, `signatures/{kind}` and `timeline`. Every rendering is made on
+request from the stored report, so there is one source of truth and no second
+copy to fall behind it. `POST /reports/{report_id}/enrich` queues
+threat-intelligence enrichment and answers 202 — the lookups run as their own
+job so they never delay a verdict.
+
+`iocs` is a feed another system acts on, and it answers accordingly. `kind`
+narrows to one of `hash`, `domain`, `ip`, `url`, `user_agent`, `ja3`, `ja3s`.
+`include` decides what is returned:
+
+| `include` | what comes back |
+| :-- | :-- |
+| `published` (default) | only what the platform's publish rule would publish — the same rule the exported STIX bundle is built with |
+| `unpublished` | only the rows it withholds, for a reader who is triaging rather than acting |
+| `all` | both |
+
+Every row carries `kind`, `value`, `is_suspicious`, `notes`, **`source`** —
+`sandbox` for something the sample resolved, reached or requested, `analyst`
+for something an agent put in an artefact, `strings` for a run of bytes in the
+file that has the shape of one, `identity` for the sample's own hashes — and
+**`published`**. A name only the sample's own byte image knows is not an
+observation of infrastructure, so it is withheld from the default feed and
+labelled in the wider ones rather than shipped looking like one the sandbox
+watched.
 
 ### Settings
 

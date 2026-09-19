@@ -28,9 +28,9 @@ GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "mcp_tools"
 
 # key -> (directory holding server.py and used as cwd, env names passed through)
 SIDECARS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "analysis": ("services/analysis-mcp", ("MALJAN_STAGING_DIR",)),
+    "analysis": ("services/analysis-mcp", ("MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS")),
     "knowledge": ("services/knowledge-mcp", ()),
-    "network": ("services/network-mcp", ()),
+    "network": ("services/network-mcp", ("MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS")),
     "threatintel": ("services/threatintel-mcp", ("VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY")),
 }
 

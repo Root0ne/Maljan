@@ -1,5 +1,6 @@
 "use client";
 
+import { humaniseKey } from "@/lib/humanise";
 import { useRef, useState } from "react";
 import { api } from "@/lib/api";
 import type {
@@ -10,6 +11,7 @@ import type {
   StageEntry,
   StageKind,
 } from "@/types/settings";
+import { agentDisplayName, agentFullName, agentKeySuffix } from "./agentNames";
 import {
   ADD_BUTTON,
   copyKey,
@@ -23,12 +25,20 @@ const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
 
 /** Seeded by the settings model, so they lock rather than delete. */
-const BUILTIN_PROFILES = new Set(["default", "measurement", "mobile", "deep_static"]);
+const BUILTIN_PROFILES = new Set([
+  "default",
+  "measurement",
+  "mobile",
+  "deep_static",
+  "team_lead",
+]);
 
-const KINDS: StageKind[] = ["analysis", "debate", "verdict", "report"];
+const KINDS: StageKind[] = ["triage", "analysis", "debate", "verdict", "report"];
 
 /** What each stage kind is for, in one line, under the selector. */
 const KIND_HELP: Record<StageKind, string> = {
+  triage:
+    "The pipeline runs the deterministic tools over the sample and writes each result to the evidence ledger before any analyst starts. It names no agent.",
   analysis: "Runs the agents it names, on the data they are configured to read.",
   debate: "Argues over the analysis stages upstream of it until they agree or the rounds run out.",
   verdict: "Runs the judge over everything the stages before it produced.",
@@ -284,6 +294,7 @@ export default function StagesEditor({
                   total={stages.length}
                   earlier={stages.slice(0, index).map((s) => s.key)}
                   analysts={analysts}
+                  definitions={definitions}
                   locked={locked}
                   error={errorFor(`${entry.key}.${key}.stages.${stage.key}`)}
                   warning={warningFor(`${entry.key}.${key}.stages.${stage.key}`)}
@@ -352,6 +363,7 @@ function StageCard({
   total,
   earlier,
   analysts,
+  definitions,
   locked,
   error,
   warning,
@@ -365,6 +377,9 @@ function StageCard({
   total: number;
   earlier: string[];
   analysts: string[];
+  /** The agent map, so a stage names its members the way an operator named
+   *  them rather than by the slug the settings map is keyed by. */
+  definitions: Record<string, AgentDefinitionEntry>;
   locked: boolean;
   error: string | undefined;
   warning: string | undefined;
@@ -402,11 +417,16 @@ function StageCard({
   return (
     <li className="border border-border rounded p-2" data-stage={stage.key}>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-mono text-text-primary">
-          {index + 1}. {stage.key}
-          <span className="ml-2 text-[10px] uppercase tracking-wider text-text-muted">
-            {stage.kind}
-          </span>
+        {/* The name leads and the key stays in the Key field below, which is
+            the one place it is edited. The header used to carry both, so
+            `triage_pack` was on screen twice, two rows apart. */}
+        <span className="text-xs text-text-primary">
+          {index + 1}. {stage.label?.trim() || humaniseKey(stage.key)}
+          {stage.kind !== stage.key && (
+            <span className="ml-2 text-[10px] uppercase tracking-wider text-text-muted">
+              {stage.kind}
+            </span>
+          )}
         </span>
         <div className="flex items-center gap-2">
           <button
@@ -457,7 +477,12 @@ function StageCard({
             aria-label={`${label} kind`}
             disabled={fixed}
             value={stage.kind}
-            onChange={(e) => onPatch({ kind: e.target.value as StageKind })}
+            onChange={(e) => {
+              const kind = e.target.value as StageKind;
+              // A triage or debate stage names no agent; a list left behind
+              // from an analysis stage is refused by the API on save.
+              onPatch(kind === "triage" || kind === "debate" ? { kind, agents: [] } : { kind });
+            }}
           >
             {KINDS.map((k) => (
               <option key={k} value={k}>
@@ -474,7 +499,12 @@ function StageCard({
           <ul className="mt-2 space-y-1">
             {stage.agents.map((agent) => (
               <li key={agent} className="flex items-center gap-2 text-xs">
-                <span className="font-mono text-text-primary">{agent}</span>
+                <span className="text-text-primary">{agentDisplayName(agent, definitions)}</span>
+                {agentKeySuffix(agent, definitions) && (
+                  <span className="font-mono text-[11px] text-text-muted">
+                    {agentKeySuffix(agent, definitions)}
+                  </span>
+                )}
                 <button
                   type="button"
                   className="text-[11px] text-text-secondary disabled:opacity-40"
@@ -506,7 +536,7 @@ function StageCard({
                 <option value="">choose an enabled agent</option>
                 {unused.map((a) => (
                   <option key={a} value={a}>
-                    {a}
+                    {agentFullName(a, definitions)}
                   </option>
                 ))}
               </select>

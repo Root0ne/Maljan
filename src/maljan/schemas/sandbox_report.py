@@ -155,6 +155,9 @@ class SandboxReport(BaseModel):
     screenshots: list[dict[str, Any]] = Field(default_factory=list)
     cti: dict[str, Any] = Field(default_factory=dict)
     unavailable: list[str] = Field(default_factory=list)
+    # True when no sandbox ran at all and this report stands in for one. A real
+    # run that observed nothing is not synthetic: its emptiness is a finding.
+    synthetic: bool = Field(default=False)
     raw: dict[str, Any] = Field(default_factory=dict)
     _validate_raw = field_validator("raw", mode="wrap")(_dict_identity_or_validate)
     # Ruled in during the pre-flight scan, beyond the brief's own field list:
@@ -364,6 +367,7 @@ def cape_report_to_sandbox_report(
         screenshots=_rows(raw.get("screenshots")),
         cti=cti_field if isinstance(cti_field, dict) else {},
         unavailable=[],
+        synthetic=bool(raw.get("synthetic")),
         raw=raw,
         summary={key: _as_str_list(summary_raw.get(key)) for key in _SUMMARY_KEYS},
         file_writes=_as_str_list(raw.get("file_writes") or raw.get("files_written")),

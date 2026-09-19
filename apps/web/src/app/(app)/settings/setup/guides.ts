@@ -1,3 +1,4 @@
+import { AGENT_DEFINITIONS_KEY } from "../configuration/agentStaging";
 import type { SettingsSchema } from "@/types/settings";
 
 export type GuideId =
@@ -53,6 +54,7 @@ export interface GuideStep {
     | "profile-picker"
     | "rest-mapping"
     | "provider-choice"
+    | "virustotal"
     | "review";
   /** Which part of a `server-form` / `agent-form` the step draws. The step
    *  components normalise an unknown value to their first section, so a
@@ -76,6 +78,9 @@ export interface GuideDef {
   id: GuideId;
   title: string;
   blurb: string;
+  /** What a first run needs. The hub offers these alone until a model is
+   *  connected, because none of the rest can be tested without one. */
+  firstRun?: boolean;
   /** The console group these keys live in — every step links to it. */
   groupHref: string;
   /** Steps may depend on the choices made so far (the LLM provider decides
@@ -164,8 +169,17 @@ const CREDENTIAL_KEYS: Record<string, { keys: string[]; advanced: string[] }> = 
   anthropic: { keys: ["core.llm.anthropic.api_key"], advanced: [] },
   gemini: { keys: ["core.llm.gemini.api_key"], advanced: [] },
   ollama: {
-    keys: ["core.llm.ollama.base_url", "core.llm.ollama.num_ctx", "core.llm.ollama.keep_alive"],
-    advanced: ["core.llm.ollama.num_ctx", "core.llm.ollama.keep_alive"],
+    keys: [
+      "core.llm.ollama.base_url",
+      "core.llm.ollama.num_ctx",
+      "core.llm.ollama.keep_alive",
+      "core.llm.ollama.disable_thinking",
+    ],
+    advanced: [
+      "core.llm.ollama.num_ctx",
+      "core.llm.ollama.keep_alive",
+      "core.llm.ollama.disable_thinking",
+    ],
   },
 };
 
@@ -175,6 +189,7 @@ function llmProvider(ctx: GuideContext): string {
 
 const LLM_GUIDE: GuideDef = {
   id: "llm",
+  firstRun: true,
   title: "Connect a language model",
   blurb: "Pick a provider, store its credentials, test the connection and choose the models the analysts and the judge run on.",
   groupHref: "/settings/configuration/models/llm",
@@ -206,7 +221,13 @@ const LLM_GUIDE: GuideDef = {
       {
         id: "test",
         title: "Test the connection",
-        intro: "This also fetches the list of models the next step offers.",
+        intro:
+          provider === "ollama"
+            ? "This also fetches the list of models the next step offers. A reasoning " +
+              "model answers in its thinking channel and leaves the answer empty, so " +
+              "the test reports that it answered nothing: turn on " +
+              "core.llm.ollama.disable_thinking above and test again."
+            : "This also fetches the list of models the next step offers.",
         probe: "llm",
         canContinue: (c) => (c.probeOk("llm") ? null : "run the connection test first"),
       },
@@ -223,18 +244,6 @@ const LLM_GUIDE: GuideDef = {
           const expert = String(c.effective(`core.llm.${p}.expert_model`) ?? "").trim();
           return expert ? null : "pick an expert model";
         },
-      },
-      {
-        id: "limits",
-        title: "Limits",
-        intro: "Token budgets and how many analysts run at once. The defaults are fine to keep.",
-        keys: [
-          "core.llm.expert_max_tokens",
-          "core.llm.judge_max_tokens",
-          "core.llm.parallel_analysts",
-          "core.llm.view_decomposition_mode",
-          "core.llm.view_decomposition_views",
-        ],
       },
       {
         id: "review",
@@ -280,7 +289,7 @@ const STATIC_PROBE: Record<string, string> = {
 /** Server keys the backend pre-populates. The generic static provider needs
  *  one the operator added, so these do not count towards "there is a server
  *  to point at". */
-const BUILTIN_SERVER_KEYS = new Set(["network", "threatintel"]);
+const BUILTIN_SERVER_KEYS = new Set(["network", "threatintel", "virustotal"]);
 
 function hasCustomServer(ctx: GuideContext): boolean {
   const servers = ctx.effective("core.mcp.servers");
@@ -300,6 +309,7 @@ const STATIC_FIELDS_INTRO: Record<string, string> = {
 
 const STATIC_GUIDE: GuideDef = {
   id: "static",
+  firstRun: true,
   title: "Choose a static analyser",
   blurb: "Pick what the static analyst reverse-engineers with, fill in that tool's settings and test it.",
   groupHref: "/settings/configuration/tools/static",
@@ -348,6 +358,7 @@ const STATIC_GUIDE: GuideDef = {
 
 const SANDBOX_GUIDE: GuideDef = {
   id: "sandbox",
+  firstRun: true,
   title: "Connect a sandbox",
   blurb: "Pick where samples are detonated, describe how to reach it and test the connection.",
   groupHref: "/settings/configuration/tools/sandbox",
@@ -487,6 +498,18 @@ const TOOL_SERVER_GUIDE: GuideDef = {
   groupHref: "/settings/configuration/tools/mcp",
   steps: () => [
     {
+      // VirusTotal's server is the one tool server nobody has to stand up, so
+      // it comes before the form that registers one by hand: an operator who
+      // only wanted file and IP reputation is finished after this step.
+      id: "virustotal",
+      title: "Connect VirusTotal",
+      intro:
+        "VirusTotal runs its own MCP server. Register this deployment to get an agent token; " +
+        "the token is stored encrypted here and the server is turned on with its lookups ticked.",
+      component: "virustotal",
+      reviewKeys: ["core.mcp.servers"],
+    },
+    {
       id: "which",
       title: "Which server",
       intro: "Add a new server, or open one that is already configured.",
@@ -524,6 +547,7 @@ const TOOL_SERVER_GUIDE: GuideDef = {
 
 const AGENT_GUIDE: GuideDef = {
   id: "agent",
+  firstRun: true,
   title: "Create an analyst",
   blurb: "Clone a built-in analyst or start from a blank one, give it tools and a model, then add it to a stage.",
   groupHref: "/settings/configuration/agents/agents",
@@ -534,7 +558,7 @@ const AGENT_GUIDE: GuideDef = {
       intro: "Clone a built-in analyst to inherit its prompt, or start from a blank generic one.",
       component: "agent-form",
       section: "identity",
-      reviewKeys: ["core.agents.definitions", "core.llm.agents"],
+      reviewKeys: [AGENT_DEFINITIONS_KEY, "core.llm.agents"],
       canContinue: (c) => (stateHas(c, "agentKey") ? null : "name the agent"),
     },
     {
@@ -677,4 +701,12 @@ export const GUIDES: GuideDef[] = [
 
 export function guideById(id: string): GuideDef | undefined {
   return GUIDES.find((g) => g.id === id);
+}
+
+/** The guides on offer, narrowed to what a first run needs before a model is
+ *  connected. Everything else is an improvement on a pipeline that already
+ *  runs, and offering it first is offering somebody a choice they cannot
+ *  evaluate. */
+export function guidesFor(llmConfigured: boolean): GuideDef[] {
+  return llmConfigured ? GUIDES : GUIDES.filter((g) => g.firstRun);
 }

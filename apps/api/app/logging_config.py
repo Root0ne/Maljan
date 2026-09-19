@@ -115,6 +115,36 @@ class HumanReadableFormatter(logging.Formatter):
         return msg
 
 
+# The handlers arq's own CLI installs, by the names its log config gives them.
+# ``arq`` configures logging before this module gets the chance — the entry
+# point is ``arq app.worker...``, which calls ``dictConfig`` on the way in —
+# and the logger it configures propagates to the root as well, so every worker
+# line was written twice: once in arq's ``HH:MM:SS: message`` format and once
+# through the formatter chosen here. Measured in a live worker log: 19 lines
+# carrying the ``[arq.worker]`` prefix against 21 bare ones.
+_ARQ_HANDLER_PREFIX = "arq."
+
+
+def hand_arq_over_to_root(name: str = "arq") -> bool:
+    """Drop arq's own handlers, leaving the root's to format its lines.
+
+    The same hand-over ``maljan.core.logger.hand_over_to_root`` performs for
+    the pipeline logger, and the same rule: only the handlers arq's log config
+    installed are taken away, so one an operator added stays, and propagation
+    is left on because the root handler is the one that has to write the line.
+    """
+    logger = logging.getLogger(name)
+    dropped = False
+    for handler in list(logger.handlers):
+        if not (handler.get_name() or "").startswith(_ARQ_HANDLER_PREFIX):
+            continue
+        logger.removeHandler(handler)
+        handler.close()
+        dropped = True
+    logger.propagate = True
+    return dropped
+
+
 def setup_logging() -> None:
     """Configure application-wide logging.
 
@@ -144,6 +174,15 @@ def setup_logging() -> None:
     handler.setFormatter(formatter)
     root_logger.addHandler(handler)
 
+    # The pipeline package installs a handler of its own for callers who have
+    # none — a CLI run, a script. Beside the root handler above it is a second
+    # writer for the same record, and every pipeline line went to stdout
+    # twice: once plain, once through the formatter chosen here. Now that
+    # there is a root handler, that one steps aside.
+    from maljan.core.logger import hand_over_to_root
+
+    hand_over_to_root()
+
     # Reduce noise from third-party libraries
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.error").setLevel(logging.INFO)
@@ -161,6 +200,7 @@ def setup_logging() -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("asyncio").setLevel(logging.WARNING)
     logging.getLogger("arq").setLevel(logging.INFO)
+    hand_arq_over_to_root()
 
     # Suppress known non-critical MCP stdio cancel-scope noise
     # (anyio/nest_asyncio incompatibility in mcp client cleanup)

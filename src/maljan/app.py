@@ -43,6 +43,7 @@ class MaljanApp:
         mock: bool = False,
         samples_dir: str = "data/samples",
         event_sink: EventSink | None = None,
+        job_id: str = "",
     ) -> None:
         self.config = config or Settings()
         self.container = ServiceContainer(
@@ -50,6 +51,7 @@ class MaljanApp:
             mock=mock,
             samples_dir=samples_dir,
             event_sink=event_sink,
+            job_id=job_id,
         )
         self.graph = build_graph(self.container)
 
@@ -227,7 +229,12 @@ class MaljanApp:
                     try:
                         import tempfile
 
+                        from maljan.tools.roots import add_sample_root
+
                         pcap_dir = Path(tempfile.gettempdir()) / "maljan-cape-pcap"
+                        # The capture lands here, so this is where the network
+                        # sidecar is allowed to read one from.
+                        add_sample_root(pcap_dir)
                         pcap_path = provider.fetch_pcap(task_id, str(pcap_dir))
                         if pcap_path:
                             net = result.report.setdefault("network", {})
@@ -270,6 +277,7 @@ class MaljanApp:
         sample_path: str | None = None,
         static_sample_path: str | None = None,
         static_sample_paths: dict[str, str] | None = None,
+        started_at: float | None = None,
     ) -> dict[str, Any]:
         """Execute the full analysis pipeline asynchronously.
 
@@ -289,12 +297,18 @@ class MaljanApp:
             static_sample_paths: One container-visible path per static provider
                 this job's profile uses, keyed by provider id; the globally
                 configured provider's entry is also ``static_sample_path``.
+            started_at: When the caller's own clock says this run began, as a
+                Unix timestamp. The worker starts counting before the sample
+                reaches this method, and the report's elapsed time is the
+                figure a reader compares against the job's duration, so the two
+                are measured from the same instant. Absent, this call's entry
+                is the start.
 
         This prevents the need for spinning up separate threads and manually
         managing event loops in async contexts (like ARQ workers), which
         solves the 'Event loop is closed' issue with google-genai.
         """
-        start = time.time()
+        start = float(started_at) if started_at else time.time()
         logger.info("=" * 60)
         logger.info("MALJAN - Multi-Agent Malware Analysis Pipeline")
         logger.info("=" * 60)
@@ -303,6 +317,16 @@ class MaljanApp:
         logger.info("Analysts: %s", self.container.analyst_keys())
         logger.info("Max iterations: %d", self.config.negotiation.max_iterations)
         logger.info("-" * 60)
+
+        # Where this run's sample is, for the tool sidecars. They read a path
+        # argument only inside the roots they were given, and the directory
+        # holding the sample the caller named is one of them: the caller is
+        # the operator or the worker, never a model. A run with no sample path
+        # names nothing, and the sidecars read only what they staged.
+        if sample_path:
+            from maljan.tools.roots import add_sample_root
+
+            add_sample_root(Path(sample_path).parent)
 
         # Submit to sandbox if sample_path is provided
         sandbox_report = await self._submit_to_sandbox(sample_path)
@@ -330,6 +354,7 @@ class MaljanApp:
         initial_state: AnalysisState = {
             "file_hash": file_hash,
             "file_name": file_name,
+            "run_started_at": start,
             "sample_path": sample_path,
             "static_sample_path": static_sample_path,
             "static_sample_paths": dict(static_sample_paths or {}),
@@ -356,6 +381,9 @@ class MaljanApp:
             "malware_report_markdown": None,
             "stix_bundle_extended": None,
             "report_error": None,
+            # No verdict has been written by anything yet, least of all by
+            # this pipeline standing in for a judge that did not answer.
+            "verdict_fallback": None,
             "degraded_mode": False,
             "degradation_reasons": [],
             # F10: declared AnalysisState channels, populated later by the
@@ -363,9 +391,13 @@ class MaljanApp:
             # complete (and the LangGraph channels exist from the first step).
             "function_hash_matches": [],
             "family_rag_candidates": [],
-            "attck_case_candidates": [],
             "validation_findings": {},
             "validation_retries": 0,
+            "validation_fed_back": {},
+            "validation_not_run": [],
+            "triage_facts": {},
+            "nudge_retry_modes": {},
+            "budget_records": {},
         }
 
         result = await self.graph.ainvoke(initial_state)

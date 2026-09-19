@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
 from maljan.providers.errors import ProviderConfigurationError
+from maljan.tools.capabilities import CAPABILITIES_TOOL, ServerCapabilities
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -131,6 +132,19 @@ def _run_async(coro: Any, label: str) -> None:
     run_coro_blocking(coro, hard_timeout=120.0, label=label)
 
 
+def _run_async_result(coro: Any, label: str, hard_timeout: float) -> Any:
+    """``_run_async`` for a call whose answer is wanted: the manifest read."""
+    from maljan.agents.base_agent import run_coro_blocking
+
+    return run_coro_blocking(coro, hard_timeout=hard_timeout, label=label)
+
+
+# How long a server gets to answer ``capabilities``. It is computed at the
+# server's start and returned from memory, so a slow answer is a wedged server
+# and not a slow probe.
+CAPABILITIES_TIMEOUT_SECONDS = 10.0
+
+
 # Every handle that still exists, so a retired agent loop can be told which of
 # them it took with it. Weak, so a handle nobody holds is simply gone.
 _LIVE_HANDLES: weakref.WeakSet[ServerHandle] = weakref.WeakSet()
@@ -221,6 +235,10 @@ class ServerHandle:
         # The argv that child was launched with, which is what makes the pid
         # above this handle's rather than merely contemporaneous.
         self._launch_argv: tuple[str, ...] = ()
+        # What the server said it can do on its host, read once per attach
+        # from its ``capabilities`` tool when it offers one; ``None`` for a
+        # server that does not, or whose answer could not be read.
+        self.capabilities: ServerCapabilities | None = None
         _LIVE_HANDLES.add(self)
         _register_retirement_hook()
 
@@ -381,6 +399,7 @@ class ServerHandle:
         self._owner_loop = _get_agent_loop()
         self._note_child_pids(before)
         self._all_tools = list(toolkit.get_tools())
+        self._read_capabilities()
         allowed = self.config.tools
         if allowed:
             manifest = {str(getattr(t, "name", "")) for t in self._all_tools}
@@ -447,6 +466,7 @@ class ServerHandle:
         self._opened_async = True
         self._note_child_pids(before)
         self._all_tools = list(toolkit.get_tools())
+        await self._aread_capabilities()
 
     async def _acleanup(self, toolkit: Any) -> bool:
         """Best-effort async close of ``toolkit`` **on the caller's loop**.
@@ -751,6 +771,57 @@ class ServerHandle:
         """Every tool the server advertises, allow-list ignored."""
         return [str(getattr(t, "name", "")) for t in self._all_tools]
 
+    def _capabilities_tool(self) -> Any | None:
+        for tool in self._all_tools:
+            if str(getattr(tool, "name", "")) == CAPABILITIES_TOOL:
+                return tool
+        return None
+
+    def _keep_capabilities(self, payload: Any) -> None:
+        parsed = ServerCapabilities.from_payload(self.name, payload)
+        self.capabilities = parsed
+        if parsed is None:
+            logger.warning("mcp server '%s': capabilities answer was not a manifest.", self.name)
+            return
+        missing = parsed.unavailable()
+        if missing:
+            logger.info(
+                "mcp server '%s': %d tool(s) unavailable on its host: %s",
+                self.name,
+                len(missing),
+                ", ".join(f"{u.tool} ({u.reason})" for u in missing),
+            )
+
+    def _read_capabilities(self) -> None:
+        """Read the manifest on the synchronous attach path. Never raises."""
+        self.capabilities = None
+        tool = self._capabilities_tool()
+        if tool is None:
+            return
+        try:
+            payload = _run_async_result(
+                tool.ainvoke({}),
+                label=f"{self.name}-capabilities",
+                hard_timeout=CAPABILITIES_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:  # noqa: BLE001 — a manifest is never worth a lost attach
+            logger.warning("mcp server '%s': capabilities could not be read (%s).", self.name, exc)
+            return
+        self._keep_capabilities(payload)
+
+    async def _aread_capabilities(self) -> None:
+        """Read the manifest on the caller's own loop. Never raises."""
+        self.capabilities = None
+        tool = self._capabilities_tool()
+        if tool is None:
+            return
+        try:
+            payload = await asyncio.wait_for(tool.ainvoke({}), CAPABILITIES_TIMEOUT_SECONDS)
+        except Exception as exc:  # noqa: BLE001 — a manifest is never worth a lost attach
+            logger.warning("mcp server '%s': capabilities could not be read (%s).", self.name, exc)
+            return
+        self._keep_capabilities(payload)
+
     def tools(self) -> list[BaseTool]:
         """The tools the model may call: the allow-list applied to the manifest.
 
@@ -760,12 +831,36 @@ class ServerHandle:
         what a newly registered custom server carries until the operator ticks
         tools off its probe result — a server is connected and inert until
         somebody says which of its tools may run.
+
+        A tool this host cannot run is dropped either way. The manifest the
+        server computed at start-up says which those are, and offering one is
+        offering the model a step that can only fail; the manifest still names
+        it, so the reason and the remedy reach the operator and the degraded
+        block. A server that answered no manifest is offered whole, as before.
         """
         allowed = self.config.tools
-        if allowed is None:
-            return list(self._all_tools)
-        keep = set(allowed)
-        return [t for t in self._all_tools if str(getattr(t, "name", "")) in keep]
+        withheld = self.capabilities.unusable() if self.capabilities else frozenset()
+        keep = None if allowed is None else set(allowed)
+        return [
+            tool
+            for tool in self._all_tools
+            for name in (str(getattr(tool, "name", "")),)
+            if name not in withheld and (keep is None or name in keep)
+        ]
+
+    def withheld_reasons(self) -> list[str]:
+        """The degradation reasons for the tools this host cannot run.
+
+        Said where the tool is withheld rather than where it would have been
+        bound, so dropping it from the model's list does not also drop the
+        sentence that explains the gap.
+        """
+        if self.capabilities is None:
+            return []
+        withheld = self.capabilities.unusable()
+        if not withheld:
+            return []
+        return [u.degradation_reason for u in self.capabilities.unavailable(sorted(withheld))]
 
     def _teardown(self, toolkit: Any) -> None:
         """Best-effort close of ``toolkit``, attached or abandoned mid-open. Never raises.
@@ -1012,6 +1107,11 @@ class ServerRegistry:
         return renamed
 
     def _merge(self, handle: ServerHandle, tools: list[BaseTool], seen: dict[str, str]) -> int:
+        # A tool the host cannot run is no longer put in front of the model, so
+        # the stage that binds it can no longer be the thing that reports it.
+        # It is reported here instead, where it is withheld, and reaches the
+        # degraded block exactly as it did before.
+        self._record(handle.withheld_reasons())
         return self.merge_tools(handle.name, handle.tools(), tools, seen)
 
     def tools_for(
@@ -1121,7 +1221,7 @@ class ServerRegistry:
         """
         available = handle.tools()
         if ref.name is None:
-            return list(available), []
+            return list(available), handle.withheld_reasons()
         wanted = str(ref.name)
         picked = [tool for tool in available if str(getattr(tool, "name", "")) == wanted]
         if not picked:

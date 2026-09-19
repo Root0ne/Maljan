@@ -11,8 +11,22 @@ something that read none of the evidence.
 
 from __future__ import annotations
 
+import pytest
+
 from maljan.extractors.capability_matrix import build_capability_matrix
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+
+
+@pytest.fixture(autouse=True)
+def _the_shared_attck_index(real_attck_index: None) -> None:
+    """Building a capability matrix resolves technique names and tactics.
+
+    It does that through ``ATTCKValidator.get_instance()``, which builds the
+    shared ATT&CK index from the corpus — so a report assembled here reaches
+    the catalogue whatever the test is about. The unit tree holds that build
+    shut; these ask for it by name so the list of tests that pay for it is a
+    list somebody can read.
+    """
 
 
 def _bundle(*, techniques: list[str], relationships: list[dict] | None = None) -> dict:
@@ -45,10 +59,10 @@ class TestSignalQuality:
         Dropping the row would leave the verdict naming a technique the report
         it is printed in does not carry."""
         cells, mappings = build_capability_matrix(
-            stix_output=_bundle(techniques=["T1000"]), isr_reports=None
+            stix_output=_bundle(techniques=["T1055"]), isr_reports=None
         )
 
-        assert [c.technique_id for c in cells] == ["T1000"]
+        assert [c.technique_id for c in cells] == ["T1055"]
         assert cells[0].contributing_layers == ["judge"]
         # The judge read the analysts, not the sample, so it corroborates
         # nothing on its own.
@@ -124,7 +138,9 @@ class TestItProjectsTheJudgeAndTheAnalysts:
 
         assert [c.technique_id for c in cells] == ["T1055"]
         assert [c.technique_id_valid for c in cells] == [False]
-        assert [m.technique_id_valid for m in mappings] == [False]
+        # The published list carries the techniques the run found, and an id
+        # the catalogue check rejected is not one of them.
+        assert mappings == []
 
     def test_one_source_flagging_an_id_marks_the_row(self) -> None:
         """Two analysts, one of which kept an id it was told does not resolve."""
@@ -174,7 +190,10 @@ class TestAJudgeIdIsCheckedLikeAnAnalystClaim:
 
         assert [c.technique_id for c in cells] == ["T0000"]
         assert [c.technique_id_valid for c in cells] == [False]
-        assert [m.technique_id_valid for m in mappings] == [False]
+        # And out of the published list: the matrix is where the answer is
+        # kept on the record, and ``ttp_mappings`` is where the report, the
+        # bundle and ``/mitre`` read their techniques from.
+        assert mappings == []
 
     def test_a_plausible_but_unknown_judge_id_is_marked(self, monkeypatch) -> None:
         self._catalogue(monkeypatch, {"T1055"})

@@ -29,7 +29,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: true
 
@@ -59,13 +59,19 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: true
       # The Makefile's `make semgrep` form: uv resolves the pinned version into
       # an ephemeral environment, so no unpinned `pip install` runs in CI.
+      #
+      # apps/web/src is in the target list and the TypeScript and React
+      # rulesets are in the config list: the console is application code that
+      # reads a live event feed, and leaving it to CodeQL alone made every file
+      # of it single-tool. What stays out of the scan is what is not source —
+      # build output, the end-to-end suite, the unit specs (`.semgrepignore`).
       - name: Scan
-        run: uv run --with semgrep==1.176.0 semgrep scan --config p/python --config p/security-audit --error --metrics=off src/ apps/api/ services/ scripts/
+        run: uv run --with semgrep==1.176.0 semgrep scan --config p/python --config p/security-audit --config p/typescript --config p/react --error --metrics=off src/ apps/api/ services/ scripts/ apps/web/src/
 
   test:
     name: Test Suite (Python ${{ matrix.python-version }})
@@ -87,7 +93,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: true
 
@@ -131,7 +137,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: true
 

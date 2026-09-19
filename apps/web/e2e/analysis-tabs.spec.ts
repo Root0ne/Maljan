@@ -4,7 +4,7 @@ import { COMPLETED_JOB, JOB_ID, REPORT, REPORT_ID } from "./report-fixture";
 /**
  * Every analysis tab, loaded once against one complete report.
  *
- * Only `/process` had coverage; the other eleven had never been rendered by a
+ * Only the process tab had coverage; the other eleven had never been rendered by a
  * test. That matters more here than on a list page, because there is **no error
  * boundary anywhere in `src/`** — a TypeError in one of these tabs is not a
  * caught error state, it takes the route down. The Summary tab in particular
@@ -61,7 +61,16 @@ const TABS: Tab[] = [
       ).toBeVisible();
     },
   },
-  { path: "/process", expect: heading(/Agent Transcript/i) },
+  {
+    path: "/conversation",
+    // No heading of its own: the tab bar names it, and the stream is the
+    // content. The recorded conversation is what a completed run draws.
+    expect: async (page) => {
+      await expect(page.getByTestId("conversation-stream")).toContainText(
+        "Final verdict: Malicious.",
+      );
+    },
+  },
 ];
 
 test.describe("Analysis tabs", () => {
@@ -123,11 +132,6 @@ test.describe("Analysis tabs", () => {
       page.getByRole("heading", { name: /Family-Feature RAG Candidates/i })
     ).toBeVisible();
     await expect(page.getByText("FormBook")).toBeVisible();
-
-    await expect(
-      page.getByRole("heading", { name: /ATT&CK Case Priors/i })
-    ).toBeVisible();
-    await expect(page.getByText("T1055", { exact: true })).toBeVisible();
   });
 
   /* C4 (dev audit 2026-09-06): the IOC, ATT&CK and timeline endpoints all
@@ -242,7 +246,7 @@ test.describe("Analysis tabs", () => {
 
     await page.goto(`/analysis/${JOB_ID}/dynamic`);
 
-    await expect(page.getByText(/may not have been detonated/)).toBeVisible();
+    await expect(page.getByText(/was not detonated on this run/)).toBeVisible();
     await expect(page.getByRole("heading", { name: "Analyst findings" })).toBeVisible();
     await expect(
       page.getByText("The sample very likely detected the sandbox and exited early.")
@@ -250,37 +254,236 @@ test.describe("Analysis tabs", () => {
     await expect(page.getByText("no process activity recorded")).toBeVisible();
   });
 
-  test("/live renders the running view", async ({ sessionPage: page }) => {
-    /* Not in the table above because it is the one tab that needs the opposite
-     * job state: on a completed run it deliberately says there is nothing live
-     * to show. It also mounts a second WebSocket of its own on top of the
-     * layout's, which is why the tab walk uses /process instead. */
-    await page.route(`**/api/v1/jobs/${JOB_ID}`, (route) =>
+  /* The identity section is the one that overlaps the tab's own blocks: the
+   * hashes it carries were printed twice on one screen, and its three signing
+   * rows are one fact about one format with the tool's defaults beside it. */
+  test("the identity table drops what the tab draws better", async ({
+    sessionPage: page,
+  }) => {
+    await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
       route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ ...COMPLETED_JOB, status: "running", completed_at: null }),
+        body: JSON.stringify({
+          ...REPORT,
+          malware_report: {
+            ...REPORT.malware_report,
+            sections: [
+              {
+                key: "identity",
+                title: "Sample identity",
+                kind: "kv",
+                columns: ["Field", "Value"],
+                rows: [
+                  ["file type", "pe"],
+                  ["mime type", ""],
+                  ["md5", "5d41402abc4b2a76b9719d911017c592"],
+                  ["sha256", "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"],
+                  ["authenticode", "present=no, subject=, issuer="],
+                  ["apk", "present=no, schemes="],
+                  ["macho", "present=no"],
+                ],
+                text: "",
+                items: [],
+                evidence_ids: ["ev_0001"],
+                source: "tool:identify_file",
+              },
+            ],
+          },
+        }),
       })
     );
-    await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
-      route.fulfill({ status: 404, body: JSON.stringify({ detail: "Not found" }) })
-    );
 
-    await page.goto(`/analysis/${JOB_ID}/live`);
+    await page.goto(`/analysis/${JOB_ID}/identity`);
 
-    await expect(page.getByRole("heading", { name: "Agent Status" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Event Log" })).toBeVisible();
-    await expect(
-      page.getByText(/Analysis already completed/)
-    ).toHaveCount(0);
+    // One place for a hash, and it is the block with the copy buttons.
+    await expect(page.getByText("5d41402abc4b2a76b9719d911017c592")).toHaveCount(1);
+    await expect(page.getByRole("heading", { name: /File Hashes/i })).toBeVisible();
+
+    // The routed format says whether the sample is signed, as a sentence; the
+    // two formats it is not say nothing at all.
+    await expect(page.getByText("Authenticode")).toBeVisible();
+    await expect(page.getByText("Not signed")).toBeVisible();
+    await expect(page.getByText(/present=no/)).toHaveCount(0);
+    await expect(page.getByText("macho", { exact: true })).toHaveCount(0);
+
+    // A hash no tool produced is absent rather than drawn as a dash.
+    await expect(page.getByText("SHA-512")).toHaveCount(0);
+    await expect(page.getByText("TLSH")).toHaveCount(0);
+    await expect(page.getByText("SSDeep")).toHaveCount(0);
+
     await expect(alerts(page)).toHaveCount(0);
   });
 
-  test("the LIVE tab is offered only while the job is running", async ({
+  /* The console dropped the one reputation answer a run gets. It draws it
+   * now, on the tab that holds the hash that was looked up, and only when the
+   * ledger actually holds it — a configured service that was never asked
+   * draws nothing. */
+  test("the identity tab draws what VirusTotal answered about the hash", async ({
     sessionPage: page,
   }) => {
+    await page.route(`**/api/v1/jobs/*/evidence**`, (route) => {
+      const tool = new URL(route.request().url()).searchParams.get("tool");
+      const entries =
+        tool === "get_file_report"
+          ? [
+              {
+                id: "9",
+                entry_id: "ev_0042",
+                stage: "triage",
+                agent: "pipeline",
+                server: "virustotal",
+                tool: "get_file_report",
+                ok: true,
+                duration_ms: 310,
+                seq: 42,
+                args: { hash: "a".repeat(64) },
+                output: "",
+                structured: {
+                  data: {
+                    attributes: {
+                      last_analysis_stats: { malicious: 42, suspicious: 3, undetected: 26 },
+                      popular_threat_classification: {
+                        suggested_threat_label: "trojan.formbook/injector",
+                      },
+                      first_submission_date: 1_600_000_000,
+                    },
+                  },
+                },
+                created_at: "2026-09-01T10:00:00Z",
+              },
+            ]
+          : [];
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          job_id: JOB_ID,
+          entries,
+          total: entries.length,
+          page: 1,
+          page_size: 5,
+        }),
+      });
+    });
+
+    await page.goto(`/analysis/${JOB_ID}/identity`);
+
+    const section = page.getByTestId("reputation-section");
+    await expect(section).toBeVisible();
+    await expect(section.getByRole("heading", { name: "VirusTotal" })).toBeVisible();
+    await expect(section).toContainText("42");
+    await expect(section).toContainText("/71");
+    await expect(section).toContainText("trojan.formbook/injector");
+    // The citation resolves into the ledger rather than restating the row.
+    await expect(section.getByRole("link", { name: "ev_0042" })).toHaveAttribute(
+      "href",
+      `/analysis/${JOB_ID}/evidence?evidence=ev_0042`,
+    );
+    await expect(alerts(page)).toHaveCount(0);
+  });
+
+  test("a run that asked nobody about the hash draws no reputation section", async ({
+    sessionPage: page,
+  }) => {
+    await page.goto(`/analysis/${JOB_ID}/identity`);
+
+    await expect(page.getByRole("heading", { name: /File Hashes/i })).toBeVisible();
+    await expect(page.getByTestId("reputation-section")).toHaveCount(0);
+  });
+
+  /* A tab is a promise that there is something behind it. The fixture report
+   * fills every one of them, which is what the walk above proves; this is the
+   * other half — a report that filled none of them offers none. */
+  test("a report with nothing in it offers only the three that always answer", async ({
+    sessionPage: page,
+  }) => {
+    await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...REPORT,
+          mitre_techniques: [],
+          stix_bundle: null,
+          agent_findings: [],
+          malware_report: {
+            ...REPORT.malware_report,
+            static: null,
+            dynamic: null,
+            network: null,
+            persistence: [],
+            ttp_mappings: [],
+            capability_matrix: [],
+            sections: [],
+            detection_signatures: [],
+            defensive_recommendations: [],
+            stix_bundle_extended: {},
+            attribution: {
+              family: null,
+              family_confidence: 0,
+              family_grounded: true,
+              actor: null,
+              campaign: null,
+              similar_samples: [],
+            },
+          },
+        }),
+      })
+    );
+
     await page.goto(`/analysis/${JOB_ID}`);
+
+    // The identity block is on every report, so IDENTITY joins the three.
+    for (const label of ["SUMMARY", "CONVERSATION", "IDENTITY", "EVIDENCE"]) {
+      await expect(page.getByRole("link", { name: new RegExp(`^${label}$`, "i") })).toBeVisible();
+    }
+    for (const label of [
+      "STATIC",
+      "DYNAMIC",
+      "NETWORK",
+      "PERSISTENCE",
+      "ATTRIBUTION",
+      "DETECTION",
+      "DEFENSE",
+    ]) {
+      await expect(page.getByRole("link", { name: new RegExp(`^${label}$`, "i") })).toHaveCount(0);
+    }
+    await expect(alerts(page)).toHaveCount(0);
+  });
+
+  test("a running job offers the three that can answer before it finishes", async ({
+    sessionPage: page,
+  }) => {
+    await page.route(`**/api/v1/jobs/${JOB_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ...COMPLETED_JOB, status: "running", completed_at: null }),
+      })
+    );
+    await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
+      route.fulfill({ status: 404, body: JSON.stringify({ detail: "Not found" }) })
+    );
+
+    await page.goto(`/analysis/${JOB_ID}`);
+
+    await expect(page.getByRole("link", { name: /^SUMMARY$/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^CONVERSATION$/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^EVIDENCE$/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^IDENTITY$/i })).toHaveCount(0);
+  });
+
+  test("the conversation is offered whatever state the job is in", async ({
+    sessionPage: page,
+  }) => {
+    /* The tab bar used to change shape when a run finished: LIVE was offered
+     * only while it ran, so leaving a completed run and coming back to it
+     * landed somewhere structurally different. One tab answers both now. */
+    await page.goto(`/analysis/${JOB_ID}`);
+    await expect(page.getByRole("link", { name: /^CONVERSATION$/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /^LIVE$/i })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /^PROCESS$/i })).toHaveCount(0);
 
     await page.route(`**/api/v1/jobs/${JOB_ID}`, (route) =>
       route.fulfill({
@@ -293,21 +496,23 @@ test.describe("Analysis tabs", () => {
       route.fulfill({ status: 404, body: JSON.stringify({ detail: "Not found" }) })
     );
     await page.goto(`/analysis/${JOB_ID}`);
-    await expect(page.getByRole("link", { name: /^LIVE$/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^CONVERSATION$/i })).toBeVisible();
   });
 
-  /* The 2026-07-26 audit folded seven routes into three. They are kept as
-   * redirect stubs precisely so bookmarks and links in already-issued reports do
-   * not 404 — which is only true for as long as something checks.
+  /* Twelve routes folded into five. They are kept as redirect stubs precisely
+   * so bookmarks and links in already-issued reports do not 404 — which is
+   * only true for as long as something checks.
    *
    * One test per redirect rather than a loop: seven navigations in a single test
    * overran the 30 s test timeout under `next dev`, which reads as a broken
    * redirect when it is only a slow first compile. */
   const REDIRECTS: [string, string][] = [
     ["/ttps", "/capabilities"],
-    ["/agents", "/process"],
-    ["/pipeline", "/process"],
-    ["/timeline", "/process"],
+    ["/agents", "/conversation"],
+    ["/pipeline", "/conversation"],
+    ["/timeline", "/conversation"],
+    ["/live", "/conversation"],
+    ["/process", "/conversation"],
     ["/rules", "/detection"],
     ["/signatures", "/detection"],
     ["/stix", "/detection"],

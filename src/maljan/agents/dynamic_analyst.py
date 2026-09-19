@@ -12,7 +12,11 @@ from typing import Any
 from langchain_core.prompts import ChatPromptTemplate
 
 from maljan.agents.base_agent import BaseAnalyst, prompt_to_messages
-from maljan.agents.prompt_fragments import FINDINGS_BLOCK_FRAGMENT, format_fragment
+from maljan.agents.prompt_fragments import (
+    CLAIM_FORMAT_FRAGMENT,
+    FINDINGS_BLOCK_FRAGMENT,
+    format_fragment,
+)
 from maljan.agents.registry import register_agent
 from maljan.agents.static_analyst import _parse_claim_blocks, _parse_disputes
 from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
@@ -197,12 +201,7 @@ class DynamicAnalyst(BaseAnalyst):
                 "For each finding state: the claim, the exact artifact reference "
                 "(e.g. 'API call: WriteProcessMemory PID=832', 'RegSetValue: HKLM\\Run\\malware'), "
                 "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID.\n\n"
-                "Format each finding as:\n"
-                "CLAIM: <claim text>\n"
-                "EVIDENCE: <artifact reference>\n"
-                "CONFIDENCE: <float>\n"
-                "TECHNIQUE: <T-ID or NONE>\n"
-                "---\n\n"
+                f"{CLAIM_FORMAT_FRAGMENT}\n"
                 f"{task_info}",
             ),
         ]
@@ -274,7 +273,7 @@ class DynamicAnalyst(BaseAnalyst):
         # that obeys it puts a JSON fence into the revised report, and nothing
         # downstream of here — the claim parser, the transcript, the Composer —
         # should ever see it.
-        response = self.llm.invoke(messages)
+        response = self.llm.invoke(self.frame_messages(messages))
         content = self._capture_findings(str(response.content))
 
         claims = _parse_claim_blocks(content)

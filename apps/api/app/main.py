@@ -69,7 +69,7 @@ async def _probe_qdrant() -> None:
 
     from app.runtime_config import runtime_config
 
-    qdrant_url = await runtime_config.get("qdrant_url")
+    qdrant_url = (await runtime_config.core()).memory.qdrant_url
     async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT_SECONDS) as client:
         resp = await client.get(f"{qdrant_url.rstrip('/')}/readyz")
         resp.raise_for_status()

@@ -167,3 +167,38 @@ FINDINGS_BLOCK_FRAGMENT = (
     '"evidence_ids": ["ev_0002"]}]}\n'
     "```"
 )
+
+
+# The shape every analyst's claims are parsed from, and the one place it is
+# written. It asks for the ledger id in the evidence line because that is what
+# the run can check: a claim whose technique cites a tool result is a claim
+# somebody can follow, and a technique with nothing behind it is what put
+# sixteen speculative ids in front of a judge on a signed binary.
+#
+# Each tool result the analyst is shown opens with its id in brackets, so the
+# id is in front of the model when it writes the line.
+CLAIM_FORMAT_FRAGMENT = (
+    "Format each finding as:\n"
+    "CLAIM: <claim text>\n"
+    "EVIDENCE: <artifact reference, naming the tool result you read it from, "
+    "for example [ev_0002]>\n"
+    "CONFIDENCE: <float>\n"
+    "TECHNIQUE: <T-ID or NONE>\n"
+    "---\n"
+)
+
+
+# The one sentence an analyst holding a reputation tool needs. A live run bound
+# VirusTotal to the judge, the judge only opened its tool loop on dissent, and
+# the whole analysis ran without anyone asking who the sample was: 19 ledger
+# entries, none of them a reputation lookup, and a family of None.
+#
+# The second half is the load-bearing half. A detection ratio is one source
+# among the run's own, and an analyst that reads it as the answer has stopped
+# analysing -- which is the failure mode a reputation tool invites.
+REPUTATION_LOOKUP_FRAGMENT = (
+    "\n\nWhen a reputation tool is among your tools, look the sample's hash up once, "
+    "cite what comes back with its evidence id like any other tool result, and weigh "
+    "it as one source: a reputation label is not the verdict, and an unknown hash is "
+    "not a clean sample."
+)

@@ -14,6 +14,12 @@ the pipeline that exists today, and ``pipeline.topology`` names their nodes
 every transcript, stored run and console view keeps working. The graph is
 pinned by ``tests/fixtures/golden/graph_default.json`` in both analyst modes.
 
+**A triage stage runs first.** It establishes the facts every later stage
+reads, so a triage stage with no dependency of its own is where the graph
+starts, and every other stage that declares no dependency follows it instead of
+``START``. A stored profile therefore gains the pack by having the stage
+inserted, without every other stage being rewritten to depend on it.
+
 **The topology is a property of the configuration, never of the sample.** A
 stage carries a ``when`` condition, but the condition is evaluated inside the
 stage's nodes at run time, not here: a stage that declines to run is still in
@@ -42,6 +48,7 @@ from maljan.pipeline.nodes import (
     make_report_node,
     make_revision_node,
     make_stage_agent_node,
+    make_triage_node,
 )
 from maljan.pipeline.routing import ConsensusRouter
 from maljan.pipeline.state import AnalysisState
@@ -107,10 +114,17 @@ def build_graph(container: ServiceContainer) -> CompiledStateGraph:
     # 2. Edges between stages. A stage with no live dependency starts at START;
     #    a stage nothing live depends on ends at END. A debate stage's way out
     #    is the router's conditional edge, wired with the stage itself, which
-    #    is why its ``exit`` is empty.
+    #    is why its ``exit`` is empty. A triage stage with no dependency stands
+    #    in for START for every other root: the facts it writes come before
+    #    anything that reads them.
+    roots = [entry for entry in staged if not any(k in by_key for k in entry.stage.depends_on)]
+    first = next((entry for entry in roots if entry.stage.kind == "triage"), None)
+    adopted = [entry for entry in roots if first is not None and entry is not first]
     for entry in staged:
         stage = entry.stage
         upstream = [by_key[key] for key in stage.depends_on if key in by_key]
+        if entry in adopted and first is not None:
+            upstream = [first]
         if not upstream:
             for node in entry.entry:
                 builder.add_edge(START, node)
@@ -119,6 +133,8 @@ def build_graph(container: ServiceContainer) -> CompiledStateGraph:
                 for head in entry.entry:
                     builder.add_edge(tail, head)
         live_dependents = [d for d in dependents(profile, stage.key) if d.key in by_key]
+        if entry is first and adopted:
+            continue
         if entry.exit and not live_dependents:
             for tail in entry.exit:
                 builder.add_edge(tail, END)
@@ -136,7 +152,21 @@ def _add_stage(
 ) -> None:
     """Add one stage's nodes and every edge that lives inside it."""
     stage = entry.stage
-    if stage.kind == "analysis":
+    if stage.kind == "triage":
+        node = entry.nodes[0]
+        builder.add_node(
+            node,
+            instrument_node(
+                node,
+                make_triage_node(
+                    container,
+                    stage=stage,
+                    announces=entry.starter == node,
+                    finishes=closes.get(node, ()),
+                ),
+            ),
+        )
+    elif stage.kind == "analysis":
         _add_analysis_stage(builder, container, entry, closes)
     elif stage.kind == "debate":
         _add_debate_stage(builder, container, profile, entry, by_key, closes)

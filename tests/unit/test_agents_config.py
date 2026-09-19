@@ -81,12 +81,28 @@ def _paper_stages() -> list[dict]:
     ]
 
 
+def _triage_pack_stage() -> dict:
+    """The deterministic first stage every team but the baseline ships with."""
+    return {
+        "key": "triage_pack",
+        "label": "Triage pack",
+        "kind": "triage",
+        "agents": [],
+        "depends_on": [],
+        "when": "",
+        "mode": "sequential",
+        "inject_upstream": "none",
+        "debate": None,
+        "builtin_tools": True,
+    }
+
+
 DEFAULT_AGENTS = {
     "profile": "default",
     "profiles": {
         "default": {
             "label": "Default",
-            "stages": _paper_stages(),
+            "stages": [_triage_pack_stage(), *_paper_stages()],
             "analysts": ["static", "dynamic", "network"],
             # Written as an analyst list, so the model keeps the stages in step
             # with ``llm.parallel_analysts`` and the negotiation settings.
@@ -95,8 +111,9 @@ DEFAULT_AGENTS = {
             "exclude_sandbox_tools": False,
             "static_provider": None,
         },
-        # The tool-free baseline: the same analysts, every server withheld and
-        # the static provider forced off, so a run measures the ensemble alone.
+        # The tool-free baseline: the same analysts, every server withheld,
+        # the static provider forced off and no triage pack in front, so a run
+        # measures the ensemble alone.
         "measurement": {
             "label": "Measurement baseline",
             "stages": _paper_stages(),
@@ -112,7 +129,7 @@ DEFAULT_AGENTS = {
             "role": "static",
             "label": "Static analyst",
             "prompt": None,
-            "tools": [_mcp("analysis"), _mcp("knowledge")],
+            "tools": [_mcp("analysis"), _mcp("knowledge"), _mcp("virustotal")],
             "static_provider": None,
             "enabled": True,
             "data_sources": [],
@@ -130,7 +147,7 @@ DEFAULT_AGENTS = {
             "role": "network",
             "label": "Network analyst",
             "prompt": None,
-            "tools": [_mcp("network"), _mcp("knowledge")],
+            "tools": [_mcp("network"), _mcp("knowledge"), _mcp("virustotal")],
             "static_provider": None,
             "enabled": True,
             "data_sources": [],
@@ -139,7 +156,7 @@ DEFAULT_AGENTS = {
             "role": "judge",
             "label": "Judge",
             "prompt": None,
-            "tools": [_mcp("knowledge")],
+            "tools": [_mcp("knowledge"), _mcp("virustotal")],
             "static_provider": None,
             "enabled": True,
             "data_sources": [],
@@ -447,15 +464,32 @@ def test_a_generic_definition_with_a_provider_reference_is_accepted():
     assert cfg.agents.definitions["strings"].tools[0].kind == "provider"
 
 
+def test_a_lead_may_name_its_own_static_provider():
+    """A lead is the same class as a generic agent, and picks its provider the same way."""
+    cfg = _settings(
+        definitions={
+            "boss": {
+                "role": "lead",
+                "prompt": "You lead.",
+                "static_provider": "r2",
+                "tools": [{"kind": "provider"}],
+            }
+        }
+    )
+    assert cfg.agents.definitions["boss"].tools[0].kind == "provider"
+
+
 def test_a_provider_reference_on_a_built_in_role_is_refused():
     """Resolution never opens a provider for a built-in role (spec §4).
 
-    Only a ``generic`` definition has no class of its own to open one
-    lazily, so a provider reference is meaningful only there.
+    Only a definition that is a prompt rather than a class — ``generic`` or
+    ``lead`` — has none of its own to open lazily.
     """
     with pytest.raises(
         ValidationError,
-        match=("'static_r2': provider tool references are only valid on generic definitions"),
+        match=(
+            "'static_r2': provider tool references are only valid on generic and lead definitions"
+        ),
     ):
         _settings(
             definitions={
@@ -563,7 +597,7 @@ class TestALegacyDatabaseGetsTheNewToolDefaults:
 
         refs = cfg.agents.definitions["static"].tools
 
-        assert [r.server for r in refs] == ["analysis", "knowledge"]
+        assert [r.server for r in refs] == ["analysis", "knowledge", "virustotal"]
 
     def test_loading_such_a_database_does_not_read_as_tampering(self):
         """The failure mode this guards: settings that refuse to load at all,
@@ -597,7 +631,7 @@ class TestALegacyDatabaseGetsTheNewToolDefaults:
         definition = cfg.agents.definitions["network"]
 
         assert definition.enabled is False
-        assert [r.server for r in definition.tools] == ["network", "knowledge"]
+        assert [r.server for r in definition.tools] == ["network", "knowledge", "virustotal"]
 
     def test_a_custom_definition_keeps_its_empty_tool_list(self):
         """The re-seed reads an empty list as "not set", which is only true for
@@ -613,3 +647,151 @@ class TestALegacyDatabaseGetsTheNewToolDefaults:
         operator added; every built-in team comes back on load."""
         cfg = _settings(profiles={"lean": {"label": "Lean", "analysts": ["static"]}})
         assert set(cfg.agents.profiles) == {*BUILTIN_PROFILES, "lean"}
+
+
+# ── agent references ───────────────────────────────────────────────────
+
+
+def _led(**definitions) -> Settings:
+    """A team whose one analyst is a lead built from ``definitions``."""
+    return _settings(
+        definitions={"helper": {"role": "generic", "prompt": "help"}, **definitions},
+        profiles={
+            "led": {
+                "stages": [
+                    {"key": "lead", "kind": "analysis", "agents": ["boss"]},
+                    {
+                        "key": "verdict",
+                        "kind": "verdict",
+                        "agents": ["judge"],
+                        "depends_on": ["lead"],
+                    },
+                ]
+            }
+        },
+        profile="led",
+    )
+
+
+def test_an_agent_reference_names_an_agent_and_nothing_else():
+    ref = ToolRef(kind="agent", agent="helper")
+    assert ref.model_dump() == {"kind": "agent", "server": None, "name": None, "agent": "helper"}
+    with pytest.raises(ValidationError, match="needs an agent"):
+        ToolRef(kind="agent")
+    with pytest.raises(ValidationError, match="names no server and no tool"):
+        ToolRef(kind="agent", agent="helper", server="knowledge")
+    with pytest.raises(ValidationError, match="names no agent"):
+        ToolRef(kind="mcp", server="knowledge", agent="helper")
+    with pytest.raises(ValidationError, match="names no server, tool or agent"):
+        ToolRef(kind="sandbox", agent="helper")
+
+
+def test_a_reference_of_any_other_kind_dumps_as_it_always_did():
+    """Stored definitions and exports predate the field; they read unchanged."""
+    assert ToolRef(kind="mcp", server="knowledge").model_dump() == {
+        "kind": "mcp",
+        "server": "knowledge",
+        "name": None,
+    }
+    assert ToolRef(kind="provider").model_dump() == {
+        "kind": "provider",
+        "server": None,
+        "name": None,
+    }
+
+
+def test_a_lead_that_asks_a_defined_agent_is_accepted():
+    cfg = _led(boss={"role": "lead", "prompt": "lead", "tools": [_agent("helper")]})
+    assert cfg.agents.definitions["boss"].tools[0].agent == "helper"
+
+
+def test_a_reference_to_an_agent_that_is_not_defined_is_refused():
+    with pytest.raises(ValidationError, match="unknown agent 'nobody' in a tool reference"):
+        _led(boss={"role": "lead", "prompt": "lead", "tools": [_agent("nobody")]})
+
+
+def test_an_agent_may_not_reference_itself():
+    with pytest.raises(ValidationError, match="'boss': an agent cannot ask itself"):
+        _led(boss={"role": "lead", "prompt": "lead", "tools": [_agent("boss")]})
+
+
+def test_the_judge_and_the_reporter_can_neither_ask_nor_be_asked():
+    from maljan.core.config import AgentDefinition, agent_reference_problems
+
+    with pytest.raises(ValidationError, match="'judge' has role 'judge' and cannot be asked"):
+        _led(boss={"role": "lead", "prompt": "lead", "tools": [_agent("judge")]})
+    # The built-in identity check refuses an edited judge before this rule is
+    # reached through ``Settings``; the rule itself is what the API shares.
+    definitions = Settings(_env_file=None).agents.definitions
+    judge = AgentDefinition(role="judge", tools=[ToolRef(kind="agent", agent="static")])
+    assert agent_reference_problems("judge", judge, definitions) == [
+        "a judge definition cannot ask other agents"
+    ]
+
+
+def test_a_reference_listed_twice_is_refused():
+    with pytest.raises(ValidationError, match="agent 'helper' is referenced twice"):
+        _led(boss={"role": "lead", "prompt": "lead", "tools": [_agent("helper"), _agent("helper")]})
+
+
+def test_a_lead_needs_a_prompt_like_a_generic_agent():
+    with pytest.raises(ValidationError, match="'boss': a lead agent needs a prompt"):
+        _led(boss={"role": "lead", "prompt": "", "tools": [_agent("helper")]})
+
+
+def test_any_analyst_may_ask_another():
+    """Consultation is not the lead's alone: a static clone may ask the network analyst."""
+    cfg = _settings(
+        definitions={
+            "static_r2": {"role": "static", "static_provider": "r2", "tools": [_agent("network")]}
+        },
+        profiles={"two": {"analysts": ["static", "static_r2"]}},
+        profile="two",
+    )
+    assert cfg.agents.definitions["static_r2"].tools[0].kind == "agent"
+
+
+def test_the_lead_is_seeded_with_the_specialists_as_its_tools():
+    lead = Settings(_env_file=None).agents.definitions["lead"]
+    assert lead.role == "lead"
+    assert lead.prompt and "lead analyst" in lead.prompt
+    asked = [ref.agent for ref in lead.tools if ref.kind == "agent"]
+    assert asked == ["static", "dynamic", "network", "reverser", "triage"]
+    assert [ref.server for ref in lead.tools if ref.kind == "mcp"] == ["knowledge"]
+    assert "lead" in seeded_generic_agents()
+
+
+def test_the_team_lead_profile_is_seeded_and_the_default_is_unchanged():
+    cfg = Settings(_env_file=None)
+    assert "team_lead" in BUILTIN_PROFILES
+    team = cfg.agents.profiles["team_lead"]
+    # No debate stage: a debate over a single analyst hands the lead its own
+    # report and costs a second full loop for a round that cannot change a
+    # position. The lead's asks are where the disagreement happens.
+    assert [(s.key, s.kind, s.agents) for s in team.stages] == [
+        ("triage_pack", "triage", []),
+        ("lead", "analysis", ["lead"]),
+        ("verdict", "verdict", ["judge"]),
+        ("report", "report", [REPORTER_AGENT_KEY]),
+    ]
+    assert not any(stage.kind == "debate" for stage in team.stages)
+    assert cfg.agents.profiles["default"].analysis_agents == ["static", "dynamic", "network"]
+    assert not any(
+        ref.kind == "agent"
+        for key in ("static", "dynamic", "network")
+        for ref in cfg.agents.definitions[key].tools
+    )
+
+
+def test_the_delegation_depth_is_a_setting_with_a_floor_and_an_annotation():
+    from maljan.core.settings_annotations import ANNOTATIONS
+
+    assert Settings(_env_file=None).agents.delegation_depth == 2
+    assert _settings(delegation_depth=3).agents.delegation_depth == 3
+    with pytest.raises(ValidationError):
+        _settings(delegation_depth=0)
+    assert ANNOTATIONS["agents.delegation_depth"]["group"] == "agents"
+
+
+def _agent(key: str) -> dict:
+    return {"kind": "agent", "agent": key}

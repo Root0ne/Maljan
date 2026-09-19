@@ -158,8 +158,15 @@ class MockSandboxClient:
 
     @staticmethod
     def _minimal_report(sha256: str, name: str) -> dict[str, Any]:
-        """Return a structurally valid but empty sandbox report."""
+        """Return a structurally valid but empty sandbox report, marked as such.
+
+        ``synthetic`` is the difference between "this sample was detonated and
+        did nothing" and "this sample was never detonated". Both are empty; only
+        the first is evidence, and an analyst handed the second used to write
+        confident claims about a detonation that never happened.
+        """
         return {
+            "synthetic": True,
             "target": {"sha256": sha256, "name": name, "md5": ""},
             "behavior": {
                 "apistats": {},

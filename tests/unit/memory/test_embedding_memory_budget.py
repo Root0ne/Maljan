@@ -81,7 +81,15 @@ class TestTheLimitsReachTheModel:
     """Setting the constants and not passing them is the obvious way to
     "fix" this and have it keep happening."""
 
-    def test_the_thread_limit_is_passed_to_the_model_constructor(self) -> None:
+    def test_the_thread_limit_is_passed_to_the_model_constructor(
+        self, real_attck_index: None
+    ) -> None:
+        """This reads the real loader's source, so it asks for the real loader.
+
+        The unit tree stands the model loader down to the bag-of-words
+        fallback; reading the stand-in's source would pass while saying
+        nothing about the constant that has to reach the constructor.
+        """
         import inspect
 
         from maljan.memory import embeddings
@@ -94,5 +102,5 @@ class TestTheLimitsReachTheModel:
 
         from maljan.memory import embeddings
 
-        source = inspect.getsource(embeddings.encode_batch)
+        source = inspect.getsource(embeddings.encode_batch_with_backend)
         assert "batch_size=_EMBED_BATCH" in source

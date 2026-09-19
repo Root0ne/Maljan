@@ -9,9 +9,11 @@ anything reaches for one.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from typing import Any
 
+import httpx
 import pytest
 
 from app.services import settings_probes  # noqa: E402
@@ -35,6 +37,24 @@ def _no_llm(monkeypatch):
         lambda *a, **k: _Exploding(),
         raising=False,
     )
+
+
+@pytest.fixture(autouse=True)
+def _the_model_answers(monkeypatch):
+    """The probe's one-turn completion, answered without touching a network.
+
+    The probe ends by calling the model, which is the whole point of it — but
+    a suite that reached an endpoint would be testing the endpoint. Every test
+    here is about what the probe resolves and reports; the completion itself
+    is driven against a mocked client in ``TestTheProbeMakesTheCallTheJobWillMake``.
+    """
+
+    async def _answered(
+        provider: str, *, endpoint: str, model: str, api_key: str = "", **_body: Any
+    ):
+        return (bool(model.strip()), f"{model!r} answered" if model.strip() else "no model named")
+
+    monkeypatch.setattr(settings_probes, "complete_one_turn", _answered)
 
 
 @pytest.fixture(autouse=True)
@@ -71,7 +91,11 @@ async def test_a_built_in_agent_resolves_to_its_prompt_and_its_tools():
     # The role-bound half first, then the definition's own references: the
     # network analyst is bound to ``network`` by role and names ``knowledge``
     # by reference.
-    assert [s["key"] for s in result.details["servers"]] == ["network", "knowledge"]
+    assert [s["key"] for s in result.details["servers"]] == [
+        "network",
+        "knowledge",
+        "virustotal",
+    ]
     assert {s["status"] for s in result.details["servers"]} == {"ok"}
 
 
@@ -286,7 +310,7 @@ def test_the_route_is_admin_only_and_passes_the_name_through(monkeypatch):
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
     app.dependency_overrides[require_admin] = lambda: MagicMock(id="1")
-    app.dependency_overrides[get_db] = lambda: MagicMock()
+    app.dependency_overrides[get_db] = lambda: MagicMock(commit=AsyncMock())
     client = TestClient(app)
 
     seen: list[str] = []
@@ -331,7 +355,11 @@ async def test_an_inheriting_agent_reports_the_resolved_global_expert_model(monk
     staged = {"llm.provider": "ollama", "llm.ollama.expert_model": "qwen3.5:9b"}
     result = await probe_agent({"name": "network", "settings": staged})
     assert result.ok is True
-    assert result.details["llm"] == {"provider": "ollama", "model": "qwen3.5:9b"}
+    assert result.details["llm"] == {
+        "provider": "ollama",
+        "model": "qwen3.5:9b",
+        "endpoint": "http://localhost:11434",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -342,7 +370,13 @@ async def test_an_inheriting_agent_reports_the_resolved_global_expert_model(monk
 
 
 def _tags(monkeypatch, names, *, reachable=True):
-    """Stand in for one GET of ``/api/tags``, counting the calls."""
+    """An Ollama server that lists ``names`` and will generate with those only.
+
+    Both halves, because the probe asks for both: the tag list says the
+    endpoint is up, and the one-turn completion says the server will actually
+    load the model. A tag it does not have is refused the way Ollama refuses
+    it, with a 404.
+    """
     import httpx
 
     calls: list[str] = []
@@ -351,18 +385,27 @@ def _tags(monkeypatch, names, *, reachable=True):
         calls.append(str(request.url))
         if not reachable:
             raise httpx.ConnectError("connection refused", request=request)
+        if request.url.path.endswith("/api/generate"):
+            import json as _json
+
+            asked = _json.loads(request.content or b"{}").get("model", "")
+            if asked not in names:
+                return httpx.Response(404, json={"error": f"model {asked!r} not found"})
+            return httpx.Response(200, json={"response": "OK"})
         return httpx.Response(200, json={"models": [{"name": n} for n in names]})
 
     monkeypatch.setattr(
         settings_probes,
         "_client",
-        lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=10),
+        lambda *_a, **_k: httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=10),
     )
     return calls
 
 
 @pytest.mark.asyncio
 async def test_a_per_agent_ollama_model_the_server_lacks_is_reported(monkeypatch):
+    """The server will not load it, and the probe finds that out by asking."""
+    monkeypatch.undo()
     calls = _tags(monkeypatch, ["qwen3:8b"])
     staged = {
         "llm.provider": "ollama",
@@ -371,9 +414,8 @@ async def test_a_per_agent_ollama_model_the_server_lacks_is_reported(monkeypatch
     }
     result = await probe_agent({"name": "network", "settings": staged})
     assert result.ok is False
-    assert "qwen3:nope" in result.detail
-    assert "not present on the Ollama server" in result.detail
-    assert len(calls) == 1
+    assert "qwen3:nope" in result.detail and "404" in result.detail
+    assert [c for c in calls if c.endswith("/api/generate")], "the model was asked, not listed"
 
 
 @pytest.mark.asyncio
@@ -386,7 +428,12 @@ async def test_a_per_agent_ollama_model_the_server_has_still_resolves(monkeypatc
     }
     result = await probe_agent({"name": "network", "settings": staged})
     assert result.ok is True
-    assert result.details["llm"] == {"provider": "ollama", "model": "qwen3:4b"}
+    assert result.details["llm"] == {
+        "provider": "ollama",
+        "model": "qwen3:4b",
+        # Where the answer is filed: the endpoint this agent would call.
+        "endpoint": "http://localhost:11434",
+    }
 
 
 @pytest.mark.asyncio
@@ -411,3 +458,200 @@ async def test_a_non_ollama_agent_model_is_not_checked_against_any_tag_list(monk
     result = await probe_agent({"name": "network", "settings": staged})
     assert result.ok is True
     assert calls == []
+
+
+class TestTheProbeMakesTheCallTheJobWillMake:
+    """A gate that refuses a job has to rest on a probe that reached the model.
+
+    Listing a catalogue says the endpoint is up and that a name appears in it.
+    It does not say the server will load that model, that the key may use it,
+    or that a misspelling has not landed on a name the catalogue happens to
+    hold — and those are the failures the gate exists to catch before a sample
+    is uploaded and a queue slot spent.
+    """
+
+    @pytest.mark.parametrize(
+        ("provider", "endpoint", "fragment"),
+        [
+            ("openai", "http://127.0.0.1:8080/v1", "/chat/completions"),
+            ("ollama", "http://box:11434", "/api/generate"),
+            ("anthropic", "", "api.anthropic.com/v1/messages"),
+            ("gemini", "", ":generateContent"),
+        ],
+    )
+    def test_every_provider_is_asked_for_one_short_answer(
+        self, provider: str, endpoint: str, fragment: str
+    ) -> None:
+        from app.services.settings_probes import COMPLETION_MAX_TOKENS, _completion_request
+
+        url, _headers, body = _completion_request(provider, endpoint, "a-model", "k")
+
+        assert url is not None and fragment in url
+        assert "a-model" in (url + json.dumps(body))
+        assert str(COMPLETION_MAX_TOKENS) in json.dumps(body)
+
+    @pytest.mark.asyncio
+    async def test_a_completion_that_was_refused_is_not_a_pass(self, monkeypatch) -> None:
+        monkeypatch.undo()
+
+        class _Client:
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *_: Any) -> None:
+                return None
+
+            async def post(self, *_: Any, **__: Any) -> Any:
+                return httpx.Response(404, request=httpx.Request("POST", "http://x"))
+
+        monkeypatch.setattr(settings_probes, "_client", lambda *_a, **_k: _Client())
+
+        ok, said = await settings_probes.complete_one_turn(
+            "openai", endpoint="http://127.0.0.1:8080/v1", model="ghost"
+        )
+
+        assert ok is False and "ghost" in said and "404" in said
+
+    @pytest.mark.asyncio
+    async def test_a_completion_that_answered_is_a_pass(self, monkeypatch) -> None:
+        monkeypatch.undo()
+
+        class _Client:
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *_: Any) -> None:
+                return None
+
+            async def post(self, *_: Any, **__: Any) -> Any:
+                return httpx.Response(
+                    200,
+                    request=httpx.Request("POST", "http://x"),
+                    json={"choices": [{"message": {"content": "OK"}}]},
+                )
+
+        monkeypatch.setattr(settings_probes, "_client", lambda *_a, **_k: _Client())
+
+        ok, said = await settings_probes.complete_one_turn(
+            "openai", endpoint="http://127.0.0.1:8080/v1", model="qwen"
+        )
+
+        assert ok is True and "qwen" in said
+
+    @pytest.mark.asyncio
+    async def test_a_two_hundred_with_nothing_in_it_is_not_a_pass(self, monkeypatch) -> None:
+        """A proxy that answers politely for a model it cannot serve."""
+        monkeypatch.undo()
+        from app.services import settings_probes
+
+        class _Client:
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *_: Any) -> None:
+                return None
+
+            async def post(self, *_: Any, **__: Any) -> Any:
+                return httpx.Response(200, request=httpx.Request("POST", "http://x"), json={})
+
+        monkeypatch.setattr(settings_probes, "_client", lambda *_a, **_k: _Client())
+
+        ok, said = await settings_probes.complete_one_turn(
+            "openai", endpoint="http://127.0.0.1:8080/v1", model="qwen"
+        )
+
+        assert ok is False and "answered nothing" in said
+
+    @pytest.mark.asyncio
+    async def test_a_completion_that_timed_out_files_nothing(self, monkeypatch) -> None:
+        """A cold model is not a missing one, and a row would lock the operator out."""
+        monkeypatch.undo()
+        from app.services import settings_probes
+
+        class _Client:
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *_: Any) -> None:
+                return None
+
+            async def post(self, *_: Any, **__: Any) -> Any:
+                raise httpx.ReadTimeout("slow", request=httpx.Request("POST", "http://x"))
+
+        monkeypatch.setattr(settings_probes, "_client", lambda *_a, **_k: _Client())
+
+        verdict, said = await settings_probes.complete_one_turn(
+            "openai", endpoint="http://127.0.0.1:8080/v1", model="qwen"
+        )
+
+        assert verdict is None, "neither a pass nor a failure"
+        assert "still be loading" in said and "Nothing was written down" in said
+        assert str(int(settings_probes.COMPLETION_TIMEOUT)) in said
+
+    @pytest.mark.asyncio
+    async def test_the_completion_gets_its_own_budget(self) -> None:
+        from app.services.settings_probes import COMPLETION_TIMEOUT, TIMEOUT
+
+        assert COMPLETION_TIMEOUT > TIMEOUT, "a cold local model is not a listing"
+
+    @pytest.mark.asyncio
+    async def test_an_agent_that_names_no_model_is_not_a_pass(self, monkeypatch) -> None:
+        monkeypatch.undo()
+        from app.services.settings_probes import complete_one_turn
+
+        ok, said = await complete_one_turn("openai", endpoint="http://x/v1", model="  ")
+
+        assert ok is False and said == "no model named"
+
+    @pytest.mark.asyncio
+    async def test_the_llm_probe_files_only_what_it_completed(self, monkeypatch) -> None:
+        """Every filed pair was asked, at its own endpoint, and no other pair is filed."""
+        monkeypatch.undo()
+        import httpx as _httpx
+
+        from app.services import settings_probes
+
+        asked: list[tuple[str, str]] = []
+
+        def handler(request: _httpx.Request) -> _httpx.Response:
+            if request.url.path.endswith("/api/generate"):
+                import json as _json
+
+                model = _json.loads(request.content or b"{}").get("model", "")
+                asked.append((f"{request.url.scheme}://{request.url.netloc.decode()}", model))
+                return _httpx.Response(200, json={"response": "OK"})
+            return _httpx.Response(
+                200, json={"models": [{"name": "qwen3:8b"}, {"name": "qwen3:70b"}]}
+            )
+
+        monkeypatch.setattr(
+            settings_probes,
+            "_client",
+            lambda *_a, **_k: _httpx.AsyncClient(
+                transport=_httpx.MockTransport(handler), timeout=10
+            ),
+        )
+
+        result = await settings_probes.probe_llm(
+            {
+                "provider": "ollama",
+                "ollama_base_url": "http://ollama:11434",
+                "ollama_expert_model": "qwen3:8b",
+                "ollama_judge_model": "qwen3:70b",
+                "agents": {
+                    "network": {
+                        "provider": "ollama",
+                        "model": "qwen3:4b",
+                        "base_url": "http://gpu-box:11434",
+                    }
+                },
+            }
+        )
+
+        filed = {(p["endpoint"], p["model"]) for p in (result.details or {})["completions"]}
+        assert filed == {
+            ("http://ollama:11434", "qwen3:8b"),
+            ("http://gpu-box:11434", "qwen3:4b"),
+        }
+        assert set(asked) == filed, "every filed pair was the pair that was called"
+        assert not any(model == "qwen3:70b" for _endpoint, model in asked), "the judge was listed"

@@ -39,9 +39,11 @@ def test_the_default_profile_is_every_built_in_analyst_and_neither_of_the_others
     analysis_agents = set(profile.analysis_agents)
     assert analysis_agents == set(BUILTIN_AGENTS) - {JUDGE_AGENT_KEY, REPORTER_AGENT_KEY}
     assert profile.analysis_agents == ["static", "dynamic", "network"]
-    # The team is the paper's pipeline written as the four stages it always
-    # was: the analysts, the debate over them, the verdict and the report.
+    # The team is the triage pack in front of the paper's pipeline written as
+    # the four stages it always was: the analysts, the debate over them, the
+    # verdict and the report.
     assert [(s.key, s.kind) for s in profile.stages] == [
+        ("triage_pack", "triage"),
         ("analysis", "analysis"),
         ("debate", "debate"),
         ("verdict", "verdict"),
@@ -52,7 +54,7 @@ def test_the_default_profile_is_every_built_in_analyst_and_neither_of_the_others
     # ``measurement`` is the second built-in: the same three analysts with
     # every tool server withheld, which is the baseline the tool sidecars are
     # measured against.
-    assert BUILTIN_PROFILES == ("default", "measurement", "mobile", "deep_static")
+    assert BUILTIN_PROFILES == ("default", "measurement", "mobile", "deep_static", "team_lead")
     baseline = Settings(_env_file=None).agents.profiles["measurement"]
     assert baseline.analysis_agents == profile.analysis_agents
     assert baseline.static_provider == "none"

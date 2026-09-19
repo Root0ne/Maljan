@@ -1,15 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useReport } from "@/app/(app)/analysis/[id]/layout";
-import { api } from "@/lib/api";
-import type { AgentFindingStatus } from "@/types";
-import { toolCallsByAgent } from "./stageTimeline";
-
-/** How much of the ledger the tool counts are taken from. Beyond this the
- *  count is shown as a floor, because a number that silently stops counting
- *  is worse than one that says where it stopped. */
-const LEDGER_SAMPLE = 200;
+import { rosterNames } from "@/lib/rosterNames";
+import type { AgentFindingStatus, JobRoster } from "@/types";
 
 /* Per-agent confidence tier. IMPORTANT: ``final_confidence`` is each agent's
  * confidence in its OWN claim \u2014 NOT a probability of maliciousness. A benign
@@ -25,10 +18,9 @@ const SIGNAL_STYLES: Record<string, { icon: string; class: string }> = {
   unknown: { icon: "-", class: "text-text-muted" },
 };
 
-/* D15+D16: status badge styling. The status comes from the worker and
- * is the source of truth for whether the analyst produced anything
- * meaningful \u2014 verdict + confidence remain useful only when
- * status === "complete". */
+/* The status badge. The status comes from the worker and is the source of
+ * truth for whether the analyst produced anything meaningful \u2014 the verdict
+ * and the confidence are useful only when it is "complete". */
 const STATUS_STYLES: Record<
   AgentFindingStatus,
   { label: string; bg: string; text: string }
@@ -42,6 +34,13 @@ const STATUS_STYLES: Record<
     label: "no data",
     bg: "bg-text-muted/10",
     text: "text-text-muted",
+  },
+  /* The analyst had data and read it, and its model stopped before writing a
+     report \u2014 a different fact from having nothing to read. */
+  no_claims: {
+    label: "no report",
+    bg: "bg-status-orange/10",
+    text: "text-status-orange",
   },
   failed: {
     label: "failed",
@@ -61,35 +60,17 @@ function confidenceToSignal(confidence: number): string {
   return "low";
 }
 
-export default function AgentsTab() {
+/* What each agent concluded. How much work it did is one line up, on the
+ * participants strip, and is not restated here: the same number in two places
+ * on one screen is the thing this view was built to remove.
+ *
+ * The names are the run's roster, read through the selector the strip above
+ * and the conversation beside it read: an agent an operator called "Ahmet" is
+ * "Ahmet" here too, rather than the `ahmet_1` the pipeline keys it by. A run
+ * whose roster names nobody shows the key, which is all it has. */
+export default function AgentsTab({ roster = null }: { roster?: JobRoster | null }) {
   const { report, job, loading } = useReport();
-  const jobId = report?.job_id ?? "";
-  // How many calls each agent made. Read from the ledger rather than from the
-  // findings, because a finding says what an agent concluded and the ledger
-  // says what it did — an agent with a confident conclusion and no calls
-  // behind it is exactly the thing worth seeing here.
-  const [toolCalls, setToolCalls] = useState<Record<string, number>>({});
-  const [ledgerTotal, setLedgerTotal] = useState(0);
-
-  useEffect(() => {
-    if (!jobId) return;
-    let cancelled = false;
-    api
-      .getJobEvidence(jobId, { pageSize: LEDGER_SAMPLE })
-      .then((response) => {
-        if (cancelled) return;
-        setToolCalls(toolCallsByAgent(response.entries));
-        setLedgerTotal(response.total);
-      })
-      .catch(() => {
-        // The findings table is the point of this tab; a ledger the browser
-        // could not read leaves the column empty rather than the tab broken.
-        if (!cancelled) setToolCalls({});
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [jobId]);
+  const names = rosterNames(roster);
 
   if (loading) {
     return <div className="p-4 text-sm text-text-secondary">Loading...</div>;
@@ -127,7 +108,8 @@ export default function AgentsTab() {
       keyFinding = String(f.status_reason);
     }
     return {
-      name: f.agent_name,
+      key: f.agent_name,
+      name: names.agent(f.agent_name),
       signal,
       confidence: pct,
       domain: f.domain,
@@ -138,17 +120,16 @@ export default function AgentsTab() {
   });
 
   const completedCount = agents.filter((a) => a.status === "complete").length;
-  const partialLedger = ledgerTotal > LEDGER_SAMPLE;
 
   // Which stage ran each agent, from the run's own stage rollup. An agent the
   // rollup does not mention is grouped on its own rather than filed under a
   // stage it may not have been in.
   const stages = report?.run_summary?.stages ?? [];
-  const stageOf = (name: string) =>
-    stages.find((stage) => (stage.agents ?? []).includes(name))?.key ?? "";
+  const stageOf = (key: string) =>
+    stages.find((stage) => (stage.agents ?? []).includes(key))?.key ?? "";
   const groups: Array<{ stage: string; rows: typeof agents }> = [];
   for (const agent of agents) {
-    const key = stageOf(agent.name);
+    const key = stageOf(agent.key);
     const group = groups.find((g) => g.stage === key);
     if (group) group.rows.push(agent);
     else groups.push({ stage: key, rows: [agent] });
@@ -181,21 +162,20 @@ export default function AgentsTab() {
         <table className="w-full">
           <thead>
             <tr className="border-b border-border">
-              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-44">Agent</th>
-              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-28">Signal</th>
-              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-24">Confidence</th>
-              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-16">Rounds</th>
-              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-20">Tools</th>
-              <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Key Finding</th>
+              <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-44">Agent</th>
+              <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-28">Signal</th>
+              <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-24">Confidence</th>
+              <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-16">Rounds</th>
+              <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Key Finding</th>
             </tr>
           </thead>
           {groups.map((group) => (
           <tbody key={group.stage || "__ungrouped"} className="divide-y divide-border-light">
             {group.stage && (
               <tr className="bg-bg-deep">
-                <td colSpan={6} className="px-4 py-1.5">
-                  <span className="text-[10px] uppercase tracking-wider text-text-muted font-mono">
-                    stage {group.stage}
+                <td colSpan={5} className="px-4 py-1.5">
+                  <span className="text-[10px] uppercase tracking-wider text-text-muted">
+                    stage {names.stage(group.stage)}
                   </span>
                 </td>
               </tr>
@@ -203,7 +183,7 @@ export default function AgentsTab() {
             {group.rows.map((agent) => {
               const style = SIGNAL_STYLES[agent.signal] || SIGNAL_STYLES.unknown;
               return (
-                <tr key={agent.name} className="hover:bg-bg-hover transition-colors">
+                <tr key={agent.key} className="hover:bg-bg-hover">
                   <td className="px-4 py-3">
                     <span className="text-sm text-text-primary">{agent.name}</span>
                     {agent.domain && (
@@ -217,10 +197,9 @@ export default function AgentsTab() {
                         <span className="text-xs font-medium capitalize">{agent.signal}</span>
                       </div>
                     ) : (
-                      // F13 (2026-07-05): fall back to the ``no_data`` style
-                      // if the backend ever emits a status outside the known
-                      // union — otherwise ``STATUS_STYLES[status].bg`` throws
-                      // on ``undefined``.
+                      // Falls back to the `no_data` style if the backend ever
+                      // emits a status outside the known union, which would
+                      // otherwise read `.bg` off `undefined`.
                       <span
                         className={`text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded font-mono ${(STATUS_STYLES[agent.status] ?? STATUS_STYLES.no_data).bg} ${(STATUS_STYLES[agent.status] ?? STATUS_STYLES.no_data).text}`}
                       >
@@ -256,19 +235,6 @@ export default function AgentsTab() {
                   </td>
                   <td className="px-4 py-3">
                     <span className="text-xs text-text-muted font-mono">{agent.revision_rounds}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className="text-xs text-text-muted font-mono"
-                      title={
-                        partialLedger
-                          ? `Counted over the first ${LEDGER_SAMPLE} of ${ledgerTotal} ledger entries`
-                          : "Tool calls this agent made, from the evidence ledger"
-                      }
-                    >
-                      {toolCalls[agent.name] ?? 0}
-                      {partialLedger ? "+" : ""}
-                    </span>
                   </td>
                   <td className="px-4 py-3">
                     <span className="text-xs text-text-secondary" title={agent.key_finding}>

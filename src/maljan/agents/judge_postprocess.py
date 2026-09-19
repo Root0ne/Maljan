@@ -1,8 +1,19 @@
 """Judge bundle post-processor.
 
-Single helper that runs after the verdict LLM returns a parsed bundle
-``dict`` and before :class:`maljan.schemas.stix_models.Bundle` validation.
-Three jobs, all defensive:
+Two helpers that run after the verdict LLM returns a parsed bundle ``dict``
+and before :class:`maljan.schemas.stix_models.Bundle` validation.
+
+:func:`lift_misplaced_extensions` runs first and answers one question: what to
+do with an item inside ``objects`` that the Bundle model cannot hold. Until
+now the answer was "throw the bundle away" — one ``x_maljan_assessment``
+written inside the list instead of beside it raised twenty-one validation
+errors and cost a live run all twenty-five of its objects and its verdict with
+them. The block is moved to the property it belongs to, unchanged; anything
+else the model cannot hold is set aside; both acts are recorded and the rest
+of the bundle is validated.
+
+:func:`postprocess_judge_bundle` then applies the defensive fixes, all three
+of them shape repairs:
 
 * STIX ID rewrite — replace placeholder / non-UUID STIX IDs the LLM smuggled in
   from the example schema (``malware--12345678-1234-1234-1234-123456789012``
@@ -24,9 +35,13 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
+from maljan.reporting.dedupe import pattern_fingerprint
+
+if TYPE_CHECKING:
+    from maljan.pipeline.validation import Violation
 
 # UUID5 namespace for ATT&CK technique IDs — same value on every run so a
 # downstream consumer can dedupe ``attack-pattern--<uuid5>`` across reports.
@@ -91,6 +106,91 @@ def _technique_display_name(tid: str) -> str | None:
         return None
 
 
+ASSESSMENT_RELOCATED_CODE = "verdict.assessment_relocated"
+
+# An object inside ``objects`` that no STIX type in the bundle's union matches.
+# Set aside rather than rewritten: what the judge meant by it is the judge's,
+# and a bundle is not worth losing over one of them.
+UNKNOWN_OBJECT_CODE = "stix.unknown_object"
+
+
+def _object_type(obj: Any) -> str:
+    return str(obj.get("type") or "").strip() if isinstance(obj, dict) else ""
+
+
+def lift_misplaced_extensions(bundle_dict: dict[str, Any]) -> list[Violation]:
+    """Move the assessment out of ``objects``, set aside what cannot be held.
+
+    Returns the violations this pass produced, in the order they happened. The
+    first — the relocation — is a move and not an edit: the block reaches the
+    bundle's own property byte for byte, and nothing about it is rewritten. It
+    is recorded as resolved and costs no retry, because there is nothing left
+    for the judge to fix. The second is a set-aside object, which is fed back
+    once like any other violation: the model wrote something this bundle has
+    no place for, and only the model can say what it meant.
+
+    A top-level block already present wins. Two answers to one question is not
+    a thing to merge, and the one the judge put where it was asked for is the
+    one it meant; the inner copy is set aside and recorded beside it.
+    """
+    from maljan.pipeline.events import safe_finding_value
+    from maljan.pipeline.validation import Violation
+    from maljan.schemas.stix_models import ASSESSMENT_PROPERTY, BUNDLE_OBJECT_TYPES
+
+    objects = bundle_dict.get("objects")
+    if not isinstance(objects, list):
+        return []
+    found: list[Violation] = []
+    kept: list[Any] = []
+    for index, obj in enumerate(objects):
+        kind = _object_type(obj)
+        if kind in BUNDLE_OBJECT_TYPES:
+            kept.append(obj)
+            continue
+        if kind == ASSESSMENT_PROPERTY and not bundle_dict.get(ASSESSMENT_PROPERTY):
+            bundle_dict[ASSESSMENT_PROPERTY] = obj
+            found.append(
+                Violation(
+                    code=ASSESSMENT_RELOCATED_CODE,
+                    message=(
+                        f"{ASSESSMENT_PROPERTY} was written inside objects[{index}] and belongs "
+                        "beside the list; it was moved there unchanged and read from there. "
+                        'Write it as a sibling of "objects" next time.'
+                    ),
+                    path=ASSESSMENT_PROPERTY,
+                )
+            )
+            continue
+        # The type is the model's own word and travels into a stored row, so it
+        # is held to the same rule every other model-written value on this path
+        # is: scrubbed, and as long as a value in a finding row may be.
+        named = f"objects[{index}]" + (f" of type {safe_finding_value(kind)!r}" if kind else "")
+        why = (
+            f"a second {ASSESSMENT_PROPERTY}; the one at the top level of the bundle is the "
+            "one that was read"
+            if kind == ASSESSMENT_PROPERTY
+            else f"not a STIX type a bundle can hold ({', '.join(sorted(BUNDLE_OBJECT_TYPES))})"
+        )
+        found.append(
+            Violation(
+                code=UNKNOWN_OBJECT_CODE,
+                message=(
+                    f"{named} is {why}, so it was set aside and the rest of the bundle was "
+                    "read. Put what it says in an object the bundle accepts, or leave it out."
+                ),
+                path=f"objects[{index}]",
+            )
+        )
+    if len(kept) != len(objects):
+        bundle_dict["objects"] = kept
+        logger.info(
+            "judge_postprocess: %d item(s) were not STIX objects; %d object(s) were read.",
+            len(objects) - len(kept),
+            len(kept),
+        )
+    return found
+
+
 def postprocess_judge_bundle(
     bundle_dict: dict[str, Any],
     *,
@@ -98,8 +198,9 @@ def postprocess_judge_bundle(
 ) -> dict[str, Any]:
     """Apply the defensive bundle fixes in place; return the same dict.
 
-    ``bundle_dict`` is the parsed JSON Bundle returned by the verdict LLM
-    (and already filtered for structurally impossible technique IDs upstream).
+    ``bundle_dict`` is the parsed JSON Bundle returned by the verdict LLM,
+    exactly as the judge wrote it; the technique check reports what is wrong
+    with its ids, it does not filter them.
     Everything done here is a shape repair — a STIX id that is not a UUID, a
     missing MITRE reference, a relationship pointing at an object that is not
     in the bundle. None of it changes what the judge decided.
@@ -298,10 +399,38 @@ def _is_wellformed_pattern(indicator: Any) -> bool:
 
     Returns True only when the pattern is a bracketed comparison expression
     (``[ <path> <op> '<value>' ]``). Keeps all patterns Maljan emits; rejects
-    empty/whitespace and truncated/garbage LLM output (e.g. ``[file:name = 'x``).
+    empty/whitespace and truncated/garbage LLM output — a ``[file:name``
+    comparison cut off before its closing bracket, say.
     """
     pat = str(_oget(indicator, "pattern", "") or "").strip()
     return pat.startswith("[") and pat.endswith("]") and "=" in pat
+
+
+def _merge_indicator_sets(kept: Any, duplicate: Any) -> None:
+    """Fold the set-shaped fields of a duplicate indicator onto the kept one.
+
+    Only the sets: ``labels`` and ``external_references`` are lists of things
+    an indicator is filed under, and losing one because two analysts described
+    the same endpoint is losing a fact. Everything else — the description, the
+    confidence, the valid-from — stays as the first occurrence wrote it, and
+    an SDO that will not take a new value (a frozen pydantic object) is left
+    alone rather than rebuilt.
+    """
+    for field in ("labels", "external_references"):
+        arriving = _oget(duplicate, field)
+        if not isinstance(arriving, list) or not arriving:
+            continue
+        current = list(_oget(kept, field) or [])
+        merged = list(current)
+        for item in arriving:
+            if item not in merged:
+                merged.append(item)
+        if merged == current:
+            continue
+        try:
+            _oset(kept, field, merged)
+        except Exception as exc:  # noqa: BLE001 — a frozen SDO keeps what it has
+            logger.debug("indicator merge skipped for %r (%s).", field, exc)
 
 
 def enforce_bundle_integrity(
@@ -359,19 +488,27 @@ def enforce_bundle_integrity(
     _dropped["duplicate_attack_pattern"] = len(objects) - len(kept)
     objects = kept
 
-    # 3) indicator dedup by (pattern_type, pattern)
-    seen_pat: dict[tuple[str, str], str] = {}
+    # 3) indicator dedup by (pattern type, canonical pattern). Canonical
+    # because two indicators for one endpoint differ by whether whoever wrote
+    # them defanged it, and an exact comparison kept both; canonical *with the
+    # case kept* wherever the case is part of the value, because a URL path is
+    # case-sensitive and folding one away removes a fact from the report.
+    # ``reporting.dedupe`` is the one place that says what makes two
+    # indicators the same, so the bundle and the report's table agree.
+    seen_pat: dict[tuple[str, str], Any] = {}
     kept = []
     for o in objects:
         if _otype(o) == "indicator":
-            key = (str(_oget(o, "pattern_type", "stix")), str(_oget(o, "pattern", "")))
-            if key in seen_pat:
+            key = pattern_fingerprint(_oget(o, "pattern_type", "stix"), _oget(o, "pattern", ""))
+            first = seen_pat.get(key)
+            if first is not None:
+                _merge_indicator_sets(first, o)
                 oid = _oid(o)
                 if isinstance(oid, str):
-                    remap[oid] = seen_pat[key]
+                    remap[oid] = _oid(first)
                 continue
             if isinstance(_oid(o), str):
-                seen_pat[key] = _oid(o)
+                seen_pat[key] = o
         kept.append(o)
     _dropped["duplicate_indicator"] = len(objects) - len(kept)
     objects = kept

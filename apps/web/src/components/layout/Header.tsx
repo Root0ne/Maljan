@@ -1,13 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Search } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import SearchPalette from "@/components/layout/SearchPalette";
 
 export default function Header() {
-  const { user, logout } = useAuth();
+  const { user, logout, canSignOut } = useAuth();
   const [value, setValue] = useState("");
   const [paletteOpen, setPaletteOpen] = useState(false);
+  /** The palette row the arrow keys are on, announced from the input. */
+  const [activeOption, setActiveOption] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   /* Global Cmd/Ctrl+K shortcut to focus the search and open the palette. */
@@ -30,13 +33,11 @@ export default function Header() {
       {/* Search */}
       <div className="flex items-center flex-1 max-w-2xl">
         <div className="relative w-full">
-          <svg
+          <Search
+            size={16}
+            aria-hidden="true"
             className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted"
-            width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.35-4.35" />
-          </svg>
+          />
           <input
             ref={inputRef}
             id="global-search"
@@ -62,6 +63,7 @@ export default function Header() {
             aria-haspopup="listbox"
             aria-expanded={paletteOpen}
             aria-controls="global-search-palette"
+            aria-activedescendant={activeOption ?? undefined}
           />
           <span className="hidden sm:flex absolute right-2 top-1/2 -translate-y-1/2 items-center gap-1 text-[11px] text-text-muted pointer-events-none">
             <kbd className="px-1 py-px border border-border rounded bg-bg-surface">Ctrl</kbd>
@@ -72,6 +74,7 @@ export default function Header() {
             query={value}
             onClose={() => setPaletteOpen(false)}
             onSelect={() => setValue("")}
+            onActiveChange={setActiveOption}
           />
         </div>
       </div>
@@ -81,12 +84,17 @@ export default function Header() {
         {user && (
           <>
             <span className="text-xs text-text-secondary">{user.email}</span>
-            <button
-              onClick={logout}
-              className="text-xs text-text-muted hover:text-text-primary transition-colors"
-            >
-              Sign out
-            </button>
+            {/* Offered only where it does something. With authentication
+                disabled the handler is a documented no-op, so the button was
+                a control that silently changed nothing. */}
+            {canSignOut && (
+              <button
+                onClick={logout}
+                className="flex h-6 items-center rounded px-1.5 text-xs text-text-muted hover:text-text-primary"
+              >
+                Sign out
+              </button>
+            )}
           </>
         )}
       </div>

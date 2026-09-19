@@ -25,8 +25,9 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
+from maljan.analysis.technique_ids import api_capability_hits, sigma_technique_ids
 from maljan.core.logger import logger
 from maljan.reporting.models import (
     DynamicBehavior,
@@ -42,6 +43,7 @@ from maljan.reporting.models import (
     RegistryMod,
     SampleIdentity,
     SandboxSignature,
+    SignatureInfo,
     StaticAnalysis,
     StringIOC,
 )
@@ -173,7 +175,38 @@ def identity_from_ledger(
         platform=str(facts.get("platform") or platform or "unknown"),  # type: ignore[arg-type]
         mime_type=_opt(facts.get("mime")),
         magic_bytes=str(facts.get("magic_hex") or computed.get("magic_hex") or ""),
+        signing=_signing_from_ledger(ledger),
     )
+
+
+def _signing_from_ledger(ledger: list[LedgerEntry]) -> SignatureInfo:
+    """The signature facts as the pack's ``signing_info`` entry states them.
+
+    Signed means any of the three signature kinds the tool looks for is
+    present; the subject and issuer are Authenticode's, or an APK's signer
+    when that is the one present. ``signature_valid`` is set only when the
+    tool reports a chain verdict (``authenticode.valid``); the extractor
+    does not verify chains today, so it stays ``None`` rather than reading
+    "present" as "valid". The entry id travels with the facts.
+    """
+    for entry, data in _payloads(ledger, "signing_info"):
+        auth = _dict_of(data.get("authenticode"))
+        apk = _dict_of(data.get("apk"))
+        macho = _dict_of(data.get("macho"))
+        valid = auth.get("valid")
+        return SignatureInfo(
+            is_signed=bool(auth.get("present") or apk.get("present") or macho.get("present")),
+            signer_subject=_opt(auth.get("subject")) or _opt(apk.get("subject")),
+            signer_issuer=_opt(auth.get("issuer")) or _opt(apk.get("issuer")),
+            signer_thumbprint=_opt(auth.get("thumbprint")) or _opt(apk.get("thumbprint")),
+            signature_valid=valid if isinstance(valid, bool) else None,
+            evidence_id=entry.id,
+        )
+    return SignatureInfo()
+
+
+def _dict_of(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _hashes_of(sample_path: str | None) -> dict[str, Any]:
@@ -245,12 +278,7 @@ def static_from_ledger(
             if not isinstance(row, dict):
                 continue
             static.imports.append(
-                ImportRow(
-                    dll=str(row.get("dll") or ""),
-                    function=str(row.get("function") or ""),
-                    category=_opt(row.get("category")),
-                    is_suspicious=bool(row.get("category")),
-                )
+                ImportRow(dll=str(row.get("dll") or ""), function=str(row.get("function") or ""))
             )
         static.exports.extend(str(name) for name in data.get("exports") or [])
         # An APK's declared permissions are its import table: the same
@@ -284,16 +312,14 @@ def static_from_ledger(
 
     # capa reaches the report as a tool call like everything else
     # (``providers.static.capa_yara.ledger_entries``); this is what keeps its
-    # capability counters and technique hits in front of the layers that read
-    # ``static``, rather than folding the bundle into the builder by hand.
+    # technique hits in front of the layers that read ``static``, rather than
+    # folding the bundle into the builder by hand.
     for _entry, data in _payloads(ledger, "capa"):
         for row in data.get("capabilities") or []:
             if not isinstance(row, dict):
                 continue
             seen = True
             namespace = str(row.get("namespace") or "")
-            top = namespace.split("/", 1)[0] if namespace else "uncategorised"
-            static.api_capabilities[top] = static.api_capabilities.get(top, 0) + 1
             for technique in row.get("attck") or []:
                 tid = _technique_id(technique)
                 if not tid:
@@ -308,11 +334,30 @@ def static_from_ledger(
                     }
                 )
 
+    # The capability profile is what the knowledge table said about the import
+    # set when the pack asked (``tools.knowledge.api_capability``): a category
+    # per API and the technique rules that list it. Counted here and cited by
+    # the entry's id. Which rules fired is ``api_capability_hits``' answer, the
+    # same one corroboration reads.
+    for entry, data in _payloads(ledger, "api_capability"):
+        rows = [row for row in data.get("capabilities") or [] if isinstance(row, dict)]
+        for row in rows:
+            category = str(row.get("category") or "").strip()
+            if category:
+                static.api_capabilities[category] = static.api_capabilities.get(category, 0) + 1
+        for hit in api_capability_hits(data):
+            static.api_technique_hits.append(
+                {**hit, "source": "api_capability", "evidence_id": entry.id}
+            )
+        if rows:
+            seen = True
+            static.api_capabilities_evidence_ids.append(entry.id)
+
     for artifact in _artifacts(isrs, "imports"):
         for row in _rows_of(artifact):
             if len(row) >= 2:
                 seen = True
-                static.imports.append(ImportRow(dll=row[0], function=row[1], is_suspicious=True))
+                static.imports.append(ImportRow(dll=row[0], function=row[1]))
     for artifact in _artifacts(isrs, "iocs", "indicators"):
         for row in _rows_of(artifact):
             if len(row) >= 2:
@@ -323,8 +368,6 @@ def static_from_ledger(
 
     if not seen:
         return None
-    for category, count in _capability_histogram(static.imports).items():
-        static.api_capabilities[category] = static.api_capabilities.get(category, 0) + count
     return static
 
 
@@ -352,15 +395,6 @@ def _technique_id(value: Any) -> str:
     text = str(value or "")
     match = _TECHNIQUE_RE.search(text)
     return match.group(0) if match else ""
-
-
-def _capability_histogram(imports: list[ImportRow]) -> dict[str, int]:
-    """``{category: count}`` over the imports the tools categorised."""
-    counts: dict[str, int] = {}
-    for row in imports:
-        if row.category:
-            counts[row.category] = counts.get(row.category, 0) + 1
-    return counts
 
 
 # ---------------------------------------------------------------------------
@@ -429,7 +463,7 @@ def dynamic_from_ledger(
                 {
                     "api": str(row.get("api") or ""),
                     "count": _int(row.get("count")),
-                    "category": row.get("category"),
+                    "process": ", ".join(str(p) for p in row.get("processes") or []),
                     "arguments": str(row.get("first_args") or ""),
                 }
             )
@@ -527,6 +561,12 @@ def _as_tree(nodes: list[ProcessNode]) -> list[ProcessNode]:
 # ---------------------------------------------------------------------------
 
 
+_DomainSource = Literal["sandbox", "analyst", "strings"]
+# What one source is worth against another. A name the sample resolved outranks
+# a name an analyst wrote down, which outranks a run of bytes in the file.
+_DOMAIN_SOURCE_RANK: dict[str, int] = {"strings": 0, "analyst": 1, "sandbox": 2}
+
+
 def network_from_ledger(
     ledger: list[LedgerEntry], isrs: dict[str, AgentISR] | None = None
 ) -> NetworkIOCs | None:
@@ -540,73 +580,117 @@ def network_from_ledger(
     from maljan.extractors.network_extractor import (
         _assess_domain,
         _is_emittable_domain,
-        _is_emittable_ip,
+        address_is_publishable,
     )
 
     network = NetworkIOCs()
-    domains: set[str] = set()
-    ips: set[str] = set()
-    urls: set[str] = set()
+    domains: dict[str, NetworkDomain] = {}
+    ips: dict[str, NetworkIP] = {}
+    urls: dict[str, NetworkURL] = {}
 
-    def _add(kind: str, value: str) -> None:
+    def _add(kind: str, value: str, source: _DomainSource = "strings") -> None:
         value = (value or "").strip()
         if not value:
             return
-        if kind == "domain" and value not in domains:
-            if not _is_emittable_domain(value):
+        if kind == "domain":
+            # What somebody watched is never dropped here. The reserved and
+            # private-use names a sandbox resolved are exactly the lateral
+            # movement an analyst reads a case for, and dropping them at the
+            # projection erased them from the report as well as from the
+            # export, with nothing recorded — while the URL carrying the same
+            # host survived and was refused at the export with a row. The
+            # export still refuses to publish one, and says so.
+            #
+            # A name only the string sweep produced is the one exception, and
+            # it is unchanged: a run of bytes that happens to end in ``.local``
+            # is not an observation of anything.
+            if source == "strings" and not _is_emittable_domain(value):
                 return
             value = value.lower().strip().rstrip(".")
-            if value in domains:
+            if not value:
                 return
-            domains.add(value)
+            known = domains.get(value)
+            if known is not None:
+                # The same name from a second source is the corroboration the
+                # indicator rule asks for, so the stronger origin wins.
+                if _DOMAIN_SOURCE_RANK[source] > _DOMAIN_SOURCE_RANK[known.source or "strings"]:
+                    known.source = source
+                return
             verdict = _assess_domain(value)
-            network.domains.append(
-                NetworkDomain(
-                    fqdn=value,
-                    is_suspicious=verdict.suspicious,
-                    reason=verdict.reason,
-                    dga_score=verdict.dga_score,
-                    is_punycode=verdict.is_punycode,
-                    homograph_target=verdict.homograph_target,
-                )
+            domain = NetworkDomain(
+                fqdn=value,
+                is_suspicious=verdict.suspicious,
+                reason=verdict.reason,
+                dga_score=verdict.dga_score,
+                is_punycode=verdict.is_punycode,
+                homograph_target=verdict.homograph_target,
+                source=source,
             )
-        elif kind == "ip" and value not in ips:
-            if not _is_emittable_ip(value):
+            domains[value] = domain
+            network.domains.append(domain)
+        elif kind == "ip":
+            known_ip = ips.get(value)
+            if known_ip is not None:
+                # The same address from a second source, read the way a
+                # domain's and a URL's are: the stronger origin wins.
+                if _DOMAIN_SOURCE_RANK[source] > _DOMAIN_SOURCE_RANK[known_ip.source or "strings"]:
+                    known_ip.source = source
                 return
-            ips.add(value)
-            network.ips.append(NetworkIP(address=value))
+            # The classes nothing could act on are out here, which is where
+            # they always were; a private address is kept when somebody watched
+            # the sample reach it, because that is lateral movement, and
+            # dropped when a string sweep produced it.
+            if not address_is_publishable(value, source):
+                return
+            created_ip = NetworkIP(address=value, source=source)
+            ips[value] = created_ip
+            network.ips.append(created_ip)
         elif kind == "url":
             # Case-fold the host so one endpoint reached twice under two
             # spellings is one URL, not two.
             value = _fold_url_host(value)
-            if value in urls:
+            known_url = urls.get(value)
+            if known_url is not None:
+                # The same endpoint from a second source, read the way a
+                # domain's is: the stronger origin wins, and that is the
+                # corroboration the indicator rule asks for.
+                if _DOMAIN_SOURCE_RANK[source] > _DOMAIN_SOURCE_RANK[known_url.source or "strings"]:
+                    known_url.source = source
                 return
-            urls.add(value)
-            network.urls.append(NetworkURL(url=value))
+            created = NetworkURL(url=value, source=source)
+            urls[value] = created
+            network.urls.append(created)
 
     for _entry, data in _payloads(ledger, "sandbox_network"):
         for key in ("dns", "domains"):
             for row in data.get(key) or []:
-                _add("domain", _first_str(row, "request", "hostname", "domain", "name"))
+                _add("domain", _first_str(row, "request", "hostname", "domain", "name"), "sandbox")
+        # An address the sample really reached, labelled as one: the default
+        # source is ``strings``, so every observed address was recorded as
+        # though a string sweep had produced it, which is the weakest claim
+        # there is and the one the publish rule holds back.
         for row in data.get("hosts") or []:
-            _add("ip", _first_str(row, "ip", "address", "host"))
+            _add("ip", _first_str(row, "ip", "address", "host"), "sandbox")
         for key in ("tcp", "udp"):
             for row in data.get(key) or []:
-                _add("ip", _first_str(row, "dst", "ip", "address"))
+                _add("ip", _first_str(row, "dst", "ip", "address"), "sandbox")
         for row in data.get("http") or []:
             host = _first_str(row, "host", "hostname")
-            _add("domain", host)
-            _add("url", _http_url(row, host))
+            _add("domain", host, "sandbox")
+            # A request the sample made, and labelled as one: the default
+            # source is ``strings``, so an observed URL used to be recorded as
+            # though it had been read out of the file's bytes.
+            _add("url", _http_url(row, host), "sandbox")
 
     for _entry, data in _payloads(ledger, "iocs_from_file", "iocs_from_text"):
         for row in data.get("iocs") or []:
             if isinstance(row, dict):
-                _add(str(row.get("kind") or ""), str(row.get("value") or ""))
+                _add(str(row.get("kind") or ""), str(row.get("value") or ""), "strings")
 
     for artifact in _artifacts(isrs, "endpoints", "network", "iocs"):
         for row in _rows_of(artifact):
             if len(row) >= 2:
-                _add(row[0].strip().lower(), row[1])
+                _add(row[0].strip().lower(), row[1], "analyst")
 
     return network if (network.domains or network.ips or network.urls) else None
 
@@ -764,10 +848,8 @@ def persistence_from_ledger(
         for row in data.get("matches") or []:
             if not isinstance(row, dict):
                 continue
-            raw_meta = row.get("meta")
-            meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
-            techniques = row.get("technique_ids") or meta.get("technique_ids") or []
-            technique = str(techniques[0]) if techniques else None
+            techniques = sigma_technique_ids(row)
+            technique = techniques[0] if techniques else None
             if technique and not technique.startswith("T1547"):
                 continue
             _add(

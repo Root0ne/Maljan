@@ -1,8 +1,18 @@
 "use client";
 
+import { probeDetail } from "@/lib/probeDetail";
 import { useRef, useState } from "react";
+import { Bot } from "lucide-react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
+import { agentDisplayName, agentKeySuffix } from "./agentNames";
+import {
+  BUILTIN_AGENT_KEYS,
+  cloneDefinition,
+  displayedDefinitions,
+  stagedDefinitions,
+  type StagedDefinitionMap,
+} from "./agentStaging";
 import Dot from "./Dot";
 import {
   ADD_BUTTON,
@@ -26,31 +36,22 @@ import type {
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
 
-/** Re-seeded by the settings model, so they lock rather than delete. */
-export const BUILTIN_AGENT_KEYS = new Set([
-  "static",
-  "dynamic",
-  "network",
-  "judge",
-  "reporter",
-]);
 /** Roles that read a static provider; the others have nothing to point at. */
-const PROVIDER_ROLES = new Set(["static", "generic"]);
+/* The roles that pick a static provider of their own: the built-in static
+   analyst, and the two that are a prompt rather than a class. A `lead` is
+   the same class as a generic agent, so the API takes a provider reference
+   on it and the console has to be able to express one. */
+const PROVIDER_ROLES = new Set(["static", "generic", "lead"]);
 /** The roles a custom definition may take. `judge` and `report` are missing on
  *  purpose: there is exactly one of each and both are built-ins, so offering
  *  either here would only produce a definition the settings model rejects. */
 const ROLE_CHOICES: AgentDefinitionEntry["role"][] = [
-  "static", "dynamic", "network", "generic",
+  "static", "dynamic", "network", "generic", "lead",
 ];
-
-export const EMPTY_DEFINITION: AgentDefinitionEntry = {
-  role: "generic",
-  label: "",
-  prompt: "",
-  tools: [],
-  static_provider: null,
-  enabled: true,
-};
+/** The roles an agent may be asked to work for another: the judge and the
+ *  reporter are not analysts and the settings model refuses a reference to
+ *  either. */
+const ASKABLE_ROLES = new Set(["static", "dynamic", "network", "generic", "lead"]);
 
 /**
  * One entry of `llm.agents`, mirroring `maljan.core.config.AgentLLMConfig`.
@@ -96,43 +97,6 @@ export interface LlmGlobalFallback {
 const RESOLVE_INPUTS = new Set<keyof AgentDefinitionEntry>([
   "role", "prompt", "tools", "static_provider",
 ]);
-
-/**
- * The definition map with a new entry at `key`: a copy of `from` when one is
- * named, else a blank generic agent.
- *
- * A clone starts from what its source *resolves to*, so an operator can see
- * and edit the built-in prompt rather than guessing it: the source's own
- * `prompt` when it has one, else the resolved text of a probe already made
- * against the source, else `null` — still "the built-in prompt" — with the
- * editor's usual hint to press Resolve first.
- *
- * Shared with the setup guide's "Start from" step so a clone means exactly
- * the same thing wherever it is made.
- */
-export function cloneDefinition(
-  definitions: Record<string, AgentDefinitionEntry>,
-  key: string,
-  from?: string,
-  sourceProbe?: ProbeResult | "running"
-): Record<string, AgentDefinitionEntry> {
-  const source = from ? definitions[from] : undefined;
-  const resolvedDetails =
-    sourceProbe && sourceProbe !== "running" && sourceProbe.ok
-      ? (sourceProbe.details as AgentProbeDetails | null)
-      : null;
-  return {
-    ...definitions,
-    [key]: source
-      ? {
-          ...source,
-          label: source.label ? `${source.label} (copy)` : key,
-          prompt: source.prompt ?? resolvedDetails?.prompt ?? null,
-          tools: source.tools.map((t) => ({ ...t })),
-        }
-      : { ...EMPTY_DEFINITION },
-  };
-}
 
 /** One field's validation message, under the field the API named. */
 function FieldError({ message }: { message?: string }) {
@@ -355,25 +319,45 @@ export function AgentDetail({
     onChangeLlmAgents({ ...llmAgents, [key]: stored });
   };
 
-  const remove = (key: string) => {
-    if (BUILTIN_AGENT_KEYS.has(key)) {
-      put(key, { enabled: false });
-      return;
-    }
-    onChange(removeEntry(definitions, key));
-  };
+  /** Removes an agent from the map. The header offers it only where `locked`
+   *  is false; note that `BUILTIN_AGENT_KEYS` is the set the settings model
+   *  locks, which is smaller than the set it re-seeds — the seeded generic
+   *  agents come back on the next load whether or not they are removed here,
+   *  which predates this editor. */
+  const remove = (key: string) => onChange(removeEntry(definitions, key));
+
+  const sameRef = (a: ToolRefEntry, b: ToolRefEntry) =>
+    a.kind === b.kind &&
+    a.server === b.server &&
+    a.name === b.name &&
+    (a.agent ?? null) === (b.agent ?? null);
 
   const toggleRef = (key: string, ref: ToolRefEntry, on: boolean) => {
-    const same = (a: ToolRefEntry) =>
-      a.kind === ref.kind && a.server === ref.server && a.name === ref.name;
     const tools = definitions[key].tools;
-    put(key, { tools: on ? [...tools, ref] : tools.filter((t) => !same(t)) });
+    put(key, { tools: on ? [...tools, ref] : tools.filter((t) => !sameRef(t, ref)) });
   };
 
   const hasRef = (key: string, ref: ToolRefEntry) =>
-    definitions[key].tools.some(
-      (t) => t.kind === ref.kind && t.server === ref.server && t.name === ref.name
-    );
+    definitions[key].tools.some((t) => sameRef(t, ref));
+
+  /** One `ask_<agent>` reference, in the shape the API stores it. */
+  const askRef = (agent: string): ToolRefEntry => ({
+    kind: "agent",
+    server: null,
+    name: null,
+    agent,
+  });
+
+  /** The agents this one may be given as tools: every other analyst-role
+   *  definition, whether or not it is enabled — a disabled one is refused at
+   *  run time by name rather than silently missing from the list. Empty for a
+   *  judge or a reporter, whose references the API always refuses, so the
+   *  group is not offered where ticking a row is a guaranteed save error. */
+  const askable = ASKABLE_ROLES.has(definitions[agentKey]?.role)
+    ? Object.entries(definitions)
+        .filter(([key, d]) => key !== agentKey && ASKABLE_ROLES.has(d.role))
+        .map(([key]) => key)
+    : [];
 
   /** The message the API put on one named field, so it can be rendered under
    *  that field rather than at the foot of the detail. */
@@ -417,7 +401,7 @@ export function AgentDetail({
           className={`text-[11px] ${result.ok ? "text-status-green" : "text-status-red"}`}
           role="status"
         >
-          {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {result.detail}
+          {result.ok ? "ok" : "failed"} · {result.latency_ms} ms · {probeDetail(result.detail)}
           {details ? ` · prompt ${details.prompt_chars} chars` : ""}
         </p>
       )}
@@ -443,11 +427,21 @@ export function AgentDetail({
       {showHeader && (
         <>
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-sm text-text-primary font-mono">
-              {agentKey}
-              <span className="ml-2 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-border text-text-muted">
-                {agent.role}
-              </span>
+            <span className="flex items-center gap-2 text-sm text-text-primary">
+              <Bot size={16} aria-hidden="true" className="text-text-muted" />
+              {agentDisplayName(agentKey, definitions)}
+              {agentKeySuffix(agentKey, definitions) && (
+                <span className="text-[11px] font-mono text-text-muted">
+                  {agentKeySuffix(agentKey, definitions)}
+                </span>
+              )}
+              {/* The role names what this agent is; where it is also the
+                  key, the key beside it has already said so. */}
+              {agent.role !== agentKey && (
+                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-elevated text-text-muted">
+                  {agent.role}
+                </span>
+              )}
               {locked && (
                 <span className="ml-2 text-[10px] uppercase tracking-wider text-text-muted">
                   built in
@@ -476,13 +470,19 @@ export function AgentDetail({
                   Clone
                 </button>
               )}
-              <button
-                type="button"
-                className="text-xs text-text-secondary"
-                onClick={() => remove(agentKey)}
-              >
-                {locked ? "Disable" : "Remove"}
-              </button>
+              {/* A built-in has no Remove, and the switch beside this is
+                  already how it is turned off. Two controls for one state,
+                  worded in opposite directions, only raised the question of
+                  whether they did the same thing. */}
+              {!locked && (
+                <button
+                  type="button"
+                  className="text-xs text-text-secondary"
+                  onClick={() => remove(agentKey)}
+                >
+                  Remove
+                </button>
+              )}
             </div>
           </div>
 
@@ -714,7 +714,7 @@ export function AgentDetail({
         <fieldset className="border border-border rounded p-2">
           <legend className="text-xs text-text-muted px-1">Tools</legend>
           <ul role="tree" aria-label={`${agentKey} tools`} className="space-y-1">
-            {agent.role === "generic" && !locked && (
+            {PROVIDER_ROLES.has(agent.role) && agent.role !== "static" && !locked && (
               <li
                 role="treeitem"
                 aria-selected={hasRef(agentKey, {
@@ -738,6 +738,34 @@ export function AgentDetail({
                   />
                   its static provider&rsquo;s tools
                 </label>
+              </li>
+            )}
+            {/* Delegation is a tool like any other, so it sits in the same
+                tree: one row per agent this one may hand a task to. The row
+                is titled by the tool's name because that is what the model
+                reads in its toolbox. */}
+            {askable.length > 0 && (
+              <li role="treeitem" aria-expanded={true} aria-selected={false}>
+                <span className="text-xs text-text-muted">Ask another agent</span>
+                <ul role="group" className="ml-4 mt-1 space-y-0.5">
+                  {askable.map((other) => (
+                    <li key={other} role="treeitem" aria-selected={hasRef(agentKey, askRef(other))}>
+                      <label className="text-xs text-text-secondary flex items-center gap-1">
+                        <input
+                          type="checkbox"
+                          aria-label={`${agentKey} asks ${other}`}
+                          disabled={locked}
+                          checked={hasRef(agentKey, askRef(other))}
+                          onChange={(e) => toggleRef(agentKey, askRef(other), e.target.checked)}
+                        />
+                        <span className="font-mono">ask_{other}</span>
+                        <span className="text-text-muted">
+                          {definitions[other].label || other}
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
               </li>
             )}
             {Object.keys(servers).map((server) => {
@@ -877,22 +905,26 @@ export default function AgentDefinitionsEditor({
    *  agent lands under that field on that agent's detail instead of a
    *  leaf-wide banner nobody can trace back to the offending definition. */
   errors: Record<string, string>;
-  onChange: (value: Record<string, AgentDefinitionEntry>) => void;
+  /** Stages the whole leaf. Built-ins arrive narrowed to what may be edited
+   *  about them, which is what `stagedDefinitions` is for. */
+  onChange: (value: StagedDefinitionMap) => void;
 }) {
-  const value = (staged ?? current?.value ?? entry.default ?? {}) as Record<
-    string,
-    AgentDefinitionEntry
-  >;
-  const llmAgents = (llmAgentsStaged ?? llmAgentsCurrent?.value ?? {}) as Record<
-    string,
-    AgentLLMOverride
-  >;
   /** What is stored right now, for the "changed" dot. An agent differs when
    *  either of the two leaves it spans has been edited: the definition itself,
    *  or its entry in the LLM override map. */
   const savedDefs = (current?.value ?? entry.default ?? {}) as Record<
     string,
     AgentDefinitionEntry
+  >;
+  /* What the editor draws is the stored map with the staged edits over it, not
+   * the staged map itself: a built-in is staged as its role and its switch
+   * alone (see `agentStaging`), which is not enough to draw a row with. */
+  const value = displayedDefinitions(staged as StagedDefinitionMap | null, savedDefs);
+  const stage = (next: Record<string, AgentDefinitionEntry>) =>
+    onChange(stagedDefinitions(next, savedDefs));
+  const llmAgents = (llmAgentsStaged ?? llmAgentsCurrent?.value ?? {}) as Record<
+    string,
+    AgentLLMOverride
   >;
   const savedLlm = (llmAgentsCurrent?.value ?? {}) as Record<string, AgentLLMOverride>;
   const [newKey, setNewKey] = useState("");
@@ -920,7 +952,7 @@ export default function AgentDefinitionsEditor({
     }
     setKeyError(null);
     setNewKey("");
-    onChange(cloneDefinition(value, key, from, resolve.probes[from ?? ""]));
+    stage(cloneDefinition(value, key, from, resolve.probes[from ?? ""]));
     // A clone starts with the source's LLM override too, if it has one — the
     // override lives outside the definition, so cloning the definition alone
     // would silently drop it and leave the clone on the global default.
@@ -984,12 +1016,19 @@ export default function AgentDefinitionsEditor({
                     label={item.enabled ? "enabled" : "disabled"}
                     className={item.enabled ? "bg-status-green" : "bg-border"}
                   />
-                  <span className="text-sm font-mono text-text-primary truncate">{key}</span>
+                  {/* The name an operator gave this analyst leads; its key
+                      follows only where the two differ. */}
+                  <span className="text-sm text-text-primary truncate">
+                    {agentDisplayName(key, value)}
+                  </span>
                   {changed && <Dot label="changed" className="bg-accent-strong" />}
                   {anyErrorFor(key) && <Dot label="invalid" className="bg-status-red" />}
                 </div>
                 <div className="flex items-center gap-2 text-[11px] text-text-muted pl-3.5">
-                  <span>{item.role}</span>
+                  {agentKeySuffix(key, value) && (
+                    <span className="font-mono">{agentKeySuffix(key, value)}</span>
+                  )}
+                  {item.role !== key && <span>{item.role}</span>}
                   {BUILTIN_AGENT_KEYS.has(key) && <span>built in</span>}
                   {verdict && (
                     <span
@@ -1035,7 +1074,7 @@ export default function AgentDefinitionsEditor({
           key={selected}
           agentKey={selected}
           definitions={value}
-          onChange={onChange}
+          onChange={stage}
           llmAgents={llmAgents}
           onChangeLlmAgents={onChangeLlmAgents}
           llmGlobal={llmGlobal}

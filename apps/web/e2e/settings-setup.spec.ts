@@ -20,6 +20,40 @@ import { MOCK_SETTINGS_SCHEMA_FULL, MOCK_SETTINGS_VALUES_FULL, MOCK_USER } from 
 const guidePath = (id: string, step?: string) =>
   `/settings/setup/${id}${step ? `?step=${step}` : ""}`;
 
+/** The same fixture with a usable Ollama endpoint stored, which is what
+ *  `llmLooksConfigured` reads. */
+const VALUES_WITH_A_MODEL = {
+  values: {
+    ...MOCK_SETTINGS_VALUES_FULL.values,
+    "core.llm.provider": { ...MOCK_SETTINGS_VALUES_FULL.values["core.llm.provider"], value: "ollama" },
+    "core.llm.ollama.base_url": {
+      ...MOCK_SETTINGS_VALUES_FULL.values["core.llm.ollama.base_url"],
+      value: "http://127.0.0.1:11434",
+    },
+  },
+};
+
+test.describe("Settings → Setup guides, once a model is connected", () => {
+  test.use({
+    mockOptions: {
+      user: { ...MOCK_USER, role: "admin" },
+      settingsSchema: MOCK_SETTINGS_SCHEMA_FULL,
+      settingsValues: VALUES_WITH_A_MODEL,
+    },
+  });
+
+  test("the hub opens the other three guides, and the console is offered", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/settings/setup");
+
+    await expect(page.getByRole("link", { name: "Start" })).toHaveCount(7);
+    await expect(page.getByTestId("guide-status-memory")).toHaveText("memory (in-process)");
+    await expect(page.getByTestId("guide-status-enrichment")).toHaveText("Off");
+    await expect(page.getByRole("link", { name: "Configuration" })).toBeVisible();
+  });
+});
+
 test.describe("Settings → Setup guides (admin)", () => {
   test.use({
     mockOptions: {
@@ -29,26 +63,32 @@ test.describe("Settings → Setup guides (admin)", () => {
     },
   });
 
-  test("the hub shows seven cards with their current-state status lines", async ({
+  /* The fixture's `core.llm.provider` is openai with no key stored, so the
+   * hub is in its first-run state: the four guides a first analysis needs and
+   * nothing else. The rest are improvements on a pipeline that already runs. */
+  test("before a model is connected the hub offers the four a first run needs", async ({
     authenticatedPage: page,
   }) => {
     await page.goto("/settings/setup");
 
     await expect(page.getByRole("heading", { name: "Setup guides" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Start" })).toHaveCount(7);
+    await expect(page.getByRole("link", { name: "Start" })).toHaveCount(4);
 
     await expect(page.getByTestId("guide-status-llm")).toHaveText("Not configured");
     await expect(page.getByTestId("guide-status-static")).toHaveText("ghidra");
     await expect(page.getByTestId("guide-status-sandbox")).toHaveText("mock (built-in fixtures)");
-    await expect(page.getByTestId("guide-status-tool-server")).toHaveText("1 server enabled");
     await expect(page.getByTestId("guide-status-agent")).toHaveText(
       "No custom analysts · active profile default"
     );
-    await expect(page.getByTestId("guide-status-memory")).toHaveText("memory (in-process)");
-    await expect(page.getByTestId("guide-status-enrichment")).toHaveText("Off");
+    await expect(page.getByTestId("guide-status-tool-server")).toHaveCount(0);
+    await expect(page.getByTestId("guide-status-memory")).toHaveCount(0);
+    await expect(page.getByTestId("guide-status-enrichment")).toHaveCount(0);
+    // And the console is not offered either, since the route it names would
+    // bounce straight back here.
+    await expect(page.getByRole("link", { name: "Configuration" })).toHaveCount(0);
   });
 
-  test("the LLM guide walks provider → credentials → test → models → limits → review and applies exactly the staged keys", async ({
+  test("the LLM guide walks provider → credentials → test → models → review and applies exactly the staged keys", async ({
     authenticatedPage: page,
   }) => {
     await page.goto(guidePath("llm"));
@@ -90,11 +130,9 @@ test.describe("Settings → Setup guides (admin)", () => {
     await page.getByRole("combobox", { name: "Ollama judge model" }).fill("qwen3:4b");
     await page.getByRole("button", { name: "Continue" }).click();
 
-    // Step 5: limits — defaults are fine, no edit needed.
-    await expect(page.getByRole("heading", { name: "Limits" })).toBeVisible();
-    await page.getByRole("button", { name: "Continue" }).click();
-
-    // Step 6: review and apply.
+    // Step 5: review and apply. There is no Limits step: it staged five keys
+    // the console already renders, under an intro saying the defaults are fine.
+    await expect(page.getByRole("heading", { name: "Limits" })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Review and apply" })).toBeVisible();
 
     const patches: Record<string, unknown>[] = [];
@@ -183,6 +221,11 @@ test.describe("Settings → Setup guides (admin)", () => {
     authenticatedPage: page,
   }) => {
     await page.goto(guidePath("tool-server"));
+
+    // The guide opens on the VirusTotal offer, which registers nothing unless
+    // the button is pressed; adding a server by hand walks straight past it.
+    await expect(page.getByRole("heading", { name: "Connect VirusTotal" })).toBeVisible();
+    await page.getByRole("button", { name: "Continue" }).click();
 
     await expect(page.getByRole("heading", { name: "Which server" })).toBeVisible();
     await page.getByLabel("new server name").fill("r2custom");
@@ -379,7 +422,7 @@ test.describe("Settings → Setup guides (admin)", () => {
     await page.waitForURL("**/settings/configuration/models/llm");
 
     const link = page.getByRole("link", { name: /^LLM & model/ });
-    await expect(link).toHaveAccessibleName(/1 unsaved changes/);
+    await expect(link).toHaveAccessibleName(/1 unsaved change/);
     await expect(page.getByTestId("changes-count")).toHaveText("1 change");
   });
 });

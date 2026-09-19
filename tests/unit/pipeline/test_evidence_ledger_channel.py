@@ -308,7 +308,10 @@ def _mediates_with_a_tool_call(judge: Any) -> None:
 
         captured: list = []
 
-        def _create(llm, tools):
+        def _create(llm, tools, prompt=None):
+            # ``prompt`` is the hook the judge's loop counts its turns on, the
+            # way the analysts' loop does; a stand-in that refused it would
+            # make the meter untestable here.
             captured.append(tools)
             executor = MagicMock()
             executor.ainvoke = _ainvoke

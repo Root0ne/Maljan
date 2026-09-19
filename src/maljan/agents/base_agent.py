@@ -16,10 +16,11 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
 import tiktoken
@@ -28,17 +29,22 @@ from langchain_core.language_models.chat_models import BaseChatModel
 if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
 
+from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.pipeline.validation import (
+    ALIGNMENT_MARGIN,
+    VALIDITY_CODE,
+    ValidationTally,
     Violation,
     mark_invalid_technique_ids,
     retry_with_feedback_sync,
     validate_isr,
+    validity_check_available,
 )
-from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, apply_budget
+from maljan.schemas.evidence import ENTRY_ID_RE, EvidenceCounter, LedgerEntry, apply_budget
 from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
 from maljan.schemas.tool_evidence import CapturedToolOutput
 
@@ -53,6 +59,10 @@ _TECHNIQUE_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
 # returning a useless "need more steps" non-answer. (Phrase observed across
 # live runs; it is not a maljan/langchain in-tree literal.)
 _RECURSION_STOP_RE = re.compile(r"need more steps to process", re.IGNORECASE)
+# What the loop writes down for itself when the graph's own limit stopped it
+# before langgraph could say so. Worded so ``_RECURSION_STOP_RE`` reads it, and
+# so the salvage path that follows treats it the way it treats langgraph's.
+RECURSION_STOP_TEXT = "Sorry, need more steps to process this request."
 
 # Bounds for the forced-synthesis salvage (see ``_force_final_synthesis``).
 #
@@ -61,11 +71,71 @@ _RECURSION_STOP_RE = re.compile(r"need more steps to process", re.IGNORECASE)
 # nothing left is precisely how the hard cap came to fire on 2026-08-11.
 _SYNTHESIS_MIN_SECONDS = 60
 
-# Character budget for the conversation re-sent to the model. The measured
-# failure re-sent 19 tool outputs — the guardrail caps each at 6,000 chars, so
-# ~114,000 characters before the system prompt. Prefilling that and generating a
-# full structured answer did not finish in 25 minutes on the local 35B.
-_SYNTHESIS_MAX_CHARS = 16_000
+# The floor under the character budget for the conversation re-sent to the
+# model. The measured failure re-sent 19 tool outputs — the guardrail caps each
+# at 6,000 chars, so ~114,000 characters before the system prompt. Prefilling
+# that and generating a full structured answer did not finish in 25 minutes on
+# the local 35B.
+#
+# A floor rather than the budget, because 16,000 characters is a number chosen
+# against one deployment's model: it cut 21 of 41 messages on a run whose
+# analyst then wrote "no malicious strings were visible in ev_0007 (referenced
+# but not displayed)". Where the server's context window is known the budget is
+# derived from it instead; where it is not, this is what holds.
+_SYNTHESIS_MIN_CHARS = 16_000
+
+# How much of the window the salvage conversation may fill, and how many
+# characters a token is worth. Four characters per token is the usual English
+# ratio, and two fifths of the window leaves room for the system prompt this
+# does not measure and for the answer the model still has to generate.
+_SYNTHESIS_CONTEXT_SHARE = 0.4
+_CHARS_PER_TOKEN = 4
+
+
+def _model_context_tokens(cfg: Any, agent_name: str) -> int:
+    """The context window of the model this agent runs on, or ``0``.
+
+    The per-agent entry decides which *provider* is asked, so an agent on
+    Ollama reads the Ollama window even when the run is otherwise OpenAI. It
+    does not carry a window of its own: an agent pointed at its own
+    OpenAI-compatible endpoint therefore reads ``llm.openai.context_size``,
+    which describes the global one. That is a known limit of this lookup and
+    not a claim about that agent's server; the floor below is what protects it.
+
+    Zero means nothing declared it, and the caller falls back to the floor.
+    """
+    try:
+        entry = (getattr(cfg.llm, "agents", None) or {}).get(agent_name)
+        provider = str(getattr(entry, "provider", "") or cfg.llm.provider)
+        if provider == "ollama":
+            return int(cfg.llm.ollama.num_ctx)
+        return int(getattr(cfg.llm.openai, "context_size", 0) or 0)
+    except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost salvage
+        logger.debug("synthesis budget: the context size could not be read (%s).", exc)
+        return 0
+
+
+def synthesis_budget_chars(cfg: Any, agent_name: str) -> int:
+    """How many characters of conversation the salvage may re-send."""
+    tokens = _model_context_tokens(cfg, agent_name)
+    if tokens <= 0:
+        return _SYNTHESIS_MIN_CHARS
+    return max(_SYNTHESIS_MIN_CHARS, int(tokens * _CHARS_PER_TOKEN * _SYNTHESIS_CONTEXT_SHARE))
+
+
+def ledger_ids_in(msgs: Sequence[Any]) -> list[str]:
+    """Every ledger id still readable in this window, in the order they appear.
+
+    Wherever it appears in a message, not only where the recorder stamped it:
+    what the caller needs is the set of ids the model can still read, and one
+    written into prose is one it can read.
+    """
+    seen: list[str] = []
+    for message in msgs:
+        for found in ENTRY_ID_RE.findall(str(getattr(message, "content", "") or "")):
+            if found.lower() not in seen:
+                seen.append(found.lower())
+    return seen
 
 
 def _message_chars(m: object) -> int:
@@ -84,14 +154,40 @@ def _message_chars(m: object) -> int:
     return total
 
 
+def _conversation_units(msgs: list) -> list[list]:
+    """The conversation as the things that can be dropped whole.
+
+    A tool call and the results it produced are one unit: dropping a result
+    while keeping the call that referenced it is what left an analyst writing
+    "no malicious strings were visible in ev_0007 (referenced but not
+    displayed)" — a sentence about evidence it had been shown the name of and
+    not the content. Everything else is a unit of one.
+    """
+    units: list[list] = []
+    for message in msgs:
+        is_result = type(message).__name__ == "ToolMessage"
+        if is_result and units and getattr(units[-1][0], "tool_calls", None):
+            units[-1].append(message)
+            continue
+        units.append([message])
+    return units
+
+
+def _is_a_tool_pair(unit: list) -> bool:
+    """Whether this unit is a tool call with its results."""
+    return bool(getattr(unit[0], "tool_calls", None))
+
+
 def _trim_for_synthesis(msgs: list, budget: int) -> list:
     """Fit a ReAct conversation into ``budget`` characters, framing first.
 
     Keeps the leading framing — the system prompt and the first human turn,
-    which carry the task and the output format — then fills the remainder with
-    the **most recent** messages. Late tool calls are the ones the model chose
-    after reading the early ones, so when something has to go, the oldest
-    evidence goes first.
+    which carry the task and the output format — and then drops whole units
+    until the rest fits: assistant prose that called no tool goes before any
+    tool call does, and after that the oldest tool call goes with its results.
+    Late tool calls are the ones the model chose after reading the early ones,
+    so when evidence has to go, the oldest goes first — and a call never
+    outlives its result or the other way round.
 
     The budget exists because of what long context costs *this* server, not for
     tidiness: on the hybrid recurrent model a ~39k-token conversation drove
@@ -111,25 +207,414 @@ def _trim_for_synthesis(msgs: list, budget: int) -> list:
     while rest and len(head) < 2 and type(rest[0]).__name__ != "ToolMessage":
         head.append(rest.pop(0))
 
-    used = sum(_message_chars(m) for m in head)
-    tail: list = []
-    for m in reversed(rest):
-        size = _message_chars(m)
-        if used + size > budget:
+    units = _conversation_units(rest)
+    used = sum(_message_chars(m) for m in head) + sum(
+        _message_chars(m) for unit in units for m in unit
+    )
+
+    # Prose first, oldest first: an assistant turn that called no tool is the
+    # model's own commentary, and the evidence is what the salvage is for.
+    for index, unit in enumerate(units):
+        if used <= budget:
+            break
+        if _is_a_tool_pair(unit):
             continue
-        tail.append(m)
-        used += size
-    tail.reverse()
-    return [*head, *tail]
+        used -= sum(_message_chars(m) for m in unit)
+        units[index] = []
+
+    for index, unit in enumerate(units):
+        if used <= budget:
+            break
+        if not unit:
+            continue
+        used -= sum(_message_chars(m) for m in unit)
+        units[index] = []
+
+    return [*head, *[m for unit in units for m in unit]]
 
 
-# Range constraints derived from the public MITRE ATT&CK Enterprise dataset.
-# Anything outside these bounds is treated as a hallucination.
-_TECHNIQUE_MIN: int = 1001
-_TECHNIQUE_MAX: int = 1700
+def steps_used(messages: list) -> int:
+    """The graph steps a conversation has spent, counted the way langgraph counts.
 
-# Explicit placeholders that LLMs sometimes emit when uncertain.
-_INVALID_TIDS: frozenset[str] = frozenset({"T0000", "T0000.000", "T9999", "T1234"})
+    An assistant turn is one node execution, and a turn that called tools
+    costs a second for the tool node; the framing and the tool results cost
+    nothing.
+    """
+    ai_turns = [m for m in messages if getattr(m, "type", "") == "ai"]
+    tool_rounds = sum(1 for m in ai_turns if getattr(m, "tool_calls", None))
+    return len(ai_turns) + tool_rounds
+
+
+def model_turns_left(max_steps: int, messages: list) -> int:
+    """How many model turns the loop still has, counted the way langgraph counts.
+
+    ``max_steps`` is handed to langgraph as ``recursion_limit``, and langgraph
+    counts node executions: an assistant turn is one, and a turn that called
+    tools costs a second for the tool node. So the budget in model turns is
+    half the steps, rounded up, less what the transcript already spent — one
+    per assistant turn plus one per tool round. What the model is told is a
+    number it can act on; the graph's own step count is not.
+    """
+    return max(0, (int(max_steps) - steps_used(messages) + 1) // 2)
+
+
+class LoopBudget:
+    """One tool loop's steps and seconds.
+
+    The loop's own turns are counted from its conversation, refreshed on every
+    model turn. What an agent it asked spends is *not* taken off this: an ask
+    carries its own step budget (``agents.delegation_steps``), because a
+    caller and its specialists doing different work out of one step count
+    starved both — the live proof watched a lead's third ask refused with
+    three steps left while the first callee had already died at a recursion
+    limit of five. The wall clock is the one thing they really share, and it
+    needs no charging: a delegated call runs inside the caller's own timeout.
+    """
+
+    def __init__(self, max_steps: int, timeout: float, started: float | None = None) -> None:
+        self.max_steps = int(max_steps)
+        self.timeout = float(timeout)
+        self.started = time.monotonic() if started is None else float(started)
+        self.own_steps = 0
+        self.delegated_steps = 0
+
+    def note_turns(self, messages: list) -> None:
+        """Record what the loop's own conversation has spent so far."""
+        self.own_steps = steps_used(messages)
+
+    def note_delegated(self, steps: int) -> None:
+        """Record what an agent this loop asked spent, for the meter only.
+
+        Not charged. The number is here so a budget row can say the caller's
+        loop had work done under it, and so the meter's two sides add up; it
+        does not shorten the caller's own budget in either dimension.
+        """
+        self.delegated_steps += max(0, int(steps))
+
+    def steps_left(self) -> int:
+        return max(0, self.max_steps - self.own_steps)
+
+    def turns_left(self, messages: list) -> int:
+        """The budget line's number: model turns this loop has left."""
+        return model_turns_left(self.max_steps, messages)
+
+    def seconds_left(self) -> float:
+        return max(0.0, self.timeout - (time.monotonic() - self.started))
+
+
+class BudgetCeiling:
+    """What one delegated loop gets: the delegation's own budget, not a share.
+
+    ``steps`` is ``agents.delegation_steps`` and replaces whatever the callee
+    would otherwise have had — a specialist answering an ask is doing one
+    focused job, not its own stage. ``seconds`` is the per-ask timeout already
+    cut down to what the caller has left, because the caller is waiting inside
+    its own wall clock.
+
+    ``wall`` is that remainder, kept separately so the hard cap can put its
+    grace inside it: clamping the abort to ``seconds`` fired it at exactly the
+    soft timeout and gave a callee none of the thirty seconds every other loop
+    gets to come back in. It defaults to ``seconds`` for a ceiling built
+    without one.
+    """
+
+    def __init__(self, steps: int, seconds: float, wall: float | None = None) -> None:
+        self.steps = int(steps)
+        self.seconds = float(seconds)
+        self.wall = float(seconds if wall is None else wall)
+
+
+# The class-level stand-ins for two pieces of per-agent state, for an analyst
+# built without ``__init__``. The mapping is read-only so one of them cannot
+# become every stand-in's; the lock is deliberately shared, because a set of
+# stand-ins asking each other is one conversation and serialising it is the
+# same answer the real agents get.
+_NO_PATH_CHOICES: Mapping[str, Any] = MappingProxyType({})
+_SHARED_STAND_IN_LOCK = threading.RLock()
+# Reentrant, unlike a real agent's: a set of stand-ins shares this one object,
+# so a plain lock would make a stand-in asking through another stand-in block
+# on itself and be refused rather than nesting.
+_SHARED_STAND_IN_ASKS_LOCK = threading.RLock()
+
+
+# How long past its own timeout a loop is left alone before it is aborted
+# outright. The soft timeout ends the model's turn; this one ends the thread
+# that would not come back from it.
+HARD_CAP_GRACE = 30.0
+
+
+def _model_that_closes_off_truncated_calls(llm: Any, tools: list, repair: Any) -> Any:
+    """``llm`` with the repair appended, or ``llm`` when it cannot be appended to.
+
+    The repair has to sit between the model and the tool node and cost
+    nothing. A node would cost a superstep of every turn; binding the tools
+    here and piping the answer through the repair costs none, because
+    langgraph sees the same one runnable it always saw.
+
+    It is appended only when binding produced a ``RunnableBinding`` — what a
+    real provider returns, and what langgraph checks for before deciding to
+    bind the tools itself. A model that binds some other way is handed back
+    untouched, because a sequence langgraph then tries to bind again would
+    fail for every loop rather than for the rare truncated call this exists
+    to rescue.
+    """
+    from langchain_core.runnables import RunnableBinding, RunnableLambda
+
+    binder = getattr(llm, "bind_tools", None)
+    if not callable(binder):
+        return llm
+    names = [str(getattr(tool, "name", "")) for tool in tools]
+    if len(set(names)) != len(names):
+        # Two tools of one name: langgraph would keep one of them and then
+        # refuse the bound list for not matching. Nothing here is worth a loop
+        # that will not start.
+        logger.debug("tool argument repair not attached: two tools share a name.")
+        return llm
+    try:
+        bound = binder(tools)
+    except Exception as exc:  # noqa: BLE001 — the loop binds them the ordinary way
+        logger.debug("tool argument repair not attached (%s).", exc)
+        return llm
+    if not isinstance(bound, RunnableBinding):
+        return llm
+    return bound | RunnableLambda(repair)
+
+
+def lock_for(agent: Any) -> Any:
+    """The lock that serialises everything driving one agent, or nothing.
+
+    An ask of an agent, a second ask of it and its own stage run all take it,
+    because all three drive the same buffers, the same budget and the same
+    call chain. A duck-typed stand-in that borrows one of these wrappers and
+    is never asked by anyone has no lock and needs none, so it gets a context
+    that does nothing rather than an attribute error.
+    """
+    lock = getattr(agent, "delegation_lock", None)
+    return lock if lock is not None else contextlib.nullcontext()
+
+
+def _turn_key(message: Any, index: int) -> str:
+    """What identifies one model turn, for publishing it exactly once.
+
+    Not ``id(message)``: CPython reuses an address after collection, so a turn
+    that had been collected could suppress a later one, and a graph that
+    copied its state between snapshots — a checkpointer, a serialising reducer
+    — would make every turn look new on every snapshot and republish the whole
+    conversation each time.
+
+    langchain gives a message its own id. A message without one is keyed on
+    its place in the conversation *and* on what it says: the place alone
+    cannot survive a conversation being replayed from the first message, which
+    a connection error does, and the text alone would swallow a turn a model
+    genuinely repeated — the degenerate loop this codebase guards against
+    elsewhere, where the interesting thing is precisely that it said the same
+    thing again.
+    """
+    own = getattr(message, "id", None)
+    if own:
+        return f"id:{own}"
+    return f"turn:{index}:{hash(str(getattr(message, 'content', '') or ''))}"
+
+
+def _steps_this_loop_spent(ledger: LoopBudget, messages: list) -> int:
+    """What *this* loop has used, from the conversation or from the budget itself.
+
+    A loop that ended at its wall clock has no conversation to hand over: the
+    thread it was running on did not come back, and the record was written
+    with an empty list — so the one run the meter exists to explain, the
+    analyst that spent twenty-five minutes and thirty tool calls and was cut
+    off, landed in the summary as zero steps. The refresher counted the
+    conversation before every model turn, so the budget itself holds the last
+    figure anyone saw.
+
+    Its own turns and nothing else. What a specialist spent is filed under the
+    specialist, and it comes out of the specialist's cap, not this one: adding
+    it here counted the same steps in two rows and made ``steps_used`` a number
+    that could exceed ``max_steps`` — a lead that made six asks of twelve steps
+    would read 82 of 40. The row carries ``delegated_steps`` beside this, for a
+    reader who wants the other number.
+    """
+    return int(steps_used(messages) if messages else ledger.own_steps)
+
+
+def hard_cap(timeout: float, ceiling: BudgetCeiling | None = None) -> float:
+    """The wall a loop is aborted at, never later than a caller is waiting for.
+
+    A delegated loop runs on a tool thread that cannot be cancelled, so the
+    grace it is normally given is the time it can outlive the caller by: the
+    caller's own wait fires, its node fails and drains it, and a callee still
+    running writes its ledger onto an agent that has finished. The ceiling
+    carries what the caller had left, and the grace goes inside that rather
+    than being clipped away against the ask's own timeout — a callee whose
+    abort fires at the same second as its soft timeout never gets to write up
+    what it gathered.
+    """
+    wall = float(timeout) + HARD_CAP_GRACE
+    if ceiling is not None:
+        wall = min(wall, float(ceiling.wall))
+    return max(1.0, wall)
+
+
+def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[int, int]:
+    """``(timeout, max_steps)`` for one loop of ``agent_name``.
+
+    The per-agent overrides for a loop of its own. A ceiling replaces both:
+    an agent answering an ask spends the delegation's budget, not its stage's
+    and not a leftover of its caller's. A module function rather than only a
+    method, so a duck-typed analyst that borrows one method reads the same
+    numbers.
+    """
+    cfg = get_settings()
+    overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
+    timeout = int(overrides.get(agent_name, cfg.react_agent_timeout))
+    step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
+    max_steps = int(step_overrides.get(agent_name, cfg.react_agent_max_steps))
+    if ceiling is not None:
+        max_steps = max(2, int(ceiling.steps))
+        timeout = max(1, int(ceiling.seconds))
+    return timeout, max_steps
+
+
+# The one human turn a tool loop gets when its last message is neither a
+# structured report nor a findings block. Exactly one: a model that will not
+# answer after being told it did not answer will not answer on the third ask
+# either, and each ask is another full model turn.
+# No tool half to the sentence: the nudge invokes the bare model, with no tools
+# bound to that turn, so a model that took that branch answered with an empty
+# message and the run's one extra step bought nothing.
+FINAL_ANSWER_NUDGE = "Your last message was not a final report. Return your final ISR now."
+
+# What the analyst reports for itself when even the nudge produced no report.
+# Not ``no_data``: the analyst had data, read it, and stopped mid-thought.
+NO_STRUCTURED_REPORT_STATUS = "no_claims"
+NO_STRUCTURED_REPORT_REASON = "the model ended without a structured report"
+
+
+def answer_is_isr(text: str) -> bool:
+    """Whether an answer carries a report at all.
+
+    The two shapes an analyst may answer in: the ``CLAIM:`` block every ISR
+    prompt asks for, and the optional fenced ``maljan-findings`` channel. Prose
+    that is neither is not a report — it may be a fine paragraph, but nothing
+    downstream can read a finding out of it without inventing one.
+    """
+    from maljan.agents.findings_block import has_findings_block
+
+    if not text or not text.strip():
+        return False
+    return "CLAIM:" in text or has_findings_block(text)
+
+
+def nudge_turns(msgs: list) -> tuple[list, bool]:
+    """The conversation as it can be sent back to the server, and whether it changed.
+
+    An assistant turn that carried a tool call whose arguments never parsed
+    ends the loop: no tool ran, and nothing answered it. Sent back as it is,
+    the server has to render that call into its template and fails on the
+    same arguments, which is the 500 a live nudge got ("Failed to parse tool
+    call arguments as JSON"). The call is dropped, the turn's text kept, and
+    the answer the nudge asks for is what the model says next.
+    """
+    from langchain_core.messages import AIMessage
+
+    out: list = []
+    changed = False
+    for message in msgs:
+        invalid = getattr(message, "invalid_tool_calls", None) or []
+        if isinstance(message, AIMessage) and invalid:
+            changed = True
+            kept_calls = list(getattr(message, "tool_calls", None) or [])
+            content = message.content if isinstance(message.content, str) else ""
+            # A turn that was nothing but the call it could not make is left
+            # out rather than sent as an empty assistant turn, which some
+            # templates render as nothing and a few reject.
+            if not content.strip() and not kept_calls:
+                continue
+            out.append(AIMessage(content=message.content, tool_calls=kept_calls))
+            continue
+        out.append(message)
+    return out, changed
+
+
+def cause_chain(exc: BaseException, limit: int = 4) -> str:
+    """``exc``'s causes, innermost last, as one line.
+
+    ``str(APIConnectionError)`` is the words "Connection error." whatever
+    produced it: a refused socket, a TLS failure, and an httpx pool being used
+    from an event loop other than the one it was opened on all read the same.
+    The last of those is a bug in this process rather than a blip on the wire
+    — it cost a full retry on the judge's first verdict request of every run
+    and nothing in the log could tell it from a flaky server. The chain is
+    where the difference is, so the chain is what gets logged.
+    """
+    parts: list[str] = []
+    seen: set[int] = {id(exc)}
+    cause: BaseException | None = exc.__cause__ or exc.__context__
+    while cause is not None and len(parts) < limit and id(cause) not in seen:
+        parts.append(repr(cause))
+        seen.add(id(cause))
+        cause = cause.__cause__ or cause.__context__
+    return " <- ".join(parts) if parts else "no cause recorded"
+
+
+# The statuses that mean "not now" rather than "no". A provider answering any
+# of these is describing its own state, and a second attempt a couple of
+# seconds later is the difference between a thin run and a lost one. Every
+# other 4xx is a refusal about the request itself and is answered once.
+RETRYABLE_STATUSES: frozenset[int] = frozenset({408, 409, 429, 500, 502, 503, 504})
+
+# The longest delay a provider's ``Retry-After`` may impose on us. Beyond this
+# the caller's own budget is the shorter answer, so the backoff below is used
+# instead and the run degrades rather than parking on one request.
+_MAX_RETRY_AFTER_SECONDS = 30
+
+
+def _provider_fault(exc: BaseException) -> str:
+    """One bounded line about a provider failure, safe to put in a log.
+
+    The class and, for a status error, the status. Deliberately not the body:
+    a provider that quotes the offending request back has quoted a credential
+    back, and this line is written to a log file that outlives the run.
+    """
+    status = getattr(exc, "status_code", None)
+    return f"{type(exc).__name__}" + (f" {status}" if status else "")
+
+
+def _retry_after(exc: BaseException, default: int) -> int:
+    """The provider's own ``Retry-After``, when it sent a usable one.
+
+    Both forms RFC 9110 allows: delta-seconds, and an HTTP-date, which several
+    hosted providers send on 429 and 503. Either way the answer is clamped —
+    a provider asking for an hour is asking for longer than the caller has.
+    """
+    headers = getattr(getattr(exc, "response", None), "headers", None)
+    raw = ""
+    if headers is not None:
+        with contextlib.suppress(Exception):
+            raw = str(headers.get("retry-after") or "").strip()
+    if not raw:
+        return default
+    try:
+        seconds = int(float(raw))
+    except (TypeError, ValueError):
+        seconds = _seconds_until(raw)
+    if 0 < seconds <= _MAX_RETRY_AFTER_SECONDS:
+        return seconds
+    return default
+
+
+def _seconds_until(http_date: str) -> int:
+    """An HTTP-date as seconds from now, or ``0`` when it is not one."""
+    from datetime import UTC, datetime
+    from email.utils import parsedate_to_datetime
+
+    try:
+        when = parsedate_to_datetime(http_date)
+    except (TypeError, ValueError):
+        return 0
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return int((when - datetime.now(UTC)).total_seconds())
 
 
 async def retry_on_connection_error(
@@ -154,38 +639,77 @@ async def retry_on_connection_error(
     routine event here. One blip degraded a whole run to "Suspicious", or
     silently dropped a report section.
 
-    Narrow on purpose, preserving the original anti-storm intent:
-    ``APIConnectionError`` only. A stall surfaces as ``TimeoutError`` from the
-    caller's ``wait_for`` and is never retried. Backoff is 1 s then 2 s.
+    Narrow on purpose, preserving the original anti-storm intent: a transport
+    failure, and the handful of statuses a provider uses to say "not now".
+    Hosted endpoints answer 500 "Internal server error" and 503 "Service
+    temporarily overloaded" for a second at a time, and a single attempt
+    against them cost a live run its static analyst, its negotiation, its
+    verdict and every composer section within twelve seconds. A refusal —
+    401, 402, 403, 404, 422 and the rest of the 400 family — is answered once,
+    because asking again cannot change it. A stall surfaces as ``TimeoutError``
+    from the caller's ``wait_for`` and is never retried. Backoff is 1 s then
+    2 s, or the provider's own ``Retry-After`` when it sends one that fits
+    inside the budget.
 
     Takes a *factory* rather than an awaitable because a coroutine cannot be
     awaited twice.
     """
-    from openai import APIConnectionError
+    from openai import APIConnectionError, APIStatusError
 
     emit = log or logger
     for attempt in range(attempts):
         try:
             return await make_awaitable()
-        except APIConnectionError as exc:
-            if attempt >= attempts - 1:
-                emit.error("%s: connection error after %d attempts: %s", what, attempts, exc)
+        except (APIConnectionError, APIStatusError) as exc:
+            status = getattr(exc, "status_code", None)
+            if isinstance(exc, APIStatusError) and status not in RETRYABLE_STATUSES:
                 raise
-            wait = 2**attempt
+            kind = f"HTTP {status}" if isinstance(exc, APIStatusError) else "connection error"
+            # The cause chain is what tells a dropped socket from this
+            # process using a pool on the wrong loop, and it is worth having
+            # for a transport failure. A status error has no such ambiguity
+            # and its chain can carry the provider's own body, which is where
+            # a credential quoted back would be — so that branch says the
+            # status and stops, rather than reporting an absence of causes as
+            # though something had named itself.
+            cause_args: tuple[str, ...] = ()
+            cause_clause = ""
+            if not isinstance(exc, APIStatusError):
+                cause_clause, cause_args = " (caused by %s)", (cause_chain(exc),)
+            if attempt >= attempts - 1:
+                emit.error(
+                    "%s: %s after %d attempts: %r" + cause_clause,
+                    what,
+                    kind,
+                    attempts,
+                    _provider_fault(exc),
+                    *cause_args,
+                )
+                raise
+            wait = _retry_after(exc, 2**attempt)
             emit.warning(
-                "%s: connection error (attempt %d/%d): %s — retrying in %ds.",
+                "%s: %s (attempt %d/%d): %r" + cause_clause + " — retrying in %ds.",
                 what,
+                kind,
                 attempt + 1,
                 attempts,
-                exc,
+                _provider_fault(exc),
+                *cause_args,
                 wait,
             )
             await asyncio.sleep(wait)
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-def describe_exception(exc: BaseException) -> str:
-    """Return a non-empty, diagnosable description of ``exc``.
+def describe_exception_for_log(exc: BaseException) -> str:
+    """Return a non-empty, diagnosable description of ``exc``, for the log.
+
+    For the log and for nothing else, which is what the name says: it keeps
+    the exception's *message*, and a message names the host path an ``OSError``
+    could not read, the URL a transport error was given and the credential a
+    base URL was configured with. That is the operator's to read, on the
+    operator's host. What a published event may say about a failure is
+    ``maljan.pipeline.events.describe_exception``, which never carries one.
 
     Analyst failures were logged as
     ``"dynamic ISR analysis failed: "`` — an empty tail — because several
@@ -198,7 +722,7 @@ def describe_exception(exc: BaseException) -> str:
     text = str(exc).strip()
     inner = getattr(exc, "exceptions", None)
     if not text and isinstance(inner, list | tuple) and inner:
-        parts = [describe_exception(sub) for sub in inner[:3]]
+        parts = [describe_exception_for_log(sub) for sub in inner[:3]]
         return f"{type(exc).__name__}({'; '.join(p for p in parts if p)})"
     if text:
         return f"{type(exc).__name__}: {text}"
@@ -278,6 +802,43 @@ def strip_tool_call_scaffolding(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
+# The width of the evidence field as the ISR stores it, and how many dropped
+# ids are written back after the cut.
+_EVIDENCE_REF_CHARS = 200
+_EVIDENCE_REF_IDS = 3
+
+# The start of an id the cut sliced through, at the end of the kept text: any
+# prefix of ``[ev_NNNN``, from the bare bracket up to a whole id whose closing
+# bracket was cut, and the space before it. The whole id is written back.
+_PARTIAL_ID_AT_END_RE = re.compile(r"\s*(?:\[(?:e(?:v(?:_\d{0,4})?)?)?)?$", re.IGNORECASE)
+
+
+def evidence_ref_text(evidence_text: str) -> str:
+    """The evidence line as the ISR stores it, with its ledger ids kept.
+
+    The field is cut to a fixed width, and the claim format asks for the id at
+    the end of a line whose front is prose, so on a long line the cut lands on
+    the one part the run can check. Any id the cut dropped is written back
+    after it, in the order the model wrote it, up to a few: the field is what
+    the report prints and what long-term memory embeds, and a constant named
+    for a width should bound it. An id the cut sliced through is removed from
+    the kept text, since the whole id follows.
+    """
+    kept = evidence_text[:_EVIDENCE_REF_CHARS]
+    if len(kept) == len(evidence_text):
+        return kept
+    kept = _PARTIAL_ID_AT_END_RE.sub("", kept)
+    still_there = {found.lower() for found in ENTRY_ID_RE.findall(kept)}
+    dropped = [
+        found
+        for found in dict.fromkeys(f.lower() for f in ENTRY_ID_RE.findall(evidence_text))
+        if found not in still_there
+    ][:_EVIDENCE_REF_IDS]
+    if not dropped:
+        return kept
+    return f"{kept} {' '.join(f'[{found}]' for found in dropped)}"
+
+
 def parse_structured_claims(text: str) -> list[ClaimEvidence]:
     """Parse ``CLAIM:``-delimited blocks, tolerating missing optional fields.
 
@@ -334,13 +895,17 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
         technique_id: str | None = None
         if technique_match:
             raw_tid = technique_match.group(1).upper()
-            if raw_tid != "NONE" and _technique_id_is_valid(raw_tid):
+            # Kept as written. Whether the id is real, retired or a
+            # placeholder is ``attck.unknown_id``'s question, asked with
+            # feedback and recorded; a parser that dropped it here would be
+            # the silent rewrite this pipeline does not do.
+            if raw_tid != "NONE":
                 technique_id = raw_tid
 
         claims.append(
             ClaimEvidence(
                 claim=claim_text[:300],
-                evidence_ref=evidence_text[:200],
+                evidence_ref=evidence_ref_text(evidence_text),
                 confidence=confidence,
                 technique_id=technique_id,
             )
@@ -348,21 +913,9 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
     return claims
 
 
-def _technique_id_is_valid(tid: str) -> bool:
-    """Return True if a technique ID is within the ATT&CK enterprise range."""
-    if tid in _INVALID_TIDS:
-        return False
-    try:
-        major = int(tid[1:5])
-    except ValueError:
-        return False
-    return _TECHNIQUE_MIN <= major <= _TECHNIQUE_MAX
-
-
 def _extract_technique_ids(text: str) -> list[str]:
-    """Extract all unique valid MITRE ATT&CK technique IDs mentioned in text."""
-    candidates = _TECHNIQUE_RE.findall(text)
-    return list(dict.fromkeys(t for t in candidates if _technique_id_is_valid(t)))
+    """Every distinct technique id mentioned in the text, in order, as written."""
+    return list(dict.fromkeys(_TECHNIQUE_RE.findall(text)))
 
 
 def _messages_text(messages: list) -> str:
@@ -380,9 +933,10 @@ def _messages_text(messages: list) -> str:
 # not a content split. Views run concurrently and merge via merge_chunk_isrs.
 # ---------------------------------------------------------------------------
 
-# Generic, tools-free system prompt for a single view. Reproduces the analysts'
-# forced CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE format so _text_to_isr can parse it,
-# and carries the "cite an artifact, do not invent" rule the §3.2 study needs.
+# Generic, tools-free system prompt for a single view. Renders the same claim
+# format the analysts are given, so ``parse_structured_claims`` reads it and
+# the format is written in one place, and carries the "cite an artifact, do
+# not invent" rule the §3.2 study needs.
 _VIEW_SYSTEM = (
     "You are an expert malware analyst examining one focused facet of a sample. "
     "Analyse ONLY the aspect named in the instruction; ignore everything else. "
@@ -390,8 +944,7 @@ _VIEW_SYSTEM = (
     "registry key, host/domain). DO NOT invent capabilities or technique IDs — if "
     "the evidence does not support a claim, omit it. Cite MITRE ATT&CK technique "
     "IDs in the form Txxxx or Txxxx.yyy only when the evidence supports them.\n"
-    "Return each finding as:\nCLAIM: <text>\nEVIDENCE: <artifact>\n"
-    "CONFIDENCE: <0.0-1.0>\nTECHNIQUE: <T-ID or NONE>\n---"
+    + CLAIM_FORMAT_FRAGMENT
 )
 
 # Per-domain ordered facets. ``_view_specs`` returns the first N (N=2 -> the first
@@ -934,7 +1487,7 @@ def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
         # is ever *delivered* is a separate question, and one the watchdog
         # answers rather than assuming.
         _cancel_and_watch(loop, future, running, what)
-        raise TimeoutError(f"{what} exceeded hard cap of {hard_timeout}s") from None
+        raise TimeoutError(f"{what} exceeded hard cap of {int(hard_timeout)}s") from None
     except _FuturesCancelled as exc:
         # It cancelled itself. ``concurrent.futures.CancelledError`` is an
         # ``Exception`` whose ``str()`` is empty, so left alone it reaches the
@@ -985,7 +1538,7 @@ async def run_on_agent_loop(coro: Any, hard_timeout: float, label: str = "") -> 
         return await asyncio.wait_for(asyncio.wrap_future(future), hard_timeout)
     except TimeoutError:
         _cancel_and_watch(loop, future, running, what)
-        raise TimeoutError(f"{what} exceeded hard cap of {hard_timeout}s") from None
+        raise TimeoutError(f"{what} exceeded hard cap of {int(hard_timeout)}s") from None
     except (asyncio.CancelledError, _FuturesCancelled) as exc:
         # Same distinction as ``_run_coro_blocking``, and here the old code was
         # actively misleading: it folded cancellation into ``TimeoutError``, so
@@ -1028,6 +1581,41 @@ def prompt_to_messages(prompt_messages: list[tuple[str, str]]) -> list[BaseMessa
         elif role == "human":
             built.append(HumanMessage(content=content))
     return built
+
+
+def frame_messages(
+    messages: list[BaseMessage], *, facts_block: str = "", run_state: str = ""
+) -> list[BaseMessage]:
+    """The conversation with the run's two standing blocks in their places.
+
+    ``facts_block`` goes at the head of the first human turn, once: it is the
+    triage pack, and the human turn is where the task and the data are.
+    ``run_state`` goes into the first system turn between its markers,
+    replacing the block already there — the same conversation framed twice
+    carries one block, the newer one. Empty blocks change nothing, so an
+    agent outside a staged run sends exactly what it always sent.
+    """
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from maljan.pipeline.run_state import RUN_STATE_BEGIN, with_run_state
+    from maljan.pipeline.triage_pack import PACK_HEADING
+
+    out: list[BaseMessage] = list(messages)
+    if run_state or any(
+        isinstance(m, SystemMessage) and RUN_STATE_BEGIN in str(m.content) for m in out
+    ):
+        for index, message in enumerate(out):
+            if isinstance(message, SystemMessage):
+                out[index] = SystemMessage(content=with_run_state(str(message.content), run_state))
+                break
+    if facts_block:
+        for index, message in enumerate(out):
+            if isinstance(message, HumanMessage):
+                content = str(message.content)
+                if PACK_HEADING not in content:
+                    out[index] = HumanMessage(content=f"{facts_block}\n\n{content}")
+                break
+    return out
 
 
 def revision_messages(
@@ -1117,7 +1705,172 @@ class _PriorAnswer:
         self.content = isr.to_text_summary()
 
 
-class BaseAnalyst(ABC):
+def alignment_gate(knowledge: Any, cfg_validation: Any, log: Any, name: str) -> Any | None:
+    """The alignment gate for one validation turn, or ``None`` when it does not run.
+
+    ``auto`` runs it only on a worker whose ATT&CK index is already built;
+    with ``alignment_gate_build`` the first run that wanted it starts the
+    build on a thread and goes without, so no analyst's validation turn ever
+    pays for the build. ``off`` never runs it. A knowledge module without the
+    question — a stub — has no gate. A function rather than a method so a
+    duck-typed analyst that borrows ``_validate_isr`` alone still gets it.
+    """
+    mode = str(getattr(cfg_validation, "alignment_gate", "auto") or "auto")
+    if mode != "auto":
+        return None
+    warm = getattr(knowledge, "index_is_warm", None)
+    gate = getattr(knowledge, "technique_alignment", None)
+    if warm is None or gate is None:
+        return None
+    try:
+        if warm():
+            return gate
+        if bool(getattr(cfg_validation, "alignment_gate_build", False)):
+            started = getattr(knowledge, "warm_index_in_background", lambda: False)()
+            if started:
+                log.info(
+                    "%s: the ATT&CK index is being built for the alignment gate; "
+                    "this run goes without it.",
+                    name,
+                )
+    except Exception as exc:  # noqa: BLE001 — a gate that cannot start is no gate
+        log.debug("%s: alignment gate unavailable (%s).", name, exc)
+    return None
+
+
+class BudgetMeter:
+    """What one loop spent, announced as it runs and written down when it ends.
+
+    A mixin rather than a method on the analyst, because the judge runs a tool
+    loop too: it binds servers by role, its ledger entries carry its name, and
+    the console draws it as a step of the pipeline. One implementation is what
+    keeps its rows the same shape as an analyst's, and what keeps the two from
+    drifting the next time the meter grows a field.
+    """
+
+    name: str
+    logger: Any
+    pipeline_stage: str
+    _container: Any = None
+    # Read-only, so an agent built without ``__init__`` — a stand-in, a script
+    # — cannot drain another one's rows out of a list they all share.
+    _budget_records: Sequence[dict[str, Any]] = ()
+
+    def _event_sink(self) -> Any:
+        """The job's event sink, or ``None`` for an agent outside a job."""
+        return getattr(getattr(self, "_container", None), "event_sink", None)
+
+    def _publish_deltas(self, snapshot: Any, already: set[str]) -> None:
+        """Publish what this agent has newly said, once per turn it says it in.
+
+        The loop reads its graph as a stream of whole states, so the smallest
+        thing there is to publish is one model turn's text — not a token. That
+        is still the difference between a reader watching an analyst work and
+        a reader watching a dot for half an hour, which is what this is for.
+
+        A turn is identified by what the model said rather than counted, so a
+        state yielded twice publishes nothing twice. Never raises, and silent
+        when ``core.events.stream_deltas`` is off or there is no sink.
+        """
+        sink = self._event_sink()
+        if sink is None:
+            return
+        try:
+            from maljan.pipeline.events import emit_agent_message_delta, scrub
+
+            # The job's settings, not the process's: a switch this job was
+            # submitted under is the one that decides what this job publishes.
+            config = getattr(getattr(self, "_container", None), "config", None)
+            if not bool(getattr(getattr(config, "events", None), "stream_deltas", True)):
+                return
+            messages = snapshot.get("messages") if isinstance(snapshot, dict) else None
+            for index, message in enumerate(list(messages or [])):
+                if getattr(message, "type", "") != "ai":
+                    continue
+                marker = _turn_key(message, index)
+                if marker in already:
+                    continue
+                already.add(marker)
+                emit_agent_message_delta(
+                    sink,
+                    stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+                    agent=str(self.name),
+                    text_delta=scrub(str(getattr(message, "content", "") or "")),
+                )
+        except Exception as exc:  # noqa: BLE001 — a delta never costs a turn
+            self.logger.debug("%s: delta not published (%s).", self.name, exc)
+
+    def _budget_tick(
+        self, ledger: LoopBudget, messages: list, *, final: bool = False, ledger_entries: int = 0
+    ) -> None:
+        """One ``budget_tick`` for this loop as it stands. Never raises."""
+        from maljan.pipeline.events import emit_budget_tick
+
+        try:
+            emit_budget_tick(
+                self._event_sink(),
+                agent=str(self.name),
+                stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+                steps_used=_steps_this_loop_spent(ledger, messages),
+                max_steps=ledger.max_steps,
+                elapsed_s=time.monotonic() - ledger.started,
+                timeout_s=ledger.timeout,
+                prompt_chars=sum(_message_chars(m) for m in messages),
+                ledger_entries=ledger_entries,
+                final=final,
+            )
+        except Exception as exc:  # noqa: BLE001 — the meter never costs a turn
+            self.logger.debug("%s: budget tick skipped (%s).", self.name, exc)
+
+    def _record_budget(
+        self, ledger: LoopBudget, messages: list, cap: str | None, *, detail: str = ""
+    ) -> None:
+        """Write this loop's spend down, and announce the cap that ended it, if one did."""
+        from maljan.pipeline.events import emit_stage_ended_at_cap
+
+        stage = str(getattr(self, "pipeline_stage", "") or "analysis")
+        record: dict[str, Any] = {
+            "stage": stage,
+            "steps_used": _steps_this_loop_spent(ledger, messages),
+            "max_steps": ledger.max_steps,
+            "elapsed_s": round(time.monotonic() - ledger.started, 1),
+            "timeout_s": round(ledger.timeout, 1),
+            "delegated_steps": ledger.delegated_steps,
+            "cap": cap,
+        }
+        self._note_budget(record)
+        if cap:
+            emit_stage_ended_at_cap(
+                self._event_sink(), stage=stage, agent=str(self.name), cap=cap, detail=detail
+            )
+
+    def _note_budget(self, record: dict[str, Any]) -> None:
+        """Keep one loop's record, on this instance rather than on the class.
+
+        Under the meter's lock: the rebinding is a read-modify-write, and a
+        delegated hand-over runs it from an executor thread while this agent's
+        own loop may be recording one of its own.
+        """
+        with self._the_meter_s_lock():
+            self._budget_records = [*self._budget_records, record]
+
+    def _the_meter_s_lock(self) -> Any:
+        """This agent's lock for its read-modify-write counters, or nothing.
+
+        A duck-typed stand-in that borrows one of these methods and is never
+        driven from two threads has none and needs none.
+        """
+        return getattr(self, "_meter_lock", None) or contextlib.nullcontext()
+
+    def drain_budget_records(self) -> list[dict[str, Any]]:
+        """Every loop's budget record since the last drain, handing over ownership."""
+        with self._the_meter_s_lock():
+            records = list(self._budget_records)
+            self._budget_records = []
+        return records
+
+
+class BaseAnalyst(BudgetMeter, ABC):
     """Abstract base class for expert agents."""
 
     def __init__(self, llm: BaseChatModel, name: str, tools: list | None = None) -> None:
@@ -1125,6 +1878,14 @@ class BaseAnalyst(ABC):
         self.name = name
         self.tools = tools or []
         self.logger = logger.getChild(self.name.lower())
+        # What the pipeline established before this agent started, rendered
+        # for a prompt, and the ids of the entries it may cite for it. Set by
+        # the node on every run, empty for an agent outside a staged run.
+        self.facts_block: str = ""
+        self.pack_ledger_ids: list[str] = []
+        # The run-state block's body, derived from the state by the node and
+        # regenerated with the remaining budget on every turn of a tool loop.
+        self.run_state_block: str = ""
         # Per-run token ledger (findings-log §4 Item 1). The container attaches
         # the shared ledger in get_agent(); None when an agent runs standalone.
         self.token_ledger: TokenLedger | None = None
@@ -1132,6 +1893,9 @@ class BaseAnalyst(ABC):
         # node before it works. Read by the evidence recorder, so a ledger
         # entry says which step of the team made the call.
         self.pipeline_stage: str = "analysis"
+        # The job this agent serves, set by the container that built it. Every
+        # attach asks for it, so two agents in one job share their handles.
+        self._job_id: str = ""
         # Per-run truncation ledger (pitfall P6, findings-log §2.0). Same
         # lifecycle as token_ledger; None disables counting.
         self.truncation_ledger: Any | None = None
@@ -1161,6 +1925,19 @@ class BaseAnalyst(ABC):
         # chunked run it arrives once per chunk.
         self._findings_buffer: list[Finding] = []
         self._artifacts_buffer: list[Artifact] = []
+        # The answers of the asks this agent made, as the specialists' own
+        # ISRs. A lead's report is the only channel its chunk has out of a
+        # stage, so a lead whose loop died with six answered asks behind it
+        # took those answers down with it: the ledger held 52 entries and the
+        # stage merged nothing. They are kept here, labelled with the agent
+        # that produced them, and they are what the salvage below and the
+        # stage's merge fall back to.
+        self._delegated_isrs: list[AgentISR] = []
+        # How many of them a salvage turn has already been shown. The buffer
+        # itself is never drained: the stage promotes every answered ask, and
+        # a chunked lead's later salvage would otherwise re-read the first
+        # chunk's answers as if they were its own.
+        self._asks_already_synthesised = 0
         # Declared here rather than only in the subclasses that populate them,
         # because ``close_tools`` below has to be able to release them for any
         # analyst. ``toolkit`` is an MCP toolkit or a Ghidra HTTP client
@@ -1193,6 +1970,64 @@ class BaseAnalyst(ABC):
         # by the analyst node onto the state's validation channels.
         self.validation_findings: list[Violation] = []
         self.validation_retries: int = 0
+        # The checks that could not run on this analyst's answers — the
+        # validity check on a box with no catalogue — by code, once each.
+        # Drained by the node like the findings are.
+        self.validation_not_run: list[str] = []
+        # The routed ``(file_type, platform)`` of the sample this agent is
+        # working on, set by the node; the platform check reads it.
+        self.sample_format: tuple[str, str] = ("unknown", "unknown")
+        # Every violation this analyst was *shown*, by code. A violation the
+        # retry fixed leaves no other trace, and a run summary that counts only
+        # the leftovers cannot say what the retry was for.
+        self.validation_fed_back: dict[str, int] = {}
+        # Whether the last tool loop ended on something that was not a report,
+        # after its one nudge. Read by ``_text_to_isr`` so the ISR says why it
+        # is empty instead of leaving the reader to infer it from a claim list.
+        self._answer_unstructured: bool = False
+        # How the last final-answer nudge had to be sent when the plain way
+        # would not do, or ``None``. The node reads it into the run summary.
+        self._nudge_retry_mode: str | None = None
+        # Delegation state (``agents.delegation``). ``call_chain`` names the
+        # agents whose asks this one is answering, outermost first; empty for
+        # an agent running its own stage. ``loop_budget`` is the running
+        # loop's, so an ask made from inside it can read what is left and
+        # charge what the callee spent; ``_budget_ceiling`` is what a caller
+        # allows this agent when it is the callee. ``steps_spent`` counts every
+        # graph step this agent's loops have used, so a caller can charge the
+        # difference. ``current_round`` is the debate round the agent is
+        # working in, so an ask carries it. ``sample_path_choices`` is what the
+        # node pinned, which an ask reads to choose the callee's own mirror.
+        #
+        # The lock is this agent's for the whole job — the container caches one
+        # instance per key — and everything that drives the agent takes it: an
+        # ask of it, and its own stage. Two callers asking it at once, or an
+        # ask arriving while its own loop runs, would share one set of buffers,
+        # one budget and one call chain. Reentrant, because a chunked stage run
+        # enters through two of the wrappers that take it.
+        self.call_chain: tuple[str, ...] = ()
+        self.loop_budget: LoopBudget | None = None
+        self._budget_ceiling: BudgetCeiling | None = None
+        self.steps_spent: int = 0
+        self.current_round: int = 0
+        self.sample_path_choices = {}
+        self.delegation_lock = threading.RLock()
+        # The caller's side of the same rule: this agent's own asks run one
+        # after another, whether or not they name the same callee. A model
+        # that emits two ``ask_*`` calls in one turn has them gathered
+        # concurrently, and two nested loops against one llama-server slot
+        # clobber its recurrent state. A different object from the lock above,
+        # so an ask made from inside an ask still nests.
+        self.asks_lock = threading.Lock()
+        # Held while the meter's rows and the validation counters are read,
+        # changed and written back: those are read-modify-write, and a
+        # hand-over from a delegation runs on an executor thread.
+        self._meter_lock = threading.Lock()
+        # The budget meter's record of every loop this agent ran since the
+        # node last drained it: steps against the cap, seconds against the
+        # limit, and the cap that ended it when one did. The node writes it
+        # to the state and the judge reads it into ``run_summary.budget``.
+        self._budget_records: Sequence[dict[str, Any]] = []
 
     def _system_prompt(self, fallback: str | Callable[[], str]) -> str:
         """This analyst's system turn for the job it is actually running.
@@ -1272,7 +2107,9 @@ class BaseAnalyst(ABC):
                 )
             except Exception as exc:  # noqa: BLE001 — teardown never propagates
                 self.logger.warning(
-                    "Tool cleanup for %s failed (non-fatal): %s", self.name, describe_exception(exc)
+                    "Tool cleanup for %s failed (non-fatal): %s",
+                    self.name,
+                    describe_exception_for_log(exc),
                 )
 
         # Drop the references regardless, so a retained agent cannot keep a
@@ -1307,7 +2144,7 @@ class BaseAnalyst(ABC):
             self.logger.warning(
                 "%s MCP initialization failed (graceful degradation, continuing without tools): %s",
                 self.name,
-                describe_exception(exc),
+                describe_exception_for_log(exc),
             )
             return False
 
@@ -1324,7 +2161,7 @@ class BaseAnalyst(ABC):
 
     def _job_key(self) -> str:
         """A per-job identity for the handles' same-job short circuit."""
-        return str(getattr(self, "_job_id", "") or "job")
+        return self._job_id or "job"
 
     def _definition_tool_refs(self) -> list[Any]:
         """This agent definition's ``ToolRef``s, under the active profile.
@@ -1428,6 +2265,99 @@ class BaseAnalyst(ABC):
             agent_name=self.name,
         )
 
+    def _run_state_body(self, steps_left: int | None, seconds_left: float | None) -> str:
+        """The node's run-state lines plus this loop's remaining budget."""
+        body = str(getattr(self, "run_state_block", "") or "").rstrip()
+        if not body:
+            return ""
+        budget = []
+        if steps_left is not None:
+            budget.append(f"{max(0, int(steps_left))} model turns")
+        if seconds_left is not None:
+            budget.append(f"{max(0, int(seconds_left))} s")
+        return f"{body}\nbudget remaining: {', '.join(budget)}" if budget else body
+
+    def frame_messages(
+        self,
+        messages: list[BaseMessage],
+        *,
+        steps_left: int | None = None,
+        seconds_left: float | None = None,
+    ) -> list[BaseMessage]:
+        """``messages`` with this agent's facts block and run-state block in place."""
+        return frame_messages(
+            messages,
+            facts_block=str(getattr(self, "facts_block", "") or ""),
+            run_state=self._run_state_body(steps_left, seconds_left),
+        )
+
+    def _loop_limits(self) -> tuple[int, int]:
+        """This agent's ``(timeout, max_steps)`` for one loop; see ``loop_limits``."""
+        return loop_limits(self.name, getattr(self, "_budget_ceiling", None))
+
+    def _run_state_refresher(
+        self,
+        max_steps: int,
+        timeout: float,
+        started: float,
+        budget: LoopBudget | None = None,
+        recorder: Any = None,
+    ) -> Any:
+        """The per-turn hook that regenerates the run-state block's budget line.
+
+        Handed to the ReAct executor as its prompt: every model turn goes
+        through it, so the block the model reads says how many steps and
+        seconds this loop has left as of that turn. Nothing accumulates — the
+        block is replaced, not appended — and a loop with no block returns
+        the conversation untouched.
+
+        ``budget`` is the loop's own when the loop made one; the arguments
+        describe a fresh one otherwise, so a caller with only the three
+        numbers reads the same line. ``recorder`` is what the tick counts its
+        ledger entries from — without it every tick but the last published a
+        zero that meant "nobody asked" rather than "no calls yet".
+        """
+        ledger = budget if budget is not None else LoopBudget(max_steps, timeout, started)
+        from maljan.pipeline.events import BUDGET_TICK_EVERY
+
+        ticked: list[int] = [0]
+
+        def refresh(state: Any) -> list[BaseMessage]:
+            messages = state.get("messages") if isinstance(state, dict) else None
+            if messages is None:
+                messages = getattr(state, "messages", None) or []
+            messages = list(messages)
+            # Counted on every turn whether or not there is a block to show
+            # it in: the budget is what an ask from inside this loop reads.
+            ledger.note_turns(messages)
+            # The meter, every few steps: a tick per turn would be a stream
+            # of near-identical events on a forty-step loop.
+            used = steps_used(messages)
+            if budget is not None and used and used // BUDGET_TICK_EVERY > ticked[0]:
+                ticked[0] = used // BUDGET_TICK_EVERY
+                self._budget_tick(
+                    ledger,
+                    messages,
+                    ledger_entries=len(getattr(recorder, "entries", None) or []),
+                )
+            if not str(getattr(self, "run_state_block", "") or ""):
+                return messages
+            # The budget is stated in model turns (``model_turns_left``): the
+            # framing and the tool results cost nothing, an assistant turn
+            # costs one and a tool round costs one more, which is how the
+            # graph's recursion limit is spent.
+            try:
+                return self.frame_messages(
+                    messages,
+                    steps_left=ledger.turns_left(messages),
+                    seconds_left=ledger.seconds_left(),
+                )
+            except Exception as exc:  # noqa: BLE001 — the block never costs a turn
+                self.logger.debug("%s: run-state refresh skipped (%s).", self.name, exc)
+                return messages
+
+        return refresh
+
     def execute_tool_loop(self, prompt_messages: list) -> str:
         """Executes a tool-calling ReAct loop if tools are available.
 
@@ -1461,7 +2391,7 @@ class BaseAnalyst(ABC):
         analyst is killed at the configured ``react_agent_timeout`` budget
         regardless of which path it takes.
         """
-        from langchain_core.messages import HumanMessage, SystemMessage
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
         # Build BaseMessages directly so literal `{...}` substrings in the
         # report content (e.g. JSON like {"programs": [...]}) are not parsed
@@ -1473,13 +2403,33 @@ class BaseAnalyst(ABC):
             elif role == "human":
                 prebuilt.append(HumanMessage(content=content))
 
-        cfg_for_timeout = get_settings()
-        _timeout_overrides = getattr(cfg_for_timeout, "react_agent_timeout_overrides", {}) or {}
-        no_tools_timeout = _timeout_overrides.get(self.name, cfg_for_timeout.react_agent_timeout)
+        # Per-agent timeout override: the static analyst with 31 Ghidra tools
+        # never finishes inside 180 s on commodity hardware, so it gets the
+        # operator-configured headroom. Per-agent recursion-step override: its
+        # Ghidra loop needs far more than the default ~4-tool-call budget, and
+        # without it the loop hit the step cap and LangGraph returned the
+        # "need more steps" stop message instead of real claims. Both are
+        # capped by a caller's ceiling when this loop answers an ask.
+        timeout, max_steps = self._loop_limits()
+
+        # The two standing blocks: the pack at the head of the task, the run
+        # state in the system turn with this loop's whole budget still ahead.
+        prebuilt = self.frame_messages(
+            prebuilt, steps_left=model_turns_left(max_steps, []), seconds_left=float(timeout)
+        )
 
         if not self.tools:
-            return self._capture_findings(self._invoke_llm_with_timeout(prebuilt, no_tools_timeout))
+            plain = LoopBudget(int(max_steps), float(timeout))
+            try:
+                answer = self._invoke_llm_with_timeout(prebuilt, timeout)
+            except TimeoutError:
+                self._record_budget(plain, [], "time", detail="the model did not answer in time")
+                raise
+            self.steps_spent += 1
+            self._record_budget(plain, [], None)
+            return self._capture_findings(answer)
 
+        from langgraph.errors import GraphRecursionError
         from langgraph.prebuilt import create_react_agent
 
         self.logger.info("Starting ReAct agent loop with %d tools...", len(self.tools))
@@ -1489,7 +2439,13 @@ class BaseAnalyst(ABC):
         # what gives each call its timing, its outcome and the id the model was
         # shown. What it gathered is appended to the agent's buffer at the end;
         # nothing is reset here, because this may be the second of ten chunks.
-        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from maljan.agents.evidence_recorder import (
+            ArgumentRepairs,
+            EvidenceRecorder,
+            RepeatGuard,
+            record_tools,
+            repair_invalid_tool_calls,
+        )
 
         # An agent built outside a container has no counter attached, and one
         # per loop would issue ``ev_0001`` twice to the same buffer. It keeps
@@ -1503,23 +2459,59 @@ class BaseAnalyst(ABC):
             # which step of the team made the call rather than the constant
             # "analysis" every entry carried when there was only one.
             stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+            sink=self._event_sink(),
         )
-        agent_executor = create_react_agent(self.llm, record_tools(self.pinned_tools(), recorder))
+        # The repeat guard is per loop, like the recorder: a second chunk is a
+        # new conversation and the model has not seen the first one's answers.
+        repeats = RepeatGuard()
+        # The arguments this loop had to close off, so the ledger entry for
+        # such a call says so and keeps what the model actually wrote.
+        repairs = ArgumentRepairs()
 
         messages = prebuilt
 
-        cfg = get_settings()
-        # Per-agent timeout override. The static
-        # analyst with 31 Ghidra tools never finishes inside 180 s on
-        # commodity hardware; give it the operator-configured headroom.
-        overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
-        timeout = overrides.get(self.name, cfg.react_agent_timeout)
-        # Per-agent recursion-step override: the
-        # static analyst's Ghidra ReAct loop needs far more than the default
-        # ~4-tool-call budget. Without this it hit the step cap and LangGraph
-        # returned the "need more steps" stop message instead of real claims.
-        step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
-        max_steps = step_overrides.get(self.name, cfg.react_agent_max_steps)
+        # The loop's budget, readable by an ask made from inside it and
+        # charged by the delegation when the callee returns.
+        budget = LoopBudget(int(max_steps), float(timeout))
+        self.loop_budget = budget
+
+        # The run-state block is regenerated on every model turn with the
+        # budget this loop has left, which is why the executor's prompt is a
+        # callable rather than the fixed messages.
+        # The per-turn refresher rides ``create_react_agent(prompt=...)``, which
+        # langgraph 1.x deprecates in favour of ``langchain.agents.create_agent``
+        # and its middleware hook. The contract this loop needs is one call
+        # before every model turn that can replace the system message; that is
+        # what moves when the helper does.
+        def _close_off_truncated_calls(answer: Any) -> Any:
+            """The model's turn with a call it ran out of room to finish made good.
+
+            Appended to the model rather than added as a node: a node is a
+            superstep, and a seam that cost one would quietly take a third of
+            every loop's tool rounds away. Here the loop's shape is exactly
+            what it was — langgraph sees one message from the model, and what
+            it sees is the message with the call in ``tool_calls`` where the
+            arguments could be closed off, and untouched where they could not.
+            """
+            try:
+                repaired = repair_invalid_tool_calls(answer, repairs)
+            except Exception as exc:  # noqa: BLE001 — a repair never costs a loop
+                self.logger.debug("tool argument repair skipped (%s).", exc)
+                return answer
+            return repaired if repaired is not None else answer
+
+        recorded = record_tools(self.pinned_tools(), recorder, repeats, repairs)
+        agent_executor = create_react_agent(
+            _model_that_closes_off_truncated_calls(self.llm, recorded, _close_off_truncated_calls),
+            recorded,
+            prompt=self._run_state_refresher(
+                int(max_steps),
+                float(timeout),
+                budget.started,
+                budget=budget,
+                recorder=recorder,
+            ),
+        )
 
         # Run the ReAct coroutine on the shared, never-closing agent
         # loop (see ``_get_agent_loop``) instead of a throwaway per-call loop.
@@ -1543,14 +2535,74 @@ class BaseAnalyst(ABC):
             # retried — the anti-storm intent is preserved.
             from openai import APIConnectionError
 
+            # The conversation as the stream last left it.
+            latest: dict = {"messages": list(messages)}
+
+            async def _until_it_answers_or_repeats() -> dict:
+                """The ReAct loop, ended early once it is only repeating itself.
+
+                Streamed rather than awaited whole for one reason: a loop that
+                has spent three turns re-asking for answers it already has is
+                not going to spend the fourth differently, and ending it needs
+                the conversation as it stands. ``stream_mode="values"`` yields
+                the state after each step, so the last one is what ``ainvoke``
+                would have returned.
+
+                Closed explicitly on the way out. Breaking out of an ``async
+                for`` leaves the generator suspended and the graph behind it
+                alive until the loop's finalizer gets to it, and on a box with
+                one llama-server slot a run that is still alive is not free.
+                """
+                stream: Any = agent_executor.astream(
+                    {"messages": messages},
+                    {"recursion_limit": max_steps},
+                    stream_mode="values",
+                )
+                spoken: set[str] = set()
+                async with contextlib.aclosing(stream) as snapshots:
+                    try:
+                        async for snapshot in snapshots:
+                            latest.update(snapshot)
+                            self._publish_deltas(snapshot, spoken)
+                            if repeats.ending_the_loop():
+                                self.logger.warning(
+                                    "%s ReAct loop ended after %d repeated tool call(s); "
+                                    "synthesising from what it gathered.",
+                                    self.name,
+                                    repeats.served_repeats,
+                                )
+                                break
+                    except GraphRecursionError:
+                        # The step cap, reached without langgraph's own
+                        # "need more steps" turn — which it only takes when
+                        # the model asks for a tool with fewer than two steps
+                        # left, and never when the cap is small. The
+                        # conversation up to here is what the loop gathered,
+                        # and the salvage below turns it into claims: an
+                        # agent at its cap writes up what it has, and a
+                        # recursion error is not something a model can read.
+                        self.logger.warning(
+                            "%s ReAct loop reached its %d-step cap; "
+                            "synthesising from what it gathered.",
+                            self.name,
+                            max_steps,
+                        )
+                        latest["messages"] = [
+                            *list(latest.get("messages") or []),
+                            AIMessage(content=RECURSION_STOP_TEXT),
+                        ]
+                return dict(latest)
+
             last_conn_exc: Exception | None = None
             for _attempt in range(3):
+                # A replayed conversation is a fresh loop as far as the model
+                # is concerned: it is about to re-make the calls it made before
+                # the connection dropped, and counting those as repeats ends an
+                # analyst for a blip the retry exists to absorb.
+                repeats.reset()
                 try:
                     result = await asyncio.wait_for(
-                        agent_executor.ainvoke(
-                            {"messages": messages},
-                            {"recursion_limit": max_steps},
-                        ),
+                        _until_it_answers_or_repeats(),
                         timeout=float(timeout),
                     )
                     msg_count = len(result.get("messages", []))
@@ -1587,7 +2639,7 @@ class BaseAnalyst(ABC):
         import time as _time
 
         _t0 = _time.monotonic()
-        hard_timeout = timeout + 30
+        hard_timeout = hard_cap(timeout, getattr(self, "_budget_ceiling", None))
         try:
             try:
                 thread_result: dict | None = _run_coro_blocking(
@@ -1598,6 +2650,12 @@ class BaseAnalyst(ABC):
                     "%s ReAct agent exceeded the %ds hard cap; aborting this analyst.",
                     self.name,
                     hard_timeout,
+                )
+                self._record_budget(
+                    budget,
+                    [],
+                    "time",
+                    detail=f"the loop exceeded its {int(hard_timeout)}s hard cap",
                 )
                 raise
             except AnalystError:
@@ -1611,11 +2669,15 @@ class BaseAnalyst(ABC):
             # thirty Ghidra calls made thirty calls, and losing all of them
             # because the last one timed out is the opposite of a ledger.
             self._finish_evidence(recorder)
+            self.loop_budget = None
 
         if thread_result is None:
             raise AnalystError(f"{self.name} ReAct agent returned no result")
 
         msgs = thread_result.get("messages", []) or []
+        # What this loop cost: its own turns. What it asked for is the
+        # callee's own budget and is counted under the callee.
+        self.steps_spent += steps_used(msgs)
         # Tool calls are AIMessage instances whose ``tool_calls`` attribute
         # is a non-empty list. Counting them is cheap and the most useful
         # single metric for "did this analyst overspend on Ghidra".
@@ -1679,8 +2741,20 @@ class BaseAnalyst(ABC):
         # tool-calling and synthesise now, so the gathered evidence becomes real
         # claims instead of a useless "need more steps" non-answer.
         hit_step_cap = bool(_RECURSION_STOP_RE.search(content))
+        # A loop ended for repeating itself is in the same place as one that
+        # spent its steps: it has evidence and no answer, and the salvage is
+        # what turns the first into the second.
+        ended_early = repeats.ending_the_loop()
         self._record_react_loop(hit_step_cap=hit_step_cap)
-        if tool_call_count > 0 and (not content.strip() or hit_step_cap):
+        cap = "repeats" if repeats.ending_the_loop() else "steps" if hit_step_cap else None
+        self._record_budget(
+            budget,
+            msgs,
+            cap,
+            detail=(f"{repeats.served_repeats} repeated tool call(s)" if cap == "repeats" else ""),
+        )
+        self._budget_tick(budget, msgs, final=True, ledger_entries=len(recorder.entries))
+        if tool_call_count > 0 and (not content.strip() or hit_step_cap or ended_early):
             self.logger.warning(
                 "%s ReAct loop ended without a final answer after %d tool calls "
                 "(messages=%d); forcing synthesis from gathered tool output.",
@@ -1695,8 +2769,141 @@ class BaseAnalyst(ABC):
             # 1,530 s cap, and zero techniques out the other side.
             synthesized = self._force_final_synthesis(msgs, timeout, elapsed)
             if synthesized.strip() and not _RECURSION_STOP_RE.search(synthesized):
-                return self._capture_findings(synthesized)
-        return self._capture_findings(content)
+                content = synthesized
+                msgs = [*msgs, AIMessage(content=synthesized)]
+
+        # A final message that is neither a structured report nor a findings
+        # block is not an answer. The loop's own stop condition cannot see that
+        # — LangGraph stops as soon as the model emits no tool call — so a model
+        # that narrated its next step and then fell silent used to reach
+        # ``_text_to_isr`` as prose, and the sentence splitter made a claim out
+        # of "Let me search for more specific strings related to malware
+        # indicators:" at 0.5. Say so once, in the same conversation, and give
+        # it the step to answer in.
+        return self._capture_findings(
+            self._settle_final_answer(content, msgs, timeout, elapsed, max_steps)
+        )
+
+    def _settle_final_answer(
+        self, content: str, msgs: list, timeout: int, elapsed: float, max_steps: int
+    ) -> str:
+        """The loop's answer, nudged once if it was not a report, and judged.
+
+        Sets ``_answer_unstructured``, which is what makes the analyst report
+        ``no_claims`` rather than an empty ISR that reads like an analyst with
+        nothing to say.
+        """
+        self._answer_unstructured = False
+        if answer_is_isr(content):
+            return content
+        nudged = self._nudge_for_final_answer(msgs, timeout, elapsed, max_steps)
+        # Only when the nudge answered the question. Taking any non-empty text
+        # would let a second non-report — often shorter than the first —
+        # replace what the loop actually produced.
+        if nudged is not None and answer_is_isr(nudged):
+            return nudged
+        self.logger.warning(
+            "%s: the loop ended without a structured report even after the nudge; reporting %s.",
+            self.name,
+            NO_STRUCTURED_REPORT_STATUS,
+        )
+        self._answer_unstructured = True
+        return content
+
+    def _nudge_for_final_answer(
+        self, msgs: list, timeout: int, elapsed: float, max_steps: int
+    ) -> str | None:
+        """Ask once for the report the loop did not produce; ``None`` on failure.
+
+        Bounded in both dimensions, like ``_force_final_synthesis``: the extra
+        turn counts against ``max_steps`` (the conversation already spent
+        ``len(msgs)`` of them, and a loop with nothing left gets no nudge) and
+        against the time the loop has already used. Never raises — a nudge that
+        cannot run leaves the answer exactly as the loop left it.
+        """
+        from langchain_core.messages import HumanMessage
+
+        remaining_steps = model_turns_left(max_steps, list(msgs))
+        if remaining_steps < 1:
+            self.logger.info(
+                "%s: no step budget left for the final-answer nudge.",
+                self.name,
+            )
+            return None
+        remaining_time = float(timeout) - elapsed
+        if remaining_time <= 1.0:
+            self.logger.info("%s: no time budget left for the final-answer nudge.", self.name)
+            return None
+
+        self.logger.warning(
+            "%s: the loop's last message was not a final report; asking once for one.",
+            self.name,
+        )
+        sendable, dropped = nudge_turns(msgs)
+        modes: list[str] = ["invalid_tool_calls_dropped"] if dropped else []
+        if dropped:
+            self.logger.warning(
+                "%s: the nudge leaves out a tool call whose arguments never parsed.", self.name
+            )
+        turns = [*sendable, HumanMessage(content=FINAL_ANSWER_NUDGE)]
+        budget = min(remaining_time, float(timeout))
+
+        def _ask_with(model: Any, label: str) -> Any:
+            async def _ask() -> Any:
+                return await asyncio.wait_for(model.ainvoke(turns), timeout=budget)
+
+            return _run_coro_blocking(_ask(), budget + 5, label=label)
+
+        try:
+            answer = _ask_with(self.llm, f"nudge:{self.name}")
+        except Exception as exc:  # noqa: BLE001 — a nudge that fails is asked one other way
+            self.logger.warning("%s: the final-answer nudge failed (%s).", self.name, exc)
+            # The other shape the server accepts: the loop's own tools bound
+            # and forbidden, so the transcript renders as the loop rendered
+            # it and the model still has to answer in prose.
+            withheld = self._llm_with_tools_withheld()
+            if withheld is None:
+                self._nudge_retry_mode = "+".join(modes) or None
+                return None
+            try:
+                answer = _ask_with(withheld, f"nudge-tools-none:{self.name}")
+            except Exception as again:  # noqa: BLE001 — changes nothing
+                self.logger.warning(
+                    "%s: the final-answer nudge failed with tools withheld too (%s).",
+                    self.name,
+                    again,
+                )
+                self._nudge_retry_mode = "+".join(modes) or None
+                return None
+            modes.append("tool_choice_none")
+        self._nudge_retry_mode = "+".join(modes) or None
+        record_response_usage(self.token_ledger, answer)
+        text = str(getattr(answer, "content", "") or "")
+        return text or None
+
+    def _llm_with_tools_withheld(self) -> Any | None:
+        """This agent's model with its tools bound and ``tool_choice="none"``, or ``None``.
+
+        ``None`` when the agent has no tools or the model cannot bind them;
+        the caller then has no second way to ask.
+        """
+        tools = list(getattr(self, "tools", None) or [])
+        bind = getattr(self.llm, "bind_tools", None)
+        if not tools or bind is None:
+            return None
+        # The same tools the loop was run with, guards included, so the
+        # server sees the tool list the transcript was produced against. An
+        # agent that cannot pin — one built outside a job — binds them bare.
+        try:
+            pinned = self.pinned_tools()
+        except Exception as exc:  # noqa: BLE001 — the bare tools are the fallback's fallback
+            self.logger.debug("%s: tools bound unpinned for the nudge (%s).", self.name, exc)
+            pinned = tools
+        try:
+            return bind(pinned, tool_choice="none")
+        except Exception as exc:  # noqa: BLE001 — a model that cannot bind has no fallback
+            self.logger.debug("%s: tools could not be bound for the nudge (%s).", self.name, exc)
+            return None
 
     def _record_react_loop(self, *, hit_step_cap: bool) -> None:
         """Count one ReAct loop and whether it exhausted its step budget.
@@ -1842,6 +3049,29 @@ class BaseAnalyst(ABC):
             )
             return ""
 
+        budget = synthesis_budget_chars(get_settings(), self.name)
+        # The same transcript rule the nudge follows: a tool call whose
+        # arguments never parsed is not sent back to the server.
+        sendable, _dropped = nudge_turns(msgs)
+        trimmed = _trim_for_synthesis(sendable, budget)
+        if len(trimmed) < len(msgs):
+            self.logger.warning(
+                "%s forced synthesis: trimmed %d of %d messages to fit %d chars.",
+                self.name,
+                len(msgs) - len(trimmed),
+                len(msgs),
+                budget,
+            )
+        # What the model can still see, named for it. Trimming drops whole
+        # tool calls, so an id that was in the conversation a moment ago may
+        # not be any more, and an analyst citing one it can no longer read is
+        # how "referenced but not displayed" got into a report.
+        visible = ledger_ids_in(trimmed)
+        citable = (
+            "The evidence still in front of you is " + ", ".join(visible) + ". Cite only these ids."
+            if visible
+            else "Cite only evidence ids that appear above."
+        )
         directive = HumanMessage(
             content=(
                 "You have gathered enough tool output above. Do NOT request or "
@@ -1849,18 +3079,9 @@ class BaseAnalyst(ABC):
                 "in this conversation, write your FINAL answer now in the exact "
                 "format the system prompt requested. Where the evidence is "
                 "genuinely insufficient for a point, state that briefly instead "
-                "of asking for more steps."
+                "of asking for more steps. " + citable
             )
         )
-        trimmed = _trim_for_synthesis(msgs, _SYNTHESIS_MAX_CHARS)
-        if len(trimmed) < len(msgs):
-            self.logger.warning(
-                "%s forced synthesis: trimmed %d of %d messages to fit %d chars.",
-                self.name,
-                len(msgs) - len(trimmed),
-                len(msgs),
-                _SYNTHESIS_MAX_CHARS,
-            )
         try:
             return self._invoke_llm_with_timeout([*trimmed, directive], remaining)
         except Exception as exc:  # noqa: BLE001 - best-effort salvage
@@ -1905,7 +3126,7 @@ class BaseAnalyst(ABC):
             return str(response.content)
 
         _t0 = _time.monotonic()
-        hard_timeout = timeout + 30
+        hard_timeout = hard_cap(timeout, getattr(self, "_budget_ceiling", None))
         try:
             content = _run_coro_blocking(_invoke(), hard_timeout, label=f"llm:{self.name}")
         except TimeoutError:
@@ -1980,6 +3201,34 @@ class BaseAnalyst(ABC):
         isr = self._text_to_isr(revised_text, revision_round=revision_round)
         return revised_text, isr
 
+    def answer_task(self, task: str) -> tuple[str, AgentISR]:
+        """Work on one task another agent handed over, and answer with claims.
+
+        The delegated path (``agents.delegation``): the agent's own system
+        prompt, the task as the human turn — framed like every other first
+        turn, with the pack in front and the run state in the system turn —
+        the tool loop, the parse into claims, and the same checks an answer to
+        a stage gets: the consistency gate and the technique check, in this
+        agent's own conversation. Returns the loop's text and the checked ISR.
+
+        The evidence the gate and the check read is the task plus what this
+        loop's own tool calls returned: a delegated answer rests on what the
+        agent went and looked at, not on a data chunk it was handed.
+
+        Raises whatever the loop raises. A caller reads the failure as a tool
+        error, which is the honest answer to an ask that could not be done.
+        """
+        self._try_initialize_mcp()
+        before = len(self._evidence_entries)
+        text = self.execute_tool_loop([("system", self._system_prompt("")), ("human", task)])
+        gathered = "\n".join(
+            str(getattr(entry, "output", "") or "") for entry in self._evidence_entries[before:]
+        )
+        evidence = f"{task}\n{gathered}" if gathered else task
+        isr = self._text_to_isr(text, revision_round=int(self.current_round))
+        isr = self._validate_isr(self._apply_consistency_gate(isr, evidence), evidence)
+        return text, self._drain_findings(isr)
+
     # ------------------------------------------------------------------
     # Safe wrappers (error handling + token protection)
     # ------------------------------------------------------------------
@@ -1996,19 +3245,160 @@ class BaseAnalyst(ABC):
             raise AnalystError(f"{self.name} analysis failed: {e}") from e
 
     def safe_analyze_isr(self, data: str) -> AgentISR:
-        """Wrapper around analyze_isr() with error handling and token protection."""
+        """Wrapper around analyze_isr() with error handling and token protection.
+
+        Under this agent's delegation lock, so an ask of it waits while its own
+        stage runs and its own stage waits while it is answering one: both
+        drive the same buffers, the same budget and the same call chain.
+        """
+        self.current_round = 0
+        with lock_for(self):
+            return self._analyze_isr_guarded(data)
+
+    def _analyze_isr_guarded(self, data: str) -> AgentISR:
+        # Whatever the loop is given, kept where the handlers below can reach
+        # it: the salvage needs the same text the analysis had, and asking for
+        # it again inside a handler is how a failing truncate would raise out
+        # of the branch that is reporting a different failure.
+        truncated = data
         try:
             truncated = self._truncate_input(data)
             isr = self.analyze_isr(truncated)
+            if not isr.claims:
+                # An analyst whose loop ended without a report answers with an
+                # empty ISR rather than raising, so the salvage belongs here as
+                # much as on the failure path below: a lead's cap arrives as
+                # "no claims" and takes every answered ask with it.
+                salvaged = self._synthesise_from_answered_asks()
+                if salvaged is not None and salvaged.claims:
+                    isr = salvaged
             return self._validate_isr(self._apply_consistency_gate(isr, truncated), truncated)
         except AnalystError:
+            salvaged = self._salvaged_isr(truncated)
+            if salvaged is not None:
+                return salvaged
             raise
         except Exception as e:
-            self.logger.error("ISR analysis failed: %s", describe_exception(e))
-            raise AnalystError(f"{self.name} ISR analysis failed: {describe_exception(e)}") from e
+            self.logger.error("ISR analysis failed: %s", describe_exception_for_log(e))
+            salvaged = self._salvaged_isr(truncated)
+            if salvaged is not None:
+                return salvaged
+            raise AnalystError(
+                f"{self.name} ISR analysis failed: {describe_exception_for_log(e)}"
+            ) from e
+
+    def _salvaged_isr(self, evidence: str) -> AgentISR | None:
+        """A report written from the answered asks, checked like any other.
+
+        Through the same gate and the same validation the ordinary path takes:
+        a salvaged report that cites what it cannot see is the failure mode
+        the gate exists for, and it is the report most likely to.
+
+        ``evidence`` is the text the analysis was given, already truncated by
+        the caller. Nothing here may raise: this runs inside the handler that
+        is reporting the original failure, and a salvage that threw would
+        replace that failure with its own.
+        """
+        try:
+            salvaged = self._synthesise_from_answered_asks()
+            if salvaged is None:
+                return None
+            return self._validate_isr(self._apply_consistency_gate(salvaged, evidence), evidence)
+        except Exception as exc:  # noqa: BLE001 — the original failure is the one to report
+            self.logger.error(
+                "%s: the salvaged report could not be checked: %s",
+                self.name,
+                describe_exception_for_log(exc),
+            )
+            return None
+
+    def answered_asks(self) -> list[AgentISR]:
+        """The specialists' own ISRs, for the asks this agent got answers to.
+
+        A peek rather than a drain: the stage node reads it when a lead's own
+        report never arrived, and it is the lead's loop that owns the buffer.
+        """
+        return list(getattr(self, "_delegated_isrs", None) or [])
+
+    def remember_answered_ask(self, isr: AgentISR) -> None:
+        """Keep a specialist's answer where the salvage and the stage can find it."""
+        if isr is None:
+            return
+        buffer = getattr(self, "_delegated_isrs", None)
+        if isinstance(buffer, list):
+            buffer.append(isr)
+
+    def _synthesise_from_answered_asks(self) -> AgentISR | None:
+        """One bounded turn that writes a lead's report from the asks it got back.
+
+        A lead delegates, and its own report is the only way its stage hears
+        about the answers. When the loop dies — the wall-clock cap, most of
+        all, which is what an 1,800 s lead chunk hits — the transcript it died
+        in is gone and the answers go with it. They do not have to: the
+        specialists' ISRs are on this agent, and one turn over them produces
+        the report the loop was about to write.
+
+        ``None`` when there is nothing to synthesise from or the turn itself
+        failed, and then the caller's own failure stands: the stage promotes
+        the specialists' answers instead, which loses the lead's synthesis but
+        no completed ask.
+        """
+        answers = self.answered_asks()[self._asks_already_synthesised :]
+        if not answers:
+            return None
+        # A chunked lead re-enters this loop once per chunk, and the answers it
+        # got in the first chunk are not answers to the second chunk's asks.
+        # The buffer keeps all of them — the stage promotes every one — and
+        # each salvage turn is shown only what came in since the last.
+        self._asks_already_synthesised = len(self.answered_asks())
+        self.logger.warning(
+            "%s: the loop ended without a report and %d ask(s) had been answered; "
+            "synthesising from those answers.",
+            self.name,
+            len(answers),
+        )
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        blocks = [
+            f"ANSWER FROM {isr.agent_id}:\n{isr.to_text_summary()}"
+            for isr in answers
+            if isr is not None
+        ]
+        prompt = self._system_prompt("")
+        messages: list[Any] = []
+        if prompt:
+            messages.append(SystemMessage(content=prompt))
+        messages.append(
+            HumanMessage(
+                content=(
+                    "Your own analysis turn ended before you wrote your report, and the "
+                    "specialists you asked have answered. Using ONLY those answers, write "
+                    "your FINAL answer now in the exact format the system prompt "
+                    "requested. Do not call any tools. Cite the evidence ids the answers "
+                    "cite, and attribute each point to the specialist that made it.\n\n"
+                    + "\n\n".join(blocks)
+                )
+            )
+        )
+        try:
+            text = self._invoke_llm_with_timeout(messages, _SYNTHESIS_MIN_SECONDS)
+        except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves the failure
+            self.logger.error(
+                "%s: synthesis from the answered asks failed: %s",
+                self.name,
+                describe_exception_for_log(exc),
+            )
+            return None
+        if not answer_is_isr(text):
+            return None
+        return self._text_to_isr(self._capture_findings(text), 0)
 
     def safe_analyze_isr_chunked(self, chunks: list) -> AgentISR:
         """Analyze a list of TextChunk objects, merging their ISRs.
+
+        Each chunk's loop runs under this agent's delegation lock, the same one
+        a single-chunk run and an ask of it take, so nothing else drives the
+        agent while one of its chunks is in flight.
 
         Raises:
             AnalystError: If the chunk list is empty or analysis fails on all
@@ -2031,7 +3421,11 @@ class BaseAnalyst(ABC):
         for chunk in chunks:
             prompt_text = f"{chunk.to_prompt_header()}\n\n{chunk.content}"
             try:
-                isr = self.analyze_isr(prompt_text)
+                # Each chunk's loop under this agent's lock, so an ask of it
+                # cannot run inside one: an ask drives the same buffers, the
+                # same budget and the same call chain this loop is using.
+                with lock_for(self):
+                    isr = self.analyze_isr(prompt_text)
                 chunk_isrs.append(isr)
                 self.logger.debug(
                     "Chunk %d/%d analyzed: %d claims.",
@@ -2170,9 +3564,11 @@ class BaseAnalyst(ABC):
         except AnalystError:
             raise
         except Exception as e:
-            self.logger.error("View-decomposition ISR analysis failed: %s", describe_exception(e))
+            self.logger.error(
+                "View-decomposition ISR analysis failed: %s", describe_exception_for_log(e)
+            )
             raise AnalystError(
-                f"{self.name} view-decomposition failed: {describe_exception(e)}"
+                f"{self.name} view-decomposition failed: {describe_exception_for_log(e)}"
             ) from e
 
     # ------------------------------------------------------------------
@@ -2263,9 +3659,11 @@ class BaseAnalyst(ABC):
         except AnalystError:
             raise
         except Exception as e:
-            self.logger.error("Tier-wise reasoning ISR analysis failed: %s", describe_exception(e))
+            self.logger.error(
+                "Tier-wise reasoning ISR analysis failed: %s", describe_exception_for_log(e)
+            )
             raise AnalystError(
-                f"{self.name} tier-wise reasoning failed: {describe_exception(e)}"
+                f"{self.name} tier-wise reasoning failed: {describe_exception_for_log(e)}"
             ) from e
 
     # ------------------------------------------------------------------
@@ -2291,8 +3689,60 @@ class BaseAnalyst(ABC):
             self.logger.debug("Validation skipped, the knowledge tools are unavailable: %s", exc)
             return isr
 
+        # What this analyst may cite: its own ledger as it stands when the
+        # answer is checked, and the triage pack's entries, which every agent
+        # was shown. It decides whether a technique claim that cites nothing
+        # is a violation: an analyst with neither has nothing to cite.
+        ledger_ids = [
+            str(getattr(entry, "id", ""))
+            for entry in (getattr(self, "_evidence_entries", None) or [])
+            if getattr(entry, "id", "")
+        ]
+        ledger_ids.extend(
+            str(i) for i in (getattr(self, "pack_ledger_ids", None) or []) if str(i).strip()
+        )
+
+        # The validity check answers from the vendored id universe; a box
+        # without it cannot check anything, and says so in the run summary
+        # instead of reporting every id as fine.
+        if not validity_check_available(knowledge):
+            not_run = getattr(self, "validation_not_run", None)
+            if not_run is None:
+                not_run = []
+                self.validation_not_run = not_run
+            if VALIDITY_CODE not in not_run:
+                not_run.append(VALIDITY_CODE)
+            self.logger.warning(
+                "%s: the ATT&CK catalogue is unavailable; technique ids are not checked.",
+                self.name,
+            )
+
+        file_type, platform = getattr(self, "sample_format", ("unknown", "unknown"))
+        sample = {"file_type": file_type, "platform": platform}
+        cfg_validation = getattr(get_settings(), "validation", None)
+        gate = alignment_gate(knowledge, cfg_validation, self.logger, self.name)
+        threshold = float(getattr(cfg_validation, "alignment_threshold", 0.05) or 0.05)
+        margin = float(getattr(cfg_validation, "alignment_margin", ALIGNMENT_MARGIN))
+        challenges = bool(getattr(cfg_validation, "weak_alignment", False))
+        # One weak-alignment batch per turn. The ranking is recorded on every
+        # claim every time; what is bounded is the asking, because a second
+        # batch would spend another full model turn on a check whose first
+        # batch the analyst has already answered.
+        asked: list[bool] = []
+
         def _validator(candidate: AgentISR) -> list[Violation]:
-            return validate_isr(candidate, attck=knowledge)
+            first = not asked
+            asked.append(True)
+            return validate_isr(
+                candidate,
+                attck=knowledge,
+                ledger_ids=ledger_ids,
+                sample=sample,
+                alignment=gate,
+                alignment_threshold=threshold,
+                alignment_margin=margin,
+                weak_alignment_challenges=challenges and first,
+            )
 
         try:
             if not _validator(isr):
@@ -2308,13 +3758,17 @@ class BaseAnalyst(ABC):
         if prompt:
             messages.append(SystemMessage(content=prompt))
         messages.append(HumanMessage(content=self._truncate_input(evidence)))
-
-        cfg = get_settings()
-        timeout = int(
-            (getattr(cfg, "react_agent_timeout_overrides", {}) or {}).get(
-                self.name, cfg.react_agent_timeout
-            )
+        # Framed like every other turn: the feedback asks the analyst to cite
+        # ledger ids, and the pack is where the ids it can cite are written.
+        # Through the module function, so a duck-typed analyst that borrows
+        # this method alone is framed too.
+        messages = frame_messages(
+            messages,
+            facts_block=str(getattr(self, "facts_block", "") or ""),
+            run_state=str(getattr(self, "run_state_block", "") or ""),
         )
+
+        timeout, _steps = loop_limits(self.name, getattr(self, "_budget_ceiling", None))
         first: list[Any] = [_PriorAnswer(isr)]
 
         def _run(turns: list[Any]) -> Any:
@@ -2329,14 +3783,24 @@ class BaseAnalyst(ABC):
             return self._text_to_isr(self._capture_findings(text), isr.revision_round)
 
         try:
+            tally = ValidationTally()
             revised, violations, retries = retry_with_feedback_sync(
-                _run, messages, [_validator], parse=_parse
+                _run,
+                messages,
+                [_validator],
+                parse=_parse,
+                on_feedback=tally.count,
+                sink=self._event_sink(),
+                agent=str(self.name),
+                stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
             )
         except Exception as exc:  # noqa: BLE001 — a retry that fails keeps the first answer
             self.logger.warning("Validation retry failed (%s); keeping the first answer.", exc)
             return isr
 
         self.validation_retries += retries
+        for code, count in tally.by_code.items():
+            self.validation_fed_back[code] = self.validation_fed_back.get(code, 0) + count
 
         # A retry that came back with fewer claims than it started with lost
         # work. ``_text_to_isr`` over a garbled second answer parses to an empty
@@ -2366,6 +3830,18 @@ class BaseAnalyst(ABC):
             )
         return revised
 
+    def drain_nudge_retry_mode(self) -> str | None:
+        """How the last nudge had to be sent, handed over once."""
+        mode = getattr(self, "_nudge_retry_mode", None)
+        self._nudge_retry_mode = None
+        return str(mode) if mode else None
+
+    def drain_validation_not_run(self) -> list[str]:
+        """The checks that could not run, handed over once."""
+        codes = list(getattr(self, "validation_not_run", None) or [])
+        self.validation_not_run = []
+        return codes
+
     def _revalidate(
         self, isr: AgentISR, validator: Callable[[AgentISR], list[Violation]]
     ) -> list[Violation]:
@@ -2376,13 +3852,20 @@ class BaseAnalyst(ABC):
             self.logger.warning("Validation: re-check skipped (%s).", exc)
             return []
 
-    def drain_validation_findings(self) -> tuple[list[dict[str, str]], int]:
-        """What this analyst was told and did not fix, and how many retries it cost."""
+    def drain_validation_findings(self) -> tuple[list[dict[str, str]], int, dict[str, int]]:
+        """What this analyst was told, what it did not fix, and what that cost.
+
+        Three values, not two: the leftovers, the retry count, and every code
+        the analyst was fed back — including the ones it went on to fix, which
+        are exactly the ones nothing else in the run records.
+        """
         rows = [v.to_dict() for v in self.validation_findings]
         retries = self.validation_retries
+        fed_back = dict(self.validation_fed_back)
         self.validation_findings = []
         self.validation_retries = 0
-        return rows, retries
+        self.validation_fed_back = {}
+        return rows, retries, fed_back
 
     def _apply_consistency_gate(self, isr: AgentISR, evidence: str) -> AgentISR:
         """LAMD foundational-tier consistency gate (findings-log §4 Item 4).
@@ -2426,18 +3909,24 @@ class BaseAnalyst(ABC):
         mediator_feedback: str,
         revision_round: int = 1,
     ) -> tuple[str, AgentISR]:
-        """Wrapper around revise_isr() with error handling."""
-        try:
-            truncated = self._truncate_input(original_data)
-            text, isr = self.revise_isr(
-                truncated, own_report, peer_reports, mediator_feedback, revision_round
-            )
-            return text, self._drain_findings(isr)
-        except AnalystError:
-            raise
-        except Exception as e:
-            self.logger.error("ISR revision failed: %s", e)
-            raise AnalystError(f"{self.name} ISR revision failed: {e}") from e
+        """Wrapper around revise_isr() with error handling.
+
+        Under this agent's delegation lock, for the reason ``safe_analyze_isr``
+        takes it: a revision round is this agent's own loop.
+        """
+        self.current_round = int(revision_round)
+        with lock_for(self):
+            try:
+                truncated = self._truncate_input(original_data)
+                text, isr = self.revise_isr(
+                    truncated, own_report, peer_reports, mediator_feedback, revision_round
+                )
+                return text, self._drain_findings(isr)
+            except AnalystError:
+                raise
+            except Exception as e:
+                self.logger.error("ISR revision failed: %s", e)
+                raise AnalystError(f"{self.name} ISR revision failed: {e}") from e
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -2479,19 +3968,43 @@ class BaseAnalyst(ABC):
         flags=re.IGNORECASE,
     )
 
+    # What a model writes on its way to a tool call rather than in a report:
+    # "Let me search for more specific strings related to malware indicators:".
+    # A live static analyst ended its loop on exactly that sentence and the
+    # free-text splitter turned it into the run's only claim, at 0.5. An
+    # intention is not a finding, whatever the loop did with it afterwards.
+    _INTENTION_CLAIM_RE = re.compile(
+        r"^\s*(?:let\s+me\b|let's\b|let\s+us\b|i\s+will\b|i'll\b|i\s+need\s+to\b"
+        r"|i\s+am\s+going\s+to\b|i'm\s+going\s+to\b|next,|now\s+i\b"
+        r"|first,\s+(?:let|i)\b)",
+        flags=re.IGNORECASE,
+    )
+
     def _is_meta_claim_text(self, text: str) -> bool:
-        """True when ``text`` is a fallback placeholder, not real analysis."""
+        """True when ``text`` is a placeholder or an intention, not real analysis."""
         if not text:
             return True
         # Match the placeholder anywhere near the start of the text — analysts
         # sometimes prepend a one-line header (e.g. "CLAIM:") before parroting
         # the fallback, so probe both the raw first line and the same line with
         # a leading ``CLAIM:``/``EVIDENCE:`` label stripped.
-        first = text.strip().splitlines()[0] if text.strip() else ""
-        if self._META_CLAIM_RE.match(first):
-            return True
+        stripped = text.strip()
+        first = stripped.splitlines()[0] if stripped else ""
         unlabelled = re.sub(r"^\s*(?:claim|evidence)\s*:\s*", "", first, flags=re.IGNORECASE)
-        return bool(self._META_CLAIM_RE.match(unlabelled))
+        if self._META_CLAIM_RE.match(first) or self._META_CLAIM_RE.match(unlabelled):
+            return True
+        announces = bool(
+            self._INTENTION_CLAIM_RE.match(first)
+            or self._INTENTION_CLAIM_RE.match(unlabelled)
+            # A sentence that ends in a colon announces what comes next; it
+            # states nothing itself.
+            or stripped.endswith(":")
+        )
+        # Only when that is the whole of it. A report may open by narrating its
+        # next step and then say something real, and the sentence splitter drops
+        # the opening sentence on its own — zeroing the whole answer for its
+        # first line would throw away the findings that followed.
+        return announces and len(self._SENTENCE_SPLIT_RE.split(stripped)) == 1
 
     def _drop_meta_claims(self, claims: list[ClaimEvidence]) -> list[ClaimEvidence]:
         """Strip parsed claims that are really "I could not analyse" meta-claims.
@@ -2529,12 +4042,14 @@ class BaseAnalyst(ABC):
                 "%s: meta-claim text detected; emitting zero-claim ISR.",
                 self.name,
             )
-            return AgentISR(
-                agent_id=self.name,
-                domain=domain,
-                claims=[],
-                dissent_items=[],
-                revision_round=revision_round,
+            return self._with_answer_status(
+                AgentISR(
+                    agent_id=self.name,
+                    domain=domain,
+                    claims=[],
+                    dissent_items=[],
+                    revision_round=revision_round,
+                )
             )
 
         # Structured output first. Several prompts —
@@ -2554,8 +4069,14 @@ class BaseAnalyst(ABC):
                     revision_round=revision_round,
                 )
 
+        # A sentence the model wrote on its way somewhere — "Let me search for
+        # more specific strings related to malware indicators:" — is scaffolding
+        # in exactly the way a raw tool call is, and the splitter cannot tell
+        # prose from intention any more than it could tell prose from a call.
         raw_sentences = [
-            s.strip() for s in self._SENTENCE_SPLIT_RE.split(text) if len(s.strip()) > 20
+            s.strip()
+            for s in self._SENTENCE_SPLIT_RE.split(text)
+            if len(s.strip()) > 20 and not self._is_meta_claim_text(s.strip())
         ]
         claims: list[ClaimEvidence] = []
         for sentence in raw_sentences[:10]:
@@ -2575,13 +4096,45 @@ class BaseAnalyst(ABC):
                 )
             )
 
-        return AgentISR(
-            agent_id=self.name,
-            domain=domain,
-            claims=claims,
-            dissent_items=[],
-            revision_round=revision_round,
+        return self._with_answer_status(
+            AgentISR(
+                agent_id=self.name,
+                domain=domain,
+                claims=claims,
+                dissent_items=[],
+                revision_round=revision_round,
+            )
         )
+
+    # Class-level default so an analyst built without ``__init__`` — a test
+    # stand-in, a script — still answers the question the parser asks it.
+    _answer_unstructured: bool = False
+    # The same, for the delegation state the loop reads and writes: a
+    # stand-in that never asks anyone and is never asked still runs a loop.
+    call_chain: tuple[str, ...] = ()
+    loop_budget: LoopBudget | None = None
+    _budget_ceiling: BudgetCeiling | None = None
+    steps_spent: int = 0
+    current_round: int = 0
+    # The lock included: ``delegation.ask`` takes it on the callee, and a
+    # stand-in that a real agent is allowed to ask must have one to take.
+    delegation_lock: Any = _SHARED_STAND_IN_LOCK
+    asks_lock: Any = _SHARED_STAND_IN_ASKS_LOCK
+    # Read-only, because one dict here would be one dict for every analyst
+    # built without ``__init__``, and the node writes a whole new mapping
+    # rather than into this one.
+    sample_path_choices: Mapping[str, Any] = _NO_PATH_CHOICES
+
+    def _with_answer_status(self, isr: AgentISR) -> AgentISR:
+        """Say on the ISR that the loop never produced a report, when it did not.
+
+        Only when there is nothing else to say: an answer that was not a report
+        but still yielded claims has already said more than the status would.
+        """
+        if self._answer_unstructured and not isr.claims:
+            isr.status = NO_STRUCTURED_REPORT_STATUS
+            isr.status_reason = NO_STRUCTURED_REPORT_REASON
+        return isr
 
     _DOMAIN_KEYWORDS: dict[str, Literal["static", "dynamic", "network"]] = {
         "static": "static",

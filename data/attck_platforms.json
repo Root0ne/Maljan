@@ -1,0 +1,6555 @@
+{
+  "_meta": {
+    "attck_version": "19.2"
+  },
+  "T0800": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0801": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0802": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0806": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0807": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0809": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0811": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0813": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0814": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0815": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0816": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0817": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0819": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0820": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0821": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0822": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0823": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0826": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0827": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0828": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0829": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0830": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0831": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0832": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0834": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0835": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0836": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0837": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0838": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0840": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0842": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0843": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0843.001": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0843.002": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0843.003": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0845": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0846": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0846.001": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0846.002": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0846.003": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0847": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0848": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0849": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0851": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0852": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0853": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0858": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0859": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0860": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0861": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0862": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0863": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0864": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0865": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0866": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0867": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0868": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0869": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0871": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0872": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0873": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0873.001": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0874": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0877": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0878": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0879": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0880": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0881": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0882": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0883": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0884": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0885": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0886": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0887": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0888": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0889": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0890": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0892": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0893": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0894": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T0895": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T1001": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1001.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1001.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1001.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1003.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1003.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1003.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1003.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1003.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows"
+    ]
+  },
+  "T1003.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1003.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux"
+    ]
+  },
+  "T1003.008": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux"
+    ]
+  },
+  "T1005": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1006": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices",
+      "Windows"
+    ]
+  },
+  "T1007": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1008": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1010": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1011": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1011.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1012": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1014": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1016": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1016.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1016.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1018": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1020": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1020.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Network Devices"
+    ]
+  },
+  "T1021": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1021.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1021.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1021.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1021.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "macOS"
+    ]
+  },
+  "T1021.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1021.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1021.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1021.008": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS"
+    ]
+  },
+  "T1025": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1027": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1027.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1027.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1027.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1027.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1027.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1027.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1027.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1027.008": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1027.009": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1027.010": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1027.011": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows"
+    ]
+  },
+  "T1027.012": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1027.013": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1027.014": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1027.015": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1027.016": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1027.017": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1027.018": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1029": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1030": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1033": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1036": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1036.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1036.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1036.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1036.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1036.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1036.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "macOS"
+    ]
+  },
+  "T1036.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1036.008": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1036.009": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "macOS"
+    ]
+  },
+  "T1036.010": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1036.011": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux"
+    ]
+  },
+  "T1036.012": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1037": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1037.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1037.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1037.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1037.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "macOS"
+    ]
+  },
+  "T1037.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1039": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1040": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1041": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1046": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "IaaS",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1047": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1048": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Network Devices",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1048.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1048.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1048.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1049": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1052": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1052.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1053": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1053.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1053.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "macOS"
+    ]
+  },
+  "T1053.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1053.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux"
+    ]
+  },
+  "T1053.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers"
+    ]
+  },
+  "T1055": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1055.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1055.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1055.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1055.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1055.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1055.008": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux"
+    ]
+  },
+  "T1055.009": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux"
+    ]
+  },
+  "T1055.011": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1055.012": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1055.013": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1055.014": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux"
+    ]
+  },
+  "T1055.015": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1056": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1056.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1056.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1056.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1056.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1057": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1059": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Network Devices",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1059.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1059.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1059.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1059.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "macOS"
+    ]
+  },
+  "T1059.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1059.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1059.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1059.008": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices"
+    ]
+  },
+  "T1059.009": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1059.010": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1059.011": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1059.012": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi"
+    ]
+  },
+  "T1059.013": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers"
+    ]
+  },
+  "T1068": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1069": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1069.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1069.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1069.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1070": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Office Suite",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1070.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1070.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1070.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1070.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1070.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1070.008": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Office Suite",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1070.009": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1070.010": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1071": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1071.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1071.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1071.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1071.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1071.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1072": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1074": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1074.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1074.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1078": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Network Devices",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1078.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Network Devices",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1078.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1078.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1078.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1080": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1082": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1083": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1087": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1087.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1087.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1087.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Office Suite",
+      "Windows"
+    ]
+  },
+  "T1087.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1090": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1090.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1090.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1090.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1090.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1091": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1092": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1095": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1098": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Network Devices",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1098.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "SaaS"
+    ]
+  },
+  "T1098.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Office Suite",
+      "Windows"
+    ]
+  },
+  "T1098.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1098.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Network Devices",
+      "macOS"
+    ]
+  },
+  "T1098.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Identity Provider",
+      "Windows"
+    ]
+  },
+  "T1098.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers"
+    ]
+  },
+  "T1098.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1102": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1102.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1102.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1102.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1104": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1105": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1106": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1110": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Network Devices",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1110.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Network Devices",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1110.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Identity Provider",
+      "Linux",
+      "Network Devices",
+      "Office Suite",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1110.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Network Devices",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1110.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Network Devices",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1111": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1112": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1113": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1114": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Office Suite",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1114.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1114.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Office Suite",
+      "Windows"
+    ]
+  },
+  "T1114.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Office Suite",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1115": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1119": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1120": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1123": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1124": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1125": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1127": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1127.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1127.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1127.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1129": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1132": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1132.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1132.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1133": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1134": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1134.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1134.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1134.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1134.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1134.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1135": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1136": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Network Devices",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1136.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1136.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1136.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1137": {
+    "domain": "enterprise",
+    "platforms": [
+      "Office Suite",
+      "Windows"
+    ]
+  },
+  "T1137.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Office Suite",
+      "Windows"
+    ]
+  },
+  "T1137.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Office Suite",
+      "Windows"
+    ]
+  },
+  "T1137.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Office Suite",
+      "Windows"
+    ]
+  },
+  "T1137.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Office Suite",
+      "Windows"
+    ]
+  },
+  "T1137.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Office Suite",
+      "Windows"
+    ]
+  },
+  "T1137.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "Office Suite",
+      "Windows"
+    ]
+  },
+  "T1140": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1176": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1176.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1176.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1185": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1187": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1189": {
+    "domain": "enterprise",
+    "platforms": [
+      "Identity Provider",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1190": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1195": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1195.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1195.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1195.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1197": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1199": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1200": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1201": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Network Devices",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1202": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1203": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1204": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1204.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1204.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1204.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "IaaS"
+    ]
+  },
+  "T1204.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1204.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1205": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1205.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1205.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1207": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1210": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1211": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Linux",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1212": {
+    "domain": "enterprise",
+    "platforms": [
+      "Identity Provider",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1213": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1213.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "SaaS"
+    ]
+  },
+  "T1213.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Office Suite",
+      "Windows"
+    ]
+  },
+  "T1213.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "SaaS"
+    ]
+  },
+  "T1213.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "SaaS"
+    ]
+  },
+  "T1213.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1213.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Linux",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1216": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1216.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1216.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1217": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1218": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1218.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1218.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1218.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1218.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1218.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1218.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1218.008": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1218.009": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1218.010": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1218.011": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1218.012": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1218.013": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1218.014": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1218.015": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1219": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1219.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1219.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1219.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1220": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1221": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1222": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1222.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1222.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "macOS"
+    ]
+  },
+  "T1398": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1404": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1406": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1406.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1406.002": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1407": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1409": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1414": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1417": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1417.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1417.002": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1418": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1418.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1420": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1421": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1422": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1422.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1422.002": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1423": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1424": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1426": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1428": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1429": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1430": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1430.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1430.002": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1437": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1437.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1451": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1453": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1456": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1458": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1461": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1464": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1471": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1474": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1474.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1474.002": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1474.003": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1480": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1480.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1480.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1481": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1481.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1481.002": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1481.003": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1482": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1484": {
+    "domain": "enterprise",
+    "platforms": [
+      "Identity Provider",
+      "Windows"
+    ]
+  },
+  "T1484.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1484.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Identity Provider",
+      "Windows"
+    ]
+  },
+  "T1485": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1485.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS"
+    ]
+  },
+  "T1486": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1489": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1490": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1491": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1491.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1491.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1495": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1496": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "IaaS",
+      "Linux",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1496.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1496.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1496.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "SaaS"
+    ]
+  },
+  "T1496.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "SaaS"
+    ]
+  },
+  "T1497": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1497.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1497.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1497.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1498": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1498.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1498.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1499": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1499.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1499.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1499.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1499.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1505": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1505.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows"
+    ]
+  },
+  "T1505.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows"
+    ]
+  },
+  "T1505.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1505.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1505.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1505.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi"
+    ]
+  },
+  "T1509": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1512": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1513": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1516": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1517": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1518": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1518.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1518.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1521": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1521.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1521.002": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1521.003": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1525": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "IaaS"
+    ]
+  },
+  "T1526": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1528": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "IaaS",
+      "Identity Provider",
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1529": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1530": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1531": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1532": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1533": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1534": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1535": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS"
+    ]
+  },
+  "T1537": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1538": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1539": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1541": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1542": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1542.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices",
+      "Windows"
+    ]
+  },
+  "T1542.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1542.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows"
+    ]
+  },
+  "T1542.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices"
+    ]
+  },
+  "T1542.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices"
+    ]
+  },
+  "T1543": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1543.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1543.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux"
+    ]
+  },
+  "T1543.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1543.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1543.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers"
+    ]
+  },
+  "T1544": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1546": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1546.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1546.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1546.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1546.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "macOS"
+    ]
+  },
+  "T1546.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "macOS"
+    ]
+  },
+  "T1546.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1546.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1546.008": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1546.009": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1546.010": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1546.011": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1546.012": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1546.013": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1546.014": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1546.015": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1546.016": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1546.017": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux"
+    ]
+  },
+  "T1546.018": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1547": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1547.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1547.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1547.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1547.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1547.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1547.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "macOS"
+    ]
+  },
+  "T1547.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1547.008": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1547.009": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1547.010": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1547.012": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1547.013": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux"
+    ]
+  },
+  "T1547.014": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1547.015": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1548": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Office Suite",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1548.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "macOS"
+    ]
+  },
+  "T1548.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1548.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "macOS"
+    ]
+  },
+  "T1548.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1548.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Office Suite"
+    ]
+  },
+  "T1548.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1550": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows"
+    ]
+  },
+  "T1550.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "IaaS",
+      "Identity Provider",
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1550.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1550.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1550.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1552": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Network Devices",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1552.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1552.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1552.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1552.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1552.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS"
+    ]
+  },
+  "T1552.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1552.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers"
+    ]
+  },
+  "T1552.008": {
+    "domain": "enterprise",
+    "platforms": [
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1553": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1553.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1553.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1553.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1553.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1553.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1553.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1554": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1555": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1555.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1555.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "macOS"
+    ]
+  },
+  "T1555.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1555.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1555.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1555.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS"
+    ]
+  },
+  "T1556": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Network Devices",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1556.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1556.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1556.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "macOS"
+    ]
+  },
+  "T1556.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices"
+    ]
+  },
+  "T1556.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1556.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1556.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Office Suite",
+      "SaaS",
+      "Windows"
+    ]
+  },
+  "T1556.008": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1556.009": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider"
+    ]
+  },
+  "T1557": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1557.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1557.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1557.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1557.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices"
+    ]
+  },
+  "T1558": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1558.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1558.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1558.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1558.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1558.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "macOS"
+    ]
+  },
+  "T1559": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1559.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1559.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1559.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1560": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1560.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1560.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1560.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1561": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1561.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1561.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1563": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1563.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "macOS"
+    ]
+  },
+  "T1563.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1564": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Office Suite",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1564.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1564.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1564.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1564.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1564.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1564.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1564.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1564.008": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Office Suite",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1564.009": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1564.010": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1564.011": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1564.012": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1564.013": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux"
+    ]
+  },
+  "T1564.014": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "macOS"
+    ]
+  },
+  "T1565": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1565.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1565.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1565.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1566": {
+    "domain": "enterprise",
+    "platforms": [
+      "Identity Provider",
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1566.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1566.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Identity Provider",
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1566.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1566.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Identity Provider",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1567": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1567.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1567.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1567.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1567.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1568": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1568.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1568.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1568.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1569": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1569.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1569.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1569.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux"
+    ]
+  },
+  "T1570": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1571": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1572": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1573": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1573.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1573.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1574": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1574.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1574.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1574.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1574.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "macOS"
+    ]
+  },
+  "T1574.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1574.008": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1574.009": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1574.010": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1574.011": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1574.012": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1574.013": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1574.014": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1575": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1577": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1578": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS"
+    ]
+  },
+  "T1578.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS"
+    ]
+  },
+  "T1578.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS"
+    ]
+  },
+  "T1578.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS"
+    ]
+  },
+  "T1578.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS"
+    ]
+  },
+  "T1578.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS"
+    ]
+  },
+  "T1580": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS"
+    ]
+  },
+  "T1582": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1583": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1583.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1583.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1583.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1583.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1583.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1583.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1583.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1583.008": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1584": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1584.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1584.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1584.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1584.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1584.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1584.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1584.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1584.008": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1585": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1585.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1585.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1585.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1586": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1586.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1586.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1586.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1587": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1587.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1587.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1587.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1587.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1588": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1588.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1588.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1588.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1588.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1588.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1588.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1588.007": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1589": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1589.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1589.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1589.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1590": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1590.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1590.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1590.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1590.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1590.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1590.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1591": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1591.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1591.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1591.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1591.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1592": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1592.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1592.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1592.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1592.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1593": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1593.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1593.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1593.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1594": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1595": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1595.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1595.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1595.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1596": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1596.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1596.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1596.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1596.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1596.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1597": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1597.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1597.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1598": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1598.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1598.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1598.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1598.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1599": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices"
+    ]
+  },
+  "T1599.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices"
+    ]
+  },
+  "T1600": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices"
+    ]
+  },
+  "T1600.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices"
+    ]
+  },
+  "T1600.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices"
+    ]
+  },
+  "T1601": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices"
+    ]
+  },
+  "T1601.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices"
+    ]
+  },
+  "T1601.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices"
+    ]
+  },
+  "T1602": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices"
+    ]
+  },
+  "T1602.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices"
+    ]
+  },
+  "T1602.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices"
+    ]
+  },
+  "T1603": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1604": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1606": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1606.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Linux",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1606.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Office Suite",
+      "SaaS",
+      "Windows"
+    ]
+  },
+  "T1608": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1608.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1608.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1608.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1608.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1608.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1608.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1609": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers"
+    ]
+  },
+  "T1610": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers"
+    ]
+  },
+  "T1611": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "Linux",
+      "Windows"
+    ]
+  },
+  "T1612": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers"
+    ]
+  },
+  "T1613": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers"
+    ]
+  },
+  "T1614": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1614.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1615": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1616": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1617": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1619": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS"
+    ]
+  },
+  "T1620": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1621": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1622": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1623": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1623.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1624": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1624.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1625": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1625.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1626": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1626.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1627": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1627.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1628": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1628.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1628.002": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1628.003": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1629": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1629.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1629.002": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1629.003": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1630": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1630.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1630.002": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1630.003": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1631": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1631.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1632": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1632.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1633": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1633.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1634": {
+    "domain": "mobile",
+    "platforms": [
+      "iOS"
+    ]
+  },
+  "T1634.001": {
+    "domain": "mobile",
+    "platforms": [
+      "iOS"
+    ]
+  },
+  "T1635": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1635.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1636": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1636.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1636.002": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1636.003": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1636.004": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1636.005": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1637": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1637.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1638": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1639": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1639.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1640": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1641": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1641.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1642": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1643": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1644": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1645": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1646": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1647": {
+    "domain": "enterprise",
+    "platforms": [
+      "macOS"
+    ]
+  },
+  "T1648": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1649": {
+    "domain": "enterprise",
+    "platforms": [
+      "Identity Provider",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1650": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1651": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS"
+    ]
+  },
+  "T1652": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1653": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1654": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1655": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1655.001": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1657": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1658": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1659": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1660": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1661": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1662": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1663": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1664": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1665": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1666": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS"
+    ]
+  },
+  "T1667": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Office Suite",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1668": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1669": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1670": {
+    "domain": "mobile",
+    "platforms": [
+      "Android"
+    ]
+  },
+  "T1671": {
+    "domain": "enterprise",
+    "platforms": [
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1673": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1674": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1675": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi"
+    ]
+  },
+  "T1676": {
+    "domain": "mobile",
+    "platforms": [
+      "Android",
+      "iOS"
+    ]
+  },
+  "T1677": {
+    "domain": "enterprise",
+    "platforms": [
+      "SaaS"
+    ]
+  },
+  "T1678": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1679": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1680": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1681": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1682": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1683": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1683.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1683.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "PRE"
+    ]
+  },
+  "T1684": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1684.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Office Suite",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1684.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Office Suite",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1685": {
+    "domain": "enterprise",
+    "platforms": [
+      "Containers",
+      "ESXi",
+      "IaaS",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1685.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1685.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Identity Provider",
+      "Office Suite",
+      "SaaS"
+    ]
+  },
+  "T1685.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1685.004": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux"
+    ]
+  },
+  "T1685.005": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1685.006": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "macOS"
+    ]
+  },
+  "T1686": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1686.001": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS"
+    ]
+  },
+  "T1686.002": {
+    "domain": "enterprise",
+    "platforms": [
+      "Network Devices"
+    ]
+  },
+  "T1686.003": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1687": {
+    "domain": "enterprise",
+    "platforms": [
+      "IaaS",
+      "Linux",
+      "SaaS",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1688": {
+    "domain": "enterprise",
+    "platforms": [
+      "Windows"
+    ]
+  },
+  "T1689": {
+    "domain": "enterprise",
+    "platforms": [
+      "Linux",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1690": {
+    "domain": "enterprise",
+    "platforms": [
+      "ESXi",
+      "Linux",
+      "Network Devices",
+      "Windows",
+      "macOS"
+    ]
+  },
+  "T1691": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T1691.001": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T1691.002": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T1692": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T1692.001": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T1692.002": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T1693": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T1693.001": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T1693.002": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T1694": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T1694.001": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T1694.002": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T1695": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T1695.001": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T1695.002": {
+    "domain": "ics",
+    "platforms": []
+  },
+  "T1695.003": {
+    "domain": "ics",
+    "platforms": []
+  }
+}

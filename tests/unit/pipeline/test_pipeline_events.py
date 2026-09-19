@@ -28,6 +28,7 @@ from maljan.pipeline.events import (
     emit_agent_message,
 )
 from maljan.pipeline.nodes import (
+    ROOM_SPEAKER,
     make_negotiation_node,
     make_revision_node,
     make_stage_agent_node,
@@ -92,6 +93,10 @@ class TestAgentMessagePayload:
             "round": 0,
             "status": "complete",
             "text": "hi",
+            # Always present, because the console switches on it and a
+            # message with no kind is one it cannot place. ``says`` is what
+            # every line emitted before the field existed was.
+            "kind": "says",
         }
 
     def test_confidence_claims_and_dissent_round_trip(self) -> None:
@@ -201,7 +206,10 @@ class TestAnalystNodeEmits:
 
         message = rec.messages()[0]
         assert message["status"] == "failed"
-        assert "ghidra died" in message["text"]
+        # The type, never the message: this line reaches every browser and the
+        # ``job_events`` table, and a message is where a host path travels.
+        assert "RuntimeError" in message["text"]
+        assert "ghidra died" not in message["text"]
 
     def test_claims_reach_the_transcript(self) -> None:
         rec = Recorder()
@@ -253,9 +261,12 @@ class TestStageNodesEmit:
         asyncio.run(node({"iteration_count": 1, "reports": {"network": "f"}, "isr_reports": {}}))
 
         message = rec.messages()[0]
-        assert message["speaker"] == "Mediator"
+        # The mediator is the debate speaking, not a member of the team: it
+        # goes out as the room and names itself in the line.
+        assert message["speaker"] == ROOM_SPEAKER
+        assert message["kind"] == "system"
         assert message["role"] == "negotiator"
-        assert message["text"] == "Agents agree."
+        assert message["text"] == "Mediator: Agents agree."
         assert message["round"] == 2
 
     def test_mediator_failure_is_visible_not_silent(self) -> None:
@@ -424,9 +435,9 @@ class TestSycophancyAndJudgeSpeak:
                 )
             )
 
-        speakers = [m["speaker"] for m in rec.messages()]
-        assert "Sycophancy detector" in speakers
-        notice = next(m for m in rec.messages() if m["speaker"] == "Sycophancy detector")
+        notice = next(m for m in rec.messages() if "Sycophancy detector" in m["text"])
+        assert notice["speaker"] == ROOM_SPEAKER
+        assert notice["kind"] == "system"
         assert notice["role"] == "system"
         assert "without new evidence" in notice["text"]
 
@@ -444,4 +455,29 @@ class TestSycophancyAndJudgeSpeak:
                 node({"iteration_count": 2, "reports": {"network": "f"}, "isr_reports": {}})
             )
 
-        assert [m["speaker"] for m in rec.messages()] == ["Mediator"]
+        texts = [m["text"] for m in rec.messages()]
+        assert texts == ["Mediator: All agree."]
+
+
+class TestAnAddressedMessage:
+    def test_stage_and_addressee_travel_when_given(self) -> None:
+        rec = Recorder()
+        emit_agent_message(
+            rec,
+            speaker="lead",
+            role="analyst",
+            text="Does it open a socket?",
+            stage="lead",
+            addressed_to="static",
+        )
+        payload = rec.messages()[0]
+        assert payload["stage"] == "lead"
+        assert payload["addressed_to"] == "static"
+
+    def test_a_line_said_to_the_room_carries_neither(self) -> None:
+        rec = Recorder()
+        emit_agent_message(
+            rec, speaker="static", role="analyst", text="hi", stage="", addressed_to=""
+        )
+        assert "stage" not in rec.messages()[0]
+        assert "addressed_to" not in rec.messages()[0]

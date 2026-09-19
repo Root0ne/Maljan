@@ -41,16 +41,30 @@ build context. Never enable it outside a trusted local environment.
 
 **WebSocket.** `/ws/analysis/{job_id}` authenticates the same access token and
 refuses anything that is not one, closing with code 1008 rather than serving
-events.
+events. It reads the account the token names before it says anything about the
+job and refuses a missing or deactivated one, and it reads that account again
+every 60 seconds while it streams, so a deactivation closes the socket instead
+of waiting out the access token.
 
 ## Roles
 
-Three roles: `admin`, `analyst` (the role a registration gets) and `readonly`.
+Two roles are enforced: `admin` and `analyst` (the role a registration gets).
 Admin gates the configuration surface — the settings schema, values, patches,
 resets, export and import — plus the audit log and API-key management. A
 refusal names the caller's actual role so the console can hide admin-only
 navigation rather than guess. There is no endpoint that grants admin; the first
 one is promoted in the database.
+
+`readonly` is a third value of the role column and **is enforced nowhere**: no
+route distinguishes it from `analyst`, so an account holding it can upload a
+sample, submit an analysis job — spending LLM and sandbox budget — and cancel
+its own jobs. Read it as a label, not as a permission. It is recorded here
+rather than removed because a row already carrying the value would not load
+against an enum without it, and dropping the value silently would widen those
+accounts rather than narrow them; enforcing it is a behaviour change with a
+migration behind it, not a documentation fix. Do not hand out `readonly`
+expecting it to restrict anything: the boundary that does hold is `admin`
+against everyone else, and `is_active` against a closed account.
 
 ## Secret storage
 
@@ -101,6 +115,30 @@ Uploaded samples are live malware. They are stored in MinIO and mirrored into
 directories excluded from on-access scanners, off shared storage and off
 developer machines that are not meant to hold samples. Detonation happens in
 whichever sandbox is configured, never on the Maljan host.
+
+## What the VirusTotal server sends
+
+The `virustotal` tool server is off until an operator registers an agent token,
+and what it sends once on depends entirely on which of its tools are ticked.
+
+With the default tick list — `get_file_report`, `get_url_report`,
+`get_domain_report`, `get_ip_report`, `get_analysis`, `get_submission` — only
+**indicators** leave the host: a hash, a URL, a domain, an IP, an analysis or
+submission id. The sample itself never does. A hash lookup still tells
+VirusTotal that this deployment is interested in that file, which is itself
+worth thinking about for a targeted investigation.
+
+Ticking `submit_file` changes the kind of disclosure, not the degree. The
+sample's bytes are uploaded to VirusTotal, where they are shared with
+VirusTotal's customers and partners under their own terms, and cannot be
+recalled. For a sample belonging to a client, a sample carrying customer data,
+or anything under an NDA, that is a decision to make deliberately and usually
+with the owner. This is why no default ticks it and why the setup guide says so
+next to the button.
+
+The agent token itself is stored like every other tool-server credential: its
+own encrypted row under `core.mcp.servers.virustotal.auth_token`, never in the
+server map's JSON row, never echoed to the browser, and masked in an export.
 
 ## Reporting a vulnerability
 

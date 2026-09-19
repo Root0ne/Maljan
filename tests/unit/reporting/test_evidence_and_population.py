@@ -280,11 +280,9 @@ class TestTechnicalSectionsSeeTheirOwnMeasurements:
                     {"technique_id": "T1622", "name": "Debugger Evasion", "confidence": 0.5},
                 ],
                 imports=[
-                    ImportRow(dll="crypt32.dll", function="CryptEncrypt", category="crypto"),
-                    ImportRow(dll="kernel32.dll", function="FindFirstFileW", category="discovery"),
-                    ImportRow(
-                        dll="kernel32.dll", function="IsDebuggerPresent", category="anti_debug"
-                    ),
+                    ImportRow(dll="crypt32.dll", function="CryptEncrypt"),
+                    ImportRow(dll="kernel32.dll", function="FindFirstFileW"),
+                    ImportRow(dll="kernel32.dll", function="IsDebuggerPresent"),
                 ],
             )
         )
@@ -302,7 +300,7 @@ class TestTechnicalSectionsSeeTheirOwnMeasurements:
     def test_the_discovery_section_sees_discovery_apis_only(self) -> None:
         facts = bundle_for("discovery", self._measured())["facts"]
         assert facts["discovery_api_count"] == 27
-        assert facts["discovery_imports"] == ["FindFirstFileW"]
+        assert "discovery_imports" not in facts, "no import is labelled by the report"
         assert facts["discovery_techniques"] == ["T1083"], "and not the evasion technique"
 
     def test_the_evasion_section_sees_evasion_techniques_only(self) -> None:
@@ -310,10 +308,9 @@ class TestTechnicalSectionsSeeTheirOwnMeasurements:
         assert facts["evasion_techniques"] == ["T1622"]
         assert facts["anti_debug_api_count"] == 10
 
-    def test_the_encryption_section_sees_crypto_imports_only(self) -> None:
+    def test_the_encryption_section_sees_the_crypto_count_and_no_labelled_imports(self) -> None:
         facts = bundle_for("encryption_scheme", self._measured())["facts"]
-        assert facts["crypto_imports"] == ["CryptEncrypt"]
-        assert facts["crypto_api_count"] == 15
+        assert facts == {"crypto_api_count": 15}
 
     def test_a_report_without_static_analysis_does_not_raise(self) -> None:
         assert bundle_for("discovery", _report())["facts"] == {}

@@ -128,22 +128,28 @@ def _print_run_summary_inline(run_summary_dict: dict) -> None:
         typer.echo("\nAgents:")
         for s in agent_stats:
             ttps = ", ".join(s.get("technique_ids", [])) or "—"
+            note = f"  [{s['status']}]" if s.get("status") else ""
             typer.echo(
                 f"  {s['agent_id']:12s}  claims={s['claim_count']}  "
-                f"conf={s['mean_confidence']:.2f}  TTPs=[{ttps}]"
+                f"conf={s['mean_confidence']:.2f}  TTPs=[{ttps}]{note}"
             )
 
     if corroboration:
-        multi = sum(1 for sources in corroboration.values() if len(sources) > 1)
+        from maljan.pipeline.validation import corroboration_sources
+
+        multi = sum(1 for row in corroboration.values() if len(corroboration_sources(row)) > 1)
         typer.echo(
             f"\nCorroboration: {len(corroboration)} technique(s) | "
             f"{multi} named by more than one source"
         )
-        # Best-corroborated first, which is the order a reader wants and the
-        # same order the judge was shown them in.
-        ranked = sorted(corroboration.items(), key=lambda item: (-len(item[1]), item[0]))
-        for tid, sources in ranked[:3]:
-            typer.echo(f"  {tid:14s} {', '.join(sources)}")
+        # Most sources first, which is the order a reader wants and the same
+        # order the judge was shown them in. Rows are read in either shape.
+        ranked = sorted(
+            corroboration.items(),
+            key=lambda item: (-len(corroboration_sources(item[1])), item[0]),
+        )
+        for tid, row in ranked[:3]:
+            typer.echo(f"  {tid:14s} {', '.join(corroboration_sources(row))}")
 
     if validation:
         unresolved = validation.get("unresolved") or []
@@ -210,6 +216,11 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
                 mean_confidence=s["mean_confidence"],
                 technique_ids=s["technique_ids"],
                 has_dissent=s["has_dissent"],
+                # Both say why an analyst has no claims, and a summary read
+                # back without them cannot tell an analyst with nothing to
+                # read from one whose model never answered.
+                no_data=bool(s.get("no_data", False)),
+                status=str(s.get("status", "") or ""),
             )
             for s in run_summary_dict.get("agent_stats", [])
         ]

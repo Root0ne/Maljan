@@ -10,11 +10,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
+from maljan.core.model_assignments import endpoint_label
 from maljan.core.settings_annotations import GROUP_DESCRIPTIONS, GROUP_ORDER
+from maljan.core.settings_overrides import redact_url
+from maljan.core.virustotal import SERVER_KEY as VIRUSTOTAL_SERVER_KEY
 from maljan.pipeline.conditions import validate_condition
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import end_read_transaction, get_db
 from app.deps import require_admin
 from app.logging_config import get_logger
 from app.logsafe import log_safe
@@ -37,16 +40,29 @@ from app.schemas.settings import (
     SchemaResponse,
     ValueDTO,
     ValuesResponse,
+    VirustotalRegisterResponse,
 )
 from app.services.audit import record as audit_record
 from app.services.mapping_preview import PREVIEW_MAX_BYTES, preview_mapping
 from app.services.server_map import SERVER_MAP_KEY, TOKEN_MASK
 from app.services.settings_catalog_api import catalog_index, full_catalog, resolved_catalog
-from app.services.settings_probes import PROBES, run_agent_probe, run_mcp_probe, run_probe
+from app.services.settings_probes import (
+    PROBES,
+    candidate_settings,
+    run_agent_probe,
+    run_mcp_probe,
+    run_probe,
+)
 from app.services.settings_service import (
     SettingsService,
     SettingsValidationError,
     core_settings_cache,
+)
+from app.services.virustotal_register import (
+    RegistrationError,
+    masked_state,
+    register_agent,
+    server_map_with_token,
 )
 
 EXPORT_FORMAT = "maljan-settings/1"
@@ -130,6 +146,31 @@ async def _agent_warnings(db: AsyncSession) -> dict[str, str]:
         return {}
 
 
+async def _unprobed_models_in(db: AsyncSession, changes: dict[str, Any]) -> list[str]:
+    """Every per-agent model this save names that no probe has reached.
+
+    Judged against the settings as this save would leave them, so an operator
+    moving an agent to a new endpoint and a new model in one change is judged
+    on the pair they are moving it to rather than the one they are leaving.
+
+    A save that names no per-agent model is answered before the store is read:
+    every PATCH goes through here, most of them carry one leaf of one group,
+    and reading the overrides back and rebuilding the whole settings model to
+    conclude that there was nothing to check is work on the path of every save.
+    """
+    from app.services.model_probes import AGENT_MODELS_KEY, unprobed_models_being_saved
+
+    if AGENT_MODELS_KEY not in changes:
+        return []
+    try:
+        stored = await SettingsService(db).load_overrides()
+        settings = candidate_settings(changes, stored)
+    except Exception as exc:  # noqa: BLE001 — a change the model rejects is refused below
+        logger.debug("probe gate skipped for this save (%s).", type(exc).__name__)
+        return []
+    return await unprobed_models_being_saved(db, settings, changes, stored)
+
+
 @router.patch("", response_model=PatchResponse)
 async def patch_values(
     body: PatchRequest,
@@ -137,6 +178,17 @@ async def patch_values(
     user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> PatchResponse | JSONResponse:
+    unprobed = await _unprobed_models_in(db, body.changes)
+    if unprobed:
+        from app.services.model_probes import AGENT_MODELS_KEY, refusal_sentence
+
+        # The same refusal a job gets, on the page that can fix it: a model
+        # saved here is one a run will call, and finding out at submit time
+        # means finding out somewhere else.
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"errors": {AGENT_MODELS_KEY: refusal_sentence(unprobed)}},
+        )
     try:
         res = await SettingsService(db).save(body.changes, user_id=user.id, ip=_client_ip(request))
     except SettingsValidationError as exc:
@@ -373,15 +425,78 @@ async def _probe_response(coro: Awaitable[Any]) -> ProbeResponse:
         result = await coro
     except (Exception, BaseExceptionGroup) as exc:  # noqa: BLE001 - reported, never raised
         logger.warning("probe failed before it ran: %s", type(exc).__name__)
-        return ProbeResponse(ok=False, latency_ms=0, detail=f"{type(exc).__name__}: {exc}")
+        # Through ``redact_url``: what reaches this fence is a driver error —
+        # arq, Redis, Qdrant — and a driver names the connection string it was
+        # configured with, password and all.
+        return ProbeResponse(
+            ok=False, latency_ms=0, detail=redact_url(f"{type(exc).__name__}: {exc}")
+        )
     return ProbeResponse(**vars(result))
+
+
+# The words that mark a staged value as an address. A probe is *pointed* at
+# one of these, and that is the part of a probe worth writing down.
+_ADDRESS_WORDS = ("url", "endpoint", "dsn", "host")
+
+
+def _endpoints_reached(values: dict[str, Any], details: dict[str, Any] | None) -> list[str]:
+    """Every endpoint this probe was pointed at, as labels rather than values.
+
+    Two sources, because two kinds of probe answer differently: the pairs an
+    LLM or agent probe reports having called, and the staged values that named
+    an address for every other one. Each goes through ``endpoint_label``, so
+    the row names the server and never the credential in front of it.
+    """
+    found: list[str] = []
+    for pair in (details or {}).get("completions") or []:
+        if isinstance(pair, dict):
+            found.append(endpoint_label(str(pair.get("endpoint") or "")))
+    for key, value in (values or {}).items():
+        leaf = str(key).rsplit(".", 1)[-1].lower()
+        if isinstance(value, str) and any(word in leaf for word in _ADDRESS_WORDS):
+            found.append(endpoint_label(value))
+    return sorted({label for label in found if label})
+
+
+async def _record_the_probe(
+    request: Request,
+    user: User,
+    probe: str,
+    body: ProbeRequest,
+    response: ProbeResponse,
+    **extra: Any,
+) -> None:
+    """One audit row per probe, naming what it was pointed at.
+
+    A probe backfills every input the caller did not stage from the decrypted
+    store, so a staged endpoint is sent the *stored* credential — a secret the
+    console never shows in the clear. Saving that endpoint is audited and
+    gated; pointing a probe at it was neither, and this is the record that
+    closes it. The staged keys are named so a reader can see the endpoint did
+    not come from the store; their values are not.
+    """
+    await audit_record(
+        "settings.probe",
+        resource_type="settings",
+        resource_id=probe,
+        user_id=user.id,
+        details={
+            "probe": probe,
+            "endpoints": _endpoints_reached(body.values, response.details),
+            "staged": sorted(body.values or {}),
+            "ok": bool(response.ok),
+            **extra,
+        },
+        ip=_client_ip(request),
+    )
 
 
 @router.post("/test/mcp", response_model=ProbeResponse)
 async def test_mcp_server(
     body: ProbeRequest,
+    request: Request,
     server: str = Query(..., description="key in mcp.servers"),
-    _: User = Depends(require_admin),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
     """Launch one configured MCP server and report the tools it offers.
@@ -392,37 +507,153 @@ async def test_mcp_server(
     ``/test/{probe}`` so the fixed path wins the match.
     """
     stored = await SettingsService(db).load_overrides()
-    return await _probe_response(run_mcp_probe(server, body.values, stored))
+    # The staged values are read; what follows launches a server and waits on
+    # it. Nothing below needs the transaction that read them, and a probe is
+    # the longest await this API makes.
+    await end_read_transaction(db)
+    response = await _probe_response(run_mcp_probe(server, body.values, stored))
+    await _record_the_probe(request, user, "mcp", body, response, server=server)
+    return response
+
+
+@router.post("/virustotal/register", response_model=VirustotalRegisterResponse)
+async def register_virustotal_agent(
+    request: Request,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> VirustotalRegisterResponse | JSONResponse:
+    """Obtain a VirusTotal agent token, store it encrypted and enable the server.
+
+    The one call in this module that reaches a third party in order to *write*
+    settings. It takes no body: everything the registration says about this
+    deployment is a constant of the build, and the only variable part -- the
+    token -- is what comes back. A failure against VirusTotal is reported as a
+    502 with their own sentence in it, because the fix is on their side or in
+    the operator's network, not in the stored settings.
+    """
+    # The caller was resolved from the database by the dependency above, so
+    # this request is already in a transaction; the registration is a call to
+    # somebody else's service and must not be made inside it.
+    await end_read_transaction(db)
+    try:
+        facts = await register_agent()
+    except RegistrationError as exc:
+        logger.warning("VirusTotal registration failed: %s", log_safe(str(exc)))
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={"errors": {"virustotal": str(exc)}},
+        )
+
+    service = SettingsService(db)
+    stored = await service.load_overrides()
+    current = stored.get(SERVER_MAP_KEY)
+    servers = server_map_with_token(
+        current if isinstance(current, dict) else {}, facts["agent_token"]
+    )
+    try:
+        await service.save({SERVER_MAP_KEY: servers}, user_id=user.id, ip=_client_ip(request))
+    except SettingsValidationError as exc:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"errors": exc.errors}
+        )
+    await audit_record(
+        "settings.virustotal.register",
+        resource_type="settings",
+        user_id=user.id,
+        details={
+            "agent_id": log_safe(facts["agent_id"]),
+            "public_handle": log_safe(facts["public_handle"]),
+        },
+        ip=_client_ip(request),
+    )
+    runtime_config.invalidate()
+    core_settings_cache.invalidate()
+    logger.info("VirusTotal agent registered: %s", log_safe(facts["public_handle"]))
+    entry = servers[VIRUSTOTAL_SERVER_KEY]
+    return VirustotalRegisterResponse(
+        **masked_state(entry if isinstance(entry, dict) else {}, facts)
+    )
+
+
+async def _write_down_what_was_reached(db: AsyncSession, pairs: list[dict[str, Any]]) -> None:
+    """File a row for every pair the probe actually completed a call with.
+
+    The list comes from the probe itself (``details["completions"]``), so what
+    is written down and what was called are one thing rather than two
+    computations that have to agree. A pair the probe timed out on is not in
+    it: nothing was learned, so nothing is recorded, and the operator is told
+    to try again.
+
+    Never raises. A probe is an operator pressing a button and reading a
+    sentence; a store that could not be written is a reason to log, not a
+    reason to give them an error instead of their answer.
+    """
+    from app.services.model_probes import record_probe
+
+    for pair in pairs:
+        try:
+            await record_probe(
+                db,
+                endpoint=str(pair.get("endpoint") or ""),
+                model=str(pair.get("model") or ""),
+                provider=str(pair.get("provider") or ""),
+                ok=bool(pair.get("ok")),
+                detail=str(pair.get("detail") or ""),
+            )
+        except Exception as exc:  # noqa: BLE001 — the answer still reaches the operator
+            logger.warning("probe result not stored: %s", type(exc).__name__)
+            continue
 
 
 @router.post("/test/agent", response_model=ProbeResponse)
 async def test_agent(
     body: ProbeRequest,
+    request: Request,
     name: str = Query(..., description="key in agents.definitions"),
-    _: User = Depends(require_admin),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
     """Resolve one agent definition and report what it would get.
 
     Takes staged values so an operator can resolve a definition they have not
-    saved yet — the same contract every other probe has. No LLM call is made:
-    this reports the model that *would* be used, never a completion.
+    saved yet — the same contract every other probe has. It ends by asking that
+    agent's model for one short answer at the endpoint the agent would call,
+    because the row this files is what refuses a job later and a gate has to
+    rest on a call that was made.
+
+    What it reached is written down against the endpoint and the model it
+    named, so submitting a job can refuse a team whose agents name a model
+    nothing has ever answered for.
     """
     stored = await SettingsService(db).load_overrides()
-    return await _probe_response(run_agent_probe(name, body.values, stored))
+    # The definition is resolved; the call to the model is not this
+    # transaction's business and may take the whole probe budget.
+    await end_read_transaction(db)
+    response = await _probe_response(run_agent_probe(name, body.values, stored))
+    await _write_down_what_was_reached(db, (response.details or {}).get("completions") or [])
+    await _record_the_probe(request, user, "agent", body, response, agent=name)
+    return response
 
 
 @router.post("/test/{probe}", response_model=ProbeResponse)
 async def test_probe(
     probe: str,
     body: ProbeRequest,
-    _: User = Depends(require_admin),
+    request: Request,
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ProbeResponse:
     if probe not in PROBES:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown probe: {probe}")
     stored = await SettingsService(db).load_overrides()
-    return await _probe_response(run_probe(probe, body.values, stored))
+    # An LLM probe is allowed five minutes at a third-party endpoint; the read
+    # that prepared it ends here rather than waiting for the answer.
+    await end_read_transaction(db)
+    response = await _probe_response(run_probe(probe, body.values, stored))
+    if probe == "llm":
+        await _write_down_what_was_reached(db, (response.details or {}).get("completions") or [])
+    await _record_the_probe(request, user, probe, body, response)
+    return response
 
 
 async def _capped_body(request: Request) -> dict[str, Any]:

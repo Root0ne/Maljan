@@ -504,8 +504,8 @@
       ]
     },
     {
-      "technique_id": "T1562.001",
-      "name": "Impair Defenses: Disable or Modify Tools",
+      "technique_id": "T1685",
+      "name": "Disable or Modify Tools",
       "min_apis": 2,
       "confidence_base": 0.5,
       "confidence_max": 0.65,
@@ -523,8 +523,8 @@
       ]
     },
     {
-      "technique_id": "T1562.006",
-      "name": "Impair Defenses: Indicator Blocking",
+      "technique_id": "T1685",
+      "name": "Disable or Modify Tools: indicator blocking",
       "min_apis": 2,
       "confidence_base": 0.46,
       "confidence_max": 0.62,

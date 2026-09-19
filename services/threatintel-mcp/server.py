@@ -10,12 +10,24 @@ Environment:
 
 from __future__ import annotations
 
+import copy
 import hashlib
+import json
 import os
 from typing import Any
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+
+from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, env, manifest
+from maljan.tools.errors import (
+    NOT_CONFIGURED,
+    TIMEOUT,
+    TOOL_FAILED,
+    error_parts,
+    error_sentence,
+    tool_error,
+)
 
 mcp = FastMCP("ThreatIntelMCP")
 
@@ -28,8 +40,51 @@ ABUSEIPDB_API_KEY = os.getenv("ABUSEIPDB_API_KEY", "")
 VT_BASE = "https://www.virustotal.com/api/v3"
 ABUSEIPDB_BASE = "https://api.abuseipdb.com/api/v2"
 
+# The wall clock every lookup on this server gives the network. Named once, so
+# the client that enforces it and the manifest that declares it cannot drift:
+# a console told "no timeout" for a call that gives up after fifteen seconds
+# is being told something untrue by the one structure whose premise is that it
+# was computed rather than claimed.
+HTTP_TIMEOUT_S = 15.0
+
 # Minimal in-memory cache to avoid hammering APIs during testing
 _cache: dict[str, Any] = {}
+
+# Every lookup answers without a key, from heuristic mock data; what the key
+# buys is the real service, and that is what the manifest says is missing.
+TOOL_NEEDS: list[ToolNeeds] = [
+    ToolNeeds(
+        "check_ip_reputation",
+        (env("VIRUSTOTAL_API_KEY"), env("ABUSEIPDB_API_KEY")),
+        timeout_s=HTTP_TIMEOUT_S,
+        without="heuristic mock data",
+    ),
+    ToolNeeds(
+        "check_domain_reputation",
+        (env("VIRUSTOTAL_API_KEY"),),
+        timeout_s=HTTP_TIMEOUT_S,
+        without="heuristic mock data",
+    ),
+    ToolNeeds(
+        "check_hash",
+        (env("VIRUSTOTAL_API_KEY"),),
+        timeout_s=HTTP_TIMEOUT_S,
+        without="heuristic mock data",
+    ),
+    ToolNeeds("get_threatintel_status"),
+]
+CAPABILITIES = manifest("threatintel", TOOL_NEEDS)
+
+
+@mcp.tool(name=CAPABILITIES_TOOL)
+def capabilities() -> dict[str, Any]:
+    """What this server can do on this host.
+
+    Each tool, the setting it needs, and whether it is configured.
+    """
+    # Deep, so "computed once when the server started" also means a
+    # caller cannot reach in and change what it says.
+    return copy.deepcopy(CAPABILITIES)
 
 
 # ---------------------------------------------------------------------------
@@ -45,6 +100,24 @@ def _abuseipdb_headers() -> dict[str, str]:
     return {"Key": ABUSEIPDB_API_KEY, "Accept": "application/json"}
 
 
+def tool_error_text(code: str, message: str, tool: str) -> str:
+    """One structured failure as the text these prose-answering tools return."""
+    return json.dumps(tool_error(code, message, tool=tool))
+
+
+def _lookup_error(code: str, message: str, tool: str) -> str:
+    """A failed lookup as the structured error, in the text these tools return.
+
+    These four answer with prose, so a failure that is also prose reads to
+    every consumer as an answer: a rate-limited or timed-out lookup was
+    recorded as a successful call whose result happened to say "timeout", and
+    it never reached the run summary's failures, the report header or the
+    console's failed row. The structured shape is what tells them apart, and
+    ``normalise_error`` gives it the remedy for its code.
+    """
+    return tool_error_text(code, message, tool)
+
+
 def _cache_key(prefix: str, query: str) -> str:
     return f"{prefix}:{hashlib.sha256(query.encode()).hexdigest()[:16]}"
 
@@ -55,8 +128,16 @@ def _check_cache(prefix: str, query: str) -> str | None:
 
 
 def _set_cache(prefix: str, query: str, value: str) -> None:
-    key = _cache_key(prefix, query)
-    _cache[key] = value
+    """Keep an answer. A failure is not an answer and is never kept.
+
+    The cache has no expiry, so one timed-out lookup cached as a failure would
+    be replayed for every later look at that indicator for the life of the
+    server — and every replay is another failed ledger entry and another row
+    in the report header, for a service that came back a second later.
+    """
+    if error_parts(value) is not None:
+        return
+    _cache[_cache_key(prefix, query)] = value
 
 
 # ---------------------------------------------------------------------------
@@ -68,11 +149,16 @@ def _vt_ip_lookup(ip_address: str) -> str:
     """Query VirusTotal for IP reputation."""
     url = f"{VT_BASE}/ip_addresses/{ip_address}"
     try:
-        with httpx.Client(timeout=15.0) as client:
+        with httpx.Client(timeout=HTTP_TIMEOUT_S) as client:
             resp = client.get(url, headers=_vt_headers())
         if resp.status_code == 401:
-            return "VirusTotal API key invalid or quota exceeded."
+            return _lookup_error(
+                NOT_CONFIGURED,
+                "VirusTotal API key invalid or quota exceeded.",
+                "check_ip_reputation",
+            )
         if resp.status_code == 404:
+            # An answer, not a failure: VirusTotal has nothing on this address.
             return f"IP {ip_address} not found in VirusTotal database."
         resp.raise_for_status()
         data = resp.json()
@@ -101,21 +187,37 @@ def _vt_ip_lookup(ip_address: str) -> str:
             f"(harmless={harmless}, undetected={undetected})."
         )
     except httpx.TimeoutException:
-        return f"VirusTotal timeout for IP {ip_address}."
+        return _lookup_error(
+            TIMEOUT,
+            f"VirusTotal did not answer for IP {ip_address} within {HTTP_TIMEOUT_S:.0f} s.",
+            "check_ip_reputation",
+        )
     except httpx.HTTPStatusError as exc:
-        return f"VirusTotal error {exc.response.status_code} for IP {ip_address}."
+        return _lookup_error(
+            TOOL_FAILED,
+            f"VirusTotal answered {exc.response.status_code} for IP {ip_address}.",
+            "check_ip_reputation",
+        )
     except Exception as exc:
-        return f"VirusTotal lookup failed for {ip_address}: {exc}"
+        return _lookup_error(
+            TOOL_FAILED,
+            f"VirusTotal lookup failed for {ip_address}: {type(exc).__name__}",
+            "check_ip_reputation",
+        )
 
 
 def _vt_domain_lookup(domain: str) -> str:
     """Query VirusTotal for domain reputation."""
     url = f"{VT_BASE}/domains/{domain}"
     try:
-        with httpx.Client(timeout=15.0) as client:
+        with httpx.Client(timeout=HTTP_TIMEOUT_S) as client:
             resp = client.get(url, headers=_vt_headers())
         if resp.status_code == 401:
-            return "VirusTotal API key invalid or quota exceeded."
+            return _lookup_error(
+                NOT_CONFIGURED,
+                "VirusTotal API key invalid or quota exceeded.",
+                "check_domain_reputation",
+            )
         if resp.status_code == 404:
             return f"Domain {domain} not found in VirusTotal database."
         resp.raise_for_status()
@@ -141,21 +243,35 @@ def _vt_domain_lookup(domain: str) -> str:
             f"{suspicious}/{total} suspicious. Categories: {cat_str}."
         )
     except httpx.TimeoutException:
-        return f"VirusTotal timeout for domain {domain}."
+        return _lookup_error(
+            TIMEOUT,
+            f"VirusTotal did not answer for domain {domain} within {HTTP_TIMEOUT_S:.0f} s.",
+            "check_domain_reputation",
+        )
     except httpx.HTTPStatusError as exc:
-        return f"VirusTotal error {exc.response.status_code} for domain {domain}."
+        return _lookup_error(
+            TOOL_FAILED,
+            f"VirusTotal answered {exc.response.status_code} for domain {domain}.",
+            "check_domain_reputation",
+        )
     except Exception as exc:
-        return f"VirusTotal lookup failed for {domain}: {exc}"
+        return _lookup_error(
+            TOOL_FAILED,
+            f"VirusTotal lookup failed for {domain}: {type(exc).__name__}",
+            "check_domain_reputation",
+        )
 
 
 def _vt_hash_lookup(file_hash: str) -> str:
     """Query VirusTotal for file hash reputation."""
     url = f"{VT_BASE}/files/{file_hash}"
     try:
-        with httpx.Client(timeout=15.0) as client:
+        with httpx.Client(timeout=HTTP_TIMEOUT_S) as client:
             resp = client.get(url, headers=_vt_headers())
         if resp.status_code == 401:
-            return "VirusTotal API key invalid or quota exceeded."
+            return _lookup_error(
+                NOT_CONFIGURED, "VirusTotal API key invalid or quota exceeded.", "check_hash"
+            )
         if resp.status_code == 404:
             return f"Hash {file_hash} not found in VirusTotal database."
         resp.raise_for_status()
@@ -183,11 +299,23 @@ def _vt_hash_lookup(file_hash: str) -> str:
             f"{malicious}/{total} malicious, {suspicious}/{total} suspicious."
         )
     except httpx.TimeoutException:
-        return f"VirusTotal timeout for hash {file_hash}."
+        return _lookup_error(
+            TIMEOUT,
+            f"VirusTotal did not answer for hash {file_hash} within {HTTP_TIMEOUT_S:.0f} s.",
+            "check_hash",
+        )
     except httpx.HTTPStatusError as exc:
-        return f"VirusTotal error {exc.response.status_code} for hash {file_hash}."
+        return _lookup_error(
+            TOOL_FAILED,
+            f"VirusTotal answered {exc.response.status_code} for hash {file_hash}.",
+            "check_hash",
+        )
     except Exception as exc:
-        return f"VirusTotal lookup failed for {file_hash}: {exc}"
+        return _lookup_error(
+            TOOL_FAILED,
+            f"VirusTotal lookup failed for {file_hash}: {type(exc).__name__}",
+            "check_hash",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -200,10 +328,12 @@ def _abuseipdb_lookup(ip_address: str) -> str:
     url = f"{ABUSEIPDB_BASE}/check"
     params = {"ipAddress": ip_address, "maxAgeInDays": "90", "verbose": "True"}
     try:
-        with httpx.Client(timeout=15.0) as client:
+        with httpx.Client(timeout=HTTP_TIMEOUT_S) as client:
             resp = client.get(url, headers=_abuseipdb_headers(), params=params)
         if resp.status_code == 401:
-            return "AbuseIPDB API key invalid."
+            return _lookup_error(
+                NOT_CONFIGURED, "AbuseIPDB API key invalid.", "check_ip_reputation"
+            )
         resp.raise_for_status()
         data = resp.json()
         d = data.get("data", {})
@@ -225,11 +355,23 @@ def _abuseipdb_lookup(ip_address: str) -> str:
             f"AbuseIPDB confidence {score}% ({total_reports} reports, last: {last_reported})."
         )
     except httpx.TimeoutException:
-        return f"AbuseIPDB timeout for IP {ip_address}."
+        return _lookup_error(
+            TIMEOUT,
+            f"AbuseIPDB did not answer for IP {ip_address} within {HTTP_TIMEOUT_S:.0f} s.",
+            "check_ip_reputation",
+        )
     except httpx.HTTPStatusError as exc:
-        return f"AbuseIPDB error {exc.response.status_code} for IP {ip_address}."
+        return _lookup_error(
+            TOOL_FAILED,
+            f"AbuseIPDB answered {exc.response.status_code} for IP {ip_address}.",
+            "check_ip_reputation",
+        )
     except Exception as exc:
-        return f"AbuseIPDB lookup failed for {ip_address}: {exc}"
+        return _lookup_error(
+            TOOL_FAILED,
+            f"AbuseIPDB lookup failed for {ip_address}: {type(exc).__name__}",
+            "check_ip_reputation",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +410,37 @@ def _mock_hash_reputation(file_hash: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _joined(parts: list[str], tool: str) -> str:
+    """Two sources as one answer, or one failure when neither answered.
+
+    A structured error joined to a sentence is neither: nothing downstream can
+    parse it, so a rate-limited lookup was recorded as a successful call whose
+    result happened to mention a rate limit, and the model read a JSON
+    document glued to prose. So: if every source failed, the answer is the
+    first failure, whole and parseable. If one answered, the failures are
+    reduced to their own sentence and what the model reads stays prose.
+    """
+    failures = [(part, error_parts(part)) for part in parts]
+    answered = [part for part, failure in failures if failure is None]
+    if not answered:
+        return parts[0] if parts else tool_error_text(TOOL_FAILED, "no source answered", tool)
+    said: list[str] = []
+    for part, failure in failures:
+        said.append(part if failure is None else str(error_sentence(part)))
+    return "\n\n".join(said)
+
+
+def _every_part_answered(text: str, parts: list[str]) -> bool:
+    """Whether the joined answer is safe to keep.
+
+    A mixed result carries one source's failure sentence in it, and the cache
+    has no expiry: keeping it would replay "VirusTotal did not answer" for
+    every later look at that indicator for the life of the server, long after
+    VirusTotal came back.
+    """
+    return all(error_parts(part) is None for part in parts) and error_parts(text) is None
+
+
 @mcp.tool()
 def check_ip_reputation(ip_address: str) -> str:
     """Check the reputation of an IP address.
@@ -287,8 +460,9 @@ def check_ip_reputation(ip_address: str) -> str:
     if not parts:
         parts.append(_mock_ip_reputation(ip_address))
 
-    result = "\n\n".join(parts)
-    _set_cache("ip", ip_address, result)
+    result = _joined(parts, "check_ip_reputation")
+    if _every_part_answered(result, parts):
+        _set_cache("ip", ip_address, result)
     return result
 
 

@@ -13,9 +13,15 @@ is the judge's decision, which is the judge's job.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
 from typing import Any
+
+from maljan.analysis.technique_ids import (
+    TECHNIQUE_ID_EXACT_RE,
+    api_capability_hits,
+    sigma_technique_ids,
+    technique_ids_in,
+)
 
 # How many techniques the block names. The judge's prompt is already a
 # multi-kilobyte assembly and the tail of a confidence-ordered list is noise;
@@ -24,8 +30,6 @@ MAX_TECHNIQUES = 25
 
 # How many sources are listed per technique before the rest are counted.
 MAX_SOURCES_PER_TECHNIQUE = 6
-
-_TID_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
 
 
 def summarise(isrs: dict[str, Any] | None, ledger: Sequence[Any] | None = None) -> str:
@@ -67,7 +71,7 @@ def collect(
     seen: dict[str, set[str]] = {}
 
     def add(tid: str, source: str, confidence: float | None) -> None:
-        if not _TID_RE.match(tid):
+        if not TECHNIQUE_ID_EXACT_RE.match(tid):
             return
         if source in seen.setdefault(tid, set()):
             return
@@ -89,10 +93,31 @@ def collect(
 
     for entry in ledger or []:
         tool = str(getattr(entry, "tool", "") or "tool")
+        # The API catalogue associates a technique with an import set; it did
+        # not observe the technique, and BitBlt plus CreateCompatibleDC reads
+        # as screen capture on any GUI program. Associations are read by
+        # ``catalogue_associations`` and shown apart; they never assert.
+        if tool == "api_capability":
+            continue
         for tid in _technique_ids(getattr(entry, "structured", None)):
             add(tid, tool, None)
 
     return rows
+
+
+def catalogue_associations(ledger: Sequence[Any] | None) -> dict[str, list[str]]:
+    """``{technique_id: ["api_capability"]}`` for the rules the import set cleared.
+
+    Reference, not evidence: the table says these APIs are listed under the
+    technique, and a reader may weigh that; nothing counts it as a source.
+    """
+    out: dict[str, list[str]] = {}
+    for entry in ledger or []:
+        if str(getattr(entry, "tool", "") or "") != "api_capability":
+            continue
+        for hit in api_capability_hits(getattr(entry, "structured", None)):
+            out.setdefault(hit["technique_id"], ["api_capability"])
+    return out
 
 
 def _as_confidence(value: Any) -> float | None:
@@ -103,21 +128,26 @@ def _as_confidence(value: Any) -> float | None:
 
 
 def _technique_ids(structured: Any, depth: int = 0) -> set[str]:
-    """Every ATT&CK id a tool result names, wherever in its shape it sits."""
+    """Every ATT&CK id a tool result asserts, in the shapes the tools emit.
+
+    capa writes ``attck`` as a list of decorated strings, a Sigma match
+    writes ``tags`` like ``attack.t1055.012``, the LOLBin table and the
+    API-to-technique rules write a bare ``technique_id``; all three are read
+    as they are written (``analysis.technique_ids``). Nothing outside those
+    keys counts, so a technique quoted in a description is not an assertion.
+    """
     if depth > 6:
         return set()
     found: set[str] = set()
     if isinstance(structured, dict):
         for key, value in structured.items():
-            if key in ("technique_id", "attck", "technique_ids") and isinstance(value, str):
-                if _TID_RE.match(value.strip().upper()):
-                    found.add(value.strip().upper())
-                continue
-            found |= _technique_ids(value, depth + 1)
+            if key in ("technique_id", "attck", "technique_ids"):
+                found.update(technique_ids_in(value))
+            elif key == "tags":
+                found.update(sigma_technique_ids({"tags": value}))
+            else:
+                found |= _technique_ids(value, depth + 1)
     elif isinstance(structured, list):
         for item in structured:
-            if isinstance(item, str) and _TID_RE.match(item.strip().upper()):
-                found.add(item.strip().upper())
-            else:
-                found |= _technique_ids(item, depth + 1)
+            found |= _technique_ids(item, depth + 1)
     return found

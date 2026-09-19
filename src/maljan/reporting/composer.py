@@ -18,7 +18,8 @@ no evidence, leave it empty — never invent** (the renderer states absence).
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from types import UnionType
+from typing import Any, Union, get_args, get_origin
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
@@ -27,7 +28,16 @@ from pydantic import BaseModel, ConfigDict, Field
 from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.logger import logger
 from maljan.llm.registry import structured_output_supported_for_llm
-from maljan.pipeline.validation import Violation, retry_with_feedback, schema_violations
+from maljan.pipeline.validation import (
+    UNGROUNDED_CAPABILITY_CODE,
+    CapabilityGrounding,
+    ValidationTally,
+    Violation,
+    keep_known_keys,
+    retry_with_feedback,
+    schema_violations,
+    section_capability_violations,
+)
 from maljan.reporting.evidence_bundles import bundle_for, is_empty
 from maljan.reporting.models import (
     C2Channel,
@@ -97,6 +107,11 @@ _SYSTEM = (
     "6. Output MUST conform to the provided JSON schema."
 )
 
+# How many invented keys a degradation reason names. A model that invents
+# forty writes forty names into the report header otherwise, and the sentence
+# stops being readable long before that.
+_MAX_NAMED_KEYS = 6
+
 # Narrative technical subsections authored as free prose (TechnicalSubsection).
 _PROSE_SECTIONS: dict[str, str] = {
     "packing_obfuscation": "Packing & Obfuscation",
@@ -106,9 +121,56 @@ _PROSE_SECTIONS: dict[str, str] = {
 }
 
 
+# What one field of a section schema is answered with, by its declared type.
+# A model that is shown the object it has to produce produces it; a model shown
+# only the section's name and the word "schema" invents a shape, and six live
+# runs on two unrelated models invented one every time.
+_PLACEHOLDER_BY_TYPE: dict[Any, str] = {
+    str: '"..."',
+    bool: "true",
+    int: "0",
+    float: "0.0",
+}
+
+
+def _field_placeholder(annotation: Any, depth: int = 0) -> str:
+    """The value one declared field is answered with, written as JSON."""
+    if depth > 2:
+        return "null"
+    origin = get_origin(annotation)
+    args = [arg for arg in get_args(annotation) if arg is not type(None)]
+    if origin in (list, tuple) and args:
+        return f"[{_field_placeholder(args[0], depth + 1)}]"
+    if origin is UnionType or origin is Union:
+        return _field_placeholder(args[0], depth) if args else "null"
+    if isinstance(annotation, type) and hasattr(annotation, "model_fields"):
+        return _expected_object(annotation, depth + 1)
+    return _PLACEHOLDER_BY_TYPE.get(annotation, '"..."')
+
+
+def _expected_object(schema: type[BaseModel], depth: int = 0) -> str:
+    """The exact JSON object a section must answer with, keys and all.
+
+    Built from the schema rather than written out beside it, so the two cannot
+    drift: the prompt's rule 6 used to say "conform to the provided JSON
+    schema" on a path where no schema was provided at all.
+    """
+    fields = getattr(schema, "model_fields", {}) or {}
+    body = ", ".join(
+        f'"{name}": {_field_placeholder(field.annotation, depth)}' for name, field in fields.items()
+    )
+    return "{" + body + "}"
+
+
 def _bundle_text(section: str, bundle: dict[str, Any]) -> str:
-    """Render an evidence bundle into a compact prompt body."""
-    lines: list[str] = [f"SECTION: {section}", ""]
+    """Render an evidence bundle into a compact prompt body.
+
+    The heading used to be the bare line ``SECTION: <name>``, which is a key
+    with a value next to it: both models answered with ``{"SECTION": ...,
+    "content": ...}`` often enough that it cannot be a coincidence. It is a
+    sentence now.
+    """
+    lines: list[str] = [f"The evidence for the {section} section follows.", ""]
     # First, and labelled as outranking everything below it. This block is the
     # same on every section and is deliberately NOT part of ``facts``: the
     # skip-on-empty check keys off ``facts``, and folding an always-present
@@ -162,14 +224,46 @@ class ReportComposer:
         self.section_max_tokens = section_max_tokens
         self.per_section_timeout = per_section_timeout
         self.token_ledger = token_ledger
+        # What each section was told was wrong with its answer, by code, across
+        # every section. The composer runs after the run summary is built, so
+        # the report node reads this and folds it in.
+        self.validation_tally = ValidationTally()
+        # Set per ``compose`` call; empty until then, which grounds nothing and
+        # therefore judges nothing (see ``ungrounded_capabilities``).
+        self._grounding = CapabilityGrounding()
+        # The triage pack and the run state for this report, set per
+        # ``compose`` call.
+        self._facts_block = ""
+        self._run_state = ""
+        # What this report lost or had trimmed, in the words the report's own
+        # degradation reasons are written in. A section dropped after its
+        # retries used to leave the report with no conclusion and nothing
+        # saying so; the keys an answer invented used to take the whole
+        # section with them.
+        self.degradations: list[str] = []
 
     async def compose(
-        self, report: MalwareReport, isr_reports: dict[str, Any] | None = None
+        self,
+        report: MalwareReport,
+        isr_reports: dict[str, Any] | None = None,
+        facts_block: str = "",
+        run_state: str = "",
     ) -> None:
         """Fill report.intro_background / technical_analysis / c2_channels /
-        conclusion. Mutates ``report`` in place; each section is best-effort."""
+        conclusion. Mutates ``report`` in place; each section is best-effort.
+
+        ``facts_block`` is the triage pack and ``run_state`` the run's state
+        block; every section's prompt leads with the two, so no section is
+        written without the facts the run established or without knowing
+        which stages ran.
+        """
         ta = report.technical_analysis or TechnicalAnalysis()
         authored = 0
+        self._facts_block = facts_block
+        self._run_state = run_state
+        # What this run established, read once and asked of every section, so
+        # a conclusion cannot be the first place "command-and-control" appears.
+        self._grounding = CapabilityGrounding.from_report(report, isr_reports)
 
         # 1. Introduction / background.
         intro = await self._author(
@@ -250,9 +344,29 @@ class ReportComposer:
         bundle = bundle_for(section, report, report.technical_evidence, isr_reports)
         if is_empty(bundle):
             return None
+        from maljan.pipeline.run_state import with_run_state
+
+        head: list[str] = []
+        run_state = str(getattr(self, "_run_state", "") or "")
+        if run_state:
+            head.append(with_run_state("", run_state))
+        facts = str(getattr(self, "_facts_block", "") or "")
+        if facts:
+            head.append(facts)
+        # The two standing blocks lead, then the instruction, then the exact
+        # object the answer has to be, then the section's own bundle. The
+        # object is in the prompt because the manual parse is the primary path
+        # on a local server — ``with_structured_output`` is skipped there — and
+        # on that path nothing had ever shown the model a key name.
+        contract = (
+            "Answer with exactly this JSON object, these keys and no others:\n"
+            f"{_expected_object(schema)}\n"
+            "A field the evidence does not support is left empty or null; the keys stay."
+        )
+        human = "\n\n".join([*head, instruction, contract, _bundle_text(section, bundle)])
         messages = [
             SystemMessage(content=_SYSTEM),
-            HumanMessage(content=f"{instruction}\n\n{_bundle_text(section, bundle)}"),
+            HumanMessage(content=human),
         ]
         try:
             return await asyncio.wait_for(
@@ -261,12 +375,19 @@ class ReportComposer:
             )
         except TimeoutError:
             logger.warning("ReportComposer: section '%s' timed out; skipping.", section)
+            self._note_degradation(
+                f"report section '{section}' is missing: it did not answer within "
+                f"{int(self.per_section_timeout)}s"
+            )
             return None
         except Exception as exc:  # noqa: BLE001
             # ``error``, not ``warning``: a dropped section is missing content
             # in a delivered report, and at warning level in a noisy worker log
             # nobody ever noticed one had gone.
             logger.error("ReportComposer: section '%s' failed (%s); SKIPPED.", section, exc)
+            self._note_degradation(
+                f"report section '{section}' is missing: the round failed ({type(exc).__name__})"
+            )
             return None
 
     async def _invoke(
@@ -283,10 +404,17 @@ class ReportComposer:
             result = await retry_on_connection_error(
                 lambda: structured.ainvoke(messages), what="ReportComposer structured"
             )
-            if isinstance(result, schema):
-                return result
             if isinstance(result, dict):
-                return schema.model_validate(result)
+                result = schema.model_validate(result)
+            if isinstance(result, schema):
+                # No retry on this path — ``with_structured_output`` owns the
+                # conversation and there is no turn to add one to — but the
+                # answer is still checked: a section that over-claims is no
+                # better for having come from the path that usually works.
+                found = section_capability_violations(result.model_dump(), self._grounding)
+                self.validation_tally.count(found)
+                self._record_ungrounded(section or schema.__name__, found)
+                return result
         except Exception as exc:  # noqa: BLE001
             logger.debug("ReportComposer: structured path failed (%s); manual parse.", exc)
         # Manual JSON fallback for local servers returning fenced JSON, through
@@ -315,7 +443,28 @@ class ReportComposer:
             declined = bool(payload) and _section_declined(payload, schema)
             if not payload or declined:
                 return None
-            return _unwrap_section_envelope(payload, schema)
+            opened = _unwrap_section_envelope(payload, schema)
+            opened = _section_text_envelope(opened, schema, section)
+            kept, dropped = keep_known_keys(schema, opened)
+            if dropped:
+                # Kept, not refused: the fields the schema declares were
+                # answered and the section is publishable. What was dropped is
+                # named where a reader of the report will find it.
+                logger.warning(
+                    "ReportComposer: section '%s' carried %d key(s) the schema does not "
+                    "declare (%s); the known fields are kept.",
+                    section or schema.__name__,
+                    len(dropped),
+                    ", ".join(dropped),
+                )
+                named = ", ".join(dropped[:_MAX_NAMED_KEYS])
+                if len(dropped) > _MAX_NAMED_KEYS:
+                    named += f" and {len(dropped) - _MAX_NAMED_KEYS} more"
+                self._note_degradation(
+                    f"report section '{section or schema.__name__}' dropped the keys "
+                    f"{named}, which its schema does not declare"
+                )
+            return kept
 
         def _validate(payload: Any) -> list[Violation]:
             # A declined section is an empty one, not a broken one: the model
@@ -323,11 +472,20 @@ class ReportComposer:
             # again would be arguing with a correct answer.
             if declined:
                 return []
-            return schema_violations(schema, payload, code="composer.schema")
+            return [
+                *schema_violations(schema, payload, code="composer.schema"),
+                *section_capability_violations(payload, self._grounding),
+            ]
 
         payload, violations, retries = await retry_with_feedback(
-            _run, list(messages), [_validate], parse=_parse
+            _run,
+            list(messages),
+            [_validate],
+            parse=_parse,
+            on_feedback=self.validation_tally.count,
         )
+        self.validation_tally.retries += retries
+        self.validation_tally.count(violations)
         if declined:
             # Logged at info so the skip is still traceable, and never as an
             # error a reader would go chasing.
@@ -336,17 +494,51 @@ class ReportComposer:
                 section or schema.__name__,
             )
             return None
-        if violations:
+        # A section whose shape is wrong cannot be published; a section that
+        # over-claims can, and dropping it would leave the report with neither
+        # the claim nor the record of it. The terms are kept on the record and
+        # the prose is left exactly as the model wrote it.
+        broken = [v for v in violations if v.code != UNGROUNDED_CAPABILITY_CODE]
+        ungrounded = [v for v in violations if v.code == UNGROUNDED_CAPABILITY_CODE]
+        if broken:
             logger.error(
                 "ReportComposer: section '%s' still breaks its schema after %d retr%s (%s); "
                 "SKIPPED.",
                 section or schema.__name__,
                 retries,
                 "y" if retries == 1 else "ies",
-                "; ".join(f"{v.path}: {v.message}" for v in violations),
+                "; ".join(f"{v.path}: {v.message}" for v in broken),
+            )
+            self._note_degradation(
+                f"report section '{section or schema.__name__}' is missing: its answer did "
+                f"not fit the schema after {retries} retr{'y' if retries == 1 else 'ies'} "
+                f"({', '.join(sorted({v.code for v in broken}))})"
             )
             return None
+        self._record_ungrounded(section or schema.__name__, ungrounded)
         return schema.model_validate(payload)
+
+    def _note_degradation(self, reason: str) -> None:
+        """One sentence about what this report lost, once."""
+        if reason not in self.degradations:
+            self.degradations.append(reason)
+
+    def _record_ungrounded(self, section: str, violations: list[Violation]) -> None:
+        """Keep a section's over-claims on the record, without editing its prose.
+
+        Records only. The manual path has already counted these as leftovers of
+        its retry loop, and counting them twice would say the model was told
+        twice.
+        """
+        if not violations:
+            return
+        logger.warning(
+            "ReportComposer: section '%s' claims %s, which this run does not establish; "
+            "kept and recorded unresolved.",
+            section,
+            ", ".join(v.path for v in violations),
+        )
+        self.validation_tally.record_unresolved(f"composer:{section}", violations)
 
 
 def _section_declined(payload: Any, schema: type[BaseModel]) -> bool:
@@ -387,6 +579,52 @@ def _unwrap_section_envelope(payload: Any, schema: type[BaseModel]) -> Any:
     if key in schema.model_fields or not isinstance(value, dict):
         return payload
     return value
+
+
+def _the_prose_field(schema: type[BaseModel]) -> str | None:
+    """Which field of ``schema`` holds the section's own prose, or ``None``.
+
+    ``text`` when the schema declares one, and otherwise the schema's single
+    string-typed field. A schema with several — a ransom note has a filename
+    and its verbatim content, an encryption scheme has nine — has no such
+    field, and guessing one would be interpretation rather than a move.
+    """
+    fields = getattr(schema, "model_fields", {}) or {}
+    if "text" in fields:
+        return "text"
+    strings = [name for name, field in fields.items() if _is_a_string_field(field.annotation)]
+    return strings[0] if len(strings) == 1 else None
+
+
+def _is_a_string_field(annotation: Any) -> bool:
+    """Whether this field holds one string, rather than a list of them."""
+    if annotation is str:
+        return True
+    if get_origin(annotation) in (UnionType, Union):
+        return [arg for arg in get_args(annotation) if arg is not type(None)] == [str]
+    return False
+
+
+def _section_text_envelope(payload: Any, schema: type[BaseModel], section: str) -> Any:
+    """``{"<section>": "the prose"}`` put where the schema wants it.
+
+    A move, not a guess. Both models answered every section with the section's
+    own name as the key, six runs out of six, and where the value was a string
+    the section's whole text was thrown away for want of a field name. It is
+    opened only when the one key *is* this section's name, its value is a
+    string, and the schema has one field that holds prose; anything else — a
+    renamed key, two keys, a value that is a list — needs interpretation and is
+    dropped as before, named in the report's own degradation reasons.
+    """
+    if not isinstance(payload, dict) or len(payload) != 1:
+        return payload
+    ((key, value),) = payload.items()
+    if not isinstance(value, str) or not value.strip():
+        return payload
+    if key in getattr(schema, "model_fields", {}) or key.strip().lower() != section.strip().lower():
+        return payload
+    field = _the_prose_field(schema)
+    return payload if field is None else {field: value}
 
 
 def _message_text(msg: Any) -> str:

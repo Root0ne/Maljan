@@ -1,0 +1,44 @@
+{
+  "parallel": {
+    "analysts": [
+      "lead"
+    ],
+    "conditional": {},
+    "edges": [
+      "__start__->triage_pack",
+      "judge->report",
+      "lead_analyst->judge",
+      "report->__end__",
+      "triage_pack->lead_analyst"
+    ],
+    "nodes": [
+      "__end__",
+      "__start__",
+      "judge",
+      "lead_analyst",
+      "report",
+      "triage_pack"
+    ]
+  },
+  "sequential": {
+    "analysts": [
+      "lead"
+    ],
+    "conditional": {},
+    "edges": [
+      "__start__->triage_pack",
+      "judge->report",
+      "lead_analyst->judge",
+      "report->__end__",
+      "triage_pack->lead_analyst"
+    ],
+    "nodes": [
+      "__end__",
+      "__start__",
+      "judge",
+      "lead_analyst",
+      "report",
+      "triage_pack"
+    ]
+  }
+}

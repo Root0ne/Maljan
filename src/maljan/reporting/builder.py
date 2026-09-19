@@ -26,7 +26,13 @@ from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
 from maljan.extractors.attribution import build_family_attribution
-from maljan.extractors.capability_matrix import build_capability_matrix
+from maljan.extractors.capability_matrix import build_capability_matrix, unmapped_behaviours
+from maljan.pipeline.outcome import (
+    INCONCLUSIVE_REASONS,
+    INCONCLUSIVE_VERDICT,
+    normalise_verdict,
+)
+from maljan.reporting.dedupe import MergeTally
 from maljan.reporting.ledger_projection import (
     dynamic_from_ledger,
     identity_from_ledger,
@@ -87,7 +93,7 @@ class MalwareReportBuilder:
         run_summary: dict[str, Any] | None,
         discussion_history: list[dict[str, Any]] | None,
         final_decision: str,
-        overall_confidence: float = 0.0,
+        overall_confidence: float | None = 0.0,
         judge_assessment: Any | None = None,
         malware_category: str | None = None,
         degraded_mode: bool = False,
@@ -147,6 +153,10 @@ class MalwareReportBuilder:
         cells, mappings = build_capability_matrix(
             stix_output=self.stix_output,
             isr_reports=self.isr_reports,
+            # The routed minimum, which is what the analyst loop and the
+            # judge's bundle check were given: a technique from a domain this
+            # sample cannot host is kept in the matrix and left unpublished.
+            sample={"platform": self.sample_platform, "file_type": self.sample_file_type},
         )
         severity = self._severity_from_judge(static, dynamic, identity)
         verdict = self._verdict_literal(self.final_decision)
@@ -162,8 +172,13 @@ class MalwareReportBuilder:
             "termination_reason": self.run_summary.get("negotiation", {}).get(
                 "termination_reason", "unknown"
             ),
+            # A float wherever this key is declared, so a run whose judge never
+            # answered — and which therefore has no assessed confidence and no
+            # negotiation block to read one from — contributes 0.0 rather than
+            # a ``None`` a reader of the projection has no field for. What was
+            # not assessed is said once, by ``overall_confidence`` itself.
             "final_confidence": self.run_summary.get("negotiation", {}).get(
-                "final_confidence", self.overall_confidence
+                "final_confidence", self.overall_confidence or 0.0
             ),
             "confidence_history": self.run_summary.get("negotiation", {}).get(
                 "confidence_history", []
@@ -189,6 +204,7 @@ class MalwareReportBuilder:
             persistence=persistence,
             capability_matrix=cells,
             ttp_mappings=mappings,
+            unmapped_behaviours=unmapped_behaviours(self.stix_output),
             attribution=attribution,
             executive_summary="",  # filled by NarrativeAgent
             capabilities_narrative=[],  # filled by NarrativeAgent
@@ -202,11 +218,29 @@ class MalwareReportBuilder:
         # The sections the report is actually made of, and the index of the
         # calls behind them. Built last so a section builder can never affect
         # the verdict, the severity or the STIX bundle above it.
+        merges = MergeTally()
         report.sections = build_sections(
             self.evidence_ledger,
             self.isr_reports,
             identity.file_type,
             str(identity.platform),
+            merges=merges,
+            # The one validated list, so the Findings table can say which of
+            # the ids it prints this run did not publish. An analyst carries
+            # technique ids on its findings as well as on its claims, and the
+            # findings' were the ones no surface ever questioned.
+            published_techniques=frozenset(
+                str(mapping.technique_id or "").strip().upper()
+                for mapping in mappings
+                if str(mapping.technique_id or "").strip()
+            ),
+        )
+        # What the run said twice and the report says once. The bundle's own
+        # indicator merge happened in the judge, long before this, and is
+        # counted by the integrity pass; both are the same act on the same
+        # run, so the summary states one number for it.
+        self.run_summary["dedupe"] = merges.as_dict(
+            extra_indicators=_indicators_merged_in_the_bundle(self.run_summary)
         )
         report.evidence_index = [
             EvidenceIndexRow(
@@ -311,20 +345,65 @@ class MalwareReportBuilder:
         """
         verdict = report.verdict
         family = report.attribution.family or report.malware_category or "unclassified malware"
-        ttp_lines = [f"{m.technique_id} ({m.technique_name})" for m in report.ttp_mappings[:5]]
-        ttp_summary = ", ".join(ttp_lines) if ttp_lines else "no MITRE techniques mapped"
-        report.executive_summary = (
-            f"Sample classified as {verdict.lower()}. Best-guess family: {family}. "
-            f"Pipeline reported {len(report.ttp_mappings)} ATT&CK techniques: "
-            f"{ttp_summary}. Confidence {report.overall_confidence:.2f}. "
-            "This is an auto-generated summary (no LLM available); review the "
-            "detailed sections for evidence."
+        # A count followed by a shorter list has to say it is a shorter list.
+        # "reported 11 ATT&CK techniques: T1027 ..., T1055 ..." and then five
+        # of them reads as a contradiction rather than as a sample.
+        named = [f"{m.technique_id} ({m.technique_name})" for m in report.ttp_mappings[:5]]
+        rest = len(report.ttp_mappings) - len(named)
+        ttp_summary = (
+            f"including {', '.join(named)}, and {rest} more" if rest > 0 else ", ".join(named)
+        )
+        if any(reason in INCONCLUSIVE_REASONS for reason in report.degradation_reasons or []):
+            # A run that examined nothing has no classification to report, and
+            # "classified as suspicious" would read as a finding drawn from
+            # evidence that does not exist.
+            report.executive_summary = (
+                "This analysis is inconclusive: no analysis was performed, so nothing "
+                "about the sample was established. The verdict is not a finding about "
+                "the sample and must not be read as one. Re-run the analysis once the "
+                "cause named in the degradation reasons is resolved."
+            )
+        else:
+            # The confidence is not restated here. Every surface that draws
+            # this paragraph draws the verdict and its confidence above it --
+            # the console's header chip, the exported report's own header --
+            # and the two used to disagree about notation on one screen.
+            techniques = (
+                "The pipeline mapped no ATT&CK technique. "
+                if not named
+                else f"The pipeline mapped {len(report.ttp_mappings)} ATT&CK techniques, "
+                f"{ttp_summary}. "
+            )
+            report.executive_summary = (
+                f"Sample classified as {verdict.lower()}. Best-guess family: {family}. "
+                f"{techniques}"
+                "This is an auto-generated summary (no LLM available); review the "
+                "detailed sections for evidence."
+            )
+        # Which tabs to point at is read from the report rather than written
+        # down: the console offers a tab only when the run filled it, so a
+        # fixed "Static, Dynamic and Network" named one it had chosen to hide.
+        drawn = [
+            name
+            for name, block in (
+                ("Identity", report.identity),
+                ("Static", report.static),
+                ("Dynamic", report.dynamic),
+                ("Network", report.network),
+            )
+            if block is not None
+        ]
+        # ``identity`` is not optional on a report, so ``drawn`` always names at
+        # least the Identity tab and there is no empty case to write for.
+        where = (
+            f"the {', '.join(drawn[:-1])} and {drawn[-1]} tabs"
+            if len(drawn) > 1
+            else f"the {drawn[0]} tab"
         )
         report.capabilities_narrative = [
             "Detailed narrative was not generated because the analysis ran in "
             "mock/offline mode or the narrative LLM call failed. The deterministic "
-            "evidence in the Static, Dynamic and Network sections below carries "
-            "the full picture.",
+            f"evidence on {where} carries the full picture.",
         ]
         report.defensive_recommendations = [
             DefensiveRecommendation(
@@ -343,12 +422,17 @@ class MalwareReportBuilder:
 
     @staticmethod
     def _verdict_literal(decision: str) -> Any:
-        normalised = (decision or "").strip().lower()
-        if normalised.startswith("malw"):
-            return "Malware"
-        if normalised.startswith("benign"):
-            return "Benign"
-        return "Suspicious"
+        """The decision as the report's own enum, through the one reading of it.
+
+        The prefix rule this used to hold itself is now
+        ``pipeline.outcome.normalise_verdict``, which the verdict statement is
+        read with as well: two readings of one word is how a judge that wrote
+        "Benign (legitimate utility)" was published as Malware while the
+        renderer two layers down would have called it Benign. A word neither
+        can read falls to ``Suspicious``, which is what the pipeline has
+        already decided for it by the time this runs.
+        """
+        return normalise_verdict(decision) or INCONCLUSIVE_VERDICT
 
     def _severity_from_judge(
         self,
@@ -491,6 +575,20 @@ class MalwareReportBuilder:
         )
 
 
+def _indicators_merged_in_the_bundle(run_summary: dict[str, Any]) -> int:
+    """How many indicators the STIX integrity pass folded, from the summary it wrote."""
+    truncation = run_summary.get("truncation")
+    if not isinstance(truncation, dict):
+        return 0
+    dropped = truncation.get("integrity_dropped")
+    if not isinstance(dropped, dict):
+        return 0
+    try:
+        return int(dropped.get("duplicate_indicator", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _build_version_history(front_matter: ReportFrontMatter) -> list[VersionHistoryEntry]:
     """Single deterministic revision-history row (reference §2)."""
     return [
@@ -557,7 +655,10 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     net = report.network
     if net:
         for d in net.domains:
-            _add("Domain", d.fqdn, d.reason or "", is_network=True)
+            # Where the name came from belongs beside it: the consolidated
+            # table is read by somebody deciding what to block.
+            note = "; ".join(part for part in (d.reason, d.source) if part)
+            _add("Domain", d.fqdn, note, is_network=True)
         for ip in net.ips:
             _add("IPv4", ip.address, f"port {ip.port}" if ip.port else "", is_network=True)
         for u in net.urls:

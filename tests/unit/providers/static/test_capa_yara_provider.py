@@ -73,8 +73,6 @@ def test_capa_results_become_capabilities_techniques_and_a_table(monkeypatch, tm
     monkeypatch.setattr(provider, "_run_yara", lambda path: [])
     bundle = provider.collect_evidence(str(sample))
     assert bundle is not None
-    assert bundle.api_capabilities["data-manipulation"] == 1
-    assert bundle.api_capabilities["host-interaction"] == 1
     ids = {hit["technique_id"] for hit in bundle.technique_hits}
     assert ids == {"T1027", "T1106"}
     # Same row shape the import-capability Layer 0 already writes into

@@ -15,10 +15,15 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from maljan.agents.base_agent import (
     BaseAnalyst,
+    evidence_ref_text,
     prompt_to_messages,
     strip_tool_call_scaffolding,
 )
-from maljan.agents.prompt_fragments import FINDINGS_BLOCK_FRAGMENT
+from maljan.agents.prompt_fragments import (
+    CLAIM_FORMAT_FRAGMENT,
+    FINDINGS_BLOCK_FRAGMENT,
+    REPUTATION_LOOKUP_FRAGMENT,
+)
 from maljan.agents.registry import register_agent
 from maljan.providers.base import StaticJobContext
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
@@ -31,10 +36,19 @@ _ISR_HEAD = (
     "You are an expert Static Malware Analyst with 15 years of reverse engineering experience. "
 )
 
+# What a claim is for. A live run produced 39 claims of which most were the
+# sample's own metadata at confidence 1.00 -- "the binary has a sha256 hash of
+# ...", "mime type consistent" -- which the judge then weighed as evidence of
+# something. Those facts belong in the artifacts block, which exists for them.
+_CLAIMS_BEAR_ON_THE_VERDICT = (
+    "\n\nClaims state findings that bear on the verdict. File metadata — hashes, size, "
+    "mime type, machine type, timestamps — goes in the artifacts block, not in claims."
+)
+
 # The optional structured channel, appended after the provider fragment so it
 # is the last thing the analyst reads before it answers. The assembly order is
 # the contract the tool-server and agent-composition layers build prompts from.
-_ISR_TAIL = FINDINGS_BLOCK_FRAGMENT
+_ISR_TAIL = FINDINGS_BLOCK_FRAGMENT + _CLAIMS_BEAR_ON_THE_VERDICT + REPUTATION_LOOKUP_FRAGMENT
 
 
 def _static_prompt(provider: Any | None = None) -> str:
@@ -431,71 +445,6 @@ class StaticAnalyst(BaseAnalyst):
             )
             return ""
 
-    def _compute_attck_case_hint(self, file_path: str) -> str:
-        """Pre-pass: surface ATT&CK techniques recurring in similar prior cases (§4 U2).
-
-        Builds the same deterministic static-feature profile as the family RAG and
-        retrieves the behaviourally-similar prior cases mined from our own long-term
-        memory; their attributed technique_ids are aggregated into ranked CANDIDATE
-        techniques for the LLM to corroborate. LLM-centric — retrieval surfaces
-        prior-art TTPs; the analyst decides which apply. Fail-safe: gated OFF by
-        default, returns '' when the corpus/profile is absent or empty.
-        """
-        from maljan.core.config import get_settings
-
-        cfg = get_settings()
-        if not cfg.preprocessing.use_attck_case_rag:
-            return ""
-        try:
-            from maljan.analysis.attck_case_rag import (
-                build_attck_case_hint,
-                retrieve_techniques,
-            )
-            from maljan.analysis.family_feature_rag import build_sample_profile_text
-            from maljan.extractors.pe_extractor import build_static_analysis
-            from maljan.memory.attck_case_index import load_attck_case_index
-
-            static = build_static_analysis(sample_path=file_path)
-            if static is None:
-                return ""
-            profile = build_sample_profile_text(static)
-            if not profile:
-                return ""
-            index = load_attck_case_index(cfg.preprocessing.attck_case_corpus_path)
-            if index is None:
-                return ""  # corpus absent — already logged once at load
-            candidates = retrieve_techniques(
-                profile,
-                index,
-                top_k=cfg.preprocessing.attck_case_rag_top_k,
-                min_score=cfg.preprocessing.attck_case_rag_min_score,
-                max_techniques=cfg.preprocessing.attck_case_rag_max_techniques,
-            )
-            hint = build_attck_case_hint(candidates)
-            if hint:
-                self.logger.info(
-                    "ATT&CK-case-RAG pre-pass: %d candidate technique(s) for '%s' (top=%s).",
-                    len(candidates),
-                    file_path,
-                    f"{candidates[0].technique_id}~{candidates[0].score:.2f}"
-                    if candidates
-                    else "-",
-                )
-            else:
-                self.logger.info("ATT&CK-case-RAG pre-pass: no technique above the floor.")
-            return hint
-        except Exception as exc:  # fail-safe: never break analysis over a hint
-            self.logger.warning(
-                "ATT&CK-case-RAG pre-pass failed (%s: %s); continuing without candidates.",
-                type(exc).__name__,
-                exc,
-            )
-            return ""
-
-    # ------------------------------------------------------------------
-    # Text interface (backward compatible)
-    # ------------------------------------------------------------------
-
     def analyze(self, data: str) -> str:
         """Translates binary file paths or raw disassembly into a focused malware analysis report."""
         self.logger.info("Executing static evaluation...")
@@ -647,7 +596,6 @@ class StaticAnalyst(BaseAnalyst):
         sink_hint = ""
         attr_hint = ""
         rag_hint = ""
-        attck_hint = ""
         analysis_path = _extract_analysis_path(data)
         if analysis_path:
             sink_hint = self._compute_sink_priority_hint(analysis_path)
@@ -665,10 +613,6 @@ class StaticAnalyst(BaseAnalyst):
         host_path = _extract_host_path(data)
         if host_path:
             rag_hint = self._compute_family_rag_hint(host_path)
-            # ATT&CK case-prior RAG (§4 U2): cross-sample TTP grounding mined from our
-            # own long-term memory. Same host profile as the family RAG, different KB
-            # (prior cases -> recurring techniques). Fail-safe and gated OFF by default.
-            attck_hint = self._compute_attck_case_hint(host_path)
         prompt_messages = [
             ("system", self._system_prompt(lambda: _static_prompt(self._provider()))),
             (
@@ -678,13 +622,8 @@ class StaticAnalyst(BaseAnalyst):
                 "For each finding state: the claim, the exact artifact "
                 "reference (e.g. 'API import: VirtualAllocEx', 'string at .data+0x20: /bin/sh'), "
                 "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID if applicable.\n\n"
-                "Format each finding as:\n"
-                "CLAIM: <claim text>\n"
-                "EVIDENCE: <artifact reference>\n"
-                "CONFIDENCE: <float>\n"
-                "TECHNIQUE: <T-ID or NONE>\n"
-                "---\n\n"
-                f"{rag_hint}{attck_hint}{attr_hint}{sink_hint}{load_hint}{target_info}",
+                f"{CLAIM_FORMAT_FRAGMENT}\n"
+                f"{rag_hint}{attr_hint}{sink_hint}{load_hint}{target_info}",
             ),
         ]
 
@@ -776,7 +715,7 @@ class StaticAnalyst(BaseAnalyst):
         # that obeys it puts a JSON fence into the revised report, and nothing
         # downstream of here — the claim parser, the transcript, the Composer —
         # should ever see it.
-        response = self.llm.invoke(messages)
+        response = self.llm.invoke(self.frame_messages(messages))
         content = self._capture_findings(str(response.content))
 
         parsed = _parse_claim_blocks(content)
@@ -981,7 +920,7 @@ def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
         claims.append(
             ClaimEvidence(
                 claim=claim_text[:300],
-                evidence_ref=evidence_text[:200],
+                evidence_ref=evidence_ref_text(evidence_text),
                 confidence=confidence,
                 technique_id=technique_id,
             )

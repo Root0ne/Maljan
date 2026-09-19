@@ -60,9 +60,7 @@ class TestBinaryBuilders:
         assert dict(sections["pe_header"].rows)["machine"] == "332"
         assert sections["pe_sections"].columns[0] == "Name"
         assert [row[0] for row in sections["pe_sections"].rows] == [".text", ".rsrc"]
-        assert ["KERNEL32.dll", "VirtualAllocEx", "process_injection"] in sections[
-            "pe_imports"
-        ].rows
+        assert ["KERNEL32.dll", "VirtualAllocEx"] in sections["pe_imports"].rows
         assert sections["pe_exports"].items == ["StartService"]
         assert sections["packer_signatures"].rows == [["UPX", ".text"]]
 
@@ -86,7 +84,7 @@ class TestBinaryBuilders:
 class TestOtherToolBuilders:
     def test_iocs(self) -> None:
         sections = _by_key(build_sections([_entry("iocs_from_file")]))
-        assert ["domain", "c2.evil.tld", "hard-coded"] in sections["iocs"].rows
+        assert ["domain", "c2.evil.tld", "hard-coded", "ev_0001"] in sections["iocs"].rows
 
     def test_strings(self) -> None:
         sections = _by_key(build_sections([_entry("strings")]))

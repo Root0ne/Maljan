@@ -28,23 +28,40 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
+from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 
-from maljan.agents.base_agent import retry_on_connection_error
+from maljan.agents.base_agent import (
+    BudgetMeter,
+    LoopBudget,
+    _turn_key,
+    retry_on_connection_error,
+    run_on_agent_loop,
+)
+from maljan.agents.judge_postprocess import ASSESSMENT_RELOCATED_CODE
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
+from maljan.pipeline.events import emit_judge_question, scrub
 from maljan.pipeline.mediation_models import MediatorVerdict
 from maljan.pipeline.state import AgentArgument
 from maljan.pipeline.validation import (
+    ValidationTally,
     Violation,
+    announce_resolved,
+    announce_unresolved,
+    assessment_conflict_violations,
+    assessment_violations,
     drop_ungrounded_indicators,
     retry_with_feedback,
+    stated_verdict_violations,
+    unsupported_benign_violations,
+    unsupported_malware_violations,
     validate_verdict_bundle,
 )
 from maljan.schemas.evidence import EvidenceCounter, LedgerEntry
@@ -53,6 +70,54 @@ from maljan.schemas.stix_models import Bundle
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
+
+# How many times the judge is asked again about a verdict answer that was
+# wrong. One: a second correction has never produced a better bundle than the
+# first, and every turn is a full judge timeout.
+_VERDICT_RETRIES = 1
+
+# The correction the judge is given for an answer that was not a bundle.
+_NOT_JSON_FEEDBACK = (
+    "Your previous answer was not a JSON STIX bundle. Return the JSON bundle only, "
+    "no tool calls, no prose."
+)
+
+# What is recorded when even the retry was not a bundle. The code lands in
+# ``run_summary.validation.unresolved``; the reason joins the report's
+# degradation reasons, where a reader looking at a verdict with no severity
+# will find out why it has none.
+VERDICT_FALLBACK_CODE = "verdict.fallback"
+VERDICT_FALLBACK_REASON = "judge verdict fell back to text extraction"
+
+# What is recorded when the judge never answered at all. A retry would cost a
+# second full judge timeout and could only produce the same fallback bundle, so
+# nothing is asked again — but a verdict extracted from the analysts' text
+# because the judge timed out is not a verdict the judge gave, and the run
+# summary says so rather than showing a clean validation block.
+VERDICT_TIMEOUT_CODE = "verdict.timeout"
+VERDICT_TIMEOUT_REASON = "the judge did not answer within its budget"
+
+
+def _answer_text(answer: Any) -> str:
+    """The text of a model answer, whatever shape it arrived in."""
+    content = getattr(answer, "content", answer)
+    return str(content if content is not None else "")
+
+
+def _is_not_json(answer: Any) -> bool:
+    """Whether an answer is something other than a JSON object.
+
+    An empty ``content`` carrying ``tool_calls`` counts: the judge binds no
+    tools on the verdict path, so a tool call there is the local model
+    emitting its own control tokens rather than an answer.
+    """
+    from maljan.utils.json_cleaner import safe_parse_json
+
+    text = _answer_text(answer).strip()
+    if not text:
+        return True
+    return not isinstance(safe_parse_json(text), dict)
+
 
 # Consensus threshold: mediator confidence must reach this to stop negotiation early
 CONSENSUS_THRESHOLD = 0.85
@@ -94,6 +159,9 @@ class JudgeVerdict(NamedTuple):
     bundle: Bundle
     violations: list[Violation]
     retries: int
+    # Every violation the judge was shown, by code — including the ones the
+    # retry fixed, which nothing else in the run records.
+    fed_back: dict[str, int] = {}
 
 
 # The judge's system prompt. A module constant so that
@@ -117,24 +185,141 @@ JUDGE_VERDICT_SYSTEM = (
     "appear verbatim in the deterministic evidence (static strings, "
     "sandbox observations, or network IOCs). When in doubt, emit zero "
     "Indicators — the deterministic renderer will fill them in.\n"
-    "- You decide severity, malware category and family; nothing downstream "
-    "computes them for you and nothing overrides what you say. Add a top-level "
-    "``x_maljan_assessment`` object to the bundle:\n"
+    "- You decide the verdict, the severity, the malware category and the "
+    "family; nothing downstream computes them for you and nothing overrides "
+    "what you say. ``x_maljan_assessment`` is a sibling of ``objects``, beside "
+    "the list and not inside it:\n"
     '    "x_maljan_assessment": {\n'
+    '      "verdict": "Malware" or "Suspicious" or "Benign" — exactly one of '
+    "those three words,\n"
     '      "severity": {"rating": "Critical|High|Medium|Low|Informational",\n'
     '                   "rationale": "why the evidence supports that rating"},\n'
     '      "malware_category": "free text, e.g. ransomware / loader / infostealer",\n'
     '      "family": {"name": "...", "confidence": 0.0-1.0,\n'
-    '                 "evidence_ids": ["ev_0012"]}\n'
+    '                 "evidence_ids": ["ev_0012"]},\n'
+    '      "confidence": 0.0-1.0\n'
     "    }\n"
-    "  Omit any of the three you cannot support. A family name MUST cite the "
-    "evidence ids it was read from; a family with no evidence ids is a guess, "
-    "and the report will say so.\n"
-    "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers."
+    "  ``verdict`` is exactly one of those three words and nothing else — no "
+    "qualifier, no parenthesis, no sentence; anything you want to qualify it "
+    "with goes in ``severity.rationale``. Give your own confidence in it under "
+    "``confidence``; both are published as you wrote them. Omit any of "
+    "the other three you cannot support. A family name MUST cite the evidence "
+    "ids it was read from; a family with no evidence ids is a guess, and the "
+    "report will say so.\n"
+    "- Write a STIX ``malware`` object only for a sample you conclude is "
+    "malware. The objects illustrate the verdict you stated; they are not a "
+    "second way of stating one, and a malware object added as a container for "
+    "a sample you call benign contradicts your own assessment.\n"
+    "- Benign is a finding, not a default. It says the evidence was examined "
+    "and nothing malicious was in it. If this run produced no evidence and no "
+    "analyst claim, say so and return Suspicious: an empty report is not a "
+    "clean sample.\n"
+    "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers.\n"
+    "\n"
+    "The answer has exactly this shape. Both top-level keys are required, and "
+    "``x_maljan_assessment`` sits beside ``objects`` rather than inside it:\n"
+    "{\n"
+    '  "type": "bundle",\n'
+    '  "id": "bundle--<uuid4>",\n'
+    '  "x_maljan_assessment": {\n'
+    '    "verdict": "Malware" | "Suspicious" | "Benign",\n'
+    '    "confidence": 0.0-1.0,\n'
+    '    "severity": {"rating": "...", "rationale": "..."},\n'
+    '    "malware_category": "...",\n'
+    '    "family": {"name": "...", "confidence": 0.0-1.0, "evidence_ids": ["ev_0012"]}\n'
+    "  },\n"
+    '  "objects": [ ... ]\n'
+    "}"
 )
 
 
-class JudgeAgent:
+# What the judge is told about the sample itself, before any analysis of it.
+# The hash the job was queued under, the name it arrived with and the format
+# detection are the router's; the md5 and size are read from the sandbox's own
+# file block. They are in the prompt always, not only when a lookup is due.
+#
+# The file name is whatever the submitter typed, so it is labelled as
+# submitted, and every value is written on its own line with its line breaks
+# removed: a name that carried a newline could otherwise close the block and
+# open one of its own.
+#
+# A live run made the case: the mediator told the judge to look the sample's
+# hash up, and no message in the conversation carried a hash. The static
+# analyst had produced no claims, so there was nothing in the prose either, and
+# the judge opened a seventeen-tool loop with nothing to ask about.
+SAMPLE_IDENTITY_HEADER = (
+    "SAMPLE IDENTITY (established by the router and the sandbox's own file block, not by analysis)"
+)
+
+_IDENTITY_FIELDS: tuple[tuple[str, str], ...] = (
+    ("sha256", "sha256"),
+    ("sha1", "sha1"),
+    ("md5", "md5"),
+    ("file_name", "file name (as submitted)"),
+    ("size_bytes", "size (bytes)"),
+    ("file_type", "file type"),
+    ("platform", "platform"),
+)
+
+
+def sample_identity_block(sample: Any) -> str:
+    """The sample's own facts as one block, or ``""`` when there are none."""
+    data = sample if isinstance(sample, dict) else {}
+    rows = [
+        f"{label}: {' '.join(str(data[key]).split())}"
+        for key, label in _IDENTITY_FIELDS
+        if str(data.get(key) or "").strip()
+    ]
+    if not rows:
+        return ""
+    return f"=== {SAMPLE_IDENTITY_HEADER} ===\n" + "\n".join(rows)
+
+
+def _identity_prefix(sample: Any) -> str:
+    """The identity block as a prompt prefix, with its blank line."""
+    block = sample_identity_block(sample)
+    return f"{block}\n\n" if block else ""
+
+
+def _standing_blocks(run_state: str, facts_block: str) -> str:
+    """The run-state block and the pack as a prompt prefix, each with its blank line.
+
+    The run state first, between its markers, because it is the shorter and
+    the one a reader orients by; the pack after it, under its own heading.
+    """
+    from maljan.pipeline.run_state import with_run_state
+
+    parts: list[str] = []
+    if run_state:
+        parts.append(with_run_state("", run_state))
+    if facts_block:
+        parts.append(facts_block)
+    return "".join(f"{part}\n\n" for part in parts if part)
+
+
+def _sha256_of(sample: Any) -> str:
+    """The sha256 the identity block carries, for a sentence that names it."""
+    data = sample if isinstance(sample, dict) else {}
+    return str(data.get("sha256") or "").strip()
+
+
+def _who_is_asked(message: Any) -> str | None:
+    """The agent a judge turn is asking, when the same turn delegates to one.
+
+    The judge's own ``ask_<key>`` tools are the only place a question in this
+    loop names a recipient. A turn that calls none is asking the room.
+    """
+    from maljan.agents.delegation import tool_name
+
+    prefix = tool_name("")
+    for call in list(getattr(message, "tool_calls", None) or []):
+        name = str((call or {}).get("name") or "")
+        if name.startswith(prefix):
+            return name[len(prefix) :] or None
+    return None
+
+
+class JudgeAgent(BudgetMeter):
     """Chief controller responsible for mediation, consensus detection, and final verdict.
 
     Usage:
@@ -160,6 +345,9 @@ class JudgeAgent:
         # node before it works — the debate stage when it mediates, the verdict
         # stage when it rules — and read by the evidence recorder.
         self.pipeline_stage: str = "analysis"
+        # The job this agent serves, set by the container that built it. Every
+        # attach asks for it, so two agents in one job share their handles.
+        self._job_id: str = ""
         # Per-run truncation ledger (pitfall P6); same lifecycle. The judge is
         # where ``judge_max_tokens`` binds and where the STIX integrity pass
         # runs, so this is the most load-bearing attachment point of the three.
@@ -178,11 +366,55 @@ class JudgeAgent:
         # checkable the same way an analyst's claim is. Same counter as the
         # analysts, so the ids are one sequence across the whole job.
         self.evidence_counter: EvidenceCounter | None = None
+        # The name the meter and the console draw this agent under. Fixed:
+        # there is one judge, and the ledger already stamps its entries with
+        # this word.
+        self.name: str = "judge"
+        # The budget meter's rows for this agent's loops, drained by the node
+        # that reads its ledger. The meter itself comes from ``BudgetMeter``,
+        # so the judge's rows are the shape the analysts' rows are.
+        self._budget_records: list[dict[str, Any]] = []
         # Accumulated across mediation rounds and drained by the judge node,
         # for the reason the analysts' buffer is: ``mediate`` runs the loop
         # once per round, and a buffer replaced on each of them would persist
         # only the last round's calls while the earlier ones consumed ids.
         self._evidence_entries: list[LedgerEntry] = []
+
+    def _publish_questions(self, conversation: list[Any], already: set[str]) -> None:
+        """Publish each question the judge has asked and not published yet.
+
+        A question, not every intermediate turn. The judge's loop narrates as
+        much as it asks, and a console that drew the narration as a question
+        card would put a card in front of the reader on nearly every turn; a
+        turn whose text ends in a question mark is the one a reader can
+        actually answer or wait on. A turn that also calls ``ask_<key>`` names
+        that agent as the addressee, because that is who the judge is asking.
+
+        Identified by where the turn sits and what it said, so a hook that
+        sees the same conversation twice — which it does, once per model turn
+        — publishes each question once, while a judge that asks the identical
+        question a second time is published twice. Never raises: this is
+        telemetry inside a prompt hook, and a hook that throws ends the loop.
+        """
+        try:
+            for index, message in enumerate(conversation):
+                if getattr(message, "type", "") != "ai":
+                    continue
+                marker = _turn_key(message, index)
+                if marker in already:
+                    continue
+                already.add(marker)
+                text = str(getattr(message, "content", "") or "").strip()
+                if not text or not text.rstrip().endswith("?"):
+                    continue
+                emit_judge_question(
+                    self._event_sink(),
+                    stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
+                    text=scrub(text),
+                    addressed_to=_who_is_asked(message),
+                )
+        except Exception as exc:  # noqa: BLE001 — a prompt hook never fails a loop
+            self.logger.debug("judge question not published (%s).", exc)
 
     def _server_registry(self) -> Any | None:
         """The job's tool-server registry, or None when this judge runs bare."""
@@ -193,7 +425,7 @@ class JudgeAgent:
 
     def _job_key(self) -> str:
         """A per-job identity for the handles' same-job short circuit."""
-        return str(getattr(self, "_job_id", "") or "job")
+        return self._job_id or "job"
 
     def _definition_tool_refs(self) -> list[Any]:
         """The judge definition's ``ToolRef``s, under the active profile.
@@ -331,12 +563,55 @@ class JudgeAgent:
             # entry that says "analysis" for either sends a reader looking for
             # an analyst that never made the call.
             stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+            sink=self._event_sink(),
         )
-        agent_executor = create_react_agent(self.llm, record_tools(self.tools, recorder))
-
         messages = messages_pre
 
-        timeout = get_settings().react_agent_timeout
+        settings = get_settings()
+        timeout = settings.react_agent_timeout
+        max_steps = int(settings.react_agent_max_steps)
+        # The judge is an agent by every other measure here — its ledger
+        # entries carry its name, it binds servers by role, the console draws
+        # it as a step — so its loop is metered like one. Without this the one
+        # loop with a hard wall-clock timeout was the only one that never said
+        # a cap had ended it.
+        budget = LoopBudget(max_steps, float(timeout))
+        cap: str | None = None
+        turns: list[Any] = []
+
+        asked: set[str] = set()
+
+        def _count_the_turns(state: Any) -> list[Any]:
+            """Count the conversation before every model turn, and change nothing.
+
+            The analysts' loop counts on the same hook because it is already
+            there to refresh their run-state block. The judge has no block to
+            refresh, and without something counting, a loop cut off at its
+            wall clock hands the meter an empty conversation and records the
+            zero steps this meter exists to stop recording.
+
+            The same hook is where a question the judge asks mid-loop is
+            published. It is the one seam the loop offers between two model
+            turns, so a question reaches a reader while the judge is still
+            waiting on the answer rather than after the verdict, which is the
+            whole point of showing it.
+            """
+            conversation = state.get("messages") if isinstance(state, dict) else None
+            if conversation is None:
+                conversation = getattr(state, "messages", None) or []
+            conversation = list(conversation)
+            # The turn about to be taken counts. The hook runs before the
+            # model, so a loop cut off *during* its first turn would otherwise
+            # record nothing at all — and the judge's characteristic failure is
+            # exactly that, one verdict call that ran past its wall clock.
+            budget.note_turns(conversation)
+            budget.own_steps += 1
+            self._publish_questions(conversation, asked)
+            return conversation
+
+        agent_executor = create_react_agent(
+            self.llm, record_tools(self.tools, recorder), prompt=_count_the_turns
+        )
         self.logger.info(
             "JudgeAgent invoking ReAct (timeout=%ds, tools=%d)...",
             timeout,
@@ -346,11 +621,12 @@ class JudgeAgent:
             result = await asyncio.wait_for(
                 agent_executor.ainvoke(
                     {"messages": messages},
-                    {"recursion_limit": get_settings().react_agent_max_steps},
+                    {"recursion_limit": max_steps},
                 ),
                 timeout=timeout,
             )
             _msgs = result.get("messages", []) or []
+            turns = list(_msgs)
             msg_count = len(_msgs)
             self.logger.info("JudgeAgent ReAct loop completed: %d messages.", msg_count)
             # Record every AI turn the ReAct executor produced
@@ -363,11 +639,19 @@ class JudgeAgent:
             return str(_msgs[-1].content)
         except TimeoutError:
             self.logger.error("JudgeAgent ReAct timed out after %ds.", timeout)
+            cap = "time"
             raise
         finally:
             # In a ``finally`` for the reason the analysts' loop uses one: a
             # mediation that timed out still made the calls it made.
             self._evidence_entries.extend(recorder.entries)
+            self._record_budget(
+                budget,
+                turns,
+                cap,
+                detail=(f"the loop did not answer within {timeout}s" if cap else ""),
+            )
+            self._budget_tick(budget, turns, final=True, ledger_entries=len(recorder.entries))
 
     def drain_evidence_entries(self) -> list[LedgerEntry]:
         """Every entry the judge's tool loops gathered, handing over ownership."""
@@ -389,12 +673,53 @@ class JudgeAgent:
             bool(isr.dissent_items) for isr in isr_reports.values() if isinstance(isr, AgentISR)
         )
 
+    def _holds_a_lookup_tool(self) -> bool:
+        """Whether a reputation server is among this judge's own tools.
+
+        Asked of the servers rather than of the tool names: the loop can only
+        answer an identity question if something in it can look a hash up, and
+        a judge holding only the knowledge sidecar would spend a full timeout
+        to learn nothing.
+        """
+        from maljan.agents.tool_pinning import server_of
+        from maljan.core.config import REPUTATION_SERVER_KEYS
+
+        attached = {server_of(tool) for tool in (getattr(self, "tools", None) or [])}
+        referenced = {str(ref.server) for ref in self._definition_tool_refs()}
+        return bool((attached | referenced) & set(REPUTATION_SERVER_KEYS))
+
+    def _can_ask_an_identity_question(self, ledger_servers: Iterable[str] | None) -> bool:
+        """Whether the judge should open its tool loop to ask who this sample is.
+
+        The loop used to run on dissent alone, so a run where every analyst
+        agreed — and none of them had a reputation tool to agree *about* —
+        ended with a judge holding a bound VirusTotal server it never called
+        and a family of None.
+
+        What settles it is the run's own record: the servers the evidence
+        ledger names. An earlier version read the analysts' prose for words
+        like "malware family", which turned the trigger *off* for the sentence
+        an analyst writes when it consulted nothing at all ("no malware family
+        could be determined") — the very case the trigger exists for. A tool
+        call is a fact, and a sentence is not one.
+        """
+        if not self._holds_a_lookup_tool():
+            return False
+        from maljan.core.config import REPUTATION_SERVER_KEYS
+
+        asked = {str(name) for name in (ledger_servers or ())}
+        return not (asked & set(REPUTATION_SERVER_KEYS))
+
     async def mediate(
         self,
         reports: dict[str, str],
         history: list[AgentArgument],
         isr_reports: dict[str, AgentISR] | None = None,
         consensus_threshold: float | None = None,
+        ledger_servers: Iterable[str] | None = None,
+        sample: Any = None,
+        facts_block: str = "",
+        run_state: str = "",
     ) -> tuple[AgentArgument, bool]:
         """Find contradictions between expert reports and determine consensus.
 
@@ -418,6 +743,8 @@ class JudgeAgent:
         """
         self.logger.info("Mediating %d expert reports for contradictions...", len(reports))
         needs_tools = self._has_explicit_dissent(isr_reports)
+        identity_unanswered = not needs_tools and self._can_ask_an_identity_question(ledger_servers)
+        needs_tools = needs_tools or identity_unanswered
 
         # Build a human-readable summary of all reports
         reports_text = "\n\n".join(
@@ -469,7 +796,18 @@ class JudgeAgent:
                 "is made to revise again, so it is not optional.\n"
                 "- The downstream Judge alone decides Malware/Benign/Suspicious. "
                 + (
-                    "You have Threat Intelligence tools to verify disputed "
+                    "You have reputation tools and no analyst has consulted one. "
+                    f"Look the sample's hash up once — its sha256 is {_sha256_of(sample)} "
+                    "and it is in the sample identity block below — cite what comes back "
+                    "as evidence, and treat a reputation label as one source rather than "
+                    "as the verdict.\n"
+                    if identity_unanswered and _sha256_of(sample)
+                    else "You have reputation tools and no analyst has consulted one. "
+                    "Look the sample up once to settle its identity, cite what comes "
+                    "back as evidence, and treat a reputation label as one source "
+                    "rather than as the verdict.\n"
+                    if identity_unanswered
+                    else "You have Threat Intelligence tools to verify disputed "
                     "IPs/domains/hashes — use them only to resolve contradictions.\n"
                     if needs_tools
                     else "No Threat Intelligence tools are needed for this run.\n"
@@ -477,6 +815,8 @@ class JudgeAgent:
             ),
             (
                 "human",
+                f"{_standing_blocks(run_state, facts_block)}"
+                f"{_identity_prefix(sample)}"
                 f"Expert Reports:\n{reports_text}\n\nPrevious Discussion:\n{history}\n\n"
                 "List the contradictions and give a single agreement_confidence "
                 "score. Do not state a verdict.",
@@ -484,7 +824,12 @@ class JudgeAgent:
         ]
 
         if needs_tools:
-            self.logger.info("Mediator: explicit dissent detected — running ReAct tool loop.")
+            self.logger.info(
+                "Mediator: %s — running ReAct tool loop.",
+                "no analyst consulted a reputation source"
+                if identity_unanswered
+                else "explicit dissent detected",
+            )
             await self._initialize_mcp_client()
             reasoning_text = await self.execute_tool_loop(prompt_messages)
         else:
@@ -567,13 +912,20 @@ class JudgeAgent:
         memory_store: MemoryStore | None = None,
         evidence_corpus: set[str] | None = None,
         current_sample_id: str | None = None,
+        sample: Any = None,
+        ledger_ids: Sequence[str] | None = None,
+        facts_block: str = "",
+        run_state: str = "",
     ) -> JudgeVerdict:
         """The final decision: a STIX bundle plus the judge's own assessment.
 
         ``evidence_summary`` is the block from ``pipeline.evidence_summary`` —
         who named which technique and how sure each one was. ``degradation_note``
         says why this run is thin, when it is; both go into the prompt because
-        the judge is the component that should be weighing them.
+        the judge is the component that should be weighing them. ``facts_block``
+        is the triage pack as every analyst saw it and ``run_state`` the run's
+        state block; both lead the human turn so the verdict is drawn over the
+        same facts the analysts were given.
 
         The answer is validated (``pipeline.validation.validate_verdict_bundle``)
         and, when something is wrong, handed back once with the problems named.
@@ -627,6 +979,8 @@ class JudgeAgent:
             SystemMessage(content=JUDGE_VERDICT_SYSTEM),
             HumanMessage(
                 content=(
+                    f"{_standing_blocks(run_state, facts_block)}"
+                    f"{_identity_prefix(sample)}"
                     f"Expert Reports:\n{reports_text}\n\n"
                     f"Negotiation History:\n{str(history)[:800]}\n\n"
                     "Return a JSON STIX 2.1 Bundle."
@@ -651,27 +1005,82 @@ class JudgeAgent:
         # timeout and throw the answer away.
         timed_out = False
 
+        async def _ask(turns: list[Any]) -> Any:
+            return await retry_on_connection_error(
+                lambda: self.llm.ainvoke(turns),
+                what="Judge verdict",
+                log=self.logger,
+            )
+
         async def _run(turns: list[Any]) -> Any:
             nonlocal timed_out
             timed_out = False
             try:
-                return await asyncio.wait_for(
-                    retry_on_connection_error(
-                        lambda: self.llm.ainvoke(turns),
-                        what="Judge verdict",
-                        log=self.logger,
-                    ),
-                    timeout=timeout,
-                )
+                # On the shared agent loop, not on the graph's. The judge's
+                # model is one cached client and the mediator has already used
+                # it — from ``run_on_agent_loop`` — by the time the verdict is
+                # asked for, so its httpx pool holds connections bound to that
+                # loop. Awaiting the same client here on the worker's loop made
+                # the *first* verdict request of every run die instantly with
+                # ``APIConnectionError("Connection error.")`` before a byte
+                # reached llama-server; the SDK then dropped the dead
+                # connection and the retry, opening a fresh one, always
+                # succeeded. See ``run_on_agent_loop`` for the same fault in
+                # the mediator, and for why one loop owns every LLM call.
+                return await run_on_agent_loop(_ask(turns), timeout, label="judge:verdict")
             except TimeoutError:
                 self.logger.error("JudgeAgent verdict timed out after %ds.", timeout)
                 timed_out = True
                 return "[TIMEOUT]"
 
+        # Whether the answer being validated was a JSON bundle at all, and how
+        # many turns have been spent. A model that answered with prose or with
+        # a tool call has said nothing about the sample, and the fallback
+        # extraction over that text is worth building only once the model has
+        # had its one chance to answer properly.
+        not_json = False
+        attempts = 0
+        # What the shape pass did to this answer before the schema saw it: an
+        # assessment moved to the property it belongs to, an object the bundle
+        # cannot hold set aside. Refilled per parse, because the retry's answer
+        # is a different answer and the previous one's findings are spent.
+        shape: list[Violation] = []
+        tally = ValidationTally()
+
         def _parse(answer: Any) -> Bundle:
+            nonlocal not_json, attempts
+            attempts += 1
+            shape.clear()
             if timed_out:
-                return self._fallback_bundle_from_text("[TIMEOUT]", reports, isr_reports)
-            return self._bundle_from_response(answer, reports, isr_reports)
+                not_json = False
+                return self._fallback_bundle_from_text(
+                    "[TIMEOUT]", reports, isr_reports, extracted=False
+                )
+            not_json = _is_not_json(answer)
+            if not_json:
+                self.logger.warning(
+                    "Judge verdict: the model answered with %d character(s) that are not a JSON "
+                    "bundle; asking once more before falling back to text extraction.",
+                    len(_answer_text(answer)),
+                )
+                if attempts <= _VERDICT_RETRIES:
+                    # A retry is coming and this bundle would be thrown away.
+                    return Bundle(objects=[])
+            parsed = self._bundle_from_response(answer, reports, isr_reports, record=shape)
+            # The relocation is done and nothing is left to ask about, so it is
+            # published as settled and counted where the round's other codes
+            # are, rather than spending the one retry this round has.
+            moved = [v for v in shape if v.code == ASSESSMENT_RELOCATED_CODE]
+            if moved:
+                tally.count(moved)
+                announce_resolved(
+                    self._event_sink(),
+                    agent="judge",
+                    stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
+                    violations=moved,
+                    retry_index=attempts - 1,
+                )
+            return parsed
 
         # The same catalogue the analyst loop consults. Absent (an air-gapped
         # box with no vendored id list) the technique question is skipped
@@ -682,17 +1091,115 @@ class JudgeAgent:
             self.logger.debug("Judge verdict: the knowledge tools are unavailable (%s).", exc)
             _knowledge = None  # type: ignore[assignment]
 
+        _analyst_claims = sum(
+            len(getattr(isr, "claims", None) or []) for isr in (isr_reports or {}).values()
+        )
+
+        def _verdict_checks(bundle: Bundle) -> list[Violation]:
+            """Whether the verdict was stated, and what a Benign or a Malware one cites.
+
+            Its own function because it runs on every way this round can end,
+            not only on the one where the judge answered a bundle: prose the
+            model stood by twice, JSON that was not a bundle, and a timeout all
+            produce a verdict, and the two paths that produce one out of *text*
+            were the two that reached a report unasked. Where the loop ran them
+            they were fed back once; everywhere else they are recorded, because
+            they annotate the verdict and never change it.
+
+            One reading of the verdict serves all three checks and the pipeline
+            with it — ``pipeline.outcome.decide_from_bundle`` — so no ending can
+            be told the sample is one thing and the report another.
+            """
+            return [
+                *stated_verdict_violations(bundle),
+                *unsupported_benign_violations(
+                    bundle,
+                    analyst_claims=_analyst_claims,
+                    ledger_ids=ledger_ids,
+                ),
+                *unsupported_malware_violations(
+                    bundle,
+                    analyst_claims=_analyst_claims,
+                    ledger_ids=ledger_ids,
+                ),
+            ]
+
         def _validate(bundle: Bundle) -> list[Violation]:
             # A timeout produced no answer, so there is nothing to give
             # feedback about. Reporting no violations ends the loop: a retry
             # would cost a second full judge timeout and could only produce the
-            # same fallback bundle.
+            # same fallback bundle. What the checks below have to say about the
+            # fallback bundle is recorded after the loop instead.
             if timed_out:
                 return []
-            return validate_verdict_bundle(bundle, evidence_corpus, attck=_knowledge)
+            if not_json:
+                return [Violation(code="verdict.not_json", message=_NOT_JSON_FEEDBACK)]
+            return [
+                # The set-aside objects, which are the model's to explain. The
+                # relocation is not among them: it is settled, announced in
+                # ``_parse``, and a retry for it would be a turn spent on a
+                # problem that no longer exists.
+                *(v for v in shape if v.code != ASSESSMENT_RELOCATED_CODE),
+                *validate_verdict_bundle(bundle, evidence_corpus, attck=_knowledge, sample=sample),
+                *assessment_violations(bundle),
+                *assessment_conflict_violations(bundle),
+                *_verdict_checks(bundle),
+            ]
 
         bundle, violations, retries = await retry_with_feedback(
-            _run, messages, [_validate], parse=_parse
+            _run,
+            messages,
+            [_validate],
+            max_retries=_VERDICT_RETRIES,
+            parse=_parse,
+            on_feedback=tally.count,
+            sink=self._event_sink(),
+            agent="judge",
+            stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
+        )
+        _from_the_loop = list(violations)
+        if timed_out:
+            # No answer at all, so there is nothing to feed back and nothing
+            # was: the bundle is this pipeline's own conservative verdict.
+            # Cheap to record and invisible without it.
+            violations = [
+                *violations,
+                Violation(code=VERDICT_TIMEOUT_CODE, message=VERDICT_TIMEOUT_REASON),
+            ]
+        elif bundle.x_maljan_fallback_verdict is not None:
+            # The bundle says it is one this pipeline built, which happens two
+            # ways: the model answered prose twice, or it answered JSON that
+            # was not a bundle. The second used to say nothing at all, so a
+            # verdict no judge expressed reached the report with a confidence
+            # derived from the analysts' own claims. Asked off the bundle's own
+            # mark rather than off the path, so neither way can be forgotten.
+            # It is a fact about this run as well as a schema problem the
+            # model was shown: the answer that was not a bundle is kept among
+            # the leftovers, because the conversation published it as one and a
+            # summary that dropped it would disagree with the feed, and the
+            # fallback code is added beside it so the run summary and the
+            # report's degradation reasons carry what the pipeline did about
+            # it.
+            if not any(v.code == VERDICT_FALLBACK_CODE for v in violations):
+                violations.append(
+                    Violation(code=VERDICT_FALLBACK_CODE, message=VERDICT_FALLBACK_REASON)
+                )
+        # And the two verdict checks over the bundle that is actually going to
+        # be reported, on every ending. One row each: a check the loop already
+        # fed back and that survived is in ``violations`` already, and asking
+        # the run summary to carry it twice would say the judge was told twice.
+        _already = {(v.code, v.path) for v in violations}
+        violations.extend(v for v in _verdict_checks(bundle) if (v.code, v.path) not in _already)
+        # What was added after the loop — the timeout, the fallback, the two
+        # verdict checks — is in the run summary, and the conversation showed
+        # none of it. Nobody was asked about them, so they are published as
+        # what they are: findings that survived this round.
+        announce_unresolved(
+            self._event_sink(),
+            agent="judge",
+            stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
+            violations=[v for v in violations if v not in _from_the_loop],
+            retry_index=retries,
         )
         dropped = drop_ungrounded_indicators(bundle, violations)
         if dropped:
@@ -701,15 +1208,24 @@ class JudgeAgent:
                 "dropped; they are recorded in the run summary.",
                 dropped,
             )
-        return JudgeVerdict(bundle=bundle, violations=violations, retries=retries)
+        return JudgeVerdict(
+            bundle=bundle, violations=violations, retries=retries, fed_back=dict(tally.by_code)
+        )
 
     def _bundle_from_response(
         self,
         answer: Any,
         reports: dict[str, str],
         isr_reports: dict[str, AgentISR] | None,
+        record: list[Violation] | None = None,
     ) -> Bundle:
-        """The model's raw answer as a Bundle, or the text fallback."""
+        """The model's raw answer as a Bundle, or the text fallback.
+
+        ``record`` collects what the shape pass had to do to the answer before
+        the schema could read it. It is the caller's list because the findings
+        belong to the round rather than to this method, and because an answer
+        that ends in the text fallback has nothing to record.
+        """
         raw = str(getattr(answer, "content", answer))
 
         from maljan.utils.json_cleaner import safe_parse_json
@@ -728,8 +1244,17 @@ class JudgeAgent:
             # learned it had invented an id, and the report showed one fewer
             # attack-pattern with nothing saying why. ``pipeline.validation`` is
             # the single place that decides an id is wrong, and it says so.
-            from maljan.agents.judge_postprocess import postprocess_judge_bundle
+            from maljan.agents.judge_postprocess import (
+                lift_misplaced_extensions,
+                postprocess_judge_bundle,
+            )
 
+            # Before the schema, and before anything that walks the objects: an
+            # item the Bundle cannot hold fails the whole model, and the judge's
+            # other twenty-four objects are not the model's to lose.
+            lifted = lift_misplaced_extensions(data)
+            if record is not None:
+                record.extend(lifted)
             data = postprocess_judge_bundle(data, ledger=getattr(self, "truncation_ledger", None))
             return Bundle.model_validate(data)
         except Exception as exc:  # noqa: BLE001 — a malformed bundle degrades to the fallback
@@ -833,22 +1358,39 @@ class JudgeAgent:
         text: str,
         reports: dict[str, str],
         isr_reports: dict[str, AgentISR] | None = None,
+        *,
+        extracted: bool = True,
     ) -> Bundle:
         """Build a minimal STIX Bundle when the LLM fails to produce valid JSON.
 
-        Extracts the verdict from the text response and creates a minimal Bundle
-        with an Identity, Malware, and Report object so the pipeline never
-        returns an empty Bundle.
+        The verdict is read out of the judge's own text and the bundle's object
+        set follows it: a ``malware`` object only when the verdict is Malware.
+        It used to be emitted unconditionally, and since the pipeline read the
+        verdict off the objects, the bundle's shape overrode the verdict the
+        judge had actually expressed — a judge that timed out reported Malware
+        over a signed sample with no claim behind it.
+
+        ``extracted`` is false when there was no answer to read at all, which is
+        what a timeout leaves. Then the verdict is this pipeline's own
+        conservative one rather than anything a model said, and the bundle says
+        so in ``x_maljan_fallback_verdict``.
         """
+        from maljan.pipeline.outcome import INCONCLUSIVE_VERDICT
         from maljan.schemas.stix_models import Bundle
 
-        decision = self._verdict_from_text(text)
+        decision = self._verdict_from_text(text) if extracted else INCONCLUSIVE_VERDICT
 
-        self.logger.info(
-            "Fallback Bundle: extracted verdict='%s' from text response (%d chars).",
-            decision,
-            len(text),
-        )
+        if extracted:
+            self.logger.info(
+                "Fallback Bundle: extracted verdict='%s' from text response (%d chars).",
+                decision,
+                len(text),
+            )
+        else:
+            self.logger.info(
+                "Fallback Bundle: no answer to read; the verdict is the pipeline's own '%s'.",
+                decision,
+            )
 
         # Fail closed. This used to union two sets and emit them as one: the
         # technique identifiers the analysts had claimed against cited evidence,
@@ -877,7 +1419,6 @@ class JudgeAgent:
                 ", ".join(model_only),
             )
 
-        malware_id = f"malware--{uuid.uuid4()}"
         # Don't bake the raw fallback text (which may contain ``[TIMEOUT]``
         # or other internal markers) into the malware SDO description —
         # downstream cross-layer aggregation can upgrade the verdict in
@@ -888,8 +1429,11 @@ class JudgeAgent:
         text_snippet = (text[:2000] if text else "No structured output available.").replace(
             "\n", " "
         )
-        objects: list[dict[str, Any]] = [
-            {
+        objects: list[dict[str, Any]] = []
+        malware_id = ""
+        if decision == "Malware":
+            malware_id = f"malware--{uuid.uuid4()}"
+            malware: dict[str, Any] = {
                 "type": "malware",
                 "id": malware_id,
                 "name": "analyzed-sample",
@@ -900,13 +1444,28 @@ class JudgeAgent:
                 ),
                 "x_maljan_fallback_reasoning": text_snippet,
                 "x_maljan_degraded_path": True,
-            },
-        ]
-        # Only when non-empty: the STIX validator refuses a property serialised
-        # as null or as an empty array, which is one of the two conformance
-        # defects an external validator found in this emitter.
-        if model_only:
-            objects[0]["x_maljan_model_only_technique_ids"] = model_only
+            }
+            # Only when non-empty: the STIX validator refuses a property
+            # serialised as null or as an empty array, which is one of the two
+            # conformance defects an external validator found in this emitter.
+            if model_only:
+                malware["x_maljan_model_only_technique_ids"] = model_only
+            objects.append(malware)
+        else:
+            # A verdict that is not Malware gets no malware object, so the
+            # rationale and the record of what was dropped need somewhere else
+            # to live: a Note, which is where STIX puts an analyst's own words
+            # about a set of objects.
+            note: dict[str, Any] = {
+                "type": "note",
+                "id": f"note--{uuid.uuid4()}",
+                "abstract": f"Verdict: {decision} (judge fallback)",
+                "content": text_snippet,
+                "x_maljan_degraded_path": True,
+            }
+            if model_only:
+                note["x_maljan_model_only_technique_ids"] = model_only
+            objects.append(note)
 
         for tid in sorted(tids):
             attack_id = f"attack-pattern--{uuid.uuid4()}"
@@ -924,6 +1483,10 @@ class JudgeAgent:
                     ],
                 }
             )
+            if not malware_id:
+                # Nothing to relate the technique to, and a relationship with a
+                # dangling source is a defect the integrity pass would prune.
+                continue
             objects.append(
                 {
                     "type": "relationship",
@@ -938,7 +1501,15 @@ class JudgeAgent:
                 }
             )
 
-        return Bundle.model_validate({"objects": objects})
+        return Bundle.model_validate(
+            {
+                "objects": objects,
+                "x_maljan_fallback_verdict": {
+                    "decision": decision,
+                    "source": "extracted" if extracted else "pipeline",
+                },
+            }
+        )
 
     # ------------------------------------------------------------------
     # Private helpers

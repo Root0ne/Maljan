@@ -72,7 +72,6 @@ def _initial_state() -> dict[str, Any]:
         "degradation_reasons": [],
         "function_hash_matches": [],
         "family_rag_candidates": [],
-        "attck_case_candidates": [],
         "validation_findings": {},
         "validation_retries": 0,
     }
@@ -171,3 +170,53 @@ async def test_an_unassessed_run_says_so_rather_than_inventing_a_severity(
 
     assert report.get("severity") is None
     assert report.get("malware_category") is None
+
+
+def _pack_row(tool: str, seq: int, ok: bool = True) -> Any:
+    from maljan.schemas.evidence import build_entry, format_entry_id
+
+    return build_entry(
+        entry_id=format_entry_id(seq),
+        seq=seq,
+        agent="pipeline",
+        tool=tool,
+        args={},
+        server="pipeline",
+        output='{"capabilities": []}' if ok else "capa failed",
+        ok=ok,
+        error=None if ok else "capa failed",
+        stage="triage_pack",
+    )
+
+
+class TestTheProviderIsNotRunTwice:
+    """With static.provider = capa_yara the pack already ran capa and YARA;
+    the report node must not pay capa's budget again or record the pair twice."""
+
+    async def _run(self, container: Any, ledger: list) -> Any:
+        from maljan.pipeline.nodes import make_report_node
+
+        container.is_mock = False
+        container.get_narrative_agent.return_value = None
+        container.get_report_composer.return_value = None
+        provider = container.get_static_provider.return_value
+        provider.capabilities.provides_evidence = True
+        provider.collect_evidence.return_value = None
+        state = {**_initial_state(), "sample_path": "/tmp/sample.bin", "evidence_ledger": ledger}
+        await make_report_node(container)(state)  # type: ignore[arg-type]
+        return provider.collect_evidence
+
+    @pytest.mark.asyncio
+    async def test_the_pack_s_capa_entry_means_no_second_run(self, fake_container: Any) -> None:
+        collect = await self._run(fake_container, [_pack_row("capa", 1)])
+        collect.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_failed_pack_entry_does_not_count(self, fake_container: Any) -> None:
+        collect = await self._run(fake_container, [_pack_row("capa", 1, ok=False)])
+        collect.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_without_a_pack_the_provider_runs(self, fake_container: Any) -> None:
+        collect = await self._run(fake_container, [])
+        collect.assert_called_once()

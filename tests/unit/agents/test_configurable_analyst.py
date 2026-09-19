@@ -115,7 +115,13 @@ def test_a_tool_that_explodes_is_recorded_and_the_loop_still_answers(monkeypatch
     monkeypatch.setattr(agent, "execute_tool_loop", _explode)
     text = agent.analyze("data")
     assert text.startswith("[WARN]")
-    assert any("tool is broken" in r for r in agent.degradation_reasons)
+    # The reason names the kind of failure, not what the failure said: it is
+    # appended to the run's degradation reasons and returned as this agent's
+    # report, and both are published. The message stays in the log, which is
+    # the same rule the capability manifest already follows.
+    assert any("RuntimeError" in r for r in agent.degradation_reasons)
+    assert not any("tool is broken" in r for r in agent.degradation_reasons)
+    assert "tool is broken" not in text
 
 
 def test_a_tool_failure_still_produces_a_zero_claim_isr_rather_than_an_exception(monkeypatch):
@@ -284,12 +290,12 @@ class TestABareFilenameToolArgIsRewritten:
         self._invoke(agent, {"query": "abc123.exe"})
         assert calls == [{"query": "abc123.exe"}]
 
-    def test_a_relative_path_ending_in_the_sample_name_is_not_touched(self):
-        """The failure is a *bare* name resolved against a foreign cwd. A model
-        that supplied a directory meant that directory."""
+    def test_a_relative_path_ending_in_the_sample_name_leads_nowhere(self):
+        """The sample's own name under a directory that holds no such file is
+        the same mistake as the bare name, one directory deeper."""
         agent, calls = self._agent_with_recording_tool()
         self._invoke(agent, {"file_path": "dropped/abc123.exe"})
-        assert calls == [{"file_path": "dropped/abc123.exe"}]
+        assert calls == [{"file_path": _PATH}]
 
     def test_the_rewrite_survives_the_schema_bound_invoke_path(self):
         """The wrapped tool is what the ReAct loop actually calls, and it calls

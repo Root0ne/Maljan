@@ -1,11 +1,17 @@
 "use client";
 
 import { Suspense, useState, useRef, useCallback, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Upload, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { SampleDTO, SandboxReportDTO } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
-import { countLabel, formatDateTime } from "@/lib/report-utils";
+import { countLabel, formatBytes, formatDateTime } from "@/lib/report-utils";
+import {
+  profileLabel,
+  sandboxProviderLabel,
+  staticProviderLabel,
+} from "@/lib/providerLabels";
 import { useProviderChoices } from "./useProviderChoices";
 
 /* ── Display interface (maps from SampleDTO) ───────── */
@@ -27,13 +33,15 @@ function mapSample(s: SampleDTO): SampleRow {
   };
 }
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+/** Whether the filename is the hash, which three of the seeded samples are. */
+function isNamedAfterItsHash(sample: SampleRow): boolean {
+  const name = sample.filename.trim().toLowerCase();
+  const base = name.replace(/\.[^.]*$/, "");
+  return base === sample.sha256.trim().toLowerCase();
 }
 
 function SamplesPageContent() {
+  const router = useRouter();
   const { staticProviders, sandboxProviders, profiles } = useProviderChoices();
   const [samples, setSamples] = useState<SampleRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,6 +55,7 @@ function SamplesPageContent() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const reportFileRef = useRef<HTMLInputElement>(null);
 
   /* ── The submit dialog ──────────────────────────────── */
   const [submitFor, setSubmitFor] = useState<SampleRow | null>(null);
@@ -59,6 +68,8 @@ function SamplesPageContent() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const firstFieldRef = useRef<HTMLSelectElement>(null);
+  /** What opened the dialog, so closing it can give the focus back. */
+  const submitTriggerRef = useRef<HTMLElement | null>(null);
   /* M9 (final review): the target sample of the *in-flight* report upload,
    * updated synchronously (a ref, not state) wherever the dialog's target
    * sample changes — opened, reopened for a different sample, or closed —
@@ -75,9 +86,12 @@ function SamplesPageContent() {
     setSubmitError(null);
   }, []);
 
+  /** `trigger` is the control that opened the dialog, so closing it can put
+   *  the focus back where it was taken from rather than on `<body>`. */
   const openSubmitDialog = useCallback(
-    (sample: SampleRow) => {
+    (sample: SampleRow, trigger: HTMLElement | null) => {
       activeSubmitSampleIdRef.current = sample.id;
+      submitTriggerRef.current = trigger;
       resetSubmitDialogFields();
       setSubmitFor(sample);
     },
@@ -88,6 +102,8 @@ function SamplesPageContent() {
     activeSubmitSampleIdRef.current = null;
     setSubmitFor(null);
     resetSubmitDialogFields();
+    submitTriggerRef.current?.focus();
+    submitTriggerRef.current = null;
   }, [resetSubmitDialogFields]);
 
   async function handleReportChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -130,8 +146,14 @@ function SamplesPageContent() {
         sampleId,
         Object.keys(config).length > 0 ? config : undefined
       );
-      window.location.href = `/analysis/${job.id}/live`;
+      // Straight to the conversation, which is where a run is watched. A
+      // client-side push rather than a document load: the store, the session
+      // and the socket all survive it.
+      router.push(`/analysis/${job.id}/conversation`);
     } catch (err) {
+      // The API's own sentence, shown as it was written: an unknown profile, a
+      // disabled analyst, or a model whose probe has not passed — each names
+      // what to fix and where, and rewording them here would lose that.
       setSubmitError(getErrorMessage(err) || "Failed to start analysis.");
       setSubmitting(false);
     }
@@ -253,6 +275,7 @@ function SamplesPageContent() {
 
   return (
     <div>
+      <h1 className="sr-only">Samples</h1>
       {actionError && (
         <div
           role="alert"
@@ -267,8 +290,14 @@ function SamplesPageContent() {
         </div>
       )}
 
-      {/* Upload Area */}
-      <div
+      {/* Upload area. The visible zone is the button, because it was a bare
+          `div onClick` with the real control hidden by `display:none` — which
+          takes the input out of the accessibility tree as well as out of the
+          page, so the only way to add a sample was a mouse (WCAG 2.1.1,
+          4.1.2). The input keeps its place in the tree and is hidden the way
+          a visually-hidden control is hidden. */}
+      <button
+        type="button"
         onDragOver={(e) => {
           e.preventDefault();
           setDragOver(true);
@@ -276,38 +305,32 @@ function SamplesPageContent() {
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         onClick={() => fileRef.current?.click()}
-        className={`mb-6 border border-dashed rounded p-6 text-center cursor-pointer transition-colors ${
+        className={`mb-6 w-full border border-dashed rounded p-6 text-center ${
           dragOver
             ? "border-accent bg-accent/5"
             : "border-border hover:border-text-muted"
         }`}
       >
-        <svg
-          className="mx-auto mb-2 text-text-muted"
-          width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
-        >
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <polyline points="17 8 12 3 7 8" />
-          <line x1="12" y1="3" x2="12" y2="15" />
-        </svg>
-        <p className="text-sm text-text-secondary">
+        <Upload size={18} aria-hidden="true" className="mx-auto mb-2 text-text-muted" />
+        <span className="block text-sm text-text-secondary">
           {uploading
             ? "Uploading..."
-            : "Drop a file here or click to upload"}
-        </p>
-        <p className="text-xs text-text-muted mt-1">
+            : "Drop a file here or choose one to upload"}
+        </span>
+        <span className="block text-xs text-text-muted mt-1">
           Executables, mobile apps, scripts, documents, archives
-        </p>
-        <input
-          ref={fileRef}
-          type="file"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) handleUpload(file);
-          }}
-        />
-      </div>
+        </span>
+      </button>
+      <input
+        ref={fileRef}
+        type="file"
+        aria-label="Sample to upload"
+        className="sr-only"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleUpload(file);
+        }}
+      />
 
       {/* Samples Table */}
       <div className="bg-bg-surface border border-border rounded">
@@ -321,64 +344,76 @@ function SamplesPageContent() {
             No samples uploaded yet.
           </div>
         ) : (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Filename</th>
-                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">SHA256</th>
-                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-24">Size</th>
-                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-36">Uploaded</th>
-                <th className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-32">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-light">
-              {samples.map((s) => (
-                <tr key={s.id} className="hover:bg-bg-hover transition-colors">
-                  <td className="px-4 py-2.5">
-                    <span className="text-sm text-text-primary">{s.filename}</span>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <code className="text-xs text-text-secondary font-mono">
-                      {s.sha256.slice(0, 16)}...
-                    </code>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <span className="text-xs text-text-secondary">{formatSize(s.file_size)}</span>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <span className="text-xs text-text-secondary">{formatDateTime(s.created_at)}</span>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex gap-1.5">
-                      <button
-                        onClick={async () => {
-                          setActionError(null);
-                          try {
-                            const detail = await api.getSample(s.id);
-                            setDetailSample(detail);
-                          } catch (err) {
-                            setActionError(getErrorMessage(err) || "Failed to load sample details.");
-                          }
-                        }}
-                        className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors"
-                      >
-                        Details
-                      </button>
-                      <button
-                        onClick={() => {
-                          setActionError(null);
-                          openSubmitDialog(s);
-                        }}
-                        className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors"
-                      >
-                        Analyze
-                      </button>
-                    </div>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border">
+                  <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">Filename</th>
+                  <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider">SHA256</th>
+                  <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-24">Size</th>
+                  <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-36">Uploaded</th>
+                  <th scope="col" className="text-left text-xs text-text-muted font-normal px-4 py-2 uppercase tracking-wider w-32">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-border-light">
+                {samples.map((s) => (
+                  <tr key={s.id} className="hover:bg-bg-hover">
+                    <td className="px-4 py-2.5">
+                      <span className="text-sm text-text-primary">{s.filename}</span>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      {/* For a sample named after its hash the two cells held
+                          the same value, the second of them cut short for no
+                          reason. */}
+                      {isNamedAfterItsHash(s) ? (
+                        <span className="text-xs text-text-muted">same as the filename</span>
+                      ) : (
+                        <code
+                          className="text-xs text-text-secondary font-mono"
+                          title={s.sha256}
+                        >
+                          {s.sha256.slice(0, 16)}…
+                        </code>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className="text-xs text-text-secondary">{formatBytes(s.file_size)}</span>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className="text-xs text-text-secondary">{formatDateTime(s.created_at)}</span>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex gap-1.5">
+                        <button
+                          onClick={async () => {
+                            setActionError(null);
+                            try {
+                              const detail = await api.getSample(s.id);
+                              setDetailSample(detail);
+                            } catch (err) {
+                              setActionError(getErrorMessage(err) || "Failed to load sample details.");
+                            }
+                          }}
+                          className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover"
+                        >
+                          Details
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            setActionError(null);
+                            openSubmitDialog(s, e.currentTarget);
+                          }}
+                          className="px-2.5 py-1 text-xs bg-accent-fill text-white rounded hover:bg-accent-fill-hover"
+                        >
+                          Analyze
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -401,12 +436,9 @@ function SamplesPageContent() {
                 type="button"
                 aria-label="Close"
                 onClick={() => setDetailSample(null)}
-                className="text-text-muted hover:text-text-primary"
+                className="flex h-6 w-6 items-center justify-center text-text-muted hover:text-text-primary"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
+                <X size={16} aria-hidden="true" />
               </button>
             </div>
             <div className="space-y-3 text-xs">
@@ -427,7 +459,7 @@ function SamplesPageContent() {
               <div className="flex gap-6">
                 <div>
                   <span className="text-text-muted uppercase tracking-wider">Size</span>
-                  <p className="text-text-primary mt-0.5">{formatSize(detailSample.file_size_bytes)}</p>
+                  <p className="text-text-primary mt-0.5">{formatBytes(detailSample.file_size_bytes)}</p>
                 </div>
                 {detailSample.mime_type && (
                   <div>
@@ -466,12 +498,9 @@ function SamplesPageContent() {
                 type="button"
                 aria-label="Close"
                 onClick={closeSubmitDialog}
-                className="text-text-muted hover:text-text-primary"
+                className="flex h-6 w-6 items-center justify-center text-text-muted hover:text-text-primary"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
+                <X size={16} aria-hidden="true" />
               </button>
             </div>
 
@@ -498,7 +527,7 @@ function SamplesPageContent() {
                 >
                   <option value="">Inherit from settings</option>
                   {staticProviders.map((p) => (
-                    <option key={p} value={p}>{p}</option>
+                    <option key={p} value={p}>{staticProviderLabel(p)}</option>
                   ))}
                 </select>
               </div>
@@ -516,7 +545,7 @@ function SamplesPageContent() {
                 >
                   <option value="">Inherit from settings</option>
                   {sandboxProviders.map((p) => (
-                    <option key={p} value={p}>{p}</option>
+                    <option key={p} value={p}>{sandboxProviderLabel(p)}</option>
                   ))}
                 </select>
                 {attachedReport && (
@@ -538,7 +567,7 @@ function SamplesPageContent() {
                 >
                   <option value="">Inherit from settings</option>
                   {profiles.map((p) => (
-                    <option key={p} value={p}>{p}</option>
+                    <option key={p} value={p}>{profileLabel(p)}</option>
                   ))}
                 </select>
               </div>
@@ -549,12 +578,21 @@ function SamplesPageContent() {
                 </label>
                 <input
                   id="sandbox-report"
+                  ref={reportFileRef}
                   type="file"
                   accept=".json,.json.gz"
                   onChange={handleReportChange}
                   disabled={reportUploading}
-                  className="w-full text-text-secondary"
+                  className="sr-only"
                 />
+                <button
+                  type="button"
+                  disabled={reportUploading}
+                  onClick={() => reportFileRef.current?.click()}
+                  className="px-2.5 py-1.5 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover disabled:text-text-disabled"
+                >
+                  Choose a report file
+                </button>
                 {reportUploading && (
                   <p className="text-text-muted mt-1">Uploading...</p>
                 )}
@@ -580,7 +618,7 @@ function SamplesPageContent() {
                 <button
                   type="button"
                   onClick={closeSubmitDialog}
-                  className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors"
+                  className="px-2.5 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover"
                 >
                   Cancel
                 </button>
@@ -588,7 +626,7 @@ function SamplesPageContent() {
                   type="button"
                   disabled={submitting}
                   onClick={() => startAnalysis(submitFor.id)}
-                  className="px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50"
+                  className="px-2.5 py-1 text-xs bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50"
                 >
                   Start analysis
                 </button>

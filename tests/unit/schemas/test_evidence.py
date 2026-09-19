@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from maljan.schemas.evidence import (
     EvidenceCounter,
     LedgerEntry,
@@ -10,7 +12,7 @@ from maljan.schemas.evidence import (
     format_entry_id,
     parse_structured,
 )
-from maljan.schemas.tool_evidence import CapturedToolOutput
+from maljan.schemas.tool_evidence import MAX_OUTPUT_CHARS, CapturedToolOutput
 
 
 class TestEntryIds:
@@ -145,3 +147,74 @@ class TestFailures:
         assert entry.ok is False
         assert entry.error == "RuntimeError: boom"
         assert entry.duration_ms == 12
+
+
+class TestTheFullResultSurvivesTheTextCut:
+    """The text a model reads is cut at MAX_OUTPUT_CHARS; the record keeps the
+    result. On the live proof a pe_info result over the cap lost its
+    structured payload, and with it every reader of the record."""
+
+    def _pe_info(self) -> dict:
+        return {
+            "size": 4486656,
+            "imports": [
+                {"dll": "KERNEL32.dll", "function": f"Function{i:04d}"} for i in range(300)
+            ],
+            "sections": [{"name": ".text", "entropy": 6.1}],
+        }
+
+    def _capa(self) -> dict:
+        return {
+            "capabilities": [
+                {
+                    "namespace": f"host-interaction/process/inject/{i}",
+                    "rule": f"inject code variant {i}",
+                    "attck": [f"Defense Evasion::Process Injection [T1055.{i % 12 + 1:03d}]"],
+                    "mbc": [],
+                    "match_count": 1,
+                }
+                for i in range(80)
+            ]
+        }
+
+    def _entry(self, payload: dict, tool: str):
+        from maljan.schemas.evidence import build_entry, format_entry_id
+
+        text = json.dumps(payload)
+        assert len(text) > MAX_OUTPUT_CHARS
+        return build_entry(
+            entry_id=format_entry_id(1),
+            seq=1,
+            agent="pipeline",
+            tool=tool,
+            args={},
+            server="pipeline",
+            output=text,
+        )
+
+    def test_a_long_pe_info_result_keeps_its_imports(self) -> None:
+        entry = self._entry(self._pe_info(), "pe_info")
+        assert len(entry.output) <= MAX_OUTPUT_CHARS
+        assert entry.output.endswith("…")
+        assert entry.structured == self._pe_info()
+
+    def test_the_technique_ids_of_a_long_capa_result_are_readable(self) -> None:
+        from maljan.pipeline.evidence_summary import _technique_ids
+
+        entry = self._entry(self._capa(), "capa")
+        assert entry.structured == self._capa()
+        assert {"T1055.001", "T1055.012"} <= _technique_ids(entry.structured)
+
+    def test_the_byte_budget_counts_the_result_that_is_kept(self) -> None:
+        from maljan.schemas.evidence import apply_budget, stored_bytes
+
+        entry = self._entry(self._pe_info(), "pe_info")
+        size = stored_bytes(entry)
+        assert size >= len(json.dumps(self._pe_info()).encode())
+        trimmed, spent = apply_budget([entry], size - 1)
+        assert (trimmed, spent) == (1, 0)
+        assert entry.structured is None and entry.output == ""
+        again = self._entry(self._pe_info(), "pe_info")
+        trimmed, spent = apply_budget([again], size)
+        assert (trimmed, spent) == (0, size)
+        assert again.structured is not None

@@ -24,7 +24,11 @@ import os
 import re
 
 from maljan.agents.base_agent import BaseAnalyst, prompt_to_messages, revision_messages
-from maljan.agents.prompt_fragments import FINDINGS_BLOCK_FRAGMENT, format_fragment
+from maljan.agents.prompt_fragments import (
+    CLAIM_FORMAT_FRAGMENT,
+    FINDINGS_BLOCK_FRAGMENT,
+    format_fragment,
+)
 from maljan.agents.registry import register_agent
 from maljan.agents.static_analyst import _parse_claim_blocks, _parse_disputes
 from maljan.schemas.isr_models import AgentISR
@@ -177,7 +181,7 @@ class NetworkAnalyst(BaseAnalyst):
             # Messages, not a template: the resolved system prompt carries a
             # literal JSON example and a template would read its braces as
             # variables.
-            response = self.llm.invoke(prompt_to_messages(prompt_messages))
+            response = self.llm.invoke(self.frame_messages(prompt_to_messages(prompt_messages)))
             content = self._capture_findings(str(response.content))
 
         return str(content)
@@ -209,7 +213,7 @@ class NetworkAnalyst(BaseAnalyst):
             mediator_feedback,
             isr=False,
         )
-        response = self.llm.invoke(prompt_to_messages(messages))
+        response = self.llm.invoke(self.frame_messages(prompt_to_messages(messages)))
         return str(response.content)
 
     # ------------------------------------------------------------------
@@ -253,12 +257,7 @@ class NetworkAnalyst(BaseAnalyst):
                         "For each finding state: the claim, the exact artifact reference "
                         "(e.g. 'TCP dst=185.220.101.5:443', 'DNS query: rnd7x.evil.com'), "
                         "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID.\n\n"
-                        "Format each finding as:\n"
-                        "CLAIM: <claim text>\n"
-                        "EVIDENCE: <artifact reference>\n"
-                        "CONFIDENCE: <float>\n"
-                        "TECHNIQUE: <T-ID or NONE>\n"
-                        "---\n",
+                        f"{CLAIM_FORMAT_FRAGMENT}",
                     ),
                 ]
                 content = self.execute_tool_loop(prompt_messages)
@@ -288,12 +287,7 @@ class NetworkAnalyst(BaseAnalyst):
                 "For each finding state: the claim, the exact artifact reference "
                 "(e.g. 'PCAP frame 10: dst=185.220.101.5:443', 'DNS query: rnd7x.evil.com'), "
                 "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID.\n\n"
-                "Format each finding as:\n"
-                "CLAIM: <claim text>\n"
-                "EVIDENCE: <artifact reference>\n"
-                "CONFIDENCE: <float>\n"
-                "TECHNIQUE: <T-ID or NONE>\n"
-                "---\n\n"
+                f"{CLAIM_FORMAT_FRAGMENT}\n"
                 f"{target_info}",
             ),
         ]
@@ -306,7 +300,7 @@ class NetworkAnalyst(BaseAnalyst):
             # Messages, not a template: the resolved system prompt carries a
             # literal JSON example and a template would read its braces as
             # variables.
-            response = self.llm.invoke(prompt_to_messages(prompt_messages))
+            response = self.llm.invoke(self.frame_messages(prompt_to_messages(prompt_messages)))
             content = self._capture_findings(str(response.content))
 
         claims = _parse_claim_blocks(content)
@@ -347,7 +341,7 @@ class NetworkAnalyst(BaseAnalyst):
         # that obeys it puts a JSON fence into the revised report, and nothing
         # downstream of here — the claim parser, the transcript, the Composer —
         # should ever see it.
-        response = self.llm.invoke(prompt_to_messages(messages))
+        response = self.llm.invoke(self.frame_messages(prompt_to_messages(messages)))
         content = self._capture_findings(str(response.content))
 
         claims = _parse_claim_blocks(content)

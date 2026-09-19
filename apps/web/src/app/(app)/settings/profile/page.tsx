@@ -102,6 +102,7 @@ export default function SettingsProfilePage() {
                   id="settings-full-name"
                   name="full_name"
                   type="text"
+                  autoComplete="name"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
@@ -113,6 +114,7 @@ export default function SettingsProfilePage() {
                   id="settings-email"
                   name="email"
                   type="email"
+                  autoComplete="email"
                   defaultValue={user.email || ""}
                   readOnly
                   className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
@@ -134,9 +136,18 @@ export default function SettingsProfilePage() {
                       onChange={(e) => setPassword(e.target.value)}
                       autoComplete="new-password"
                       minLength={8}
-                      aria-describedby={passwordTooShort ? "settings-new-password-error" : undefined}
+                      aria-describedby={
+                        passwordTooShort
+                          ? "settings-new-password-error settings-new-password-rule"
+                          : "settings-new-password-rule"
+                      }
                       className="w-full h-9 px-3 text-sm bg-bg-deep border border-border rounded text-text-primary focus:border-accent focus:outline-none"
                     />
+                    {/* The rule the field enforces, said before it is broken
+                        rather than only after (WCAG 3.3.2). */}
+                    <p id="settings-new-password-rule" className="mt-1 text-xs text-text-muted">
+                      At least 8 characters.
+                    </p>
                     {passwordTooShort && (
                       <p id="settings-new-password-error" className="mt-1 text-xs text-status-red">Must be at least 8 characters.</p>
                     )}
@@ -175,7 +186,7 @@ export default function SettingsProfilePage() {
                 <button
                   type="submit"
                   disabled={!canSave}
-                  className="h-9 px-4 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="h-9 px-4 text-xs bg-accent-fill text-white rounded hover:bg-accent-fill-hover disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {saving ? "Saving..." : "Save changes"}
                 </button>

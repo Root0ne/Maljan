@@ -37,12 +37,20 @@ _CATALOG: dict[str, Any] | None = None
 
 
 def reset_indices() -> None:
-    """Drop the warm index and catalog. For tests and for a refresh."""
-    global _HYBRID_INDEX, _HYBRID_FAILED, _CATALOG
+    """Drop the warm index and catalog. For tests and for a refresh.
+
+    The attempt is dropped with them. ``_WARM_STARTED`` is the memory of a
+    build having been started, and it is sticky precisely so a failed one is
+    not retried; a caller that has just thrown the index away is asking for
+    the cold state, and leaving the flag set would disarm the background
+    warmer for the rest of the process with nothing able to arm it again.
+    """
+    global _HYBRID_INDEX, _HYBRID_FAILED, _CATALOG, _WARM_STARTED
     with _INDEX_LOCK:
         _HYBRID_INDEX = None
         _HYBRID_FAILED = ""
         _CATALOG = None
+        _WARM_STARTED = False
 
 
 def _catalog() -> dict[str, Any]:
@@ -99,6 +107,80 @@ def _hybrid_index() -> tuple[Any, str]:
     return index, ""
 
 
+def index_is_warm() -> bool:
+    """Whether this process has already built the hybrid ATT&CK index."""
+    with _INDEX_LOCK:
+        return _HYBRID_INDEX is not None
+
+
+# Set under ``_INDEX_LOCK`` by the one call that starts the background build,
+# and never cleared: a build that failed is remembered as attempted, so no
+# later run starts another and every later caller is answered ``False``.
+_WARM_STARTED = False
+
+
+def warm_index_in_background() -> bool:
+    """Start building the hybrid index on a daemon thread, once per process.
+
+    For the caller that may not wait: the alignment gate on a worker that has
+    not built the index yet. ``True`` when a build was started by this call,
+    ``False`` when one was already started in this process — running,
+    finished or failed — or the index is already there. Check and set happen
+    under one lock, so two analysts in parallel start one build, not two.
+    """
+    global _WARM_STARTED
+    with _INDEX_LOCK:
+        if _HYBRID_INDEX is not None or _WARM_STARTED:
+            return False
+        _WARM_STARTED = True
+
+    threading.Thread(target=_hybrid_index, name="maljan-attck-index", daemon=True).start()
+    return True
+
+
+def catalogue_available() -> bool:
+    """Whether the vendored technique universe could be read at all.
+
+    The validity check answers from it, and a check that answers "nothing
+    unknown" because it had no universe to compare against did not run.
+    """
+    from maljan.memory.attck_loader import valid_ids
+
+    try:
+        return bool(valid_ids())
+    except Exception as exc:  # noqa: BLE001 — an unreadable universe is an absent one
+        logger.warning("knowledge: the ATT&CK id universe is unavailable (%s).", exc)
+        return False
+
+
+def technique_alignment(text: str, technique_id: str, k: int = 5) -> dict[str, Any] | None:
+    """The index's gate score for ``technique_id`` against ``text``, and its candidates.
+
+    ``None`` when the index is not built in this process: this never builds
+    it, because the caller is an analyst's validation turn and a build there
+    would cost every run on a cold worker seconds it did not budget. The
+    ranking is the same ``resolve_technique`` gives; the one addition is the
+    claimed id's own ``score_gate``, whether or not the index ranked it.
+    """
+    if not index_is_warm():
+        return None
+    index, _reason = _hybrid_index()
+    if index is None:
+        return None
+    tid = (technique_id or "").strip().upper()
+    answer = resolve_technique(text, k=k)
+    candidates = [
+        {"technique_id": c["technique_id"], "score_gate": c["score_gate"], "score": c["score"]}
+        for c in answer.get("candidates") or []
+    ]
+    try:
+        gate_score = round(float(index.validate_and_score(tid, text)), 4)
+    except Exception as exc:  # noqa: BLE001 — an id the index cannot score scores nothing
+        logger.debug("knowledge: no gate score for %s (%s).", tid, exc)
+        gate_score = 0.0
+    return {"technique_id": tid, "gate_score": gate_score, "candidates": candidates}
+
+
 # ---------------------------------------------------------------------------
 # ATT&CK
 # ---------------------------------------------------------------------------
@@ -144,7 +226,7 @@ def resolve_technique(text: str, k: int = 5, domain: str | None = None) -> dict[
 
 def attck_lookup(technique_id: str) -> dict[str, Any]:
     """One technique's catalogue entry, and whether it exists at all."""
-    from maljan.memory.attck_loader import domain_of, platforms_for, valid_ids
+    from maljan.memory.attck_loader import domain_of, platforms_for, retired_in, valid_ids
 
     tid = (technique_id or "").strip().upper()
     if not tid:
@@ -161,8 +243,36 @@ def attck_lookup(technique_id: str) -> dict[str, Any]:
         or f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/",
     }
     if technique is None:
-        out["reason"] = "the ATT&CK catalogue has no entry for this id"
+        retired = retired_in(tid)
+        out["reason"] = (
+            f"retired in ATT&CK {retired}"
+            if retired
+            else "the ATT&CK catalogue has no entry for this id"
+        )
+        if retired:
+            out["retired_in"] = retired
     return out
+
+
+def attck_retired_in(technique_id: str) -> str | None:
+    """The ATT&CK release that retired the id, from the vendored set; ``None`` otherwise."""
+    from maljan.memory.attck_loader import retired_in
+
+    return retired_in(technique_id)
+
+
+def attck_scope(technique_id: str) -> dict[str, Any]:
+    """The domain and platforms the vendored catalogue gives a technique.
+
+    Answered from the two vendored files alone — the id catalogue and the
+    platform map — so a validation turn that asks it loads no STIX bundle and
+    touches no network. ``attck_lookup`` is the fuller answer, with the name
+    and the tactics, and it costs the catalogue load; this one does not.
+    """
+    from maljan.memory.attck_loader import domain_of, platforms_for
+
+    tid = (technique_id or "").strip().upper()
+    return {"technique_id": tid, "domain": domain_of(tid), "platforms": list(platforms_for(tid))}
 
 
 def attck_validate(ids: list[str]) -> dict[str, Any]:
@@ -177,7 +287,7 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
     every id is real never loads it, which is what makes this cheap enough to
     call inside an analyst's own loop.
     """
-    from maljan.memory.attck_loader import valid_ids
+    from maljan.memory.attck_loader import retired_in, valid_ids
 
     known = valid_ids()
     unknown = [t for t in (str(raw).strip().upper() for raw in ids or []) if t and t not in known]
@@ -187,6 +297,11 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
     invalid: list[dict[str, Any]] = []
     for tid in unknown:
         row: dict[str, Any] = {"id": tid, "suggestions": []}
+        # An id a previous catalogue had is retired, not invented; the release
+        # that retired it is the fact a reader of an older report needs.
+        retired = retired_in(tid)
+        if retired:
+            row["retired_in"] = retired
         # The parent of a bogus sub-technique is the single most likely intent,
         # and it is a string operation rather than a search — a suggestion that
         # cost an embedding model would be worse than no suggestion.
@@ -218,46 +333,71 @@ def api_capability(
     behaviour_map: str = DEFAULT_API_BEHAVIOUR_MAP,
     attck_map: str = DEFAULT_API_ATTCK_MAP,
 ) -> dict[str, Any]:
-    """What each named API does, and which techniques cite it as evidence.
+    """What each named API does, and which techniques the catalogue associates it with.
+
+    A reference lookup, not an observation: the catalogue lists ``BitBlt``
+    and ``CreateCompatibleDC`` under screen capture, and every GUI program
+    imports them. What comes back is an association a reader may weigh; it
+    is never counted as a rule match or a source.
 
     ``behaviours`` is the catalog's own category for the API; ``techniques``
-    are the technique rules that list it. Both are lookups in a vendored table,
-    so an API absent from the table comes back with empty lists rather than a
-    guess.
+    are the technique rules the *whole* import set clears whose evidence
+    includes this API, each with the APIs it matched and its ``min_apis``.
+    Every rule in the vendored map needs two or more APIs, so the set is
+    matched once and the rows point back into it: asked one name at a time,
+    no rule could ever fire. Both are lookups in a vendored table, so an API
+    absent from the table comes back with empty lists rather than a guess.
 
     ``catalog_flags`` carries the catalog's own labels — ``suspicious`` for an
     API it tiers high or medium — named for where they come from rather than
     presented as this tool's finding. A bare ``suspicious: true`` would be a
     verdict, and the tools state facts.
+
+    ``corroborated_by`` appears on a row whose category means nothing on its
+    own — drawing to a device context, pumping a message queue — and lists the
+    APIs whose presence beside it would give it weight. The catalogue used to
+    file the GDI blit calls under keylogging and tier them high, so a signed
+    SSH client read as a keylogger; the category now says what it is and what
+    it is not.
     """
-    from maljan.analysis.api_capability_db import load_api_attck_map, load_api_behaviour_db
+    from maljan.analysis.api_capability_db import (
+        canonical_name,
+        load_api_attck_map,
+        load_api_behaviour_db,
+    )
 
     names = [str(n).strip() for n in (api_names or []) if str(n).strip()]
     behaviours = load_api_behaviour_db(str(resolve_data(behaviour_map)))
     techniques = load_api_attck_map(str(resolve_data(attck_map)))
+    cleared = techniques.match(set(names)) if techniques is not None and names else []
     rows: list[dict[str, Any]] = []
     for name in names:
         category, suspicious = behaviours.classify(name) if behaviours else (None, False)
         cited: list[dict[str, Any]] = []
-        if techniques is not None:
-            for rule, matched in techniques.match({name}):
-                cited.append(
-                    {
-                        "technique_id": rule.technique_id,
-                        "name": rule.name,
-                        "matched": matched,
-                        "min_apis": rule.min_apis,
-                    }
-                )
-        rows.append(
-            {
-                "api": name,
-                "category": category,
-                "behaviours": [category] if category else [],
-                "techniques": cited,
-                "catalog_flags": ["suspicious"] if suspicious else [],
-            }
-        )
+        for rule, matched in cleared:
+            # Compared by the A/W-folded key, so an import table holding both
+            # spellings has both rows cite the rule, in every process alike.
+            if canonical_name(name) not in {canonical_name(m) for m in matched}:
+                continue
+            cited.append(
+                {
+                    "technique_id": rule.technique_id,
+                    "name": rule.name,
+                    "matched": list(matched),
+                    "min_apis": rule.min_apis,
+                }
+            )
+        row: dict[str, Any] = {
+            "api": name,
+            "category": category,
+            "behaviours": [category] if category else [],
+            "techniques": cited,
+            "catalog_flags": ["suspicious"] if suspicious else [],
+        }
+        corroborators = behaviours.corroborated_by(category) if behaviours else ()
+        if corroborators:
+            row["corroborated_by"] = list(corroborators)
+        rows.append(row)
     out: dict[str, Any] = {"capabilities": rows}
     if behaviours is None:
         out["reason"] = f"the API behaviour catalog is not readable at {behaviour_map}"

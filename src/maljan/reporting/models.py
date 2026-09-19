@@ -76,7 +76,13 @@ class SignatureInfo(BaseModel):
     is_signed: bool = False
     signer_subject: str | None = None
     signer_issuer: str | None = None
+    # SHA-1 over the signer certificate, which is how Windows, VirusTotal and
+    # every signing-certificate feed name one. The identifier the subject and
+    # issuer above were read from.
+    signer_thumbprint: str | None = None
     signature_valid: bool | None = None
+    # The pack's ``signing_info`` entry these facts were read from.
+    evidence_id: str | None = None
 
 
 # Canonical platform vocabulary. Used by SampleIdentity, the Sigma and YARA
@@ -148,12 +154,14 @@ class PESection(BaseModel):
 class ImportRow(BaseModel):
     """Single DLL→function import row."""
 
-    model_config = _STRICT_CONFIG
+    # Permissive on purpose: a report written while the extractor labelled
+    # imports carries ``is_suspicious`` and ``category`` on every row. Those
+    # keys are ignored on load rather than kept as fields nothing writes; what
+    # an import means is stated by the pack's ``api_capability`` entry now.
+    model_config = _PERMISSIVE_CONFIG
 
     dll: str
     function: str
-    is_suspicious: bool = False
-    category: str | None = None  # "process_injection", "anti_debug", "network", ...
 
 
 class StringIOC(BaseModel):
@@ -207,13 +215,17 @@ class StaticAnalysis(BaseModel):
     # often the family's own before the industry picked one.
     pdb_path: str | None = None
     obfuscation_indicators: list[str] = Field(default_factory=list)
-    # {behaviour_category: count} over the resolved import table. Cheap to carry
-    # and it saves every consumer — prompt, report, family RAG — from
-    # recomputing the same histogram from ``imports``.
+    # {behaviour_category: count} over the import table, as the knowledge table
+    # stated it when the triage pack asked (``tools.knowledge.api_capability``).
+    # ``api_capabilities_evidence_ids`` names the ledger entries it was counted
+    # from, so the profile line in the report points at rows a reader can open.
     api_capabilities: dict[str, int] = Field(default_factory=dict)
-    # The audit trail behind an import-derived technique: one row per technique
-    # with the exact imports that evidenced it. Without this a reader sees a
-    # technique in the report and has no way to check the reasoning.
+    api_capabilities_evidence_ids: list[str] = Field(default_factory=list)
+    # The audit trail behind a rule-derived technique: one row per rule that
+    # fired over the import table — capa's, or the knowledge table's technique
+    # rules — with the imports or namespaces that evidenced it and, for the
+    # pack's rows, the ledger id. Without this a reader sees a technique in the
+    # report and has no way to check the reasoning.
     api_technique_hits: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -299,6 +311,12 @@ class NetworkDomain(BaseModel):
     # IDN/punycode homograph signals.
     is_punycode: bool = False
     homograph_target: str | None = None
+    # Where the name came from. ``sandbox`` is a resolution or a request the
+    # sample actually made, ``analyst`` an agent's own artefact, ``strings`` a
+    # run of bytes in the file that has the shape of a hostname — which is a
+    # far weaker claim and was being published as though it were the same one.
+    # ``None`` for a producer that does not record it.
+    source: Literal["sandbox", "analyst", "strings"] | None = None
     # Filled asynchronously by the threat-intel enrichment worker.
     reputation: dict[str, Any] | None = None
 
@@ -314,6 +332,13 @@ class NetworkIP(BaseModel):
     asn: str | None = None
     geo: str | None = None
     is_suspicious: bool = False
+    # Where the address came from, with the same three answers and the same
+    # weight a domain's and a URL's carry. The string sweep turns any run of
+    # digits with dots in it into an address — one live bundle published
+    # ``6.0.0.0``, a version number out of the strings table — and until this
+    # the addresses were the one network kind nothing asked about.
+    # ``None`` for a producer that does not record it.
+    source: Literal["sandbox", "analyst", "strings"] | None = None
     reputation: dict[str, Any] | None = None
 
 
@@ -326,6 +351,12 @@ class NetworkURL(BaseModel):
     method: str = "GET"
     status: int | None = None
     user_agent: str | None = None
+    # Where the URL came from, with the same three answers and the same weight
+    # a domain's ``source`` carries. A run of bytes in the file that has the
+    # shape of a URL is a far weaker claim than a request the sample made, and
+    # the two were being published as though they were the same one.
+    # ``None`` for a producer that does not record it.
+    source: Literal["sandbox", "analyst", "strings"] | None = None
 
 
 class NetworkIOCs(BaseModel):
@@ -425,6 +456,18 @@ class CapabilityCell(BaseModel):
     # the marker beside it. Defaults ``True`` so rows persisted before the flag
     # existed keep their meaning.
     technique_id_valid: bool = True
+    # The catalogue's own scope for the technique: the ATT&CK domain that owns
+    # it and the platforms it declares. Filled from the catalogue by the
+    # matrix builder; empty when the catalogue had nothing to say. The FP
+    # linter's platform check reads them.
+    platforms: list[str] = Field(default_factory=list)
+    domain: str = ""
+    # Why this technique is not in ``ttp_mappings``, in words, and empty when
+    # it is. Two rules put a sentence here: an id the ATT&CK catalogue has no
+    # entry for, and one whose domain or platforms the sample cannot host
+    # after the producer was told and kept it. The row itself stays exactly as
+    # the producer wrote it — this says what the report did with it.
+    not_published: str = ""
 
 
 class TTPMapping(BaseModel):
@@ -452,7 +495,11 @@ class TTPMapping(BaseModel):
 class FamilyAttribution(BaseModel):
     """Best-guess malware family / actor / campaign attribution."""
 
-    model_config = _STRICT_CONFIG
+    # Permissive on purpose: every report written before the in-process
+    # case-prior retrieval went carries ``attck_case_candidates`` (usually
+    # ``[]``). The key is ignored on load rather than kept as a field nothing
+    # writes.
+    model_config = _PERMISSIVE_CONFIG
 
     family: str | None = None
     family_confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
@@ -484,13 +531,6 @@ class FamilyAttribution(BaseModel):
     # node from the judge node's RAG pass (empty unless the RAG is enabled and a
     # fingerprint catalog is present).
     family_rag_candidates: list[dict[str, Any]] = Field(default_factory=list)
-    # ATT&CK case-prior RAG candidates (§4 U2) — ATT&CK techniques that recur in
-    # behaviourally-similar prior cases mined from our own long-term memory, surfaced
-    # as advisory evidence the analyst weighed (sibling of family_rag_candidates). Each
-    # row: technique_id, support, similarity, match_method, source. Populated by the
-    # report node from the judge node's ATT&CK-case RAG pass (empty unless the RAG is
-    # enabled and a case corpus is present).
-    attck_case_candidates: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -809,7 +849,12 @@ class MalwareReport(BaseModel):
 
     # --- Verdict & severity ---
     verdict: Literal["Malware", "Suspicious", "Benign"] = "Suspicious"
-    overall_confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
+    # ``None`` when nothing assessed a confidence — a verdict the pipeline
+    # wrote itself because the judge never answered. It is not defaulted to
+    # 0.0 for the same reason ``severity`` is not defaulted to "Informational":
+    # a confidence of zero is an assessment, and printing one for a report that
+    # has none says the run was certain it knew nothing.
+    overall_confidence: Annotated[float | None, Field(ge=0.0, le=1.0)] = 0.0
     malware_category: str | None = None
     # ``None`` when the judge assessed no severity. It is not defaulted to
     # "Informational": an unassessed report and a report assessed as harmless
@@ -834,7 +879,15 @@ class MalwareReport(BaseModel):
     network: NetworkIOCs | None = None
     persistence: list[PersistenceMechanism] = Field(default_factory=list)
     capability_matrix: list[CapabilityCell] = Field(default_factory=list)
+    # The published technique list. Every other technique surface is built from
+    # it — the report's ATT&CK section, its References, the STIX
+    # attack-patterns, ``/reports/{id}/mitre`` — so a technique appears in all
+    # of them or in none, and an id the ATT&CK check rejected appears in none.
     ttp_mappings: list[TTPMapping] = Field(default_factory=list)
+    # What the judge named as an attack-pattern without naming a technique id,
+    # after being asked for one. A behaviour, reported as a behaviour: it is
+    # never published as an ATT&CK technique, and it is not dropped either.
+    unmapped_behaviours: list[str] = Field(default_factory=list)
 
     # --- Attribution ---
     attribution: FamilyAttribution = Field(default_factory=FamilyAttribution)

@@ -7,11 +7,14 @@ A projection, and only a projection. Two inputs:
   - ``isr_reports`` — the analysts' own claims, which add the technique ids and
     the evidence quotes the judge did not carry over.
 
-An id the ATT&CK catalogue does not have is carried through and marked
-(``technique_id_valid``), not dropped: it is the producer's answer, and the
-report is where a reader is told it does not resolve. That holds for the judge
-as much as for an analyst — the judge's ids are checked here because the judge
-has no later loop to be told in.
+An id the ATT&CK catalogue does not have is carried through to the matrix and
+marked (``technique_id_valid``), not dropped: it is the producer's answer, and
+the report is where a reader is told it does not resolve. That holds for the
+judge as much as for an analyst — the judge's ids are checked here because the
+judge has no later loop to be told in. It does not reach ``ttp_mappings``,
+which is the *published* technique list every other technique surface of the
+report is built from, and which therefore names only techniques this run
+found.
 
 Neither input is adjusted here. The cap this module used to apply — halving the
 confidence of an obfuscation or injection claim whose supporting static
@@ -76,17 +79,26 @@ def build_capability_matrix(
     *,
     stix_output: dict[str, Any] | None,
     isr_reports: dict[str, Any] | None,
+    sample: dict[str, Any] | None = None,
 ) -> tuple[list[CapabilityCell], list[TTPMapping]]:
     """Return ``(capability_cells, ttp_mappings)`` for the report.
 
     Both lists are sorted by descending confidence so the UI renders the
     most relevant rows first.
+
+    ``sample`` is the routed platform and file type. With it, a technique from
+    an ATT&CK domain the sample cannot host — two enterprise-only ids on an
+    Android package, in the run that made the case — joins the rule an
+    unresolvable id already follows: kept in the matrix with the reason
+    written beside it, and out of the published list. Without it the question
+    is not asked, which is the same fall-open answer the validator gives.
     """
     techniques = _collect_techniques(stix_output, isr_reports)
     if not techniques:
         return [], []
 
     index = _load_attck_index()
+    out_of_scope = _out_of_scope(list(techniques), sample)
 
     cells: list[CapabilityCell] = []
     mappings: list[TTPMapping] = []
@@ -108,6 +120,22 @@ def build_capability_matrix(
             continue
 
         tactic_id, tactic_name = _resolve_tactic(index, tactic_slug)
+        domain, platforms = _catalogue_scope(tid)
+        # The cell keeps an id the catalogue rejected or the sample cannot
+        # host, with the reason written beside it: it is the producer's answer
+        # and deleting it would delete the record of it. The mapping does not,
+        # because ``ttp_mappings`` is the published technique list — the
+        # report's ATT&CK section, its References, the STIX attack-patterns and
+        # ``/reports/{id}/mitre`` are all built from it — and a technique a
+        # check rejected is not one this run found.
+        if not valid:
+            not_published = "the ATT&CK catalogue has no entry for this id in any domain"
+        elif out_of_scope.get(tid):
+            not_published = out_of_scope[tid]
+        elif not info.get("claimed"):
+            not_published = FINDING_ONLY_REASON
+        else:
+            not_published = ""
         cells.append(
             CapabilityCell(
                 tactic=tactic_id or "TA0000",
@@ -118,8 +146,19 @@ def build_capability_matrix(
                 confidence=max(0.0, min(1.0, confidence)),
                 contributing_layers=layers,
                 technique_id_valid=valid,
+                platforms=platforms,
+                domain=domain,
+                not_published=not_published,
             )
         )
+        if not_published:
+            logger.info(
+                "capability_matrix: %s stays in the matrix marked and out of the published "
+                "technique list; %s.",
+                tid,
+                not_published,
+            )
+            continue
         mappings.append(
             TTPMapping(
                 technique_id=tid,
@@ -147,6 +186,78 @@ def build_capability_matrix(
 # claim into two agreeing sources.
 _JUDGE_SOURCE = "judge"
 
+# Why an id that reached the report on a finding alone is not published. A
+# claim is questioned in its analyst's own loop — its technique id is asked
+# whether the catalogue has it, whether the sample's domain can host it and
+# whether any evidence grounds it, and the analyst is shown the answer and
+# given a turn. A finding's ``technique_ids`` are read by the corroboration
+# metric and the report's Findings table and by nothing that asks a question,
+# so a finding citing no evidence at all and carrying no confidence would
+# otherwise publish a technique. It is printed everywhere, with this beside it,
+# and published nowhere.
+FINDING_ONLY_REASON = (
+    "it was named on a finding rather than on a claim, so no check asked what evidence holds it up"
+)
+
+
+def _out_of_scope(ids: list[str], sample: dict[str, Any] | None) -> dict[str, str]:
+    """Per technique the sample cannot host, why — in the check's own words.
+
+    The same function the analyst loop and the judge's bundle check ask
+    (``pipeline.validation.platform_mismatch_message``), over the same
+    catalogue, so the sentence the report carries is the one the producer was
+    shown. It runs here rather than reading the surviving violations back
+    because this is after the feedback turn by construction: a technique the
+    retry replaced is not in the matrix to be asked about.
+
+    Never raises, and answers nothing for a sample whose platform is unknown or
+    cross-domain — the check falls open, so a question nobody can answer is not
+    counted as a mismatch.
+    """
+    if not sample:
+        return {}
+    try:
+        from maljan.pipeline.validation import expected_technique_scope, platform_mismatch_message
+        from maljan.tools import knowledge
+    except Exception as exc:  # noqa: BLE001 — a knowledge lookup degrades, never raises
+        logger.debug("capability_matrix: the platform check is unavailable (%s)", exc)
+        return {}
+    scope = expected_technique_scope(sample)
+    if scope[0] is None:
+        return {}
+    found: dict[str, str] = {}
+    for tid in ids:
+        try:
+            message = platform_mismatch_message(tid, knowledge, scope)
+        except Exception as exc:  # noqa: BLE001 — an unanswered lookup is no mismatch
+            logger.debug("capability_matrix: no platform answer for %s (%s)", tid, exc)
+            continue
+        if message:
+            found[tid] = " ".join(message.split())
+    return found
+
+
+def _catalogue_scope(technique_id: str) -> tuple[str, list[str]]:
+    """``(domain, platforms)`` the catalogue declares for the id; empty when it cannot say.
+
+    The FP linter's platform check reads these off the cell. Never raises:
+    a catalogue that cannot be read leaves the cell without a scope, which
+    the linter reads as nothing to check rather than as a mismatch.
+    """
+    try:
+        from maljan.tools import knowledge
+
+        answer = knowledge.attck_lookup(technique_id)
+    except Exception as exc:  # noqa: BLE001 — a knowledge lookup degrades, never raises
+        logger.debug("capability_matrix: no catalogue scope for %s (%s)", technique_id, exc)
+        return "", []
+    if not isinstance(answer, dict):
+        return "", []
+    return (
+        str(answer.get("domain") or ""),
+        [str(p) for p in (answer.get("platforms") or []) if str(p).strip()],
+    )
+
 
 def _unknown_to_the_catalogue(ids: list[str]) -> set[str]:
     """Which of ``ids`` the ATT&CK catalogue has no entry for.
@@ -159,7 +270,9 @@ def _unknown_to_the_catalogue(ids: list[str]) -> set[str]:
     labelled — one rule for the model that had the last word.
 
     Never raises. An unreachable catalogue marks nothing rather than marking
-    everything.
+    everything, and records nothing here: ``run_summary.validation.not_run``
+    is written by the analyst loop and the judge node, which are the two
+    places a check that did not run is a fact about the run.
     """
     try:
         from maljan.pipeline.validation import unknown_technique_ids
@@ -188,8 +301,14 @@ def _collect_techniques(
         # takes the max once, where a reader can see it happen; a row that
         # rewrites its own ``confidence`` key as it goes reads like the thing
         # this phase removed even when it is only accumulating.
+        # ``claimed`` is whether any producer put this id somewhere a check
+        # was asked about it: a judge attack-pattern, a judge relationship, an
+        # analyst claim. A finding's technique ids reach the report through a
+        # path no check has ever seen, so they leave this false and the caller
+        # marks the row unpublished.
         return techniques.setdefault(
-            tid, {"evidence": [], "confidences": [], "layers": [], "valid": True}
+            tid,
+            {"evidence": [], "confidences": [], "layers": [], "valid": True, "claimed": False},
         )
 
     # 1. The judge's bundle. An attack-pattern says the technique is in the
@@ -201,6 +320,7 @@ def _collect_techniques(
     unknown = _unknown_to_the_catalogue(judge_ids + [tid for tid, _c, _a in judge_relationships])
     for tid in judge_ids:
         row = _row(tid)
+        row["claimed"] = True
         if tid in unknown:
             row["valid"] = False
         # The judge is credited as the source. Without it an attack-pattern the
@@ -212,6 +332,7 @@ def _collect_techniques(
             row["layers"].append(_JUDGE_SOURCE)
     for tid, confidence, agents in judge_relationships:
         row = _row(tid)
+        row["claimed"] = True
         if tid in unknown:
             row["valid"] = False
         row["confidences"].append(confidence)
@@ -228,6 +349,10 @@ def _collect_techniques(
                 if not claim_tid:
                     continue
                 row = _row(str(claim_tid))
+                # The same id on a claim and on a finding is judged as the
+                # claim's: it was asked the questions, and the finding is a
+                # second mention of an answer that already stands.
+                row["claimed"] = True
                 # An id the catalogue does not have stays in the matrix and is
                 # marked. Dropping it deleted the analyst's answer from the one
                 # surface a reader looks at, which is the behaviour this whole
@@ -241,6 +366,39 @@ def _collect_techniques(
                 quote = getattr(claim, "claim", None) or getattr(claim, "evidence_ref", None) or ""
                 if quote and quote not in row["evidence"]:
                     row["evidence"].append(str(quote)[:200])
+            # 3. The findings' own technique ids. An ISR carries ids in two
+            # places, and this was the one no check ever saw: the report's
+            # Findings table and the corroboration metric are both built from
+            # it, so a run whose final claims carried no id at all still
+            # printed three enterprise-only techniques on an Android sample
+            # with nothing saying they were not published. Collected here, they
+            # are asked the domain question and the catalogue question with
+            # every other id. What they are not asked is what a claim is asked
+            # in its analyst's own loop — whether any evidence grounds them —
+            # so an id that arrived here and nowhere else is printed as claimed
+            # and published nowhere; see ``FINDING_ONLY_REASON``.
+            for finding in getattr(isr, "findings", None) or []:
+                confidence = float(getattr(finding, "confidence", 0.0) or 0.0)
+                title = str(getattr(finding, "title", "") or "")
+                layer = getattr(isr, "domain", None) or agent_name or "agent"
+                for raw in getattr(finding, "technique_ids", None) or []:
+                    tid = str(raw or "").strip().upper()
+                    if not tid:
+                        continue
+                    row = _row(tid)
+                    row["confidences"].append(confidence)
+                    if layer and str(layer) not in row["layers"]:
+                        row["layers"].append(str(layer))
+                    if title and title not in row["evidence"]:
+                        row["evidence"].append(title[:200])
+
+    # The catalogue question, asked of every id still standing. A claim was
+    # asked it in the analyst's own loop and carries the answer; an id that
+    # arrived on a finding was asked it nowhere, and one catalogue giving one
+    # answer is the point.
+    standing = [tid for tid, row in techniques.items() if row.get("valid", True)]
+    for tid in _unknown_to_the_catalogue(standing):
+        techniques[tid]["valid"] = False
 
     return techniques
 
@@ -264,6 +422,33 @@ def _judge_technique_ids(stix_output: dict[str, Any] | None) -> list[str]:
                     found.append(tid)
                 break
     return found
+
+
+def unmapped_behaviours(stix_output: dict[str, Any] | None) -> list[str]:
+    """What the judge named as an attack-pattern without naming a technique.
+
+    The validator asks for the id once; an object that comes back without one
+    still describes something the judge observed, and dropping it silently is
+    how three of them reached one report's ``/mitre`` as techniques with an
+    empty ``technique_id``. They are reported here instead, as behaviours,
+    which is what they are — and they are not published as ATT&CK techniques
+    on any surface.
+    """
+    names: list[str] = []
+    for obj in _judge_objects(stix_output):
+        if obj.get("type") != "attack-pattern":
+            continue
+        refs = obj.get("external_references") or []
+        if any(isinstance(ref, dict) and str(ref.get("external_id") or "").strip() for ref in refs):
+            continue
+        name = str(obj.get("name") or "").strip()
+        if name and name.upper().split()[0].rstrip(":").startswith("T"):
+            # The id is in the name, which ``_attack_pattern_technique_id``
+            # reads; it is a mapped technique and belongs to the matrix.
+            continue
+        if name and name not in names:
+            names.append(name[:200])
+    return names
 
 
 def _judge_relationship_rows(

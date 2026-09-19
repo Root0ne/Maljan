@@ -259,11 +259,28 @@ class TestBuilderOptionalSummaries:
 
     def test_corroboration_counts_per_source_without_combining_anything(self) -> None:
         builder = _make_builder()
-        builder.set_corroboration({"T1055": ["static", "dynamic"], "T1071": ["static"]})
+        builder.set_corroboration(
+            {
+                "T1055": {"asserted_by": ["capa"], "claimed_by": ["static", "dynamic"]},
+                "T1071": {"asserted_by": [], "claimed_by": ["static"]},
+            }
+        )
 
         summary = builder.build()
-        assert summary.corroboration == {"T1055": ["static", "dynamic"], "T1071": ["static"]}
-        assert summary.techniques_by_layer == {"static": 2, "dynamic": 1}
+        assert summary.corroboration["T1055"] == {
+            "asserted_by": ["capa"],
+            "claimed_by": ["static", "dynamic"],
+        }
+        assert summary.techniques_by_layer == {"capa": 1, "static": 2, "dynamic": 1}
+
+    def test_a_summary_stored_as_flat_source_lists_still_builds(self) -> None:
+        builder = _make_builder()
+        builder.set_corroboration({"T1055": ["static", "dynamic"]})
+        summary = builder.build()
+        assert summary.corroboration == {
+            "T1055": {"asserted_by": [], "claimed_by": ["static", "dynamic"]}
+        }
+        assert summary.techniques_by_layer == {"static": 1, "dynamic": 1}
 
     def test_an_empty_tally_leaves_validation_unset(self) -> None:
         builder = _make_builder()
@@ -356,3 +373,28 @@ class TestRunSummaryToDict:
     def test_validation_none_when_not_set(self) -> None:
         d = self._make_summary().to_dict()
         assert d["validation"] is None
+
+
+class TestASummaryStoredInTheFlatShape:
+    """A stored summary from before the two lists is read on every path,
+    not only through the builder: the CLI builds a RunSummary from the
+    stored dict directly."""
+
+    def test_the_dataclass_normalises_on_construction(self) -> None:
+        import dataclasses
+
+        summary = dataclasses.replace(
+            _make_builder().build(), corroboration={"T1055": ["static", "capa"]}
+        )
+        assert summary.corroboration == {
+            "T1055": {"asserted_by": [], "claimed_by": ["static", "capa"]}
+        }
+        assert summary.to_dict()["corroboration"]["T1055"]["claimed_by"] == ["static", "capa"]
+        assert "| T1055 | — | static, capa |" in summary.to_markdown()
+
+    def test_the_current_shape_passes_through(self) -> None:
+        import dataclasses
+
+        row = {"asserted_by": ["capa"], "claimed_by": ["static"]}
+        summary = dataclasses.replace(_make_builder().build(), corroboration={"T1055": row})
+        assert summary.corroboration == {"T1055": row}

@@ -100,11 +100,15 @@ export interface McpServerEntry {
  * `kind: "provider"` means "this agent's static provider's tools" and carries
  * nothing else. `kind: "sandbox"` means the job's sandbox report, read through
  * the in-process sandbox tool set, and likewise carries nothing else.
+ * `kind: "agent"` names another definition: the agent gets a tool
+ * `ask_<agent>` that hands that agent a task and returns its answer. The API
+ * writes `agent` only on that kind, so the field is optional here.
  */
 export interface ToolRefEntry {
-  kind: "mcp" | "provider" | "sandbox";
+  kind: "mcp" | "provider" | "sandbox" | "agent";
   server: string | null;
   name: string | null;
+  agent?: string | null;
 }
 
 /**
@@ -117,7 +121,7 @@ export interface ToolRefEntry {
  * exported as-is.
  */
 export interface AgentDefinitionEntry {
-  role: "static" | "dynamic" | "network" | "judge" | "generic" | "report";
+  role: "static" | "dynamic" | "network" | "judge" | "generic" | "lead" | "report";
   label: string;
   prompt: string | null;
   tools: ToolRefEntry[];
@@ -134,7 +138,7 @@ export interface DebateOptionsEntry {
   sycophancy_check: boolean;
 }
 
-export type StageKind = "analysis" | "debate" | "verdict" | "report";
+export type StageKind = "triage" | "analysis" | "debate" | "verdict" | "report";
 export type StageMode = "parallel" | "sequential";
 export type InjectUpstream = "none" | "findings" | "full";
 
@@ -249,6 +253,26 @@ export interface ImportRequest {
   values: Record<string, unknown>;
 }
 
+/** One tool of a server's capability manifest: what it needs on the server's
+ *  host and whether it is there. `without` names what the tool still does
+ *  when its dependency is missing. */
+export interface CapabilityCell {
+  name: string;
+  optional_dependency: string | null;
+  available: boolean;
+  reason: string | null;
+  timeout_s: number | null;
+  remediation?: string;
+  without?: string;
+}
+
+/** A server's `capabilities()` answer, computed on its host when it started. */
+export interface CapabilityManifest {
+  server: string;
+  version: string;
+  tools: CapabilityCell[];
+}
+
 export interface ProbeResult {
   ok: boolean;
   latency_ms: number;
@@ -256,8 +280,34 @@ export interface ProbeResult {
   models: string[] | null;
   /** The probed server's whole manifest, for the allow-list tick boxes. */
   tools: string[] | null;
-  /** Probe-specific structured facts; the agent probe fills this in. */
-  details: AgentProbeDetails | Record<string, unknown> | null;
+  /** Probe-specific structured facts; the agent probe fills this in, and an
+   *  MCP probe of a server that offers `capabilities` puts the manifest under
+   *  `capabilities`. */
+  details: AgentProbeDetails | { capabilities: CapabilityManifest } | Record<string, unknown> | null;
+}
+
+/** The unavailable tools of a probe result, or none when the server offers no
+ *  manifest. */
+export function unavailableTools(result: ProbeResult | null | undefined): CapabilityCell[] {
+  const details = result?.details as { capabilities?: CapabilityManifest } | null | undefined;
+  const cells = details?.capabilities?.tools;
+  if (!Array.isArray(cells)) return [];
+  return cells.filter((cell) => cell && cell.available === false);
+}
+
+/** What `POST /settings/virustotal/register` answers with. The token never
+ *  appears: `auth_token` is the same mask a stored server credential shows,
+ *  and the agent id and public handle are VirusTotal's own names for this
+ *  deployment. */
+export interface VirustotalRegistration {
+  server: string;
+  enabled: boolean;
+  transport: string;
+  url: string;
+  auth_token: string;
+  agent_id: string;
+  public_handle: string;
+  tools: string[] | null;
 }
 
 export interface ChannelPreview {

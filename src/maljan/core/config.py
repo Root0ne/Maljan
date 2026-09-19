@@ -22,6 +22,7 @@ Heterogeneous Model Ensemble:
 import contextvars
 import re
 import sys
+from collections.abc import Iterable, Mapping
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
 
@@ -29,12 +30,20 @@ from pydantic import (
     BaseModel,
     Field,
     SecretStr,
+    SerializerFunctionWrapHandler,
     field_validator,
+    model_serializer,
     model_validator,
 )
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
-from maljan.agents.prompts import ANDROID_STATIC_PROMPT, REVERSER_PROMPT, TRIAGE_PROMPT
+from maljan.agents.prompts import (
+    ANDROID_STATIC_PROMPT,
+    LEAD_PROMPT,
+    REVERSER_PROMPT,
+    TRIAGE_PROMPT,
+)
+from maljan.core import virustotal
 
 # ---------------------------------------------------------------------------
 # Per-provider LLM configs
@@ -65,6 +74,24 @@ class OpenAIConfig(BaseModel):
     # leaving an empty answer + frequent timeouts). Off by default; only applied
     # when base_url is set, so vanilla OpenAI stays untouched.
     disable_thinking: bool = False
+    # Which dialect the endpoint behind ``base_url`` speaks. The three extras
+    # above (the sampler penalty, the ``n_predict`` echo of the output cap and
+    # ``chat_template_kwargs``) are llama.cpp's, not OpenAI's, and sending them
+    # to a hosted OpenAI-compatible API is a 400 on the first request — a live
+    # run against integrate.api.nvidia.com died on
+    # ``Unsupported parameter(s): n_predict`` before a single analyst ran.
+    # A custom base URL is not the same fact as a llama.cpp server, so it is
+    # asked here instead of inferred from one. ``auto`` reads the host: a
+    # loopback, link-local or private address is a local server, anything else
+    # is a hosted API that gets standard fields only.
+    compat: Literal["auto", "llama_cpp", "standard"] = "auto"
+    # The context window the server behind ``base_url`` was started with, in
+    # tokens. Zero means it is not known, which is the honest default: an
+    # OpenAI-compatible endpoint does not report it and guessing one is worse
+    # than saying so. What reads it is the forced-synthesis budget, which fits
+    # the salvage conversation to a fraction of the window rather than to a
+    # fixed number of characters chosen for one deployment.
+    context_size: Annotated[int, Field(ge=0)] = 0
 
 
 class AnthropicConfig(BaseModel):
@@ -83,6 +110,14 @@ class OllamaConfig(BaseModel):
     judge_model: str = "qwen3.5:9b"
     keep_alive: str = "30m"
     num_ctx: Annotated[int, Field(ge=1)] = 32768
+    # Ollama's own ``think`` switch, the counterpart of the OpenAI-compatible
+    # ``disable_thinking`` above. A reasoning model served by Ollama spends its
+    # output budget in the thinking channel and answers with an empty string;
+    # turning this on spends it on the answer. Off by default, because a model
+    # that cannot think is not told to stop — Ollama answers a ``think`` it
+    # does not understand with an error, and most tags are not reasoning
+    # models.
+    disable_thinking: bool = False
 
 
 class GeminiConfig(BaseModel):
@@ -239,6 +274,16 @@ class LLMConfig(BaseModel):
     frontier: FrontierConfig = Field(default_factory=FrontierConfig)
     # Per-agent overrides: {"static": AgentLLMConfig(...), "dynamic": ...}
     agents: dict[str, AgentLLMConfig] = Field(default_factory=dict)
+
+    # Whether a job is refused when an agent names a model no probe has
+    # reached. A model name is the one part of a definition nothing validates
+    # until the run gets to that agent: a typo in it, or an endpoint that no
+    # longer serves it, fails minutes into an analysis with a sample already
+    # uploaded and a queue slot spent. The settings probe already answers the
+    # question; this makes the answer a precondition rather than a courtesy.
+    # Turned off for an air-gapped batch run, where the endpoint is known good
+    # and there is nobody at a console to press the button.
+    require_probe: bool = True
 
     # Hard output cap for the judge verdict generation (max_tokens). The judge
     # otherwise has no output bound — only the 600 s wall-clock timeout — so a
@@ -535,17 +580,6 @@ class PreprocessingConfig(BaseModel):
     family_rag_top_k: Annotated[int, Field(ge=1)] = 5
     family_rag_min_score: Annotated[float, Field(ge=0, le=1)] = 0.3
 
-    # Windows API behaviour map — the data-driven replacement for the 51-entry
-    # ``pe_extractor._SUSPICIOUS_IMPORTS`` table. ~680 API names across 13
-    # behaviour categories, with a per-category tier deciding which of them
-    # actually count as *suspicious* (categorising RegOpenKeyExA is useful;
-    # flagging it is not). ON by default and fail-safe in both directions: a
-    # missing or malformed catalog logs once and falls back to the built-in
-    # table, so the worst case is the behaviour we shipped before it existed.
-    # Build it with scripts/knowledge/build_api_capability_db.py.
-    use_api_behaviour_map: bool = True
-    api_behaviour_map_path: str = "data/api_behaviour_map_v1.json"
-
     # Deterministic API→ATT&CK mapping, computed from the same resolved-import
     # set as the behaviour map above (one parse, two projections). It fills
     # ``StaticAnalysis.api_technique_hits``: one row per technique with the
@@ -577,51 +611,6 @@ class PreprocessingConfig(BaseModel):
     use_language_signatures: bool = True
     language_signatures_path: str = "data/language_signatures_v1.json"
 
-    # ATT&CK case-prior RAG (§4 U2 — LLM-centric, cross-sample TTP grounding).
-    # The per-sample function RAG retrieves over THIS sample's own functions only;
-    # this fills the cross-sample gap. When enabled AND a vendored case corpus exists
-    # at ``attck_case_corpus_path``, the static analyst's sample profile retrieves the
-    # behaviourally-similar prior cases mined from our OWN long-term memory (Qdrant
-    # StoredCase: summary_text + attributed technique_ids), and their technique_ids are
-    # aggregated into a ranked ATT&CK CANDIDATE list injected as evidence — the LLM
-    # decides which TTPs apply. Raises static-only TTP precision without a second
-    # statistical brain (nothing trained; adding a case is a new corpus row). Reuses
-    # the fastembed BGE-384 embedder already loaded for LTM — zero new deps. Build the
-    # corpus with scripts/knowledge/build_attck_case_kb.py.
-    #
-    # STAYS OFF — measured, not merely undeployed. The index itself works; the
-    # *query* does not reach it:
-    #
-    #   corpus-native query (leave-one-out, near-duplicates suppressed)
-    #       retrieval F1 0.620   vs frequency-prior 0.424   vs random 0.078
-    #   production query (build_sample_profile_text over 15 labelled samples)
-    #       retrieval F1 0.111   vs frequency-prior 0.123
-    #
-    # So with the query production actually sends, the candidate list is no better than
-    # printing the eight most common techniques in the corpus and never looking at the
-    # sample. The cause is a vocabulary mismatch, not a tuning problem: the corpus
-    # renders capa rule sentences and lowercase API names ("allocate RW memory";
-    # "closehandle"), the runtime profile renders import-category counts and CamelCase
-    # ("capabilities: execution x5"; "GetProcAddress"). The only text the two share is
-    # the boilerplate, which is why every query lands at 0.78-0.90 similarity regardless
-    # of content. A variant querying with only the lowercased import segment was tried
-    # and did not close the gap (F1 0.090).
-    #
-    # Enabling it anyway would be worse than a no-op: an LLM shown a technique list that
-    # tracks corpus frequency rather than this sample would read it as corroboration.
-    # Re-open this when the corpus is rebuilt in build_sample_profile_text's vocabulary
-    # (or the query in capa's) — the eval script re-runs in ~2 min and answers it.
-    use_attck_case_rag: bool = False
-    attck_case_corpus_path: str = "data/attck_case_corpus_v1.json"
-    attck_case_rag_top_k: Annotated[int, Field(ge=1)] = 5
-    # NOTE: this floor is inert at present — every one of the 15 production-style queries
-    # scored 0.78-0.90 against the corpus, so nothing is ever filtered. It is kept (rather
-    # than raised to a value that would appear to work) because the scores do not separate
-    # good matches from bad ones, exactly as measured for the semantic ATT&CK gate above;
-    # a threshold picked to make the numbers look decisive would only hide that.
-    attck_case_rag_min_score: Annotated[float, Field(ge=0, le=1)] = 0.35
-    attck_case_rag_max_techniques: Annotated[int, Field(ge=1)] = 8
-
     # ATT&CK index backend for technique-ID grounding (§1.5). One of:
     #   "tfidf"    keyword bag-of-words (clean alignment gate, weaker ranking)
     #   "semantic" dense BGE-384 embeddings (better ranking, poor gate)
@@ -641,12 +630,27 @@ class PreprocessingConfig(BaseModel):
 # MCP (Model Context Protocol) Integration
 # ---------------------------------------------------------------------------
 
-# The role a definition plays in the fixed skeleton. ``generic`` is the one
-# role with no class of its own: it runs as ``ConfigurableAnalyst``. ``report``
-# is the one role that is only a prompt template: the reporter definition picks
-# the LLM and the prompt the narrative and composer steps run with, and the
-# report stage is a deterministic build around them rather than an agent loop.
-AnalystRole = Literal["static", "dynamic", "network", "judge", "generic", "report"]
+# The role a definition plays in the fixed skeleton. ``generic`` and ``lead``
+# are the roles with no class of their own: both run as ``ConfigurableAnalyst``
+# and are nothing but their prompt and their tools. ``lead`` is the one whose
+# tools are, first of all, other agents: it plans, delegates and weighs, and
+# naming that as a role is what lets the console, the transcript and a report
+# say which agent led. ``report`` is the one role that is only a prompt
+# template: the reporter definition picks the LLM and the prompt the narrative
+# and composer steps run with, and the report stage is a deterministic build
+# around them rather than an agent loop.
+AnalystRole = Literal["static", "dynamic", "network", "judge", "generic", "lead", "report"]
+# The roles that are a prompt rather than a class, and therefore need one.
+PROMPT_ROLES: tuple[str, ...] = ("generic", "lead")
+
+# Why a provider reference is refused, in one sentence both the settings model
+# and the API's definition editor raise, so the two never word it differently.
+# A built-in role opens the provider its class knows about; a definition that
+# is only a prompt is the one that has to say which one it wants.
+PROVIDER_REFERENCE_RULE = (
+    f"provider tool references are only valid on {' and '.join(PROMPT_ROLES)} "
+    "definitions; built-in roles open their provider themselves"
+)
 
 # Deprecated. ``MCPServerConfig.agents`` used to be a Literal of the four
 # built-in roles; an operator can now bind a server to any definition key, so
@@ -662,12 +666,25 @@ SERVER_KEY_PATTERN = r"^[a-z][a-z0-9_-]{0,31}$"
 # The one value in ``ProfileDefinition.exclude_servers`` that is not a key.
 # It cannot collide with one: the key pattern above admits no ``*``.
 ALL_SERVERS = "*"
-BUILTIN_SERVER_KEYS: tuple[str, ...] = ("analysis", "knowledge", "network", "threatintel")
+BUILTIN_SERVER_KEYS: tuple[str, ...] = (
+    "analysis",
+    "knowledge",
+    "network",
+    "threatintel",
+    virustotal.SERVER_KEY,
+)
+# The built-in servers that answer "who is this sample": VirusTotal's own
+# server and the REST sidecar that reads VirusTotal and AbuseIPDB. Named as a
+# set rather than found by scanning prose, because what decides whether the
+# question has been asked is which server a ledger entry came from, and a
+# sentence that happens to contain the word "reputation" is not an answer.
+REPUTATION_SERVER_KEYS: tuple[str, ...] = (virustotal.SERVER_KEY, "threatintel")
 RESERVED_SERVER_KEYS: tuple[str, ...] = (
     "analysis",
     "knowledge",
     "network",
     "threatintel",
+    virustotal.SERVER_KEY,
     "ghidra",
     "cape",
 )
@@ -708,17 +725,40 @@ class MCPServerConfig(BaseModel):
     label: str = ""
 
 
+# The names a built-in sidecar is always started with, whatever a stored
+# registry row says. They are the two facts a sidecar cannot work out for
+# itself: which directories it may read a path argument in, and where a
+# delivered sample lands and for how long. A child that loses
+# ``MALJAN_SAMPLE_ROOTS`` refuses every tool call on the run's own sample;
+# one that loses ``MALJAN_STAGING_DIR`` writes its uploads somewhere the rest
+# of the deployment does not look, and one that loses
+# ``MALJAN_STAGING_TTL_HOURS`` silently keeps live malware on disk for the
+# default day instead of the hours the deployment chose.
+#
+# Everything else a built-in ships with is a default an operator may take
+# away. ``threatintel``'s ``VIRUSTOTAL_API_KEY`` and ``ABUSEIPDB_API_KEY`` are
+# the deployment's own credentials: clearing that list is how an operator stops
+# a sample being looked up, and it stays cleared.
+REQUIRED_ENV_ALLOW: dict[str, tuple[str, ...]] = {
+    "analysis": ("MALJAN_STAGING_DIR", "MALJAN_STAGING_TTL_HOURS", "MALJAN_SAMPLE_ROOTS"),
+    "network": ("MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"),
+}
+
+
 def _builtin_servers() -> dict[str, MCPServerConfig]:
-    """The four sidecars every run depends on, as settings rather than constants.
+    """The servers a deployment starts with, as settings rather than constants.
 
     ``analysis`` and ``knowledge`` are the tool sidecars: every static-analysis
     capability the pipeline used to run in-process, and every reference lookup
     it used to consult from one stage, offered to an agent as a tool. An
     operator turns one off by flipping ``enabled`` rather than by editing code.
     ``analysis``
-    is the one built-in that sees environment variables of its own —
-    ``MALJAN_STAGING_DIR`` and ``MALJAN_STAGING_TTL_HOURS``, which say where
-    its ``put_sample`` uploads land and how long they are kept.
+    sees environment variables of its own — ``MALJAN_STAGING_DIR`` and
+    ``MALJAN_STAGING_TTL_HOURS``, which say where its ``put_sample`` uploads
+    land and how long they are kept. Both file-reading sidecars also see
+    ``MALJAN_SAMPLE_ROOTS``: the directories they may read a path argument in,
+    on top of the staging directory. The worker exports the mirror it copies
+    a sample into; without it a sidecar reads only what it staged itself.
 
     The two tool sidecars carry ``agents=[]`` on purpose. They are bound by the
     ``ToolRef``s in ``_builtin_definitions()`` and by nothing else, so a clone
@@ -733,6 +773,11 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
     threat-intel one alone allowed to see the two intel keys. ``tools=None``
     keeps the whole manifest, which is what those agents did, and what
     ``tests/fixtures/golden/mcp_tools/*.json`` pins.
+
+    ``virustotal`` is the one entry that is neither a sidecar of this repo nor
+    a local process: it is VirusTotal's own server, reached over HTTP with an
+    agent token, and the one built-in that ships disabled and with a narrowed
+    tool list.
     """
     return {
         "analysis": MCPServerConfig(
@@ -741,7 +786,11 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             command=sys.executable,
             args=["services/analysis-mcp/server.py"],
             cwd="services/analysis-mcp",
-            env_allow=["MALJAN_STAGING_DIR", "MALJAN_STAGING_TTL_HOURS"],
+            env_allow=[
+                "MALJAN_STAGING_DIR",
+                "MALJAN_STAGING_TTL_HOURS",
+                "MALJAN_SAMPLE_ROOTS",
+            ],
             agents=[],
             label="Analysis MCP",
         ),
@@ -760,6 +809,7 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             command=sys.executable,
             args=["services/network-mcp/server.py"],
             cwd="services/network-mcp",
+            env_allow=["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"],
             agents=["network"],
             label="Network MCP",
         ),
@@ -773,7 +823,54 @@ def _builtin_servers() -> dict[str, MCPServerConfig]:
             agents=["judge"],
             label="Threat intel MCP",
         ),
+        # VirusTotal's own MCP server, reached over its streamable-HTTP
+        # endpoint. Off until an operator registers an agent token, because
+        # there is nothing to seed a credential with and a server that dials
+        # out on every run without one would only ever contribute a failure.
+        #
+        # ``tools`` is the one built-in that ships a narrowed list. Every
+        # lookup is read-only; the submit tools upload the sample to
+        # VirusTotal, so they stay unticked until the operator says otherwise.
+        # ``agents=[]`` for the reason the tool sidecars carry it: the
+        # definitions in ``_builtin_definitions()`` reference this server by
+        # name, and a role binding on top would make those lists decorative.
+        virustotal.SERVER_KEY: MCPServerConfig(
+            enabled=False,
+            transport="streamable-http",
+            url=virustotal.MCP_ENDPOINT,
+            tools=list(virustotal.LOOKUP_TOOLS),
+            agents=[],
+            label=virustotal.SERVER_LABEL,
+        ),
     }
+
+
+def builtin_env_allow(key: str, configured: Iterable[str]) -> list[str]:
+    """The names a built-in's child may read: the required ones, then the stored ones.
+
+    Some of a built-in sidecar's environment belongs to the code that ships
+    with it rather than to a stored setting. ``analysis`` and ``network``
+    refuse a path argument that lands outside the directories
+    ``MALJAN_SAMPLE_ROOTS`` names, so a child that cannot read that variable
+    refuses the very sample its run is about — with the error a real escape
+    attempt gets, in the ledger and in front of the model.
+
+    The registry is stored as a single row holding every server, written whole
+    whenever an operator saves anything in it: a token, a server of their own,
+    a built-in switched off. Each save therefore pins the built-ins' launch
+    parameters as they stood that day, and re-seeding only the *missing* keys
+    left a name added to a sidecar afterwards reaching fresh installs alone.
+    ``REQUIRED_ENV_ALLOW`` is what a stored row cannot take away.
+
+    It is a floor, not the whole shipped list. Every other default is the
+    operator's to remove — a ``threatintel`` whose ``env_allow`` an admin has
+    emptied keeps its API keys out of the child on load, on save, in the
+    editor's view and in the connection test. Stored names are kept, after the
+    required ones, so a name an admin added still reaches the child. A key with
+    nothing required of it — every server an operator added, and a built-in
+    that takes no path — is left exactly as stored.
+    """
+    return list(dict.fromkeys([*REQUIRED_ENV_ALLOW.get(key, ()), *configured]))
 
 
 class MCPConfig(BaseModel):
@@ -799,9 +896,14 @@ class MCPConfig(BaseModel):
         keeps every other field they set. An override written before a built-in
         existed simply gains it. Neither can end with a run silently missing a
         sidecar the pipeline assumes.
+
+        A stored ``env_allow`` is kept as it is, except that the names in
+        ``REQUIRED_ENV_ALLOW`` come back — see ``builtin_env_allow``.
         """
         for key, default in _builtin_servers().items():
-            self.servers.setdefault(key, default)
+            stored = self.servers.setdefault(key, default)
+            if stored is not default:
+                stored.env_allow = builtin_env_allow(key, stored.env_allow)
         return self
 
 
@@ -833,10 +935,10 @@ BUILTIN_AGENTS: tuple[str, ...] = ("static", "dynamic", "network", "judge", "rep
 # time a fourth is added.
 def seeded_generic_agents() -> tuple[str, ...]:
     """The seeded definitions that are a prompt rather than a class."""
-    return tuple(key for key, d in _builtin_definitions().items() if d.role == "generic")
+    return tuple(key for key, d in _builtin_definitions().items() if d.role in PROMPT_ROLES)
 
 
-BUILTIN_PROFILES: tuple[str, ...] = ("default", "measurement", "mobile", "deep_static")
+BUILTIN_PROFILES: tuple[str, ...] = ("default", "measurement", "mobile", "deep_static", "team_lead")
 
 # What an agent may be handed as its input text. ``sample.path`` is the
 # container-visible path its tools load the sample from; ``sample.chunks`` the
@@ -878,19 +980,47 @@ class ToolRef(BaseModel):
     report, read through ``providers.sandbox_tools``. It carries nothing else
     for the same reason a provider reference does not — there is exactly one
     report per job and naming it twice could disagree.
+
+    ``kind="agent"`` names another definition. Bound to an agent, it appears in
+    that agent's toolbox as ``ask_<agent>``: a tool that hands the named agent a
+    task, runs it under the same job, and returns its answer. It is a tool and
+    nothing more, so the ask, the answer and everything the callee did on the
+    way are in the ledger, the budget and the transcript like any other call
+    (``agents.delegation``).
     """
 
-    kind: Literal["mcp", "provider", "sandbox"]
+    kind: Literal["mcp", "provider", "sandbox", "agent"]
     server: str | None = None
     name: str | None = None
+    agent: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _agent_only_when_named(self, handler: SerializerFunctionWrapHandler) -> Any:
+        """Dump ``agent`` only on an agent reference.
+
+        Every stored definition, every export and every pinned dump was
+        written before the field existed; a reference of any other kind dumps
+        exactly as it always did, so none of them reads as changed.
+        """
+        dumped = handler(self)
+        if isinstance(dumped, dict) and self.kind != "agent":
+            dumped.pop("agent", None)
+        return dumped
 
     @model_validator(mode="after")
     def _shape_matches_the_kind(self) -> "ToolRef":
         if self.kind == "mcp":
             if not self.server:
                 raise ValueError("an mcp tool reference needs a server")
-        elif self.server is not None or self.name is not None:
-            raise ValueError(f"a {self.kind} tool reference names no server and no tool")
+            if self.agent is not None:
+                raise ValueError("an mcp tool reference names no agent")
+        elif self.kind == "agent":
+            if not self.agent:
+                raise ValueError("an agent tool reference needs an agent")
+            if self.server is not None or self.name is not None:
+                raise ValueError("an agent tool reference names no server and no tool")
+        elif self.server is not None or self.name is not None or self.agent is not None:
+            raise ValueError(f"a {self.kind} tool reference names no server, tool or agent")
         return self
 
 
@@ -984,11 +1114,16 @@ class StageDefinition(BaseModel):
     a stage whose condition is false is still part of the graph and still
     records a result, so the topology is a property of the configuration alone
     and never of the sample.
+
+    A ``triage`` stage names no agent. It is the pipeline itself running the
+    deterministic tools over the sample and writing each result to the
+    evidence ledger before any analyst starts (``pipeline.triage_pack``), so
+    the facts a model may or may not ask for exist either way.
     """
 
     key: Annotated[str, Field(pattern=SERVER_KEY_PATTERN)]
     label: str = ""
-    kind: Literal["analysis", "debate", "verdict", "report"] = "analysis"
+    kind: Literal["triage", "analysis", "debate", "verdict", "report"] = "analysis"
     agents: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
     when: str = ""
@@ -1007,22 +1142,51 @@ class StageDefinition(BaseModel):
         return self
 
 
+# The stage that runs the deterministic tools before any analyst. One key
+# everywhere, because the migration that gives stored profiles the stage and
+# the seeds that ship with it have to agree on what to skip when it is there.
+TRIAGE_STAGE_KEY = "triage_pack"
+
+
+def triage_stage() -> StageDefinition:
+    """The deterministic first step of a team, written once.
+
+    No agents and no upstream: it runs the tools in ``src/maljan/tools`` over
+    the sample and records what they said, and everything after it reads the
+    ledger it wrote. It carries no condition of its own because the facts it
+    establishes are the ones a condition further down is written against.
+    """
+    return StageDefinition(
+        key=TRIAGE_STAGE_KEY,
+        label="Triage pack",
+        kind="triage",
+        inject_upstream="none",
+    )
+
+
 def stages_from_analysts(
     analysts: list[str],
     *,
     parallel: bool = False,
     max_rounds: int = 3,
     consensus_threshold: float = 0.8,
+    triage: bool = True,
 ) -> list[StageDefinition]:
-    """The four-stage form of a profile that was written as a list of analysts.
+    """The stage form of a profile that was written as a list of analysts.
 
     This is the whole of the compatibility story: every profile in every
     operator database predates stages, and the pipeline they describe is one
     analysis stage, one debate, one verdict and one report. Written once here
     so the settings model, the alembic migration and the tests cannot each
     invent a slightly different translation.
+
+    ``triage`` puts the deterministic triage pack in front of the four. It is
+    on for every team but the measurement baseline, whose whole purpose is to
+    show what the models do with nothing established for them.
     """
+    head = [triage_stage()] if triage else []
     return [
+        *head,
         StageDefinition(
             key="analysis",
             label="Analysis",
@@ -1069,8 +1233,43 @@ def stages_from_analysts(
 _DERIVED_FIELDS: tuple[str, ...] = ("mode", "debate")
 
 
+def _is_a_fixed_node_name(key: str) -> bool:
+    """Whether ``key`` would collide with a node the graph names itself.
+
+    A triage stage's node is its key; the judge, the report, the debate's two
+    nodes, every ``<agent>_analyst`` and every ``<stage>__join`` are names the
+    builder issues, and a stage that took one would break the build instead
+    of being refused at save time.
+    """
+    from maljan.pipeline.topology import (
+        JOIN_SUFFIX,
+        JUDGE_NODE,
+        NEGOTIATION_NODE,
+        REPORT_NODE,
+        REVISION_NODE,
+    )
+
+    return (
+        key in (JUDGE_NODE, REPORT_NODE, NEGOTIATION_NODE, REVISION_NODE)
+        or key.endswith("_analyst")
+        or key.endswith(JOIN_SUFFIX)
+        or key.endswith(f"__{NEGOTIATION_NODE}")
+        or key.endswith(f"__{REVISION_NODE}")
+    )
+
+
+def has_triage_stage(stages: list["StageDefinition"]) -> bool:
+    """Whether a team runs the triage pack. Read off the kind, never the key."""
+    return any(stage.kind == "triage" for stage in stages)
+
+
 def stages_are_derived(analysts: list[str], stages: list["StageDefinition"]) -> bool:
     """Whether ``stages`` is still the plain conversion of ``analysts``.
+
+    With or without the triage pack in front: whether a team runs the pack is
+    the one thing about a derived team that is not read from the two global
+    keys, so the check accepts both forms and re-derivation keeps whichever
+    the document had.
 
     The ``derived_from_analysts`` marker travels in the stored document, so it
     arrives over the wire from an import, a script's PATCH, or a hand-edited
@@ -1087,7 +1286,7 @@ def stages_are_derived(analysts: list[str], stages: list["StageDefinition"]) -> 
     """
     if not analysts:
         return False
-    expected = stages_from_analysts(list(analysts))
+    expected = stages_from_analysts(list(analysts), triage=has_triage_stage(stages))
     if len(expected) != len(stages):
         return False
     for want, have in zip(expected, stages, strict=True):
@@ -1220,6 +1419,16 @@ class ProfileDefinition(BaseModel):
         for stage in self.stages:
             if stage.kind == "analysis" and not stage.agents:
                 raise ValueError(f"stage {stage.key!r} is an analysis stage with no agent")
+            if stage.kind == "triage" and stage.agents:
+                raise ValueError(
+                    f"stage {stage.key!r} is a triage stage and names an agent; the "
+                    "pipeline runs it"
+                )
+            if stage.kind == "triage" and _is_a_fixed_node_name(stage.key):
+                raise ValueError(
+                    f"stage {stage.key!r} is a triage stage keyed like a graph node the "
+                    "pipeline names itself; choose another key"
+                )
             if stage.kind == "debate":
                 upstream = self._reachable(stage.key)
                 if not any(s.kind == "analysis" for s in self.stages if s.key in upstream):
@@ -1345,6 +1554,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             tools=[
                 ToolRef(kind="mcp", server="analysis"),
                 ToolRef(kind="mcp", server="knowledge"),
+                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
             ],
         ),
         "dynamic": AgentDefinition(
@@ -1358,12 +1568,16 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             tools=[
                 ToolRef(kind="mcp", server="network"),
                 ToolRef(kind="mcp", server="knowledge"),
+                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
             ],
         ),
         JUDGE_AGENT_KEY: AgentDefinition(
             role="judge",
             label="Judge",
-            tools=[ToolRef(kind="mcp", server="knowledge")],
+            tools=[
+                ToolRef(kind="mcp", server="knowledge"),
+                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
+            ],
         ),
         REPORTER_AGENT_KEY: AgentDefinition(
             role="report",
@@ -1383,6 +1597,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             tools=[
                 ToolRef(kind="mcp", server="analysis"),
                 ToolRef(kind="mcp", server="knowledge"),
+                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
             ],
         ),
         "android_static": AgentDefinition(
@@ -1392,6 +1607,7 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             tools=[
                 ToolRef(kind="mcp", server="analysis"),
                 ToolRef(kind="mcp", server="knowledge"),
+                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
             ],
         ),
         "reverser": AgentDefinition(
@@ -1400,6 +1616,25 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             prompt=REVERSER_PROMPT,
             tools=[
                 ToolRef(kind="provider"),
+                ToolRef(kind="mcp", server="knowledge"),
+                ToolRef(kind="mcp", server=virustotal.SERVER_KEY),
+            ],
+        ),
+        # The lead analyst: its tools are the other analysts. It asks the
+        # three the paper measured, the reverser for a function-level answer
+        # and the triage agent for a second reading of the pack, and keeps
+        # the knowledge server so it can check a technique id a specialist
+        # cited before it repeats it.
+        "lead": AgentDefinition(
+            role="lead",
+            label="Lead analyst",
+            prompt=LEAD_PROMPT,
+            tools=[
+                ToolRef(kind="agent", agent="static"),
+                ToolRef(kind="agent", agent="dynamic"),
+                ToolRef(kind="agent", agent="network"),
+                ToolRef(kind="agent", agent="reverser"),
+                ToolRef(kind="agent", agent="triage"),
                 ToolRef(kind="mcp", server="knowledge"),
             ],
         ),
@@ -1418,8 +1653,9 @@ def _builtin_profiles() -> dict[str, ProfileDefinition]:
     limit still raises it for the default profile.
 
     ``measurement`` is the same three analysts with every tool server taken
-    away and every static provider forced to ``none``: the honest baseline for
-    "what does the ensemble contribute on its own". It is a profile rather than
+    away, every static provider forced to ``none`` and no triage pack in front
+    of them: the honest baseline for "what does the ensemble contribute on its
+    own". It is a profile rather than
     three cloned definitions because a clone would have to be kept in step with
     its original by hand, and the first time someone edited one and not the
     other the baseline would silently stop being the same agents.
@@ -1433,24 +1669,32 @@ def _builtin_profiles() -> dict[str, ProfileDefinition]:
     paper_analysts = ["static", "dynamic", "network"]
     return {
         "default": ProfileDefinition(label="Default", analysts=list(paper_analysts)),
+        # Written out without the triage pack, and still marked derived so the
+        # two global keys keep applying to it: the baseline measures what the
+        # ensemble does with nothing established for it, and a pack of facts
+        # in every prompt would be the opposite of that.
         "measurement": ProfileDefinition(
             label="Measurement baseline",
             analysts=list(paper_analysts),
+            stages=stages_from_analysts(list(paper_analysts), triage=False),
+            derived_from_analysts=True,
             exclude_servers=[ALL_SERVERS],
             exclude_sandbox_tools=True,
             static_provider="none",
         ),
         "mobile": ProfileDefinition(label="Mobile", stages=_mobile_stages()),
         "deep_static": ProfileDefinition(label="Deep static", stages=_deep_static_stages()),
+        "team_lead": ProfileDefinition(label="Team lead", stages=_team_lead_stages()),
     }
 
 
 def _triage_stage() -> StageDefinition:
-    """The first stage of every team that has one, written once.
+    """The first analyst of every seeded team that has one, written once.
 
-    Triage reads nothing upstream because there is nothing upstream: it is the
-    step that decides what the rest of the team should look at, and a stage
-    that was handed conclusions would be deciding under their influence.
+    Triage reads nothing upstream because nothing upstream has concluded
+    anything: the pack before it is facts, not findings, and this is the step
+    that decides what the rest of the team should look at. A stage that was
+    handed conclusions would be deciding under their influence.
     """
     return StageDefinition(
         key="triage",
@@ -1474,6 +1718,7 @@ def _mobile_stages() -> list[StageDefinition]:
     about detonating an APK belongs in the team definition.
     """
     return [
+        triage_stage(),
         _triage_stage(),
         StageDefinition(
             key="android_static",
@@ -1530,6 +1775,7 @@ def _deep_static_stages() -> list[StageDefinition]:
     should not have to name the decompiler an operator happens to run.
     """
     return [
+        triage_stage(),
         _triage_stage(),
         StageDefinition(
             key="static",
@@ -1582,6 +1828,131 @@ def _deep_static_stages() -> list[StageDefinition]:
     ]
 
 
+def _team_lead_stages() -> list[StageDefinition]:
+    """A team led by one agent: the pack, the lead, the verdict.
+
+    The lead is the only analyst the stage list names. The specialists it
+    asks are its tools, not stages: which of them run, in what order and how
+    often is the lead's decision on this sample, which is the point of having
+    a lead rather than a fixed sequence. What they did is still in the ledger
+    under their own keys, and the verdict reads the lead's report with their
+    evidence cited in it.
+
+    No debate stage, and that is the whole difference from the other seeded
+    teams. A debate is agents arguing with each other, and this team has one
+    analyst: the stage would hand the lead its own report, ask it to revise
+    against nobody, and cost a second full loop — with the asks that loop
+    makes — for a round that cannot change a position. The lead's own asks
+    are where the disagreement happens here; a specialist that contradicts
+    the lead does it in the answer the lead reads, not in a round afterwards.
+    """
+    return [
+        triage_stage(),
+        StageDefinition(
+            key="lead",
+            label="Lead",
+            kind="analysis",
+            agents=["lead"],
+            inject_upstream="none",
+        ),
+        StageDefinition(
+            key="verdict",
+            label="Verdict",
+            kind="verdict",
+            agents=[JUDGE_AGENT_KEY],
+            depends_on=["lead"],
+            inject_upstream="none",
+        ),
+        StageDefinition(
+            key="report",
+            label="Report",
+            kind="report",
+            agents=[REPORTER_AGENT_KEY],
+            depends_on=["verdict"],
+            inject_upstream="none",
+        ),
+    ]
+
+
+def agent_reference_problems(
+    key: str, definition: AgentDefinition, definitions: Mapping[str, AgentDefinition]
+) -> list[str]:
+    """Everything wrong with ``definition``'s agent references, as sentences.
+
+    Shared by the settings model and the API's definition editor so the two
+    refuse the same things in the same words. A reference to an agent that is
+    not there, to the definition itself, to the judge or the reporter, and a
+    reference on the judge or the reporter are all refused here; whether the
+    named agent is enabled is a runtime question, answered by the ask itself,
+    because a built-in profile may keep a disabled member while another
+    profile runs.
+    """
+    problems: list[str] = []
+    refs = [ref for ref in definition.tools if ref.kind == "agent"]
+    if refs and definition.role in ("judge", "report"):
+        problems.append(f"a {definition.role} definition cannot ask other agents")
+    seen: set[str] = set()
+    for ref in refs:
+        callee = str(ref.agent)
+        if callee in seen:
+            problems.append(f"agent {callee!r} is referenced twice")
+            continue
+        seen.add(callee)
+        if callee == key:
+            problems.append("an agent cannot ask itself")
+            continue
+        target = definitions.get(callee)
+        if target is None:
+            available = ", ".join(sorted(definitions)) or "(none)"
+            problems.append(f"unknown agent {callee!r} in a tool reference. Available: {available}")
+            continue
+        if target.role in ("judge", "report"):
+            problems.append(f"{callee!r} has role {target.role!r} and cannot be asked")
+    return problems
+
+
+def convert_builtin_profile_document(name: str, entry: Any) -> Any:
+    """A stored built-in profile, read with the pack choice its seed made.
+
+    ``ProfileDefinition`` converts a bare analyst list with the triage pack
+    in front, because every team gets the pack unless it says otherwise. The
+    one seeded team that says otherwise is the measurement baseline, and it
+    cannot say so from inside a document that carries no stages. So a stored
+    built-in without stages is converted here, by name, with the choice its
+    seed made — and the identity check then compares like with like.
+
+    A stored built-in that carries derived stages is brought to the same
+    choice: a ``default`` written before the pack existed holds four stages
+    and the mark, and re-deriving it with the pack is what its seed would
+    have produced. Only a plain derivation is touched; stages someone wrote
+    are left as written for the identity check to judge.
+    """
+    if not isinstance(entry, dict):
+        return entry
+    seed = _builtin_profiles().get(name)
+    analysts = entry.get("analysts")
+    if seed is None or not isinstance(analysts, list) or not analysts:
+        return entry
+    wanted = has_triage_stage(seed.stages)
+    stored = entry.get("stages")
+    if stored:
+        if not entry.get("derived_from_analysts"):
+            return entry
+        try:
+            typed = [StageDefinition.model_validate(stage) for stage in stored]
+        except ValueError:
+            return entry
+        if has_triage_stage(typed) == wanted or not stages_are_derived(list(analysts), typed):
+            return entry
+    return {
+        **entry,
+        "stages": [
+            stage.model_dump() for stage in stages_from_analysts(list(analysts), triage=wanted)
+        ],
+        "derived_from_analysts": True,
+    }
+
+
 def _profile_stage_identity(stages: Any) -> Any:
     """A built-in profile's stages with the two editable fields taken out.
 
@@ -1600,11 +1971,34 @@ def _profile_stage_identity(stages: Any) -> Any:
 
 
 class AgentsConfig(BaseModel):
-    """The agent definitions, the profiles, and which profile is active."""
+    """The agent definitions, the profiles, and which profile is active.
+
+    ``delegation_depth`` bounds how far one ask may nest: a stage's agent asking
+    a specialist is depth 1, that specialist asking another is depth 2, and an
+    ask that would go deeper is refused with a tool error the model reads. It
+    bounds the nesting, never the number of asks.
+
+    ``delegation_steps`` and ``delegation_timeout_seconds`` are what one ask
+    gets. They are the delegation's own budget, not a share of the caller's:
+    a callee derived from what its caller had left ran out of steps before it
+    had made a tool call — the live proof watched a static specialist die at a
+    recursion limit of five, and every later ask refused with "0 s and 3 steps
+    remain". An ask is bounded by the caller's remaining wall clock and by
+    nothing else, because the wall clock is the one thing the two really
+    share: the ask runs inside the caller's own timeout.
+    """
 
     profile: str = "default"
     profiles: dict[str, ProfileDefinition] = Field(default_factory=_builtin_profiles)
     definitions: dict[str, AgentDefinition] = Field(default_factory=_builtin_definitions)
+    delegation_depth: Annotated[int, Field(ge=1)] = 2
+    # Twelve steps is about five tool rounds and an answer — what a specialist
+    # needs to open the sample, look at two or three things and write a claim.
+    delegation_steps: Annotated[int, Field(ge=2)] = 12
+    # Five minutes per ask on a local model: a specialist with tools spends
+    # most of it waiting for its own tool calls, and a lead with a long stage
+    # timeout can still make several asks inside one loop.
+    delegation_timeout_seconds: Annotated[int, Field(ge=1)] = 300
 
     @model_validator(mode="before")
     @classmethod
@@ -1636,6 +2030,27 @@ class AgentsConfig(BaseModel):
             else:
                 merged[key] = entry
         return {**data, "definitions": merged}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _convert_builtin_profile_lists(cls, data: Any) -> Any:
+        """Read a stored built-in profile's analyst list with its seed's shape.
+
+        See ``convert_builtin_profile_document``: the measurement baseline is
+        the seeded team without the triage pack, and a document that still
+        holds only its analyst list has to be converted the way its seed was
+        or the identity check below refuses a team nobody edited.
+        """
+        if not isinstance(data, dict):
+            return data
+        profiles = data.get("profiles")
+        if not isinstance(profiles, dict):
+            return data
+        converted = {
+            name: convert_builtin_profile_document(str(name), entry)
+            for name, entry in profiles.items()
+        }
+        return {**data, "profiles": converted}
 
     @model_validator(mode="before")
     @classmethod
@@ -1735,14 +2150,13 @@ class AgentsConfig(BaseModel):
                 raise ValueError(f"{key!r}: only the built-in judge may have role judge")
             if definition.role == "report" and key != REPORTER_AGENT_KEY:
                 raise ValueError(f"{key!r}: only the built-in reporter may have role report")
-            if definition.role == "generic" and not (definition.prompt or "").strip():
-                raise ValueError(f"{key!r}: a generic agent needs a prompt")
+            if definition.role in PROMPT_ROLES and not (definition.prompt or "").strip():
+                raise ValueError(f"{key!r}: a {definition.role} agent needs a prompt")
             has_provider_ref = any(ref.kind == "provider" for ref in definition.tools)
-            if has_provider_ref and definition.role != "generic":
-                raise ValueError(
-                    f"{key!r}: provider tool references are only valid on generic "
-                    "definitions; built-in roles open their provider themselves"
-                )
+            if has_provider_ref and definition.role not in PROMPT_ROLES:
+                raise ValueError(f"{key!r}: {PROVIDER_REFERENCE_RULE}")
+            for problem in agent_reference_problems(key, definition, self.definitions):
+                raise ValueError(f"{key!r}: {problem}")
 
         for name, profile in self.profiles.items():
             self._check_profile_members(name, profile)
@@ -2129,6 +2543,79 @@ class ReportingConfig(BaseModel):
     evidence_budget_bytes: Annotated[int, Field(ge=0)] = 524288
 
 
+class TriageConfig(BaseModel):
+    """The triage pack: the deterministic tools the pipeline runs before any analyst.
+
+    ``enabled`` off leaves the stage in every team and makes it decline with
+    that reason, so a run without the pack still says it had none.
+    ``strings_head`` bounds the one open-ended tool in the pack; the rest read
+    fixed structures or scan with their own budgets. ``reputation`` is the one
+    network call the pack makes: ``auto`` asks whichever reputation server is
+    enabled and not withheld by the team, once, for the sample hash, and
+    ``off`` records that it did not. ``budget_seconds`` bounds the pack as a
+    whole, checked between steps.
+    """
+
+    enabled: bool = True
+    strings_head: Annotated[int, Field(ge=1)] = 300
+    reputation: Literal["auto", "off"] = "auto"
+    # The whole pack's wall clock. capa has its own subprocess budget and yara
+    # its own, and nothing else in the pack did; a step that would start after
+    # this many seconds is recorded as not run instead.
+    budget_seconds: Annotated[int, Field(ge=1)] = 1200
+
+
+class EventsConfig(BaseModel):
+    """The live conversation feed: what it carries, and how long it is kept.
+
+    The events themselves are not optional — the console is drawn from them
+    and a run that published none would be a spinner again. What is settable
+    is the one channel that costs something per model turn rather than per
+    step, and how long the record of a finished run stays on the job.
+
+    ``stream_deltas`` publishes an agent's partial text while its loop is
+    still running. It is on because a thirty-minute analyst that says nothing
+    until it is done is the complaint this whole feed exists to answer; a
+    deployment whose browsers are on a thin link can turn it off and still see
+    every finished message.
+
+    ``retention_days`` bounds ``job_events``. The transcript and the evidence
+    ledger of a finished run are kept by the report and the job and are not
+    touched by this; what ages out is the moment-by-moment feed, which is what
+    a reader wants while a run is fresh and nobody reads a month later.
+    """
+
+    stream_deltas: bool = True
+    retention_days: Annotated[int, Field(ge=1)] = 30
+
+
+class ValidationConfig(BaseModel):
+    """The technique check's one heuristic part, and when it is allowed to run.
+
+    Validity, platform consistency and corroboration are exact and always on.
+    The alignment gate ranks a claim's text against the ATT&CK index, and the
+    index costs seconds and hundreds of megabytes to build. ``auto`` runs the
+    gate only when this worker already built the index; ``alignment_gate_build``
+    lets the first run that needs it build it once, in a thread, for the runs
+    after. The ranking it produces is recorded on the claim and shown to the
+    judge whenever the gate runs.
+
+    Whether that ranking may also *question* a claim is ``weak_alignment``, and
+    it is off. The index scores a correct id near zero often enough that the
+    check questioned 81 of 92 claims in one audited run, each one costing a
+    full model turn; it stays off until it clears the bar the recorded fixture
+    sets. With it on, a claim is questioned when its id scores under
+    ``alignment_threshold`` — the paper's gate — and an in-scope candidate from
+    another tactic beats that score by ``alignment_margin``.
+    """
+
+    alignment_gate: Literal["auto", "off"] = "auto"
+    alignment_gate_build: bool = False
+    alignment_threshold: Annotated[float, Field(ge=0.0, le=1.0)] = 0.05
+    alignment_margin: Annotated[float, Field(ge=0.0, le=1.0)] = 0.20
+    weak_alignment: bool = False
+
+
 # ---------------------------------------------------------------------------
 # Root Settings
 # ---------------------------------------------------------------------------
@@ -2198,6 +2685,10 @@ class Settings(BaseSettings):
     # readers is gone.
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     reporting: ReportingConfig = Field(default_factory=ReportingConfig)
+    triage: TriageConfig = Field(default_factory=TriageConfig)
+    validation: ValidationConfig = Field(default_factory=ValidationConfig)
+    # The live conversation feed the console is drawn from.
+    events: EventsConfig = Field(default_factory=EventsConfig)
     # Which analysts exist, in what order, and what each one gets. The
     # ``default`` profile is the architecture this project measured itself on.
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
@@ -2273,6 +2764,14 @@ class Settings(BaseSettings):
             # safe_analyze_isr_chunked still tolerates a genuinely wedged chunk.
             # Override via ``REACT_AGENT_TIMEOUT_OVERRIDES__static=1500``.
             "static": 1500,
+            # A lead's stage has to hold several asks end to end. At the
+            # default 300 s per ask, 1800 fits six of them — which is the
+            # number ``delegation._asks_that_fit`` computes and the number the
+            # ``ask_<key>`` tool's description gives the model — with the
+            # lead's own turns around them; the per-ask timeout is what bounds
+            # any one specialist, and the refusal is what stops the last ask
+            # that would not fit.
+            "lead": 1800,
             # Judge budget bumped 300 → 600 for the same reason — the
             # final-verdict LLM call on Qwen 35B repeatedly bottlenecked
             # at 180-300s in the 2026-05-28 sequential live runs.
@@ -2330,6 +2829,12 @@ class Settings(BaseSettings):
         default_factory=lambda: {
             "static": 40,
             "network": 6,
+            # A lead spends its steps on asks and on reading what comes back,
+            # and each ask is two of them — the turn that calls the tool and
+            # the node that runs it. Six asks and the turns to weigh them is
+            # forty; the specialists' own steps are their own and do not come
+            # out of this.
+            "lead": 40,
         }
     )
 
@@ -2440,6 +2945,7 @@ class Settings(BaseSettings):
                 parallel=bool(self.llm.parallel_analysts),
                 max_rounds=self.negotiation.max_iterations,
                 consensus_threshold=self.negotiation.consensus_threshold,
+                triage=has_triage_stage(profile.stages),
             )
 
 

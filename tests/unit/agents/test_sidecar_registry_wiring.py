@@ -62,7 +62,12 @@ def test_the_network_analyst_takes_both_halves_from_the_registry(monkeypatch):
     )
     agent = _wired(container, "network")
     agent._initialize_mcp_client()
-    assert [t.name for t in agent.tools] == ["extract_dns", "network_tool", "knowledge_tool"]
+    assert [t.name for t in agent.tools] == [
+        "extract_dns",
+        "network_tool",
+        "knowledge_tool",
+        "virustotal_tool",
+    ]
 
 
 @pytest.mark.asyncio
@@ -89,6 +94,10 @@ async def test_the_judge_takes_its_tools_from_the_registry(monkeypatch):
     judge = JudgeAgent(llm=MagicMock(), config=cfg)
     judge._container = container
     await judge._initialize_mcp_client()
-    assert [t.name for t in judge.tools] == ["check_ip_reputation", "knowledge_tool"]
+    assert [t.name for t in judge.tools] == [
+        "check_ip_reputation",
+        "knowledge_tool",
+        "virustotal_tool",
+    ]
     await judge.aclose()
     assert judge.tools == []

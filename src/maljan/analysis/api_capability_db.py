@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -38,8 +38,10 @@ __all__ = [
     "reset_cache",
 ]
 
-# Tiers that make an import "suspicious". ``informational`` deliberately does
-# not: see ``pe_extractor.classify_import`` for why the two facts are separate.
+# Tiers the catalogue itself calls "suspicious". ``informational`` deliberately
+# is not one: every Windows program reads files and opens keys. The tool that
+# reads this (``tools.knowledge.api_capability``) reports the tier as a
+# catalogue flag, named for where it comes from, not as a finding.
 _SUSPICIOUS_TIERS = frozenset({"high", "medium"})
 _VALID_TIERS = frozenset({"high", "medium", "informational"})
 
@@ -74,6 +76,11 @@ def _variants(name: str) -> tuple[str, ...]:
     return (lowered,)
 
 
+def canonical_name(name: str) -> str:
+    """The A/W-folded key of an API name, for callers comparing spellings."""
+    return _canonical(name)
+
+
 def _canonical(name: str) -> str:
     """Fold an API name to one key shared by its ANSI and wide spellings.
 
@@ -91,6 +98,15 @@ class ApiBehaviourDB:
     by_name: dict[str, tuple[str, bool]]
     by_name_lower: dict[str, tuple[str, bool]]
     tiers: dict[str, str]
+    # Per category, the APIs whose presence beside it would make the group
+    # mean something. A category that is informational on its own — drawing a
+    # window, pumping its message queue — is not evidence, and saying so
+    # without saying what would be leaves the reader to guess.
+    corroborators: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+    def corroborated_by(self, category: str | None) -> tuple[str, ...]:
+        """The APIs the catalogue names as corroboration for ``category``."""
+        return self.corroborators.get(category or "", ())
 
     def classify(self, function: str) -> tuple[str | None, bool]:
         hit = self.by_name.get(function)
@@ -156,9 +172,11 @@ class ApiAttckMap:
         report cites what is in the binary, not what the catalog happens to
         call it.
         """
-        # canonical (A/W-folded) name -> the spelling the binary actually uses
+        # canonical (A/W-folded) name -> the spelling the binary actually uses.
+        # Sorted, so which of an A/W pair is cited does not depend on the
+        # process's string hash seed: the record must read the same twice.
         by_canonical: dict[str, str] = {}
-        for name in imported:
+        for name in sorted(imported):
             by_canonical.setdefault(_canonical(name), name)
 
         out: list[tuple[TechniqueRule, list[str]]] = []
@@ -259,6 +277,7 @@ def _load_behaviour_uncached(catalog_path: str) -> ApiBehaviourDB | None:
     by_name: dict[str, tuple[str, bool]] = {}
     by_name_lower: dict[str, tuple[str, bool]] = {}
     tiers: dict[str, str] = {}
+    corroborators: dict[str, tuple[str, ...]] = {}
 
     for category, spec in windows.items():
         if not isinstance(category, str) or not isinstance(spec, dict):
@@ -273,6 +292,9 @@ def _load_behaviour_uncached(catalog_path: str) -> ApiBehaviourDB | None:
         if not isinstance(apis, list):
             continue
         tiers[category] = tier
+        named = spec.get("corroborated_by")
+        if isinstance(named, list):
+            corroborators[category] = tuple(a for a in named if isinstance(a, str) and a)
         suspicious = tier in _SUSPICIOUS_TIERS
         for api in apis:
             if not isinstance(api, str) or not api:
@@ -294,7 +316,12 @@ def _load_behaviour_uncached(catalog_path: str) -> ApiBehaviourDB | None:
         len(tiers),
         catalog_path,
     )
-    return ApiBehaviourDB(by_name=by_name, by_name_lower=by_name_lower, tiers=tiers)
+    return ApiBehaviourDB(
+        by_name=by_name,
+        by_name_lower=by_name_lower,
+        tiers=tiers,
+        corroborators=corroborators,
+    )
 
 
 def _load_attck_uncached(catalog_path: str) -> ApiAttckMap | None:

@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from maljan.analysis.run_summary import stage_duration_lines
 from maljan.core.logger import logger
 from maljan.reporting.models import (
     DefensiveRecommendation,
@@ -109,13 +110,30 @@ class MarkdownRenderer:
         badge = self._verdict_badge(report.verdict)
         sha256 = report.identity.hashes.sha256 or "unknown"
         generated = report.generated_at.isoformat()
+        # "not assessed" rather than 0.00: a confidence of zero is an
+        # assessment, and a verdict the pipeline wrote because the judge never
+        # answered has none. The same word the severity block uses for the
+        # same reason.
+        confidence = (
+            "not assessed"
+            if report.overall_confidence is None
+            else f"{report.overall_confidence:.2f}"
+        )
         header = (
             f"# Malware Analysis Report\n\n"
             f"**Verdict**: {badge}  \n"
             f"**Sample SHA256**: `{sha256}`  \n"
             f"**Generated**: {generated}  \n"
-            f"**Overall Confidence**: {report.overall_confidence:.2f}"
+            f"**Overall Confidence**: {confidence}"
         )
+        if report.overall_confidence is None:
+            header += (
+                "\n\n> **[NO CONFIDENCE ASSESSED]** This verdict carries no "
+                "confidence: the judge assessed none, or never answered at all. "
+                "Nothing is substituted for one — the analysts' confidence "
+                "belongs to their own claims, and a verdict none of them reached "
+                "is not something they rated."
+            )
         if report.degraded_mode:
             reasons = "; ".join(report.degradation_reasons) or "low analyst/sandbox data"
             header += (
@@ -123,6 +141,11 @@ class MarkdownRenderer:
                 "verdict, confidence and severity below should be treated as tentative "
                 f"and corroborated manually.  \n> Reasons: {reasons}"
             )
+        elif report.degradation_reasons:
+            # A run that is not degraded can still be missing something a
+            # reader would look for — a section the composer could not get past
+            # its schema is simply absent from the report otherwise.
+            header += "\n\n**Notes**: " + "; ".join(report.degradation_reasons) + "."
         # What the report is standing on, said in the header rather than left
         # in a JSON field: a reader who is told nothing was trimmed reads the
         # evidence sections as complete, and a reader who is told twelve
@@ -138,6 +161,24 @@ class MarkdownRenderer:
             if trimmed:
                 line += f", {trimmed} evidence entries trimmed to the budget"
             header += line + "."
+        # Each distinct failure once, with what would fix it: a reader who is
+        # told document_info failed for want of olefile, and how to install
+        # it, can act; a count of failures alone is a number.
+        failures = [row for row in (evidence.get("failures") or []) if isinstance(row, dict)]
+        if failures:
+            lines = []
+            for row in failures:
+                tool = str(row.get("tool") or "tool")
+                server = row.get("server")
+                where = f" ({server})" if server else ""
+                count = int(row.get("count") or 1)
+                times = f" ×{count}" if count > 1 else ""
+                message = str(row.get("error") or "").strip() or "failed"
+                remedy = str(row.get("remediation") or "").strip()
+                lines.append(
+                    f"- `{tool}`{where}{times}: {message}" + (f" — {remedy}" if remedy else "")
+                )
+            header += "\n\n**Tool failures**:\n" + "\n".join(lines)
         profile = (report.run_summary or {}).get("profile") or {}
         # Live-verification L2: a reduced profile (fewer/different analysts than
         # the default ensemble) changes what evidence backs the verdict, but
@@ -171,9 +212,17 @@ class MarkdownRenderer:
         # `4d5a` is the finding, and the type string alone hides it.
         if ident.magic_bytes:
             lines.append(f"| Magic bytes | `{ident.magic_bytes}` |")
-        lines.append(f"| Signed | {'yes' if ident.signing.is_signed else 'no'} |")
-        if ident.signing.signer_subject:
-            lines.append(f"| Signer | {ident.signing.signer_subject} |")
+        signing = ident.signing
+        cited = f" ({signing.evidence_id})" if signing.evidence_id else ""
+        lines.append(f"| Signed | {'yes' if signing.is_signed else 'no'}{cited} |")
+        if signing.signer_subject:
+            lines.append(f"| Signer | {signing.signer_subject} |")
+        if signing.signer_issuer:
+            lines.append(f"| Signer issuer | {signing.signer_issuer} |")
+        if signing.signature_valid is not None:
+            lines.append(
+                f"| Signature chain | {'valid' if signing.signature_valid else 'invalid'} |"
+            )
         lines.append("")
         lines.append("**Hashes:**")
         lines.append("")
@@ -257,8 +306,11 @@ class MarkdownRenderer:
 
         if static.api_capabilities:
             ordered = sorted(static.api_capabilities.items(), key=lambda kv: -kv[1])
+            cited = ", ".join(static.api_capabilities_evidence_ids)
             lines.append(
-                "**Import capability profile**: "
+                "**Import capability profile**"
+                + (f" ({cited})" if cited else "")
+                + ": "
                 + ", ".join(f"{cat} ×{count}" for cat, count in ordered)
             )
             lines.append("")
@@ -267,20 +319,27 @@ class MarkdownRenderer:
             lines.append("### ATT&CK Techniques Derived From Imports")
             lines.append("")
             lines.append(
-                "_Deterministic: each row is the import table alone — no sandbox, "
-                "no model. This is the audit trail behind the capability matrix._"
+                "_Deterministic: each row is a rule that fired over the import table — "
+                "capa's, or the knowledge table's — no sandbox, no model. The pack's "
+                "rows cite their ledger entry._"
             )
             lines.append("")
-            lines.append("| Technique | Name | Confidence | Imports |")
+            lines.append("| Technique | Name | Source | Imports |")
             lines.append("|---|---|---|---|")
-            for hit in sorted(
+            # By source, then technique: a stated order, so a capa-heavy binary
+            # cannot push the pack's rows off the end of the audit trail.
+            ordered_hits = sorted(
                 static.api_technique_hits,
-                key=lambda h: -float(h.get("confidence") or 0.0),
-            )[:25]:
+                key=lambda h: (str(h.get("source") or ""), str(h.get("technique_id") or "")),
+            )
+            for hit in ordered_hits[:25]:
                 apis = ", ".join(f"`{a}`" for a in (hit.get("matched_apis") or [])[:6])
+                source = str(hit.get("source") or "-")
+                if hit.get("evidence_id"):
+                    source = f"{source} ({hit['evidence_id']})"
                 lines.append(
                     f"| {hit.get('technique_id', '?')} | {hit.get('name', '-')} "
-                    f"| {float(hit.get('confidence') or 0.0):.2f} | {apis} |"
+                    f"| {source} | {apis} |"
                 )
             lines.append("")
 
@@ -303,16 +362,6 @@ class MarkdownRenderer:
                     f"| `{sec.name}` | {sec.virtual_address} | {sec.virtual_size} | "
                     f"{sec.raw_size} | {raw_offset} | {sec.entropy:.2f} | {flag} |"
                 )
-            lines.append("")
-
-        suspicious_imports = [i for i in static.imports if i.is_suspicious]
-        if suspicious_imports:
-            lines.append("### Suspicious Imports")
-            lines.append("")
-            lines.append("| DLL | Function | Category |")
-            lines.append("|---|---|---|")
-            for imp in suspicious_imports[:40]:
-                lines.append(f"| `{imp.dll}` | `{imp.function}` | {imp.category or '-'} |")
             lines.append("")
 
         if static.exports:
@@ -410,14 +459,14 @@ class MarkdownRenderer:
         if dyn.notable_apis:
             lines.append("### Notable APIs")
             lines.append("")
-            lines.append("| API | Category | Process | Count |")
-            lines.append("|---|---|---|---|")
+            lines.append("| API | Process | Count |")
+            lines.append("|---|---|---|")
             for api in dyn.notable_apis[:20]:
                 if not isinstance(api, dict):
                     continue
                 lines.append(
-                    f"| `{api.get('api', '-')}` | {api.get('category', '-')} | "
-                    f"`{api.get('process', '-')}` | {api.get('count', 0)} |"
+                    f"| `{api.get('api', '-')}` | `{api.get('process') or '-'}` | "
+                    f"{api.get('count', 0)} |"
                 )
             lines.append("")
 
@@ -441,8 +490,8 @@ class MarkdownRenderer:
         if net.domains:
             lines.append("### Domains")
             lines.append("")
-            lines.append("| FQDN | Suspicious | Reason | Resolved IPs | Queried by |")
-            lines.append("|---|---|---|---|---|")
+            lines.append("| FQDN | Source | Suspicious | Reason | Resolved IPs | Queried by |")
+            lines.append("|---|---|---|---|---|---|")
             for d in net.domains[:40]:
                 lines.append(_domain_row(d))
             lines.append("")
@@ -515,7 +564,9 @@ class MarkdownRenderer:
         lines = ["## MITRE ATT&CK Matrix", ""]
         if not cells and not mappings:
             lines.append("_No ATT&CK techniques mapped._")
-            return "\n".join(lines)
+            return "\n".join(
+                lines + _not_published_lines(report) + _unmapped_behaviour_lines(report)
+            )
 
         if cells:
             lines.append("| Tactic | Technique | Confidence | Layers |")
@@ -546,7 +597,9 @@ class MarkdownRenderer:
                 for quote in mapping.evidence_quotes[:6]:
                     lines.append(f"> {_truncate(quote, 240)}")
                 lines.append("")
-        return "\n".join(lines).rstrip()
+        return "\n".join(
+            lines + _not_published_lines(report) + _unmapped_behaviour_lines(report)
+        ).rstrip()
 
     def _section_attribution(self, report: MalwareReport) -> str:
         attr = report.attribution
@@ -609,22 +662,6 @@ class MarkdownRenderer:
                     f"| {float(cand.get('similarity') or 0.0):.3f} "
                     f"| {cand.get('malware_category', '-')} "
                     f"| {cand.get('sample_count', '-')} |"
-                )
-        if attr.attck_case_candidates:
-            lines.append("")
-            lines.append("**ATT&CK case priors (techniques recurring in similar prior cases):**")
-            lines.append("")
-            lines.append(
-                "_Advisory only — these are priors from past runs, not evidence from this sample._"
-            )
-            lines.append("")
-            lines.append("| Technique | Support | Similarity |")
-            lines.append("|---|---|---|")
-            for cand in attr.attck_case_candidates[:10]:
-                lines.append(
-                    f"| {cand.get('technique_id', '?')} "
-                    f"| {cand.get('support', '-')} "
-                    f"| {float(cand.get('similarity') or 0.0):.3f} |"
                 )
         if attr.similar_samples:
             lines.append("")
@@ -884,7 +921,9 @@ class MarkdownRenderer:
 
         elapsed = run_summary.get("elapsed_seconds")
         if elapsed is not None:
-            lines.append(f"- Elapsed: {float(elapsed):.1f}s")
+            lines.append(f"- Elapsed: {float(elapsed):.1f}s (the whole run, to this report)")
+        for line in stage_duration_lines(run_summary.get("stages")):
+            lines.append(f"- {line.replace('**', '').rstrip()}")
         verdict = run_summary.get("final_decision")
         if verdict:
             lines.append(f"- Verdict: {verdict}")
@@ -914,15 +953,61 @@ class MarkdownRenderer:
             lines.append(f"- Report sections with no evidence: {ungrounded}")
         corroboration = run_summary.get("corroboration") or {}
         if corroboration:
-            multi = sum(1 for sources in corroboration.values() if len(sources) > 1)
-            lines.append(f"- TTPs: {len(corroboration)} named, {multi} by more than one source")
+            from maljan.analysis.corroboration import (
+                corroboration_sources,
+                published_count,
+                technique_label,
+            )
+
+            multi = sum(1 for row in corroboration.values() if len(corroboration_sources(row)) > 1)
+            asserted = sum(
+                1
+                for row in corroboration.values()
+                if isinstance(row, dict) and row.get("asserted_by")
+            )
+            # What each number counts, because "3 named" over a run that
+            # published none of the three reads as three findings.
+            lines.append(
+                f"- TTPs: {len(corroboration)} claimed, {published_count(corroboration)} "
+                f"published, {multi} claimed by more than one source, "
+                f"{asserted} asserted by a deterministic source"
+            )
         validation = run_summary.get("validation") or {}
         if validation:
             unresolved = validation.get("unresolved") or []
+            not_run = validation.get("not_run") or []
             lines.append(
                 f"- Validation: {validation.get('retries', 0)} feedback retries, "
                 f"{len(unresolved)} finding(s) left unresolved"
+                + (f", checks that could not run: {', '.join(not_run)}" if not_run else "")
             )
+            for row in unresolved:
+                if not isinstance(row, dict):
+                    continue
+                message = " ".join(str(row.get("message") or "").split())
+                lines.append(f"  - `{row.get('code', '')}` ({row.get('agent', '')}): {message}")
+        if corroboration:
+            lines.append("")
+            lines.append("**Corroboration per technique:**")
+            lines.append("")
+            lines.append(
+                "_Catalogue is the API table's association, shown for reference; "
+                "it is not a rule match and counts for nothing._"
+            )
+            lines.append("")
+            lines.append("| Technique | Asserted by | Claimed by | Catalogue |")
+            lines.append("|---|---|---|---|")
+            for tid, row in sorted(corroboration.items()):
+                if isinstance(row, dict):
+                    asserted_by = ", ".join(row.get("asserted_by") or []) or "—"
+                    claimed_by = ", ".join(row.get("claimed_by") or []) or "—"
+                    associated = ", ".join(row.get("associated_by") or []) or "—"
+                else:
+                    asserted_by, claimed_by = "—", ", ".join(str(s) for s in row) or "—"
+                    associated = "—"
+                label = technique_label(str(tid), row if isinstance(row, dict) else None)
+                lines.append(f"| {label} | {asserted_by} | {claimed_by} | {associated} |")
+            lines.append("")
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
@@ -957,6 +1042,48 @@ def _evidence_body(section: Any) -> list[str]:
     if section.text:
         return ["```", section.text, "```"]
     return []
+
+
+def _not_published_lines(report: MalwareReport) -> list[str]:
+    """The techniques a producer claimed and this report does not publish.
+
+    They are in the matrix above, with the confidence and the layers that
+    claimed them, because the claim is the producer's. They are in none of the
+    technique surfaces — not the evidence list below, not the References, not
+    the STIX attack-patterns, not ``/reports/{id}/mitre`` — and this is where a
+    reader is told which ones and why.
+    """
+    rows = [
+        cell for cell in (getattr(report, "capability_matrix", None) or []) if cell.not_published
+    ]
+    if not rows:
+        return []
+    lines = ["", "### Claims that were not published as techniques", ""]
+    lines.extend(
+        f"- {cell.technique_id} {cell.technique_name}: {_truncate(cell.not_published, 300)}"
+        for cell in rows
+    )
+    return lines
+
+
+def _unmapped_behaviour_lines(report: MalwareReport) -> list[str]:
+    """The behaviours the verdict named and could not map to a technique.
+
+    Printed under the matrix and never inside it: a behaviour with no technique
+    id is not an ATT&CK technique, and the run that produced three of them had
+    them published as techniques with an empty id.
+    """
+    names = list(getattr(report, "unmapped_behaviours", None) or [])
+    if not names:
+        return []
+    lines = ["", "### Behaviours with no mapped technique", ""]
+    lines.extend(f"- {_truncate(name, 200)}" for name in names)
+    lines.append("")
+    lines.append(
+        "_Named in the verdict without a MITRE ATT&CK technique id after the id was "
+        "asked for. They are not ATT&CK techniques and are not counted as any._"
+    )
+    return lines
 
 
 def _truncate(value: str, length: int) -> str:
@@ -1017,7 +1144,13 @@ def _domain_row(d: NetworkDomain) -> str:
     # "-" here — but when a dropped child resolves the C2 rather than the
     # parent, this column is the whole story and it was not being printed.
     pids = ", ".join(str(p) for p in d.queried_pids[:6]) or "-"
-    return f"| `{d.fqdn}` | {flag} | {reason} | {ips} | {pids} |"
+    # Where the name came from. `strings` is a run of bytes in the file that
+    # has the shape of a hostname — a far weaker claim than a name the
+    # sandbox watched the sample resolve, and the two were printed
+    # identically. Such a name is also kept out of the exported bundle, so a
+    # reader comparing the table with the bundle needs the column to see why.
+    source = d.source or "-"
+    return f"| `{d.fqdn}` | {source} | {flag} | {reason} | {ips} | {pids} |"
 
 
 def _ip_row(ip: NetworkIP) -> str:

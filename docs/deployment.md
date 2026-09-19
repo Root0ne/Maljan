@@ -18,7 +18,7 @@ applies both.
 | `qdrant` | `qdrant/qdrant:v1.18.2` | Vector store, pinned to match the client version. |
 | `minio` | `minio/minio:latest` | Sample storage, with its own console. |
 | `ghidra-mcp` | built from `external/ghidra-mcp` | Static analysis engine. Capped at 6 GB memory and swap, because the JVM's own limit does not bound the container. |
-| `migrate` | `maljan-backend` | One-shot `alembic upgrade head`. Runs to completion before the API and the worker start. |
+| `migrate` | `maljan-backend` | One-shot `alembic upgrade head`. Runs to completion before the API and the worker start; on an upgrade, migrate before restarting either, since a stored built-in team written before a seeding revision loads under a renamed key until the revision has run. |
 | `backend-api` | `maljan-backend` | The FastAPI service. |
 | `backend-worker` | `maljan-backend` | The arq worker. Capped at 8 GB memory and swap; `WORKER_RSS_RESTART_MB` makes it exit between jobs before it gets there, and `restart: unless-stopped` brings it back. |
 | `frontend` | built from `docker/Dockerfile.frontend` | The console. |
@@ -95,6 +95,31 @@ them.
 Behind a reverse proxy, set `CORS_ORIGINS` to the console's real origin, keep
 `COOKIE_SECURE` true, and populate the `trusted_proxy_ips` setting so the rate
 limiter honours `X-Forwarded-For` only from your proxy.
+
+## VirusTotal over stdio (optional)
+
+The `virustotal` built-in needs nothing installed: it is VirusTotal's own
+server over HTTP, and registering an agent token from Settings → Setup guides
+is the whole setup. Install the package only for `submit_local_file`, the
+upload-by-path tool that exists solely when the server runs on the host that
+holds the sample:
+
+```bash
+uv tool install --python 3.12 vt-mcp==0.8.4
+```
+
+`uvx --python 3.12 vt-mcp==0.8.4` runs the same release without installing it.
+The command is stdio-only and takes no flags; it reads the agent token from
+`VTAI_TOKEN` (or `VTAI_TOKEN_FILE`) in its own environment. Add it as a second
+tool server with transport `stdio` and put the variable name in `env_allow`, so
+the token reaches the child from the worker's environment rather than being
+written into a setting the console echoes back.
+
+A server added this way is started with exactly the names it lists. A built-in
+is the one case where that field has a floor: `analysis` and `network` are
+always passed the sample roots and the staging directory, whatever the stored
+registry holds, because a child without them refuses the run's own sample. See
+[configuration.md](configuration.md#which-directories-a-sidecar-may-read).
 
 ## Upgrades and migrations
 

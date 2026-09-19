@@ -14,7 +14,7 @@ destroyed in transit, by four layers each behaving as written:
 3. The task ends CANCELLED, so ``concurrent.futures.Future.result()`` raises
    ``concurrent.futures.CancelledError`` — which in Python 3.13 IS an
    ``Exception`` and whose ``str()`` is **empty**.
-4. ``describe_exception`` fell back to the bare class name.
+4. ``describe_exception_for_log`` fell back to the bare class name.
 
 These tests pin each link. They need no llama-server, no CAPE and no network:
 a coroutine that cancels itself reproduces the whole chain exactly.
@@ -32,7 +32,7 @@ import pytest
 from maljan.agents.base_agent import (
     _get_agent_loop,
     _run_coro_blocking,
-    describe_exception,
+    describe_exception_for_log,
     run_on_agent_loop,
 )
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError
@@ -113,22 +113,22 @@ class TestTheTwoCancellationsAreNotTheSameEvent:
         assert _get_agent_loop() is before
 
 
-class TestDescribeExceptionNeverReturnsAWordAlone:
+class TestDescribeExceptionForLogNeverReturnsAWordAlone:
     def test_the_two_cancellederrors_are_told_apart(self) -> None:
         """They are different classes that print the same word, and only one is
         an ``Exception`` — which is exactly why it slipped through."""
-        futures_text = describe_exception(concurrent.futures.CancelledError())
-        asyncio_text = describe_exception(asyncio.CancelledError())
+        futures_text = describe_exception_for_log(concurrent.futures.CancelledError())
+        asyncio_text = describe_exception_for_log(asyncio.CancelledError())
 
         assert futures_text != asyncio_text
         assert "concurrent.futures" in futures_text
         assert "asyncio" in asyncio_text
 
     def test_a_message_is_preferred_when_there_is_one(self) -> None:
-        assert describe_exception(ValueError("real detail")) == "ValueError: real detail"
+        assert describe_exception_for_log(ValueError("real detail")) == "ValueError: real detail"
 
     def test_builtins_are_not_needlessly_qualified(self) -> None:
-        assert describe_exception(ValueError()) == "ValueError"
+        assert describe_exception_for_log(ValueError()) == "ValueError"
 
 
 class TestInitializeRunsCleanupOnCancellation:

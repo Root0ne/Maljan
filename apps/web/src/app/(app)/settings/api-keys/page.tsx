@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ApiKeyDTO, ApiKeyCreateDTO } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
@@ -131,7 +132,7 @@ export default function SettingsApiKeysPage() {
           </div>
           <button
             type="submit"
-            className="h-9 px-4 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors"
+            className="h-9 px-4 text-xs bg-accent-fill text-white rounded hover:bg-accent-fill-hover"
           >
             Create
           </button>
@@ -146,7 +147,7 @@ export default function SettingsApiKeysPage() {
               <button
                 type="button"
                 onClick={() => handleCopyKey(createdKey.raw_key)}
-                className="shrink-0 h-7 px-2 text-xs text-text-secondary border border-border rounded hover:text-text-primary transition-colors"
+                className="shrink-0 h-7 px-2 text-xs text-text-secondary border border-border rounded hover:text-text-primary"
               >
                 {copyState === "copied" ? "Copied" : "Copy"}
               </button>
@@ -188,6 +189,9 @@ export default function SettingsApiKeysPage() {
       )}
 
       {/* Key list */}
+      <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
+        Issued keys
+      </h2>
       {apiKeysLoading ? (
         <div className="text-xs text-text-muted">Loading API keys...</div>
       ) : apiKeysError ? (
@@ -235,7 +239,7 @@ export default function SettingsApiKeysPage() {
                         setKeyActionError(null);
                         setConfirmRevoke(key);
                       }}
-                      className="h-7 px-3 text-xs text-text-secondary border border-border rounded hover:text-status-red hover:border-status-red/30 transition-colors"
+                      className="h-7 px-3 text-xs text-text-secondary border border-border rounded hover:text-status-red hover:border-status-red/30"
                     >
                       Revoke
                     </button>
@@ -269,10 +273,7 @@ export default function SettingsApiKeysPage() {
                 disabled={revoking}
                 className="text-text-muted hover:text-text-primary disabled:text-text-disabled"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
+                <X size={16} aria-hidden="true" />
               </button>
             </div>
             <p className="text-sm text-text-secondary mb-4 leading-relaxed">
@@ -289,7 +290,7 @@ export default function SettingsApiKeysPage() {
                 type="button"
                 onClick={closeRevokeModal}
                 disabled={revoking}
-                className="px-3 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover transition-colors disabled:text-text-disabled"
+                className="px-3 py-1 text-xs border border-border text-text-secondary rounded hover:bg-bg-hover disabled:text-text-disabled"
               >
                 Keep it
               </button>
@@ -297,7 +298,7 @@ export default function SettingsApiKeysPage() {
                 type="button"
                 onClick={handleConfirmRevoke}
                 disabled={revoking}
-                className="px-3 py-1 text-xs bg-status-red text-bg-deep rounded hover:bg-status-red/90 transition-colors disabled:opacity-50"
+                className="px-3 py-1 text-xs bg-status-red text-bg-deep rounded hover:bg-status-red/90 disabled:opacity-50"
               >
                 {revoking ? "Revoking..." : "Revoke key"}
               </button>

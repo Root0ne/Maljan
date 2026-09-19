@@ -4,10 +4,10 @@ import { test, expect } from "./fixtures";
  * The global search palette.
  *
  * It lives in the app header, so it is mounted on every authenticated page and
- * fires three requests — samples, jobs, reports — on the first keystroke. Those
- * three mocks existed in the fixture surface with nothing exercising them,
- * which meant the palette's whole network path was untested while looking
- * covered.
+ * fires three requests on the first keystroke: the samples, the jobs and the
+ * reports that carry the verdicts of the finished ones. Those three mocks
+ * existed in the fixture surface with nothing exercising them, which meant the
+ * palette's whole network path was untested while looking covered.
  */
 
 const SEARCH_LABEL = /Search files, hashes, IPs, or malware families/;
@@ -30,7 +30,7 @@ async function openPalette(page: import("@playwright/test").Page) {
 }
 
 test.describe("Search palette", () => {
-  test("Ctrl+K opens it and typing finds a job", async ({
+  test("Ctrl+K opens it and typing finds the sample and its analysis", async ({
     authenticatedPage: page,
   }) => {
     const box = await openPalette(page);
@@ -39,24 +39,36 @@ test.describe("Search palette", () => {
     await expect(palette).toBeVisible();
     // An empty query fires nothing at all — the palette says so rather than
     // listing everything.
-    await expect(palette.getByText(/Type to search across samples/)).toBeVisible();
+    await expect(palette.getByText(/Type to search samples and analyses/)).toBeVisible();
 
     await box.fill("invoice");
 
-    /* Three rows, not one: the sample, the job and the report fixtures all
-     * describe the same file, so a hit under each group header is what proves
-     * all three sources were queried and merged rather than one of them
-     * carrying the result on its own. */
+    /* Two rows, not three: the file, and the analysis of it. The report row
+     * used to be a third that linked exactly where the job row linked. */
     await expect(
       palette.getByRole("option", { name: /invoice_scan\.exe/ })
-    ).toHaveCount(3);
-    for (const group of ["Samples", "Jobs", "Reports"]) {
+    ).toHaveCount(2);
+    for (const group of ["Samples", "Analyses"]) {
       await expect(palette.getByText(group, { exact: true })).toBeVisible();
     }
+    /* The verdict rides on the analysis row, which is what proves the two
+     * endpoints were joined rather than one of them carrying the result. */
+    await expect(palette.getByRole("option", { name: /Malicious/ })).toHaveCount(1);
     /* The banner is the point of this assertion. Each of the three sources is
      * caught independently, so a partial failure renders "Search is incomplete
      * — … could not be loaded." *alongside* whatever did load. A test that only
      * checked for a matching row would pass with two thirds of search dead. */
+    await expect(palette.getByRole("alert")).toHaveCount(0);
+  });
+
+  test("a verdict is searchable on the row the analysis is on", async ({
+    authenticatedPage: page,
+  }) => {
+    const box = await openPalette(page);
+    await box.fill("trojan");
+
+    const palette = page.getByRole("listbox", { name: "Search results" });
+    await expect(palette.getByRole("option", { name: /invoice_scan\.exe/ })).toHaveCount(1);
     await expect(palette.getByRole("alert")).toHaveCount(0);
   });
 
@@ -70,6 +82,25 @@ test.describe("Search palette", () => {
     const palette = page.getByRole("listbox", { name: "Search results" });
     await expect(palette.getByText(/No matches for/)).toBeVisible();
     await expect(palette.getByRole("alert")).toHaveCount(0);
+  });
+
+  /* The arrow keys moved `aria-selected` between options that had no ids,
+   * under a combobox with no `aria-activedescendant` — so the highlighted
+   * result was carried by a background colour and by nothing else. */
+  test("announces the row the arrow keys are on", async ({ authenticatedPage: page }) => {
+    const box = await openPalette(page);
+    await box.fill("invoice");
+
+    const palette = page.getByRole("listbox", { name: "Search results" });
+    await expect(palette.getByRole("option").first()).toBeVisible();
+
+    const first = await palette.getByRole("option").first().getAttribute("id");
+    expect(first).toBeTruthy();
+    await expect(box).toHaveAttribute("aria-activedescendant", first!);
+
+    await page.keyboard.press("ArrowDown");
+    const second = await palette.getByRole("option").nth(1).getAttribute("id");
+    await expect(box).toHaveAttribute("aria-activedescendant", second!);
   });
 
   test("Escape closes it", async ({ authenticatedPage: page }) => {

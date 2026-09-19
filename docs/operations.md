@@ -51,9 +51,16 @@ A tool server reached over HTTP does not share the worker's filesystem, so the
 sample is delivered to it rather than named. The worker writes each delivery
 into the staging directory (`MALJAN_STAGING_DIR`, a `maljan-analysis-mcp` directory under the
 system temp directory by default) and the sidecars sweep it on a TTL
-(`MALJAN_STAGING_TTL_HOURS`, 24 hours by default; `0` disables pruning).
+(`MALJAN_STAGING_TTL_HOURS`, 24 hours by default; `0` disables pruning). The
+payloads `carve_payloads` writes under `carved/<sha256>/` are swept on the same
+TTL, and an emptied tree goes with them; before that the sweep stepped over
+directories and nothing carved ever expired, so a long-lived host accumulated
+them — check that directory on an upgrade.
 Everything in it is live malware, on the same terms as `SAMPLES_DIR`: exclude
-it from on-access scanning and keep it off shared storage. A staging write that
+it from on-access scanning and keep it off shared storage. One staging
+directory serves every job the server process handles, which is why a tool
+argument naming a carved file is held to the tree of the sample the call is
+pinned to rather than to the directory as a whole. A staging write that
 fails costs that server its tools for the run and is logged; it does not fail
 the job.
 

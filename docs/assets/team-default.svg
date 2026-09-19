@@ -1,23 +1,28 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="508" height="416" viewBox="0 0 508 416" role="img" aria-label="The default team, stage by stage">
+<svg xmlns="http://www.w3.org/2000/svg" width="508" height="508" viewBox="0 0 508 508" role="img" aria-label="The default team, stage by stage">
 <title>Default team</title>
 <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#4b5563"/></marker></defs>
 <text x="24" y="24" fill="#e5e7eb" font-family="monospace" font-size="14">Default</text>
-<rect x="24" y="50" width="460" height="58" rx="6" fill="#1f2937" stroke="#4b5563"/>
-<text x="38" y="73" fill="#e5e7eb" font-family="monospace" font-size="13">analysis<tspan fill="#9ca3af" font-size="11">  analysis</tspan></text>
-<text x="38" y="93" fill="#9ca3af" font-family="monospace" font-size="11">static, dynamic, network</text>
+<rect x="24" y="50" width="460" height="58" rx="6" fill="#1f2a24" stroke="#4b5563"/>
+<text x="38" y="73" fill="#e5e7eb" font-family="monospace" font-size="13">triage_pack<tspan fill="#9ca3af" font-size="11">  triage</tspan></text>
+<text x="38" y="93" fill="#9ca3af" font-family="monospace" font-size="11">—</text>
 <line x1="254.0" y1="108" x2="254.0" y2="138" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
 <text x="264.0" y="130" fill="#9ca3af" font-family="monospace" font-size="10">reads none</text>
-<rect x="24" y="142" width="460" height="58" rx="6" fill="#312e28" stroke="#4b5563"/>
-<text x="38" y="165" fill="#e5e7eb" font-family="monospace" font-size="13">debate<tspan fill="#9ca3af" font-size="11">  debate</tspan></text>
-<text x="38" y="185" fill="#9ca3af" font-family="monospace" font-size="11">—</text>
+<rect x="24" y="142" width="460" height="58" rx="6" fill="#1f2937" stroke="#4b5563"/>
+<text x="38" y="165" fill="#e5e7eb" font-family="monospace" font-size="13">analysis<tspan fill="#9ca3af" font-size="11">  analysis</tspan></text>
+<text x="38" y="185" fill="#9ca3af" font-family="monospace" font-size="11">static, dynamic, network</text>
 <line x1="254.0" y1="200" x2="254.0" y2="230" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
 <text x="264.0" y="222" fill="#9ca3af" font-family="monospace" font-size="10">reads none</text>
-<rect x="24" y="234" width="460" height="58" rx="6" fill="#26313a" stroke="#4b5563"/>
-<text x="38" y="257" fill="#e5e7eb" font-family="monospace" font-size="13">verdict<tspan fill="#9ca3af" font-size="11">  verdict</tspan></text>
-<text x="38" y="277" fill="#9ca3af" font-family="monospace" font-size="11">judge</text>
+<rect x="24" y="234" width="460" height="58" rx="6" fill="#312e28" stroke="#4b5563"/>
+<text x="38" y="257" fill="#e5e7eb" font-family="monospace" font-size="13">debate<tspan fill="#9ca3af" font-size="11">  debate</tspan></text>
+<text x="38" y="277" fill="#9ca3af" font-family="monospace" font-size="11">—</text>
 <line x1="254.0" y1="292" x2="254.0" y2="322" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
 <text x="264.0" y="314" fill="#9ca3af" font-family="monospace" font-size="10">reads none</text>
-<rect x="24" y="326" width="460" height="58" rx="6" fill="#2a2536" stroke="#4b5563"/>
-<text x="38" y="349" fill="#e5e7eb" font-family="monospace" font-size="13">report<tspan fill="#9ca3af" font-size="11">  report</tspan></text>
-<text x="38" y="369" fill="#9ca3af" font-family="monospace" font-size="11">reporter</text>
+<rect x="24" y="326" width="460" height="58" rx="6" fill="#26313a" stroke="#4b5563"/>
+<text x="38" y="349" fill="#e5e7eb" font-family="monospace" font-size="13">verdict<tspan fill="#9ca3af" font-size="11">  verdict</tspan></text>
+<text x="38" y="369" fill="#9ca3af" font-family="monospace" font-size="11">judge</text>
+<line x1="254.0" y1="384" x2="254.0" y2="414" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="264.0" y="406" fill="#9ca3af" font-family="monospace" font-size="10">reads none</text>
+<rect x="24" y="418" width="460" height="58" rx="6" fill="#2a2536" stroke="#4b5563"/>
+<text x="38" y="441" fill="#e5e7eb" font-family="monospace" font-size="13">report<tspan fill="#9ca3af" font-size="11">  report</tspan></text>
+<text x="38" y="461" fill="#9ca3af" font-family="monospace" font-size="11">reporter</text>
 </svg>

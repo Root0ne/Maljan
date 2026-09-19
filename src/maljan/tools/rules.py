@@ -14,6 +14,7 @@ is the difference between a tool that is usable in a loop and one that is not.
 from __future__ import annotations
 
 import os
+import re
 import threading
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,25 @@ _SIGMA_CACHE: dict[str, Any] = {}
 # ``Settings`` to find a rule file.
 _YARA_RULES_ENV = "MALJAN_YARA_RULES_DIR"
 _SIGMA_RULES_ENV = "MALJAN_SIGMA_RULES_DIR"
+
+
+def corpus_roots() -> tuple[Path, ...]:
+    """Where a rule corpus may live: the shipped ``data`` tree, and the operator's own.
+
+    The operator's are whatever the two environment names point at, because
+    those are set on the server rather than passed to it — the same
+    distinction ``resolve_data`` draws when it leaves an absolute path alone.
+
+    Exported for the tool server, which holds a model-chosen ``ruleset`` to
+    them. An in-process caller passes its own corpus and is not held to
+    anything: the trust boundary is the server, not this module.
+    """
+    roots = [resolve_data("data")]
+    for env_var in (_YARA_RULES_ENV, _SIGMA_RULES_ENV):
+        override = os.environ.get(env_var, "").strip()
+        if override:
+            roots.append(resolve_data(override))
+    return tuple(roots)
 
 
 def _resolve_ruleset(ruleset: str, default: str, env_var: str = "") -> Path:
@@ -163,6 +183,15 @@ def _yara_native_matches(
     return rows
 
 
+def _identifier_for(rule: Any, pattern: str) -> str:
+    """The identifier the compiled engine gives this string of this rule."""
+    patterns = list(getattr(rule, "patterns", ()) or ())
+    if pattern in patterns:
+        return str(patterns.index(pattern))
+    group = list(getattr(rule, "all_of", ()) or ())
+    return f"a{group.index(pattern)}" if pattern in group else "0"
+
+
 def _yara_regex_matches(layer: Any, data: bytes) -> list[dict[str, Any]]:
     """The regex fallback the layer keeps for a box without yara-python.
 
@@ -170,19 +199,22 @@ def _yara_regex_matches(layer: Any, data: bytes) -> list[dict[str, Any]]:
     same bytes, so it knows where each literal was found even though it never
     compiled a YARA rule.
     """
-    compiled: dict[str, list[Any]] = getattr(layer, "_compiled", {}) or {}
-    rules_by_id = {rule.id: rule for rule in getattr(layer, "_rules", []) or []}
     decoded = data.decode("utf-8", errors="replace")
     rows: list[dict[str, Any]] = []
-    for rule_id, patterns in compiled.items():
-        rule = rules_by_id.get(rule_id)
+    for rule in getattr(layer, "_rules", []) or []:
+        rule_id = rule.id
+        # Which strings count is the layer's answer, not a second copy of the
+        # rule kept here: a together-group fires only whole, and a copy that
+        # did not know that could not fire the pair form at all. What this
+        # function adds is where each of them was found.
+        fired = layer.literal_matches(rule, decoded)
         strings: list[dict[str, Any]] = []
-        for index, pattern in enumerate(patterns):
-            for match in pattern.finditer(decoded):
+        for pattern in fired:
+            for match in re.finditer(re.escape(pattern), decoded, re.IGNORECASE):
                 strings.append(
                     {
                         "offset": match.start(),
-                        "identifier": f"${index}",
+                        "identifier": f"${_identifier_for(rule, pattern)}",
                         "data_hex": match.group()
                         .encode("utf-8", errors="replace")[:_MAX_MATCH_BYTES]
                         .hex(),

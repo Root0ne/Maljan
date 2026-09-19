@@ -23,15 +23,48 @@ async function expectNoAlerts(page: import("@playwright/test").Page) {
   await expect(alerts(page)).toHaveCount(0);
 }
 
-test.describe("Jobs", () => {
-  test("lists jobs by sample name", async ({ authenticatedPage: page }) => {
+test.describe("Analyses", () => {
+  test("lists runs by sample name, with the verdict of the ones that finished", async ({
+    authenticatedPage: page,
+  }) => {
     await page.goto("/jobs");
 
-    // "Analysis Jobs — 1 result"; only rendered on success.
-    await expect(page.getByRole("heading", { name: /^Analysis Jobs/ })).toBeVisible();
+    /* Two headings start with "Analyses" now: the page's own, which is
+     * visually hidden because the rail already says where the reader is, and
+     * the list's, which counts what it holds and is only rendered on success.
+     * The outline used to begin at the second one. */
+    await expect(page.getByRole("heading", { name: "Analyses", exact: true })).toBeAttached();
+    await expect(page.getByRole("heading", { name: /^Analyses — / })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Filters" })).toBeVisible();
     await expect(page.getByRole("link", { name: /invoice_scan\.exe/ })).toBeVisible();
+    // The verdict the Reports page used to carry, on the row it belongs to.
+    // The backend's raw "Malware" is owed to the reader as "Malicious".
+    await expect(page.getByText("Malicious").first()).toBeVisible();
+    await expect(page.getByText("Malware", { exact: true })).toHaveCount(0);
     await expectNoAlerts(page);
+  });
+
+  /* A report is a completed job, so the reports table was this table with one
+   * filter already applied. The old route lands on exactly that. */
+  test("/reports redirects into the list with its status filter applied", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/reports");
+
+    await expect(page).toHaveURL(/\/jobs\?status=completed$/, { timeout: 20_000 });
+    await expect(page.getByRole("link", { name: /invoice_scan\.exe/ })).toBeVisible();
+    await expectNoAlerts(page);
+  });
+
+  test("a status nothing matches empties the list and says which one", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto("/jobs");
+    await page.getByRole("button", { name: /^failed/ }).click();
+    await expect(page.getByText("No failed analysis.")).toBeVisible();
+
+    await page.getByRole("button", { name: /^completed/ }).click();
+    await expect(page.getByRole("link", { name: /invoice_scan\.exe/ })).toBeVisible();
   });
 });
 
@@ -39,7 +72,10 @@ test.describe("Samples", () => {
   test("lists samples with their hash and size", async ({ authenticatedPage: page }) => {
     await page.goto("/samples");
 
-    await expect(page.getByRole("heading", { name: /^Samples/ })).toBeVisible();
+    // The page's own heading, and the list's own count. See the note on the
+    // analyses list above.
+    await expect(page.getByRole("heading", { name: "Samples", exact: true })).toBeAttached();
+    await expect(page.getByRole("heading", { name: /^Samples — / })).toBeVisible();
     // The table and its column headers are not rendered at all when the list is
     // empty, so this doubles as proof the row exists.
     await expect(page.getByRole("columnheader", { name: "Filename" })).toBeVisible();
@@ -55,29 +91,6 @@ test.describe("Samples", () => {
     await expect(modal).toBeVisible();
     await expect(modal.getByText("Sample Details")).toBeVisible();
     await expect(modal.getByText(/9f86d081884c7d659a2feaa0c55ad015/)).toBeVisible();
-  });
-});
-
-test.describe("Reports", () => {
-  test("lists reports and normalises the verdict", async ({ authenticatedPage: page }) => {
-    await page.goto("/reports");
-
-    await expect(page.getByRole("heading", { name: "Reports", exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: /invoice_scan\.exe/ })).toBeVisible();
-    // The mock verdict is the backend's raw "Malware"; the UI owes the reader
-    // "Malicious". Same rule the dashboard and transcript specs enforce.
-    await expect(page.getByText("Malicious").first()).toBeVisible();
-    await expect(page.getByText("Malware", { exact: true })).toHaveCount(0);
-    await expectNoAlerts(page);
-  });
-
-  test("the verdict tabs filter client-side", async ({ authenticatedPage: page }) => {
-    await page.goto("/reports");
-    await page.getByRole("button", { name: /^Benign/ }).click();
-    await expect(page.getByText("No reports found.")).toBeVisible();
-
-    await page.getByRole("button", { name: /^Malicious/ }).click();
-    await expect(page.getByRole("link", { name: /invoice_scan\.exe/ })).toBeVisible();
   });
 });
 
@@ -149,13 +162,10 @@ test.describe("Result counts", () => {
     authenticatedPage: page,
   }) => {
     await page.goto("/jobs");
-    await expect(page.getByRole("heading", { name: "Analysis Jobs — 1 result" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Analyses — 1 result" })).toBeVisible();
 
     await page.goto("/samples");
     await expect(page.getByRole("heading", { name: "Samples — 1 file" })).toBeVisible();
-
-    await page.goto("/reports");
-    await expect(page.getByText("1 analysis report generated")).toBeVisible();
 
     await page.goto("/audit");
     await expect(page.getByText("1 total entry")).toBeVisible();
@@ -184,10 +194,34 @@ test.describe("Audit log", () => {
     await page.goto("/audit");
 
     await expect(page.getByRole("heading", { name: "Audit Logs" })).toBeVisible();
-    await expect(page.getByText("job.create")).toBeVisible();
+    // The action reads as a sentence, the actor is drawn by name, and the IP
+    // column survives because this fixture row has one.
+    await expect(page.getByText("Job create")).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Who" })).toBeVisible();
+    await expect(page.getByText("Ada Lovelace")).toBeVisible();
     await expect(page.getByText("10.0.0.5")).toBeVisible();
     await expect(page.getByText("1 total entry")).toBeVisible();
     await expectNoAlerts(page);
+  });
+
+  /* The log had no way to narrow 1766 entries but Previous and Next. */
+  test("narrows the log by action, through the endpoint", async ({
+    authenticatedPage: page,
+  }) => {
+    const asked: string[] = [];
+    await page.route("**/api/v1/audit/logs?**", (route) => {
+      asked.push(new URL(route.request().url()).searchParams.get("action") ?? "");
+      return route.fulfill({
+        json: { items: [], total: 0, page: 1, page_size: 20, pages: 0 },
+      });
+    });
+    await page.goto("/audit");
+
+    await page.getByLabel("Action").fill("settings");
+    await page.getByRole("button", { name: "Filter" }).click();
+
+    await expect(page.getByText("No entry matches “settings”.")).toBeVisible();
+    expect(asked).toContain("settings");
   });
 
   test("a failed fetch is reported, not disguised as an empty log", async ({

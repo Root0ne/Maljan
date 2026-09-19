@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "docs" / "assets"
 
 # The teams drawn on the architecture page, in the order they are introduced.
-TEAMS: tuple[str, ...] = ("default", "mobile", "deep_static")
+TEAMS: tuple[str, ...] = ("default", "mobile", "deep_static", "team_lead")
 
 BOX_WIDTH = 460
 BOX_HEIGHT = 58
@@ -34,6 +34,7 @@ MARGIN = 24
 # One fill per stage kind, so a reader can tell an analysis stage from the
 # debate at a glance without reading the label.
 KIND_FILL: dict[str, str] = {
+    "triage": "#1f2a24",
     "analysis": "#1f2937",
     "debate": "#312e28",
     "verdict": "#26313a",

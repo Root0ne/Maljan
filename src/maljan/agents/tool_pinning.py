@@ -55,11 +55,57 @@ SERVER_METADATA_KEY = "maljan_server"
 _PATH_ARG_SUBSTRINGS = ("path", "file")
 _PATH_ARG_NAMES = frozenset({"binary", "sample", "target", "program"})
 
+# The argument names that mean "the file under analysis" and nothing else.
+# These are the platform's to fill and are not advertised to the model at all:
+# a model that cannot see the argument cannot mistype it, and one live run
+# spent a static analyst's whole step budget on a sample path with three
+# characters missing and then on guessing directories.
+#
+# A *qualified* path name is not here and stays the model's to give:
+# ``pcap_path`` names a capture, ``rule_path`` a rule file, ``member_path`` a
+# member inside an archive or an APK. Those are choices, and the sample is not.
+SAMPLE_ARG_NAMES = frozenset(
+    {
+        "path",
+        "file",
+        "file_path",
+        "filepath",
+        "file_name",
+        "filename",
+        "input_file",
+        "target_file",
+        "binary",
+        "sample",
+        "sample_path",
+        "target",
+        "program",
+    }
+)
+
+# The servers whose path-taking tools read the sample the platform staged for
+# them. The other built-ins take a hash or a name, and a server an operator
+# added is theirs: this project does not narrow what its tools advertise.
+PINNED_SERVERS = frozenset({"analysis", "knowledge", "network"})
+
+# How the worker hands a server that cannot see this filesystem the sample's
+# bytes. It is the platform's delivery primitive and never an analysis step, so
+# it is not in the toolbox the model is shown — a live run called it with
+# ``{"sha256": "null", "content_b64": ""}`` and was told, correctly, that the
+# empty string's digest is not the sample's.
+DELIVERY_TOOLS = frozenset(
+    {"put_sample", "put_sample_begin", "put_sample_chunk", "put_sample_finish"}
+)
+
 
 def is_path_argument(name: str) -> bool:
     """Whether an argument's name says it holds a file or a path."""
     lowered = name.lower()
     return any(s in lowered for s in _PATH_ARG_SUBSTRINGS) or lowered in _PATH_ARG_NAMES
+
+
+def names_the_sample(argument: str) -> bool:
+    """Whether this argument's name means the file under analysis."""
+    return argument.strip().lower() in SAMPLE_ARG_NAMES
 
 
 def server_of(tool: Any) -> str:
@@ -88,6 +134,25 @@ def _spellings(default_path: str | None, target: str) -> frozenset[str]:
     )
 
 
+def _basenames(default_path: str | None, target: str) -> frozenset[str]:
+    """The file names that can only be this sample, wherever they are written.
+
+    The third spelling a local model produces, after the bare name and the
+    worker path: the right file name under a directory that does not exist. A
+    live run sent ``/home/user/Belleges/.../<sample>`` -- one letter wrong in a
+    directory the model half-remembered from the prompt -- and the tool
+    answered "no such file" for the rest of the loop.
+    """
+    return frozenset(
+        name
+        for name in (
+            os.path.basename(default_path) if default_path else "",
+            os.path.basename(target),
+        )
+        if name
+    )
+
+
 def pin_paths(
     tools: list[Any],
     *,
@@ -103,20 +168,73 @@ def pin_paths(
     server.
     """
     per_server = dict(path_by_server or {})
+    offered = [tool for tool in tools if getattr(tool, "name", "") not in DELIVERY_TOOLS]
     if not default_path and not per_server:
-        return list(tools)
+        return list(offered)
     out: list[Any] = []
-    for tool in tools:
-        target = per_server.get(server_of(tool)) or default_path
+    for tool in offered:
+        server = server_of(tool)
+        target = per_server.get(server) or default_path
         if not target:
             out.append(tool)
             continue
-        out.append(_pin_tool(tool, target, _spellings(default_path, target), agent_name))
+        hidden = _sample_arguments(tool) if server in PINNED_SERVERS else ()
+        out.append(
+            _pin_tool(
+                tool,
+                target,
+                _spellings(default_path, target),
+                _basenames(default_path, target),
+                agent_name,
+                hidden,
+            )
+        )
     return out
 
 
-def _pin_tool(tool: Any, pinned: str, spellings: frozenset[str], agent_name: str) -> Any:
+def _sample_arguments(tool: Any) -> tuple[str, ...]:
+    """The arguments of ``tool`` that name the sample, in its declared order."""
+    fields = getattr(getattr(tool, "args_schema", None), "model_fields", None)
+    if not isinstance(fields, dict):
+        return ()
+    return tuple(name for name in fields if names_the_sample(name))
+
+
+def _schema_without(args_schema: Any, hidden: tuple[str, ...]) -> Any:
+    """``args_schema`` with ``hidden`` gone, or ``None`` when it cannot be rebuilt.
+
+    The model binds to this, so a field that is not in it is a field the model
+    never sees and cannot get wrong. The original schema is untouched: it is
+    shared with the server registry, and the platform's own calls still go
+    through the unwrapped tool.
+    """
+    from pydantic import create_model
+
+    fields = getattr(args_schema, "model_fields", None)
+    if not isinstance(fields, dict):
+        return None
+    kept = {name: (field.annotation, field) for name, field in fields.items() if name not in hidden}
+    try:
+        return create_model(getattr(args_schema, "__name__", "Args"), **kept)  # type: ignore[call-overload]
+    except Exception as exc:  # noqa: BLE001 — a guardrail never costs a tool
+        logger.warning("tool_pinning: the schema for a pinned tool could not be narrowed: %s", exc)
+        return None
+
+
+def _pin_tool(
+    tool: Any,
+    pinned: str,
+    spellings: frozenset[str],
+    basenames: frozenset[str],
+    agent_name: str,
+    hidden: tuple[str, ...] = (),
+) -> Any:
     """Rebuild one tool with its path arguments corrected.
+
+    ``hidden`` is the arguments that name the sample on a built-in server.
+    They are taken out of the schema the model binds to and filled here, so the
+    model neither sees nor types them; everything else keeps the narrow
+    correction below, which is all a tool naming some other file needs.
 
     A fresh tool is built rather than mutating the original: the resolved tool
     object is shared with the server registry, and an in-place wrap would leak
@@ -138,11 +256,37 @@ def _pin_tool(tool: Any, pinned: str, spellings: frozenset[str], agent_name: str
         return tool
 
     name = getattr(tool, "name", "")
+    # The schema the model binds to, minus the arguments it has no business
+    # naming. A schema that cannot be rebuilt leaves the arguments where they
+    # are and falls back to the correction alone, which is what this did for
+    # every tool before.
+    narrowed = _schema_without(args_schema, hidden) if hidden else None
+    if hidden and narrowed is None:
+        hidden = ()
+    args_schema = narrowed or args_schema
+
+    def _means_this_sample(value: str) -> bool:
+        """Whether a path argument can only be the sample, spelled wrongly.
+
+        Two ways: one of the spellings the model was shown, or the sample's own
+        file name under a directory that holds no such file. The second stays
+        narrow because of the existence check -- a model that named a real file
+        elsewhere named a real file, and only a path that leads nowhere is
+        worth second-guessing.
+        """
+        if value in spellings:
+            return True
+        if value == pinned or os.path.basename(value) not in basenames:
+            return False
+        return not os.path.exists(value)
 
     def _correct(kwargs: dict[str, Any]) -> dict[str, Any]:
         out = dict(kwargs)
+        # The sample's own path, supplied rather than asked for.
+        for key in hidden:
+            out[key] = pinned
         for key, value in kwargs.items():
-            if isinstance(value, str) and value in spellings and is_path_argument(key):
+            if isinstance(value, str) and is_path_argument(key) and _means_this_sample(value):
                 logger.warning(
                     "%s: tool '%s' was called with %r for argument '%s'; "
                     "substituting the path this server can open, %r.",

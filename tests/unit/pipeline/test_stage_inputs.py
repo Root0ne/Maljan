@@ -166,7 +166,11 @@ class TestBuiltinToolsOnAStage:
                 },
             ]
         )
-        assert [r.server for r in mcp_refs_for(settings, "static")] == ["analysis", "knowledge"]
+        assert [r.server for r in mcp_refs_for(settings, "static")] == [
+            "analysis",
+            "knowledge",
+            "virustotal",
+        ]
 
     def test_a_stage_that_withholds_them_takes_the_four_sidecars_away(self) -> None:
         settings = _settings(
@@ -196,7 +200,11 @@ class TestBuiltinToolsOnAStage:
             ]
         )
         assert mcp_refs_for(settings, "static") == []
-        assert [r.server for r in mcp_refs_for(settings, "network")] == ["network", "knowledge"]
+        assert [r.server for r in mcp_refs_for(settings, "network")] == [
+            "network",
+            "knowledge",
+            "virustotal",
+        ]
 
 
 REPORT = {
@@ -492,7 +500,11 @@ class TestInjectionDoesNotHideTheNoDataGuard:
     def test_a_dataless_analyst_still_skips_when_findings_are_injected(self) -> None:
         out = self._node_out("findings")
         assert "no network data available" in out["reports"]["network"].lower()
-        assert out["stage_results"]["deep"]["reason"] == "no data for this agent"
+        # The stage ran; the analyst inside it is the one that had nothing.
+        assert out["stage_results"]["deep"]["reason"] == ""
+        assert out["stage_results"]["deep"]["agent_reasons"] == {
+            "network": "no data for this agent"
+        }
 
     def test_it_skips_with_full_reports_injected_too(self) -> None:
         out = self._node_out("full")

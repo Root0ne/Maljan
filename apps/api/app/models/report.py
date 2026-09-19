@@ -23,7 +23,10 @@ class AnalysisReport(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     # Verdict
     verdict: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    overall_confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    # ``NULL`` when nothing assessed a confidence: a verdict the pipeline
+    # wrote itself because the judge never answered has none, and storing 0.0
+    # there would print "0/100" for a run that reached no number at all.
+    overall_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     malware_category: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Structured data (stored as JSONB for flexibility)
@@ -55,7 +58,10 @@ class AnalysisReport(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     def __repr__(self) -> str:
-        return f"<AnalysisReport verdict={self.verdict} confidence={self.overall_confidence:.2f}>"
+        confidence = (
+            "not assessed" if self.overall_confidence is None else f"{self.overall_confidence:.2f}"
+        )
+        return f"<AnalysisReport verdict={self.verdict} confidence={confidence}>"
 
 
 class AgentFinding(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -89,6 +95,8 @@ class AgentFinding(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     #   "no_data"  - analyst ran but produced 0 claims (e.g. nothing to
     #                report, or LLM refused to contradict an obvious
     #                empty sandbox report)
+    #   "no_claims"- analyst read its data and its model ended without a
+    #                structured report, even after being asked for one
     #   "failed"   - analyst raised / returned ``[ERROR]`` text
     #   "timeout"  - analyst ReAct loop hit its asyncio.wait_for limit
     #
@@ -126,16 +134,24 @@ class AgentMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     the sycophancy detector's intervention.
 
     This table is that stream, written down. The worker tees every
-    ``agent_message`` event as it is published and persists the list verbatim,
-    so the conversation a reader sees a month later is not a reconstruction of
-    the live one — it is the same recording. Columns mirror the payload built by
+    ``agent_message`` event as it is published and persists the list as it was
+    published — scrubbed of credential shapes, URL userinfo and host paths as
+    the copy is taken, exactly as the socket saw it — so the conversation a reader
+    sees a month later is not a reconstruction of the live one, and not a more
+    revealing version of it either: it is the same recording. The verbatim
+    text of a tool call stays on the evidence ledger, behind the report's
+    ownership check. Columns mirror the payload built by
     ``maljan.pipeline.events.emit_agent_message`` field for field; the frontend
     maps them straight onto its transcript model with no reshaping.
 
-    Rows are immutable and append-only. ``seq`` is emission order within the
-    run, and is the ordering key: round number alone cannot separate the
-    speakers inside a round, and timestamps are too coarse for messages emitted
-    in the same millisecond.
+    Rows are immutable and append-only. ``seq`` is the number the publisher
+    gave the message when it went out — the same one the live event carries —
+    and is the ordering key: round number alone cannot separate the speakers
+    inside a round, and timestamps are too coarse for messages emitted in the
+    same millisecond. One number for the live message and its stored row is
+    what lets a console holding both collapse them into one line instead of
+    drawing it twice. It counts the whole run's events rather than only this
+    conversation, so it is monotonic and sparse.
     """
 
     __tablename__ = "agent_messages"
@@ -152,9 +168,26 @@ class AgentMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     speaker: Mapped[str] = mapped_column(String(100), nullable=False)
     # analyst | reviser | negotiator | judge | system
     role: Mapped[str] = mapped_column(String(20), nullable=False)
+    # What the line *is*, from ``maljan.pipeline.events.MESSAGE_KINDS``: a
+    # report, a delegated ask, the answer to one, a verdict, a system notice.
+    # NULL on a row written before the column existed, and NULL is the only
+    # honest value there: such a row was recorded without its kind, so a
+    # reader falls back to deriving one rather than claiming it was a
+    # ``says``. Without it a stored ask and its answer replay as two plain
+    # lines and lose the arrow between them, although ``addressed_to`` — the
+    # other half of that pair — is stored.
+    kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # The team stage the speaker was working in, when the producer knew it.
+    # The console groups a replayed conversation by it; without it every
+    # replayed line falls into one unnamed stage.
+    stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # The label the operator gave this agent, so a replay names it the way the
+    # live view did. Never a substitute for ``speaker``, which stays the
+    # identity everything joins on.
+    display_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # Negotiation round; 0 for the initial pass.
     round: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    # complete | no_data | failed | timeout — same vocabulary as AgentFinding.
+    # complete | no_data | no_claims | failed | timeout — the AgentFinding vocabulary.
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="complete")
 
     # The skimmable one-line body.
@@ -170,6 +203,14 @@ class AgentMessage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     claims: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     dissent: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
+    # The agent this line was said *to*, when it was said to one agent rather
+    # than to the room: a delegated ask names the callee and its answer names
+    # the caller. NULL everywhere else, which is what a line to the room is.
+    # Without it a stored ask and a stored report by the same agent in the
+    # same round were indistinguishable, and the console had to key them apart
+    # on a digest of the text.
+    addressed_to: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # When the pipeline emitted it, not when the row was written — the run can
     # finish minutes after the message was spoken.

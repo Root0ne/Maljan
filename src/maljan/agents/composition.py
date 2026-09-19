@@ -24,6 +24,12 @@ path *is* resolved here.
 ``ToolRef(kind="sandbox")`` is the third half and the simplest: the job's
 sandbox report is already on the container, so the tools over it are closures
 built here with nothing to open and nothing that can hang.
+
+``ToolRef(kind="agent")`` is the fourth: another agent of the same job, as a
+tool named ``ask_<key>``. Built here as a closure over the container and the
+two keys (``agents.delegation``), it opens nothing at resolution time; the
+callee is resolved when it is first asked, through the container, like any
+stage agent.
 """
 
 from __future__ import annotations
@@ -67,6 +73,18 @@ class ResolvedAgent:
 def active_profile(settings: Settings) -> ProfileDefinition:
     """The profile this job runs. ``AgentsConfig`` guarantees it exists."""
     return settings.agents.profiles[settings.agents.profile]
+
+
+def display_name(settings: Settings, key: str) -> str:
+    """The label an operator gave this agent, or its key when they gave none.
+
+    The label lives on the definition, which only an admin can read through
+    the settings endpoint. Every place that puts a name in front of a reader
+    asks here instead, so a non-admin watching a run sees the same name the
+    operator typed rather than the registry key the name was meant to replace.
+    """
+    definition = settings.agents.definitions.get(key)
+    return str(getattr(definition, "label", "") or key)
 
 
 def analyst_keys(settings: Settings) -> list[str]:
@@ -248,15 +266,39 @@ def _sandbox_tools(container: Any, definition: AgentDefinition) -> list[Any]:
     return list(sandbox_tools(container))
 
 
+def _agent_tools(container: Any, definition: AgentDefinition, key: str) -> list[Any]:
+    """The ``ask_<agent>`` tools, one per agent reference on the definition.
+
+    In-process like the sandbox tools, and only bound where the definition
+    asks: an agent with no agent reference has no way to ask anyone, which is
+    what keeps the default profile's analysts exactly what they were.
+
+    A profile that excludes every server excludes this one too. ``*`` is the
+    measurement baseline's way of saying "nothing to call", and an agent that
+    could still hand its task to a colleague with tools would call through it.
+    """
+    refs = [ref for ref in definition.tools if ref.kind == "agent" and ref.agent]
+    if not refs:
+        return []
+    from maljan.core.config import ALL_SERVERS
+
+    if ALL_SERVERS in _withheld_servers(container.config, key):
+        return []
+    from maljan.agents.delegation import ask_tool
+
+    return [ask_tool(container, key, str(ref.agent)) for ref in refs]
+
+
 def _claim_in_process_tools(
     incoming: list[Any], source: str, tools: list[Any], seen: dict[str, str]
 ) -> None:
     """Put an in-process half into ``tools`` and record what it claimed.
 
-    Two halves come through here: the static provider's tools and the sandbox
-    report's. Both are first, so neither renames anything; recording their
-    names under the source's own id is what makes a later server's identically
-    named tool take the prefix rather than vanish into ``_dedupe``.
+    Three halves come through here: the static provider's tools, the sandbox
+    report's and the team's ``ask_<agent>`` tools. All are first, so none
+    renames anything; recording their names under the source's own id is what
+    makes a later server's identically named tool take the prefix rather than
+    vanish into ``_dedupe``.
     """
     for tool in incoming:
         name = str(getattr(tool, "name", ""))
@@ -271,8 +313,8 @@ def _withheld_servers(settings: Settings, key: str) -> set[str]:
 
     Two sources, and they stack. The profile's own ``exclude_servers`` is the
     tool-free baseline's lever and applies to every member. A stage's
-    ``builtin_tools=False`` is the narrower one: it withholds the four built-in
-    sidecars from that stage's agents only, so a triage stage can be made to
+    ``builtin_tools=False`` is the narrower one: it withholds every built-in
+    server from that stage's agents only, so a triage stage can be made to
     read what it was handed instead of going looking, without cloning the
     definitions it runs.
     """
@@ -309,6 +351,67 @@ def mcp_refs_for(settings: Settings, key: str) -> list[ToolRef]:
     if definition is None:
         return []
     return _mcp_refs(settings, definition, key)
+
+
+def servers_bound_to(settings: Settings, key: str) -> set[str]:
+    """Every server agent ``key`` can reach under the active profile.
+
+    Two binding mechanisms, and both count. A definition's
+    ``ToolRef(kind="mcp")`` is one; ``core.mcp.servers.<server>.agents``
+    naming the agent is the other, and it is the one the shipped map uses for
+    ``network``, ``threatintel`` and every other role-bound server. Reading
+    only the first said a stage-less specialist brought nothing with it.
+
+    Narrowed by what the profile withholds from this agent, because a server
+    it cannot resolve is not one it brings.
+    """
+    from maljan.core.config import ALL_SERVERS
+
+    withheld = _withheld_servers(settings, key)
+    if ALL_SERVERS in withheld:
+        return set()
+    bound = {str(ref.server) for ref in mcp_refs_for(settings, key)}
+    bound |= {
+        str(name)
+        for name, server in settings.mcp.servers.items()
+        if server.enabled and key in server.agents and str(name) not in withheld
+    }
+    return bound
+
+
+def servers_withheld_from(
+    settings: Settings,
+    caller_key: str,
+    callee_key: str,
+    also: frozenset[str] = frozenset(),
+) -> list[str]:
+    """The servers ``callee_key`` brings that ``caller_key``'s own stage may not reach.
+
+    A callee's effective tool set is what it is bound to — by its own
+    definition and by the server map alike, see ``servers_bound_to`` —
+    narrowed by the tool policy of the stage doing the asking: a stage with
+    ``builtin_tools=False`` is told to read what it was handed, and an ask
+    that came back with a ``knowledge`` lookup or a ``network`` query would
+    have gone around it.
+
+    Reported rather than applied, because the callee is one cached instance
+    per job: narrowing the instance for one ask would narrow it for whoever
+    asks next, and for its own stage. The delegation refuses the ask instead,
+    in words the model reads.
+    """
+    from maljan.core.config import ALL_SERVERS
+
+    # ``also`` is what the stage that started the chain withholds, carried down
+    # by the delegation. Without it the policy stops at the first callee: a
+    # specialist that no stage names withholds nothing of its own, so the ask
+    # it makes in turn would reach exactly what the stage was told not to.
+    withheld = _withheld_servers(settings, caller_key) | set(also)
+    if not withheld:
+        return []
+    brought = servers_bound_to(settings, callee_key)
+    if ALL_SERVERS in withheld:
+        return sorted(brought)
+    return sorted(brought & withheld)
 
 
 def _excluded_servers(settings: Settings, key: str = "") -> str:
@@ -348,9 +451,14 @@ def _staging_inputs(container: Any) -> tuple[str | None, str]:
 
 
 async def _astage(
-    container: Any, tools: list[Any], job_key: str
+    registry: Any, container: Any, tools: list[Any], job_key: str
 ) -> tuple[dict[str, str], list[str]]:
     """Upload the sample to every bound server that wants it. Never raises.
+
+    The registry is handed in rather than asked of the container: the
+    synchronous caller below holds the container's cache lock while it waits
+    for this coroutine, so a guarded getter reached from here would wait for a
+    lock that only the blocked caller can release.
 
     Staging records its own failures on the registry, which is the union
     across every agent in the job; this agent's own reasons are the ones that
@@ -362,7 +470,6 @@ async def _astage(
         return {}, []
     from maljan.agents.sample_staging import stage_for_agent
 
-    registry = container.get_server_registry()
     before = len(registry.degradation_reasons)
     try:
         staged = await stage_for_agent(registry, tools, sample_path, sha256=digest, job_id=job_key)
@@ -372,21 +479,55 @@ async def _astage(
     return dict(staged), list(registry.degradation_reasons[before:])
 
 
+def _has_remote_server(registry: Any, tools: list[Any]) -> bool:
+    """Whether any server behind ``tools`` is reached over a network.
+
+    Only such a server is ever staged to, and the answer is a property of the
+    configuration alone — no transport is touched, nothing is awaited. Asking
+    it here, on the caller's own thread, is what keeps a deployment whose
+    servers are all local subprocesses from handing the agent loop a
+    coroutine, and waiting on it, for an answer that is always ``{}``.
+    """
+    from maljan.agents.sample_staging import REMOTE_TRANSPORTS
+    from maljan.agents.tool_pinning import server_of
+
+    for key in dict.fromkeys(server_of(tool) for tool in tools):
+        if not key:
+            continue
+        try:
+            handle = registry.get(key)
+        except Exception:  # noqa: BLE001 — a tool from a server that is gone
+            continue
+        transport = str(getattr(handle.config, "transport", "stdio") or "stdio").lower()
+        if transport in REMOTE_TRANSPORTS:
+            return True
+    return False
+
+
 def _stage(container: Any, tools: list[Any], job_key: str) -> tuple[dict[str, str], list[str]]:
     """``_astage`` for the synchronous resolver, on the shared agent loop.
 
     The same loop the handles were opened on, which is the loop their
     transports are bound to: uploading on any other one is the cross-loop
     failure ``ServerHandle`` exists to avoid.
+
+    Both questions that can be answered without a transport are answered
+    first, on this thread: a job with no sample stages nothing, and neither
+    does a deployment whose servers are all local.
     """
     sample_path, _ = _staging_inputs(container)
     if not sample_path:
+        return {}, []
+    registry = container.get_server_registry()
+    if not _has_remote_server(registry, tools):
         return {}, []
     from maljan.agents.base_agent import run_coro_blocking
 
     try:
         staged, reasons = run_coro_blocking(
-            _astage(container, tools, job_key), hard_timeout=120.0, label="sample-staging"
+            _astage(registry, container, tools, job_key),
+            hard_timeout=120.0,
+            label="sample-staging",
         )
     except Exception as exc:  # noqa: BLE001 — staging never fails a run
         logger.warning("sample staging skipped for job %s: %s", job_key, exc)
@@ -417,6 +558,7 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
         seen,
     )
     _claim_in_process_tools(_sandbox_tools(container, definition), "sandbox", tools, seen)
+    _claim_in_process_tools(_agent_tools(container, definition, key), "team", tools, seen)
     registry = container.get_server_registry()
     bound, bound_reasons = registry.tools_for(
         key, job_key, exclude=_excluded_servers(settings, key), seen=seen
@@ -472,6 +614,7 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
         seen,
     )
     _claim_in_process_tools(_sandbox_tools(container, definition), "sandbox", tools, seen)
+    _claim_in_process_tools(_agent_tools(container, definition, key), "team", tools, seen)
     registry = container.get_server_registry()
     bound, bound_reasons = await registry.atools_for(
         key, job_key, exclude=_excluded_servers(settings, key), seen=seen
@@ -484,7 +627,9 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
         reasons.extend(ref_reasons)
 
     deduped = _dedupe(tools)
-    staged, staging_reasons = await _astage(container, deduped, job_key)
+    staged, staging_reasons = await _astage(
+        container.get_server_registry(), container, deduped, job_key
+    )
     reasons.extend(staging_reasons)
     return ResolvedAgent(
         key=key,
