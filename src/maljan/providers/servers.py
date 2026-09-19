@@ -178,24 +178,59 @@ def _abandon_handles_on(loop: asyncio.AbstractEventLoop) -> None:
     user of the server re-attaches on the fresh loop instead of parking on a
     future the retired loop will never complete.
 
-    Runs on the watchdog thread. The reap is the only slow part and is bounded
-    by ``CHILD_TERM_GRACE``.
+    Runs on the watchdog thread, and the grace period is paid **once** for the
+    whole set rather than once per handle. A retirement that met sixty-one
+    abandoned handles used to spend ``CHILD_TERM_GRACE`` on each of them in
+    turn — two minutes of a daemon thread, which is how one of them came to be
+    writing a log line after the interpreter had closed the stream under it.
+    Every child is signalled first, the grace is waited out once, and the
+    survivors are killed; the whole set is one log line rather than one per
+    handle.
     """
-    for handle in list(_LIVE_HANDLES):
-        if handle._owner_loop is not loop:
-            continue
-        logger.error(
-            "mcp server %r was attached to the agent loop that has just been retired; "
-            "abandoning its toolkit and reaping its child.",
-            handle.name,
-        )
+    import sys
+    import time
+
+    if sys.is_finalizing():
+        return
+    abandoned = [handle for handle in list(_LIVE_HANDLES) if handle._owner_loop is loop]
+    if not abandoned:
+        return
+    signalled: list[tuple[ServerHandle, list[int]]] = []
+    for handle in abandoned:
         handle._toolkit = None
         handle._all_tools = []
         handle._opened_async = False
         try:
-            handle._reap_children()
+            pids = handle._terminate_children()
         except Exception as exc:  # noqa: BLE001 — teardown never propagates
             logger.warning("mcp server %r child reap failed (non-fatal): %s", handle.name, exc)
+            pids = []
+        if pids:
+            signalled.append((handle, pids))
+    logger.error(
+        "%d mcp server(s) were attached to the agent loop that has just been retired; "
+        "abandoning their toolkits and reaping %d child process(es). servers=%s",
+        len(abandoned),
+        sum(len(pids) for _handle, pids in signalled),
+        ", ".join(sorted({handle.name for handle in abandoned})),
+    )
+    if signalled and not sys.is_finalizing():
+        time.sleep(CHILD_TERM_GRACE)
+        killed: list[tuple[str, int]] = []
+        for handle, pids in signalled:
+            try:
+                killed.extend((handle.name, pid) for pid in handle._kill_survivors(pids, say=False))
+            except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                logger.warning("mcp server %r child kill failed (non-fatal): %s", handle.name, exc)
+        if killed:
+            logger.warning(
+                "%d child process(es) of %d abandoned mcp server(s) ignored SIGTERM and were "
+                "killed: %s",
+                len(killed),
+                len({name for name, _pid in killed}),
+                ", ".join(f"{name}={pid}" for name, pid in killed),
+            )
+    for handle in abandoned:
         handle._forget_attachment()
 
 
@@ -718,19 +753,45 @@ class ServerHandle:
             ", ".join(str(pid) for pid in pids),
         )
 
-    def _kill_survivors(self, pids: list[int]) -> None:
-        """SIGKILL whichever of ``pids`` sat through the SIGTERM."""
-        import signal
+    def _terminate_children(self) -> list[int]:
+        """SIGTERM this handle's children and hand back the pids that got it.
 
+        The first half of a reap, on its own so a caller with many handles to
+        release can signal all of them before waiting out a single grace period
+        rather than paying one per handle.
+        """
+        import signal
+        import sys
+
+        if sys.is_finalizing():
+            return []
+        pids = self._live_children()
+        if pids:
+            self._signal_children(pids, signal.SIGTERM)
+        return pids
+
+    def _kill_survivors(self, pids: list[int], *, say: bool = True) -> list[int]:
+        """SIGKILL whichever of ``pids`` sat through the SIGTERM.
+
+        Returns the pids it killed. ``say=False`` for a caller releasing many
+        handles at once, which says it once for all of them instead.
+        """
+        import signal
+        import sys
+
+        if sys.is_finalizing():
+            return []
         survivors = [pid for pid in pids if pid in _own_child_pids()]
         if not survivors:
-            return
+            return []
         self._signal_children(survivors, signal.SIGKILL)
-        logger.warning(
-            "mcp server '%s' child(ren) %s ignored SIGTERM; killed.",
-            self.name,
-            ", ".join(str(pid) for pid in survivors),
-        )
+        if say:
+            logger.warning(
+                "mcp server '%s' child(ren) %s ignored SIGTERM; killed.",
+                self.name,
+                ", ".join(str(pid) for pid in survivors),
+            )
+        return survivors
 
     async def _areap_children(self) -> None:
         """Terminate, then kill, the child this handle spawned. Never raises.
@@ -740,24 +801,22 @@ class ServerHandle:
         when a cleanup is abandoned. Without this the child outlives the job
         and, with ``max_jobs = 1``, accumulates one sidecar per analysis.
         """
-        import signal
-
-        pids = self._live_children()
+        pids = self._terminate_children()
         if not pids:
             return
-        self._signal_children(pids, signal.SIGTERM)
         await asyncio.sleep(CHILD_TERM_GRACE)
         self._kill_survivors(pids)
 
     def _reap_children(self) -> None:
         """``_areap_children`` for the synchronous close path."""
-        import signal
+        import sys
         import time
 
-        pids = self._live_children()
+        if sys.is_finalizing():
+            return
+        pids = self._terminate_children()
         if not pids:
             return
-        self._signal_children(pids, signal.SIGTERM)
         time.sleep(CHILD_TERM_GRACE)
         self._kill_survivors(pids)
 

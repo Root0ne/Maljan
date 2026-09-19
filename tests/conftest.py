@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from unittest.mock import MagicMock
 
 import pytest
@@ -22,6 +23,46 @@ def reset_observability_state() -> None:
     observability.throttle.last_error = None
     throttle._pool = None
     throttle._last_failure_at = None
+
+
+@pytest.fixture(autouse=True)
+def close_the_sidecars_a_test_opened() -> Iterator[None]:
+    """A test's tool servers go with the test, the way a job's go with the job.
+
+    ``_ATTACHED_HANDLES`` holds an open handle strongly for as long as it is
+    attached, which is right — dropping the last reference to an open stdio
+    toolkit spins the agent loop — but it means a test that opens one and does
+    not close it leaves it there for the whole session. An instrumented run
+    found eighty-three of them at the end, twenty-odd still holding live child
+    pids, so the two files that retire the shared agent loop on purpose met a
+    registry holding every earlier test's handles and reaped them all on the
+    watchdog thread.
+
+    Only what this test left is closed: the set is read before it runs and the
+    difference afterwards is what it opened.
+    """
+    from maljan.providers import servers
+
+    before = set(servers._ATTACHED_HANDLES)
+    yield
+    for handle in set(servers._ATTACHED_HANDLES) - before:
+        try:
+            handle.close()
+        except Exception:  # noqa: BLE001 — a test's leftovers never fail a test
+            pass
+        # ``close`` declines a handle ``aopen`` attached, whose exit stack
+        # belongs to a loop this thread is not on and which is usually already
+        # closed by the time a test ends. Its child is this process's either
+        # way, and nothing else will come back for it.
+        if handle in servers._ATTACHED_HANDLES:
+            handle._toolkit = None
+            handle._all_tools = []
+            handle._opened_async = False
+            try:
+                handle._reap_children()
+            except Exception:  # noqa: BLE001
+                pass
+            handle._forget_attachment()
 
 
 @pytest.fixture

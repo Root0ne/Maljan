@@ -884,6 +884,16 @@ change landed on `main`.
 
 ### Fixed
 
+- **A retirement of the shared agent loop no longer costs a grace period per
+  abandoned tool server.** When that loop is retired, every handle bound to it
+  is abandoned and its child reaped — and the reap ran serially: SIGTERM, a
+  two-second wait, SIGKILL and a log line for each handle in turn, on a daemon
+  watchdog thread. One recorded retirement walked sixty-one of them. The set is
+  now signalled together, the grace is waited out once, the survivors are
+  killed, and the whole set is one log line naming the servers and the counts.
+  A test's tool servers are also closed with the test now, so a session no
+  longer hands a retirement every earlier test's handles.
+
 - **Enrichment stopped taking the slot an analysis was waiting for.** The
   post-verdict reputation lookups were queued beside the analyses, where the
   worker's one-job-at-a-time rule — which exists so two analyses never share a
