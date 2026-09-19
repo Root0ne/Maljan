@@ -55,12 +55,29 @@ system temp directory by default) and the sidecars sweep it on a TTL
 
 **Staging is per job.** The configured directory is the base, and each job gets
 one directory of its own inside it, `job-<the job's id>`: the sidecar's
-`put_sample` uploads land there and so does the `carved/<sha256>/` tree of
-everything that job carves. The worker removes the whole directory when the run
-ends — on success, on failure and on an operator's cancel — and what a removal
-misses is taken by the same TTL, which prunes a job directory whole once the
-newest file in it is past the cutoff. So a nameable residue means a worker that
-was killed, and it goes on its own within the TTL.
+`put_sample` uploads land there, so does the `carved/<sha256>/` tree of
+everything that job carves, and so do the sandbox captures fetched for it, in a
+`captures/` child. The worker removes the whole directory when the run ends —
+on success, on failure and on an operator's cancel — and what a removal misses
+is taken by the same TTL, which prunes a job directory whole once the newest
+file in it is past the cutoff. So a nameable residue means a worker that was
+killed, and it goes on its own within the TTL.
+
+A run that lasts longer than the TTL without staging anything new keeps its
+directory: the job touches it while it refreshes its own owner heartbeat, which
+is how a sidecar sweeping a base two workers share can tell a long job from an
+abandoned one.
+
+**The sandbox capture.** A capture is the full record of a detonation, and the
+path to it is written by the model rather than by the platform — the network
+analyst is told where it is and passes it to `pcap_summary`. It used to be
+fetched into one directory under the system temp directory, shared by every job
+and every worker on the host, named as a readable directory for every sidecar
+started afterwards, and removed by nothing. It now lands in the job's own
+`captures/` directory, at 0600 inside a 0700 tree, is named as a readable
+directory for that job's sidecars only, and goes when the job does. Whatever an
+earlier release left in `maljan-cape-pcap` is swept on the same TTL; nothing
+writes there any more.
 
 Everything in it is live malware, on the same terms as `SAMPLES_DIR`: exclude it
 from on-access scanning and keep it off shared storage. A staging write that

@@ -36,6 +36,21 @@ def _live_pids() -> set[int]:
     return _own_child_pids()
 
 
+def _still_running(pid: int) -> bool:
+    """Whether the process is alive at all, reaped or not.
+
+    The child of a handle dies with the loop whether or not the handle was
+    closed, so "no longer our child" on its own says nothing; this asks the
+    procfs entry, and reads a zombie as gone.
+    """
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8") as fh:
+            fields = fh.read().rsplit(") ", 1)
+    except OSError:
+        return False
+    return bool(fields[1:]) and fields[1].split(" ", 1)[0] != "Z"
+
+
 @pytest.mark.skipif(
     _INTERPRETER_MISSING, reason="no python interpreter available to launch the sidecar"
 )
@@ -52,28 +67,49 @@ class TestAFinishedJobHoldsNoSidecar:
         )
 
     def _run(self, job_id: str, tmp_path: Path, outcome: str) -> tuple[list[Any], set[int]]:
+        """One job's tool phase, ended the way ``outcome`` names, then torn down.
+
+        The three endings are three code paths and not three labels: one
+        returns, one raises out of the body into the caller's own ``finally``,
+        and one is a task another task cancels while it is awaiting. All three
+        reach ``container.aclose()`` the way the worker's ``finally`` does.
+        """
         from maljan.providers import servers
 
         container = self._container(job_id, tmp_path)
+        spawned: set[int] = set()
 
-        async def one_job() -> tuple[list[Any], set[int]]:
+        async def tool_phase() -> None:
             registry = container.get_server_registry()
             handle = registry.get("analysis")
             await handle.aopen(job_id)
             assert handle.is_open
-            spawned = set(handle._child_pids)
+            spawned.update(handle._child_pids)
             assert spawned, "the sidecar really is a child of this process"
             if outcome == "failure":
-                # A job that ends in an exception reaches the same teardown.
-                with pytest.raises(RuntimeError):
-                    raise RuntimeError("the analysis failed")
-            elif outcome == "cancel":
-                task = asyncio.current_task()
-                assert task is not None
-            await container.aclose()
-            return [h for h in servers._LIVE_HANDLES if h._job_id == job_id], spawned
+                raise RuntimeError("the analysis failed")
+            if outcome == "cancel":
+                await asyncio.sleep(LIVE_BUDGET_S)
 
-        held, spawned = asyncio.run(asyncio.wait_for(one_job(), timeout=LIVE_BUDGET_S))
+        async def one_job() -> list[Any]:
+            task = asyncio.ensure_future(tool_phase())
+            try:
+                if outcome == "cancel":
+                    while not spawned:
+                        await asyncio.sleep(0.05)
+                    task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await task
+                elif outcome == "failure":
+                    with pytest.raises(RuntimeError):
+                        await task
+                else:
+                    await task
+            finally:
+                await container.aclose()
+            return [h for h in servers._LIVE_HANDLES if h._job_id == job_id]
+
+        held = asyncio.run(asyncio.wait_for(one_job(), timeout=LIVE_BUDGET_S))
         return held, spawned
 
     @pytest.mark.parametrize("outcome", ["success", "failure", "cancel"])
@@ -88,6 +124,9 @@ class TestAFinishedJobHoldsNoSidecar:
         assert [handle for handle in held if handle._owner_loop is not None] == []
         assert [handle for handle in servers._ATTACHED_HANDLES if handle._job_id == job_id] == []
         assert not (spawned & _live_pids()), "the sidecar's child process is gone"
+        assert not any(_still_running(pid) for pid in spawned), (
+            "and it is not merely no longer our child"
+        )
 
     def test_the_registry_the_container_dropped_is_collectable(self, tmp_path: Path) -> None:
         """``_LIVE_HANDLES`` is weak, so a closed job's handles simply go."""
@@ -221,3 +260,60 @@ class TestTheReapPaysOneGraceForTheWholeSet:
             assert handle.inner._terminate_children() == []
         finally:
             loop.close()
+
+
+class TestTheRemovalCannotBeSkipped:
+    """A job's ``finally`` awaits three things before it takes the staging
+    directory away, and a worker being shut down cancels the task again while
+    one of them is unwinding. ``CancelledError`` is a ``BaseException``, so
+    none of the handlers there catch it and the block would simply end."""
+
+    def test_a_second_cancellation_during_the_teardown_does_not_skip_it(self) -> None:
+        removed: list[str] = []
+
+        async def job() -> None:
+            try:
+                await asyncio.sleep(LIVE_BUDGET_S)
+            finally:
+                try:
+                    # Standing in for the three awaits the worker makes here:
+                    # the event feed, the owner heartbeat and the teardown. The
+                    # second cancellation lands on the first of them.
+                    task = asyncio.current_task()
+                    assert task is not None
+                    task.cancel()
+                    await asyncio.sleep(0)
+                    await asyncio.sleep(0)
+                finally:
+                    removed.append("staging")
+
+        async def cancelled_twice() -> None:
+            task: asyncio.Task[None] = asyncio.ensure_future(job())
+            await asyncio.sleep(0)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        asyncio.run(cancelled_twice())
+
+        assert removed == ["staging"], "the guarded statement ran anyway"
+
+    def test_the_worker_guards_it_that_way(self) -> None:
+        """The pattern above, read out of the function that has to carry it."""
+        import ast
+        import inspect
+
+        from app.worker import analysis_worker
+
+        tree = ast.parse(inspect.getsource(analysis_worker.run_analysis))
+        outer = [node for node in ast.walk(tree) if isinstance(node, ast.Try) and node.finalbody]
+        guarded = [
+            node
+            for node in outer
+            for statement in node.finalbody
+            if isinstance(statement, ast.Try)
+            for inner in statement.finalbody
+            if "remove_job_staging" in ast.dump(inner)
+        ]
+
+        assert guarded, "the removal is the body of a finally of its own"

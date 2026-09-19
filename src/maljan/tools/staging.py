@@ -62,6 +62,19 @@ DEFAULT_BASE_NAME = "maljan-analysis-mcp"
 # an older release, and it keeps the name away from ``carved``.
 JOB_DIRECTORY_PREFIX = "job-"
 
+# The child of a job directory a sandbox capture is fetched into. A capture is
+# the one file the platform writes into staging without going through
+# ``put_sample``, and until it moved here it went to a directory shared by
+# every job on the host, named as a permanent sample root, and removed by
+# nothing — so a sample carrying one instruction could have a later job read
+# an earlier job's whole network capture.
+CAPTURES_DIRECTORY = "captures"
+
+# Where the release before this fetched captures. Written by nothing now; the
+# sweep still reaches it, because it is this project's directory and what is
+# in it is somebody's traffic.
+LEGACY_CAPTURE_DIR_NAME = "maljan-cape-pcap"
+
 # A job id is a uuid in every deployment, but it arrives as a string and a
 # directory name is not a place to find out otherwise. Anything outside this
 # set becomes a hyphen and the original is named by a digest suffix, so two ids
@@ -84,10 +97,18 @@ def default_base() -> Path:
 
 
 def staging_base(environ: Mapping[str, str] | None = None) -> Path:
-    """The configured base, created or not. Never the per-job directory."""
+    """The configured base, created or not. Never the per-job directory.
+
+    Made absolute here, at the one place both sides read it. A relative
+    ``MALJAN_STAGING_DIR`` otherwise means two directories: the worker resolves
+    it against its own working directory and a built-in sidecar against
+    ``services/<name>-mcp``, which is the cwd it is spawned with — so the
+    remover would look somewhere the writer never wrote.
+    """
     source = os.environ if environ is None else environ
     configured = str(source.get(STAGING_DIR_ENV, "")).strip()
-    return Path(configured) if configured else default_base()
+    base = Path(configured) if configured else default_base()
+    return base if base.is_absolute() else Path(os.path.abspath(base))
 
 
 def job_directory_name(job_id: str) -> str:
@@ -97,9 +118,16 @@ def job_directory_name(job_id: str) -> str:
     directory without passing a path between them, and a single path segment
     whatever the id was: a value carrying a separator or a ``..`` is replaced
     character by character and then distinguished by a digest of the original.
+
+    Written in lower case, because a staging base may sit on a mount that does
+    not distinguish case (macOS, CIFS) and two ids differing only in case would
+    then be one directory. A job id is a uuid in every deployment here, so this
+    changes nothing in practice and closes the case that is not a deployment
+    here. The digest suffix keeps two ids apart when the folding — or the
+    character replacement — made them equal.
     """
     raw = str(job_id or "")
-    safe = _UNSAFE_IN_A_NAME.sub("-", raw)[:_MAX_ID_CHARS]
+    safe = _UNSAFE_IN_A_NAME.sub("-", raw)[:_MAX_ID_CHARS].lower()
     if safe != raw:
         digest = sha256(raw.encode("utf-8", "surrogatepass")).hexdigest()[:_DIGEST_CHARS]
         safe = f"{safe}-{digest}" if safe else digest
@@ -128,6 +156,41 @@ def job_staging_dir(base: Path, job_id: str) -> Path:
     return base / job_directory_name(job_id)
 
 
+def job_capture_dir(job_id: str, environ: Mapping[str, str] | None = None) -> Path:
+    """Where this job's sandbox captures land, created or not.
+
+    A child of the job's own staging directory, which is what makes a capture
+    obey every rule the rest of this job's bytes obey: removed with the job,
+    swept by the same TTL, and refused to another job by ``confined_to_this_job``
+    without a rule of its own.
+    """
+    return job_staging_dir(staging_base(environ), job_id) / CAPTURES_DIRECTORY
+
+
+def open_capture_dir(job_id: str) -> Path:
+    """This job's capture directory, created 0o700, readable by this job's sidecars.
+
+    The directory is named as a sample root because a capture is not staged
+    through ``put_sample`` — the sandbox provider writes it and the network
+    analyst is told the path — and a root is how a sidecar learns it may read
+    a directory the platform filled. The root is this job's own and is dropped
+    when the job ends, so no later job inherits it; the shared, permanent root
+    of the release before this is what let one job read another's capture.
+    """
+    from maljan.tools.roots import add_sample_root
+
+    captures = job_capture_dir(job_id)
+    for directory in (captures.parent.parent, captures.parent, captures):
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if directory.is_symlink() or not directory.is_dir():
+            raise RuntimeError(f"capture path {directory} is not a directory")
+        if directory.lstat().st_mode & 0o077:
+            directory.chmod(0o700)
+    note_job_directory(job_id, captures.parent)
+    add_sample_root(captures)
+    return captures
+
+
 def staging_root(environ: Mapping[str, str] | None = None) -> Path:
     """The directory the server reading ``environ`` may write and read.
 
@@ -139,6 +202,45 @@ def staging_root(environ: Mapping[str, str] | None = None) -> Path:
     base = staging_base(source)
     leaf = str(source.get(STAGING_JOB_ENV, "")).strip()
     return base / leaf if is_job_directory_name(leaf) else base
+
+
+def touch_job_staging(job_id: str) -> bool:
+    """Say this job is still running, where another process's sweep can read it.
+
+    The sweep prunes a job directory whole once the newest mtime inside it is
+    past the TTL, and it runs inside a sidecar — a child with no database, no
+    queue and no way to ask whether a job is alive. So the job says so on disk,
+    by keeping its own directory's mtime current: the owner that refreshes the
+    heartbeat refreshes this beside it, twice inside the claim's own TTL.
+
+    Without it, a job that has been running longer than
+    ``MALJAN_STAGING_TTL_HOURS`` without staging anything new — a long static
+    pass, a slow sandbox — could have its directory, carved payloads and all,
+    removed under it by a *second* worker's sidecar sharing the base.
+
+    Returns whether there was a directory to touch.
+    """
+    directory = job_staging_dir(staging_base(), job_id)
+    try:
+        os.utime(directory, None, follow_symlinks=False)
+    except OSError:  # nothing staged yet, or a directory somebody else owns
+        return False
+    return True
+
+
+def make_private(path: Path) -> None:
+    """Take everyone but this user off a file the platform just wrote.
+
+    For a file a provider streamed in rather than one this project opened:
+    ``put_sample`` creates its own at 0o600 with ``O_NOFOLLOW``, while a
+    capture arrives through an HTTP client that writes at the process umask —
+    0o664 on this host, which on a shared machine is every local user.
+    """
+    try:
+        if not path.is_symlink() and path.is_file():
+            path.chmod(0o600)
+    except OSError:  # a file the provider removed again, or a foreign mount
+        pass
 
 
 def confined_to_this_job(resolved: Path, environ: Mapping[str, str] | None = None) -> Path:
@@ -190,24 +292,35 @@ def forget_job_directories(job_id: str) -> list[Path]:
 def remove_job_staging(job_id: str) -> list[Path]:
     """Remove every staging directory this process composed for ``job_id``.
 
-    Returns the ones that are gone afterwards. Never raises: a removal that
-    fails is the caller's to log, and what is left behind is swept by the
-    sidecar's own TTL.
+    Returns the ones that were there and are gone. A directory that was never
+    created — a job whose sidecars staged nothing — is not in that list and is
+    not a failure either; the caller tells the two apart by asking what is left
+    on disk rather than by counting. Never raises: a removal that fails is the
+    caller's to log, and what is left behind is swept by the sidecar's TTL.
 
     The tree holds live malware, so it is walked rather than handed to a
     library: nothing is followed through a symlink, and each directory is made
     private again before it is descended into, so a partial removal cannot
     leave a readable directory behind.
+
+    The job's capture directory goes with it, and so does the sample root that
+    named it: a root left behind would be inherited by every sidecar this
+    process starts afterwards, which is the shape of the leak this replaces.
     """
+    from maljan.tools.roots import remove_sample_root
+
+    remove_sample_root(job_capture_dir(job_id))
     removed: list[Path] = []
     for path in forget_job_directories(job_id):
+        if not path.exists() and not path.is_symlink():
+            continue
         if remove_tree(path):
             removed.append(path)
     return removed
 
 
 def remove_tree(root: Path) -> bool:
-    """Delete ``root`` and everything under it. True when it is gone.
+    """Delete ``root`` and everything under it. True when nothing is there.
 
     A symlink at ``root`` is unlinked rather than followed, and so is every
     link inside it: a directory of staged malware is exactly the place a link

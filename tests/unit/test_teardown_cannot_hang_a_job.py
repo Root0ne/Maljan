@@ -188,7 +188,11 @@ class TestTheWorkerBoundsTheWholeThing:
         from app.worker import analysis_worker
 
         source = inspect.getsource(analysis_worker.run_analysis)
-        finally_block = source.split("finally:")[-1]
+        # The job's own ``finally``, at the function's indentation. The blocks
+        # inside it have ``finally``s of their own — one of them guarantees the
+        # staging removal past a re-cancellation — so the split is on the
+        # outermost rather than on the last.
+        finally_block = source.split("\n    finally:")[-1]
         assert 'memprobe.probe("job:end"' in finally_block
         # It must sit outside the try that guards aclose, or a timeout skips it.
         assert finally_block.index("except TimeoutError") < finally_block.index(

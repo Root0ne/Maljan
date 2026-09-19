@@ -884,6 +884,22 @@ change landed on `main`.
 
 ### Fixed
 
+- **A sandbox capture belongs to the job it was fetched for.** The capture was
+  written into one directory under the system temp directory, shared by every
+  job and every worker on the host, world-readable, named as a readable
+  directory for every sidecar started after it, and removed by nothing — while
+  `pcap_path` is a qualified argument the *model* writes. A sample carrying one
+  instruction could therefore have a later job read an earlier job's whole
+  detonation: the operator's addressing, the C2 exchange, whatever the malware
+  sent in the clear. Every provider that fetches one (CAPE, the REST DSL,
+  Triage) now writes into a `captures/` child of the job's own staging
+  directory, 0600 inside a 0700 tree; the directory is named as a readable root
+  for that job's sidecars alone and the root is dropped when the job ends; both
+  file-reading sidecars refuse another job's capture by every spelling; and the
+  whole thing goes with the job's staging directory. **What an operator does:**
+  nothing. What an earlier release left in `maljan-cape-pcap` under the system
+  temp directory is swept on the staging TTL, and nothing writes there any more.
+
 - **A retirement of the shared agent loop no longer costs a grace period per
   abandoned tool server.** When that loop is retired, every handle bound to it
   is abandoned and its child reaped — and the reap ran serially: SIGTERM, a

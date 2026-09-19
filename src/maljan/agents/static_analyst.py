@@ -193,6 +193,7 @@ class StaticAnalyst(BaseAnalyst):
                 if summarizer is not None:
                     guardrail = summarizer.summarize_chunk
         return StaticJobContext(
+            job_key=str(getattr(self, "_job_id", "") or ""),
             host_sample_path=getattr(self, "_host_sample_path", None),
             mirror_sample_path=getattr(self, "_analysis_file_path", None),
             output_guardrail=guardrail,

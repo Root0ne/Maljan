@@ -258,6 +258,17 @@ services:
     # application settings, read from the settings store at job start, not
     # passed as env. The allocator/embedding knobs below are process-level
     # tuning outside the settings catalog and stay here.
+    #
+    # Staging is deliberately not named here. What the tool sidecars stage —
+    # uploads, carved payloads and the sandbox captures they are pointed at —
+    # goes into this container's own temp directory, one directory per job
+    # (`/tmp/maljan-analysis-mcp/job-<id>/`), removed when the job ends and
+    # swept on a TTL after that. It is live malware, so it is left on the
+    # container's writable layer rather than put on a named volume where it
+    # would outlive the container. An operator who does want it elsewhere sets
+    # the analysis and network servers' MALJAN_STAGING_DIR in the console; the
+    # per-job directory inside it is composed by the worker and is not a
+    # setting (see docs/configuration.md).
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-maljan}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}@postgres:5432/${POSTGRES_DB:-maljan}
       REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in docker/.env}@redis:6379/0

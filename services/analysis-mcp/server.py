@@ -22,6 +22,7 @@ import copy
 import hashlib
 import os
 import stat
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -1015,7 +1016,38 @@ def _prune_staging(base: Path) -> int:
             removed += 1
         except OSError:  # a file another call already removed
             continue
-    return removed + _prune_carved(base / CARVED_DIRECTORY, cutoff)
+    removed += _prune_carved(base / CARVED_DIRECTORY, cutoff)
+    return removed + _prune_legacy_captures(cutoff)
+
+
+def _prune_legacy_captures(cutoff: float) -> int:
+    """Take away the sandbox captures the release before this left in the open.
+
+    Captures used to be fetched into one directory under the system temp
+    directory, shared by every job and every worker on the host, and nothing
+    ever removed them. They now live inside the job's own staging directory and
+    go with it; this reaches what is already on disk. The directory is this
+    project's own and its name is fixed, so there is nothing here an operator
+    configured and nothing to guess at.
+    """
+    root = Path(tempfile.gettempdir()) / staging.LEGACY_CAPTURE_DIR_NAME
+    if not root.is_dir() or root.is_symlink():
+        return 0
+    removed = 0
+    for entry in root.iterdir():
+        try:
+            info = entry.lstat()
+            if stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+                continue
+            if info.st_mtime >= cutoff:
+                continue
+            entry.unlink()
+            removed += 1
+        except OSError:  # a file another sweep already removed
+            continue
+    with contextlib.suppress(OSError):  # only when the last capture has gone
+        root.rmdir()
+    return removed
 
 
 def _newest_mtime(root: Path) -> float:

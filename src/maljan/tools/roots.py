@@ -101,6 +101,26 @@ def add_sample_root(path: str | Path) -> None:
     os.environ[SAMPLE_ROOTS_ENV] = f"{present}{ROOT_SEPARATOR}{entry}" if present else entry
 
 
+def remove_sample_root(path: str | Path) -> None:
+    """Stop naming ``path`` as a root for the sidecars started after this.
+
+    The other half of ``add_sample_root``, for a root that belongs to one job
+    rather than to the deployment: the directory a sandbox capture was fetched
+    into. A sidecar already running keeps the environment it was spawned with,
+    which is why this has to happen while the job still owns its servers —
+    what it prevents is the *next* job's sidecars inheriting a root naming a
+    directory of somebody else's traffic.
+    """
+    entry = str(path).strip()
+    if not entry:
+        return
+    present = [part for part in os.environ.get(SAMPLE_ROOTS_ENV, "").split(ROOT_SEPARATOR) if part]
+    kept = [part for part in present if part != entry]
+    if len(kept) == len(present):
+        return
+    os.environ[SAMPLE_ROOTS_ENV] = ROOT_SEPARATOR.join(kept)
+
+
 def resolve_under_roots(path: str | Path, *, extra_roots: Iterable[str | Path] = ()) -> Path:
     """``path`` resolved, if it lands inside one of the roots. Otherwise refused.
 

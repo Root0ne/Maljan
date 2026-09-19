@@ -718,8 +718,15 @@ class ServiceContainer:
         One key per job: the handles' same-job short circuit compares it, so a
         container that answered differently for two of its agents would close
         and reopen every server between them.
+
+        A caller with no job id of its own — the command line — gets one per
+        process. The key names the directory a tool server stages in, and the
+        constant it used to be meant two ``maljan`` runs on one machine writing
+        into one directory, each able to name the other's upload and carved
+        payloads by their paths. Deterministic within a run, different between
+        runs, and pruned whole by the staging sweep.
         """
-        return self.job_id or "job"
+        return self.job_id or f"cli-{os.getpid()}"
 
     def get_agent(self, name: str) -> BaseAnalyst:
         """The agent definition ``name`` names, instantiated and wired.

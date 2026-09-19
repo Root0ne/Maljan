@@ -343,9 +343,19 @@ class ServerHandle:
         ``child_env`` and stays the base, and the sidecar joins the two itself.
         The name is recorded so this job's teardown can remove exactly what it
         pointed its sidecars at.
+
+        Cleared first, and unconditionally. ``child_env`` applies a server's own
+        ``env`` map on top of everything, so a stored mapping naming this
+        variable would otherwise reach the child verbatim — pointing a server at
+        a directory belonging to whichever job the operator had written down,
+        for every job it is attached to, and having this job's teardown remove
+        it under that other job's name. The leaf is the spawn's to compose or
+        nobody's; settings validation refuses the name as well, and this is the
+        fence for a mapping that reached a handle by some other path.
         """
         from maljan.tools import staging
 
+        env.pop(staging.STAGING_JOB_ENV, None)
         if not self._job_id or not self._stages_per_job():
             return
         leaf = staging.job_directory_name(self._job_id)

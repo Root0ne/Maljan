@@ -179,17 +179,18 @@ def _parsed(answer: Any) -> dict[str, Any]:
 
 
 class _Job:
-    """One live analysis sidecar, attached for one job id."""
+    """One live sidecar, attached for one job id."""
 
-    def __init__(self, job_id: str) -> None:
+    def __init__(self, job_id: str, server: str = "analysis") -> None:
         self.job_id = job_id
+        self.server = server
         self.handle: Any = None
 
     async def open(self) -> None:
         from maljan.core.settings_overrides import build_settings
         from maljan.providers.servers import ServerHandle
 
-        self.handle = ServerHandle("analysis", build_settings({}).mcp.servers["analysis"])
+        self.handle = ServerHandle(self.server, build_settings({}).mcp.servers[self.server])
         await self.handle.aopen(self.job_id)
 
     async def call(self, tool: str, **kwargs: Any) -> Any:
@@ -696,3 +697,520 @@ class TestTheStagedPathCacheBelongsToItsJob:
         from app.worker.analysis_worker import remove_job_staging
 
         assert remove_job_staging("a-job-that-never-ran") == []
+
+
+class TestTheBoundaryWhenTheBaseIsInsideASampleRoot:
+    """The configuration ``confined_to_this_job`` exists for.
+
+    A deployment may put its staging base inside the directory it keeps samples
+    in, and then a sibling job's directory answers the roots question
+    truthfully: it really is inside a root this server may read. The job
+    directory is the boundary whatever the roots are.
+    """
+
+    @pytest.fixture
+    def nested(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        from maljan.tools.roots import SAMPLE_ROOTS_ENV
+
+        corpus = tmp_path / "corpus"
+        base = corpus / "staging"
+        base.mkdir(parents=True)
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(base))
+        monkeypatch.setenv(SAMPLE_ROOTS_ENV, str(corpus))
+        monkeypatch.setenv(staging.STAGING_JOB_ENV, staging.job_directory_name("mine"))
+        return base
+
+    def test_a_sibling_jobs_file_is_refused(self, nested: Path) -> None:
+        from maljan.tools.roots import PathOutsideRoots, resolve_under_roots
+
+        theirs = staging.job_staging_dir(nested, "theirs")
+        theirs.mkdir()
+        (theirs / "upload.bin").write_bytes(b"THEIRS\x00")
+        inside = resolve_under_roots(str(theirs / "upload.bin"))
+
+        with pytest.raises(PathOutsideRoots):
+            staging.confined_to_this_job(inside)
+
+    def test_this_jobs_own_file_is_not(self, nested: Path) -> None:
+        from maljan.tools.roots import resolve_under_roots
+
+        mine = staging.job_staging_dir(nested, "mine")
+        (mine / "carved").mkdir(parents=True)
+        (mine / "carved" / "payload").write_bytes(b"MINE\x00")
+        inside = resolve_under_roots(str(mine / "carved" / "payload"))
+
+        assert staging.confined_to_this_job(inside) == inside
+
+    def test_a_sample_outside_the_base_is_not_touched(self, nested: Path, tmp_path: Path) -> None:
+        from maljan.tools.roots import resolve_under_roots
+
+        sample = tmp_path / "corpus" / "sample.bin"
+        sample.write_bytes(b"SAMPLE\x00")
+        inside = resolve_under_roots(str(sample))
+
+        assert staging.confined_to_this_job(inside) == inside
+
+    def test_a_server_with_no_leaf_is_held_to_nothing_new(
+        self, nested: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A probe or a hand-started server writes in the base itself."""
+        from maljan.tools.roots import resolve_under_roots
+
+        monkeypatch.delenv(staging.STAGING_JOB_ENV, raising=False)
+        theirs = staging.job_staging_dir(nested, "theirs")
+        theirs.mkdir()
+        (theirs / "upload.bin").write_bytes(b"THEIRS\x00")
+        inside = resolve_under_roots(str(theirs / "upload.bin"))
+
+        assert staging.confined_to_this_job(inside) == inside
+
+
+class TestTheLeafIsTheSpawnsAlone:
+    def test_a_stored_mapping_cannot_supply_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``child_env`` applies a server's own map last, so the composed name
+        is cleared before the question of composing one is even asked."""
+        from maljan.core.config import MCPServerConfig
+        from maljan.providers.servers import ServerHandle
+
+        captured: dict[str, Any] = {}
+
+        class _FakeToolkit:
+            def __init__(self, server_params: Any = None, **kwargs: Any) -> None:
+                captured["env"] = dict(getattr(server_params, "env", {}) or {})
+
+            async def initialize(self) -> None:
+                return None
+
+            def get_tools(self) -> list[Any]:
+                return []
+
+        monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
+        config = MCPServerConfig.model_construct(
+            enabled=True,
+            transport="stdio",
+            command=sys.executable,
+            args=["-c", ""],
+            env={staging.STAGING_JOB_ENV: staging.job_directory_name("someone-else")},
+            env_allow=[],
+            tools=None,
+            agents=[],
+            label="",
+            cwd="",
+            url="",
+        )
+        handle = ServerHandle("theirs", config)
+        handle.open("mine")
+        handle.close()
+
+        assert staging.STAGING_JOB_ENV not in captured["env"]
+
+    def test_a_staging_server_gets_the_spawns_name_and_not_the_stored_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.core.config import MCPServerConfig
+        from maljan.providers.servers import ServerHandle
+
+        captured: dict[str, Any] = {}
+
+        class _FakeToolkit:
+            def __init__(self, server_params: Any = None, **kwargs: Any) -> None:
+                captured["env"] = dict(getattr(server_params, "env", {}) or {})
+
+            async def initialize(self) -> None:
+                return None
+
+            def get_tools(self) -> list[Any]:
+                return []
+
+        monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
+        config = MCPServerConfig.model_construct(
+            enabled=True,
+            transport="stdio",
+            command=sys.executable,
+            args=["-c", ""],
+            env={staging.STAGING_JOB_ENV: staging.job_directory_name("someone-else")},
+            env_allow=[staging.STAGING_DIR_ENV],
+            tools=None,
+            agents=[],
+            label="",
+            cwd="",
+            url="",
+        )
+        handle = ServerHandle("theirs", config)
+        handle.open("mine")
+        handle.close()
+
+        assert captured["env"][staging.STAGING_JOB_ENV] == staging.job_directory_name("mine")
+
+    def test_settings_refuse_the_name_where_it_is_entered(self) -> None:
+        import pydantic
+
+        from maljan.core.config import MCPServerConfig
+
+        for field in ("env", "env_allow"):
+            payload: dict[str, Any] = {"transport": "stdio", "command": "/bin/true"}
+            payload[field] = (
+                {staging.STAGING_JOB_ENV: "job-x"} if field == "env" else [staging.STAGING_JOB_ENV]
+            )
+            with pytest.raises(pydantic.ValidationError, match=staging.STAGING_JOB_ENV):
+                MCPServerConfig(**payload)
+
+
+class TestAHandleOpensUnderTheJobsIdentity:
+    def test_a_static_provider_names_the_job_and_not_the_sample(self) -> None:
+        """Two jobs on one sample are the case a per-job directory exists for,
+        and the sample's digest is the same string for both of them."""
+        from maljan.core.config import MCPServerConfig
+        from maljan.providers.base import StaticJobContext
+        from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
+
+        opened: list[str] = []
+
+        class _Provider(GenericMCPStaticProvider):
+            pass
+
+        provider = _Provider(
+            MCPServerConfig(transport="stdio", command="/bin/true"), label="generic"
+        )
+        provider._handle.open = lambda job_id, **_k: opened.append(job_id)  # type: ignore[method-assign]
+        provider._handle.tools = lambda: []  # type: ignore[method-assign]
+
+        provider.open(StaticJobContext(job_key="job-one", sha256="d" * 64))
+
+        assert opened == ["job-one"]
+
+    def test_with_no_job_it_still_has_an_identity_of_its_own(self) -> None:
+        from maljan.core.config import MCPServerConfig
+        from maljan.providers.base import StaticJobContext
+        from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
+
+        opened: list[str] = []
+        provider = GenericMCPStaticProvider(
+            MCPServerConfig(transport="stdio", command="/bin/true"), label="generic"
+        )
+        provider._handle.open = lambda job_id, **_k: opened.append(job_id)  # type: ignore[method-assign]
+        provider._handle.tools = lambda: []  # type: ignore[method-assign]
+
+        provider.open(StaticJobContext(sha256="e" * 64))
+
+        assert opened == ["e" * 64]
+
+    def test_the_resolver_hands_the_provider_the_containers_job(self) -> None:
+        import inspect
+
+        from maljan.agents import composition
+
+        source = inspect.getsource(composition._provider_tools)
+        assert "StaticJobContext(job_key=container.job_key())" in source
+
+
+class TestALiveJobKeepsItsDirectory:
+    """A sidecar sweeping the shared base cannot ask whether a job is alive, so
+    the job says so on disk."""
+
+    def test_the_owner_keeps_the_directory_current(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
+        directory = staging.job_staging_dir(tmp_path / "staging", "live")
+        directory.mkdir(parents=True)
+        long_ago = time.time() - 7200
+        os.utime(directory, (long_ago, long_ago))
+
+        assert staging.touch_job_staging("live") is True
+        assert directory.lstat().st_mtime > long_ago + 3000
+
+    def test_a_job_that_staged_nothing_has_nothing_to_touch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
+
+        assert staging.touch_job_staging("never") is False
+
+    def test_a_touched_directory_survives_another_workers_sweep(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        server = TestTheSweepReachesAJobDirectory._server()
+        base = tmp_path / "staging"
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(base))
+        monkeypatch.setenv(staging.STAGING_TTL_ENV, "1")
+        directory = staging.job_staging_dir(base, "long-run")
+        directory.mkdir(parents=True)
+        stale = directory / "ffffffffffffffff_old.exe"
+        stale.write_bytes(b"STAGED-AT-THE-START\x00")
+        long_ago = time.time() - 7200
+        for entry in (stale, directory):
+            os.utime(entry, (long_ago, long_ago))
+
+        staging.touch_job_staging("long-run")
+        server._prune_staging(base)
+
+        assert directory.is_dir(), "the job said it was still running"
+
+
+class TestTheBaseIsRecordedAbsolute:
+    def test_a_relative_setting_is_made_absolute_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The worker resolves a relative value against its own directory and a
+        built-in sidecar against the one it is spawned with."""
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, "rel/staging")
+
+        assert staging.staging_base().is_absolute()
+        assert staging.job_staging_dir(staging.staging_base(), "one").is_absolute()
+
+    def test_what_the_spawn_records_is_absolute(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from maljan.core.config import MCPServerConfig
+        from maljan.providers.servers import ServerHandle
+
+        class _FakeToolkit:
+            def __init__(self, server_params: Any = None, **kwargs: Any) -> None:
+                pass
+
+            async def initialize(self) -> None:
+                return None
+
+            def get_tools(self) -> list[Any]:
+                return []
+
+        monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, "rel/staging")
+        handle = ServerHandle(
+            "analysis",
+            MCPServerConfig(
+                transport="stdio",
+                command=sys.executable,
+                args=["-c", ""],
+                env_allow=[staging.STAGING_DIR_ENV],
+            ),
+        )
+        handle.open("rel-job")
+        handle.close()
+
+        assert all(path.is_absolute() for path in staging.job_directories("rel-job"))
+
+
+class TestAMissingDirectoryIsNotARemoval:
+    def test_it_is_not_counted(self, tmp_path: Path) -> None:
+        staging.note_job_directory("never-staged", tmp_path / "job-never-staged")
+
+        assert staging.remove_job_staging("never-staged") == []
+
+    def test_one_that_was_there_is(self, tmp_path: Path) -> None:
+        directory = tmp_path / "job-real"
+        directory.mkdir()
+        (directory / "upload.bin").write_bytes(b"BYTES\x00")
+        staging.note_job_directory("real", directory)
+
+        assert staging.remove_job_staging("real") == [directory]
+
+
+# A libpcap file with a global header and no packets: enough for a reader to
+# open it and report nothing, which is all these tests ask of one.
+EMPTY_CAPTURE = bytes.fromhex("d4c3b2a1020004000000000000000000000004000100000000")[:24]
+
+
+class TestASandboxCaptureBelongsToItsJob:
+    """A capture is the one file the platform writes into staging without
+    going through ``put_sample``, and ``pcap_path`` is a qualified argument the
+    *model* writes — read out of the prompt the network analyst was given. It
+    used to land in one directory shared by every job on the host, named as a
+    permanent sample root and removed by nothing."""
+
+    def test_it_lands_in_this_jobs_own_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.tools.roots import ROOT_SEPARATOR, SAMPLE_ROOTS_ENV
+
+        base = tmp_path / "staging"
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(base))
+        monkeypatch.setenv(SAMPLE_ROOTS_ENV, "")
+
+        captures = staging.open_capture_dir("one")
+
+        assert captures == staging.job_staging_dir(base, "one") / "captures"
+        assert captures.is_dir()
+        for directory in (base, captures.parent, captures):
+            assert stat.S_IMODE(directory.lstat().st_mode) == 0o700
+        roots = os.environ[SAMPLE_ROOTS_ENV].split(ROOT_SEPARATOR)
+        assert str(captures) in roots, "this job's sidecars may read it"
+
+    def test_a_streamed_capture_is_not_left_readable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A provider writes it through an HTTP client at the process umask."""
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
+        captures = staging.open_capture_dir("one")
+        written = captures / "rest_41.pcap"
+        written.write_bytes(EMPTY_CAPTURE)
+        written.chmod(0o664)
+
+        staging.make_private(written)
+
+        assert stat.S_IMODE(written.lstat().st_mode) == 0o600
+
+    def test_the_root_and_the_directory_go_when_the_job_does(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.tools.roots import SAMPLE_ROOTS_ENV
+
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
+        monkeypatch.setenv(SAMPLE_ROOTS_ENV, "")
+        captures = staging.open_capture_dir("one")
+        (captures / "rest_41.pcap").write_bytes(EMPTY_CAPTURE)
+
+        removed = staging.remove_job_staging("one")
+
+        assert removed == [captures.parent]
+        assert not captures.exists()
+        assert str(captures) not in os.environ[SAMPLE_ROOTS_ENV]
+
+    def test_a_later_job_does_not_inherit_the_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The permanent root of the release before this is what let a later
+        job's sidecars read an earlier job's capture."""
+        from maljan.tools.roots import SAMPLE_ROOTS_ENV, configured_roots
+
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
+        monkeypatch.setenv(SAMPLE_ROOTS_ENV, "")
+        first = staging.open_capture_dir("one")
+        staging.remove_job_staging("one")
+
+        second = staging.open_capture_dir("two")
+
+        assert first not in configured_roots()
+        assert second in configured_roots()
+        staging.remove_job_staging("two")
+
+    def test_the_sweep_takes_the_directory_the_old_release_left(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        server = TestTheSweepReachesAJobDirectory._server()
+        base = tmp_path / "staging"
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(base))
+        monkeypatch.setenv(staging.STAGING_TTL_ENV, "1")
+        monkeypatch.setattr(server.tempfile, "gettempdir", lambda: str(tmp_path))
+        legacy = tmp_path / staging.LEGACY_CAPTURE_DIR_NAME
+        legacy.mkdir()
+        old = legacy / "rest_41.pcap"
+        old.write_bytes(EMPTY_CAPTURE)
+        long_ago = time.time() - 7200
+        os.utime(old, (long_ago, long_ago))
+        elsewhere = tmp_path / "somebody-elses.pcap"
+        elsewhere.write_bytes(EMPTY_CAPTURE)
+        (legacy / "pointer.pcap").symlink_to(elsewhere)
+        os.utime(legacy / "pointer.pcap", (long_ago, long_ago), follow_symlinks=False)
+        base.mkdir(parents=True, exist_ok=True)
+
+        removed = server._prune_staging(base)
+
+        assert removed == 1
+        assert not old.exists()
+        assert elsewhere.exists(), "a link is never followed out of it"
+
+    def test_a_fresh_capture_in_the_old_directory_stays(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        server = TestTheSweepReachesAJobDirectory._server()
+        base = tmp_path / "staging"
+        base.mkdir(parents=True)
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(base))
+        monkeypatch.setenv(staging.STAGING_TTL_ENV, "1")
+        monkeypatch.setattr(server.tempfile, "gettempdir", lambda: str(tmp_path))
+        legacy = tmp_path / staging.LEGACY_CAPTURE_DIR_NAME
+        legacy.mkdir()
+        fresh = legacy / "rest_42.pcap"
+        fresh.write_bytes(EMPTY_CAPTURE)
+
+        assert server._prune_staging(base) == 0
+        assert fresh.exists()
+
+    def test_the_shared_directory_is_no_longer_written(self) -> None:
+        """Nothing composes the old path any more; the sweep names it, and the
+        one place it is named is the sweep."""
+        root = Path(__file__).resolve().parents[3]
+        written = [
+            path
+            for path in (root / "src" / "maljan").rglob("*.py")
+            if staging.LEGACY_CAPTURE_DIR_NAME in path.read_text(encoding="utf-8")
+        ]
+
+        assert [path.name for path in written] == ["staging.py"]
+
+
+@live_sidecar
+class TestNoJobCanNameAnotherJobsCapture:
+    """The proof, through live children of both file-reading sidecars."""
+
+    @staticmethod
+    def _run(coro: Any) -> Any:
+        return asyncio.run(asyncio.wait_for(coro, timeout=LIVE_BUDGET_S))
+
+    @pytest.fixture
+    def two_captures(self, staged: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
+        """One capture per job, each in its job's own directory, both named as
+        roots — the second half being the configuration this has to hold under
+        even when a root points straight at the other job's directory."""
+        from maljan.tools.roots import add_sample_root
+
+        mine = staging.open_capture_dir("one") / "rest_41.pcap"
+        theirs = staging.open_capture_dir("two") / "rest_42.pcap"
+        for capture in (mine, theirs):
+            capture.write_bytes(EMPTY_CAPTURE)
+            staging.make_private(capture)
+        add_sample_root(theirs.parent)
+        return mine, theirs
+
+    def test_the_capture_sidecar_refuses_every_spelling(
+        self, staged: Path, two_captures: tuple[Path, Path]
+    ) -> None:
+        mine, theirs = two_captures
+
+        async def one_job() -> tuple[list[Any], Any]:
+            job = _Job("one", server="network")
+            await job.open()
+            try:
+                root = staging.job_staging_dir(staged, "one") / "captures"
+                spellings = [
+                    str(theirs),
+                    os.path.relpath(theirs, root),
+                    f"../../{staging.job_directory_name('two')}/captures/{theirs.name}",
+                    str(theirs.parent),
+                ]
+                refused = [
+                    await job.call("read_pcap_summary", pcap_path=spelling)
+                    for spelling in spellings
+                ]
+                return refused, await job.call("read_pcap_summary", pcap_path=str(mine))
+            finally:
+                await job.close()
+
+        refused, own = self._run(one_job())
+
+        for answer in refused:
+            assert _error(answer).get("code") == "path_outside_roots", answer
+        # This tool answers in prose rather than JSON when it reads one, so
+        # "not a refusal" is what says the job reaches its own capture.
+        assert "path_outside_roots" not in str(own), own
+
+    def test_the_analysis_sidecar_refuses_it_too(
+        self, staged: Path, two_captures: tuple[Path, Path]
+    ) -> None:
+        mine, theirs = two_captures
+
+        async def one_job() -> tuple[Any, Any]:
+            job = _Job("one")
+            await job.open()
+            try:
+                return (
+                    await job.call("identify_file", path=str(theirs)),
+                    await job.call("identify_file", path=str(mine)),
+                )
+            finally:
+                await job.close()
+
+        stolen, own = self._run(one_job())
+
+        assert _error(stolen).get("code") == "path_outside_roots"
+        assert _error(own) == {}

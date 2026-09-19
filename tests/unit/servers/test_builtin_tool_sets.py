@@ -115,7 +115,7 @@ def test_the_built_in_child_env_is_byte_for_byte_the_pre_branch_child_env(name, 
     from maljan.agents.subprocess_env import child_env
     from maljan.core.config import Settings
     from maljan.providers.servers import ServerRegistry
-    from maljan.tools.staging import STAGING_JOB_ENV, job_directory_name
+    from maljan.tools.staging import STAGING_JOB_ENV
 
     monkeypatch.delenv("PYTHONIOENCODING", raising=False)
 
@@ -139,7 +139,10 @@ def test_the_built_in_child_env_is_byte_for_byte_the_pre_branch_child_env(name, 
     try:
         expected = child_env(allow=tuple(handle.config.env_allow))
         if handle._stages_per_job():
-            expected[STAGING_JOB_ENV] = job_directory_name("test-job")
+            # Written out rather than asked of the code under test: a value
+            # derived by calling the same function it is checking is a value
+            # pinned against itself.
+            expected[STAGING_JOB_ENV] = "job-test-job"
         assert captured["env"] == expected
         assert "PYTHONIOENCODING" not in captured["env"]
     finally:

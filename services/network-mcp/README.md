@@ -22,9 +22,11 @@ its tools are bound to the `network` analyst.
 
 Every `pcap_path` is resolved (symlinks followed) and refused unless it lands
 inside this job's staging directory — `MALJAN_STAGING_DIR` plus the job leaf,
-the same directory the analysis sidecar writes this job's uploads into — or one
-of the directories listed in `MALJAN_SAMPLE_ROOTS` (separated by `:`, empty by
-default). A capture staged for another job is refused; nothing here writes. The capture a sandbox run produced is in one of them because the
+the same directory the analysis sidecar writes this job's uploads into, and
+whose `captures/` child holds the captures fetched for this job — or one of the
+directories listed in `MALJAN_SAMPLE_ROOTS` (separated by `:`, empty by
+default). A capture fetched for another job is refused by every spelling, even
+where a sample root contains the staging base; nothing here writes. The capture a sandbox run produced is in one of them because the
 worker exports the directory it fetched it to. A refusal is `{"error":
 {"code": "path_outside_roots", ...}}` and names no host path; see "Which
 directories a sidecar may read" in `docs/configuration.md`.

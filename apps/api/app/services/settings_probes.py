@@ -815,6 +815,8 @@ async def handshake(config: MCPServerConfig, name: str) -> tuple[list[str], dict
     (and its own cleanup) finish in the background, closing the handle once
     it does.
     """
+    from maljan.tools import staging
+
     handle = ServerHandle(name, config)
 
     async def _run() -> tuple[list[str], dict[str, Any] | None]:
@@ -843,6 +845,10 @@ async def handshake(config: MCPServerConfig, name: str) -> tuple[list[str], dict
         return task.result()
     finally:
         await handle.aclose()
+        # A probe is not a job, so the identity it opened under is a probe's
+        # and the directory it names is this call's to take away. A probe
+        # stages nothing, so there is normally nothing there.
+        staging.remove_job_staging(f"probe-{name}")
 
 
 def _probe_config(entry: dict[str, Any], name: str) -> MCPServerConfig:

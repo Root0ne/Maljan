@@ -227,16 +227,22 @@ class MaljanApp:
                 # the structured IOCs. Only CAPE-style providers declare it.
                 if caps.can_fetch_pcap and isinstance(result.report, dict):
                     try:
-                        import tempfile
+                        from maljan.tools import staging
 
-                        from maljan.tools.roots import add_sample_root
-
-                        pcap_dir = Path(tempfile.gettempdir()) / "maljan-cape-pcap"
-                        # The capture lands here, so this is where the network
-                        # sidecar is allowed to read one from.
-                        add_sample_root(pcap_dir)
+                        # This job's own capture directory, inside its staging
+                        # directory: named as a root for this job's sidecars
+                        # and for no later one, removed with everything else
+                        # the job staged, and swept by the same TTL. A capture
+                        # is a full record of the detonation — the operator's
+                        # addressing, the C2 exchange, whatever the malware
+                        # sent in the clear — and ``pcap_path`` is a qualified
+                        # argument the *model* writes, so a directory shared
+                        # between jobs was one instruction inside a sample away
+                        # from an earlier job's traffic.
+                        pcap_dir = staging.open_capture_dir(self.container.job_key())
                         pcap_path = provider.fetch_pcap(task_id, str(pcap_dir))
                         if pcap_path:
+                            staging.make_private(Path(pcap_path))
                             net = result.report.setdefault("network", {})
                             if isinstance(net, dict):
                                 net["pcap_local_path"] = pcap_path

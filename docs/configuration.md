@@ -966,6 +966,19 @@ past the cutoff, and the flat files an older release left in the base. So a
 long-lived server accumulates neither samples nor job directories, and an
 upgrade has nothing to migrate.
 
+A job directory is pruned whole only once the newest file anywhere inside it is
+past the cutoff, and a running job keeps its own directory current while it
+refreshes its owner heartbeat — so a run longer than the TTL does not lose its
+carved payloads to a second worker's sidecar sweeping the same base. Set the
+TTL below the longest run this deployment can have and that marker is the only
+thing standing between a live job and its own directory; there is no reason to.
+
+The sandbox capture a job fetches lands in a `captures/` child of the same
+directory and obeys every rule above: 0700, removed with the job, swept by the
+same TTL, and unreachable from another job. The directory an earlier release
+used, `maljan-cape-pcap` under the system temp directory, is swept as well and
+is no longer written.
+
 ### Which directories a sidecar may read
 
 A sample is adversary-authored content and the analyst model reads it, so the

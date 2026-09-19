@@ -730,6 +730,28 @@ class MCPServerConfig(BaseModel):
     # Display name; empty means "use the key".
     label: str = ""
 
+    @model_validator(mode="after")
+    def _refuse_the_composed_names(self) -> "MCPServerConfig":
+        """A name the spawn composes is not a name a stored row may carry.
+
+        ``MALJAN_STAGING_JOB`` says which job's directory a sidecar writes and
+        reads in, and it is composed per job when the server is started. A
+        stored mapping is applied to the child's environment on top of
+        everything else, so one naming this would point that server at another
+        job's bytes for every job it is attached to. There is nothing an
+        operator could correctly write here, so the value is refused where it
+        is entered rather than ignored where it is used.
+        """
+        from maljan.tools.staging import STAGING_JOB_ENV
+
+        for name in (STAGING_JOB_ENV,):
+            if name in self.env or name in self.env_allow:
+                raise ValueError(
+                    f"{name} is composed per job when this server is started and cannot be "
+                    f"set here; remove it from env and env_allow"
+                )
+        return self
+
 
 # The names a built-in sidecar is always started with, whatever a stored
 # registry row says. They are the two facts a sidecar cannot work out for

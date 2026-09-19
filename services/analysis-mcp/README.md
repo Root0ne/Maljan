@@ -75,11 +75,19 @@ behind an HTTP transport. See the "Tool servers on another host" section of
 | `MALJAN_STAGING_TTL_HOURS` | `24` | how long a staged sample is kept; `0` disables pruning |
 | `MALJAN_SAMPLE_ROOTS` | empty | the other directories a path argument may name, separated by `:` |
 
-Staging is per job: uploads and carved payloads land in `<base>/job-<id>/`,
-the job's owner removes that directory when the run ends, and the TTL sweep
-prunes a job directory whole once the newest file in it is past the cutoff. A
+Staging is per job: uploads, carved payloads and the sandbox captures fetched
+for that job (in a `captures/` child) land in `<base>/job-<id>/`, the job's
+owner removes that directory when the run ends, and the TTL sweep prunes a job
+directory whole once the newest file in it is past the cutoff — unless the job
+is still running, which it says by keeping its own directory's mtime current. A
 server started without `MALJAN_STAGING_JOB` — by hand, or by a settings probe —
-writes in the base itself.
+writes in the base itself. The name cannot be set in a server's `env` or
+`env_allow`: settings validation refuses it and the spawn clears it, because a
+stored value would point that server at another job's bytes.
+
+The sweep also takes what an earlier release left in the shared capture
+directory, `maljan-cape-pcap` under the system temp directory. Nothing writes
+there now.
 
 Every `path` argument is resolved (symlinks followed) and refused unless it
 lands inside *this job's* staging directory or one of `MALJAN_SAMPLE_ROOTS` —
