@@ -52,6 +52,7 @@ const profiles: CatalogEntry = {
   editor: "stages",
   subgroup: null,
   advanced: false,
+  required_env: null,
 };
 
 /** Only what `buildFieldRowProps` actually reads. */

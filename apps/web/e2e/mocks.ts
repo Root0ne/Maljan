@@ -329,6 +329,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           order: 0,
           choices_from: null,
           editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.negotiation.retry_delay",
@@ -352,6 +353,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           order: 0,
           choices_from: null,
           editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         // Task 9: an `advanced: true`, `"ui"`-sourced entry so the fold-open
         // rule (open on mount when something inside it is staged or
@@ -378,6 +380,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           order: 0,
           choices_from: null,
           editor: null, subgroup: null, advanced: true,
+          required_env: null,
         },
         {
           key: "core.negotiation.blocked_hosts",
@@ -401,6 +404,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           order: 0,
           choices_from: null,
           editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
       ],
     },
@@ -431,6 +435,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           order: 0,
           choices_from: null,
           editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         // Task C14 fix: real `core_catalog()` leaves the agent-definitions
         // editor's LLM section falls back to — `llm.provider` exists (an
@@ -444,6 +449,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           title: "Provider", description: "Selects which LLM backend serves both the expert and judge roles.",
           applies: "next_job", editable: true, reason: null, probe: "llm",
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         // `llm.agents` (`dict[str, AgentLLMConfig]`) is one JSON leaf, staged
         // as a whole exactly like `core.mcp.servers` — the agent-definitions
@@ -457,6 +463,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           description: "Per-agent LLM overrides for the heterogeneous model ensemble.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
       ],
     },
@@ -477,6 +484,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           description: "Base URL of the local Ollama server.",
           applies: "next_job", editable: true, reason: null, probe: "llm",
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
       ],
     },
@@ -495,6 +503,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           title: "Sandbox provider", description: "Which sandbox produces the dynamic evidence.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: "sandbox_providers", editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.sandbox.cape2.base_url", namespace: "core", path: "sandbox.cape2.base_url",
@@ -504,6 +513,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           applies: "next_job", editable: true, reason: null, probe: "cape2",
           applies_when: { "core.sandbox.provider": ["cape2"] }, order: 0,
           choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.sandbox.triage.base_url", namespace: "core", path: "sandbox.triage.base_url",
@@ -513,6 +523,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           applies: "next_job", editable: true, reason: null, probe: "triage",
           applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
           choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         // Task B17/B18: the REST sandbox's own fields, grouped and rendered by
         // `RestSandboxEditor` — `editor: "rest_sandbox"` is what routes them
@@ -527,6 +538,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: { "core.sandbox.provider": ["rest"] }, order: 0,
           choices_from: null, editor: "rest_sandbox", subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.sandbox.rest.report.format", namespace: "core", path: "sandbox.rest.report.format",
@@ -536,6 +548,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: { "core.sandbox.provider": ["rest"] }, order: 0,
           choices_from: null, editor: "rest_sandbox", subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.sandbox.rest.mapping.processes", namespace: "core", path: "sandbox.rest.mapping.processes",
@@ -548,6 +561,7 @@ export const MOCK_SETTINGS_SCHEMA = {
             "core.sandbox.rest.report.format": ["generic"],
           }, order: 0,
           choices_from: null, editor: "rest_sandbox", subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.sandbox.rest.mapping.dns", namespace: "core", path: "sandbox.rest.mapping.dns",
@@ -560,6 +574,7 @@ export const MOCK_SETTINGS_SCHEMA = {
             "core.sandbox.rest.report.format": ["generic"],
           }, order: 0,
           choices_from: null, editor: "rest_sandbox", subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.sandbox.rest.mapping.target_sha256", namespace: "core",
@@ -573,6 +588,7 @@ export const MOCK_SETTINGS_SCHEMA = {
             "core.sandbox.rest.report.format": ["generic"],
           }, order: 0,
           choices_from: null, editor: "rest_sandbox", subgroup: null, advanced: false,
+          required_env: null,
         },
       ],
     },
@@ -591,6 +607,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           title: "Static provider", description: "Which tool the static analyst attaches.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: "static_providers", editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
       ],
     },
@@ -609,6 +626,13 @@ export const MOCK_SETTINGS_SCHEMA = {
           description: "Every MCP server Maljan can attach, keyed by a short name.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: null, editor: "server_map", subgroup: null, advanced: false,
+          // Resolved by the API from `REQUIRED_ENV_ALLOW`: the names each
+          // built-in sidecar is started with whatever the stored registry
+          // says. The editor draws them above the box rather than in it.
+          required_env: {
+            analysis: ["MALJAN_STAGING_DIR", "MALJAN_STAGING_TTL_HOURS", "MALJAN_SAMPLE_ROOTS"],
+            network: ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"],
+          },
         },
         {
           key: "core.static.generic.server", namespace: "core", path: "static.generic.server",
@@ -618,6 +642,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           description: "Which registry entry the generic_mcp static provider drives.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: 0, choices_from: "mcp_servers", editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
       ],
     },
@@ -636,6 +661,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           title: "Active profile", description: "Which analyst profile a new job runs.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: "profiles", editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.agents.definitions", namespace: "core", path: "agents.definitions",
@@ -645,6 +671,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           description: "Every analyst Maljan can run, keyed by a short name.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: null, editor: "agent_definitions", subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.agents.profiles", namespace: "core", path: "agents.profiles",
@@ -654,6 +681,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           description: "Named teams, each an ordered list of stages.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: null, editor: "stages", subgroup: null, advanced: false,
+          required_env: null,
         },
         // Task 21: a plain leaf that stays on the *Agents* page while
         // `core.agents.profile` above moves to the virtual *Profiles* page.
@@ -669,6 +697,7 @@ export const MOCK_SETTINGS_SCHEMA = {
           description: "Seconds one analyst may run before it is cut off.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: 1, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
       ],
     },
@@ -950,6 +979,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Provider", description: "Selects which LLM backend serves both the expert and judge roles.",
           applies: "next_job", editable: true, reason: null, probe: "llm",
           applies_when: null, order: -1, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.llm.expert_max_tokens", namespace: "core", path: "llm.expert_max_tokens",
@@ -958,6 +988,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Expert max tokens", description: "Token budget for one analyst turn.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.llm.judge_max_tokens", namespace: "core", path: "llm.judge_max_tokens",
@@ -966,6 +997,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Judge max tokens", description: "Token budget for the judge's verdict.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.llm.parallel_analysts", namespace: "core", path: "llm.parallel_analysts",
@@ -974,6 +1006,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Parallel analysts", description: "How many analysts run at once.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.llm.view_decomposition_mode", namespace: "core", path: "llm.view_decomposition_mode",
@@ -982,6 +1015,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "View decomposition mode", description: "Whether a large sample is split into multiple views.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.llm.view_decomposition_views", namespace: "core", path: "llm.view_decomposition_views",
@@ -990,6 +1024,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "View decomposition views", description: "How many views a split sample is divided into.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
       ],
     },
@@ -1005,6 +1040,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Ollama base URL", description: "Base URL of the local Ollama server.",
           applies: "next_job", editable: true, reason: null, probe: "llm",
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.llm.ollama.expert_model", namespace: "core", path: "llm.ollama.expert_model",
@@ -1013,6 +1049,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Ollama expert model", description: "Model the analysts run on.",
           applies: "next_job", editable: true, reason: null, probe: "llm",
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.llm.ollama.judge_model", namespace: "core", path: "llm.ollama.judge_model",
@@ -1021,6 +1058,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Ollama judge model", description: "Model the judge writes the verdict on.",
           applies: "next_job", editable: true, reason: null, probe: "llm",
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.llm.ollama.num_ctx", namespace: "core", path: "llm.ollama.num_ctx",
@@ -1029,6 +1067,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Ollama context length", description: "The context window Ollama is asked to serve.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.llm.ollama.keep_alive", namespace: "core", path: "llm.ollama.keep_alive",
@@ -1037,6 +1076,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Ollama keep-alive", description: "How long Ollama keeps the model loaded after a request.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.llm.openai.api_key", namespace: "core", path: "llm.openai.api_key",
@@ -1045,6 +1085,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "OpenAI-compatible API key", description: "Bearer token for the OpenAI-compatible endpoint.",
           applies: "next_job", editable: true, reason: null, probe: "llm",
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
       ],
     },
@@ -1061,6 +1102,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Static provider", description: "Which tool the static analyst attaches.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: "static_providers", editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.static.r2.binary_path", namespace: "core", path: "static.r2.binary_path",
@@ -1070,6 +1112,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           applies: "next_job", editable: true, reason: null, probe: "r2",
           applies_when: { "core.static.provider": ["r2"] }, order: 0,
           choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.static.r2.mirror_dir", namespace: "core", path: "static.r2.mirror_dir",
@@ -1079,6 +1122,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: { "core.static.provider": ["r2"] }, order: 0,
           choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.static.generic.server", namespace: "core", path: "static.generic.server",
@@ -1088,6 +1132,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: { "core.static.provider": ["generic_mcp"] }, order: 0,
           choices_from: "mcp_servers", editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
       ],
     },
@@ -1104,6 +1149,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Sandbox provider", description: "Which sandbox produces the dynamic evidence.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: "sandbox_providers", editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.sandbox.triage.api_token", namespace: "core", path: "sandbox.triage.api_token",
@@ -1113,6 +1159,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           applies: "next_job", editable: true, reason: null, probe: "triage",
           applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
           choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.sandbox.triage.base_url", namespace: "core", path: "sandbox.triage.base_url",
@@ -1122,6 +1169,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           applies: "next_job", editable: true, reason: null, probe: "triage",
           applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
           choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.sandbox.triage.profile", namespace: "core", path: "sandbox.triage.profile",
@@ -1131,6 +1179,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
           choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.sandbox.triage.fetch_pcap", namespace: "core", path: "sandbox.triage.fetch_pcap",
@@ -1140,6 +1189,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
           choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.sandbox.triage.poll_interval_seconds", namespace: "core",
@@ -1150,6 +1200,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
           choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.sandbox.triage.timeout_seconds", namespace: "core",
@@ -1160,6 +1211,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: { "core.sandbox.provider": ["triage"] }, order: 0,
           choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
       ],
     },
@@ -1176,6 +1228,13 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           description: "Every MCP server Maljan can attach, keyed by a short name.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: null, editor: "server_map", subgroup: null, advanced: false,
+          // Resolved by the API from `REQUIRED_ENV_ALLOW`: the names each
+          // built-in sidecar is started with whatever the stored registry
+          // says. The editor draws them above the box rather than in it.
+          required_env: {
+            analysis: ["MALJAN_STAGING_DIR", "MALJAN_STAGING_TTL_HOURS", "MALJAN_SAMPLE_ROOTS"],
+            network: ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"],
+          },
         },
       ],
     },
@@ -1192,6 +1251,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Active profile", description: "Which analyst profile a new job runs.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: "profiles", editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.agents.definitions", namespace: "core", path: "agents.definitions",
@@ -1201,6 +1261,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           description: "Every analyst Maljan can run, keyed by a short name.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: null, editor: "agent_definitions", subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.agents.profiles", namespace: "core", path: "agents.profiles",
@@ -1210,6 +1271,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           description: "Named teams, each an ordered list of stages.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: null, editor: "stages", subgroup: null, advanced: false,
+          required_env: null,
         },
       ],
     },
@@ -1225,6 +1287,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Backend", description: "In-process memory, or a Qdrant instance that survives a restart.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.memory.qdrant_url", namespace: "core", path: "memory.qdrant_url",
@@ -1233,6 +1296,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Qdrant URL", description: "Where the Qdrant instance lives.",
           applies: "next_job", editable: true, reason: null, probe: "qdrant",
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.memory.qdrant_api_key", namespace: "core", path: "memory.qdrant_api_key",
@@ -1241,6 +1305,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Qdrant API key", description: "Credential for a hosted Qdrant instance.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.memory.qdrant_collection", namespace: "core", path: "memory.qdrant_collection",
@@ -1249,6 +1314,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Qdrant collection", description: "Collection findings are written to and read from.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.memory.qdrant_function_hash_collection", namespace: "core",
@@ -1258,6 +1324,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Qdrant function-hash collection", description: "Collection function hashes are written to and read from.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "core.memory.top_k", namespace: "core", path: "memory.top_k",
@@ -1266,6 +1333,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Neighbours per lookup", description: "How many prior findings a lookup returns.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
       ],
     },
@@ -1281,6 +1349,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Enrichment enabled", description: "Look indicators up against threat-intelligence sources.",
           applies: "live", editable: true, reason: null, probe: null,
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "api.enrichment_max_lookups", namespace: "api", path: "enrichment_max_lookups",
@@ -1289,6 +1358,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "Max lookups per analysis", description: "Caps how many lookups a single analysis may spend.",
           applies: "live", editable: true, reason: null, probe: null,
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "api.virustotal_api_key", namespace: "api", path: "virustotal_api_key",
@@ -1297,6 +1367,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "VirusTotal API key", description: "Leave empty to skip VirusTotal.",
           applies: "live", editable: true, reason: null, probe: "virustotal",
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
         {
           key: "api.abuseipdb_api_key", namespace: "api", path: "abuseipdb_api_key",
@@ -1305,6 +1376,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = {
           title: "AbuseIPDB API key", description: "Leave empty to skip AbuseIPDB.",
           applies: "live", editable: true, reason: null, probe: "abuseipdb",
           applies_when: null, order: 0, choices_from: null, editor: null, subgroup: null, advanced: false,
+          required_env: null,
         },
       ],
     },

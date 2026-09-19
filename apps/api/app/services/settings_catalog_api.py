@@ -17,6 +17,7 @@ from dataclasses import replace
 from functools import lru_cache
 from typing import Any, get_args, get_origin
 
+from maljan.core.config import REQUIRED_ENV_ALLOW
 from maljan.core.settings_annotations import GROUP_ORDER
 from maljan.core.settings_catalog import CatalogEntry, FieldType, _bounds, core_catalog
 from maljan.core.settings_overrides import redact_url
@@ -585,11 +586,22 @@ def resolved_catalog(
     servers, profiles or agents exist right now; the web must not decide
     either, or "what is a valid provider" has two answers. So it happens
     exactly here, once, on the way out.
+
+    The server-map leaf also leaves with ``REQUIRED_ENV_ALLOW`` on it, for the
+    same reason: the names a built-in sidecar is always started with are the
+    API's rule, the editor draws them as fixed rather than as lines to delete,
+    and a second copy of the rule in the console is a copy that drifts from
+    the one the save enforces.
     """
     sources = _choice_sources(servers, profiles, agents)
     out: list[CatalogEntry] = []
     for entry in full_catalog():
         if entry.choices_from and entry.choices_from in sources:
             entry = replace(entry, choices=sources[entry.choices_from])
+        if entry.editor == "server_map":
+            entry = replace(
+                entry,
+                required_env={key: list(names) for key, names in REQUIRED_ENV_ALLOW.items()},
+            )
         out.append(entry)
     return out

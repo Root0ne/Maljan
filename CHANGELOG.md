@@ -2465,6 +2465,13 @@ change landed on `main`.
   pairs understated it. The deadline is now taken as the probe begins.
 - **The Ollama probe's failure detail reads as two sentences.** It joined
   "answered nothing" to the remedy with no separator.
+- **The console reads the required environment names from the API.** The names
+  a built-in sidecar is always started with were written down a second time in
+  TypeScript with nothing pinning the two lists together, so a change on the
+  Python side would have left the editor drawing the wrong names as fixed and
+  silently restoring ones it had offered as removable. The server-map catalog
+  entry now carries `required_env`, resolved from `REQUIRED_ENV_ALLOW` the way
+  `choices` is resolved, and the console's copy is gone.
 
 ### Removed
 

@@ -8,7 +8,12 @@ import { getErrorMessage } from "@/lib/errors";
 import type { CatalogEntry, McpServerEntry, ProbeResult, SettingValue } from "@/types/settings";
 import { unavailableTools } from "@/types/settings";
 import Dot from "./Dot";
-import { addedEnvNames, requiredEnvNames, withRequiredEnvNames } from "./envAllow";
+import {
+  addedEnvNames,
+  requiredEnvNames,
+  withRequiredEnvNames,
+  type RequiredEnv,
+} from "./envAllow";
 import { deepEqual, mapKeyError, putEntry, removeEntry } from "./mapEditorHelpers";
 import SecretField, { type SecretStatus } from "./SecretField";
 
@@ -144,10 +149,11 @@ function EnvMapField({
  * The names a stdio child inherits from the worker's own environment.
  *
  * A built-in's required names are drawn above the box rather than in it. The
- * API passes them whatever the stored registry says (`envAllow.ts`), so a line
- * an admin deleted here used to be accepted, put back on save, and reported as
- * saved — a server that looked narrowed and was not. What stays editable is
- * the rest of the list, which is theirs.
+ * API passes them whatever the stored registry says and names them on the
+ * server-map catalog entry, so a line an admin deleted here used to be
+ * accepted, put back on save, and reported as saved — a server that looked
+ * narrowed and was not. What stays editable is the rest of the list, which is
+ * theirs.
  *
  * The typed text is local state for the reason the environment map's is: a
  * half-typed name is not reformatted under the cursor, and what is staged is
@@ -156,18 +162,24 @@ function EnvMapField({
 function EnvAllowField({
   serverKey,
   envAllow,
+  requiredEnv,
   onChange,
 }: {
   serverKey: string;
   envAllow: string[];
+  requiredEnv: RequiredEnv;
   onChange: (envAllow: string[]) => void;
 }) {
-  const required = requiredEnvNames(serverKey);
-  const [text, setText] = useState(() => addedEnvNames(serverKey, envAllow).join("\n"));
+  const required = requiredEnvNames(requiredEnv, serverKey);
+  const [text, setText] = useState(() =>
+    addedEnvNames(requiredEnv, serverKey, envAllow).join("\n")
+  );
 
   const stage = (next: string) => {
     setText(next);
-    onChange(withRequiredEnvNames(serverKey, next.split("\n").filter((name) => name !== "")));
+    onChange(
+      withRequiredEnvNames(requiredEnv, serverKey, next.split("\n").filter((name) => name !== ""))
+    );
   };
 
   return (
@@ -282,6 +294,7 @@ export function ServerDetail({
   probe,
   errors = {},
   entryKey = "core.mcp.servers",
+  requiredEnv = {},
   editable = true,
   sections = ALL_SERVER_SECTIONS,
 }: {
@@ -295,6 +308,9 @@ export function ServerDetail({
   errors?: Record<string, string>;
   /** The leaf these errors are keyed under. */
   entryKey?: string;
+  /** Per built-in, the environment names the API always passes, as the
+   *  server-map catalog entry reports them. */
+  requiredEnv?: RequiredEnv;
   /** Whether the token may be replaced — the leaf's own `editable`. */
   editable?: boolean;
   sections?: ServerSection[];
@@ -489,6 +505,7 @@ export function ServerDetail({
                 <EnvAllowField
                   serverKey={serverKey}
                   envAllow={server.env_allow}
+                  requiredEnv={requiredEnv}
                   onChange={(env_allow) => put(serverKey, { env_allow })}
                 />
               </>
@@ -807,6 +824,7 @@ export default function ServerMapEditor({
           probe={probe}
           errors={errors}
           entryKey={entry.key}
+          requiredEnv={entry.required_env ?? {}}
           editable={entry.editable}
         />
       )}

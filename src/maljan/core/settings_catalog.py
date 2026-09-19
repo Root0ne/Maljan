@@ -77,6 +77,13 @@ class CatalogEntry:
     subgroup: str | None = None
     # Folded into the group's closed "Advanced" disclosure.
     advanced: bool = False
+    # For the tool-server map alone: the environment names each built-in is
+    # started with whatever the stored registry says, so the editor can draw
+    # them as fixed rather than as lines an admin may delete and the API then
+    # puts back. Filled by the API as it serialises the catalog, for the same
+    # reason ``choices`` is: the rule lives in ``REQUIRED_ENV_ALLOW`` and a
+    # second copy of it in the console is a copy that drifts.
+    required_env: dict[str, list[str]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -29,6 +29,7 @@ function entry(overrides: Partial<CatalogEntry>): CatalogEntry {
     editor: null,
     subgroup: null,
     advanced: false,
+    required_env: null,
     ...overrides,
   };
 }

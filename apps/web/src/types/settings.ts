@@ -60,6 +60,12 @@ export interface CatalogEntry {
   subgroup: string | null;
   /** Hidden behind an "Advanced" disclosure until the operator opens it. */
   advanced: boolean;
+  /** For the tool-server map alone: per built-in server, the environment names
+   *  the API always passes it whatever the stored registry says
+   *  (`REQUIRED_ENV_ALLOW`). Resolved by the API as it serialises the catalog,
+   *  the way `choices` is, so the editor draws the rule the save enforces
+   *  rather than a copy of it. Null on every other entry. */
+  required_env: Record<string, readonly string[]> | null;
 }
 
 /**

@@ -56,6 +56,30 @@ def test_the_schema_carries_registry_ids_and_the_current_server_keys(client):
     assert entries["core.mcp.servers"]["editor"] == "server_map"
 
 
+def test_the_server_map_leaf_carries_the_names_a_built_in_is_always_started_with(client):
+    """The console draws the rule the save enforces, not a copy of it.
+
+    ``REQUIRED_ENV_ALLOW`` is put back on load, on save and in the connection
+    test whatever the stored registry says, and the editor draws those names
+    as fixed rather than as lines an admin may delete. A second copy of the
+    list in TypeScript could drift from this one, and then the editor would
+    offer a name as removable that the save silently restores.
+    """
+    from maljan.core.config import REQUIRED_ENV_ALLOW
+
+    with patch("app.api.v1.settings.SettingsService.load_overrides", AsyncMock(return_value={})):
+        response = client.get("/api/v1/settings/schema")
+    entries = {e["key"]: e for g in response.json()["groups"] for e in g["entries"]}
+
+    assert entries["core.mcp.servers"]["required_env"] == {
+        key: list(names) for key, names in REQUIRED_ENV_ALLOW.items()
+    }
+    # Only that leaf: every other entry says nothing about environment names.
+    assert [key for key, entry in entries.items() if entry["required_env"] is not None] == [
+        "core.mcp.servers"
+    ]
+
+
 def test_a_patch_to_the_server_map_is_validated_and_reported_per_key(client):
     with patch("app.api.v1.settings.SettingsService.load_overrides", AsyncMock(return_value={})):
         response = client.patch(
