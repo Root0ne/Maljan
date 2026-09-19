@@ -437,6 +437,7 @@ def enforce_bundle_integrity(
     objects: list[Any],
     *,
     ledger: Any | None = None,
+    dropped_as: str | None = None,
 ) -> list[Any]:
     """Make a STIX object list internally valid and non-redundant, in place-ish.
 
@@ -456,6 +457,11 @@ def enforce_bundle_integrity(
                  often this pass fires and what it removes, and nothing counted it
                  before. Typed loosely to keep this module free of a core import
                  it does not otherwise need.
+        dropped_as: One reason to file everything this run of the pass removes
+                 under, in place of the per-step reasons. The caller that sweeps
+                 up after the indicator cap uses it: nothing there is a defect of
+                 anybody's bundle, it is all the cap's own loss, and one name for
+                 it keeps that separate from what the first pass repaired.
     """
     _objects_in = len(objects)
     _dropped: dict[str, int] = {}
@@ -550,7 +556,9 @@ def enforce_bundle_integrity(
             ledger.record_integrity_pass(
                 objects_in=_objects_in,
                 objects_out=len(objects),
-                dropped=_dropped,
+                dropped=(
+                    {dropped_as: sum(_dropped.values())} if dropped_as is not None else _dropped
+                ),
             )
         except Exception:  # noqa: BLE001 — telemetry must never break a bundle
             pass

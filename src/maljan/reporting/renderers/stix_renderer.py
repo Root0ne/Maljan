@@ -71,6 +71,10 @@ from maljan.schemas.stix_pattern import read_comparisons
 
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
+# What the truncation ledger files the integrity pass's second run under: a
+# relationship the indicator cap left pointing at nothing.
+CAP_ORPHAN_REASON = "cap_orphan"
+
 # What the run summary calls a judge object this export declined to carry. Each
 # says what is not in the bundle and why; nothing is rewritten, and the judge's
 # own bundle keeps the object.
@@ -830,8 +834,13 @@ class ExtendedSTIXRenderer:
         if capped is objects:
             return Bundle(objects=objects)
         # Only what the cap orphaned is left to sweep, and it is the cap's
-        # doing rather than the pass's, so this one is not counted again.
-        return Bundle(objects=enforce_bundle_integrity(capped))
+        # doing rather than a defect of anybody's bundle — so it is counted
+        # under a reason of its own. Counted it must be: the pass used to run
+        # here with no ledger at all, and a reader totalling what the aggregate
+        # says was removed could not reconcile it with the objects in the file.
+        return Bundle(
+            objects=enforce_bundle_integrity(capped, ledger=ledger, dropped_as=CAP_ORPHAN_REASON)
+        )
 
     @staticmethod
     def _normalize_judge_timestamps(objects: list[Any]) -> None:

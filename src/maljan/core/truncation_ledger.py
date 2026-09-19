@@ -37,6 +37,13 @@ INTEGRITY_REASONS = (
     "duplicate_indicator",
     "dangling_relationship",
     "duplicate_relationship",
+    # The pass runs a second time after the indicator cap, and everything it
+    # takes out there is something the cap orphaned — a relationship whose
+    # endpoint is no longer in the bundle. Its own reason, because it is the
+    # cap's loss rather than a defect of anybody's bundle, and because that
+    # second pass used to run without a ledger at all: a reader could not
+    # reconcile the object count with what the aggregate said had been removed.
+    "cap_orphan",
 )
 
 
