@@ -94,8 +94,10 @@ _FORMAT_TOOLS: dict[str, tuple[str, Callable[..., dict[str, Any]]]] = {
 }
 
 # Which block of the API catalogue a routed format's imports belong to. A
-# format this table does not name has no import vocabulary of its own, and the
-# catalogue's Windows block is what every caller before the Linux one meant.
+# format this table does not name is not asked at all: a Mach-O's symbols are
+# neither Win32 nor libc, and a catalogue answering about the wrong system is
+# worse than one that says nothing. The import table is in the format entry
+# either way, for a model that wants to read it.
 _BEHAVIOUR_PLATFORM_BY_FORMAT: dict[str, str] = {
     "pe": "windows",
     "elf": "linux",
@@ -553,12 +555,20 @@ class _Pack:
 
     def _catalogue_lookups(self, format_facts: dict[str, Any] | None, routed: str) -> None:
         names = _imported_names(format_facts)
-        if names:
-            # The routed format picks the catalogue's vocabulary. The two
-            # overlap by name — ``connect``, ``send``, ``system`` — so asking
-            # the Windows block about an ELF's libc symbols gave them Win32
-            # categories and cleared Win32 technique rules on them.
-            platform = _BEHAVIOUR_PLATFORM_BY_FORMAT.get(routed, "windows")
+        # The routed format picks the catalogue's vocabulary. The two blocks
+        # overlap by name — ``connect``, ``send``, ``system`` — so asking the
+        # Windows block about an ELF's libc symbols gave them Win32 categories
+        # and cleared Win32 technique rules on them. A format with no block is
+        # not asked, rather than asked about the wrong system.
+        platform = _BEHAVIOUR_PLATFORM_BY_FORMAT.get(routed)
+        if names and platform is None:
+            logger.info(
+                "triage: the API catalogue has no vocabulary for a %s sample; "
+                "its %d imported names are in the format entry and nowhere else.",
+                routed or "sample of unknown format",
+                len(names),
+            )
+        if names and platform is not None:
             self.record(
                 "api_capability",
                 {"api_names": names, "platform": platform},

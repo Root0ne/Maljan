@@ -884,6 +884,11 @@
     "linux": {
       "process_injection": {
         "tier": "high",
+        "flags_with": [
+          "process_vm_readv",
+          "process_vm_writev",
+          "ptrace"
+        ],
         "apis": [
           "fexecve",
           "memfd_create",
@@ -892,14 +897,26 @@
         ]
       },
       "anti_debug": {
-        "tier": "high",
+        "tier": "informational",
+        "corroborated_by": [
+          "memfd_create",
+          "process_vm_readv",
+          "process_vm_writev"
+        ],
         "apis": [
           "personality",
           "ptrace"
         ]
       },
       "network": {
-        "tier": "medium",
+        "tier": "informational",
+        "corroborated_by": [
+          "EVP_EncryptInit_ex",
+          "SSL_connect",
+          "curl_easy_perform",
+          "popen",
+          "system"
+        ],
         "apis": [
           "accept",
           "accept4",
@@ -917,15 +934,11 @@
           "getpeername",
           "getsockname",
           "getsockopt",
-          "htonl",
-          "htons",
           "inet_addr",
           "inet_ntoa",
           "inet_ntop",
           "inet_pton",
           "listen",
-          "ntohl",
-          "ntohs",
           "recv",
           "recvfrom",
           "recvmsg",
@@ -936,12 +949,18 @@
           "sendto",
           "setsockopt",
           "shutdown",
-          "socket",
-          "socketpair"
+          "socket"
         ]
       },
       "crypto": {
-        "tier": "medium",
+        "tier": "informational",
+        "corroborated_by": [
+          "connect",
+          "readdir",
+          "rename",
+          "socket",
+          "unlink"
+        ],
         "apis": [
           "AES_cbc_encrypt",
           "AES_set_encrypt_key",
@@ -1061,7 +1080,13 @@
         ]
       },
       "privilege": {
-        "tier": "high",
+        "tier": "informational",
+        "corroborated_by": [
+          "chroot",
+          "memfd_create",
+          "process_vm_writev",
+          "ptrace"
+        ],
         "apis": [
           "cap_set_flag",
           "cap_set_proc",
@@ -1082,9 +1107,14 @@
         ]
       },
       "execution": {
-        "tier": "medium",
+        "tier": "informational",
+        "corroborated_by": [
+          "connect",
+          "memfd_create",
+          "ptrace",
+          "socket"
+        ],
         "apis": [
-          "dlclose",
           "dlopen",
           "dlsym",
           "execl",
@@ -1102,6 +1132,12 @@
       },
       "process": {
         "tier": "informational",
+        "corroborated_by": [
+          "memfd_create",
+          "ptrace",
+          "setsid",
+          "system"
+        ],
         "apis": [
           "clone",
           "daemon",

@@ -43,6 +43,11 @@ _HYBRID_FAILED_AT: float = 0.0
 # ``validation.index_retry_seconds``; this module reads no settings itself.
 _RETRY_AFTER_SECONDS: float = 900.0
 
+# How the setting reaches a tool sidecar, which has an environment and no
+# settings store. The knowledge server is the process where the build actually
+# happens, so it is the one the operator's value has to arrive at.
+INDEX_RETRY_ENV = "MALJAN_INDEX_RETRY_SECONDS"
+
 
 def set_index_retry_after(seconds: float) -> None:
     """How long to wait after a failed index build before attempting another."""
@@ -250,7 +255,13 @@ def attck_lookup(technique_id: str) -> dict[str, Any]:
     dictionary question costs a file read: the fifty-megabyte STIX bundle is
     what ``resolve_technique`` ranks over, and nothing else here loads it.
     """
-    from maljan.memory.attck_loader import domain_of, retired_in, technique_entry, valid_ids
+    from maljan.memory.attck_loader import (
+        domain_of,
+        platforms_for,
+        retired_in,
+        technique_entry,
+        valid_ids,
+    )
 
     tid = (technique_id or "").strip().upper()
     if not tid:
@@ -261,9 +272,14 @@ def attck_lookup(technique_id: str) -> dict[str, Any]:
         "technique_id": tid,
         "name": technique.name if technique else "",
         "domain": (technique.domain if technique else None) or domain_of(tid),
-        "platforms": list(technique.platforms) if technique else [],
+        # Through ``platforms_for`` rather than off the row, so this and
+        # ``attck_scope`` answer the same thing for a valid id the table does
+        # not carry — a checkout whose id catalogue is newer than its table.
+        "platforms": list(platforms_for(tid)),
         "tactics": list(technique.tactics) if technique else [],
-        "url": f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/",
+        # The form the bundle's own external reference uses, for every one of
+        # the catalogued ids, so a stored report's link does not change shape.
+        "url": f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}",
     }
     if technique is None:
         retired = retired_in(tid)
@@ -288,9 +304,9 @@ def attck_scope(technique_id: str) -> dict[str, Any]:
     """The domain and platforms the vendored catalogue gives a technique.
 
     Answered from the two vendored files alone — the id catalogue and the
-    platform map — so a validation turn that asks it loads no STIX bundle and
-    touches no network. ``attck_lookup`` is the fuller answer, with the name
-    and the tactics, and it costs the catalogue load; this one does not.
+    technique table — so a validation turn that asks it loads no STIX bundle
+    and touches no network. ``attck_lookup`` is the fuller answer, with the
+    name, the tactics and the retirement, and it costs no more than this one.
     """
     from maljan.memory.attck_loader import domain_of, platforms_for
 
@@ -401,21 +417,26 @@ def api_capability(
     cleared = techniques.match(set(names)) if techniques is not None and names else []
     rows: list[dict[str, Any]] = []
     for name in names:
-        category, suspicious = behaviours.classify(name) if behaviours else (None, False)
+        category, tiered = behaviours.classify(name) if behaviours else (None, False)
+        # The label is decided against the whole set, not against the one name:
+        # a category the catalogue gates says nothing until what would give it
+        # weight is there too.
+        suspicious = behaviours.is_flagged(category, tiered, names) if behaviours else False
         cited: list[dict[str, Any]] = []
         for rule, matched in cleared:
             # Compared by the A/W-folded key, so an import table holding both
             # spellings has both rows cite the rule, in every process alike.
             if canonical_name(name) not in {canonical_name(m) for m in matched}:
                 continue
-            cited.append(
-                {
-                    "technique_id": rule.technique_id,
-                    "name": rule.name,
-                    "matched": list(matched),
-                    "min_apis": rule.min_apis,
-                }
-            )
+            row_cited: dict[str, Any] = {
+                "technique_id": rule.technique_id,
+                "name": rule.name,
+                "matched": list(matched),
+                "min_apis": rule.min_apis,
+            }
+            if rule.rule:
+                row_cited["rule"] = rule.rule
+            cited.append(row_cited)
         row: dict[str, Any] = {
             "api": name,
             "category": category,
@@ -426,6 +447,9 @@ def api_capability(
         corroborators = behaviours.corroborated_by(category) if behaviours else ()
         if corroborators:
             row["corroborated_by"] = list(corroborators)
+        gate = behaviours.flags_with(category) if behaviours else ()
+        if gate and not suspicious:
+            row["flagged_with"] = list(gate)
         rows.append(row)
     out: dict[str, Any] = {"capabilities": rows, "platform": wanted}
     if behaviours is None:

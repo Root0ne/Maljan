@@ -36,7 +36,7 @@ from maljan.pipeline.triage_pack import (
 from maljan.schemas.evidence import EvidenceCounter
 from maljan.tools import rules
 from tests.unit.pipeline.test_stage_events import _state
-from tests.unit.tools.test_binary import _elf, _pe
+from tests.unit.tools.test_binary import _elf, _elf_with_imports, _pe
 
 CAPA = CapaSettings(rules_dir="data/capa-rules", signatures_dir="data/capa-signatures", timeout_s=5)
 
@@ -204,12 +204,44 @@ class TestTheFormatTools:
         assert "pe_info" not in _tools(result)
 
     def test_an_elf_s_symbols_are_asked_of_the_linux_vocabulary(self, tmp_path: Path) -> None:
-        """The two blocks share names, so the routed format picks the block."""
-        result = _pack(_write(tmp_path, "s.elf", _elf()), "elf")
-        lookups = [entry for entry in result.entries if entry.tool == "api_capability"]
-        for lookup in lookups:
-            assert lookup.args["platform"] == "linux"
-            assert lookup.structured["platform"] == "linux"
+        """The two blocks share names, so the routed format picks the block.
+
+        The sample carries a real dynamic symbol table: a bare ELF header has
+        no imports, the pack then records no catalogue lookup at all, and a
+        test written over that list passes however the routing is wired.
+        """
+        sample = _elf_with_imports("socket", "connect", "send", "recv", "setuid")
+        result = _pack(_write(tmp_path, "s.elf", sample), "elf")
+        (lookup,) = [entry for entry in result.entries if entry.tool == "api_capability"]
+        assert lookup.args["platform"] == "linux"
+        assert lookup.args["api_names"] == ["socket", "connect", "send", "recv", "setuid"]
+        assert lookup.structured["platform"] == "linux"
+        rows = lookup.structured["capabilities"]
+        assert [row["category"] for row in rows] == [
+            "network",
+            "network",
+            "network",
+            "network",
+            "privilege",
+        ]
+        # The Windows rule these four names clear is not offered to an ELF.
+        assert [hit for row in rows for hit in row["techniques"]] == []
+
+    def test_a_pe_s_imports_are_asked_of_the_windows_vocabulary(self, tmp_path: Path) -> None:
+        result = _pack(_write(tmp_path, "s.exe", _pe()), "pe")
+        (lookup,) = [entry for entry in result.entries if entry.tool == "api_capability"]
+        assert lookup.args["platform"] == "windows"
+        assert lookup.structured["platform"] == "windows"
+        categories = {row["category"] for row in lookup.structured["capabilities"]}
+        assert categories == {"filesystem", "network"}
+
+    def test_a_format_with_no_vocabulary_is_asked_nothing(self, tmp_path: Path) -> None:
+        """A Mach-O's symbols are neither Win32 nor libc, and the catalogue
+        answering about the wrong system is worse than not answering."""
+        from maljan.pipeline import triage_pack as module
+
+        assert "mach-o" not in module._BEHAVIOUR_PLATFORM_BY_FORMAT
+        assert module._BEHAVIOUR_PLATFORM_BY_FORMAT == {"pe": "windows", "elf": "linux"}
 
     def test_an_apk_gets_apk_info_and_its_signature_is_seen(self, tmp_path: Path) -> None:
         result = _pack(_apk(tmp_path), "apk")

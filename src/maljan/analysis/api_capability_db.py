@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -109,10 +110,36 @@ class ApiBehaviourDB:
     # window, pumping its message queue — is not evidence, and saying so
     # without saying what would be leaves the reader to guess.
     corroborators: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Per category, the names whose presence beside it turns the catalogue's
+    # ``suspicious`` label on. A category with no gate is labelled by its tier
+    # alone, which is how the label has always worked and how every Windows
+    # category still works.
+    flag_gates: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
     def corroborated_by(self, category: str | None) -> tuple[str, ...]:
         """The APIs the catalogue names as corroboration for ``category``."""
         return self.corroborators.get(category or "", ())
+
+    def flags_with(self, category: str | None) -> tuple[str, ...]:
+        """The names a gated category needs beside it before it is labelled."""
+        return self.flag_gates.get(category or "", ())
+
+    def is_flagged(self, category: str | None, tiered: bool, present: Iterable[str]) -> bool:
+        """Whether the catalogue labels a row, given the whole set it was asked about.
+
+        A gated category is labelled only when one of its gate names is in the
+        set. ``memfd_create`` on its own is ordinary in the graphics and
+        service stacks; the same symbol beside a call that reaches into another
+        process is not, and a label that cannot tell those apart is a label a
+        reader learns to ignore.
+        """
+        if not tiered:
+            return False
+        gate = self.flag_gates.get(category or "")
+        if not gate:
+            return True
+        wanted = {_canonical(name) for name in gate}
+        return any(_canonical(name) in wanted for name in present)
 
     def classify(self, function: str) -> tuple[str | None, bool]:
         hit = self.by_name.get(function)
@@ -135,6 +162,11 @@ class TechniqueRule:
 
     technique_id: str
     name: str
+    # What distinguishes two rules that evidence the same technique from
+    # different imports. ``name`` stays the catalogue's name for the id, so a
+    # surface printing the two together never states a name ATT&CK does not
+    # use; this is the label that says which of them matched.
+    rule: str
     apis: frozenset[str]
     apis_lower: frozenset[str]
     min_apis: int
@@ -296,6 +328,7 @@ def _load_behaviour_uncached(catalog_path: str, platform: str) -> ApiBehaviourDB
     by_name_lower: dict[str, tuple[str, bool]] = {}
     tiers: dict[str, str] = {}
     corroborators: dict[str, tuple[str, ...]] = {}
+    flag_gates: dict[str, tuple[str, ...]] = {}
 
     for category, spec in block.items():
         if not isinstance(category, str) or not isinstance(spec, dict):
@@ -313,6 +346,9 @@ def _load_behaviour_uncached(catalog_path: str, platform: str) -> ApiBehaviourDB
         named = spec.get("corroborated_by")
         if isinstance(named, list):
             corroborators[category] = tuple(a for a in named if isinstance(a, str) and a)
+        gate = spec.get("flags_with")
+        if isinstance(gate, list):
+            flag_gates[category] = tuple(a for a in gate if isinstance(a, str) and a)
         suspicious = tier in _SUSPICIOUS_TIERS
         for api in apis:
             if not isinstance(api, str) or not api:
@@ -342,6 +378,7 @@ def _load_behaviour_uncached(catalog_path: str, platform: str) -> ApiBehaviourDB
         by_name_lower=by_name_lower,
         tiers=tiers,
         corroborators=corroborators,
+        flag_gates=flag_gates,
     )
 
 
@@ -416,6 +453,7 @@ def _parse_rule(row: Any) -> TechniqueRule | None:
     return TechniqueRule(
         technique_id=tid,
         name=str(row.get("name") or tid),
+        rule=str(row.get("rule") or ""),
         apis=frozenset(apis),
         apis_lower=frozenset(a.lower() for a in apis),
         min_apis=min_apis,

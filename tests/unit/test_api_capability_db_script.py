@@ -173,3 +173,51 @@ class TestTheLinuxBlock:
         assert not {"registry", "persistence", "keylogging", "credential"} & set(
             script.LINUX_CATEGORIES
         )
+
+    def test_the_symbols_that_ordinary_software_lives_on_are_never_a_rule(self) -> None:
+        """Measured, then written down: no Linux technique rule may rest on
+        privilege dropping, on ordinary networking or on ordinary process
+        control, because every daemon on a system does all three."""
+        script = _script()
+        ordinary = (
+            set(script.LINUX_CATEGORIES["privilege"][1])
+            | set(script.LINUX_CATEGORIES["network"][1])
+            | set(script.LINUX_CATEGORIES["process"][1])
+            | set(script.LINUX_CATEGORIES["discovery"][1])
+        )
+        checked = 0
+        for rule in script.ATTCK_TECHNIQUES:
+            if "linux" not in (rule.get("platforms") or []):
+                continue
+            assert not (set(rule["apis"]) & ordinary), rule["technique_id"]
+            checked += 1
+        assert checked >= 3
+
+    def test_only_a_measured_minority_of_the_block_is_ever_labelled(self) -> None:
+        """A group whose bare presence labels more than one ordinary binary in
+        a hundred is an association with corroborators, not a tier."""
+        script = _script()
+        labelled = {
+            group
+            for group, (tier, _apis) in script.LINUX_CATEGORIES.items()
+            if tier in {script.HIGH, script.MEDIUM}
+        }
+        assert labelled == {"process_injection"}
+        # And even that one waits for a name that reaches into another process.
+        assert set(script.LINUX_FLAG_GATES) == labelled
+
+    def test_a_group_that_means_little_alone_names_what_would_give_it_weight(self) -> None:
+        script = _script()
+        for group in ("privilege", "network", "execution", "anti_debug", "crypto", "process"):
+            assert script.LINUX_CORROBORATORS.get(group), group
+
+    def test_a_corroborator_and_a_gate_name_a_symbol_the_block_actually_has(self) -> None:
+        script = _script()
+        known = {api for _tier, apis in script.LINUX_CATEGORIES.values() for api in apis}
+        for named in (script.LINUX_CORROBORATORS, script.LINUX_FLAG_GATES):
+            for group, names in named.items():
+                assert set(names) <= known, group
+
+    def test_the_windows_block_carries_no_gate(self) -> None:
+        """The label there is the tier alone, as it has always been."""
+        assert _script().FLAG_GATES_BY_PLATFORM["windows"] == {}

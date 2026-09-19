@@ -200,6 +200,7 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "recvfrom",
             "bind",
             "listen",
+            "ntohs",
             "accept",
             "closesocket",
             "shutdown",
@@ -207,14 +208,13 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "ioctlsocket",
             "gethostbyname",
             "gethostname",
+            "htons",
             "getaddrinfo",
             "GetAddrInfoW",
             "freeaddrinfo",
             "inet_addr",
             "inet_ntoa",
             "inet_pton",
-            "htons",
-            "ntohs",
             "InternetOpenA",
             "InternetOpenW",
             "InternetOpenUrlA",
@@ -1036,11 +1036,21 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
 #     with ordinary calls rather than which calls it imports.
 # The mapping is deliberately smaller than Windows's, and a category that would
 # fire on every coreutils binary is worse than no category.
+#
+# Tiers here were measured, not judged. Every group was run against the 1894
+# ELF binaries with a dynamic symbol table under this machine's own /usr/bin,
+# /usr/sbin and systemd directories, and a group whose bare presence labels
+# more than one in a hundred of them is an informational association with
+# ``corroborated_by`` rather than a tier the catalogue calls suspicious. Only
+# reading or writing another process's memory survived that bar, and even it
+# carries ``flags_with``: the flag appears when the symbol set actually reaches
+# into another process, not when a program merely creates an anonymous file.
 
 LINUX_CATEGORIES: dict[str, tuple[str, list[str]]] = {
-    # Reading or writing another process's memory. ``ptrace`` is the obvious
-    # omission here: it is a debugger call before it is an injection call, so
-    # it sits under anti_debug and the injection technique rule names it there.
+    # Reading or writing another process's memory, and running code that was
+    # never a file. ``ptrace`` is the obvious omission here: it is a debugger
+    # call before it is an injection call, so it sits under anti_debug and the
+    # injection technique rule names it there.
     "process_injection": (
         HIGH,
         [
@@ -1050,17 +1060,19 @@ LINUX_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "fexecve",
         ],
     ),
-    # ``personality`` is how a process turns ASLR off for itself, which almost
-    # nothing but a debugger, a loader and an evasive sample ever does.
+    # ``personality`` is how a process turns ASLR off for itself and ``ptrace``
+    # is how it attaches to another. A debugger, ``strace`` and ``setarch`` are
+    # the ordinary users of both, so the group says what it is and names what
+    # would give it weight instead of carrying a tier of its own.
     "anti_debug": (
-        HIGH,
+        INFO,
         [
             "ptrace",
             "personality",
         ],
     ),
     "network": (
-        MEDIUM,
+        INFO,
         [
             "accept",
             "accept4",
@@ -1078,15 +1090,11 @@ LINUX_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "getpeername",
             "getsockname",
             "getsockopt",
-            "htonl",
-            "htons",
             "inet_addr",
             "inet_ntoa",
             "inet_ntop",
             "inet_pton",
             "listen",
-            "ntohl",
-            "ntohs",
             "recv",
             "recvfrom",
             "recvmsg",
@@ -1098,11 +1106,10 @@ LINUX_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "setsockopt",
             "shutdown",
             "socket",
-            "socketpair",
         ],
     ),
     "crypto": (
-        MEDIUM,
+        INFO,
         [
             "AES_cbc_encrypt",
             "AES_set_encrypt_key",
@@ -1221,12 +1228,13 @@ LINUX_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "uname",
         ],
     ),
-    # Dropping or assuming another identity. The setuid family is what a
-    # legitimate privileged helper uses too, which is exactly why the row says
-    # "the catalogue files this under privilege" and never "this is a
-    # privilege escalation".
+    # Dropping or assuming another identity. The setuid family is what every
+    # daemon and every legitimate privileged helper uses to *drop* privilege —
+    # 7.8% of the measured binaries import one — so the group is an
+    # association with corroborators and the catalogue says nothing about it
+    # on its own.
     "privilege": (
-        HIGH,
+        INFO,
         [
             "cap_set_flag",
             "cap_set_proc",
@@ -1247,11 +1255,11 @@ LINUX_CATEGORIES: dict[str, tuple[str, list[str]]] = {
         ],
     ),
     # Handing a string to a shell, replacing the process image, or resolving a
-    # symbol at run time.
+    # symbol at run time. Ordinary in 22% of the measured binaries, which is
+    # what an association looks like rather than a finding.
     "execution": (
-        MEDIUM,
+        INFO,
         [
-            "dlclose",
             "dlopen",
             "dlsym",
             "execl",
@@ -1292,9 +1300,37 @@ CATEGORIES_BY_PLATFORM: dict[str, dict[str, tuple[str, list[str]]]] = {
     "linux": LINUX_CATEGORIES,
 }
 
+# The Linux counterpart of ``WINDOWS_CORROBORATORS``, and the reason the block
+# tiers almost nothing: an ELF's dynamic symbol table is small and ordinary,
+# and a group that means little alone should say what would give it weight
+# rather than carry a label a reader cannot act on.
+LINUX_CORROBORATORS: dict[str, list[str]] = {
+    "anti_debug": ["memfd_create", "process_vm_readv", "process_vm_writev"],
+    "privilege": ["chroot", "memfd_create", "process_vm_writev", "ptrace"],
+    "network": ["EVP_EncryptInit_ex", "SSL_connect", "curl_easy_perform", "popen", "system"],
+    "execution": ["connect", "memfd_create", "ptrace", "socket"],
+    "crypto": ["connect", "readdir", "rename", "socket", "unlink"],
+    "process": ["memfd_create", "ptrace", "setsid", "system"],
+}
+
+# Per category, the names whose presence beside it turns the catalogue's own
+# ``suspicious`` label on. A category with no entry here is labelled by its
+# tier alone, which is every Windows category and how the flag has always
+# worked. ``process_injection`` has one because ``memfd_create`` by itself is
+# ordinary in the graphics and service stacks, while the same symbol beside a
+# call that reaches into another process is not.
+LINUX_FLAG_GATES: dict[str, list[str]] = {
+    "process_injection": ["process_vm_readv", "process_vm_writev", "ptrace"],
+}
+
 CORROBORATORS_BY_PLATFORM: dict[str, dict[str, list[str]]] = {
     "windows": WINDOWS_CORROBORATORS,
-    "linux": {},
+    "linux": LINUX_CORROBORATORS,
+}
+
+FLAG_GATES_BY_PLATFORM: dict[str, dict[str, list[str]]] = {
+    "windows": {},
+    "linux": LINUX_FLAG_GATES,
 }
 
 
@@ -1732,10 +1768,14 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     {
         # ATT&CK 19.2 folded this and Indicator Blocking below into T1685, and
         # the builder follows the vendored set's revoked-by to it. The id here
-        # is the one the rule was curated against; the name is what the current
-        # catalogue calls the behaviour.
+        # is the one the rule was curated against; ``name`` is the catalogue's
+        # own name for the id it ends up on, and ``rule`` is what distinguishes
+        # two rules that evidence the same technique from different imports. A
+        # surface printing the id beside the name must print a name the
+        # catalogue agrees with.
         "technique_id": "T1562.001",
         "name": "Disable or Modify Tools",
+        "rule": "scanning and tracing provider calls",
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
@@ -1751,7 +1791,8 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     },
     {
         "technique_id": "T1562.006",
-        "name": "Disable or Modify Tools: indicator blocking",
+        "name": "Disable or Modify Tools",
+        "rule": "tracing provider calls and the event log",
         "min_apis": 2,
         "confidence_base": 0.46,
         "confidence_max": 0.62,
@@ -2075,61 +2116,34 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     # ------------------------------------------------------------------ Linux
     # Only where the mapping is uncontroversial: the symbols are the technique's
     # own mechanism rather than one plausible use of them. Every id here is
-    # valid in the vendored catalogue and declares Linux, which a test checks.
-    {
-        "technique_id": "T1082",
-        "name": "System Information Discovery",
-        "platforms": ["linux"],
-        "min_apis": 2,
-        "confidence_base": 0.38,
-        "confidence_max": 0.52,
-        "apis": ["uname", "sysinfo", "gethostname", "get_nprocs", "sysconf"],
-    },
-    {
-        "technique_id": "T1033",
-        "name": "System Owner/User Discovery",
-        "platforms": ["linux"],
-        "min_apis": 2,
-        "confidence_base": 0.38,
-        "confidence_max": 0.52,
-        "apis": ["getuid", "geteuid", "getpwuid", "getpwnam", "getlogin"],
-    },
-    {
-        "technique_id": "T1095",
-        "name": "Non-Application Layer Protocol",
-        "platforms": ["linux"],
-        "min_apis": 3,
-        "confidence_base": 0.40,
-        "confidence_max": 0.58,
-        "apis": ["socket", "connect", "send", "recv", "sendto", "recvfrom"],
-    },
-    {
-        "technique_id": "T1071.001",
-        "name": "Web Protocols",
-        "platforms": ["linux"],
-        "min_apis": 2,
-        "confidence_base": 0.46,
-        "confidence_max": 0.62,
-        "apis": ["curl_easy_init", "curl_easy_setopt", "curl_easy_perform", "curl_global_init"],
-    },
-    {
-        "technique_id": "T1573",
-        "name": "Encrypted Channel",
-        "platforms": ["linux"],
-        "min_apis": 3,
-        "confidence_base": 0.40,
-        "confidence_max": 0.58,
-        "apis": ["SSL_CTX_new", "SSL_new", "SSL_connect", "SSL_read", "SSL_write"],
-    },
-    {
-        "technique_id": "T1548.001",
-        "name": "Setuid and Setgid",
-        "platforms": ["linux"],
-        "min_apis": 2,
-        "confidence_base": 0.44,
-        "confidence_max": 0.60,
-        "apis": ["setuid", "setgid", "setresuid", "setresgid", "setreuid", "setregid"],
-    },
+    # valid in the vendored catalogue and declares Linux, which a test checks,
+    # and every one was measured against this machine's own ELF binaries before
+    # it was kept — a rule that fires on more than one in a hundred ordinary
+    # programs is not evidence of anything and was dropped.
+    #
+    # Four rules were written and removed on that measurement, and the reasons
+    # are worth keeping so they are not written again:
+    #   - Setuid and Setgid on the ``setuid``/``setgid`` family. The technique
+    #     is abuse of the setuid *bit on a file*; calling ``setuid`` is how
+    #     every daemon and every legitimate setuid helper drops privilege, and
+    #     a symbol table cannot tell the two apart. It cleared on 6.3% of them,
+    #     ``su`` and ``bash`` included, and the direction of the error is the
+    #     dangerous one: a privilege drop published as an escalation.
+    #   - Non-Application Layer Protocol on the BSD socket calls. Those calls
+    #     evidence "it talks over a network" and nothing narrower; 5.8%,
+    #     ``ping`` included.
+    #   - System Owner/User Discovery (``getuid`` and friends) at 12.9% and
+    #     System Information Discovery (``uname`` and friends) at 4.6%. Every
+    #     program that prints a prompt asks who it is running as.
+    #   - Web Protocols on the libcurl session calls and Encrypted Channel on
+    #     the OpenSSL client session. Both are one plausible use of a library
+    #     among many: linking libcurl evidences "it makes HTTP requests" and
+    #     linking libssl "it speaks TLS", and the techniques are about a
+    #     command channel. ``curl`` and ``openssl`` themselves cleared them.
+    #
+    # What is left is three rules whose symbols are the technique's own
+    # mechanism and nothing else, the worst of which appears on 0.2% of the
+    # measured binaries.
     {
         "technique_id": "T1055.008",
         "name": "Ptrace System Calls",
@@ -2282,15 +2296,22 @@ def _validate(techniques: list[dict[str, Any]]) -> list[str]:
     # folds two sub-techniques into one technique — 19.2 folded Disable or
     # Modify Tools and Indicator Blocking into T1685 — leaves two distinct
     # evidence rules pointing at the same id, and each keeps its own APIs, its
-    # own min_apis and its own confidence. The same technique evidenced on two
-    # platforms is two rules as well, from two vocabularies. A repeated
-    # (platform, id, name) is the copy the duplicate check exists to catch.
-    seen: set[tuple[str, str, str]] = set()
+    # own min_apis, its own confidence and its own ``rule`` label. The same
+    # technique evidenced on two platforms is two rules as well, from two
+    # vocabularies. A repeated (platform, id, name, rule) is the copy the
+    # duplicate check exists to catch.
+    seen: set[tuple[str, str, str, str]] = set()
     for tech in techniques:
         for platform in (str(p) for p in tech.get("platforms") or ["windows"]):
-            rule = (platform, str(tech["technique_id"]), str(tech["name"]))
+            rule = (
+                platform,
+                str(tech["technique_id"]),
+                str(tech["name"]),
+                str(tech.get("rule") or ""),
+            )
             if rule in seen:
-                problems.append(f"duplicate {rule[0]} technique {rule[1]} {rule[2]!r}")
+                label = f" {rule[3]!r}" if rule[3] else ""
+                problems.append(f"duplicate {rule[0]} technique {rule[1]} {rule[2]!r}{label}")
             seen.add(rule)
 
     # An API in two categories has no defined tier. The consumer is a reverse
@@ -2321,6 +2342,9 @@ def _block(platform: str, category: str) -> dict[str, object]:
     corroborators = CORROBORATORS_BY_PLATFORM.get(platform, {}).get(category)
     if corroborators:
         block["corroborated_by"] = sorted(set(corroborators))
+    gate = FLAG_GATES_BY_PLATFORM.get(platform, {}).get(category)
+    if gate:
+        block["flags_with"] = sorted(set(gate))
     block["apis"] = sorted(set(apis))
     return block
 
