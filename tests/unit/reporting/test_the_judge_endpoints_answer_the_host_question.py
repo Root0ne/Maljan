@@ -241,6 +241,32 @@ class TestAPatternIsNotOneComparison:
         assert exported == [pattern]
         assert declined == []
 
+    def test_the_object_type_is_read_whatever_case_it_is_written_in(self) -> None:
+        """Case carries no meaning in a STIX object path, and a judge shouts."""
+        exported, declined = _render(f"[DOMAIN-NAME:value = '{RESERVED}']")
+
+        assert exported == []
+        assert [code for code, _why in declined] == [UNPUBLISHABLE_DOMAIN_CODE]
+
+    def test_a_comparison_with_no_endpoint_in_it_says_that_is_why(self) -> None:
+        """A regular expression is not an endpoint, and saying it is not a name
+        or address that could exist would be a sentence about something else."""
+        exported, declined = _render(r"[url:value MATCHES '^https?://.*\\.evil\\.example/']")
+
+        assert exported == []
+        assert declined[0][0] == UNPUBLISHABLE_URL_CODE
+        assert "could not read the pattern's endpoint" in declined[0][1]
+
+    def test_the_same_holds_for_a_wildcard_and_for_a_subnet(self) -> None:
+        for pattern in (
+            "[domain-name:value LIKE '%.evil.example']",
+            f"[ipv4-addr:value ISSUBSET '{C2_ADDRESS}/24']",
+        ):
+            exported, declined = _render(pattern)
+
+            assert exported == [], pattern
+            assert "could not read the pattern's endpoint" in declined[0][1], pattern
+
     def test_an_object_path_written_inside_a_url_is_not_one(self) -> None:
         """A URL's own text can look like a comparison, and is not."""
         url = f"https://{C2_DOMAIN}/x?next=domain-name:value"

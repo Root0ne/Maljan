@@ -824,10 +824,13 @@ class TestARetiredId:
     not as invented."""
 
     @pytest.fixture(autouse=True)
-    def _no_suggestions(self, monkeypatch: pytest.MonkeyPatch):
+    def _no_suggestions(self, monkeypatch: pytest.MonkeyPatch, real_attck_index: None):
         """The retired note comes from the vendored id universe; the suggestions
-        beside it come from the ranked index, which is a corpus download and a
-        model this suite does not take. These tests are about the note."""
+        beside it come from the ranked index, which is a corpus build this suite
+        does not take. These tests are about the note.
+
+        The catalogue itself is still asked for: the lookup reads a technique's
+        name and description, and the vendored scope files carry neither."""
         from maljan.tools import knowledge
 
         monkeypatch.setattr(knowledge, "resolve_technique", lambda *a, **k: {"candidates": []})

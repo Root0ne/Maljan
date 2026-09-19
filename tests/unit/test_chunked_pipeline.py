@@ -245,6 +245,15 @@ class TestMergeChunkISRsDissent:
 
 
 class TestSafeAnalyzeISRChunked:
+    @pytest.fixture(autouse=True)
+    def _the_shared_attck_index(self, real_attck_index: None) -> None:
+        """Building a capability matrix resolves technique names and tactics.
+
+        It does that through ``ATTCKValidator.get_instance()``, which builds
+        the shared ATT&CK index from the corpus. The unit tree holds that
+        build shut; this class asks for it by name.
+        """
+
     """Test safe_analyze_isr_chunked() on a concrete minimal BaseAnalyst subclass."""
 
     class _ConcreteAnalyst:

@@ -102,5 +102,5 @@ class TestTheLimitsReachTheModel:
 
         from maljan.memory import embeddings
 
-        source = inspect.getsource(embeddings.encode_batch)
+        source = inspect.getsource(embeddings.encode_batch_with_backend)
         assert "batch_size=_EMBED_BATCH" in source

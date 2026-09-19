@@ -36,6 +36,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 SRC = Path(__file__).resolve().parents[2] / "src" / "maljan"
 
 # The names that carry a decision. ``verdict`` is the one the whole run is
@@ -540,6 +542,15 @@ class TestARelocationMovesAndDoesNotEdit:
 
 
 class TestARejectedIdIsDroppedAndNeverRewritten:
+    @pytest.fixture(autouse=True)
+    def _the_shared_attck_index(self, real_attck_index: None) -> None:
+        """Building a capability matrix resolves technique names and tactics.
+
+        It does that through ``ATTCKValidator.get_instance()``, which builds
+        the shared ATT&CK index from the corpus. The unit tree holds that
+        build shut; this class asks for it by name.
+        """
+
     """The published technique list carries no id the catalogue rejected.
 
     Dropping a row from what is published is not a rewrite: the id the producer

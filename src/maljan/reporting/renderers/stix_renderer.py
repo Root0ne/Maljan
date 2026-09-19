@@ -125,8 +125,17 @@ _NETWORK_PATTERN_PREFIXES = (
 # URL.
 _PATTERN_LITERALS_RE = re.compile(r"'([^']*)'")
 
-# An object path in a pattern comparison: the type, then the property.
-_OBJECT_PATH_RE = re.compile(r"([a-z0-9-]+):[a-z_.]+")
+# An object path in a pattern comparison: the type, then the property. Case
+# does not carry meaning in a STIX object path, and a judge writes
+# ``[URL:value = ...]`` often enough that reading it as a kind this question is
+# not about would be a hole rather than a nicety.
+_OBJECT_PATH_RE = re.compile(r"([a-z0-9-]+):[a-z_.]+", re.IGNORECASE)
+
+# Comparison operators whose right-hand side is not an endpoint: a regular
+# expression, a wildcard shape, a subnet. The value cannot be asked the host
+# question, so the indicator is declined for that reason and not for a reason
+# that would be untrue of it.
+_UNREADABLE_OPERATORS = ("matches", "like", "issubset", "issuperset")
 
 # The object types whose value is an endpoint a consumer would act on, which is
 # what the host question is asked about.
@@ -197,6 +206,15 @@ def unpublishable_endpoint_sentence(value: str, kind_words: str, whose: str) -> 
     )
 
 
+def unreadable_endpoint_sentence(value: str, kind_words: str, whose: str) -> str:
+    """The recorded sentence for a comparison this code cannot read an endpoint from."""
+    return (
+        f"the {kind_words} indicator for {safe_finding_value(value)!r} is not in the exported "
+        f"bundle: the pipeline could not read the pattern's endpoint, so it could not ask whether "
+        f"this export may carry it. It is unchanged in {whose}."
+    )
+
+
 def unpublishable_domain_sentence(fqdn: str) -> str:
     """The recorded sentence for a name somebody watched that no export may carry."""
     return (
@@ -211,8 +229,8 @@ def _observed(source: Any) -> bool:
     return str(source or "").strip().lower() in _OBSERVED_SOURCES
 
 
-def _pattern_endpoints(pattern: str) -> list[tuple[str, str]]:
-    """Every ``(object type, literal)`` a network comparison in this pattern names.
+def _pattern_endpoints(pattern: str) -> list[tuple[str, str, str]]:
+    """Every ``(object type, literal, operator)`` a network comparison names.
 
     A STIX pattern is not one comparison. ``[a] OR [b]``, an ``AND`` of two
     object paths and an ``IN`` list of several values are all one pattern with
@@ -225,17 +243,25 @@ def _pattern_endpoints(pattern: str) -> list[tuple[str, str]]:
     looks like an object path inside it. Only what is written *outside* the
     quotes says what is being compared.
     """
-    found: list[tuple[str, str]] = []
+    found: list[tuple[str, str, str]] = []
     kind = ""
+    operator = ""
     for index, chunk in enumerate(pattern.split("'")):
         if index % 2 == 0:
-            paths = _OBJECT_PATH_RE.findall(chunk)
             # No path in this chunk means the list of values goes on: ``IN
             # ('a', 'b')`` writes the path once and quotes twice.
-            kind = paths[-1] if paths else kind
+            paths = list(_OBJECT_PATH_RE.finditer(chunk))
+            if paths:
+                kind = paths[-1].group(1).lower()
+                operator = chunk[paths[-1].end() :].strip().lower()
         elif kind in _NETWORK_OBJECT_TYPES:
-            found.append((kind, chunk))
+            found.append((kind, chunk, operator))
     return found
+
+
+def _endpoint_is_readable(operator: str) -> bool:
+    """Whether the right-hand side of this comparison is an endpoint at all."""
+    return not any(word in operator for word in _UNREADABLE_OPERATORS)
 
 
 def _endpoint_is_publishable(kind: str, literal: str) -> bool:
@@ -273,19 +299,17 @@ def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
     endpoint up is ``stix.ungrounded_indicator``'s question, and it is asked of
     every indicator the judge writes.
     """
-    for kind, literal in _pattern_endpoints(indicator.pattern or ""):
-        if _endpoint_is_publishable(kind, literal):
+    for kind, literal, operator in _pattern_endpoints(indicator.pattern or ""):
+        readable = _endpoint_is_readable(operator)
+        if readable and _endpoint_is_publishable(kind, literal):
             continue
+        code = UNPUBLISHABLE_URL_CODE if kind == "url" else UNPUBLISHABLE_DOMAIN_CODE
+        words = {"url": "URL", "domain-name": "domain"}.get(kind, "address")
+        if not readable:
+            return (code, unreadable_endpoint_sentence(literal, words, "the judge's own bundle"))
         if kind == "url":
-            return (
-                UNPUBLISHABLE_URL_CODE,
-                impossible_host_sentence(literal, "the judge's own bundle"),
-            )
-        words = "domain" if kind == "domain-name" else "address"
-        return (
-            UNPUBLISHABLE_DOMAIN_CODE,
-            unpublishable_endpoint_sentence(literal, words, "the judge's own bundle"),
-        )
+            return (code, impossible_host_sentence(literal, "the judge's own bundle"))
+        return (code, unpublishable_endpoint_sentence(literal, words, "the judge's own bundle"))
     return None
 
 

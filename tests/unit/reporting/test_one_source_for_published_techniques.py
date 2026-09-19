@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from maljan.extractors.capability_matrix import build_capability_matrix, unmapped_behaviours
 from maljan.pipeline.validation import MISSING_ID_CODE, validate_verdict_bundle
 from maljan.reporting.builder import MalwareReportBuilder
@@ -41,6 +43,18 @@ _OBJECT_IDS = {
     "T1027": "attack-pattern--0f1e2d3c-4b5a-4968-8776-655443332202",
     "T1063": "attack-pattern--0f1e2d3c-4b5a-4968-8776-655443332203",
 }
+
+
+@pytest.fixture(autouse=True)
+def _the_shared_attck_index(real_attck_index: None) -> None:
+    """Building a capability matrix resolves technique names and tactics.
+
+    It does that through ``ATTCKValidator.get_instance()``, which builds the
+    shared ATT&CK index from the corpus — so a report assembled here reaches
+    the catalogue whatever the test is about. The unit tree holds that build
+    shut; these ask for it by name so the list of tests that pay for it is a
+    list somebody can read.
+    """
 
 
 def _attack_pattern(tid: str) -> dict[str, Any]:

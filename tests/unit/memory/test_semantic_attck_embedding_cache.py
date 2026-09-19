@@ -19,8 +19,10 @@ the wrong text.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from maljan.memory import semantic_attck_index as sai
 from maljan.memory.attck_loader import ATTCKTechnique
@@ -46,17 +48,34 @@ def _fake_vectors(n: int) -> list[list[float]]:
     return [[float((i + j) % 7) / 10.0 for j in range(dim)] for i in range(n)]
 
 
+@contextmanager
+def _as_the_model(vectors: list[list[float]]) -> Iterator[MagicMock]:
+    """Run the block as though the real model produced ``vectors``.
+
+    Which backend is in use decides three things — the cache key, whether a
+    stored file may be reused, and whether anything is stored at all — so a
+    test about the cache has to say which one it is standing in for. These are
+    about the model's vectors, which are the ones the cache exists to keep.
+    """
+    backend = sai.embeddings.model_backend_id()
+    with (
+        patch.object(sai.embeddings, "active_backend", return_value=backend),
+        patch.object(
+            sai.embeddings, "encode_batch_with_backend", return_value=(vectors, backend)
+        ) as embedded,
+    ):
+        yield embedded
+
+
 class TestTheCacheRoundTripsExactly:
     def test_a_second_build_reuses_the_vectors_and_does_not_embed(self, tmp_path: Path) -> None:
         techs = [_tech("T1055"), _tech("T1056.001", "Keylogging", "Log keystrokes.")]
         with patch.object(sai, "_EMB_CACHE_DIR", tmp_path):
-            with patch.object(
-                sai.embeddings, "encode_batch", return_value=_fake_vectors(2)
-            ) as first:
+            with _as_the_model(_fake_vectors(2)) as first:
                 a = SemanticATTCKIndex.from_techniques(techs)
             assert first.call_count == 1, "the cold build must embed"
 
-            with patch.object(sai.embeddings, "encode_batch") as second:
+            with _as_the_model([]) as second:
                 b = SemanticATTCKIndex.from_techniques(techs)
             second.assert_not_called()
 
@@ -71,21 +90,17 @@ class TestTheCacheCannotOutliveItsCorpus:
 
     def test_changed_technique_text_misses_the_cache(self, tmp_path: Path) -> None:
         with patch.object(sai, "_EMB_CACHE_DIR", tmp_path):
-            with patch.object(sai.embeddings, "encode_batch", return_value=_fake_vectors(1)):
+            with _as_the_model(_fake_vectors(1)):
                 SemanticATTCKIndex.from_techniques([_tech("T1055", desc="old text")])
-            with patch.object(
-                sai.embeddings, "encode_batch", return_value=_fake_vectors(1)
-            ) as again:
+            with _as_the_model(_fake_vectors(1)) as again:
                 SemanticATTCKIndex.from_techniques([_tech("T1055", desc="NEW text")])
             again.assert_called_once()
 
     def test_an_added_technique_misses_the_cache(self, tmp_path: Path) -> None:
         with patch.object(sai, "_EMB_CACHE_DIR", tmp_path):
-            with patch.object(sai.embeddings, "encode_batch", return_value=_fake_vectors(1)):
+            with _as_the_model(_fake_vectors(1)):
                 SemanticATTCKIndex.from_techniques([_tech("T1055")])
-            with patch.object(
-                sai.embeddings, "encode_batch", return_value=_fake_vectors(2)
-            ) as again:
+            with _as_the_model(_fake_vectors(2)) as again:
                 SemanticATTCKIndex.from_techniques([_tech("T1055"), _tech("T1059")])
             again.assert_called_once()
 
@@ -94,7 +109,7 @@ class TestTheCacheCannotOutliveItsCorpus:
         score every technique against a different geometry."""
         techs = [_tech("T1055")]
         with patch.object(sai, "_EMB_CACHE_DIR", tmp_path):
-            with patch.object(sai.embeddings, "encode_batch", return_value=_fake_vectors(1)):
+            with _as_the_model(_fake_vectors(1)):
                 SemanticATTCKIndex.from_techniques(techs)
             key_before = sai._corpus_key(["T1055"], [techs[0].searchable_text])
             with patch.object(sai.embeddings, "EMBED_DIM", 768):
@@ -105,9 +120,9 @@ class TestTheCacheCannotOutliveItsCorpus:
         self, tmp_path: Path
     ) -> None:
         with patch.object(sai, "_EMB_CACHE_DIR", tmp_path):
-            with patch.object(sai.embeddings, "encode_batch", return_value=_fake_vectors(1)):
+            with _as_the_model(_fake_vectors(1)):
                 SemanticATTCKIndex.from_techniques([_tech("T1055", desc="v1")])
-            with patch.object(sai.embeddings, "encode_batch", return_value=_fake_vectors(1)):
+            with _as_the_model(_fake_vectors(1)):
                 SemanticATTCKIndex.from_techniques([_tech("T1055", desc="v2")])
         assert len(list(tmp_path.glob("embeddings-*.json"))) == 1
 
@@ -120,13 +135,11 @@ class TestABrokenCacheDegradesInsteadOfFailing:
     def test_corrupt_json_falls_back_to_embedding(self, tmp_path: Path) -> None:
         techs = [_tech("T1055")]
         with patch.object(sai, "_EMB_CACHE_DIR", tmp_path):
-            with patch.object(sai.embeddings, "encode_batch", return_value=_fake_vectors(1)):
+            with _as_the_model(_fake_vectors(1)):
                 SemanticATTCKIndex.from_techniques(techs)
             for f in tmp_path.glob("embeddings-*.json"):
                 f.write_text("{not json", encoding="utf-8")
-            with patch.object(
-                sai.embeddings, "encode_batch", return_value=_fake_vectors(1)
-            ) as again:
+            with _as_the_model(_fake_vectors(1)) as again:
                 idx = SemanticATTCKIndex.from_techniques(techs)
             again.assert_called_once()
         assert idx._emb
@@ -136,30 +149,26 @@ class TestABrokenCacheDegradesInsteadOfFailing:
         missing and quietly stop being able to correct an id to it."""
         techs = [_tech("T1055"), _tech("T1059")]
         with patch.object(sai, "_EMB_CACHE_DIR", tmp_path):
-            with patch.object(sai.embeddings, "encode_batch", return_value=_fake_vectors(2)):
+            with _as_the_model(_fake_vectors(2)):
                 SemanticATTCKIndex.from_techniques(techs)
             path = next(tmp_path.glob("embeddings-*.json"))
             raw = json.loads(path.read_text(encoding="utf-8"))
             raw["vectors"].pop("T1059")
             path.write_text(json.dumps(raw), encoding="utf-8")
-            with patch.object(
-                sai.embeddings, "encode_batch", return_value=_fake_vectors(2)
-            ) as again:
+            with _as_the_model(_fake_vectors(2)) as again:
                 SemanticATTCKIndex.from_techniques(techs)
             again.assert_called_once()
 
     def test_a_wrong_width_vector_is_rejected(self, tmp_path: Path) -> None:
         techs = [_tech("T1055")]
         with patch.object(sai, "_EMB_CACHE_DIR", tmp_path):
-            with patch.object(sai.embeddings, "encode_batch", return_value=_fake_vectors(1)):
+            with _as_the_model(_fake_vectors(1)):
                 SemanticATTCKIndex.from_techniques(techs)
             path = next(tmp_path.glob("embeddings-*.json"))
             raw = json.loads(path.read_text(encoding="utf-8"))
             raw["vectors"]["T1055"] = [0.1, 0.2]
             path.write_text(json.dumps(raw), encoding="utf-8")
-            with patch.object(
-                sai.embeddings, "encode_batch", return_value=_fake_vectors(1)
-            ) as again:
+            with _as_the_model(_fake_vectors(1)) as again:
                 SemanticATTCKIndex.from_techniques(techs)
             again.assert_called_once()
 
@@ -167,6 +176,6 @@ class TestABrokenCacheDegradesInsteadOfFailing:
         blocked = tmp_path / "nope"
         blocked.write_text("I am a file, not a directory", encoding="utf-8")
         with patch.object(sai, "_EMB_CACHE_DIR", blocked):
-            with patch.object(sai.embeddings, "encode_batch", return_value=_fake_vectors(1)):
+            with _as_the_model(_fake_vectors(1)):
                 idx = SemanticATTCKIndex.from_techniques([_tech("T1055")])
         assert idx._emb, "the index must still build when the cache cannot be written"
