@@ -18,6 +18,8 @@ import pytest
 
 from maljan.agents._indicator_denylists import whole_value_in
 
+# Every haystack below is lowercased, because the corpus reaches this function
+# lowercased and the function lowercases only the value it is asked about.
 MAILBOX = "operator@example.org"
 HOST = "gate.example.org"
 ADDRESS = "185.220.101.1"
@@ -44,10 +46,21 @@ FOUND: list[tuple[str, str]] = [
     (HOST, f"{HOST}:443"),
     (HOST, f"{ADDRESS}:{HOST}"),
     (ADDRESS, f"{ADDRESS}:8080 was reached"),
-    # A separator inside a path, either way round.
+    # A separator inside a path, either way round, for a value with parts.
     ("x.exe", "the dropper wrote /tmp/x.exe"),
-    ("x.exe", "the dropper wrote C:\\Windows\\Temp\\x.exe"),
+    ("x.exe", "the dropper wrote c:\\windows\\temp\\x.exe"),
     (HOST, f"http://{HOST}/a/b?q=1"),
+    ("evil.exe", "the dropper wrote c:\\tmp\\evil.exe"),
+    ("global\\zararli", "opened mutex global\\zararli now"),
+    # A bare component, free-standing, is found the way it always was.
+    ("system32", "the sample wrote system32 twice"),
+    ("8080", "the port was 8080 all along"),
+    ("temp", "it unpacked into temp, then ran"),
+    # A value written straight after a two-character escape in a tool's JSON.
+    (HOST, f'"a\\n{HOST}"'),
+    (HOST, f'"a\\t{HOST}"'),
+    ("system32", '"a\\nsystem32"'),
+    (HOST, f'"{HOST}\\nb"'),
 ]
 
 NOT_FOUND: list[tuple[str, str]] = [
@@ -69,6 +82,19 @@ NOT_FOUND: list[tuple[str, str]] = [
     # A longer path the value is written inside.
     ("x.exe", "the dropper wrote /tmp/prefix-x.exe"),
     ("/tmp/x", "the dropper wrote /tmp/xyz"),
+    # A bare single component between two parts of a compound value. Every one
+    # of these appears in half the paths a sandbox writes down, and this
+    # function is the second-source bar for the kinds that carry them.
+    ("system32", "c:\\windows\\system32\\a.dll"),
+    ("8080", "10.0.0.5:8080"),
+    ("temp", "c:\\windows\\temp\\x"),
+    ("zararlimutex", "c:\\zararlimutex\\x"),
+    ("run", "hklm\\software\\microsoft\\windows\\currentversion\\run"),
+    ("windows", "c:/windows/system32"),
+    # A path separator is not a two-character escape, whatever letter follows.
+    ("ew\\evil.com", "c:\\new\\evil.com"),
+    ("ew\\evil.com", "\\\\server\\new\\evil.com"),
+    ("emp\\x.exe", "c:\\temp\\x.exe"),
 ]
 
 

@@ -251,15 +251,28 @@ def malformed_hash_in(pattern: str) -> tuple[str, str] | None:
 
 
 # What continues one label of a value: the characters a host name, a path
-# segment, a mailbox, a digest or a registry key is written with. What is *not*
-# here is as load bearing: a slash, a backslash and a colon join the parts of a
-# compound value rather than extend a part, so each of them bounds a part.
-_CONTINUES_A_VALUE_RE = re.compile(r"[A-Za-z0-9._\-@+%~]")
+# segment, a mailbox, a digest or a registry key is written with.
+_CONTINUES_A_LABEL_RE = re.compile(r"[A-Za-z0-9._\-@+%~]")
+
+# The three characters that join the parts of a compound value rather than
+# extend a part. They bound a part — but only for a value that has parts of its
+# own; see the docstring below.
+_JOINS_A_VALUE = "/\\:"
+_CONTINUES_A_COMPONENT_RE = re.compile(r"[A-Za-z0-9._\-@+%~/\\:]")
 
 # The one character that is a value's and a sentence's both. Which it is shows
 # in what follows it: ``a@b.com.`` ends a sentence, ``a@b.com.tr`` is a longer
 # name.
 _TERMINAL_DOT = "."
+
+# The letters a two-character escape is written with. Text a tool returned as
+# JSON reaches the corpus with its escapes intact, so a value written straight
+# after a newline is written straight after a backslash and an ``n``.
+_ESCAPE_LETTERS = frozenset('nrt"\\/bf')
+
+# What a path component is written with, for telling an escape from a
+# separator below.
+_ENDS_A_PATH_COMPONENT = "\\/ \t\"'"
 
 
 def whole_value_in(literal: str, haystack: str) -> bool:
@@ -273,37 +286,101 @@ def whole_value_in(literal: str, haystack: str) -> bool:
 
     The boundary rule, once, because both ends read it. A value runs from one
     boundary to the next, and a boundary is anything that does not continue a
-    label: a space, a bracket, a quote — and the three characters that join the
-    parts of a compound value rather than extend a part, ``/``, ``\\`` and
-    ``:``. That is what makes the host of ``http://evil.example/x`` findable, and
-    the host of ``evil.example:443``, and a mailbox after ``mailto:``. A ``.``
-    continues a label, so ``168.1.1`` is still not found inside ``192.168.1.1``
-    and ``evil.com`` is still not found inside ``notevil.com``,
+    label: a space, a bracket, a quote, and the newline a tool's JSON output
+    writes as two characters.
+
+    ``/``, ``\\`` and ``:`` join the parts of a compound value rather than
+    extend a part, so they bound a part too — **but only for a value that has
+    parts of its own.** A value that carries one of those three characters or a
+    dot is a compound or distinctive thing — a path, a host, an address, a
+    mailbox, a file name with an extension — and finding it between two of them
+    is finding that thing: ``evil.exe`` is corroborated by
+    ``c:\\tmp\\evil.exe`` and the host of ``http://evil.example/x`` is
+    corroborated by the URL. A bare single component is not: ``system32``,
+    ``8080``, ``temp`` and a one-word mutex name appear inside half the paths a
+    sandbox writes down, and this function decides the second-source bar for
+    the mutex, registry, path, e-mail and address kinds. One of those is found
+    only as a free-standing token, which is the rule that held before the
+    joining characters became boundaries.
+
+    A ``.`` continues a label either way, so ``168.1.1`` is not found inside
+    ``192.168.1.1`` and ``evil.com`` is not found inside ``notevil.com``,
     ``sub.evil.com`` or ``evil.com.br`` — except at the end of a value, where a
     ``.`` that nothing continues is the sentence's full stop.
     """
     lowered = str(literal or "").lower()
     if not lowered:
         return False
+    continues = _continuation_for(lowered)
     start = haystack.find(lowered)
     while start != -1:
-        if _opens_a_value(haystack, start) and _closes_a_value(haystack, start + len(lowered)):
+        if _opens_a_value(haystack, start, continues) and _closes_a_value(
+            haystack, start + len(lowered), continues
+        ):
             return True
         start = haystack.find(lowered, start + 1)
     return False
 
 
-def _opens_a_value(haystack: str, start: int) -> bool:
+def _continuation_for(value: str) -> re.Pattern[str]:
+    """Which characters continue the thing ``value`` is, rather than bound it."""
+    if any(character in value for character in _JOINS_A_VALUE) or _TERMINAL_DOT in value:
+        return _CONTINUES_A_LABEL_RE
+    return _CONTINUES_A_COMPONENT_RE
+
+
+def _opens_a_value(haystack: str, start: int, continues: re.Pattern[str]) -> bool:
     """Whether a value may begin at ``start`` rather than continue a longer one."""
-    return start == 0 or not _CONTINUES_A_VALUE_RE.match(haystack[start - 1])
+    if start == 0 or not continues.match(haystack[start - 1]):
+        return True
+    return _after_an_escape(haystack, start)
 
 
-def _closes_a_value(haystack: str, end: int) -> bool:
+def _closes_a_value(haystack: str, end: int, continues: re.Pattern[str]) -> bool:
     """Whether a value may end at ``end`` rather than run on into a longer one."""
     after = haystack[end : end + 1]
-    if not after or not _CONTINUES_A_VALUE_RE.match(after):
+    if not after or not continues.match(after):
+        return True
+    if _before_an_escape(haystack, end):
         return True
     if after != _TERMINAL_DOT:
         return False
     following = haystack[end + 1 : end + 2]
-    return not following or not _CONTINUES_A_VALUE_RE.match(following)
+    return not following or not continues.match(following)
+
+
+def _after_an_escape(haystack: str, start: int) -> bool:
+    """Whether the two characters before ``start`` are an escape, not a value's."""
+    return start >= 2 and _is_an_escape(haystack, start - 2)
+
+
+def _before_an_escape(haystack: str, end: int) -> bool:
+    """Whether the two characters at ``end`` are an escape, not a value's."""
+    return _is_an_escape(haystack, end)
+
+
+def _is_an_escape(haystack: str, index: int) -> bool:
+    """Whether a backslash at ``index`` opens a two-character escape.
+
+    JSON writes a newline as ``\\`` and ``n``, and a path's own backslash as two
+    backslashes, so inside JSON the two readings never collide. In text that is
+    not JSON they can: ``c:\\new\\evil.com`` carries the same two characters and
+    the backslash is a separator. What tells them apart is the component in
+    front of it — a drive root, or another separator — so a backslash that
+    separates two parts of a path is never read as an escape.
+    """
+    if (
+        haystack[index : index + 1] != "\\"
+        or haystack[index + 1 : index + 2] not in _ESCAPE_LETTERS
+    ):
+        return False
+    return not _separates_a_path(haystack, index)
+
+
+def _separates_a_path(haystack: str, index: int) -> bool:
+    """Whether the backslash at ``index`` stands between two parts of a path."""
+    cut = index
+    while cut > 0 and haystack[cut - 1] not in _ENDS_A_PATH_COMPONENT:
+        cut -= 1
+    component = haystack[cut:index]
+    return component.endswith(":") or (cut > 0 and haystack[cut - 1] in "\\/")
