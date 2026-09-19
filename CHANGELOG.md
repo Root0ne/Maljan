@@ -506,6 +506,27 @@ change landed on `main`.
 
 ### Changed
 
+- **A tool answer too big for the prompt is shortened, not cut in half.** A
+  JSON result over `preprocessing.max_tool_output_chars` was cut as text, which
+  ended the document mid-array: the model got a prefix with none of the
+  answer's own metadata (`total`, `next_offset`, `read_path`) and the ledger
+  got prose it could not parse, so `structured` was empty. Every reader of the
+  record — the evidence sections, corroboration, the triage pack — skips an
+  entry with no `structured`, so an analyst's *largest* answers, the ones that
+  found the most, contributed nothing to the report and nothing said so. Such
+  an answer is now shortened as a document: elements come off the end of its
+  largest lists until it fits, no key is ever dropped, `truncated` is set and
+  each shortened list says how many rows came back (`<key>_returned` beside a
+  `total` the tool already emits, otherwise `<key>_omitted`). **What changes
+  for a consumer:** a large result now reads as valid JSON with fewer rows and
+  a stated count rather than as a cut-off string, and `structured` is populated
+  for those entries for the first time — so evidence sections, corroboration
+  and the triage pack begin to see calls they have never seen, and a report
+  over the same sample can carry more than it did. Anything that is not a JSON
+  object (decompilation, plain text) takes the same character cut as before,
+  byte for byte. The run summary's truncation block counts the new outcome
+  separately as `tool_output_shortened`.
+
 - **Deprecated: `react_agent_max_steps_overrides` and
   `react_agent_timeout_overrides`.** A budget belongs to the agent that spends
   it, so it is set on the agent's definition now. Both maps are still read for

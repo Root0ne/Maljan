@@ -292,7 +292,17 @@ class GhidraHTTPClient:
         Every outcome is recorded on ``_truncation_ledger`` when one is attached,
         including the pass-through: pitfall P6 asks for truncation *frequency*,
         and a frequency needs its denominator.
+
+        A JSON document is shortened as a document: elements come off the end
+        of its largest lists until it fits, no key is dropped, and it says how
+        many rows it handed over (``maljan.agents.output_shortening``). A cut
+        made in characters ends a document mid-array, which reaches the model
+        as a prefix it cannot read the metadata of and the ledger as prose
+        with no ``structured`` at all — so the calls that found the most were
+        the ones the report never saw. Everything that is not a JSON object
+        takes the character cut exactly as it always did.
         """
+        from maljan.agents.output_shortening import shorten_json_document
         from maljan.core.truncation_ledger import record_guardrail_outcome
 
         chars_in = len(output)
@@ -311,6 +321,17 @@ class GhidraHTTPClient:
             chars_in,
             self._max_output_chars,
         )
+
+        shortened, was_shortened = shorten_json_document(output, self._max_output_chars)
+        if was_shortened:
+            record_guardrail_outcome(
+                self._truncation_ledger,
+                chars_in=chars_in,
+                chars_kept=len(shortened),
+                over_limit=True,
+                shortened=True,
+            )
+            return shortened
 
         if self._output_guardrail is not None:
             try:

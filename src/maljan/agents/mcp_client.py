@@ -308,12 +308,23 @@ class MCPLangChainToolkit:
         much as the cut: pitfall P6 asks for truncation *frequency*, and a
         frequency needs its denominator.
 
+        A JSON document is shortened as a document: elements come off the end
+        of its largest lists until it fits, no key is dropped, and it says how
+        many rows it handed over (``maljan.agents.output_shortening``). A cut
+        made in characters ends a document mid-array, which reaches the model
+        as a prefix it cannot read the metadata of and the ledger as prose
+        with no ``structured`` at all — so the calls that found the most were
+        the ones the report never saw. Everything that is not a JSON object
+        takes the character cut exactly as it always did.
+
         Args:
             output: Raw tool output text.
 
         Returns:
             Potentially shortened output.
         """
+        from maljan.agents.output_shortening import shorten_json_document
+
         chars_in = len(output)
 
         if chars_in <= self._max_output_chars:
@@ -325,6 +336,11 @@ class MCPLangChainToolkit:
             chars_in,
             self._max_output_chars,
         )
+
+        shortened, was_shortened = shorten_json_document(output, self._max_output_chars)
+        if was_shortened:
+            self._record_guardrail(chars_in, len(shortened), over_limit=True, shortened=True)
+            return shortened
 
         if self._output_guardrail is not None:
             try:
@@ -348,6 +364,7 @@ class MCPLangChainToolkit:
         over_limit: bool,
         summarised: bool = False,
         hard_truncated: bool = False,
+        shortened: bool = False,
     ) -> None:
         """Record one guardrail decision; no-op without a ledger, never raises."""
         from maljan.core.truncation_ledger import record_guardrail_outcome
@@ -359,4 +376,5 @@ class MCPLangChainToolkit:
             over_limit=over_limit,
             summarised=summarised,
             hard_truncated=hard_truncated,
+            shortened=shortened,
         )
