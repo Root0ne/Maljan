@@ -924,6 +924,8 @@
     {
       "technique_id": "T1055.008",
       "name": "Ptrace System Calls",
+      "rule": "attaching to another process and reading or writing its memory",
+      "ordinary_use": "a debugger, a tracer and a crash reporter reach into another process with exactly this pair",
       "platforms": [
         "linux"
       ],
@@ -939,6 +941,8 @@
     {
       "technique_id": "T1620",
       "name": "Reflective Code Loading",
+      "rule": "executing an anonymous file that was never written to disk",
+      "ordinary_use": "a language runtime, a just-in-time compiler and a sandbox launcher execute anonymous memory the same way",
       "platforms": [
         "linux"
       ],
@@ -948,20 +952,6 @@
       "apis": [
         "fexecve",
         "memfd_create"
-      ]
-    },
-    {
-      "technique_id": "T1622",
-      "name": "Debugger Evasion",
-      "platforms": [
-        "linux"
-      ],
-      "min_apis": 2,
-      "confidence_base": 0.46,
-      "confidence_max": 0.62,
-      "apis": [
-        "personality",
-        "ptrace"
       ]
     }
   ]

@@ -191,7 +191,7 @@ class TestTheLinuxBlock:
                 continue
             assert not (set(rule["apis"]) & ordinary), rule["technique_id"]
             checked += 1
-        assert checked >= 3
+        assert checked >= 2
 
     def test_only_a_measured_minority_of_the_block_is_ever_labelled(self) -> None:
         """A group whose bare presence labels more than one ordinary binary in
@@ -221,3 +221,33 @@ class TestTheLinuxBlock:
     def test_the_windows_block_carries_no_gate(self) -> None:
         """The label there is the tier alone, as it has always been."""
         assert _script().FLAG_GATES_BY_PLATFORM["windows"] == {}
+
+    def test_every_rule_says_what_it_is_the_mechanism_of_and_who_else_uses_it(self) -> None:
+        """A mechanism with ordinary users that does not name them reads as an
+        accusation, and the builder refuses a rule that leaves either out."""
+        script = _script()
+        checked = 0
+        for rule in script.ATTCK_TECHNIQUES:
+            if "linux" not in (rule.get("platforms") or []):
+                continue
+            assert rule["rule"].strip()
+            assert rule["ordinary_use"].strip()
+            checked += 1
+        assert checked >= 2
+        bare = {**_rule("T1055.008"), "platforms": ["linux"], "apis": ["ptrace"], "min_apis": 1}
+        assert script._validate([bare]) == [
+            "T1055.008 has no rule label",
+            "T1055.008 names no ordinary user of the same symbols",
+        ]
+
+    def test_a_rule_whose_mechanism_cannot_be_told_from_its_opposite_is_absent(self) -> None:
+        """Debugger Evasion is a process tracing itself. An import list shows
+        that a program can call ptrace and not what it calls it on, and every
+        binary the rule named was a debugger."""
+        script = _script()
+        linux = {
+            rule["technique_id"]
+            for rule in script.ATTCK_TECHNIQUES
+            if "linux" in (rule.get("platforms") or [])
+        }
+        assert linux == {"T1055.008", "T1620"}

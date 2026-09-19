@@ -399,8 +399,28 @@ were removed because they fired on ordinary software.
 
 A technique id in either block is retargeted, or dropped and listed, against
 the vendored catalogue's `revoked_by` when a release retires it. A rule carries
-`name` — the catalogue's name for the id — and, where two rules evidence one
-technique from different imports, a `rule` label that says which matched.
+`name` — the catalogue's name for the id — a `rule` label saying which of two
+rules on one technique matched, and, in the Linux block, `ordinary_use`: one
+sentence naming the software that is not a sample and imports the same symbols,
+because a mechanism with ordinary users that does not say so reads as an
+accusation.
+
+Rerun the measurement after an ATT&CK refresh, after adding a group or a rule,
+or on a distribution whose software is not the one the block was written
+against:
+
+```
+uv run python scripts/knowledge/measure_api_behaviour_block.py \
+    --fail-over 1 /usr/bin /usr/sbin /usr/lib/systemd
+```
+
+It reads the dynamic symbol imports of the ELF files under those directories,
+prints per group and per rule how many binaries each appears on and labels, and
+names the ones carrying a label or a technique row so a reader can judge
+whether that population is the one the technique describes. `--fail-over` exits
+non-zero when anything is above that share. It needs `pyelftools`, reaches no
+network, and no test runs it: a test that read a host's binaries would answer
+differently on every machine.
 
 ### Rule corpora
 

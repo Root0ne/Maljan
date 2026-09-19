@@ -492,13 +492,16 @@ change landed on `main`.
 - **An ELF's symbols have a behaviour catalogue.**
   `data/api_behaviour_map_v1.json` gains a `linux` block of nine groups over
   182 libc, syscall, OpenSSL and libcurl names, and `data/api_attck_map_v1.json`
-  three Linux technique rules, each naming an id the vendored table declares
-  for Linux. Every tier and every rule was measured against the 1894 ELF
-  binaries with a dynamic symbol table on the machine it was written on: eight
-  of the nine groups are informational associations carrying `corroborated_by`,
-  the ninth is labelled only when a second name says the sample reaches into
-  another process (`flags_with`, a new key the Windows block does not use), and
-  the worst technique rule appears on 0.2% of those binaries. The vocabulary is
+  two Linux technique rules, each naming an id the vendored table declares
+  for Linux. Every tier and every rule was measured against the 1911 ELF
+  binaries with a dynamic symbol table on the machine it was written on, with
+  `scripts/knowledge/measure_api_behaviour_block.py`, which ships so the
+  measurement can be repeated: eight of the nine groups are informational
+  associations carrying `corroborated_by`, the ninth is labelled only when a
+  second name says the sample reaches into another process (`flags_with`, a new
+  key the Windows block does not use), and the worst technique rule appears on
+  0.16% of those binaries. Each Linux rule carries `ordinary_use`, one sentence
+  naming the software that is not a sample and imports the same symbols. The vocabulary is
   deliberately narrower than the Windows one: `registry` has no counterpart,
   and `persistence`, `keylogging`, `screen_capture`, `credential` and `evasion`
   are absent because their honest Linux evidence is a path or an X11 call

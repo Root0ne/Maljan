@@ -124,24 +124,29 @@ class ApiBehaviourDB:
         """The names a gated category needs beside it before it is labelled."""
         return self.flag_gates.get(category or "", ())
 
-    def is_flagged(self, category: str | None, tiered: bool, present: Iterable[str]) -> bool:
-        """Whether the catalogue labels a row, given the whole set it was asked about.
+    def _gate_is_met(self, category: str | None, present: Iterable[str]) -> bool:
+        """Whether a gated category's second name is in the set asked about.
 
-        A gated category is labelled only when one of its gate names is in the
-        set. ``memfd_create`` on its own is ordinary in the graphics and
-        service stacks; the same symbol beside a call that reaches into another
-        process is not, and a label that cannot tell those apart is a label a
-        reader learns to ignore.
+        ``memfd_create`` on its own is ordinary in the graphics and service
+        stacks; the same symbol beside a call that reaches into another process
+        is not, and a label that cannot tell those apart is a label a reader
+        learns to ignore.
         """
-        if not tiered:
-            return False
         gate = self.flag_gates.get(category or "")
         if not gate:
             return True
         wanted = {_canonical(name) for name in gate}
         return any(_canonical(name) in wanted for name in present)
 
-    def classify(self, function: str) -> tuple[str | None, bool]:
+    def classify(self, function: str, present: Iterable[str] = ()) -> tuple[str | None, bool]:
+        """``(category, whether the catalogue labels it)`` for one API name.
+
+        The label is decided here rather than by the caller, so a reader that
+        asks about one name cannot label a gated category the catalogue would
+        not have labelled. ``present`` is the whole set the name was seen in;
+        with none given a gated category answers ``False``, because the second
+        name that would open the gate is not there to be seen.
+        """
         hit = self.by_name.get(function)
         if hit is None:
             for candidate in _variants(function):
@@ -150,7 +155,8 @@ class ApiBehaviourDB:
                     break
         if hit is None:
             return None, False
-        return hit
+        category, tiered = hit
+        return category, tiered and self._gate_is_met(category, present)
 
     def __len__(self) -> int:
         return len(self.by_name)
@@ -167,6 +173,10 @@ class TechniqueRule:
     # surface printing the two together never states a name ATT&CK does not
     # use; this is the label that says which of them matched.
     rule: str
+    # What software that is not a sample imports the same set for. A rule
+    # states a mechanism and a mechanism has ordinary users; the row carries
+    # the sentence so it cannot be read as an accusation on its own.
+    ordinary_use: str
     apis: frozenset[str]
     apis_lower: frozenset[str]
     min_apis: int
@@ -454,6 +464,7 @@ def _parse_rule(row: Any) -> TechniqueRule | None:
         technique_id=tid,
         name=str(row.get("name") or tid),
         rule=str(row.get("rule") or ""),
+        ordinary_use=str(row.get("ordinary_use") or ""),
         apis=frozenset(apis),
         apis_lower=frozenset(a.lower() for a in apis),
         min_apis=min_apis,

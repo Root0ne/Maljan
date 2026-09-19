@@ -530,8 +530,12 @@ class TestTheLinuxVocabulary:
 
     def test_the_pair_clears_the_ptrace_rule_and_cites_the_symbols_it_matched(self) -> None:
         result = knowledge.api_capability(["ptrace", "process_vm_writev"], platform="linux")
-        cited = {hit["technique_id"] for row in result["capabilities"] for hit in row["techniques"]}
-        assert "T1055.008" in cited
+        hits = [hit for row in result["capabilities"] for hit in row["techniques"]]
+        assert {hit["technique_id"] for hit in hits} == {"T1055.008"}
+        # The row says what the pair is the mechanism of and who else uses it,
+        # so it cannot be read as an accusation on its own.
+        assert hits[0]["rule"] == "attaching to another process and reading or writing its memory"
+        assert "debugger" in hits[0]["ordinary_use"]
 
     def test_a_windows_rule_cannot_fire_on_an_elf_s_symbols(self) -> None:
         """``socket``, ``connect``, ``send`` and ``recv`` are in both blocks.
@@ -579,9 +583,17 @@ class TestTheLinuxVocabulary:
 
     def test_a_bot_shaped_import_list_still_produces_associations(self) -> None:
         """The other half of the bar: a catalogue that says nothing about
-        anything is no catalogue. A Linux bot's own shape — a socket loop, a
-        shell, a self-trace and an anonymous executable — is described and its
-        distinctive pairs clear their rules."""
+        anything is no catalogue.
+
+        Read for what it is. The list carries the exact symbols the surviving
+        rules are written on, so the rules clearing is arithmetic rather than
+        evidence that the block would catch an arbitrary bot — a canonical
+        Mirai shape, which traces nothing and executes no anonymous file,
+        produces associations and no technique row at all. What this pins is
+        that the categories still describe a sample's shape after the tiering
+        was taken almost entirely off, and that the two rules fire when their
+        own evidence is present.
+        """
         bot = [
             "__libc_start_main",
             "close",
@@ -619,7 +631,7 @@ class TestTheLinuxVocabulary:
         cleared = sorted(
             {hit["technique_id"] for row in result["capabilities"] for hit in row["techniques"]}
         )
-        assert cleared == ["T1620", "T1622"]
+        assert cleared == ["T1620"]
 
     def test_the_label_waits_for_what_would_give_it_weight(self) -> None:
         """An anonymous file on its own is ordinary in the graphics and service

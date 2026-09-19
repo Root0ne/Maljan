@@ -417,11 +417,11 @@ def api_capability(
     cleared = techniques.match(set(names)) if techniques is not None and names else []
     rows: list[dict[str, Any]] = []
     for name in names:
-        category, tiered = behaviours.classify(name) if behaviours else (None, False)
-        # The label is decided against the whole set, not against the one name:
-        # a category the catalogue gates says nothing until what would give it
-        # weight is there too.
-        suspicious = behaviours.is_flagged(category, tiered, names) if behaviours else False
+        # The label is decided against the whole set, not against the one
+        # name: a category the catalogue gates says nothing until what would
+        # give it weight is there too. The accessor does that, so a reader
+        # that asks it about one name alone gets the same answer.
+        category, suspicious = behaviours.classify(name, names) if behaviours else (None, False)
         cited: list[dict[str, Any]] = []
         for rule, matched in cleared:
             # Compared by the A/W-folded key, so an import table holding both
@@ -436,6 +436,8 @@ def api_capability(
             }
             if rule.rule:
                 row_cited["rule"] = rule.rule
+            if rule.ordinary_use:
+                row_cited["ordinary_use"] = rule.ordinary_use
             cited.append(row_cited)
         row: dict[str, Any] = {
             "api": name,

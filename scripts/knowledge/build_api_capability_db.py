@@ -2144,9 +2144,19 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     # What is left is three rules whose symbols are the technique's own
     # mechanism and nothing else, the worst of which appears on 0.2% of the
     # measured binaries.
+    #
+    # Each of the two carries the sentence a reader needs beside it. The rule
+    # states a mechanism, and the same mechanism is the ordinary working of
+    # software that is not a sample; a row that does not say so reads as an
+    # accusation, which is not what a reference lookup may be.
     {
         "technique_id": "T1055.008",
         "name": "Ptrace System Calls",
+        "rule": "attaching to another process and reading or writing its memory",
+        "ordinary_use": (
+            "a debugger, a tracer and a crash reporter reach into another process "
+            "with exactly this pair"
+        ),
         "platforms": ["linux"],
         "min_apis": 2,
         "confidence_base": 0.50,
@@ -2156,21 +2166,25 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     {
         "technique_id": "T1620",
         "name": "Reflective Code Loading",
+        "rule": "executing an anonymous file that was never written to disk",
+        "ordinary_use": (
+            "a language runtime, a just-in-time compiler and a sandbox launcher "
+            "execute anonymous memory the same way"
+        ),
         "platforms": ["linux"],
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
         "apis": ["memfd_create", "fexecve"],
     },
-    {
-        "technique_id": "T1622",
-        "name": "Debugger Evasion",
-        "platforms": ["linux"],
-        "min_apis": 2,
-        "confidence_base": 0.46,
-        "confidence_max": 0.62,
-        "apis": ["ptrace", "personality"],
-    },
+    # Debugger Evasion was written here on ``ptrace`` and ``personality`` and
+    # is gone. The technique is a process tracing *itself* so that no debugger
+    # can attach, and turning address randomisation off for its own image; an
+    # import list shows that a program can call ptrace and cannot show what it
+    # calls it on. Measured, the rule named four binaries and every one was a
+    # debugger — the population whose ordinary working the symbols are, rather
+    # than the one the technique describes. A deterministic fact the platform
+    # states is right or absent, and this one could not be made right.
 ]
 
 _CONFIDENCE_CEILING = 0.65
@@ -2291,6 +2305,14 @@ def _validate(techniques: list[dict[str, Any]]) -> list[str]:
                 problems.append(
                     f"{tid} is filed under {platform} and the catalogue does not list it"
                 )
+        # A Linux rule states a mechanism, and every mechanism here is also the
+        # ordinary working of software that is not a sample. A rule with no
+        # label and no sentence naming that software reads as an accusation.
+        if "linux" in platforms:
+            if not str(tech.get("rule") or "").strip():
+                problems.append(f"{tid} has no rule label")
+            if not str(tech.get("ordinary_use") or "").strip():
+                problems.append(f"{tid} names no ordinary user of the same symbols")
 
     # Two rules on one id are allowed and one rule twice is not: a release that
     # folds two sub-techniques into one technique — 19.2 folded Disable or
