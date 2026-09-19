@@ -918,6 +918,152 @@
       "platforms": [
         "windows"
       ]
+    },
+    {
+      "technique_id": "T1082",
+      "name": "System Information Discovery",
+      "platforms": [
+        "linux"
+      ],
+      "min_apis": 2,
+      "confidence_base": 0.38,
+      "confidence_max": 0.52,
+      "apis": [
+        "get_nprocs",
+        "gethostname",
+        "sysconf",
+        "sysinfo",
+        "uname"
+      ]
+    },
+    {
+      "technique_id": "T1033",
+      "name": "System Owner/User Discovery",
+      "platforms": [
+        "linux"
+      ],
+      "min_apis": 2,
+      "confidence_base": 0.38,
+      "confidence_max": 0.52,
+      "apis": [
+        "geteuid",
+        "getlogin",
+        "getpwnam",
+        "getpwuid",
+        "getuid"
+      ]
+    },
+    {
+      "technique_id": "T1095",
+      "name": "Non-Application Layer Protocol",
+      "platforms": [
+        "linux"
+      ],
+      "min_apis": 3,
+      "confidence_base": 0.4,
+      "confidence_max": 0.58,
+      "apis": [
+        "connect",
+        "recv",
+        "recvfrom",
+        "send",
+        "sendto",
+        "socket"
+      ]
+    },
+    {
+      "technique_id": "T1071.001",
+      "name": "Web Protocols",
+      "platforms": [
+        "linux"
+      ],
+      "min_apis": 2,
+      "confidence_base": 0.46,
+      "confidence_max": 0.62,
+      "apis": [
+        "curl_easy_init",
+        "curl_easy_perform",
+        "curl_easy_setopt",
+        "curl_global_init"
+      ]
+    },
+    {
+      "technique_id": "T1573",
+      "name": "Encrypted Channel",
+      "platforms": [
+        "linux"
+      ],
+      "min_apis": 3,
+      "confidence_base": 0.4,
+      "confidence_max": 0.58,
+      "apis": [
+        "SSL_CTX_new",
+        "SSL_connect",
+        "SSL_new",
+        "SSL_read",
+        "SSL_write"
+      ]
+    },
+    {
+      "technique_id": "T1548.001",
+      "name": "Setuid and Setgid",
+      "platforms": [
+        "linux"
+      ],
+      "min_apis": 2,
+      "confidence_base": 0.44,
+      "confidence_max": 0.6,
+      "apis": [
+        "setgid",
+        "setregid",
+        "setresgid",
+        "setresuid",
+        "setreuid",
+        "setuid"
+      ]
+    },
+    {
+      "technique_id": "T1055.008",
+      "name": "Ptrace System Calls",
+      "platforms": [
+        "linux"
+      ],
+      "min_apis": 2,
+      "confidence_base": 0.5,
+      "confidence_max": 0.65,
+      "apis": [
+        "process_vm_readv",
+        "process_vm_writev",
+        "ptrace"
+      ]
+    },
+    {
+      "technique_id": "T1620",
+      "name": "Reflective Code Loading",
+      "platforms": [
+        "linux"
+      ],
+      "min_apis": 2,
+      "confidence_base": 0.5,
+      "confidence_max": 0.65,
+      "apis": [
+        "fexecve",
+        "memfd_create"
+      ]
+    },
+    {
+      "technique_id": "T1622",
+      "name": "Debugger Evasion",
+      "platforms": [
+        "linux"
+      ],
+      "min_apis": 2,
+      "confidence_base": 0.46,
+      "confidence_max": 0.62,
+      "apis": [
+        "personality",
+        "ptrace"
+      ]
     }
   ]
 }

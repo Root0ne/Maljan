@@ -93,6 +93,14 @@ _FORMAT_TOOLS: dict[str, tuple[str, Callable[..., dict[str, Any]]]] = {
     "jar": ("archive_list", binary.archive_list),
 }
 
+# Which block of the API catalogue a routed format's imports belong to. A
+# format this table does not name has no import vocabulary of its own, and the
+# catalogue's Windows block is what every caller before the Linux one meant.
+_BEHAVIOUR_PLATFORM_BY_FORMAT: dict[str, str] = {
+    "pe": "windows",
+    "elf": "linux",
+}
+
 # How a reputation answer says how many engines flagged the hash. The
 # structured form is VirusTotal's own ``last_analysis_stats``; the prose form
 # is what the threat-intel sidecar writes ("55/70 detections").
@@ -467,7 +475,7 @@ class _Pack:
         format_facts = self._format_facts(routed)
         self._strings_and_iocs()
         self._rules()
-        self._catalogue_lookups(format_facts)
+        self._catalogue_lookups(format_facts, routed)
         self._sandbox_summary()
         self._reputation()
         self._function_matches()
@@ -543,13 +551,18 @@ class _Pack:
                 lambda: rules.sigma_match_sandbox(report),
             )
 
-    def _catalogue_lookups(self, format_facts: dict[str, Any] | None) -> None:
+    def _catalogue_lookups(self, format_facts: dict[str, Any] | None, routed: str) -> None:
         names = _imported_names(format_facts)
         if names:
+            # The routed format picks the catalogue's vocabulary. The two
+            # overlap by name — ``connect``, ``send``, ``system`` — so asking
+            # the Windows block about an ELF's libc symbols gave them Win32
+            # categories and cleared Win32 technique rules on them.
+            platform = _BEHAVIOUR_PLATFORM_BY_FORMAT.get(routed, "windows")
             self.record(
                 "api_capability",
-                {"api_names": names},
-                lambda: knowledge.api_capability(names),
+                {"api_names": names, "platform": platform},
+                lambda: knowledge.api_capability(names, platform=platform),
             )
         report = self.inputs.sandbox_report
         if report:

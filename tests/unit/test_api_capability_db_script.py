@@ -114,7 +114,7 @@ class TestTheDuplicateCheck:
     def test_the_same_rule_twice_is_still_a_problem(self) -> None:
         script = _script()
         problems = script._validate([_rule("T1685", "One"), _rule("T1685", "One")])
-        assert problems == ["duplicate technique T1685 'One'"]
+        assert problems == ["duplicate windows technique T1685 'One'"]
 
     def test_an_id_outside_the_catalogue_is_a_problem(self) -> None:
         script = _script()
@@ -131,3 +131,45 @@ class TestWhatTheVendoredSetSays:
         for tid, row in retired.items():
             if tid.startswith("_") or "revoked_by" not in row:
                 assert tid not in replacements
+
+
+class TestTheLinuxBlock:
+    """The ELF vocabulary mirrors the Windows one's structure and its
+    discipline: an association, never a verdict, and only names whose presence
+    says something a reader could not have assumed."""
+
+    def test_every_linux_rule_names_a_technique_the_catalogue_allows_on_linux(self) -> None:
+        from maljan.memory.attck_loader import technique_entry
+
+        script = _script()
+        linux = [t for t in script.ATTCK_TECHNIQUES if "linux" in (t.get("platforms") or [])]
+        assert linux, "the catalogue ships no Linux technique rules"
+        for rule in linux:
+            entry = technique_entry(rule["technique_id"])
+            assert entry is not None, rule["technique_id"]
+            assert "Linux" in entry.platforms, rule["technique_id"]
+
+    def test_every_api_a_linux_rule_names_is_in_a_linux_category(self) -> None:
+        script = _script()
+        known = {api for _tier, apis in script.LINUX_CATEGORIES.values() for api in apis}
+        for rule in script.ATTCK_TECHNIQUES:
+            if "linux" not in (rule.get("platforms") or []):
+                continue
+            assert set(rule["apis"]) <= known, rule["technique_id"]
+
+    def test_no_libc_name_is_claimed_by_two_categories(self) -> None:
+        script = _script()
+        owners: dict[str, list[str]] = {}
+        for category, (_tier, apis) in script.LINUX_CATEGORIES.items():
+            for api in apis:
+                owners.setdefault(api, []).append(category)
+        assert [api for api, cats in owners.items() if len(cats) > 1] == []
+
+    def test_the_groups_that_would_be_a_guess_are_absent(self) -> None:
+        """Linux persistence is a path, not a call; the registry has no
+        counterpart. A category that cannot be evidenced by a symbol name is
+        not authored at all."""
+        script = _script()
+        assert not {"registry", "persistence", "keylogging", "credential"} & set(
+            script.LINUX_CATEGORIES
+        )

@@ -187,7 +187,10 @@ class TestTheOrderAndTheIds:
     def test_the_import_set_reaches_api_capability(self, tmp_path: Path) -> None:
         result = _pack(_write(tmp_path, "s.exe", _pe()), "pe")
         (lookup,) = [entry for entry in result.entries if entry.tool == "api_capability"]
-        assert lookup.args == {"api_names": ["CreateFileA", "HttpSendRequestA"]}
+        assert lookup.args == {
+            "api_names": ["CreateFileA", "HttpSendRequestA"],
+            "platform": "windows",
+        }
         assert [row["api"] for row in lookup.structured["capabilities"]] == [
             "CreateFileA",
             "HttpSendRequestA",
@@ -199,6 +202,14 @@ class TestTheFormatTools:
         result = _pack(_write(tmp_path, "s.elf", _elf()), "elf")
         assert "elf_info" in _tools(result)
         assert "pe_info" not in _tools(result)
+
+    def test_an_elf_s_symbols_are_asked_of_the_linux_vocabulary(self, tmp_path: Path) -> None:
+        """The two blocks share names, so the routed format picks the block."""
+        result = _pack(_write(tmp_path, "s.elf", _elf()), "elf")
+        lookups = [entry for entry in result.entries if entry.tool == "api_capability"]
+        for lookup in lookups:
+            assert lookup.args["platform"] == "linux"
+            assert lookup.structured["platform"] == "linux"
 
     def test_an_apk_gets_apk_info_and_its_signature_is_seen(self, tmp_path: Path) -> None:
         result = _pack(_apk(tmp_path), "apk")

@@ -352,8 +352,16 @@ def api_capability(
     api_names: list[str],
     behaviour_map: str = DEFAULT_API_BEHAVIOUR_MAP,
     attck_map: str = DEFAULT_API_ATTCK_MAP,
+    platform: str = "windows",
 ) -> dict[str, Any]:
     """What each named API does, and which techniques the catalogue associates it with.
+
+    ``platform`` picks the vocabulary: ``windows`` for a PE's imports,
+    ``linux`` for an ELF's dynamic symbols. The two overlap by name —
+    ``connect``, ``send``, ``system`` are in both — so asking the wrong one
+    gives a libc symbol a Win32 category, and a platform the catalogue has no
+    block for answers empty rows and a ``reason`` rather than the other
+    platform's answers.
 
     A reference lookup, not an observation: the catalogue lists ``BitBlt``
     and ``CreateCompatibleDC`` under screen capture, and every GUI program
@@ -387,8 +395,9 @@ def api_capability(
     )
 
     names = [str(n).strip() for n in (api_names or []) if str(n).strip()]
-    behaviours = load_api_behaviour_db(str(resolve_data(behaviour_map)))
-    techniques = load_api_attck_map(str(resolve_data(attck_map)))
+    wanted = str(platform or "").strip().lower() or "windows"
+    behaviours = load_api_behaviour_db(str(resolve_data(behaviour_map)), wanted)
+    techniques = load_api_attck_map(str(resolve_data(attck_map)), wanted)
     cleared = techniques.match(set(names)) if techniques is not None and names else []
     rows: list[dict[str, Any]] = []
     for name in names:
@@ -418,9 +427,9 @@ def api_capability(
         if corroborators:
             row["corroborated_by"] = list(corroborators)
         rows.append(row)
-    out: dict[str, Any] = {"capabilities": rows}
+    out: dict[str, Any] = {"capabilities": rows, "platform": wanted}
     if behaviours is None:
-        out["reason"] = f"the API behaviour catalog is not readable at {behaviour_map}"
+        out["reason"] = f"the API behaviour catalog at {behaviour_map} has no {wanted} categories"
     return out
 
 

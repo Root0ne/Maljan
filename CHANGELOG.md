@@ -487,6 +487,21 @@ change landed on `main`.
   `data/attck_retired_ids.json` gains `revoked_by` per row where the bundle
   names a successor, which is what lets a data builder retarget a retired id
   mechanically.
+- **An ELF's symbols have a behaviour catalogue.**
+  `data/api_behaviour_map_v1.json` gains a `linux` block of nine groups over
+  188 libc, syscall, OpenSSL and libcurl names, and `data/api_attck_map_v1.json`
+  nine Linux technique rules, each naming an id the vendored table declares for
+  Linux. The vocabulary is deliberately narrower than the Windows one:
+  `registry` has no counterpart, and `persistence`, `keylogging`,
+  `screen_capture`, `credential` and `evasion` are absent because their honest
+  Linux evidence is a path or an X11 call rather than a symbol name. The
+  catalogue is asked one platform at a time — `tools.knowledge.api_capability`
+  and the knowledge sidecar's tool take `platform`, and the triage pack passes
+  the routed format's — so a name in both blocks (`connect`, `send`, `system`)
+  is answered about the system the sample actually runs on.
+  **Upgrading:** a caller of `api_capability`, `load_api_behaviour_db` or
+  `load_api_attck_map` that wants ELF answers must pass `platform="linux"`;
+  the default stays Windows, so nothing that exists changes.
 - **The API capability builder regenerates its own data file.** Its curated
   source still named two ids ATT&CK 19.2 retired, and its own check refused
   them, so `data/api_attck_map_v1.json` had no working generator. A retired id

@@ -46,10 +46,10 @@ class TestApiCapability:
 
     def test_a_missing_catalog_is_named_rather_than_silently_empty(self) -> None:
         result = knowledge.api_capability(["WriteProcessMemory"], behaviour_map="data/nope.json")
-        assert "not readable" in result["reason"]
+        assert "has no windows categories" in result["reason"]
 
     def test_an_empty_list_is_an_empty_answer(self) -> None:
-        assert knowledge.api_capability([]) == {"capabilities": []}
+        assert knowledge.api_capability([]) == {"capabilities": [], "platform": "windows"}
 
     def test_a_rule_fires_over_the_whole_set_and_each_api_it_matched_cites_it(self) -> None:
         """Every rule in the vendored map needs two or more APIs. Matched one
@@ -451,3 +451,84 @@ class TestTheCitationIsTheSameInEveryProcess:
             assert cited[name], f"{name} cites nothing"
         # Both spellings of a pair cite the rule, with the same matched list.
         assert cited["RegCreateKeyExA"] == cited["RegCreateKeyExW"]
+
+
+class TestTheLinuxVocabulary:
+    """An ELF's dynamic symbols are asked of the catalogue's Linux block. The
+    two blocks share names, so the platform is what keeps a libc symbol from
+    being answered about Win32."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_catalogues(self) -> Iterator[None]:
+        from maljan.analysis import api_capability_db
+
+        api_capability_db.reset_cache()
+        yield
+        api_capability_db.reset_cache()
+
+    def test_a_libc_symbol_reports_its_linux_category(self) -> None:
+        result = knowledge.api_capability(["ptrace", "process_vm_writev"], platform="linux")
+        by_api = {row["api"]: row for row in result["capabilities"]}
+        assert result["platform"] == "linux"
+        assert by_api["ptrace"]["category"] == "anti_debug"
+        assert by_api["process_vm_writev"]["category"] == "process_injection"
+
+    def test_the_pair_clears_the_ptrace_rule_and_cites_the_symbols_it_matched(self) -> None:
+        result = knowledge.api_capability(["ptrace", "process_vm_writev"], platform="linux")
+        cited = {hit["technique_id"] for row in result["capabilities"] for hit in row["techniques"]}
+        assert "T1055.008" in cited
+
+    def test_a_windows_rule_cannot_fire_on_an_elf_s_symbols(self) -> None:
+        """``socket``, ``connect``, ``send`` and ``recv`` are in both blocks."""
+        names = ["socket", "connect", "send", "recv"]
+        linux = knowledge.api_capability(names, platform="linux")
+        rules = {
+            (hit["technique_id"], hit["name"])
+            for row in linux["capabilities"]
+            for hit in row["techniques"]
+        }
+        assert rules == {("T1095", "Non-Application Layer Protocol")}
+
+    def test_a_benign_coreutils_import_list_is_flagged_nothing(self) -> None:
+        """The catalogue must have nothing to say about an ordinary program."""
+        coreutils = [
+            "__libc_start_main",
+            "abort",
+            "calloc",
+            "close",
+            "error",
+            "exit",
+            "fclose",
+            "fflush",
+            "fopen",
+            "fprintf",
+            "free",
+            "fwrite",
+            "getenv",
+            "getopt_long",
+            "isatty",
+            "localtime",
+            "lstat",
+            "malloc",
+            "memcpy",
+            "opendir",
+            "printf",
+            "read",
+            "readdir",
+            "realloc",
+            "setlocale",
+            "stat",
+            "strcmp",
+            "strlen",
+            "textdomain",
+            "write",
+        ]
+        result = knowledge.api_capability(coreutils, platform="linux")
+        assert [row["api"] for row in result["capabilities"] if row["catalog_flags"]] == []
+        assert [row["api"] for row in result["capabilities"] if row["techniques"]] == []
+
+    def test_a_platform_the_catalogue_has_no_block_for_says_so(self) -> None:
+        result = knowledge.api_capability(["open"], platform="plan9")
+        assert result["platform"] == "plan9"
+        assert result["capabilities"][0]["category"] is None
+        assert "no plan9 categories" in result["reason"]

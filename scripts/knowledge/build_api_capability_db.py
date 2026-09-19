@@ -34,6 +34,7 @@ _BEHAVIOUR_OUT = _ROOT / "data" / "api_behaviour_map_v1.json"
 _ATTCK_OUT = _ROOT / "data" / "api_attck_map_v1.json"
 _VALID_IDS = _ROOT / "data" / "attck_valid_ids.json"
 _RETIRED_IDS = _ROOT / "data" / "attck_retired_ids.json"
+_TECHNIQUES = _ROOT / "data" / "attck_techniques.json"
 
 # ---------------------------------------------------------------------------
 # Tiers
@@ -1013,6 +1014,290 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
 # deterministic import signal corroborates other layers without solo-driving a
 # verdict. That ceiling is enforced again in the loader.
 
+# ---------------------------------------------------------------------------
+# Linux / ELF behaviour categories
+# ---------------------------------------------------------------------------
+# The same discipline as the Windows block above, and the same sentence a
+# reader should keep in mind: a row is an association, not a verdict. An ELF's
+# dynamic symbol table is much smaller and much more ordinary than a PE's
+# import table — every C program in existence calls ``read`` and ``malloc`` —
+# so the bar for a name to appear here at all is that its presence says
+# something a reader could not have assumed, and the bar for a high or medium
+# tier is that the name is unusual in ordinary software.
+#
+# What is deliberately absent, rather than guessed at:
+#   - ``registry``, which has no Linux counterpart;
+#   - ``persistence``, because Linux persistence is a path — a unit file, a
+#     crontab, a shell profile — and not a libc call, so any symbol list here
+#     would be a guess dressed as data;
+#   - ``keylogging``, ``screen_capture`` and ``credential``, whose honest
+#     vocabularies are X11, /dev/input and file paths rather than libc;
+#   - ``evasion``, which on Linux is overwhelmingly about what a process does
+#     with ordinary calls rather than which calls it imports.
+# The mapping is deliberately smaller than Windows's, and a category that would
+# fire on every coreutils binary is worse than no category.
+
+LINUX_CATEGORIES: dict[str, tuple[str, list[str]]] = {
+    # Reading or writing another process's memory. ``ptrace`` is the obvious
+    # omission here: it is a debugger call before it is an injection call, so
+    # it sits under anti_debug and the injection technique rule names it there.
+    "process_injection": (
+        HIGH,
+        [
+            "process_vm_readv",
+            "process_vm_writev",
+            "memfd_create",
+            "fexecve",
+        ],
+    ),
+    # ``personality`` is how a process turns ASLR off for itself, which almost
+    # nothing but a debugger, a loader and an evasive sample ever does.
+    "anti_debug": (
+        HIGH,
+        [
+            "ptrace",
+            "personality",
+        ],
+    ),
+    "network": (
+        MEDIUM,
+        [
+            "accept",
+            "accept4",
+            "bind",
+            "connect",
+            "curl_easy_cleanup",
+            "curl_easy_init",
+            "curl_easy_perform",
+            "curl_easy_setopt",
+            "curl_global_init",
+            "freeaddrinfo",
+            "getaddrinfo",
+            "gethostbyname",
+            "getnameinfo",
+            "getpeername",
+            "getsockname",
+            "getsockopt",
+            "htonl",
+            "htons",
+            "inet_addr",
+            "inet_ntoa",
+            "inet_ntop",
+            "inet_pton",
+            "listen",
+            "ntohl",
+            "ntohs",
+            "recv",
+            "recvfrom",
+            "recvmsg",
+            "res_query",
+            "res_search",
+            "send",
+            "sendmsg",
+            "sendto",
+            "setsockopt",
+            "shutdown",
+            "socket",
+            "socketpair",
+        ],
+    ),
+    "crypto": (
+        MEDIUM,
+        [
+            "AES_cbc_encrypt",
+            "AES_set_encrypt_key",
+            "EVP_CIPHER_CTX_free",
+            "EVP_CIPHER_CTX_new",
+            "EVP_DecryptFinal_ex",
+            "EVP_DecryptInit_ex",
+            "EVP_DecryptUpdate",
+            "EVP_DigestFinal_ex",
+            "EVP_DigestInit_ex",
+            "EVP_DigestUpdate",
+            "EVP_EncryptFinal_ex",
+            "EVP_EncryptInit_ex",
+            "EVP_EncryptUpdate",
+            "EVP_aes_128_cbc",
+            "EVP_aes_256_cbc",
+            "EVP_aes_256_gcm",
+            "EVP_sha256",
+            "MD5_Final",
+            "MD5_Init",
+            "MD5_Update",
+            "RAND_bytes",
+            "RSA_private_decrypt",
+            "RSA_public_encrypt",
+            "SHA256_Final",
+            "SHA256_Init",
+            "SHA256_Update",
+            "SSL_CTX_new",
+            "SSL_connect",
+            "SSL_new",
+            "SSL_read",
+            "SSL_write",
+            "gcry_cipher_decrypt",
+            "gcry_cipher_encrypt",
+            "gcry_cipher_open",
+            "gcry_cipher_setkey",
+        ],
+    ),
+    "filesystem": (
+        INFO,
+        [
+            "access",
+            "chdir",
+            "chmod",
+            "chown",
+            "close",
+            "closedir",
+            "creat",
+            "faccessat",
+            "fchmod",
+            "fchown",
+            "fclose",
+            "fopen",
+            "fopen64",
+            "fread",
+            "fseek",
+            "fstat",
+            "ftell",
+            "ftruncate",
+            "fwrite",
+            "getcwd",
+            "link",
+            "lstat",
+            "mkdir",
+            "mkdirat",
+            "open",
+            "open64",
+            "openat",
+            "opendir",
+            "pread",
+            "pwrite",
+            "read",
+            "readdir",
+            "readdir64",
+            "readlink",
+            "realpath",
+            "remove",
+            "rename",
+            "renameat",
+            "rmdir",
+            "stat",
+            "stat64",
+            "symlink",
+            "truncate",
+            "unlink",
+            "unlinkat",
+            "utimes",
+            "write",
+        ],
+    ),
+    "discovery": (
+        INFO,
+        [
+            "get_nprocs",
+            "getegid",
+            "getenv",
+            "geteuid",
+            "getgid",
+            "getgrgid",
+            "getgrnam",
+            "getifaddrs",
+            "getuid",
+            "getlogin",
+            "getpgid",
+            "getpid",
+            "getppid",
+            "getpwnam",
+            "getpwuid",
+            "gethostname",
+            "isatty",
+            "sched_getaffinity",
+            "secure_getenv",
+            "sysconf",
+            "sysinfo",
+            "ttyname",
+            "uname",
+        ],
+    ),
+    # Dropping or assuming another identity. The setuid family is what a
+    # legitimate privileged helper uses too, which is exactly why the row says
+    # "the catalogue files this under privilege" and never "this is a
+    # privilege escalation".
+    "privilege": (
+        HIGH,
+        [
+            "cap_set_flag",
+            "cap_set_proc",
+            "capset",
+            "chroot",
+            "initgroups",
+            "setegid",
+            "seteuid",
+            "setfsgid",
+            "setfsuid",
+            "setgid",
+            "setgroups",
+            "setregid",
+            "setresgid",
+            "setresuid",
+            "setreuid",
+            "setuid",
+        ],
+    ),
+    # Handing a string to a shell, replacing the process image, or resolving a
+    # symbol at run time.
+    "execution": (
+        MEDIUM,
+        [
+            "dlclose",
+            "dlopen",
+            "dlsym",
+            "execl",
+            "execle",
+            "execlp",
+            "execv",
+            "execve",
+            "execvp",
+            "execvpe",
+            "popen",
+            "posix_spawn",
+            "posix_spawnp",
+            "system",
+        ],
+    ),
+    # Making, reaping and detaching processes: the vocabulary of a daemon as
+    # much as of a dropper, which is why it is informational.
+    "process": (
+        INFO,
+        [
+            "clone",
+            "daemon",
+            "fork",
+            "kill",
+            "nice",
+            "setpgid",
+            "setsid",
+            "vfork",
+            "wait4",
+            "waitpid",
+        ],
+    ),
+}
+
+
+CATEGORIES_BY_PLATFORM: dict[str, dict[str, tuple[str, list[str]]]] = {
+    "windows": WINDOWS_CATEGORIES,
+    "linux": LINUX_CATEGORIES,
+}
+
+CORROBORATORS_BY_PLATFORM: dict[str, dict[str, list[str]]] = {
+    "windows": WINDOWS_CORROBORATORS,
+    "linux": {},
+}
+
+
 ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     # ---------------------------------------------------------------- Discovery
     {
@@ -1787,6 +2072,91 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     # information. What *is* suspicious is that pair in a binary with almost no
     # other imports — dynamic API resolution — and that is already detected, as
     # an obfuscation indicator, by ``_pe_obfuscation_indicators``.
+    # ------------------------------------------------------------------ Linux
+    # Only where the mapping is uncontroversial: the symbols are the technique's
+    # own mechanism rather than one plausible use of them. Every id here is
+    # valid in the vendored catalogue and declares Linux, which a test checks.
+    {
+        "technique_id": "T1082",
+        "name": "System Information Discovery",
+        "platforms": ["linux"],
+        "min_apis": 2,
+        "confidence_base": 0.38,
+        "confidence_max": 0.52,
+        "apis": ["uname", "sysinfo", "gethostname", "get_nprocs", "sysconf"],
+    },
+    {
+        "technique_id": "T1033",
+        "name": "System Owner/User Discovery",
+        "platforms": ["linux"],
+        "min_apis": 2,
+        "confidence_base": 0.38,
+        "confidence_max": 0.52,
+        "apis": ["getuid", "geteuid", "getpwuid", "getpwnam", "getlogin"],
+    },
+    {
+        "technique_id": "T1095",
+        "name": "Non-Application Layer Protocol",
+        "platforms": ["linux"],
+        "min_apis": 3,
+        "confidence_base": 0.40,
+        "confidence_max": 0.58,
+        "apis": ["socket", "connect", "send", "recv", "sendto", "recvfrom"],
+    },
+    {
+        "technique_id": "T1071.001",
+        "name": "Web Protocols",
+        "platforms": ["linux"],
+        "min_apis": 2,
+        "confidence_base": 0.46,
+        "confidence_max": 0.62,
+        "apis": ["curl_easy_init", "curl_easy_setopt", "curl_easy_perform", "curl_global_init"],
+    },
+    {
+        "technique_id": "T1573",
+        "name": "Encrypted Channel",
+        "platforms": ["linux"],
+        "min_apis": 3,
+        "confidence_base": 0.40,
+        "confidence_max": 0.58,
+        "apis": ["SSL_CTX_new", "SSL_new", "SSL_connect", "SSL_read", "SSL_write"],
+    },
+    {
+        "technique_id": "T1548.001",
+        "name": "Setuid and Setgid",
+        "platforms": ["linux"],
+        "min_apis": 2,
+        "confidence_base": 0.44,
+        "confidence_max": 0.60,
+        "apis": ["setuid", "setgid", "setresuid", "setresgid", "setreuid", "setregid"],
+    },
+    {
+        "technique_id": "T1055.008",
+        "name": "Ptrace System Calls",
+        "platforms": ["linux"],
+        "min_apis": 2,
+        "confidence_base": 0.50,
+        "confidence_max": 0.65,
+        "apis": ["ptrace", "process_vm_readv", "process_vm_writev"],
+    },
+    {
+        "technique_id": "T1620",
+        "name": "Reflective Code Loading",
+        "platforms": ["linux"],
+        "min_apis": 2,
+        "confidence_base": 0.50,
+        "confidence_max": 0.65,
+        "apis": ["memfd_create", "fexecve"],
+    },
+    {
+        "technique_id": "T1622",
+        "name": "Debugger Evasion",
+        "platforms": ["linux"],
+        "min_apis": 2,
+        "confidence_base": 0.46,
+        "confidence_max": 0.62,
+        "apis": ["ptrace", "personality"],
+    },
 ]
 
 _CONFIDENCE_CEILING = 0.65
@@ -1822,6 +2192,16 @@ def _vendored_replacements() -> dict[str, str]:
         for tid, row in raw.items()
         if isinstance(row, dict) and not str(tid).startswith("_") and row.get("revoked_by")
     }
+
+
+def _vendored_platforms(technique_id: str) -> tuple[str, ...]:
+    """The platforms the vendored table declares for an id, lowercased."""
+    try:
+        raw = json.loads(_TECHNIQUES.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ()
+    row = raw.get(technique_id)
+    return tuple(str(p).lower() for p in (row or {}).get("platforms") or ())
 
 
 def _retargeted(
@@ -1863,10 +2243,14 @@ def _validate(techniques: list[dict[str, Any]]) -> list[str]:
     if not valid_ids:
         problems.append(f"cannot read {_VALID_IDS}")
 
-    known_apis = {api for _tier, apis in WINDOWS_CATEGORIES.values() for api in apis}
+    known_apis = {
+        platform: {api for _tier, apis in categories.values() for api in apis}
+        for platform, categories in CATEGORIES_BY_PLATFORM.items()
+    }
 
     for tech in techniques:
         tid = tech["technique_id"]
+        platforms = [str(p) for p in tech.get("platforms") or ["windows"]]
         if valid_ids and tid not in valid_ids:
             problems.append(f"{tid} is not in attck_valid_ids.json")
         if tech["confidence_max"] > _CONFIDENCE_CEILING:
@@ -1878,21 +2262,36 @@ def _validate(techniques: list[dict[str, Any]]) -> list[str]:
         # An ATT&CK entry naming an API the behaviour table has never heard of is
         # almost always a typo, and a typo here is silent: the technique simply
         # never fires.
-        for api in tech["apis"]:
-            if api not in known_apis:
-                problems.append(f"{tid} references unknown API {api!r}")
+        for platform in platforms:
+            if platform not in known_apis:
+                problems.append(f"{tid} names the platform {platform!r}, which has no categories")
+                continue
+            for api in tech["apis"]:
+                if api not in known_apis[platform]:
+                    problems.append(f"{tid} references unknown {platform} API {api!r}")
+        # A technique rule must apply to the platform it is filed under: the
+        # id's own platforms in the vendored table say where it can.
+        declared = _vendored_platforms(tid)
+        for platform in platforms:
+            if declared and platform not in {p.lower() for p in declared}:
+                problems.append(
+                    f"{tid} is filed under {platform} and the catalogue does not list it"
+                )
 
     # Two rules on one id are allowed and one rule twice is not: a release that
     # folds two sub-techniques into one technique — 19.2 folded Disable or
     # Modify Tools and Indicator Blocking into T1685 — leaves two distinct
     # evidence rules pointing at the same id, and each keeps its own APIs, its
-    # own min_apis and its own confidence. A repeated (id, name) is the copy
-    # the duplicate check exists to catch.
-    seen: set[tuple[str, str]] = set()
-    for rule in ((str(t["technique_id"]), str(t["name"])) for t in techniques):
-        if rule in seen:
-            problems.append(f"duplicate technique {rule[0]} {rule[1]!r}")
-        seen.add(rule)
+    # own min_apis and its own confidence. The same technique evidenced on two
+    # platforms is two rules as well, from two vocabularies. A repeated
+    # (platform, id, name) is the copy the duplicate check exists to catch.
+    seen: set[tuple[str, str, str]] = set()
+    for tech in techniques:
+        for platform in (str(p) for p in tech.get("platforms") or ["windows"]):
+            rule = (platform, str(tech["technique_id"]), str(tech["name"]))
+            if rule in seen:
+                problems.append(f"duplicate {rule[0]} technique {rule[1]} {rule[2]!r}")
+            seen.add(rule)
 
     # An API in two categories has no defined tier. The consumer is a reverse
     # index — one dict, one entry per name — so whichever category is built last
@@ -1901,22 +2300,25 @@ def _validate(techniques: list[dict[str, Any]]) -> list[str]:
     # and `discovery` (informational, therefore not), which meant the import's
     # suspicion depended on dict ordering rather than on anything about the
     # import. Ambiguity here is not a style problem, it is nondeterminism.
-    owners: dict[str, list[str]] = {}
-    for category, (_tier, apis) in WINDOWS_CATEGORIES.items():
-        for api in apis:
-            owners.setdefault(api.lower(), []).append(category)
-    for api, cats in sorted(owners.items()):
-        if len(cats) > 1:
-            problems.append(f"{api!r} claimed by more than one category: {sorted(cats)}")
+    for platform, categories in CATEGORIES_BY_PLATFORM.items():
+        owners: dict[str, list[str]] = {}
+        for category, (_tier, apis) in categories.items():
+            for api in apis:
+                owners.setdefault(api.lower(), []).append(category)
+        for api, cats in sorted(owners.items()):
+            if len(cats) > 1:
+                problems.append(
+                    f"{platform} {api!r} claimed by more than one category: {sorted(cats)}"
+                )
 
     return problems
 
 
-def _block(category: str) -> dict[str, object]:
+def _block(platform: str, category: str) -> dict[str, object]:
     """One category as the catalog carries it, corroborators included."""
-    tier, apis = WINDOWS_CATEGORIES[category]
+    tier, apis = CATEGORIES_BY_PLATFORM[platform][category]
     block: dict[str, object] = {"tier": tier}
-    corroborators = WINDOWS_CORROBORATORS.get(category)
+    corroborators = CORROBORATORS_BY_PLATFORM.get(platform, {}).get(category)
     if corroborators:
         block["corroborated_by"] = sorted(set(corroborators))
     block["apis"] = sorted(set(apis))
@@ -1938,24 +2340,29 @@ def main() -> int:
     behaviour = {
         "schema": "maljan-api-behaviour/v1",
         "version": "1.0",
-        "platforms": {"windows": {cat: _block(cat) for cat in WINDOWS_CATEGORIES}},
+        "platforms": {
+            platform: {cat: _block(platform, cat) for cat in categories}
+            for platform, categories in CATEGORIES_BY_PLATFORM.items()
+        },
     }
     attck = {
         "schema": "maljan-api-attck/v1",
         "version": "1.0",
         "techniques": [
-            {**t, "platforms": ["windows"], "apis": sorted(set(t["apis"]))} for t in techniques
+            {**t, "platforms": t.get("platforms") or ["windows"], "apis": sorted(set(t["apis"]))}
+            for t in techniques
         ],
     }
 
     _BEHAVIOUR_OUT.write_text(json.dumps(behaviour, indent=2) + "\n", encoding="utf-8")
     _ATTCK_OUT.write_text(json.dumps(attck, indent=2) + "\n", encoding="utf-8")
 
-    total_apis = sum(len(set(apis)) for _tier, apis in WINDOWS_CATEGORIES.values())
-    print(
-        f"wrote {_BEHAVIOUR_OUT.relative_to(_ROOT)}: "
-        f"{len(WINDOWS_CATEGORIES)} categories, {total_apis} APIs"
-    )
+    for platform, categories in CATEGORIES_BY_PLATFORM.items():
+        total_apis = sum(len(set(apis)) for _tier, apis in categories.values())
+        print(
+            f"wrote {_BEHAVIOUR_OUT.relative_to(_ROOT)}: "
+            f"{platform}, {len(categories)} categories, {total_apis} APIs"
+        )
     print(f"wrote {_ATTCK_OUT.relative_to(_ROOT)}: {len(techniques)} techniques")
     return 0
 

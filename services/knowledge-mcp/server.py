@@ -82,12 +82,20 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
 
 
 @mcp.tool()
-def api_capability(api_names: list[str]) -> dict[str, Any]:
+def api_capability(api_names: list[str], platform: str = "windows") -> dict[str, Any]:
     """Look up what named APIs do and which techniques the catalogue associates them with.
 
-    A reference association, not an observation of the technique.
+    A reference association, not an observation of the technique. ``platform``
+    is the vocabulary to ask: "windows" for a PE's imports, "linux" for an
+    ELF's dynamic symbols. The two share names, so the wrong one answers about
+    the wrong system.
     """
-    return _guard("api_capability", knowledge_tools.api_capability, api_names=api_names)
+    return _guard(
+        "api_capability",
+        knowledge_tools.api_capability,
+        api_names=api_names,
+        platform=platform,
+    )
 
 
 @mcp.tool()

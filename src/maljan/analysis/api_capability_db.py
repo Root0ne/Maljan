@@ -1,9 +1,15 @@
-"""Reverse-indexed lookup for Windows imports: behaviour category and ATT&CK.
+"""Reverse-indexed lookup for a binary's imports: behaviour category and ATT&CK.
 
-Two projections of **one** fact — the set of API names a PE actually imports.
-Resolving that set is expensive (``pefile`` over the whole binary); projecting
-it onto two taxonomies is nearly free, so both live behind one loader and one
-cache and neither re-parses the sample.
+Two projections of **one** fact — the set of API names a binary actually
+imports. Resolving that set is expensive (``pefile`` over the whole binary, or
+the ELF's dynamic symbol table); projecting it onto two taxonomies is nearly
+free, so both live behind one loader and one cache and neither re-parses the
+sample.
+
+One platform at a time. The catalogue carries a block per platform and the two
+vocabularies overlap by name — ``connect``, ``send``, ``recv``, ``system`` are
+in both — so a caller names the platform its imports came from and gets that
+block's reverse index and that platform's technique rules alone.
 
 The reverse index matters more than it looks. The obvious implementation — for
 each import, walk every category's list — is O(imports x categories x names),
@@ -200,33 +206,43 @@ class ApiAttckMap:
 # ---------------------------------------------------------------------------
 
 _CACHE_LOCK = threading.Lock()
-_BEHAVIOUR_CACHE: dict[str, ApiBehaviourDB | None] = {}
-_ATTCK_CACHE: dict[str, ApiAttckMap | None] = {}
+_BEHAVIOUR_CACHE: dict[tuple[str, str], ApiBehaviourDB | None] = {}
+_ATTCK_CACHE: dict[tuple[str, str], ApiAttckMap | None] = {}
+
+# The platform whose vocabulary is loaded when a caller names none. Windows was
+# the only block the catalogue had, and every caller that predates the Linux
+# one means Windows.
+DEFAULT_PLATFORM = "windows"
 
 
-def load_api_behaviour_db(catalog_path: str) -> ApiBehaviourDB | None:
-    """Load (and cache) the behaviour map, or ``None``.
+def load_api_behaviour_db(
+    catalog_path: str, platform: str = DEFAULT_PLATFORM
+) -> ApiBehaviourDB | None:
+    """Load (and cache) one platform's behaviour map, or ``None``.
 
-    ``None`` — never an exception — when the file is absent or malformed, so
-    callers treat "no catalog" as the normal degraded state.
+    ``None`` — never an exception — when the file is absent or malformed or
+    carries no block for the platform, so callers treat "no catalog" as the
+    normal degraded state. Each platform is its own vocabulary and its own
+    reverse index: ``connect`` and ``send`` are in both, and folding the two
+    together would give a PE's imports a libc category.
     """
-    key = str(catalog_path)
+    key = (str(catalog_path), str(platform).strip().lower() or DEFAULT_PLATFORM)
     with _CACHE_LOCK:
         if key in _BEHAVIOUR_CACHE:
             return _BEHAVIOUR_CACHE[key]
-    result = _load_behaviour_uncached(key)
+    result = _load_behaviour_uncached(*key)
     with _CACHE_LOCK:
         _BEHAVIOUR_CACHE[key] = result
     return result
 
 
-def load_api_attck_map(catalog_path: str) -> ApiAttckMap | None:
-    """Load (and cache) the API→ATT&CK map, or ``None``."""
-    key = str(catalog_path)
+def load_api_attck_map(catalog_path: str, platform: str = DEFAULT_PLATFORM) -> ApiAttckMap | None:
+    """Load (and cache) the API→ATT&CK rules that apply to one platform."""
+    key = (str(catalog_path), str(platform).strip().lower() or DEFAULT_PLATFORM)
     with _CACHE_LOCK:
         if key in _ATTCK_CACHE:
             return _ATTCK_CACHE[key]
-    result = _load_attck_uncached(key)
+    result = _load_attck_uncached(*key)
     with _CACHE_LOCK:
         _ATTCK_CACHE[key] = result
     return result
@@ -256,7 +272,7 @@ def _read_json(catalog_path: str, what: str) -> dict[str, Any] | None:
     return doc
 
 
-def _load_behaviour_uncached(catalog_path: str) -> ApiBehaviourDB | None:
+def _load_behaviour_uncached(catalog_path: str, platform: str) -> ApiBehaviourDB | None:
     doc = _read_json(catalog_path, "api-behaviour")
     if doc is None:
         return None
@@ -267,10 +283,12 @@ def _load_behaviour_uncached(catalog_path: str) -> ApiBehaviourDB | None:
             "api-behaviour: '%s' has no 'platforms' — using the built-in table.", catalog_path
         )
         return None
-    windows = platforms.get("windows")
-    if not isinstance(windows, dict):
-        logger.warning(
-            "api-behaviour: '%s' has no windows platform — using the built-in table.", catalog_path
+    block = platforms.get(platform)
+    if not isinstance(block, dict):
+        logger.info(
+            "api-behaviour: '%s' has no %s platform — no behaviour categories for it.",
+            catalog_path,
+            platform,
         )
         return None
 
@@ -279,7 +297,7 @@ def _load_behaviour_uncached(catalog_path: str) -> ApiBehaviourDB | None:
     tiers: dict[str, str] = {}
     corroborators: dict[str, tuple[str, ...]] = {}
 
-    for category, spec in windows.items():
+    for category, spec in block.items():
         if not isinstance(category, str) or not isinstance(spec, dict):
             continue
         tier = spec.get("tier")
@@ -306,13 +324,16 @@ def _load_behaviour_uncached(catalog_path: str) -> ApiBehaviourDB | None:
 
     if not by_name:
         logger.warning(
-            "api-behaviour: '%s' produced no entries — using the built-in table.", catalog_path
+            "api-behaviour: '%s' produced no %s entries — using the built-in table.",
+            catalog_path,
+            platform,
         )
         return None
 
     logger.info(
-        "api-behaviour: loaded %d APIs across %d categories from '%s'.",
+        "api-behaviour: loaded %d %s APIs across %d categories from '%s'.",
         len(by_name),
+        platform,
         len(tiers),
         catalog_path,
     )
@@ -324,7 +345,7 @@ def _load_behaviour_uncached(catalog_path: str) -> ApiBehaviourDB | None:
     )
 
 
-def _load_attck_uncached(catalog_path: str) -> ApiAttckMap | None:
+def _load_attck_uncached(catalog_path: str, platform: str) -> ApiAttckMap | None:
     doc = _read_json(catalog_path, "api-attck")
     if doc is None:
         return None
@@ -338,16 +359,26 @@ def _load_attck_uncached(catalog_path: str) -> ApiAttckMap | None:
     relevant: set[str] = set()
     for row in rows:
         rule = _parse_rule(row)
-        if rule is None:
+        # A rule is matched only against the platform it is written for. The
+        # two vocabularies share names — ``connect``, ``send``, ``recv`` — so a
+        # PE's imports would otherwise clear a libc rule and an ELF's a Win32
+        # one, each citing a technique nothing on that sample evidences.
+        if rule is None or platform not in {p.lower() for p in rule.platforms}:
             continue
         rules.append(rule)
         relevant |= set(rule.apis_lower)
 
     if not rules:
-        logger.warning("api-attck: '%s' produced no usable rules — layer disabled.", catalog_path)
+        logger.warning(
+            "api-attck: '%s' has no usable %s rules — no technique rows for it.",
+            catalog_path,
+            platform,
+        )
         return None
 
-    logger.info("api-attck: loaded %d technique rules from '%s'.", len(rules), catalog_path)
+    logger.info(
+        "api-attck: loaded %d %s technique rules from '%s'.", len(rules), platform, catalog_path
+    )
     return ApiAttckMap(techniques=tuple(rules), relevant_apis_lower=frozenset(relevant))
 
 

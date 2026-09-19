@@ -365,6 +365,21 @@ A failed index build is remembered for `validation.index_retry_seconds`
 (default 900) and then attempted again, so one unreachable moment does not cost
 a worker its index for the life of the process; 0 never re-attempts.
 
+### The API catalogue
+
+`data/api_behaviour_map_v1.json` and `data/api_attck_map_v1.json` are written
+by `scripts/knowledge/build_api_capability_db.py` (`make prepare-api-db`) from
+the curated tables in its source; no hand edits. Both carry one block per
+platform — `windows` for a PE's imports, `linux` for an ELF's dynamic symbols —
+and a caller asks one at a time, because the two vocabularies share names
+(`connect`, `send`, `system`). `tools.knowledge.api_capability` takes
+`platform` and the triage pack passes the routed format's, so an ELF's symbols
+are never given Win32 categories. The Linux block is narrower on purpose:
+there is no registry, and persistence, keylogging, screen capture and
+credential access have no unambiguous libc vocabulary to author from. A
+technique id in either block is retargeted, or dropped and listed, against the
+vendored catalogue's `revoked_by` when a release retires it.
+
 ### Rule corpora
 
 The Sigma and YARA corpora belong to the `analysis` tool server, which is what
