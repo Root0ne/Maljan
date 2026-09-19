@@ -1808,11 +1808,33 @@ def _runtime_paths(evidence_corpus: set[str] | None) -> set[str]:
     return found
 
 
-# A place written as a place: a root — a POSIX slash, a drive letter, a UNC
-# share, an environment variable — and at least one step under it. A directory
-# carries no extension, so the shape of the path is what is left to ask about;
-# a bare ``/I FyD`` out of a strings table has a root and nothing under it.
-_DIRECTORY_SHAPE_RE = re.compile(r"^(?:/|[A-Za-z]:[\\/]|\\\\|%[A-Za-z_]+%[\\/])[^\\/]+[\\/]")
+# The root a path on this machine is written from: a POSIX slash, a drive with
+# either separator, a UNC share, an environment variable, a home tilde, or a
+# registry hive — which ``directory:path`` carries about as often as the
+# registry's own object type does.
+_DIRECTORY_ROOT_RE = re.compile(
+    r"^(?:/"
+    r"|[A-Za-z]:[\\/]?"
+    r"|\\\\"
+    r"|%[A-Za-z_][A-Za-z0-9_]*%[\\/]?"
+    r"|\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)[\\/]?"
+    r"|~[\\/]?"
+    r"|(?:HKLM|HKCU|HKCR|HKU|HKCC|HKEY_[A-Z_]+)[\\/]"
+    r")",
+    re.IGNORECASE,
+)
+
+# A step that is a placeholder rather than a name. A strings table is full of
+# them — a format string the sample was compiled with, read out of the bytes as
+# though it were a path somebody visited.
+_PLACEHOLDER_STEP_RE = re.compile(r"^(?:%[-+ #0-9.]*[a-zA-Z]|%\d+|\{[^}]*\}|<[^>]*>|\$\d+)$")
+
+# What a step must carry to read as a name rather than as punctuation: two
+# characters somebody could have typed as part of one.
+_NAME_RUN_RE = re.compile(r"[A-Za-z0-9]{2}")
+
+# A character no path on any of these filesystems carries.
+_CONTROL_CHARACTERS = frozenset(chr(code) for code in range(0x20)) | {chr(0x7F)}
 
 # A run of hexadecimal on its own, and the lengths a digest this project can
 # name comes in. Anything else quoted in a pattern is asked the corpus question
@@ -1840,6 +1862,62 @@ def _comparisons(pattern: str) -> list[tuple[str, str]]:
         for comparison in read_comparisons(pattern)
         if comparison.literal.strip()
     ]
+
+
+def reads_as_a_place(value: str) -> bool:
+    """Whether this literal is written the way a directory on a machine is.
+
+    The validity half of the directory question, and only that: it removes what
+    could not be a place, and says nothing about whether this run saw one. A
+    place has a root and at least one named step under it — ``/tmp`` is a
+    directory, ``/`` and ``C:\\`` are roots and nothing under them — and every
+    step is written the way a name is: not empty, not whitespace, no control
+    character, not a format specifier a sample was compiled with, and at least
+    one of them carrying two characters running that somebody could have typed.
+    A strings table produces ``/%s/%s`` and ``/ /`` by the dozen.
+    """
+    text = str(value or "")
+    root = _DIRECTORY_ROOT_RE.match(text)
+    if root is None:
+        return False
+    steps = [step for step in re.split(r"[\\/]", text[root.end() :]) if step != ""]
+    if not steps or text[root.end() :].startswith(("/", "\\")):
+        return False
+    for step in steps:
+        if not step.strip() or _PLACEHOLDER_STEP_RE.match(step):
+            return False
+        if any(character in _CONTROL_CHARACTERS for character in step):
+            return False
+    return any(_NAME_RUN_RE.search(step) for step in steps)
+
+
+def _place_in_the_evidence(
+    literal: str, haystack: str, runtime_paths: set[str], own: set[str]
+) -> bool:
+    """Whether the run recorded this place, however either side spelled it.
+
+    The grounding half. A path is written with whichever separator the writer's
+    platform uses and with a trailing one as often as without, so the literal is
+    asked under the spellings that mean the same location — the normalisation
+    the report's own path rows go through — and each is asked as a whole value
+    rather than as a substring.
+    """
+    from maljan.agents._indicator_denylists import whole_value_in
+    from maljan.reporting.dedupe import canonical_path
+
+    lowered = literal.lower()
+    spellings = {
+        lowered,
+        canonical_path(literal).lower(),
+        lowered.replace("\\", "/"),
+        lowered.replace("/", "\\"),
+    }
+    spellings |= {spelling.rstrip("/\\") for spelling in spellings if len(spelling) > 1}
+    return any(
+        spelling in own or spelling in runtime_paths or whole_value_in(spelling, haystack)
+        for spelling in spellings
+        if spelling
+    )
 
 
 def _whole_token_in(literal: str, haystack: str, own: set[str]) -> bool:
@@ -1977,16 +2055,21 @@ def _indicator_problem(
                 or lowered in own
             )
             if path.startswith("directory:path"):
-                # A directory has no extension to answer with, and telling the
-                # judge its own row "has no file extension … so nothing says it
-                # is a real path" was untrue of the thing it had written. What
-                # is asked of a place is whether it is written as one: a root
-                # and a step under it, or a location this run watched.
-                if not (anchored or _DIRECTORY_SHAPE_RE.match(literal)):
+                # Two questions, and a directory is asked both. A directory has
+                # no extension to answer the first with, and telling the judge
+                # its own row "has no file extension … so nothing says it is a
+                # real path" was untrue of the thing it had written.
+                if not reads_as_a_place(literal):
                     return (
-                        f"{safe_finding_value(literal)!r} is not anchored to a filesystem "
-                        "location and was not observed at runtime, so nothing says it is a "
-                        "directory on the analysed machine."
+                        f"{safe_finding_value(literal)!r} is not written as a directory: a "
+                        "path on this machine has a root — a drive, a share, a POSIX slash, "
+                        "an environment variable or a registry hive — and at least one named "
+                        "step under it."
+                    )
+                if not _place_in_the_evidence(literal, haystack, runtime_paths, own):
+                    return (
+                        f"{safe_finding_value(literal)!r} appears nowhere in the evidence "
+                        "this run collected as a value of its own."
                     )
                 grounded = True
                 continue
