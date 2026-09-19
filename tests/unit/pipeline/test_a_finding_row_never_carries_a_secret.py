@@ -33,6 +33,7 @@ from maljan.pipeline.validation import (
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 from maljan.schemas.stix_models import Bundle
 from tests.credential_shapes import prefixed_key
+from tests.unit.pipeline._source_names import called_name, names_reaching
 from tests.unit.pipeline.test_validation import _Attck
 
 SRC = pathlib.Path(__file__).resolve().parents[3] / "src" / "maljan"
@@ -275,6 +276,12 @@ OWNED_IN: dict[str, frozenset[str]] = {
 }
 
 WRAPPER = "safe_finding_value"
+# The constructor of a stored finding row. Never compared as a bare spelling:
+# ``from ... import Violation as Finding`` renames it and a walk keyed on the
+# one spelling goes quiet on the whole module. ``tests/unit/pipeline``'s other
+# source guard was told the same thing about its own helper and the resolution
+# is shared with it.
+CONSTRUCTOR = "Violation"
 
 
 def _source(name: str) -> pathlib.Path:
@@ -284,12 +291,6 @@ def _source(name: str) -> pathlib.Path:
 def _tree_of(name: str) -> ast.AST:
     path = _source(name)
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-
-
-def _called(node: ast.AST) -> str:
-    """The name a call calls, however it is spelled."""
-    func = getattr(node, "func", None)
-    return getattr(func, "id", "") or getattr(func, "attr", "")
 
 
 def _root_names(node: ast.AST) -> set[str]:
@@ -321,7 +322,7 @@ def _module_names(tree: ast.AST) -> frozenset[str]:
 
 def _is_wrapped(node: ast.AST) -> bool:
     return any(
-        isinstance(child, ast.Call) and _called(child) == WRAPPER for child in ast.walk(node)
+        isinstance(child, ast.Call) and called_name(child) == WRAPPER for child in ast.walk(node)
     )
 
 
@@ -344,7 +345,7 @@ def _is_code_owned(node: ast.AST, owned: frozenset[str] | set[str]) -> bool:
     argument was obtained: ``_retired_note(tid, attck)`` answers a catalogue
     release, not the technique id it was asked about.
     """
-    if isinstance(node, ast.Call) and _called(node) in CODE_OWNED_CALLS:
+    if isinstance(node, ast.Call) and called_name(node) in CODE_OWNED_CALLS:
         return True
     names = _root_names(node)
     if not names:
@@ -356,7 +357,7 @@ def _value_is_owned(node: ast.AST, owned: frozenset[str] | set[str]) -> bool:
     """Whether the text this expression produces is this codebase's own."""
     if _is_wrapped(node):
         return True
-    if isinstance(node, ast.Call) and _called(node) in MESSAGE_BUILDERS | CODE_OWNED_CALLS:
+    if isinstance(node, ast.Call) and called_name(node) in MESSAGE_BUILDERS | CODE_OWNED_CALLS:
         return True
     if _is_text_expression(node):
         return all(
@@ -367,39 +368,111 @@ def _value_is_owned(node: ast.AST, owned: frozenset[str] | set[str]) -> bool:
     return _is_code_owned(node, owned)
 
 
-def _owned_locals(function: ast.FunctionDef, owned: frozenset[str]) -> set[str]:
-    """Names this function assigns from a value whose text this codebase owns.
+# A binding with nothing to read: a parameter, a loop or comprehension target,
+# a ``with`` or ``except`` name, a nested definition. Whatever it holds came
+# from outside this function's own text, so the name is not this codebase's
+# however it is spelled.
+OPAQUE = object()
+# A binding whose value is another module's own source.
+IMPORTED = object()
+
+
+def _bindings(function: ast.FunctionDef) -> dict[str, list[Any]]:
+    """Every name this function binds, and what each binding was given.
+
+    The value is the expression assigned, :data:`IMPORTED` for a name an import
+    binds, or :data:`OPAQUE` for a binding with no expression to read.
+    Collected so that a name can be *revoked*: ownership that only grows means
+    a local spelled like one of the 251 names the walked modules bind at their
+    top level — ``scrub``, ``reason_sentence``, ``corroboration_row`` — is
+    trusted for its spelling, which is the rule this file exists to refuse.
+    """
+    found: dict[str, list[Any]] = {}
+
+    def _bind(name: str, value: Any) -> None:
+        found.setdefault(name, []).append(value)
+
+    def _targets(node: ast.AST, value: Any) -> None:
+        """Bind what this target binds, and nothing it merely reads.
+
+        ``rows[name] = x`` and ``obj.field = x`` bind neither ``name`` nor
+        ``field``: they read one and write through the other, and treating the
+        index as a binding revoked a constant a function had imported.
+        """
+        if isinstance(node, ast.Name):
+            _bind(node.id, value)
+        elif isinstance(node, ast.Tuple | ast.List):
+            for element in node.elts:
+                _targets(element, value)
+        elif isinstance(node, ast.Starred):
+            _targets(node.value, value)
+
+    for node in ast.walk(function):
+        if isinstance(node, ast.arg):
+            _bind(node.arg, OPAQUE)
+        elif isinstance(node, ast.Import | ast.ImportFrom):
+            for alias in node.names:
+                _bind(alias.asname or alias.name.split(".")[0], IMPORTED)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                _targets(target, node.value)
+        elif isinstance(node, ast.AnnAssign | ast.AugAssign):
+            if isinstance(node.target, ast.Name):
+                _bind(node.target.id, node.value if node.value is not None else OPAQUE)
+        elif isinstance(node, ast.NamedExpr):
+            _bind(node.target.id, node.value)
+        elif isinstance(node, ast.For | ast.AsyncFor | ast.comprehension):
+            _targets(node.target, OPAQUE)
+        elif isinstance(node, ast.withitem):
+            if node.optional_vars is not None:
+                _targets(node.optional_vars, OPAQUE)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            _bind(node.name, OPAQUE)
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            if node is not function:
+                _bind(node.name, OPAQUE)
+    return found
+
+
+def _owned_locals(
+    function: ast.FunctionDef, owned: frozenset[str], bindings: dict[str, list[Any]]
+) -> set[str]:
+    """Names this function binds whose every binding this codebase owns.
 
     ``message = safe_finding_value(...)`` two lines above the f-string that
     prints it is the same wrap, and a scan that could not see that would push
     the helper into the f-string for no reason. ``why = f"…{OWN_CONSTANT}…"``
     is the same thing said with a constant, and ``mismatch =
     platform_mismatch_message(...)`` is the builder's own guarantee — which is
-    what makes it safe, not the name it was given.
+    what makes it safe, not the name it was given. A name the function imports
+    is owned for the reason a module-level one is: it is another module's own
+    source, and half the vocabularies these sentences quote are imported where
+    they are used.
+
+    *Every* binding, because one of them is enough to carry a producer's text:
+    a name given a constant on one line and a model's answer on the next is
+    this codebase's on neither.
     """
-    assigned: set[str] = {
-        alias.asname or alias.name.split(".")[0]
-        for node in ast.walk(function)
-        if isinstance(node, ast.Import | ast.ImportFrom)
-        for alias in node.names
-    }
-    for _round in range(3):
+    assigned: set[str] = set()
+    for _round in range(len(bindings) + 1):
         before = len(assigned)
-        for node in ast.walk(function):
-            if not isinstance(node, ast.Assign | ast.AnnAssign) or node.value is None:
+        for name, values in bindings.items():
+            if name in assigned:
                 continue
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            names = {t.id for t in targets if isinstance(t, ast.Name)}
-            if not names or names <= assigned:
-                continue
-            if _value_is_owned(node.value, owned | assigned):
-                assigned |= names
+            if all(
+                value is IMPORTED
+                or (value is not OPAQUE and _value_is_owned(value, owned | assigned))
+                for value in values
+            ):
+                assigned.add(name)
         if len(assigned) == before:
             break
     return assigned
 
 
-def _message_expressions(function: ast.FunctionDef) -> list[ast.expr]:
+def _message_expressions(
+    function: ast.FunctionDef, constructors: frozenset[str] | set[str]
+) -> list[ast.expr]:
     """The expressions this function turns into a violation message.
 
     For a function that builds a message for somebody else, that is everything
@@ -413,7 +486,7 @@ def _message_expressions(function: ast.FunctionDef) -> list[ast.expr]:
         return [function]
     found: list[ast.expr] = []
     for node in ast.walk(function):
-        if not (isinstance(node, ast.Call) and _called(node) == "Violation"):
+        if not (isinstance(node, ast.Call) and called_name(node) in constructors):
             continue
         found.extend(_violation_messages(node))
     return found
@@ -427,17 +500,21 @@ def _violation_messages(node: ast.Call) -> list[ast.expr]:
     return found
 
 
-def _interpolations(function: ast.FunctionDef) -> list[ast.expr]:
+def _interpolations(
+    function: ast.FunctionDef, constructors: frozenset[str] | set[str]
+) -> list[ast.expr]:
     """Every value the messages of this function substitute."""
     return [
         node.value
-        for expression in _message_expressions(function)
+        for expression in _message_expressions(function, constructors)
         for node in ast.walk(expression)
         if isinstance(node, ast.FormattedValue)
     ]
 
 
-def _functions_that_matter(tree: ast.AST) -> list[ast.FunctionDef]:
+def _functions_that_matter(
+    tree: ast.AST, constructors: frozenset[str] | set[str]
+) -> list[ast.FunctionDef]:
     """The functions that build a Violation, plus the ones that build a message."""
     found: list[ast.FunctionDef] = []
     for node in ast.walk(tree):
@@ -447,15 +524,40 @@ def _functions_that_matter(tree: ast.AST) -> list[ast.FunctionDef]:
             found.append(node)
             continue
         if any(
-            isinstance(child, ast.Call) and _called(child) == "Violation"
+            isinstance(child, ast.Call) and called_name(child) in constructors
             for child in ast.walk(node)
         ):
             found.append(node)
     return found
 
 
+def _builds_a_row(tree: ast.AST) -> bool:
+    """Whether this module constructs a finding row, under any name it gave it."""
+    constructors = names_reaching(tree, CONSTRUCTOR)
+    return any(
+        isinstance(node, ast.Call) and called_name(node) in constructors for node in ast.walk(tree)
+    )
+
+
 def _owned_for(function: ast.FunctionDef, module: frozenset[str]) -> frozenset[str]:
-    return frozenset(CODE_OWNED | BUILTIN_NAMES | module | OWNED_IN.get(function.name, frozenset()))
+    """Every name whose value this codebase owns *where this function reads it*.
+
+    A module-level name is owned until the function binds that spelling itself.
+    Then the binding is what reaches the interpolation, and only the binding can
+    say whether the text is this repository's — which is why a local is asked
+    about its value and never about its name.
+    """
+    bindings = _bindings(function)
+    # ``CODE_OWNED`` survives a binding and the module's own names do not, and
+    # the difference is who vouched for what. Each name on ``CODE_OWNED`` is a
+    # local somebody read and wrote a reason for. A module-level name is owned
+    # because of where it is *bound*, so a function that binds that spelling
+    # itself is reading something else entirely — and there are 251 of those
+    # spellings across the walked modules, several of them ordinary lowercase
+    # words a function would reach for.
+    vouched = CODE_OWNED | OWNED_IN.get(function.name, frozenset())
+    outer = frozenset(vouched | ((BUILTIN_NAMES | module) - set(bindings)))
+    return outer | frozenset(_owned_locals(function, outer, bindings))
 
 
 class TestEveryRowIsHeldToTheSameRule:
@@ -465,10 +567,7 @@ class TestEveryRowIsHeldToTheSameRule:
         elsewhere = sorted(
             str(path.relative_to(SRC))
             for path in SRC.rglob("*.py")
-            if any(
-                isinstance(node, ast.Call) and _called(node) == "Violation"
-                for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
-            )
+            if _builds_a_row(ast.parse(path.read_text(encoding="utf-8")))
             and str(path.relative_to(SRC)) not in WALKED
         )
 
@@ -478,10 +577,14 @@ class TestEveryRowIsHeldToTheSameRule:
         )
 
     def test_it_inspects_the_modules_it_claims_to(self) -> None:
-        functions = [f for name in WALKED for f in _functions_that_matter(_tree_of(name))]
+        found: list[tuple[ast.FunctionDef, set[str]]] = []
+        for name in WALKED:
+            tree = _tree_of(name)
+            constructors = names_reaching(tree, CONSTRUCTOR)
+            found += [(f, constructors) for f in _functions_that_matter(tree, constructors)]
 
-        assert len(functions) >= 13, "the scan found almost nothing to look at"
-        assert sum(len(_interpolations(f)) for f in functions) >= 20
+        assert len(found) >= 13, "the scan found almost nothing to look at"
+        assert sum(len(_interpolations(f, c)) for f, c in found) >= 20
 
     def test_every_message_builder_it_trusts_is_one_of_these_functions(self) -> None:
         defined = {
@@ -498,11 +601,11 @@ class TestEveryRowIsHeldToTheSameRule:
         for name in WALKED:
             tree = _tree_of(name)
             module = _module_names(tree)
-            for function in _functions_that_matter(tree):
+            constructors = names_reaching(tree, CONSTRUCTOR)
+            for function in _functions_that_matter(tree, constructors):
                 owned = _owned_for(function, module)
-                wrapped = _owned_locals(function, owned)
-                for value in _interpolations(function):
-                    if _is_wrapped(value) or _is_code_owned(value, owned | wrapped):
+                for value in _interpolations(function, constructors):
+                    if _is_wrapped(value) or _is_code_owned(value, owned):
                         continue
                     offences.append(f"{name}:{value.lineno} {function.name}: {ast.unparse(value)}")
 
@@ -519,12 +622,11 @@ class TestEveryRowIsHeldToTheSameRule:
         for name in WALKED:
             tree = _tree_of(name)
             module = _module_names(tree)
-            for function in _functions_that_matter(tree):
-                owned = _owned_for(function, module) | _owned_locals(
-                    function, _owned_for(function, module)
-                )
+            constructors = names_reaching(tree, CONSTRUCTOR)
+            for function in _functions_that_matter(tree, constructors):
+                owned = _owned_for(function, module)
                 for node in ast.walk(function):
-                    if not (isinstance(node, ast.Call) and _called(node) == "Violation"):
+                    if not (isinstance(node, ast.Call) and called_name(node) in constructors):
                         continue
                     for message in _violation_messages(node):
                         if isinstance(message, ast.JoinedStr | ast.Constant):
@@ -557,39 +659,159 @@ class TestEveryRowIsHeldToTheSameRule:
 
         assert self._offences(source) == ["model_text"]
 
+    def test_it_catches_one_built_under_an_alias(self) -> None:
+        """A renaming import used to take the whole module out of the scan."""
+        source = (
+            "from maljan.pipeline.validation import Violation as V\n"
+            "def leak(model_text):\n"
+            "    return V('x', f'said {model_text}')\n"
+        )
+
+        assert self._offences(source) == ["model_text"]
+        assert _builds_a_row(ast.parse(source))
+
+    def test_it_catches_one_built_through_a_module_alias(self) -> None:
+        source = (
+            "from maljan.pipeline import validation as val\n"
+            "def leak(model_text):\n"
+            "    return val.Violation('x', f'said {model_text}')\n"
+        )
+
+        assert self._offences(source) == ["model_text"]
+        assert _builds_a_row(ast.parse(source))
+
     def test_it_does_not_trust_a_local_spelled_like_a_builder(self) -> None:
         """A name on MESSAGE_BUILDERS used to make any local of that name safe."""
         source = (
             "def leak(model_text):\n    problem = model_text\n    return Violation('x', problem)\n"
         )
-        tree = ast.parse(source)
-        module = _module_names(tree)
 
-        offences = [
-            ast.unparse(message)
-            for function in _functions_that_matter(tree)
-            for node in ast.walk(function)
-            if isinstance(node, ast.Call) and _called(node) == "Violation"
-            for message in _violation_messages(node)
-            if not _value_is_owned(
-                message,
-                _owned_for(function, module)
-                | _owned_locals(function, _owned_for(function, module)),
-            )
-        ]
+        assert self._message_offences(source) == ["problem"]
 
-        assert offences == ["problem"]
+    def test_it_does_not_trust_a_local_spelled_like_a_module_constant(self) -> None:
+        """Ownership that only grows trusts a local for the name it borrowed."""
+        source = (
+            "OWN = 'constant'\n"
+            "def leak(model_text):\n"
+            "    OWN = model_text\n"
+            "    return Violation('x', f'said {OWN}')\n"
+        )
+
+        assert self._offences(source) == ["OWN"]
+
+    def test_a_name_given_a_constant_and_then_a_producer_s_text_is_neither(self) -> None:
+        source = (
+            "OWN = 'constant'\n"
+            "def leak(model_text):\n"
+            "    OWN = 'still ours'\n"
+            "    OWN = model_text\n"
+            "    return Violation('x', f'said {OWN}')\n"
+        )
+
+        assert self._offences(source) == ["OWN"]
+
+    def test_a_loop_target_that_borrows_a_module_name_is_not_owned(self) -> None:
+        source = (
+            "STEP = 'constant'\n"
+            "def leak(rows):\n"
+            "    for STEP in rows:\n"
+            "        return Violation('x', f'said {STEP}')\n"
+        )
+
+        assert self._offences(source) == ["STEP"]
+
+    def test_an_except_target_that_borrows_a_module_name_is_not_owned(self) -> None:
+        source = (
+            "WHERE = 'constant'\n"
+            "def leak():\n"
+            "    try:\n"
+            "        pass\n"
+            "    except ValueError as WHERE:\n"
+            "        return Violation('x', f'said {WHERE}')\n"
+        )
+
+        assert self._offences(source) == ["WHERE"]
+
+    def test_a_with_target_that_borrows_a_module_name_is_not_owned(self) -> None:
+        source = (
+            "SEEN = 'constant'\n"
+            "def leak(opened):\n"
+            "    with opened as SEEN:\n"
+            "        return Violation('x', f'said {SEEN}')\n"
+        )
+
+        assert self._offences(source) == ["SEEN"]
+
+    def test_a_walrus_that_borrows_a_module_name_is_not_owned(self) -> None:
+        source = (
+            "TALLY = 'constant'\n"
+            "def leak(model_text):\n"
+            "    return Violation('x', f'said {(TALLY := model_text)}')\n"
+        )
+
+        assert "TALLY := model_text" in " ".join(self._offences(source))
+
+    def test_a_comprehension_target_that_borrows_a_module_name_is_not_owned(self) -> None:
+        source = (
+            "PLACE = 'constant'\n"
+            "def leak(rows):\n"
+            "    said = ', '.join(PLACE for PLACE in rows)\n"
+            "    return Violation('x', f'said {said}')\n"
+        )
+
+        assert self._offences(source) == ["said"]
+
+    def test_it_reads_a_row_built_inside_a_nested_function(self) -> None:
+        source = (
+            "def outer(model_text):\n"
+            "    def inner():\n"
+            "        return Violation('x', f'said {model_text}')\n"
+            "    return inner\n"
+        )
+
+        assert self._offences(source) == ["model_text", "model_text"]
+
+    def test_it_reads_a_row_built_in_a_class_body_s_method(self) -> None:
+        source = (
+            "MARK = 'constant'\n"
+            "class Rows:\n"
+            "    def build(self, model_text):\n"
+            "        MARK = model_text\n"
+            "        return Violation('x', f'said {MARK}')\n"
+        )
+
+        assert self._offences(source) == ["MARK"]
 
     @staticmethod
-    def _offences(source: str) -> list[str]:
+    def _scan(source: str) -> tuple[ast.AST, frozenset[str], set[str]]:
         tree = ast.parse(source)
-        module = _module_names(tree)
+        return tree, _module_names(tree), names_reaching(tree, CONSTRUCTOR)
+
+    def _offences(self, source: str) -> list[str]:
+        """Every interpolated value the scan would refuse in this source."""
+        tree, module, constructors = self._scan(source)
         found: list[str] = []
-        for function in _functions_that_matter(tree):
+        for function in _functions_that_matter(tree, constructors):
             owned = _owned_for(function, module)
-            wrapped = _owned_locals(function, owned)
-            for value in _interpolations(function):
-                if _is_wrapped(value) or _is_code_owned(value, owned | wrapped):
+            for value in _interpolations(function, constructors):
+                if _is_wrapped(value) or _is_code_owned(value, owned):
                     continue
                 found.append(ast.unparse(value))
+        return found
+
+    def _message_offences(self, source: str) -> list[str]:
+        """Every whole message the scan would refuse in this source."""
+        tree, module, constructors = self._scan(source)
+        found: list[str] = []
+        for function in _functions_that_matter(tree, constructors):
+            owned = _owned_for(function, module)
+            for node in ast.walk(function):
+                if not (isinstance(node, ast.Call) and called_name(node) in constructors):
+                    continue
+                for message in _violation_messages(node):
+                    if isinstance(message, ast.JoinedStr | ast.Constant):
+                        continue
+                    if _value_is_owned(message, owned):
+                        continue
+                    found.append(ast.unparse(message))
         return found
