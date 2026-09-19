@@ -743,7 +743,7 @@ def pe_info(
 @reads_a_carved_file
 def elf_info(path: str, carved_path: str = "") -> dict[str, Any]:
     """Parse an ELF: sections, imports (listed without interpretation), exports, segments,
-    interpreter, DT_NEEDED."""
+    interpreter, DT_NEEDED. Ask api_capability with platform="linux" what a symbol is used for."""
     return _guard("elf_info", binary_tools.elf_info, path=path, carved_path=carved_path)
 
 

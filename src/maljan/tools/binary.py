@@ -348,7 +348,10 @@ def elf_info(path: str) -> dict[str, Any]:
     shows up in a section table.
 
     Imports are listed without interpretation: each row is ``dll`` and
-    ``function``, and no capability label, as in :func:`pe_info`.
+    ``function``, and no capability label, as in :func:`pe_info`. What a libc
+    symbol is used for is the knowledge server's ``api_capability`` question,
+    asked with ``platform="linux"`` so the answer comes from the catalogue's
+    ELF vocabulary rather than its Win32 one.
     """
     target = Path(path)
     if not target.is_file():

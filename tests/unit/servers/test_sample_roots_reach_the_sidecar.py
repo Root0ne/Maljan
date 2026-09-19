@@ -344,14 +344,20 @@ class TestWhatAStoredRowMayTakeAwayAndWhatItMayNot:
         for key, required in REQUIRED_ENV_ALLOW.items():
             assert set(required) <= set(servers[key].env_allow), key
 
-    def test_nothing_but_the_roots_and_the_staging_names_is_required(self) -> None:
+    def test_nothing_but_the_roots_the_staging_names_and_the_retry_is_required(self) -> None:
         """A credential is never a name a stored row is made to carry."""
         from maljan.core.config import REQUIRED_ENV_ALLOW
+        from maljan.tools.knowledge import INDEX_RETRY_ENV
         from maljan.tools.roots import SAMPLE_ROOTS_ENV
 
         named = {name for required in REQUIRED_ENV_ALLOW.values() for name in required}
 
-        assert named == {SAMPLE_ROOTS_ENV, "MALJAN_STAGING_DIR", "MALJAN_STAGING_TTL_HOURS"}
+        assert named == {
+            SAMPLE_ROOTS_ENV,
+            "MALJAN_STAGING_DIR",
+            "MALJAN_STAGING_TTL_HOURS",
+            INDEX_RETRY_ENV,
+        }
 
     @pytest.mark.parametrize("name", PATH_TAKING)
     def test_a_sidecar_that_confines_paths_may_not_lose_the_roots(self, name: str) -> None:

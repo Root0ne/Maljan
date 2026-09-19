@@ -11,22 +11,8 @@ something that read none of the evidence.
 
 from __future__ import annotations
 
-import pytest
-
 from maljan.extractors.capability_matrix import build_capability_matrix
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-
-
-@pytest.fixture(autouse=True)
-def _the_shared_attck_index(real_attck_index: None) -> None:
-    """Building a capability matrix resolves technique names and tactics.
-
-    It does that through ``ATTCKValidator.get_instance()``, which builds the
-    shared ATT&CK index from the corpus — so a report assembled here reaches
-    the catalogue whatever the test is about. The unit tree holds that build
-    shut; these ask for it by name so the list of tests that pay for it is a
-    list somebody can read.
-    """
 
 
 def _bundle(*, techniques: list[str], relationships: list[dict] | None = None) -> dict:

@@ -10,12 +10,17 @@ failing three hundred files later.
 
 Three doors, each held in the way that fits what is behind it.
 
-**The index build fails.** ``load_all_domains`` is the single entry — the
-knowledge catalogue calls it directly and ``ATTCKIndex.from_loader`` calls it
-too — and it refuses. The refusal is at the build rather than at the network
-fetch on purpose: a machine with a warm cache reaches the same code for the
-same reason and pays a second and a hundred megabytes for it, so a test that
-gets there should be red there too, not only on a runner.
+**The index build fails.** ``load_all_domains`` is the entry
+``ATTCKIndex.from_loader`` uses, and it refuses. The refusal is at the build
+rather than at the network fetch on purpose: a machine with a warm cache
+reaches the same code for the same reason and pays a second and a hundred
+megabytes for it, so a test that gets there should be red there too, not only
+on a runner. ``load_attck_data`` and ``_fetch_bundle`` are held as well,
+because a module that bound the name at import — ``from …attck_loader import
+load_all_domains`` at the top of a test file — keeps the original function and
+walks straight past a patch on the module attribute. Those two are what the
+original reaches through, so the door holds whichever way in a caller found,
+and a test with a stand-in of its own for either still overrides it.
 
 **The embedding model falls back.** ``embeddings`` ships a deterministic
 bag-of-words projection for the case where the model cannot be loaded, and it
@@ -50,6 +55,8 @@ import pytest
 
 from maljan.memory import attck_index, attck_loader, embeddings, semantic_attck_index
 
+_REFUSE_FETCH = "a unit test fetched the ATT&CK corpus from the network."
+
 _STAND_IN = (
     "Use the package's stand-in catalogue (``_Attck`` in "
     "tests/unit/pipeline/test_validation.py or test_technique_check.py), or ask for the "
@@ -66,6 +73,10 @@ def _refuse_build(*_args: Any, **_kwargs: Any) -> Any:
     )
 
 
+def _refuse_fetch(*_args: Any, **_kwargs: Any) -> Any:
+    pytest.fail(f"{_REFUSE_FETCH} {_STAND_IN}", pytrace=False)
+
+
 def _bag_of_words(*_args: Any, **_kwargs: Any) -> None:
     """No model, which is the module's own signal to project bags of words."""
     return None
@@ -77,6 +88,8 @@ def _attck_doors() -> dict[str, Any]:
     return {
         "loader": attck_loader.load_all_domains,
         "index": attck_index.load_all_domains,
+        "data": attck_loader.load_attck_data,
+        "fetch": attck_loader._fetch_bundle,
         "model": embeddings._try_load_fastembed,
     }
 
@@ -121,6 +134,8 @@ def _no_attck_downloads(
     """
     monkeypatch.setattr(attck_loader, "load_all_domains", _refuse_build)
     monkeypatch.setattr(attck_index, "load_all_domains", _refuse_build)
+    monkeypatch.setattr(attck_loader, "load_attck_data", _refuse_build)
+    monkeypatch.setattr(attck_loader, "_fetch_bundle", _refuse_fetch)
     monkeypatch.setattr(embeddings, "_try_load_fastembed", _bag_of_words)
     monkeypatch.setattr(embeddings, "_model", None)
     monkeypatch.setattr(attck_loader, "ATTCK_CACHE_DIR", _attck_cache_dir)
@@ -148,5 +163,7 @@ def real_attck_index(
     """
     monkeypatch.setattr(attck_loader, "load_all_domains", _attck_doors["loader"])
     monkeypatch.setattr(attck_index, "load_all_domains", _attck_doors["loader"])
+    monkeypatch.setattr(attck_loader, "load_attck_data", _attck_doors["data"])
+    monkeypatch.setattr(attck_loader, "_fetch_bundle", _attck_doors["fetch"])
     monkeypatch.setattr(embeddings, "_try_load_fastembed", _attck_doors["model"])
     yield

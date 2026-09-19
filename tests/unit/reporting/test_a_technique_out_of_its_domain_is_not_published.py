@@ -23,8 +23,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
-
 from maljan.extractors.capability_matrix import FINDING_ONLY_REASON, build_capability_matrix
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.renderers.markdown import MarkdownRenderer
@@ -42,18 +40,6 @@ PRE_ONLY = "T1583"
 
 ANDROID = {"platform": "android", "file_type": "apk"}
 WINDOWS = {"platform": "windows", "file_type": "pe"}
-
-
-@pytest.fixture(autouse=True)
-def _the_shared_attck_index(real_attck_index: None) -> None:
-    """Building a capability matrix resolves technique names and tactics.
-
-    It does that through ``ATTCKValidator.get_instance()``, which builds the
-    shared ATT&CK index from the corpus — so a report assembled here reaches
-    the catalogue whatever the test is about. The unit tree holds that build
-    shut; these ask for it by name so the list of tests that pay for it is a
-    list somebody can read.
-    """
 
 
 def _isr(*technique_ids: str) -> dict[str, AgentISR]:
