@@ -1017,15 +1017,69 @@ async def release_job(redis_conn: Any, job_id: str) -> None:
         )
 
 
+def remove_job_staging(job_id: str) -> list[Path]:
+    """Take away what this job's sidecars staged and carved. Never raises.
+
+    Staging is one directory per job, named by the same rule on both sides
+    (``maljan.tools.staging``), so this removes exactly what this process
+    pointed its sidecars at and nothing a concurrent job owns. Removal never
+    follows a symlink: the tree holds live malware, and a link planted in it is
+    the one way a cleanup becomes a delete somewhere else.
+
+    A directory that cannot be removed is said once and left to the sidecar's
+    own TTL sweep, which prunes a job directory whole by the newest mtime
+    inside it. The cached upload paths go with it, because a path into a
+    directory that is gone is not a cache, it is an error every tool call after
+    it would answer with.
+    """
+    from maljan.agents import sample_staging
+    from maljan.tools import staging
+
+    wanted = staging.job_directories(job_id)
+    sample_staging.forget_job(job_id)
+    try:
+        removed = staging.remove_job_staging(job_id)
+    except Exception as exc:  # noqa: BLE001 — a cleanup never fails a finished job
+        logger.warning(
+            "Could not remove the staging directory of job %s (%s); the sidecar's TTL "
+            "sweep prunes it.",
+            job_id,
+            type(exc).__name__,
+            extra={"job_id": job_id, "component": "worker.lifecycle"},
+        )
+        return []
+    left = [path for path in wanted if path not in removed]
+    if left:
+        logger.warning(
+            "The staging directory of job %s was not fully removed (%s); the sidecar's "
+            "TTL sweep prunes it.",
+            job_id,
+            ", ".join(str(path) for path in left),
+            extra={"job_id": job_id, "component": "worker.lifecycle"},
+        )
+    for path in removed:
+        logger.debug("Removed the staging directory %s", path, extra={"job_id": job_id})
+    return removed
+
+
 async def hold_job_owner(redis_conn: Any, job_id: str) -> None:
     """Refresh this job's claim until the task running this is cancelled.
 
     Two refreshes inside one TTL, so a missed write — a Redis blip, a loop that
     was busy — does not expire the claim on its own.
+
+    The job's staging directory is touched beside the claim, and for the same
+    reason said differently: a sidecar sweeping the shared base has no way to
+    ask whether a job is alive, so a long run that stages nothing new says so
+    on disk (``staging.touch_job_staging``) rather than losing its directory to
+    another worker's TTL.
     """
+    from maljan.tools import staging
+
     while True:
         await asyncio.sleep(JOB_OWNER_REFRESH_SECONDS)
         await claim_job(redis_conn, job_id)
+        staging.touch_job_staging(job_id)
 
 
 async def live_owners(redis_conn: Any, job_ids: list[str]) -> set[str] | None:
@@ -2287,72 +2341,91 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         return {"status": "failed", "error": reason}
 
     finally:
-        # Whatever is still queued of this job's conversation, written
-        # before the task returns. First in the block: the teardown below
-        # can take a while and a reader who opens a cancelled run wants
-        # its last lines, not the ones from two seconds earlier.
-        await _stop_event_feed(job_id)
+        # Everything this block does is wrapped again, because the one
+        # statement that must not be skipped is the last: three of the
+        # statements below are awaits, a re-cancellation while one of them is
+        # unwinding is a ``BaseException`` no handler here catches, and what
+        # would then be left on disk is a directory of live malware. The
+        # ordering is deliberate and stays — the staging directory is taken
+        # away once the teardown has returned and no child is left to write it
+        # back — so the guarantee is made with a ``finally`` of its own rather
+        # than by moving the call earlier.
+        try:
+            # Whatever is still queued of this job's conversation, written
+            # before the task returns. First in the block: the teardown below
+            # can take a while and a reader who opens a cancelled run wants
+            # its last lines, not the ones from two seconds earlier.
+            await _stop_event_feed(job_id)
 
-        # The claim goes with the run, on every way out of it. Cancelled and
-        # awaited rather than left to the garbage collector: a refresher that
-        # outlived its job would keep saying a finished job is running, which
-        # is the one thing the sweep believes.
-        if owner_task is not None:
-            owner_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await owner_task
-        await release_job(redis_conn, job_id)
+            # The claim goes with the run, on every way out of it. Cancelled and
+            # awaited rather than left to the garbage collector: a refresher that
+            # outlived its job would keep saying a finished job is running, which
+            # is the one thing the sweep believes.
+            if owner_task is not None:
+                owner_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await owner_task
+            await release_job(redis_conn, job_id)
 
-        # The worker's own private copies of the sample never outlive the
-        # job that downloaded them, on success, failure or cancellation
-        # alike (H3, security hardening). ``remove_quietly`` is a no-op
-        # on ``None`` (nothing was ever downloaded) and never raises.
-        from app.worker import sample_files
+            # The worker's own private copies of the sample never outlive the
+            # job that downloaded them, on success, failure or cancellation
+            # alike (H3, security hardening). ``remove_quietly`` is a no-op
+            # on ``None`` (nothing was ever downloaded) and never raises.
+            from app.worker import sample_files
 
-        sample_files.remove_quietly(temp_path, job_id=job_id)
-        for _host_mirror in host_mirrors:
-            sample_files.remove_quietly(_host_mirror, job_id=job_id)
+            sample_files.remove_quietly(temp_path, job_id=job_id)
+            for _host_mirror in host_mirrors:
+                sample_files.remove_quietly(_host_mirror, job_id=job_id)
 
-        # Release the agents' MCP toolkits, their stdio subprocesses and the
-        # per-job caches. A ``finally`` rather than ``async with`` because
-        # the body above spans ~500 lines and returns early on the
-        # user-cancelled path — this covers success, failure and
-        # cancellation without re-indenting any of it.
-        #
-        # ``aclose`` is total by construction (see MaljanApp.aclose), so a
-        # failed teardown cannot turn a completed analysis into a failed
-        # one. Whether it actually reclaims the memory is a separate
-        # question, which is why the readings are logged either side of it
-        # and why the worker also carries a hard recycle backstop.
-        if app is not None:
-            from maljan.core import memprobe
+            # Release the agents' MCP toolkits, their stdio subprocesses and the
+            # per-job caches. A ``finally`` rather than ``async with`` because
+            # the body above spans ~500 lines and returns early on the
+            # user-cancelled path — this covers success, failure and
+            # cancellation without re-indenting any of it.
+            #
+            # ``aclose`` is total by construction (see MaljanApp.aclose), so a
+            # failed teardown cannot turn a completed analysis into a failed
+            # one. Whether it actually reclaims the memory is a separate
+            # question, which is why the readings are logged either side of it
+            # and why the worker also carries a hard recycle backstop.
+            if app is not None:
+                from maljan.core import memprobe
 
-            memprobe.probe("job:before_teardown", job_id=job_id)
-            try:
-                # The outermost fence. Each toolkit close is bounded, and
-                # the container bounds them again — this bounds the lot,
-                # because a job is not finished until this returns and
-                # ``max_jobs = 1`` means the next one cannot start.
-                #
-                # Earned the hard way: a run that had already written its
-                # report sat here for 42 minutes with arq still reporting
-                # ``j_ongoing=1``, and only ended on SIGTERM. An ``mcp``
-                # stdio exit stack waits on its child process, and a child
-                # that does not exit waits forever.
-                await asyncio.wait_for(app.aclose(), timeout=_TEARDOWN_BUDGET)
-            except TimeoutError:
-                logger.error(
-                    "Teardown exceeded %.0fs and was abandoned; the job is "
-                    "complete and its result is stored, but MCP subprocesses "
-                    "may have leaked. The RSS ceiling will recycle the worker.",
-                    _TEARDOWN_BUDGET,
-                    extra={"job_id": job_id},
-                )
-            except Exception as exc:  # noqa: BLE001 — teardown never fails a job
-                logger.warning("Teardown failed (non-fatal): %s", exc)
-            gc.collect()
-            reclaimed = memprobe.malloc_trim()
-            memprobe.probe("job:end", job_id=job_id, trim_reclaimed_mb=reclaimed)
+                memprobe.probe("job:before_teardown", job_id=job_id)
+                try:
+                    # The outermost fence. Each toolkit close is bounded, and
+                    # the container bounds them again — this bounds the lot,
+                    # because a job is not finished until this returns and
+                    # ``max_jobs = 1`` means the next one cannot start.
+                    #
+                    # Earned the hard way: a run that had already written its
+                    # report sat here for 42 minutes with arq still reporting
+                    # ``j_ongoing=1``, and only ended on SIGTERM. An ``mcp``
+                    # stdio exit stack waits on its child process, and a child
+                    # that does not exit waits forever.
+                    await asyncio.wait_for(app.aclose(), timeout=_TEARDOWN_BUDGET)
+                except TimeoutError:
+                    logger.error(
+                        "Teardown exceeded %.0fs and was abandoned; the job is "
+                        "complete and its result is stored, but MCP subprocesses "
+                        "may have leaked. The RSS ceiling will recycle the worker.",
+                        _TEARDOWN_BUDGET,
+                        extra={"job_id": job_id},
+                    )
+                except Exception as exc:  # noqa: BLE001 — teardown never fails a job
+                    logger.warning("Teardown failed (non-fatal): %s", exc)
+                gc.collect()
+                reclaimed = memprobe.malloc_trim()
+                memprobe.probe("job:end", job_id=job_id, trim_reclaimed_mb=reclaimed)
+
+        finally:
+            # What the sidecars staged and carved for this job, its sandbox
+            # captures included: one directory per job, so one removal rather
+            # than a search. It goes with the owner heartbeat and the sample
+            # copies above — on success, failure, an operator's cancel and
+            # every early return — and the sample root that named the capture
+            # directory goes with it, so no later job inherits it.
+            remove_job_staging(job_id)
 
 
 # ── Helpers ──────────────────────────────────────────────────────

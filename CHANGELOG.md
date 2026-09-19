@@ -564,6 +564,28 @@ change landed on `main`.
 
 ### Changed
 
+- **Staging is per job.** The sidecars' staging directory held every job the
+  server process ever ran: `put_sample` uploads landed flat in it under
+  sixteen hex characters and the original file name, every sample's carved tree
+  sat beside every other's, and two runs of the same sample shared one tree, so
+  the only thing keeping one run out of another's files was the shape of the
+  carved tree rather than the directory. `MALJAN_STAGING_DIR` is now the
+  **base**, and each job writes into `job-<its id>` inside it: its uploads, its
+  `carved/<sha256>/` trees, and nothing another job can name by any spelling.
+  The spawn composes that one directory name and passes it to the child as
+  `MALJAN_STAGING_JOB` — a leaf, not a path, so an operator's configured base
+  stays the base; the sidecar joins the two. A path argument resolving into
+  another job's directory is refused even where a sample root contains the
+  base. The job's owner removes the directory on success, on failure and on an
+  operator's cancel, and the `MALJAN_STAGING_TTL_HOURS` sweep now prunes a job
+  directory whole — by the newest mtime inside it, following no link — as well
+  as the files inside a directory still in use. **What an operator does:**
+  nothing. The flat uploads and the single `carved/` tree of the previous
+  release are swept by the same TTL where they lie; a host you want clean at
+  once can have that directory emptied while no job is running. A sidecar
+  started by hand or by a settings probe gets no leaf and writes in the base
+  exactly as before.
+
 - **A tool answer too big for the prompt is shortened, not cut in half.** A
   JSON result over `preprocessing.max_tool_output_chars` was cut as text, which
   ended the document mid-array: the model got a prefix with none of the
@@ -1037,6 +1059,44 @@ change landed on `main`.
   hundred a whole team makes — the ceiling now bounds the process cost rather
   than a quarter of it.
 ### Fixed
+
+- **A sandbox capture belongs to the job it was fetched for.** The capture was
+  written into one directory under the system temp directory, shared by every
+  job and every worker on the host, world-readable, named as a readable
+  directory for every sidecar started after it, and removed by nothing — while
+  `pcap_path` is a qualified argument the *model* writes. A sample carrying one
+  instruction could therefore have a later job read an earlier job's whole
+  detonation: the operator's addressing, the C2 exchange, whatever the malware
+  sent in the clear. Every provider that fetches one (CAPE, the REST DSL,
+  Triage) now writes into a `captures/` child of the job's own staging
+  directory, 0600 inside a 0700 tree; the directory is named as a readable root
+  for that job's sidecars alone and the root is dropped when the job ends; both
+  file-reading sidecars refuse another job's capture by every spelling; and the
+  whole thing goes with the job's staging directory. **What an operator does:**
+  nothing. What an earlier release left in `maljan-cape-pcap` under the system
+  temp directory is swept on the staging TTL, and nothing writes there any more.
+  A capture is created 0600 with `O_NOFOLLOW` rather than written and then
+  chmodded, and a fetch that fails or returns too few bytes to be a capture
+  leaves none behind.
+
+- **A run with no job id of its own removes what it staged.** The command line,
+  a settings probe and any script that builds a container used to compose a
+  staging directory and leave it for the TTL — and the name was derived from
+  the process, so a second run that drew a recycled pid inside that window
+  inherited the first one's uploads, carved payloads and capture. The name is
+  now per run, the container takes its directory away as the last thing it
+  closes, and `maljan analyze` releases the run in a `finally` that covers a
+  completed analysis, a failed one and an interrupted one alike.
+
+- **A retirement of the shared agent loop no longer costs a grace period per
+  abandoned tool server.** When that loop is retired, every handle bound to it
+  is abandoned and its child reaped — and the reap ran serially: SIGTERM, a
+  two-second wait, SIGKILL and a log line for each handle in turn, on a daemon
+  watchdog thread. One recorded retirement walked sixty-one of them. The set is
+  now signalled together, the grace is waited out once, the survivors are
+  killed, and the whole set is one log line naming the servers and the counts.
+  A test's tool servers are also closed with the test now, so a session no
+  longer hands a retirement every earlier test's handles.
 
 - **A process that has finished its work is not ended by its own watchdog.** The
   cancel watchdog is a daemon thread with a ten-second fuse: when a run ends

@@ -102,6 +102,10 @@ class _Container:
     def get_agent_llm(self, name: str) -> Any:
         return self.llm
 
+    def job_key(self) -> str:
+        """What the real container answers, and what a provider opens under."""
+        return "job-under-test"
+
     def get_static_provider(self, provider_id: str | None = None) -> Any:
         return self._provider
 

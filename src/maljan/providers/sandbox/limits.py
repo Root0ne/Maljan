@@ -53,17 +53,30 @@ def read_capped(response: Any, *, what: str, cap: int | None = None) -> bytes:
 def stream_to_file_capped(response: Any, out: Path, *, what: str, cap: int | None = None) -> None:
     """Write a streamed response to ``out``, stopping if it passes the cap.
 
-    The partial file is removed on the way out: half a capture is not a
-    capture, and leaving it behind would let the next reader mistake it for
-    one.
+    The partial file is removed on the way out — for the cap and for anything
+    else that goes wrong mid-stream: half a capture is not a capture, and
+    leaving it behind would let the next reader mistake it for one.
+
+    Created 0o600 with ``O_NOFOLLOW`` rather than written and then chmodded.
+    What this writes is a sandbox capture — the whole of a detonation's
+    traffic — and the two-step form leaves it readable at the process umask
+    for as long as the download takes, which for a capture is the whole of the
+    interesting window.
     """
+    import os
+
     limit = MAX_RESPONSE_BYTES if cap is None else cap
     written = 0
-    with open(out, "wb") as handle:
-        for chunk in response.iter_bytes(CHUNK_BYTES):
-            written += len(chunk)
-            if written > limit:
-                handle.close()
-                out.unlink(missing_ok=True)
-                raise _too_large(what, limit)
-            handle.write(chunk)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+    try:
+        with os.fdopen(os.open(out, flags, 0o600), "wb") as handle:
+            for chunk in response.iter_bytes(CHUNK_BYTES):
+                written += len(chunk)
+                if written > limit:
+                    handle.close()
+                    out.unlink(missing_ok=True)
+                    raise _too_large(what, limit)
+                handle.write(chunk)
+    except Exception:
+        out.unlink(missing_ok=True)
+        raise

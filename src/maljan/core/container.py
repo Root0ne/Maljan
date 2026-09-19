@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
+import uuid
 import weakref
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any, cast
@@ -264,6 +265,13 @@ class ServiceContainer:
         # queued it knows it. Empty for the CLI and for tests, which run one
         # analysis per process and have no such id to give.
         self.job_id = str(job_id or "")
+        # What ``job_key`` answers when nothing gave it one. Composed here, so
+        # it belongs to this container and therefore to one run: the key names
+        # the directory a tool server stages in, and a value derived from the
+        # process alone would have a second run that drew the same pid — after
+        # a recycle, ordinary in a container with a small ``pid_max`` — inherit
+        # the first run's uploads, carved payloads and capture.
+        self._run_key = f"cli-{os.getpid()}-{uuid.uuid4().hex[:8]}"
         # Progress feed for the live transcript UI. ``None`` outside the API
         # worker (CLI, tests), which makes every emit a no-op — see
         # maljan.pipeline.events.
@@ -733,8 +741,17 @@ class ServiceContainer:
         One key per job: the handles' same-job short circuit compares it, so a
         container that answered differently for two of its agents would close
         and reopen every server between them.
+
+        A caller with no job id of its own — the command line, a probe, a
+        script — gets one per run. The key names the directory a tool server
+        stages in, and the constant it used to be meant two ``maljan`` runs on
+        one machine writing into one directory, each able to name the other's
+        upload and carved payloads by their paths. One per run rather than one
+        per process, because a pid comes round again: this is fixed for the
+        life of the container, different for the next one, and the run that
+        composed it removes it (``MaljanApp.aclose``).
         """
-        return self.job_id or "job"
+        return self.job_id or self._run_key
 
     def get_agent(self, name: str) -> BaseAnalyst:
         """The agent definition ``name`` names, instantiated and wired.
@@ -940,6 +957,20 @@ class ServiceContainer:
             self._narrative_agent_cache = None
             self._report_composer_cache = None
             self._server_registry_cache = None
+
+        # Last, and after the servers above are closed: what this run staged,
+        # carved and fetched. Here rather than in one caller, because every
+        # caller that has no worker behind it reaches teardown through this
+        # method — the command line, a settings probe, a script — and each of
+        # them would otherwise leave a directory of live malware for the TTL.
+        # The worker removes it again in a ``finally`` of its own, and a
+        # removal of what is already gone does nothing.
+        try:
+            from maljan.tools import staging
+
+            staging.remove_job_staging(self.job_key())
+        except Exception as exc:  # noqa: BLE001 — teardown never propagates
+            logger.warning("Removing this run's staging failed (non-fatal): %s", exc)
 
     def get_narrative_agent(self) -> Any | None:
         """Return the singleton NarrativeAgent or ``None`` in mock mode.

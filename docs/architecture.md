@@ -984,21 +984,30 @@ analysis tools that read a file — `identify_file`, `hashes`, `signing_info`,
 `strings`, `iocs_from_file`, `pe_info`, `elf_info`, `macho_info`, `apk_info`,
 `carve_payloads`, `archive_list`, `document_info`, `yara_scan` and `capa`. It
 is held to **the carved tree of the file this call is pinned to, and that file
-itself** — `<staging>/carved/<the sample's sha256>/`, which is exactly the key
-`carve_payloads` writes under and which the sidecar derives from the bytes it
-was handed. Not the staging base: one staging directory serves every job on the
-host, `put_sample` writes `<staging>/<sha16>_<name>` into it and every sample's
-carved tree sits beside every other's, so a base-wide bound let a run read
+itself** — `<staging>/job-<id>/carved/<the sample's sha256>/`, which is exactly
+the key `carve_payloads` writes under and which the sidecar derives from the
+bytes it was handed. Not the staging base: a base-wide bound let a run read
 another run's payload and another run's upload. A sample is adversary-authored
 content this model reads, and it can carry another sample's digest in its own
 bytes beside one instruction to point a tool at it; samples are not only
 malware, either, since an operator submits a suspicious document that may hold
-somebody's data. Two runs of the same sample share one tree, which is the same
-bytes read twice.
+somebody's data.
+
+**Staging is per job, and that is what makes the bound the directory rather
+than the tree.** `MALJAN_STAGING_DIR` stays the operator's base; the process
+that spawns a sidecar composes one leaf inside it per job and passes it as
+`MALJAN_STAGING_JOB`, which the sidecar joins to the base itself — two
+variables, because `child_env` applies a server's own `env` map last and a
+composed path would either lose to the operator's value or overwrite it. The
+job's owner removes that directory on every way out of the run, and the TTL
+sweep prunes whatever a killed worker left. So `put_sample` uploads are not
+nameable across jobs either, and two runs of the same sample no longer share a
+tree.
 
 Both spellings a model writes are understood — the absolute path
-`carve_payloads` returned, and the tail of it relative to the staging base or
-to the tree — and whichever it is, the resolved path must land inside the tree
+`carve_payloads` returned, and the tail of it relative to this job's staging
+directory or to the tree — and whichever it is, the resolved path must land
+inside the tree
 or on the sample. Symlinks are followed on both sides first, so a link planted
 under staging and a climb out of it land where they really point and meet the
 existing remediation-bearing refusal. The value must resolve onto a **regular

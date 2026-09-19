@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -815,34 +816,50 @@ async def handshake(config: MCPServerConfig, name: str) -> tuple[list[str], dict
     (and its own cleanup) finish in the background, closing the handle once
     it does.
     """
+    from maljan.tools import staging
+
     handle = ServerHandle(name, config)
+    # Per call, not per server. A probe is not a job, so the directory its
+    # identity names is this call's to take away — and two operators pressing
+    # Test on one server at the same time would otherwise share a leaf, so one
+    # call's cleanup would remove the other call's directory while it was
+    # still using it.
+    probe_key = f"probe-{name}-{uuid.uuid4().hex[:8]}"
 
     async def _run() -> tuple[list[str], dict[str, Any] | None]:
-        await handle.aopen(f"probe-{name}")
+        await handle.aopen(probe_key)
         capabilities = getattr(handle, "capabilities", None)
         to_dict = getattr(capabilities, "to_dict", None)
         return handle.all_tool_names(), (to_dict() if callable(to_dict) else None)
 
-    task: asyncio.Task[tuple[list[str], dict[str, Any] | None]] = asyncio.ensure_future(_run())
-    done, _pending = await asyncio.wait({task}, timeout=PROBE_BUDGET_SECONDS)
-    if task not in done:
-        # Ask it to stop, but do not wait for that to finish here — that wait
-        # is exactly the ~20 s ``_acleanup`` budget this fix avoids blocking
-        # on. A short, fixed grace period still lets the common case (a
-        # cancellation that responds immediately) close the handle before
-        # this returns; a genuinely wedged server closes later, from the
-        # callback, once its own cancellation finally unwinds.
-        task.cancel()
-        done2, _pending2 = await asyncio.wait({task}, timeout=0.1)
-        if task in done2:
-            await handle.aclose()
-        else:
-            task.add_done_callback(lambda _t: _detach_cleanup(handle.aclose(), f"probe-{name}"))
-        raise TimeoutError(f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s")
+    # Every way out of this — the answer, a failure, and the timeout that
+    # raises out of the branch below — leaves the directory removed. A probe
+    # stages nothing, so there is normally nothing there; what makes this worth
+    # the line is that the one path that used to skip it, the timeout, is the
+    # path on which a server *was* started and may have written something.
     try:
-        return task.result()
+        task: asyncio.Task[tuple[list[str], dict[str, Any] | None]] = asyncio.ensure_future(_run())
+        done, _pending = await asyncio.wait({task}, timeout=PROBE_BUDGET_SECONDS)
+        if task not in done:
+            # Ask it to stop, but do not wait for that to finish here — that
+            # wait is exactly the ~20 s ``_acleanup`` budget this fix avoids
+            # blocking on. A short, fixed grace period still lets the common
+            # case (a cancellation that responds immediately) close the handle
+            # before this returns; a genuinely wedged server closes later, from
+            # the callback, once its own cancellation finally unwinds.
+            task.cancel()
+            done2, _pending2 = await asyncio.wait({task}, timeout=0.1)
+            if task in done2:
+                await handle.aclose()
+            else:
+                task.add_done_callback(lambda _t: _detach_cleanup(handle.aclose(), probe_key))
+            raise TimeoutError(f"no MCP handshake within {PROBE_BUDGET_SECONDS:.0f} s")
+        try:
+            return task.result()
+        finally:
+            await handle.aclose()
     finally:
-        await handle.aclose()
+        staging.remove_job_staging(probe_key)
 
 
 def _probe_config(entry: dict[str, Any], name: str) -> MCPServerConfig:
@@ -1008,12 +1025,15 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
     # an agent with five servers legitimately needs five times as long as
     # one with one, and an agent with none should not wait for one either.
     budget = PROBE_BUDGET_SECONDS * max(1, len(bound))
-    job_key = f"probe-{name}"
+    # Per call: see ``handshake_tools``. The container carries it, so every
+    # handle this probe opens — its agent's servers and any static provider
+    # the definition references — opens under one identity that is this call's.
+    job_key = f"probe-{name}-{uuid.uuid4().hex[:8]}"
 
     # ``mock=True`` is what makes this cheap and safe: the container builds no
     # LLM registry at all, so ``get_agent_llm`` would raise rather than reach a
     # provider. The model is reported from the settings instead, below.
-    container = ServiceContainer(settings, mock=True)
+    container = ServiceContainer(settings, mock=True, job_id=job_key)
 
     # The same fix, reused rather than re-derived: ``asyncio.wait_for`` waits
     # for the cancelled coroutine's own cleanup before raising, and a wedged

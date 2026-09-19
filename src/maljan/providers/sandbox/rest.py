@@ -317,9 +317,13 @@ class RestSandboxProvider(SandboxProvider):
                 # every other pcap failure does, rather than filling the disk.
                 stream_to_file_capped(response, out, what="The sandbox capture")
         except Exception:  # noqa: BLE001 — never a hard failure, as for every sandbox
+            out.unlink(missing_ok=True)
             return None
         # libpcap/pcapng global header is 24 bytes; anything smaller is empty.
+        # The bytes go with the answer: what is left of a capture nobody will
+        # read is a file of somebody's traffic waiting for the sweep.
         if not out.exists() or out.stat().st_size < 24:
+            out.unlink(missing_ok=True)
             return None
         return str(out)
 

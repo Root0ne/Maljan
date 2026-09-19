@@ -1011,15 +1011,49 @@ transport on another host. Two environment variables configure that, and with
 
 | variable | default | meaning |
 | :-- | :-- | :-- |
-| `MALJAN_STAGING_DIR` | a `maljan-analysis-mcp` directory under the system temp dir | where uploads land |
+| `MALJAN_STAGING_DIR` | a `maljan-analysis-mcp` directory under the system temp dir | the base uploads land under |
 | `MALJAN_STAGING_TTL_HOURS` | `24` | how long a staged sample, and a payload carved out of one, is kept; `0` disables pruning |
 
-The directory is created with mode 0o700 and refused if what is already at that
-path is a symlink or belongs to another user — the default name is predictable
-and the system temp directory is shared. Each file is created with
-`O_CREAT|O_EXCL|O_NOFOLLOW` at 0o600 rather than written and then chmodded, and
-every `put_sample*` call prunes entries past the TTL, so a long-lived server
-does not accumulate samples without bound.
+`MALJAN_STAGING_DIR` is the **base**, and each job writes into one directory of
+its own inside it — `job-<the job's id>`, holding that job's uploads and its
+`carved/<sha256>/` trees. The name is composed by the process that starts the
+sidecar and handed over as a third variable, `MALJAN_STAGING_JOB`; it is a
+single directory name, never a path, so an operator's `MALJAN_STAGING_DIR` is
+the base whatever else is configured. That variable is not read from the
+environment and is not something to set: a sidecar started without one writes
+into the base itself, which is what a settings probe and a server run by hand
+do.
+
+Both the base and the job directory are created with mode 0o700 and refused if
+what is already at that path is a symlink or belongs to another user — the
+default name is predictable and the system temp directory is shared. Each file
+is created with `O_CREAT|O_EXCL|O_NOFOLLOW` at 0o600 rather than written and
+then chmodded, and every `put_sample*` call prunes past the TTL: the files of a
+job directory still in use, the whole directory of one whose newest file is
+past the cutoff, and the flat files an older release left in the base. So a
+long-lived server accumulates neither samples nor job directories, and an
+upgrade has nothing to migrate.
+
+A job directory is pruned whole only once the newest file anywhere inside it is
+past the cutoff, and a running job keeps its own directory current while it
+refreshes its owner heartbeat — so a run longer than the TTL does not lose its
+carved payloads to a second worker's sidecar sweeping the same base. Set the
+TTL below the longest run this deployment can have and that marker is the only
+thing standing between a live job and its own directory; there is no reason to.
+
+The sandbox capture a job fetches lands in a `captures/` child of the same
+directory and obeys every rule above: 0700, files 0600 from their first byte,
+removed with the job, swept by the same TTL, and unreachable from another job.
+The directory an earlier release used, `maljan-cape-pcap` under the system temp
+directory, is swept as well and is no longer written.
+
+One configuration would widen this if nothing else stopped it: a
+`MALJAN_SAMPLE_ROOTS` entry containing the staging base — the deployment's
+whole samples directory, say, with the base inside it — which names every
+job's directory as one a sidecar may read. `confined_to_this_job` refuses it
+anyway: a path argument resolving under the base but outside this job's own
+directory is refused whatever the roots say, so the job directory is the
+boundary and the roots cannot loosen it.
 
 ### Which directories a sidecar may read
 
@@ -1029,17 +1063,20 @@ file-reading sidecars — `analysis` and `network` — therefore resolve every
 `path`, `pcap_path` and `ruleset` argument (symlinks followed) and refuse
 anything that lands outside the directories they were given:
 
-* the staging directory `MALJAN_STAGING_DIR` names, where their own uploads
-  land, and
+* this job's staging directory, where their own uploads land, and
 * every directory in `MALJAN_SAMPLE_ROOTS`.
+
+This job's, not the base: a path that resolves into another job's staging
+directory is refused even when a sample root happens to contain the base, so
+the job directory is the boundary whatever the roots are configured as.
 
 `carved_path` on the `analysis` sidecar is narrower than both, because it is
 the one file argument a *model* chooses rather than the platform: it is held to
-`<staging>/carved/<sha256 of the file the call is pinned to>/` and to that file
-itself, so a run reaches the payloads it carved and nothing another run
-carved or uploaded. One staging directory serves every job a server process
-handles, which is why the base is not the bound. The resolved value must be a
-regular file; a directory, a FIFO, a device or a socket is refused.
+`<staging>/job-<id>/carved/<sha256 of the file the call is pinned to>/` and to
+that file itself, so a run reaches the payloads it carved and nothing another
+run carved or uploaded — two jobs on the same sample carve into two directories
+and neither can name the other's. The resolved value must be a regular file; a
+directory, a FIFO, a device or a socket is refused.
 
 | variable | default | meaning | seen by |
 | :-- | :-- | :-- | :-- |

@@ -62,10 +62,13 @@ CHUNKED_TOOLS = ("put_sample_begin", "put_sample_chunk", "put_sample_finish")
 # else is a local subprocess reading the local filesystem.
 REMOTE_TRANSPORTS = frozenset({"http", "streamable-http", "sse"})
 
-# ``(server_key, sha256) -> (path, staged_at)``. Process-wide: one worker
-# analyses many samples against the same servers, and a per-job cache would
-# re-upload the same sample for every agent bound to the server.
-_CACHE: dict[tuple[str, str], tuple[str, float]] = {}
+# ``(job_id, server_key, sha256) -> (path, staged_at)``. One entry per job, not
+# per process: staging is per job now, so a path cached under an earlier job's
+# id names a file inside a directory that job's teardown has removed, and every
+# tool call made with it would answer "no such file". Still shared across the
+# agents of one job, which is what the cache is for — a sample is uploaded once
+# however many agents are bound to the server.
+_CACHE: dict[tuple[str, str, str], tuple[str, float]] = {}
 
 
 def clear_cache() -> None:
@@ -73,13 +76,26 @@ def clear_cache() -> None:
     _CACHE.clear()
 
 
-def _cached(server_key: str, sha256: str) -> str | None:
-    entry = _CACHE.get((server_key, sha256))
+def forget_job(job_id: str) -> int:
+    """Forget what this job staged. Returns how many entries went.
+
+    Called where the job's staging directory is removed, because that is what
+    makes the paths in here wrong rather than merely old.
+    """
+    stale = [key for key in _CACHE if key[0] == str(job_id)]
+    for key in stale:
+        _CACHE.pop(key, None)
+    return len(stale)
+
+
+def _cached(job_id: str, server_key: str, sha256: str) -> str | None:
+    key = (job_id, server_key, sha256)
+    entry = _CACHE.get(key)
     if entry is None:
         return None
     path, staged_at = entry
     if time.monotonic() - staged_at > CACHE_TTL_SECONDS:
-        _CACHE.pop((server_key, sha256), None)
+        _CACHE.pop(key, None)
         return None
     return path
 
@@ -163,7 +179,7 @@ async def stage_sample(
         # would look up under "", miss every time, and re-upload the sample
         # once per agent bound to the server.
         digest = sha256 or hashlib.sha256(blob).hexdigest()
-        cached = _cached(server_key, digest)
+        cached = _cached(job_id, server_key, digest)
         if cached is not None:
             return cached
         chunked = len(blob) > CHUNK_THRESHOLD_BYTES and all(t in manifest for t in CHUNKED_TOOLS)
@@ -179,7 +195,7 @@ async def stage_sample(
         _record(registry, server_key, "the server returned no path")
         return None
     logger.info("staged sample %s to '%s' at %s for job %s.", digest[:12], server_key, path, job_id)
-    _CACHE[(server_key, digest)] = (path, time.monotonic())
+    _CACHE[(job_id, server_key, digest)] = (path, time.monotonic())
     return path
 
 
