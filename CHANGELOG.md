@@ -2246,6 +2246,15 @@ change landed on `main`.
   participant that has said nothing now takes its state from its own stages:
   running is working, finished is done, and anything else leaves it where the
   feed put it.
+- **The report's own elapsed time is the run, not the verdict stage.** The run
+  summary started its clock inside the judge node, so a 473 s job published
+  `Elapsed: 66.0s` and a reader quoting the report got a wall clock five to
+  seven times short. The worker's own start now reaches the pipeline as
+  `state["run_started_at"]` and the report node closes the figure when the
+  report is composed, so it measures the same span the job row does; the
+  per-stage durations are printed beside it from `run_summary.stages`, the
+  list the console's stage headers are drawn from. Stored reports keep the
+  figure they were written with.
 
 ### Removed
 

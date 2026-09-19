@@ -1737,6 +1737,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     sample_path=temp_path,
                     static_sample_path=static_sample_path,
                     static_sample_paths=static_sample_paths,
+                    # The same instant this job's own duration is measured
+                    # from, so the report's elapsed time and the job row
+                    # cannot disagree.
+                    started_at=start_time,
                 )
             )
             pipeline_result = await pipeline_task

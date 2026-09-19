@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from maljan.analysis.run_summary import stage_duration_lines
 from maljan.core.logger import logger
 from maljan.reporting.models import (
     DefensiveRecommendation,
@@ -920,7 +921,9 @@ class MarkdownRenderer:
 
         elapsed = run_summary.get("elapsed_seconds")
         if elapsed is not None:
-            lines.append(f"- Elapsed: {float(elapsed):.1f}s")
+            lines.append(f"- Elapsed: {float(elapsed):.1f}s (the whole run, to this report)")
+        for line in stage_duration_lines(run_summary.get("stages")):
+            lines.append(f"- {line.replace('**', '').rstrip()}")
         verdict = run_summary.get("final_decision")
         if verdict:
             lines.append(f"- Verdict: {verdict}")

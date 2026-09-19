@@ -2881,7 +2881,11 @@ def make_judge_node(
                     f"{evidence_summary}\n\n{_check_note}" if evidence_summary else _check_note
                 )
 
-            start_time = time.time()
+            # When this run began. The state carries the caller's own clock;
+            # a graph assembled without it falls back to here, which is the
+            # reading the summary used to publish for every run and which made
+            # a 473 s job print 66 s.
+            start_time = float(state.get("run_started_at") or 0.0) or time.time()
 
             memory_store: MemoryStore | None = None
             try:
@@ -4059,6 +4063,18 @@ def make_report_node(
         own = _verdict_record(stage, started, ran=True).get("stage_results")
         if stage is not None and state.get("run_summary"):
             _state_summary["stages"] = stage_rollup(container, state, own)
+        # The run's elapsed time, closed here for the same reason the rollup
+        # is: the judge's clock stops before the report is composed, and the
+        # figure a reader compares against the job's own duration is the whole
+        # run. Measured from the instant the caller started counting.
+        _run_started_at = float(state.get("run_started_at") or 0.0)
+        if _run_started_at and state.get("run_summary"):
+            _elapsed = round(max(0.0, time.time() - _run_started_at), 3)
+            _state_summary["elapsed_seconds"] = _elapsed
+            _closed_summary = dict(report.run_summary or {})
+            if _closed_summary:
+                _closed_summary["elapsed_seconds"] = _elapsed
+                report.run_summary = _closed_summary
         if _state_summary:
             result["run_summary"] = {**(state.get("run_summary") or {}), **_state_summary}
         if own:

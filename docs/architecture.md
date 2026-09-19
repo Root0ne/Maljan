@@ -852,6 +852,13 @@ depended on the sample could not be drawn, compared or reasoned about before
 the sample arrived. What each stage did lands in `state["stage_results"]` and
 reaches the reader as `run_summary.stages`.
 
+`run_summary.elapsed_seconds` is the whole run: the worker's own clock reaches
+the pipeline as `state["run_started_at"]`, and the report node closes the
+figure when the report is composed, so it is the same span the job row's
+`duration_seconds` measures. The report prints the per-stage durations from
+`run_summary.stages` beside it — the list the console's stage headers are drawn
+from — so the two surfaces cannot disagree about where a run spent its time.
+
 Each stage also announces itself live, once: `stage_started` from its first
 node, `stage_skipped` from that node instead when the condition is false, and
 `stage_finished` from the one node that runs after everything in it is done.

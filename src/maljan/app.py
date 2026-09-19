@@ -277,6 +277,7 @@ class MaljanApp:
         sample_path: str | None = None,
         static_sample_path: str | None = None,
         static_sample_paths: dict[str, str] | None = None,
+        started_at: float | None = None,
     ) -> dict[str, Any]:
         """Execute the full analysis pipeline asynchronously.
 
@@ -296,12 +297,18 @@ class MaljanApp:
             static_sample_paths: One container-visible path per static provider
                 this job's profile uses, keyed by provider id; the globally
                 configured provider's entry is also ``static_sample_path``.
+            started_at: When the caller's own clock says this run began, as a
+                Unix timestamp. The worker starts counting before the sample
+                reaches this method, and the report's elapsed time is the
+                figure a reader compares against the job's duration, so the two
+                are measured from the same instant. Absent, this call's entry
+                is the start.
 
         This prevents the need for spinning up separate threads and manually
         managing event loops in async contexts (like ARQ workers), which
         solves the 'Event loop is closed' issue with google-genai.
         """
-        start = time.time()
+        start = float(started_at) if started_at else time.time()
         logger.info("=" * 60)
         logger.info("MALJAN - Multi-Agent Malware Analysis Pipeline")
         logger.info("=" * 60)
@@ -347,6 +354,7 @@ class MaljanApp:
         initial_state: AnalysisState = {
             "file_hash": file_hash,
             "file_name": file_name,
+            "run_started_at": start,
             "sample_path": sample_path,
             "static_sample_path": static_sample_path,
             "static_sample_paths": dict(static_sample_paths or {}),
