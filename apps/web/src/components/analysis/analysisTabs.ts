@@ -148,9 +148,11 @@ export function tabHasContent(key: string, report: ReportDetailDTO | null): bool
     case "/persistence":
       return nonEmpty(mr?.persistence) || sectionsForTab(sections, "persistence").length > 0;
     case "/capabilities":
-      /* The techniques the run mapped, and only those: the tab builds its
-       * matrix from `ttp_mappings` or, for a report that predates them, from
-       * the `/mitre` endpoint whose stored copy is `mitre_techniques`.
+      /* The techniques the run named: the tab builds its matrix from the
+       * capability matrix, which holds a cell for every one of them with the
+       * reason beside any the run did not publish, and falls back to
+       * `ttp_mappings` or to the `/mitre` endpoint whose stored copy is
+       * `mitre_techniques` for a report stored before either.
        * `corroboration` is read per technique to decorate a card that already
        * exists, so a corroborated id the judge never mapped would offer a tab
        * that then apologises — which is the thing this rule is for.
@@ -159,7 +161,9 @@ export function tabHasContent(key: string, report: ReportDetailDTO | null): bool
        * rows, so a list of rows that parses to no technique is not a mapping
        * here either. */
       return (
-        hasMappedTechniques(mr?.ttp_mappings) || hasMappedTechniques(report.mitre_techniques)
+        hasMappedTechniques(mr?.capability_matrix) ||
+        hasMappedTechniques(mr?.ttp_mappings) ||
+        hasMappedTechniques(report.mitre_techniques)
       );
     case "/attribution":
       return attributionSaysSomething(mr);

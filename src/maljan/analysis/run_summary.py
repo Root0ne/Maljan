@@ -31,6 +31,7 @@ from typing import Any
 from maljan.analysis.corroboration import (
     corroboration_row,
     corroboration_sources,
+    published_count,
     technique_label,
 )
 
@@ -365,12 +366,16 @@ class RunSummary:
 
         # Corroboration
         if self.corroboration:
+            published = published_count(self.corroboration)
             lines += [
                 "## Corroboration",
                 "",
                 "Which sources named each technique: the deterministic sources that carry",
                 "their own ATT&CK ids, and the agents. Two lists, not a combined confidence:",
-                "nothing here multiplies one layer's number by another's.",
+                "nothing here multiplies one layer's number by another's. A row that names",
+                "a technique this run did not publish says so, with the reason.",
+                "",
+                f"**{len(self.corroboration)} claimed, {published} published.**",
                 "",
                 "| Technique | Asserted by | Claimed by | Catalogue |",
                 "|---|---|---|---|",

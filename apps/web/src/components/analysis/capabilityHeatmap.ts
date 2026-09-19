@@ -83,6 +83,10 @@ export interface Technique {
   /** `false` when the ATT&CK catalog has no entry for the id and the producer
    *  kept it after being told. */
   valid: boolean;
+  /** Why this run did not publish the technique, in words, and empty when it
+   *  did. A producer named it and the report keeps the claim; the card says
+   *  the claim was not published rather than drawing it as a capability. */
+  notPublished: string;
 }
 
 export interface Tactic {
@@ -133,6 +137,9 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
     // Absent on rows persisted before the flag existed, and those rows meant
     // "valid" — only an explicit ``false`` marks a row.
     const valid = t.technique_id_valid !== false;
+    // Only a capability cell carries this; a published mapping and a /mitre
+    // row never do, which reads as published, which they are.
+    const notPublished = String(t.not_published ?? "");
 
     // Canonical Enterprise display name wins for any KNOWN tactic id. This
     // covers two cases: (a) the mapping only carried the TA-id (TTPMapping has
@@ -166,6 +173,7 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
       existing.sources = [...new Set([...existing.sources, ...sources])];
       existing.corroborating = existing.sources.filter((source) => !isJudge(source));
       existing.valid = existing.valid && valid;
+      existing.notPublished = existing.notPublished || notPublished;
     } else {
       tactic.techniques.push({
         id: techId,
@@ -174,6 +182,7 @@ export function parseTechniques(raw: unknown[]): Tactic[] {
         sources,
         corroborating: sources.filter((source) => !isJudge(source)),
         valid,
+        notPublished,
       });
       tactic.technique_count++;
     }

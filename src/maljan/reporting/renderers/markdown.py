@@ -953,7 +953,11 @@ class MarkdownRenderer:
             lines.append(f"- Report sections with no evidence: {ungrounded}")
         corroboration = run_summary.get("corroboration") or {}
         if corroboration:
-            from maljan.analysis.corroboration import corroboration_sources, technique_label
+            from maljan.analysis.corroboration import (
+                corroboration_sources,
+                published_count,
+                technique_label,
+            )
 
             multi = sum(1 for row in corroboration.values() if len(corroboration_sources(row)) > 1)
             asserted = sum(
@@ -961,8 +965,11 @@ class MarkdownRenderer:
                 for row in corroboration.values()
                 if isinstance(row, dict) and row.get("asserted_by")
             )
+            # What each number counts, because "3 named" over a run that
+            # published none of the three reads as three findings.
             lines.append(
-                f"- TTPs: {len(corroboration)} named, {multi} by more than one source, "
+                f"- TTPs: {len(corroboration)} claimed, {published_count(corroboration)} "
+                f"published, {multi} claimed by more than one source, "
                 f"{asserted} asserted by a deterministic source"
             )
         validation = run_summary.get("validation") or {}

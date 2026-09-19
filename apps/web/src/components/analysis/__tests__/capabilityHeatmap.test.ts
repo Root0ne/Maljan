@@ -160,3 +160,25 @@ describe("a technique the catalogue only associates", () => {
     expect(associatedBy(null, "T1113")).toEqual([]);
   });
 });
+
+describe("a technique the run did not publish", () => {
+  it("carries the reason the check gave", () => {
+    const tech = only([
+      row({
+        not_published:
+          "TECHNIQUE T1055 belongs to the ATT&CK enterprise domain (platforms Linux, " +
+          "Windows, macOS); this sample is mobile-domain, Android.",
+      }),
+    ]);
+    expect(tech.notPublished).toContain("mobile-domain, Android");
+  });
+
+  it("is empty for a published mapping, which carries no such key", () => {
+    expect(only([row()]).notPublished).toBe("");
+  });
+
+  it("keeps the reason when the same id arrives twice", () => {
+    const tech = only([row(), row({ not_published: "outside the sample's ATT&CK domain" })]);
+    expect(tech.notPublished).toBe("outside the sample's ATT&CK domain");
+  });
+});

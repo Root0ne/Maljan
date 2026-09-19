@@ -255,3 +255,78 @@ class TestWhatIsLeftAlone:
         )
 
         assert [m.technique_id for m in mappings] == [ENTERPRISE]
+
+
+# The recorded Android run's static analyst: one claim carrying no technique id
+# at all, and three findings carrying enterprise-only ones. ``findings`` is the
+# second place an ISR keeps technique ids, and the one no check ever saw — the
+# report printed all three with nothing saying they were not published.
+def _findings_only_isr() -> dict[str, AgentISR]:
+    return {
+        "static": AgentISR.model_validate(
+            {
+                "agent_id": "static",
+                "domain": "static",
+                "claims": [
+                    {
+                        "claim": "the sample is flagged by 10 of 75 engines",
+                        "evidence_ref": "[ev_0016] get_file_report",
+                        "confidence": 0.95,
+                        "technique_id": None,
+                    }
+                ],
+                "findings": [
+                    {
+                        "title": "Obfuscation Indicators",
+                        "confidence": 0.70,
+                        "technique_ids": [ENTERPRISE],
+                        "evidence_ids": ["ev_0005", "ev_0007"],
+                    },
+                    {
+                        "title": "Native Code Presence",
+                        "confidence": 0.90,
+                        "technique_ids": ["T1055"],
+                        "evidence_ids": ["ev_0004", "ev_0006"],
+                    },
+                ],
+            }
+        )
+    }
+
+
+class TestAFindingsOwnTechniqueIdsAreAsked:
+    def test_they_reach_the_matrix(self) -> None:
+        cells, _mappings = build_capability_matrix(
+            stix_output={"objects": []}, isr_reports=_findings_only_isr(), sample=ANDROID
+        )
+
+        assert {cell.technique_id for cell in cells} == {ENTERPRISE, "T1055"}
+
+    def test_none_of_them_is_published_on_a_mobile_sample(self) -> None:
+        cells, mappings = build_capability_matrix(
+            stix_output={"objects": []}, isr_reports=_findings_only_isr(), sample=ANDROID
+        )
+
+        assert mappings == []
+        for cell in cells:
+            assert "mobile" in cell.not_published.lower(), cell.technique_id
+
+    def test_the_report_names_them_as_claims_it_did_not_publish(self) -> None:
+        cells, mappings = build_capability_matrix(
+            stix_output={"objects": []}, isr_reports=_findings_only_isr(), sample=ANDROID
+        )
+        report = _report(ANDROID)
+        report.capability_matrix = cells
+        report.ttp_mappings = mappings
+
+        rendered = MarkdownRenderer()._section_attack_matrix(report)
+
+        assert "Claims that were not published as techniques" in rendered
+        assert ENTERPRISE in rendered
+
+    def test_a_windows_sample_publishes_the_same_ids(self) -> None:
+        _cells, mappings = build_capability_matrix(
+            stix_output={"objects": []}, isr_reports=_findings_only_isr(), sample=WINDOWS
+        )
+
+        assert {m.technique_id for m in mappings} == {ENTERPRISE, "T1055"}

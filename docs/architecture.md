@@ -1220,7 +1220,16 @@ is assembled from what the run gathered rather than recomputed beside it:
 * The capability matrix is a projection of the judge's technique list and the
   analysts' claims, carrying each source's own confidence unadjusted. It is
   where an id the ATT&CK check rejected stays on the record, marked
-  `technique_id_valid=False` and spelled as the producer wrote it.
+  `technique_id_valid=False` and spelled as the producer wrote it. **Every id
+  that reaches the report is collected into it**, from all three carriers: the
+  judge's attack-patterns, `claims[].technique_id`, and
+  `findings[].technique_ids` — the second place an ISR keeps technique ids, and
+  the one no check ever saw. A recorded Android run's final ISR carried one
+  claim with no id at all, so no domain check fired anywhere, and the report's
+  Findings and Corroboration tables printed three enterprise-only ids with
+  nothing saying they were not published. Every id still standing is asked the
+  catalogue question here as well as the domain one, so an id that arrived on a
+  finding gets the same answer an analyst's claim got in its own loop.
 * `ttp_mappings` is the *published* technique list, and every other technique
   surface is built from it: the report's ATT&CK section, its References, the
   `attack-pattern` objects of the STIX bundle — minted with ids derived from
@@ -1258,6 +1267,20 @@ is assembled from what the run gathered rather than recomputed beside it:
   bundle; three attack-patterns with no ATT&CK reference and ids copied out of
   the STIX documentation against an empty `ttp_mappings`; a rejected id
   published in all three.
+* **Every surface that prints a technique id says whether the run published
+  it.** The markdown's ATT&CK section names the unpublished ones under *Claims
+  that were not published as techniques*; the Findings table writes
+  `T1027 (claimed, not published)` in its Techniques column; each
+  `run_summary.corroboration` row carries `not_published`, written by the
+  report node from the capability matrix's own reasons, and the tables print it
+  through `technique_label`; the run summary's own line counts both — *"3
+  claimed, 0 published"*, because "3 named" over a run that published none of
+  them reads as three findings. An id in neither the published list nor the
+  matrix's reasons — dropped by its analyst in revision, so no check was ever
+  asked about it — says exactly that. The console's ATT&CK tab draws from
+  `capability_matrix` rather than from `ttp_mappings`, so a claimed-and-unpublished
+  technique appears there too, with the words *claimed, not published* and the
+  check's sentence under them rather than a colour.
 * An attack-pattern with a name and no technique id is asked for one
   (`attck.missing_id`) — before this it skipped every ATT&CK check, because all
   of them key on the id, which is why the Mobile-domain check never ran on an

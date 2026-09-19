@@ -338,6 +338,37 @@ def _collect_techniques(
                 quote = getattr(claim, "claim", None) or getattr(claim, "evidence_ref", None) or ""
                 if quote and quote not in row["evidence"]:
                     row["evidence"].append(str(quote)[:200])
+            # 3. The findings' own technique ids. An ISR carries ids in two
+            # places, and this was the one no check ever saw: the report's
+            # Findings table and the corroboration metric are both built from
+            # it, so a run whose final claims carried no id at all still
+            # printed three enterprise-only techniques on an Android sample
+            # with nothing saying they were not published. Collected here, they
+            # are asked the domain question and the catalogue question with
+            # every other id, and the ones that fail carry the reason into the
+            # matrix.
+            for finding in getattr(isr, "findings", None) or []:
+                confidence = float(getattr(finding, "confidence", 0.0) or 0.0)
+                title = str(getattr(finding, "title", "") or "")
+                layer = getattr(isr, "domain", None) or agent_name or "agent"
+                for raw in getattr(finding, "technique_ids", None) or []:
+                    tid = str(raw or "").strip().upper()
+                    if not tid:
+                        continue
+                    row = _row(tid)
+                    row["confidences"].append(confidence)
+                    if layer and str(layer) not in row["layers"]:
+                        row["layers"].append(str(layer))
+                    if title and title not in row["evidence"]:
+                        row["evidence"].append(title[:200])
+
+    # The catalogue question, asked of every id still standing. A claim was
+    # asked it in the analyst's own loop and carries the answer; an id that
+    # arrived on a finding was asked it nowhere, and one catalogue giving one
+    # answer is the point.
+    standing = [tid for tid, row in techniques.items() if row.get("valid", True)]
+    for tid in _unknown_to_the_catalogue(standing):
+        techniques[tid]["valid"] = False
 
     return techniques
 

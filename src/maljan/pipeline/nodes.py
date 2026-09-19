@@ -1432,6 +1432,30 @@ def _with_upstream(chunks: list, block: str) -> list:
     return [replace(head, content=content, char_count=len(content)), *chunks[1:]]
 
 
+def _corroboration_with_publication(report: Any, state: AnalysisState) -> dict[str, Any] | None:
+    """The corroboration rows, each saying whether this run published the id.
+
+    ``None`` when there is nothing to amend — no summary, or no technique named
+    — so an untouched column stays untouched.
+    """
+    from maljan.analysis.corroboration import mark_unpublished
+
+    stored = (state.get("run_summary") or {}).get("corroboration") or {}
+    rows = (report.run_summary or {}).get("corroboration") or stored
+    if not rows:
+        return None
+    published = {
+        str(mapping.technique_id or "").strip().upper()
+        for mapping in (getattr(report, "ttp_mappings", None) or [])
+    }
+    reasons = {
+        str(cell.technique_id or "").strip().upper(): cell.not_published
+        for cell in (getattr(report, "capability_matrix", None) or [])
+        if cell.not_published
+    }
+    return mark_unpublished(rows, published, reasons)
+
+
 def _amended_validation(validation: Any, tally: ValidationTally) -> dict[str, Any] | None:
     """A ``validation`` block plus what the report round cost.
 
@@ -4054,6 +4078,19 @@ def make_report_node(
         if _ledger:
             _state_summary["evidence"] = _summary["evidence"]
             _state_summary["sections_without_evidence"] = _summary["sections_without_evidence"]
+        # Which of the techniques the run named it actually published, said
+        # here because this is the first node that holds both lists. The
+        # corroboration metric counts every id any producer named, including
+        # the ones that reach it through a finding rather than a claim, and a
+        # run whose report printed three enterprise-only ids on an Android
+        # sample said nothing about their not being published anywhere.
+        _published_summary = _corroboration_with_publication(report, state)
+        if _published_summary is not None:
+            _state_summary["corroboration"] = _published_summary
+            _with_publication = dict(report.run_summary or {})
+            if _with_publication:
+                _with_publication["corroboration"] = _published_summary
+                report.run_summary = _with_publication
         # The stage rollup is finished here rather than in the judge: the
         # judge cannot know how long the report took or whether it ran, and a
         # run summary whose own report stage is missing is the one row a reader

@@ -225,6 +225,15 @@ class MalwareReportBuilder:
             identity.file_type,
             str(identity.platform),
             merges=merges,
+            # The one validated list, so the Findings table can say which of
+            # the ids it prints this run did not publish. An analyst carries
+            # technique ids on its findings as well as on its claims, and the
+            # findings' were the ones no surface ever questioned.
+            published_techniques=frozenset(
+                str(mapping.technique_id or "").strip().upper()
+                for mapping in mappings
+                if str(mapping.technique_id or "").strip()
+            ),
         )
         # What the run said twice and the report says once. The bundle's own
         # indicator merge happened in the judge, long before this, and is

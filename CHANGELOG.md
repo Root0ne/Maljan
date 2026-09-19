@@ -2288,6 +2288,20 @@ change landed on `main`.
   recorded, never rewritten; the platform mints none of them. Dedupe compares
   normalised paths — separators, runs of them, a trailing one, and the case of
   a Windows path — so the same directory written twice is one indicator.
+- **A technique the report prints is published, or the report says it is not.**
+  An ISR carries technique ids in two places, and only one of them was ever
+  questioned: `claims[].technique_id`, which the validator and the capability
+  matrix read, and `findings[].technique_ids`, which the report's Findings
+  table and the corroboration metric are built from. An Android run whose final
+  claims carried no id at all fired no domain check anywhere and printed
+  `T1027`, `T1055` and `T1071` — enterprise-only — in two tables and a count,
+  with nothing saying they were not published. The findings' ids are now
+  collected into the capability matrix with every other one and asked the
+  domain and catalogue questions there; each `run_summary.corroboration` row
+  carries `not_published` with the check's own sentence; the Findings table
+  writes `claimed, not published` beside such an id; the summary counts "N
+  claimed, M published"; and the console's ATT&CK tab draws from the capability
+  matrix so the claim is visible there, in words, with the reason under it.
 
 ### Removed
 
