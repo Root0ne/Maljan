@@ -959,6 +959,27 @@ its embeddings are cached on disk; on the compose stack that cache is a named
 volume, because rebuilding it costs the judge node about a gigabyte of resident
 memory and a minute and a half on the first analysis.
 
+A cached vector records what produced it, and is reused only by the same
+thing. `maljan.memory.embeddings` has two backends — the sentence model and a
+bag-of-words projection it falls back to when the model cannot be loaded, on
+an air-gapped install or in a container that is briefly out of memory — and
+the fallback projects into the model's own 384 dimensions so the vector
+store's schema stays stable. Nothing else tells the two apart: the numbers are
+the same shape and the same width. So `embeddings.active_backend` is the one
+fact three decisions read. It is in the cache key, it is in the stored file's
+header, and a file whose backend is not the one in use is ignored with a line
+saying so — including every file written before the field existed, which is
+read as an unrecorded backend rather than as this one.
+
+A run on the fallback writes nothing into that cache and deletes nothing from
+it. The cache is shared with every later process on the host, and a model that
+failed to load once is a condition of that run, not of the host: re-embedding
+costs the run that could not load the model, while a stored bag-of-words
+corpus costs every run after it and says nothing about itself. The stale-file
+sweep is held to the same rule — it removes what its own backend wrote and
+what predates the field, and leaves another backend's file where it is — so a
+fallback run cannot clear the model's cache on its way past.
+
 ## The evidence ledger
 
 Every tool call an analysis makes is written down as it happens. The tool loop
@@ -1365,7 +1386,11 @@ does. Asking it of URLs alone exported `[domain-name:value = 'localhost']` and
 in the tree refused the same two values. A pattern is not one comparison, so
 every value in it is asked — `[a] OR [b]`, an `AND` of two object paths, an
 `IN` list — and an indicator with one unpublishable endpoint in it is declined
-whole. A syntactically routable address the judge invented passes this
+whole. The object type is read whatever case it is written in. A comparison
+whose right-hand side is not an endpoint at all — `MATCHES`, `LIKE`,
+`ISSUBSET` — is declined too, with the reason that is true of it: the pipeline
+could not read the pattern's endpoint, so it could not ask whether this export
+may carry it. A syntactically routable address the judge invented passes this
 question by design; whether any evidence holds it up is
 `stix.ungrounded_indicator`'s question, and that check is asked of every
 indicator the judge writes.

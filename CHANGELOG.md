@@ -2158,7 +2158,11 @@ change landed on `main`.
   `[ipv4-addr:value = '127.0.0.1']` unrecorded while every other path refused
   the same two values. A pattern is not one comparison, so every value in one
   is asked and an indicator with a single unpublishable endpoint in it is
-  declined whole. The corroboration half is still not asked of the judge,
+  declined whole. An object type is read whatever case it is written in, and a
+  comparison whose right-hand side is not an endpoint — a regular expression, a
+  wildcard, a subnet — is declined with a sentence saying the pipeline could not
+  read the pattern's endpoint rather than one about a host that could not exist.
+  The corroboration half is still not asked of the judge,
   because the judge's own assertion is the source and "the judge said so" is
   not a second source this code will assert on its behalf; whether any evidence
   holds an endpoint up stays `stix.ungrounded_indicator`'s question. A row that fails is
@@ -2212,6 +2216,22 @@ change landed on `main`.
   the truth for a producer that was corrected and answered the same way twice,
   and the opposite of it for a row about the export: the judge wrote the
   object and the export declined to carry it.
+- **A cached ATT&CK embedding says what produced it.** The embedding cache
+  keyed on version, dimension and corpus, and the file it wrote recorded
+  version and dimension — but `embeddings` has two backends, and the
+  bag-of-words projection it falls back to when the sentence model cannot be
+  loaded has the model's own 384 dimensions, because the vector store's schema
+  is shared. So a process that could not load the model wrote a bag-of-words
+  corpus into `~/.cache/maljan/attck`, deleted every other file there as
+  stale, and the next process on that host logged "reused cached embeddings"
+  and ranked techniques against it. `embeddings.active_backend` is one fact
+  and three decisions read it: it is in the key, it is in the stored header,
+  and a file whose backend is not the one in use is ignored with a line saying
+  so — a file written before the field existed included, which is an
+  unrecorded backend rather than this one. A fallback run writes nothing and
+  deletes nothing: a model that failed to load once is a condition of that run
+  and must not outlive it, and the stale-file sweep now removes only what its
+  own backend wrote and what predates the field.
 - **Every `arq` line is written once.** The worker's entry point is arq's own
   CLI, which configures a handler on the `arq` logger before the application
   configures the root one, and that logger still propagates: a measured worker
