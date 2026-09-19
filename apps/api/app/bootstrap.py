@@ -112,8 +112,10 @@ def validate_bootstrap(s: APISettings) -> BootstrapReport:
     # A moment that does not read is a typo an operator can fix in a second,
     # and one they must be told about: left alone it reads as "no end at all",
     # which is the opposite of what they were writing down. A refusal here can
-    # only reach a deployment that set this variable itself.
-    if written and lapses is None:
+    # only reach a deployment that set this variable itself — and only while
+    # there is a grace secret for it to bound. A finished rotation that left
+    # the timestamp behind boots, because the timestamp then bounds nothing.
+    if grace_secret and written and lapses is None:
         problems.append(f"JWT_PREVIOUS_SECRET_NOT_AFTER is not an ISO-8601 moment: {written!r}")
     elif grace_secret and lapses is None:
         warnings.append(

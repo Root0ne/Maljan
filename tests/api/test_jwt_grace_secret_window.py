@@ -157,6 +157,21 @@ class TestStartupWillNotLetItBeForgotten:
         assert not [p for p in report.problems if "JWT_PREVIOUS" in p]
         assert not [w for w in report.warnings if "JWT_PREVIOUS" in w]
 
+    def test_a_leftover_moment_with_no_secret_left_to_bound_is_not_a_refusal(
+        self, monkeypatch
+    ) -> None:
+        """Step three of the runbook is clearing the secret; the moment may lag."""
+        from app.bootstrap import validate_bootstrap
+        from app.config import get_settings
+
+        s = get_settings()
+        monkeypatch.setattr(s, "jwt_previous_secret_key", SecretStr(""))
+        monkeypatch.setattr(s, "jwt_previous_secret_not_after", "tomorrow")
+
+        report = validate_bootstrap(s)
+
+        assert not [problem for problem in report.problems if "JWT_PREVIOUS" in problem]
+
     def test_a_lapsed_one_is_a_warning_to_finish_the_rotation(self, monkeypatch) -> None:
         report = self._report(monkeypatch, datetime.now(UTC) - timedelta(days=1))
 
