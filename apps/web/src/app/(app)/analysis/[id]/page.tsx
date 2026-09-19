@@ -5,7 +5,12 @@ import Link from "next/link";
 
 import { useReport } from "./layout";
 import { api } from "@/lib/api";
-import { countLabel, downloadBlob, downloadObject } from "@/lib/report-utils";
+import {
+  bundleLossSentence,
+  countLabel,
+  downloadBlob,
+  downloadObject,
+} from "@/lib/report-utils";
 import { getErrorMessage } from "@/lib/errors";
 import { ENRICH_BUTTON_LABEL, ENRICH_STATUS_MESSAGE } from "@/lib/enrichment";
 import { degradedBannerText } from "@/lib/degradedBanner";
@@ -462,6 +467,7 @@ function RunRecord({
   const triage = runSummary.triage ?? null;
   const validation = runSummary.validation ?? null;
   const retryMode = Object.entries(runSummary.nudge?.retry_mode ?? {});
+  const bundleLoss = bundleLossSentence(runSummary.truncation ?? null);
   const configRows = Object.entries(config ?? {}).filter(
     ([key]) => !SHOWN_IN_THE_HEADER.has(key),
   );
@@ -505,6 +511,7 @@ function RunRecord({
                 ? `${countLabel(validation.retries, "correction turn")} were spent on producers that answered in the wrong shape.`
                 : "No producer needed a correction turn."}
             </li>
+            {bundleLoss && <li className="text-text-muted">{bundleLoss}</li>}
             {(validation?.unresolved ?? []).map((item, i) => (
               <li key={i} className="text-status-orange">
                 {validationRowText(item)}

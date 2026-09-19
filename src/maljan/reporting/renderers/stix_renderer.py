@@ -220,8 +220,23 @@ def _network_rank(source: Any) -> int:
     return _NETWORK_SOURCE_RANK.get(name, _UNRECORDED_SOURCE_RANK)
 
 
+def _record_indicator_cap(ledger: Any | None, *, removed: int) -> None:
+    """Tell the truncation ledger what the cap spent. Never raises.
+
+    The cap is the one place a bundle loses objects that the integrity pass
+    does not account for, so without this the ledger's reasons stop short of
+    the bundle.
+    """
+    if ledger is None:
+        return
+    try:
+        ledger.record_indicator_cap(removed=removed)
+    except Exception:  # noqa: BLE001 — telemetry must never break an export
+        return
+
+
 def _within_the_indicator_cap(
-    objects: list[Any], order: dict[str, tuple[int, int, int]]
+    objects: list[Any], order: dict[str, tuple[int, int, int]], ledger: Any | None = None
 ) -> list[Any]:
     """``objects`` with the lowest-priority indicators removed, or ``objects`` itself.
 
@@ -235,10 +250,12 @@ def _within_the_indicator_cap(
     """
     indicators = [obj for obj in objects if getattr(obj, "type", "") == "indicator"]
     if len(indicators) <= MAX_TOTAL_INDICATORS:
+        _record_indicator_cap(ledger, removed=0)
         return objects
     last = (_BAND_FILE_NAME + 1, 0, len(order))
     ranked = sorted(indicators, key=lambda obj: order.get(obj.id, last))
     kept = {obj.id for obj in ranked[:MAX_TOTAL_INDICATORS]}
+    _record_indicator_cap(ledger, removed=len(indicators) - MAX_TOTAL_INDICATORS)
     logger.warning(
         "stix_renderer: total indicator cap (%d) exceeded by %d; the lowest-priority "
         "indicator(s) are not exported.",
@@ -841,14 +858,16 @@ class ExtendedSTIXRenderer:
         from maljan.agents.judge_postprocess import enforce_bundle_integrity
 
         objects = enforce_bundle_integrity(objects, ledger=ledger)
-        capped = _within_the_indicator_cap(objects, order)
+        capped = _within_the_indicator_cap(objects, order, ledger=ledger)
         if capped is objects:
             return Bundle(objects=objects)
         # Only what the cap orphaned is left to sweep, and it is the cap's
         # doing rather than a defect of anybody's bundle — so it is counted
         # under a reason of its own. Counted it must be: the pass used to run
         # here with no ledger at all, so this sweep's losses appeared in no
-        # total. The cap's own removals still appear in none.
+        # total. The cap's own removals are counted beside them, under
+        # ``indicator_cap_removed``, so every object that left this bundle
+        # left under a name.
         return Bundle(
             objects=enforce_bundle_integrity(capped, ledger=ledger, dropped_as=CAP_ORPHAN_REASON)
         )

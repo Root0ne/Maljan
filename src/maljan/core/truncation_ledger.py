@@ -42,9 +42,18 @@ INTEGRITY_REASONS = (
     # endpoint is no longer in the bundle. Its own reason, because it is the
     # cap's loss rather than a defect of anybody's bundle, and because that
     # second pass used to run without a ledger at all, so what it removed was
-    # counted nowhere. What the cap itself removed is still counted nowhere.
+    # counted nowhere.
     "cap_orphan",
 )
+
+# What the indicator cap itself removed, and what step 5 of the integrity pass
+# takes out of a report's or a note's ``object_refs`` without removing an
+# object. Neither is a repair and neither belongs in ``INTEGRITY_REASONS`` —
+# the reasons there total to what the pass removed, and folding two other
+# kinds of loss in would break that total. They are counted here so that
+# everything that leaves a bundle leaves under a name.
+INDICATOR_CAP_REASON = "indicator_cap"
+REFS_TRIMMED_REASON = "refs_trimmed"
 
 
 def truncation_rate(over_limit: int, calls: int) -> float:
@@ -213,6 +222,15 @@ class TruncationLedger:
         self.integrity_objects_in = 0
         self.integrity_objects_out = 0
         self.integrity_dropped: dict[str, int] = dict.fromkeys(INTEGRITY_REASONS, 0)
+        # References a report or a note lost in step 5 of the pass. The object
+        # count does not move, so this is not an ``integrity_dropped`` reason;
+        # it is nonetheless a removal a reader comparing the bundle with the
+        # judge's own would otherwise find unaccounted.
+        self.integrity_refs_trimmed = 0
+
+        # The total indicator cap (reporting/renderers/stix_renderer).
+        self.indicator_cap_invocations = 0
+        self.indicator_cap_removed = 0
 
     # -- tool output --------------------------------------------------------
 
@@ -281,19 +299,37 @@ class TruncationLedger:
         objects_in: int,
         objects_out: int,
         dropped: dict[str, int] | None = None,
+        refs_trimmed: int = 0,
     ) -> None:
         """Record one ``enforce_bundle_integrity`` invocation.
 
         Unknown reason keys are ignored rather than accumulated, so a typo at a
         call site cannot silently invent a category in the C7 report.
+
+        ``refs_trimmed`` is counted apart from ``dropped``: the references step
+        5 takes out of a report or a note remove no object, so adding them to a
+        reason would stop the reasons totalling to what the pass removed.
         """
         with self._lock:
             self.integrity_invocations += 1
             self.integrity_objects_in += max(0, int(objects_in))
             self.integrity_objects_out += max(0, int(objects_out))
+            self.integrity_refs_trimmed += max(0, int(refs_trimmed))
             for reason, count in (dropped or {}).items():
                 if reason in self.integrity_dropped:
                     self.integrity_dropped[reason] += max(0, int(count))
+
+    # -- indicator cap ------------------------------------------------------
+
+    def record_indicator_cap(self, *, removed: int) -> None:
+        """Record one run of the total indicator cap.
+
+        Recorded even when the cap did not bind, so the count of removals has
+        the denominator every other bound on this ledger has.
+        """
+        with self._lock:
+            self.indicator_cap_invocations += 1
+            self.indicator_cap_removed += max(0, int(removed))
 
     # -- reporting ----------------------------------------------------------
 
@@ -334,7 +370,10 @@ class TruncationLedger:
                 "integrity_objects_removed": max(
                     0, self.integrity_objects_in - self.integrity_objects_out
                 ),
+                "integrity_refs_trimmed": self.integrity_refs_trimmed,
                 "integrity_dropped": dict(self.integrity_dropped),
+                "indicator_cap_invocations": self.indicator_cap_invocations,
+                "indicator_cap_removed": self.indicator_cap_removed,
             }
 
     @property

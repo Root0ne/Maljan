@@ -139,9 +139,11 @@ class TruncationMetrics:
     half the model's native 262,144 (findings-log §2.0) — and until 2026-08-09
     none of it was counted.
 
-    The last three fields are not truncation: they record what the STIX integrity
-    pass removed, because the claim that repairing beats rejecting needs a
-    number.
+    The integrity and cap fields are not truncation: they record what left the
+    exported STIX bundle, because the claim that repairing beats rejecting needs
+    a number, and because everything a bundle loses should leave under a name —
+    the pass's own repairs, the references it trims out of a report or a note,
+    and the total indicator cap's own removals.
     """
 
     tool_output_calls: int
@@ -160,6 +162,15 @@ class TruncationMetrics:
     # Defaulted because a summary read back from storage predates the outcome.
     tool_output_shortened: int = 0
     tool_output_shortening_timeouts: int = 0
+    # References the pass took out of a report's or a note's ``object_refs``.
+    # No object left the bundle for these, which is why they are their own
+    # number rather than a reason under ``integrity_dropped``.
+    integrity_refs_trimmed: int = 0
+    # Indicators the total indicator cap removed, and how often the cap ran.
+    # Defaulted for the same reason the two above are: a summary read back from
+    # storage predates them.
+    indicator_cap_invocations: int = 0
+    indicator_cap_removed: int = 0
 
     @property
     def any_bound_hit(self) -> bool:
@@ -512,6 +523,8 @@ class RunSummary:
                 f"| ReAct step cap | {trunc.react_step_cap_hits} / {trunc.react_invocations} |",
                 f"| Judge token cap | {trunc.judge_token_cap_hits} / {trunc.judge_invocations} |",
                 f"| STIX objects repaired away | {trunc.integrity_objects_removed} |",
+                f"| STIX indicators over the cap | {trunc.indicator_cap_removed} |",
+                f"| STIX references trimmed | {trunc.integrity_refs_trimmed} |",
                 "",
             ]
             if any(trunc.integrity_dropped.values()):
@@ -605,7 +618,10 @@ class RunSummary:
                 "judge_token_cap_hits": t.judge_token_cap_hits,
                 "integrity_invocations": t.integrity_invocations,
                 "integrity_objects_removed": t.integrity_objects_removed,
+                "integrity_refs_trimmed": t.integrity_refs_trimmed,
                 "integrity_dropped": dict(t.integrity_dropped),
+                "indicator_cap_invocations": t.indicator_cap_invocations,
+                "indicator_cap_removed": t.indicator_cap_removed,
                 "any_bound_hit": t.any_bound_hit,
             }
 
@@ -804,7 +820,10 @@ class RunSummaryBuilder:
             judge_token_cap_hits=int(snapshot.get("judge_token_cap_hits", 0)),
             integrity_invocations=int(snapshot.get("integrity_invocations", 0)),
             integrity_objects_removed=int(snapshot.get("integrity_objects_removed", 0)),
+            integrity_refs_trimmed=int(snapshot.get("integrity_refs_trimmed", 0)),
             integrity_dropped=dict(dropped) if isinstance(dropped, dict) else {},
+            indicator_cap_invocations=int(snapshot.get("indicator_cap_invocations", 0)),
+            indicator_cap_removed=int(snapshot.get("indicator_cap_removed", 0)),
         )
         return self
 

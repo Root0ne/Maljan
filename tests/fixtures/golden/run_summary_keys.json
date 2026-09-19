@@ -106,9 +106,12 @@
   },
   "truncation": {
     "any_bound_hit": null,
+    "indicator_cap_invocations": null,
+    "indicator_cap_removed": null,
     "integrity_dropped": "<data-keyed map>",
     "integrity_invocations": null,
     "integrity_objects_removed": null,
+    "integrity_refs_trimmed": null,
     "judge_invocations": null,
     "judge_token_cap_hits": null,
     "react_invocations": null,

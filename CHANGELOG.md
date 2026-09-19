@@ -917,6 +917,17 @@ change landed on `main`.
   **Upgrading:** a run whose evidence does not name a directory it claimed will
   carry a `stix.ungrounded_indicator` row for it where it carried none before,
   and the indicator is dropped after the retry rather than exported.
+- **Everything the exported STIX bundle loses now leaves under a name.** The
+  total indicator cap removed indicators with a log line and nothing else, and
+  the integrity pass trimmed a report's or a note's `object_refs` without
+  recording it, so the run summary's removal total could not be reconciled with
+  the bundle a reader holds. Both are counted: `truncation.indicator_cap_removed`
+  and `truncation.integrity_refs_trimmed` on the run summary, two rows in the
+  report's Bounds Hit table, and one sentence in the console's run record when
+  the bundle is shorter than what the run produced.
+  **Upgrading:** `run_summary.truncation` carries three new keys
+  (`indicator_cap_invocations`, `indicator_cap_removed`, `integrity_refs_trimmed`);
+  a summary stored before this release has none of them and reads as zero.
 
 ### Fixed
 

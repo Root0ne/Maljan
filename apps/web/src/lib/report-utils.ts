@@ -133,3 +133,34 @@ export function countLabel(
 ): string {
   return `${count} ${count === 1 ? singular : plural}`;
 }
+
+/**
+ * What the exported STIX bundle lost, as one sentence, or null.
+ *
+ * Two bounds take objects out of the bundle after the judge and the renderer
+ * have written it: the integrity pass repairs malformed and duplicated
+ * objects away, and the total indicator cap drops the lowest-priority
+ * indicators when there are more than the export carries. Both are counted on
+ * the run summary; a reader comparing the bundle against the report's own IOC
+ * tables has no other way to learn that the difference is deliberate.
+ *
+ * Null when nothing was removed, so a clean run says nothing rather than
+ * saying zero.
+ */
+export function bundleLossSentence(
+  truncation: { integrity_objects_removed?: number; indicator_cap_removed?: number } | null,
+): string | null {
+  const repaired = Math.max(0, Number(truncation?.integrity_objects_removed ?? 0) || 0);
+  const capped = Math.max(0, Number(truncation?.indicator_cap_removed ?? 0) || 0);
+  if (repaired === 0 && capped === 0) return null;
+  const parts: string[] = [];
+  if (repaired > 0) {
+    parts.push(`${countLabel(repaired, "object")} repaired away as malformed or duplicated`);
+  }
+  if (capped > 0) {
+    parts.push(
+      `${countLabel(capped, "indicator")} over the export's total cap, lowest priority first`,
+    );
+  }
+  return `The exported STIX bundle is shorter than what the run produced: ${parts.join("; ")}.`;
+}

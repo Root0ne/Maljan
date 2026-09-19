@@ -539,12 +539,18 @@ def enforce_bundle_integrity(
     _dropped["duplicate_relationship"] = _dup_rel
     objects = kept
 
-    # 5) trim object_refs to surviving objects
+    # 5) trim object_refs to surviving objects. What this takes out removes no
+    # object, so it is not one of the reasons — but it is a removal, and a
+    # reader comparing the exported bundle with the judge's own would find it
+    # nowhere if it were not counted.
     ids = {_oid(o) for o in objects}
+    _refs_trimmed = 0
     for o in objects:
         refs = _oget(o, "object_refs")
         if isinstance(refs, list):
-            _oset(o, "object_refs", [r for r in refs if r in ids])
+            surviving = [r for r in refs if r in ids]
+            _refs_trimmed += len(refs) - len(surviving)
+            _oset(o, "object_refs", surviving)
 
     if ledger is not None:
         try:
@@ -554,6 +560,7 @@ def enforce_bundle_integrity(
                 dropped=(
                     {dropped_as: sum(_dropped.values())} if dropped_as is not None else _dropped
                 ),
+                refs_trimmed=_refs_trimmed,
             )
         except Exception:  # noqa: BLE001 — telemetry must never break a bundle
             pass
