@@ -309,7 +309,7 @@ class TestTheBookkeepingIsInOnePlaceAndIsOurs:
             if key.startswith(BOOKKEEPING_KEY) and key != BOOKKEEPING_KEY
         )
 
-        notice = shortened_notice(parsed, tool="strings", unused_args=["pattern"])
+        notice = shortened_notice(parsed, narrowing=["pattern"])
         assert f"`{ours}`" in notice
         assert shortened_sentence(json.loads(parsed))
         assert "/rows" in shortened_sentence(json.loads(parsed))
@@ -853,10 +853,48 @@ class TestWhatTheRecordThenHolds:
     def test_the_model_is_told_the_answer_was_shortened_and_what_to_do(self) -> None:
         from maljan.agents.evidence_recorder import shortened_notice
 
-        notice = shortened_notice(_strings_answer(2), tool="strings", unused_args=["pattern"])
+        notice = shortened_notice(_strings_answer(2), narrowing=["pattern"])
         assert notice == ""
 
         parsed = shorten_json_document(_strings_answer(300), 4000).text
-        said = shortened_notice(parsed, tool="strings", unused_args=["pattern"])
+        said = shortened_notice(parsed, narrowing=["limit", "offset", "pattern"])
         assert BOOKKEEPING_KEY in said
         assert "`pattern`" in said
+        assert "`limit`" in said and "`offset`" in said
+        assert "identical call returns the identical shortened answer" in said
+
+    def test_the_arguments_named_are_the_ones_the_schema_offered(self) -> None:
+        """Read off the tool's own schema, never guessed from its name."""
+        from maljan.agents.output_shortening import narrowing_arguments
+
+        strings = ("path", "carved_path", "min_len", "limit", "offset", "pattern", "start", "end")
+        assert narrowing_arguments(strings) == ("limit", "offset", "pattern", "start", "end")
+        assert narrowing_arguments(("pcap_path", "packet_limit")) == ("packet_limit",)
+        assert narrowing_arguments(("text", "k")) == ("k",)
+        assert narrowing_arguments(("path", "carved_path")) == ()
+        assert narrowing_arguments(()) == ()
+
+    def test_a_tool_with_nothing_to_vary_is_told_that_and_nothing_more(self) -> None:
+        from maljan.agents.evidence_recorder import shortened_notice
+
+        parsed = shorten_json_document(_strings_answer(300), 4000).text
+        said = shortened_notice(parsed, narrowing=())
+
+        assert "no argument that narrows or pages it" in said
+        assert "narrow it with" not in said
+        assert "call another tool" not in said
+
+    def test_the_sentence_is_inside_the_limit_the_answer_was_cut_to(self) -> None:
+        """The notice is appended after the cut, so the cut keeps room for it."""
+        from maljan.agents.evidence_recorder import shortened_notice
+        from maljan.agents.mcp_client import MCPLangChainToolkit
+
+        narrowing = ("limit", "offset", "pattern")
+        limit = 4000
+        toolkit = MCPLangChainToolkit(max_output_chars=limit)
+
+        answer = toolkit._apply_output_guardrail(_strings_answer(300), narrowing)
+        notice = shortened_notice(answer, narrowing=narrowing)
+
+        assert notice, "the answer was shortened and the model is told so"
+        assert len(answer) + len(notice) <= limit

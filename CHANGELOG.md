@@ -2917,6 +2917,17 @@ change landed on `main`.
   `core.preprocessing.max_tool_output_chars` (6000 by default) rather than at
   8000, so an operator who relied on the wider cut should raise the setting.
 
+- **The shortening notice names the way to narrow.** The sentence a model reads
+  on a shortened answer said what was missing and offered every optional
+  argument the call had not set, so a model that met the same 116-of-150 answer
+  three times re-issued the identical call each time. It now says that an
+  identical call returns the identical shortened answer and names the
+  arguments of *that* tool that narrow or page it, read off the schema the tool
+  offered; a tool with no such argument is said to have none, and nothing more
+  is offered. The shortening keeps room for the sentence, so an answer and its
+  notice together stay inside the limit the answer was cut to. No code
+  re-issues a call or edits an argument.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**

@@ -444,17 +444,26 @@ REPAIRED_NOTICE = (
 )
 
 
-def shortened_notice(text: str, *, tool: str, unused_args: Sequence[str] = ()) -> str:
+def shortened_notice(text: str, *, narrowing: Sequence[str] = ()) -> str:
     """What the model is told when its answer had to be shortened, or ``""``.
 
     On the result rather than only in the ledger, for the same reason the
     repaired-arguments notice is: the model is the one that can ask again for
     the part it did not get. The answer already carries the arithmetic under
-    its own key; this says what that key is and what to do about it, in the
-    same words the repeat notice uses to name the arguments this tool can be
-    narrowed with.
+    its own key; this says what that key is, that asking again the same way
+    gets the same answer, and which of this tool's own arguments reach what
+    was left out — a model that met a shortened answer three times re-issued
+    the identical call each time.
+
+    ``narrowing`` is read off the schema the tool offered, in
+    ``output_shortening.narrowing_arguments``, and the guardrail that
+    shortened the answer kept room for the sentence those same names produce.
     """
-    from maljan.agents.output_shortening import BOOKKEEPING_KEY, our_key_in
+    from maljan.agents.output_shortening import (
+        BOOKKEEPING_KEY,
+        our_key_in,
+        shortening_sentence,
+    )
 
     if BOOKKEEPING_KEY not in text:
         return ""
@@ -467,11 +476,7 @@ def shortened_notice(text: str, *, tool: str, unused_args: Sequence[str] = ()) -
     ours = our_key_in(parsed)
     if not ours:
         return ""
-    return (
-        f"\n\nThis answer did not fit and was shortened; `{ours}` says which parts "
-        f"were cut and how much of each is missing. To see the rest, "
-        f"{_do_something_else(tool, unused_args)}"
-    )
+    return shortening_sentence(narrowing, key=ours)
 
 
 # What both notices say on the call before the loop ends. One sentence, in one
@@ -591,6 +596,7 @@ def _record_tool(
     """
     from langchain_core.tools import StructuredTool
 
+    from maljan.agents.output_shortening import narrowing_arguments
     from maljan.agents.tool_pinning import server_of
 
     func = getattr(tool, "func", None)
@@ -608,6 +614,11 @@ def _record_tool(
         for name, field in (getattr(args_schema, "model_fields", {}) or {}).items()
         if getattr(field, "is_required", lambda: False)()
     )
+    # The arguments of this tool that reach a part its answer left out, read
+    # off the same schema the model was offered. Per tool rather than per call:
+    # what narrows an answer is a property of the tool, and the guardrail that
+    # shortens the answer reserves room for the sentence naming exactly these.
+    narrowing = narrowing_arguments(accepted)
 
     def _unused(kwargs: dict[str, Any]) -> tuple[str, ...]:
         """The arguments this tool takes that the call did not really set.
@@ -707,7 +718,7 @@ def _record_tool(
         _note(kwargs, entry.id)
         # Read off the answer itself, before any notice is appended to it: a
         # notice is prose and prose does not parse.
-        shortened = shortened_notice(text, tool=name, unused_args=_unused(kwargs))
+        shortened = shortened_notice(text, narrowing=narrowing)
         if raw is not None:
             text = f"{text}{REPAIRED_NOTICE}"
         text = f"{text}{shortened}"

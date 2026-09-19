@@ -1143,7 +1143,20 @@ wall cannot pre-empt the one parse everything depends on, and past the parse a
 monotonic wall checked at every phase. An answer this system has already
 shortened is not shortened again — a second map would count against a baseline
 the first one moved. `run_summary.truncation` counts the three outcomes apart,
-and the wall firing among them.
+and the wall firing among them — on the job's one truncation ledger, which the
+server registry puts on every toolkit it opens, so a bound a tool server's
+answer hit is counted where the run summary reads.
+
+**What the model is told about it.** A shortened answer carries one sentence
+for the model: the key the arithmetic is under, that an identical call returns
+the identical shortened answer, and this tool's own arguments that reach what
+was left out — `limit`, `offset` and `pattern` for `strings`, nothing at all
+for a tool that offers no such argument, which the sentence then says. The
+arguments are read off the schema the tool offered
+(`agents.output_shortening.narrowing_arguments`), never guessed per tool, and
+the shortening keeps room for the sentence, so an answer and its notice
+together are inside the limit the answer was cut to. Nothing re-issues a call
+and nothing edits an argument: the text is the model's to act on.
 
 The sentence a reader sees is drawn above the section's table, not as a row in
 it: the bookkeeping is this system's account of its own handling, and a

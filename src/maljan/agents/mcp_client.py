@@ -13,7 +13,7 @@ supported:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import suppress
 from typing import Any
 
@@ -207,6 +207,13 @@ class MCPLangChainToolkit:
         args_schema = create_model(f"{mcp_tool.name}Schema", **properties)  # type: ignore[call-overload]
 
         tool_name = mcp_tool.name
+        # This tool's own way of asking for less, read off the schema it
+        # offered. The shortening keeps room for the sentence that names them,
+        # so an answer plus its notice is still inside the limit the answer was
+        # cut to.
+        from maljan.agents.output_shortening import narrowing_arguments
+
+        narrowing = narrowing_arguments(properties)
 
         async def arun_tool(**kwargs: Any) -> str:
             if not self.session:
@@ -230,7 +237,7 @@ class MCPLangChainToolkit:
                 output = "\n".join(c.text for c in result.content if hasattr(c, "text"))
                 # On a thread: shortening a five-megabyte answer is CPU-bound
                 # and synchronous, and this is a coroutine serving an agent.
-                return await asyncio.to_thread(self._apply_output_guardrail, output)
+                return await asyncio.to_thread(self._apply_output_guardrail, output, narrowing)
             except Exception as exc:
                 logger.warning("MCP tool '%s' raised %s: %s", tool_name, type(exc).__name__, exc)
                 return (
@@ -299,7 +306,7 @@ class MCPLangChainToolkit:
         clean = " ".join(description.split())
         return f"[{cat}] {clean}"
 
-    def _apply_output_guardrail(self, output: str) -> str:
+    def _apply_output_guardrail(self, output: str, narrowing: Sequence[str] = ()) -> str:
         """Limit tool output size to prevent LLM context overflow.
 
         If the output exceeds ``_max_output_chars``:
@@ -326,13 +333,22 @@ class MCPLangChainToolkit:
         — reaches the summariser and then the character cut exactly as it
         always did, byte for byte.
 
+        ``narrowing`` names this tool's own arguments that reach what a
+        shortening leaves out. The recorder appends a sentence naming them to a
+        shortened answer, so the room that sentence needs is kept back here:
+        the answer and its notice together are what has to fit.
+
         Args:
             output: Raw tool output text.
+            narrowing: The tool's arguments that narrow or page its answer.
 
         Returns:
             Potentially shortened output.
         """
-        from maljan.agents.output_shortening import shorten_json_document
+        from maljan.agents.output_shortening import (
+            shorten_json_document,
+            shortening_sentence_room,
+        )
 
         chars_in = len(output)
 
@@ -346,7 +362,8 @@ class MCPLangChainToolkit:
             self._max_output_chars,
         )
 
-        attempt = shorten_json_document(output, self._max_output_chars)
+        room = shortening_sentence_room(narrowing)
+        attempt = shorten_json_document(output, max(1, self._max_output_chars - room))
         if attempt.shortened:
             self._record_guardrail(chars_in, len(attempt.text), over_limit=True, shortened=True)
             return attempt.text
