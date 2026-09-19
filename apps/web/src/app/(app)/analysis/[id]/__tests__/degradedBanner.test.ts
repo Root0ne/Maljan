@@ -31,7 +31,13 @@ describe("the degraded-run banner", () => {
     expect(PAGE).toContain("degradationReasons");
   });
 
-  it("says the confidence shown is the judge's own", () => {
-    expect(PAGE).toContain("the judge&apos;s own");
+  it("leaves the sentence about the confidence to the reading it was read under", () => {
+    // A run whose verdict the judge did not state, or stated in a word the
+    // pipeline does not know, publishes no confidence of the judge's, so the
+    // page cannot say the number above the banner is the judge's own. Which
+    // sentence is true is decided by degradedBannerText from the recorded
+    // reading; the wordings themselves are pinned beside that function.
+    expect(PAGE).toContain("degradedBannerText");
+    expect(PAGE).not.toContain("the judge&apos;s own");
   });
 });

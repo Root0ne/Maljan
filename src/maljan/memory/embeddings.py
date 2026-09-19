@@ -44,6 +44,30 @@ _FALLBACK_DIM = 384  # match fastembed so the Qdrant collection schema stays sta
 
 EMBED_DIM: int = _FASTEMBED_DIM
 
+# What produced a vector. The two backends have the same 384 dimensions and
+# produce numbers of the same shape, and nothing else tells them apart — so
+# anything that stores a vector, or reads a stored one, has to carry this.
+# A bag-of-words projection is not a worse embedding of the same kind; it is a
+# different function, and the two are not comparable.
+FALLBACK_BACKEND = "bag-of-words-v1"
+
+
+def model_backend_id() -> str:
+    """The identifier of the real model, as this code knows it."""
+    return _MODEL_NAME
+
+
+def active_backend() -> str:
+    """Which backend a call made right now would use.
+
+    One fact, asked wherever the answer matters: which vectors may be reused,
+    which may be stored, and which stored file another run is allowed to
+    delete.
+    """
+    model = _try_load_fastembed()
+    return _MODEL_NAME if model and model is not False else FALLBACK_BACKEND
+
+
 # onnxruntime intra-op threads and the batch handed to the model.
 #
 # These two numbers were the whole of the worker's "memory leak" (2026-07-27).
@@ -166,16 +190,26 @@ def encode(text: str) -> list[float]:
 
 
 def encode_batch(texts: list[str]) -> list[list[float]]:
-    """Embed many texts at once, returning one unit vector per input.
+    """Embed many texts at once, returning one unit vector per input."""
+    return encode_batch_with_backend(texts)[0]
+
+
+def encode_batch_with_backend(texts: list[str]) -> tuple[list[list[float]], str]:
+    """The vectors, and the name of what produced them.
 
     Uses fastembed's native batch path (`model.embed(list)`) which is ~10x
     faster than calling :func:`encode` per string — important when embedding a
     whole corpus (e.g. ~700 ATT&CK techniques) at index-build time. Falls back
     to the per-item path (BoW when fastembed is unavailable). Empty strings map
     to zero vectors. Output order matches input order.
+
+    The backend is reported conservatively: only the clean batch path through
+    the model claims the model. If the batch raised and the per-item path
+    finished the work, the result is a mixture nobody can label, and a caller
+    deciding whether to store it durably should treat it as the fallback.
     """
     if not texts:
-        return []
+        return [], active_backend()
 
     model = _try_load_fastembed()
     if model and model is not False:
@@ -190,14 +224,15 @@ def encode_batch(texts: list[str]) -> list[list[float]]:
                     if norm and abs(norm - 1.0) > 1e-3:
                         vec = [v / norm for v in vec]
                     out.append(vec)
-                return out
+                return out, _MODEL_NAME
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Embeddings: fastembed batch embed failed (%s). Falling back to per-item.",
                 exc,
             )
+        return [encode(t) for t in texts], FALLBACK_BACKEND
 
-    return [encode(t) for t in texts]
+    return [encode(t) for t in texts], FALLBACK_BACKEND
 
 
 def cosine(a: list[float], b: list[float]) -> float:

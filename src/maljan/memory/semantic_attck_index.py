@@ -89,9 +89,9 @@ class SemanticATTCKIndex(ATTCKIndex):
             )
             return
 
-        vectors = embeddings.encode_batch(texts)
+        vectors, backend = embeddings.encode_batch_with_backend(texts)
         self._emb = dict(zip(tids, vectors, strict=True))
-        _store_cached_embeddings(key, self._emb)
+        _store_cached_embeddings(key, self._emb, backend)
 
     # ------------------------------------------------------------------
     # Scoring (override: cosine over dense embeddings)
@@ -147,12 +147,17 @@ def _corpus_key(tids: list[str], texts: list[str]) -> str:
 
     Order-sensitive on purpose — ``_emb`` is keyed by technique id, but a
     reordering means the loader produced a different corpus and the cheap thing
-    is to re-embed rather than reason about whether it mattered. Includes the
-    embedding dimension so a model swap (see ``embeddings._MODEL_NAME``) cannot
-    silently reuse vectors from the previous model.
+    is to re-embed rather than reason about whether it mattered.
+
+    The backend is in the key because the dimension is not enough to tell the
+    two apart: the bag-of-words fallback projects into the same 384 dimensions
+    the model uses, so a run that could not load the model wrote vectors a
+    later run with the model read back as its own and ranked techniques with.
     """
     digest = hashlib.sha256()
-    digest.update(f"v{_EMB_CACHE_VERSION}:{embeddings.EMBED_DIM}\n".encode())
+    digest.update(
+        f"v{_EMB_CACHE_VERSION}:{embeddings.EMBED_DIM}:{embeddings.active_backend()}\n".encode()
+    )
     for tid, text in zip(tids, texts, strict=True):
         digest.update(tid.encode("utf-8"))
         digest.update(b"\0")
@@ -165,6 +170,28 @@ def _cache_path(key: str) -> Path:
     return _EMB_CACHE_DIR / f"embeddings-{key[:32]}.json"
 
 
+def _their_backend(path: Path) -> str | None:
+    """The backend recorded in a cache file on disk, or ``None``."""
+    try:
+        return _stored_backend(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError) as exc:
+        logger.debug("SemanticATTCKIndex: could not read %s (%s).", path.name, exc)
+        return None
+
+
+def _stored_backend(raw: object) -> str | None:
+    """What produced the vectors in this file, or ``None`` when it does not say.
+
+    Every file written before the field existed answers ``None``, and an
+    unknown backend is not the one in use: those files are re-embedded rather
+    than trusted.
+    """
+    if not isinstance(raw, dict):
+        return None
+    backend = raw.get("backend")
+    return backend if isinstance(backend, str) and backend else None
+
+
 def _load_cached_embeddings(key: str, tids: list[str]) -> dict[str, list[float]] | None:
     """Return the cached vectors, or ``None`` to fall back to embedding."""
     path = _cache_path(key)
@@ -172,6 +199,17 @@ def _load_cached_embeddings(key: str, tids: list[str]) -> dict[str, list[float]]
         if not path.is_file():
             return None
         raw = json.loads(path.read_text(encoding="utf-8"))
+        in_use = embeddings.active_backend()
+        stored = _stored_backend(raw)
+        if stored != in_use:
+            logger.info(
+                "SemanticATTCKIndex: ignoring the cached embeddings in %s — they were written "
+                "by %s and this process embeds with %s.",
+                path.name,
+                stored or "an unrecorded backend",
+                in_use,
+            )
+            return None
         vectors = raw.get("vectors")
         if not isinstance(vectors, dict):
             return None
@@ -191,8 +229,23 @@ def _load_cached_embeddings(key: str, tids: list[str]) -> dict[str, list[float]]
         return None
 
 
-def _store_cached_embeddings(key: str, emb: dict[str, list[float]]) -> None:
-    """Write the cache. Best-effort: a read-only cache dir must not fail a run."""
+def _store_cached_embeddings(key: str, emb: dict[str, list[float]], backend: str) -> None:
+    """Write the cache. Best-effort: a read-only cache dir must not fail a run.
+
+    A fallback run writes nothing. The cache is shared with every later
+    process on the host, and a model that could not be loaded once — a missing
+    wheel, a cold container, a machine briefly out of memory — is a transient
+    condition that must not leave a durable trace that outlives it. Re-embedding
+    costs the run that could not load the model; a stored bag-of-words corpus
+    costs every run after it, silently.
+    """
+    if backend == embeddings.FALLBACK_BACKEND:
+        logger.info(
+            "SemanticATTCKIndex: embedded %d techniques with %s and did not cache them.",
+            len(emb),
+            backend,
+        )
+        return
     path = _cache_path(key)
     try:
         _EMB_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -201,16 +254,27 @@ def _store_cached_embeddings(key: str, emb: dict[str, list[float]]) -> None:
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(
             json.dumps(
-                {"version": _EMB_CACHE_VERSION, "dim": embeddings.EMBED_DIM, "vectors": emb}
+                {
+                    "version": _EMB_CACHE_VERSION,
+                    "dim": embeddings.EMBED_DIM,
+                    "backend": backend,
+                    "vectors": emb,
+                }
             ),
             encoding="utf-8",
         )
         tmp.replace(path)
-        # Old keys are previous ATT&CK releases or a previous model. Leaving
-        # them accumulates a few MB per release forever.
+        # Old keys are previous ATT&CK releases or a previous corpus. Leaving
+        # them accumulates a few MB per release forever. What this sweep may
+        # not do is speak for another backend: it deletes what it wrote before
+        # and what predates the field, and leaves a file some other backend
+        # wrote where it is.
         for stale in _EMB_CACHE_DIR.glob("embeddings-*.json"):
-            if stale != path:
-                stale.unlink(missing_ok=True)
+            if stale == path:
+                continue
+            if _their_backend(stale) not in (None, backend):
+                continue
+            stale.unlink(missing_ok=True)
         logger.info("SemanticATTCKIndex: cached %d embeddings to %s.", len(emb), path.name)
     except OSError as exc:
         logger.debug("SemanticATTCKIndex: could not write embedding cache (%s).", exc)

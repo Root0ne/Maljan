@@ -399,3 +399,34 @@ class Bundle(_SpecConformantModel):
         if not annotated:
             return None
         return sum(r.x_maljan_confidence for r in annotated) / len(annotated)
+
+
+def _bundle_object_types() -> frozenset[str]:
+    """Every ``type`` the union above accepts, read off the union itself.
+
+    Read rather than listed, so a member added to ``_BundleObject`` is known
+    here without anybody remembering to say so twice. The caller is the pass
+    that sets aside an object the Bundle cannot hold, and a stale list there
+    would throw away an object the schema would have taken.
+    """
+    import typing
+
+    found: set[str] = set()
+    for member in typing.get_args(_BundleObject):
+        field = member.model_fields.get("type")
+        if field is None:
+            continue
+        found.update(str(value) for value in typing.get_args(field.annotation))
+    return frozenset(found)
+
+
+# The STIX types a ``Bundle`` can hold. Anything else inside ``objects`` fails
+# the whole bundle, which is why one misplaced extension object used to cost a
+# judge's twenty-five-object answer.
+BUNDLE_OBJECT_TYPES: frozenset[str] = _bundle_object_types()
+
+# The bundle's own extension property, and the only ``type`` value the lift
+# pass recognises as something that belongs beside ``objects`` rather than in
+# it. The judge is asked for it at the top level and writes it inside the list
+# often enough to have cost two live runs their bundles.
+ASSESSMENT_PROPERTY = "x_maljan_assessment"

@@ -8,6 +8,8 @@ import { api } from "@/lib/api";
 import { countLabel, downloadBlob, downloadObject } from "@/lib/report-utils";
 import { getErrorMessage } from "@/lib/errors";
 import { ENRICH_BUTTON_LABEL, ENRICH_STATUS_MESSAGE } from "@/lib/enrichment";
+import { degradedBannerText } from "@/lib/degradedBanner";
+import { validationRowText } from "@/lib/validationRows";
 import { SEVERITY_STYLES } from "@/types/malware-report";
 import type { FpWarning, MalwareReport } from "@/types/malware-report";
 
@@ -158,11 +160,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
             DEGRADED RUN
           </span>
           <div className="text-text-secondary space-y-1">
-            <p>
-              The pipeline produced only partial signal, so the verdict and
-              severity should be treated as preliminary. The confidence shown
-              above is the judge&apos;s own, set knowing the reasons below.
-            </p>
+            <p>{degradedBannerText(report?.verdict_reading, report?.overall_confidence)}</p>
             {degradationReasons.length > 0 && (
               <ul className="list-disc list-inside text-xs">
                 {degradationReasons.map((r, i) => (
@@ -509,7 +507,7 @@ function RunRecord({
             </li>
             {(validation?.unresolved ?? []).map((item, i) => (
               <li key={i} className="text-status-orange">
-                {item.agent} left {item.code} unfixed: {item.message}
+                {validationRowText(item)}
               </li>
             ))}
             {retryMode.map(([agent, mode]) => (

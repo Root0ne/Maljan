@@ -11,9 +11,13 @@ which it has not done since the cap was removed.
 
 Three things hold now. The judge node records that it fell back, and with what
 class of failure. The report carries ``overall_confidence`` ``None`` for such a
-run and says the judge did not answer. And the run summary carries the note
-under ``verdict.fallback``, the code the judge agent already uses when its
-answer was not the verdict it was asked for.
+run and says on its front page that no confidence was assessed. And the run
+summary carries the note under ``verdict.fallback``, the code the judge agent
+already uses when its answer was not the verdict it was asked for.
+
+The same answer covers the judge that did answer and put no number on what it
+said: there is one author of a verdict's confidence, and when that author
+abstains the report says so rather than borrowing a number from somebody else.
 """
 
 from __future__ import annotations
@@ -129,11 +133,16 @@ class TestAJudgeThatAnsweredClearsTheChannel:
 
 class TestNothingDerivesAConfidenceForIt:
     def test_an_unjudged_verdict_has_none(self) -> None:
-        assert _overall_confidence(None, _confident_analysts(), judged=False) is None
+        assert _overall_confidence(None, judged=False) is None
 
-    def test_a_judged_run_still_falls_back_to_the_analysts(self) -> None:
-        """The behaviour for a judge that answered without a confidence is unchanged."""
-        assert _overall_confidence(None, _confident_analysts(), judged=True) == pytest.approx(0.92)
+    def test_a_judge_that_answered_without_a_number_gives_none_either(self) -> None:
+        """The analysts' mean is not a second answer, on any path.
+
+        It belongs to their own claims — 0.92 on the run that prompted this —
+        and a verdict none of them reached is not something they were 92% sure
+        of.
+        """
+        assert _overall_confidence(None, judged=True) is None
 
 
 class TestTheSummaryCarriesTheNote:
@@ -221,12 +230,23 @@ def _reported(fallback: dict[str, Any] | None) -> tuple[dict[str, Any], str]:
 
 
 class TestTheReportSaysTheJudgeDidNotAnswer:
+    @pytest.fixture(autouse=True)
+    def _real_catalogue(self, real_attck_index: None) -> None:
+        """This asks the real ATT&CK catalogue for names and descriptions.
+
+        The unit tree holds the corpus download shut, and these are the tests
+        that want what is behind it. They read the loader's own disk cache when
+        one is there and fetch when it is not, which is what they did before
+        the door existed; the opt-out is here so the list of tests that pay
+        that cost is a list somebody can read.
+        """
+
     def test_the_confidence_is_none_and_the_header_says_so(self) -> None:
         report, markdown = _reported({"decision": "Suspicious", "failure": "TimeoutError"})
 
         assert report["overall_confidence"] is None
         assert "**Overall Confidence**: not assessed" in markdown
-        assert "The judge did not answer" in markdown
+        assert "NO CONFIDENCE ASSESSED" in markdown
         # The number that used to be printed here belongs to the analysts'
         # claims, and it is still on the record where it means something.
         assert "0.92" not in markdown.split("## ")[0]
@@ -259,16 +279,33 @@ class TestTheReportSaysTheJudgeDidNotAnswer:
 
         assert "validation" not in (update.get("run_summary") or {})
 
-    def test_a_run_whose_judge_answered_is_untouched(self) -> None:
+    def test_a_run_whose_judge_answered_says_nothing_about_a_fallback(self) -> None:
+        """This judge answered and assessed no confidence, so there is none to print.
+
+        The analysts' 0.92 used to fill the gap. It is the confidence they put
+        on their own claims and it is still on the record where it means that;
+        the front page of a verdict nobody put a number on says so instead.
+        """
         report, markdown = _reported(None)
 
-        assert report["overall_confidence"] == pytest.approx(0.92)
-        assert "**Overall Confidence**: 0.92" in markdown
-        assert "The judge did not answer" not in markdown
+        assert report["overall_confidence"] is None
+        assert "**Overall Confidence**: not assessed" in markdown
+        assert "NO CONFIDENCE ASSESSED" in markdown
         assert "verdict.fallback" not in str(report["run_summary"].get("validation") or {})
 
 
 class TestAJudgeThatAnsweredWithNoVerdict:
+    @pytest.fixture(autouse=True)
+    def _real_catalogue(self, real_attck_index: None) -> None:
+        """This asks the real ATT&CK catalogue for names and descriptions.
+
+        The unit tree holds the corpus download shut, and these are the tests
+        that want what is behind it. They read the loader's own disk cache when
+        one is there and fetch when it is not, which is what they did before
+        the door existed; the opt-out is here so the list of tests that pay
+        that cost is a list somebody can read.
+        """
+
     """The same rule for a judge that answered with text, or not at all.
 
     Its body did not raise, so nothing wrote the fallback channel — and the
@@ -409,7 +446,7 @@ class TestAJudgeThatAnsweredWithNoVerdict:
         )
 
         assert report["overall_confidence"] is None
-        assert "The judge did not answer" in markdown
+        assert "NO CONFIDENCE ASSESSED" in markdown
 
     def test_the_note_the_judge_already_recorded_is_not_written_again(self) -> None:
         update = _run_report(

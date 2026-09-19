@@ -580,22 +580,35 @@ def network_from_ledger(
     from maljan.extractors.network_extractor import (
         _assess_domain,
         _is_emittable_domain,
-        _is_emittable_ip,
+        address_is_publishable,
     )
 
     network = NetworkIOCs()
     domains: dict[str, NetworkDomain] = {}
-    ips: set[str] = set()
-    urls: set[str] = set()
+    ips: dict[str, NetworkIP] = {}
+    urls: dict[str, NetworkURL] = {}
 
     def _add(kind: str, value: str, source: _DomainSource = "strings") -> None:
         value = (value or "").strip()
         if not value:
             return
         if kind == "domain":
-            if not _is_emittable_domain(value):
+            # What somebody watched is never dropped here. The reserved and
+            # private-use names a sandbox resolved are exactly the lateral
+            # movement an analyst reads a case for, and dropping them at the
+            # projection erased them from the report as well as from the
+            # export, with nothing recorded — while the URL carrying the same
+            # host survived and was refused at the export with a row. The
+            # export still refuses to publish one, and says so.
+            #
+            # A name only the string sweep produced is the one exception, and
+            # it is unchanged: a run of bytes that happens to end in ``.local``
+            # is not an observation of anything.
+            if source == "strings" and not _is_emittable_domain(value):
                 return
             value = value.lower().strip().rstrip(".")
+            if not value:
+                return
             known = domains.get(value)
             if known is not None:
                 # The same name from a second source is the corroboration the
@@ -615,33 +628,59 @@ def network_from_ledger(
             )
             domains[value] = domain
             network.domains.append(domain)
-        elif kind == "ip" and value not in ips:
-            if not _is_emittable_ip(value):
+        elif kind == "ip":
+            known_ip = ips.get(value)
+            if known_ip is not None:
+                # The same address from a second source, read the way a
+                # domain's and a URL's are: the stronger origin wins.
+                if _DOMAIN_SOURCE_RANK[source] > _DOMAIN_SOURCE_RANK[known_ip.source or "strings"]:
+                    known_ip.source = source
                 return
-            ips.add(value)
-            network.ips.append(NetworkIP(address=value))
+            # The classes nothing could act on are out here, which is where
+            # they always were; a private address is kept when somebody watched
+            # the sample reach it, because that is lateral movement, and
+            # dropped when a string sweep produced it.
+            if not address_is_publishable(value, source):
+                return
+            created_ip = NetworkIP(address=value, source=source)
+            ips[value] = created_ip
+            network.ips.append(created_ip)
         elif kind == "url":
             # Case-fold the host so one endpoint reached twice under two
             # spellings is one URL, not two.
             value = _fold_url_host(value)
-            if value in urls:
+            known_url = urls.get(value)
+            if known_url is not None:
+                # The same endpoint from a second source, read the way a
+                # domain's is: the stronger origin wins, and that is the
+                # corroboration the indicator rule asks for.
+                if _DOMAIN_SOURCE_RANK[source] > _DOMAIN_SOURCE_RANK[known_url.source or "strings"]:
+                    known_url.source = source
                 return
-            urls.add(value)
-            network.urls.append(NetworkURL(url=value))
+            created = NetworkURL(url=value, source=source)
+            urls[value] = created
+            network.urls.append(created)
 
     for _entry, data in _payloads(ledger, "sandbox_network"):
         for key in ("dns", "domains"):
             for row in data.get(key) or []:
                 _add("domain", _first_str(row, "request", "hostname", "domain", "name"), "sandbox")
+        # An address the sample really reached, labelled as one: the default
+        # source is ``strings``, so every observed address was recorded as
+        # though a string sweep had produced it, which is the weakest claim
+        # there is and the one the publish rule holds back.
         for row in data.get("hosts") or []:
-            _add("ip", _first_str(row, "ip", "address", "host"))
+            _add("ip", _first_str(row, "ip", "address", "host"), "sandbox")
         for key in ("tcp", "udp"):
             for row in data.get(key) or []:
-                _add("ip", _first_str(row, "dst", "ip", "address"))
+                _add("ip", _first_str(row, "dst", "ip", "address"), "sandbox")
         for row in data.get("http") or []:
             host = _first_str(row, "host", "hostname")
             _add("domain", host, "sandbox")
-            _add("url", _http_url(row, host))
+            # A request the sample made, and labelled as one: the default
+            # source is ``strings``, so an observed URL used to be recorded as
+            # though it had been read out of the file's bytes.
+            _add("url", _http_url(row, host), "sandbox")
 
     for _entry, data in _payloads(ledger, "iocs_from_file", "iocs_from_text"):
         for row in data.get("iocs") or []:

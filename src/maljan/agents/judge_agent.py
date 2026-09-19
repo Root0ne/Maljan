@@ -42,6 +42,7 @@ from maljan.agents.base_agent import (
     retry_on_connection_error,
     run_on_agent_loop,
 )
+from maljan.agents.judge_postprocess import ASSESSMENT_RELOCATED_CODE
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
@@ -52,11 +53,13 @@ from maljan.pipeline.state import AgentArgument
 from maljan.pipeline.validation import (
     ValidationTally,
     Violation,
+    announce_resolved,
     announce_unresolved,
     assessment_conflict_violations,
     assessment_violations,
     drop_ungrounded_indicators,
     retry_with_feedback,
+    stated_verdict_violations,
     unsupported_benign_violations,
     unsupported_malware_violations,
     validate_verdict_bundle,
@@ -182,10 +185,12 @@ JUDGE_VERDICT_SYSTEM = (
     "appear verbatim in the deterministic evidence (static strings, "
     "sandbox observations, or network IOCs). When in doubt, emit zero "
     "Indicators — the deterministic renderer will fill them in.\n"
-    "- You decide severity, malware category and family; nothing downstream "
-    "computes them for you and nothing overrides what you say. Add a top-level "
-    "``x_maljan_assessment`` object to the bundle:\n"
+    "- You decide the verdict, the severity, the malware category and the "
+    "family; nothing downstream computes them for you and nothing overrides "
+    "what you say. Add a top-level ``x_maljan_assessment`` object to the "
+    "bundle:\n"
     '    "x_maljan_assessment": {\n'
+    '      "verdict": "Malware|Suspicious|Benign",\n'
     '      "severity": {"rating": "Critical|High|Medium|Low|Informational",\n'
     '                   "rationale": "why the evidence supports that rating"},\n'
     '      "malware_category": "free text, e.g. ransomware / loader / infostealer",\n'
@@ -193,9 +198,17 @@ JUDGE_VERDICT_SYSTEM = (
     '                 "evidence_ids": ["ev_0012"]},\n'
     '      "confidence": 0.0-1.0\n'
     "    }\n"
-    "  Omit any of the four you cannot support. A family name MUST cite the "
-    "evidence ids it was read from; a family with no evidence ids is a guess, "
-    "and the report will say so.\n"
+    "  ``verdict`` is exactly one of those three words and nothing else — no "
+    "qualifier, no parenthesis, no sentence; anything you want to qualify it "
+    "with goes in ``severity.rationale``. Give your own confidence in it under "
+    "``confidence``; both are published as you wrote them. Omit any of "
+    "the other three you cannot support. A family name MUST cite the evidence "
+    "ids it was read from; a family with no evidence ids is a guess, and the "
+    "report will say so.\n"
+    "- Write a STIX ``malware`` object only for a sample you conclude is "
+    "malware. The objects illustrate the verdict you stated; they are not a "
+    "second way of stating one, and a malware object added as a container for "
+    "a sample you call benign contradicts your own assessment.\n"
     "- Benign is a finding, not a default. It says the evidence was examined "
     "and nothing malicious was in it. If this run produced no evidence and no "
     "analyst claim, say so and return Suspicious: an empty report is not a "
@@ -1011,10 +1024,17 @@ class JudgeAgent(BudgetMeter):
         # had its one chance to answer properly.
         not_json = False
         attempts = 0
+        # What the shape pass did to this answer before the schema saw it: an
+        # assessment moved to the property it belongs to, an object the bundle
+        # cannot hold set aside. Refilled per parse, because the retry's answer
+        # is a different answer and the previous one's findings are spent.
+        shape: list[Violation] = []
+        tally = ValidationTally()
 
         def _parse(answer: Any) -> Bundle:
             nonlocal not_json, attempts
             attempts += 1
+            shape.clear()
             if timed_out:
                 not_json = False
                 return self._fallback_bundle_from_text(
@@ -1030,7 +1050,21 @@ class JudgeAgent(BudgetMeter):
                 if attempts <= _VERDICT_RETRIES:
                     # A retry is coming and this bundle would be thrown away.
                     return Bundle(objects=[])
-            return self._bundle_from_response(answer, reports, isr_reports)
+            parsed = self._bundle_from_response(answer, reports, isr_reports, record=shape)
+            # The relocation is done and nothing is left to ask about, so it is
+            # published as settled and counted where the round's other codes
+            # are, rather than spending the one retry this round has.
+            moved = [v for v in shape if v.code == ASSESSMENT_RELOCATED_CODE]
+            if moved:
+                tally.count(moved)
+                announce_resolved(
+                    self._event_sink(),
+                    agent="judge",
+                    stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
+                    violations=moved,
+                    retry_index=attempts - 1,
+                )
+            return parsed
 
         # The same catalogue the analyst loop consults. Absent (an air-gapped
         # box with no vendored id list) the technique question is skipped
@@ -1046,7 +1080,7 @@ class JudgeAgent(BudgetMeter):
         )
 
         def _verdict_checks(bundle: Bundle) -> list[Violation]:
-            """What a Benign or a Malware verdict over a silent run cites.
+            """Whether the verdict was stated, and what a Benign or a Malware one cites.
 
             Its own function because it runs on every way this round can end,
             not only on the one where the judge answered a bundle: prose the
@@ -1055,8 +1089,13 @@ class JudgeAgent(BudgetMeter):
             were the two that reached a report unasked. Where the loop ran them
             they were fed back once; everywhere else they are recorded, because
             they annotate the verdict and never change it.
+
+            One reading of the verdict serves all three checks and the pipeline
+            with it — ``pipeline.outcome.decide_from_bundle`` — so no ending can
+            be told the sample is one thing and the report another.
             """
             return [
+                *stated_verdict_violations(bundle),
                 *unsupported_benign_violations(
                     bundle,
                     analyst_claims=_analyst_claims,
@@ -1080,13 +1119,17 @@ class JudgeAgent(BudgetMeter):
             if not_json:
                 return [Violation(code="verdict.not_json", message=_NOT_JSON_FEEDBACK)]
             return [
+                # The set-aside objects, which are the model's to explain. The
+                # relocation is not among them: it is settled, announced in
+                # ``_parse``, and a retry for it would be a turn spent on a
+                # problem that no longer exists.
+                *(v for v in shape if v.code != ASSESSMENT_RELOCATED_CODE),
                 *validate_verdict_bundle(bundle, evidence_corpus, attck=_knowledge, sample=sample),
                 *assessment_violations(bundle),
                 *assessment_conflict_violations(bundle),
                 *_verdict_checks(bundle),
             ]
 
-        tally = ValidationTally()
         bundle, violations, retries = await retry_with_feedback(
             _run,
             messages,
@@ -1158,8 +1201,15 @@ class JudgeAgent(BudgetMeter):
         answer: Any,
         reports: dict[str, str],
         isr_reports: dict[str, AgentISR] | None,
+        record: list[Violation] | None = None,
     ) -> Bundle:
-        """The model's raw answer as a Bundle, or the text fallback."""
+        """The model's raw answer as a Bundle, or the text fallback.
+
+        ``record`` collects what the shape pass had to do to the answer before
+        the schema could read it. It is the caller's list because the findings
+        belong to the round rather than to this method, and because an answer
+        that ends in the text fallback has nothing to record.
+        """
         raw = str(getattr(answer, "content", answer))
 
         from maljan.utils.json_cleaner import safe_parse_json
@@ -1178,8 +1228,17 @@ class JudgeAgent(BudgetMeter):
             # learned it had invented an id, and the report showed one fewer
             # attack-pattern with nothing saying why. ``pipeline.validation`` is
             # the single place that decides an id is wrong, and it says so.
-            from maljan.agents.judge_postprocess import postprocess_judge_bundle
+            from maljan.agents.judge_postprocess import (
+                lift_misplaced_extensions,
+                postprocess_judge_bundle,
+            )
 
+            # Before the schema, and before anything that walks the objects: an
+            # item the Bundle cannot hold fails the whole model, and the judge's
+            # other twenty-four objects are not the model's to lose.
+            lifted = lift_misplaced_extensions(data)
+            if record is not None:
+                record.extend(lifted)
             data = postprocess_judge_bundle(data, ledger=getattr(self, "truncation_ledger", None))
             return Bundle.model_validate(data)
         except Exception as exc:  # noqa: BLE001 — a malformed bundle degrades to the fallback

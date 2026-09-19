@@ -778,8 +778,7 @@ class TestThePlatformCheckLoadsNoCatalogue:
 class TestAPreOnlyTechnique:
     def test_it_is_exempt_from_the_platform_half(self) -> None:
         """T1583 (Acquire Infrastructure) declares PRE alone: it happens before
-        any host is touched, so a Windows sample cannot contradict it. The
-        domain half still applies."""
+        any host is touched, so a Windows sample cannot contradict it."""
         from maljan.tools import knowledge
 
         assert knowledge.attck_scope("T1583")["platforms"] == ["PRE"]
@@ -794,11 +793,25 @@ class TestAPreOnlyTechnique:
         message = platform_mismatch_message("T1000", _Scope(), ("enterprise", ("Windows",)))
         assert "declares the platforms PRE, Linux" in message
 
-    def test_a_pre_only_technique_from_another_domain_is_still_a_mismatch(self) -> None:
+    def test_the_exemption_covers_the_domain_half_as_well(self) -> None:
+        """A domain is a matrix a technique is filed in, not a host it runs on.
+
+        Every PRE technique is filed in the enterprise matrix and mobile has
+        none, so asking the domain first made each of them cross-domain on an
+        Android sample. That was a warning while the check only annotated;
+        once the report began reading it to decide what to publish, it took
+        ``T1583 Acquire Infrastructure`` off an Android infostealer's C2
+        registration and out of every published surface.
+        """
+        from maljan.tools import knowledge
+
+        assert platform_mismatch_message("T1583", knowledge, ("mobile", ("Android",))) == ""
+
+    def test_a_technique_that_also_names_a_host_is_still_a_mismatch(self) -> None:
         class _Scope:
             @staticmethod
             def attck_scope(tid: str) -> dict[str, Any]:
-                return {"technique_id": tid, "domain": "mobile", "platforms": ["PRE"]}
+                return {"technique_id": tid, "domain": "mobile", "platforms": ["PRE", "Android"]}
 
         assert "belongs to the ATT&CK mobile domain" in platform_mismatch_message(
             "T1000", _Scope(), ("enterprise", ("Windows",))
@@ -809,6 +822,19 @@ class TestARetiredId:
     """T1562.001 was a real id in the catalogue this tree shipped before 19.2.
     A stored report or a prompt that still names it must read as retired,
     not as invented."""
+
+    @pytest.fixture(autouse=True)
+    def _no_suggestions(self, monkeypatch: pytest.MonkeyPatch, real_attck_index: None):
+        """The retired note comes from the vendored id universe; the suggestions
+        beside it come from the ranked index, which is a corpus build this suite
+        does not take. These tests are about the note.
+
+        The catalogue itself is still asked for: the lookup reads a technique's
+        name and description, and the vendored scope files carry neither."""
+        from maljan.tools import knowledge
+
+        monkeypatch.setattr(knowledge, "resolve_technique", lambda *a, **k: {"candidates": []})
+        yield
 
     def test_the_analyst_is_told_the_id_was_retired_and_in_which_release(self) -> None:
         from maljan.tools import knowledge

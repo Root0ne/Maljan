@@ -168,6 +168,17 @@ class TestLolbinLookup:
 
 
 class TestAttckLookup:
+    @pytest.fixture(autouse=True)
+    def _real_catalogue(self, real_attck_index: None) -> None:
+        """This asks the real ATT&CK catalogue for names and descriptions.
+
+        The unit tree holds the corpus download shut, and these are the tests
+        that want what is behind it. They read the loader's own disk cache when
+        one is there and fetch when it is not, which is what they did before
+        the door existed; the opt-out is here so the list of tests that pay
+        that cost is a list somebody can read.
+        """
+
     def test_a_real_technique_is_valid_and_carries_its_domain_and_platforms(self) -> None:
         result = knowledge.attck_lookup("T1055")
         assert result["valid"] is True
@@ -190,6 +201,17 @@ class TestAttckLookup:
 
 
 class TestAttckValidate:
+    @pytest.fixture(autouse=True)
+    def _real_catalogue(self, real_attck_index: None) -> None:
+        """This asks the real ATT&CK catalogue for names and descriptions.
+
+        The unit tree holds the corpus download shut, and these are the tests
+        that want what is behind it. They read the loader's own disk cache when
+        one is there and fetch when it is not, which is what they did before
+        the door existed; the opt-out is here so the list of tests that pay
+        that cost is a list somebody can read.
+        """
+
     def test_only_the_invalid_ids_come_back(self) -> None:
         result = knowledge.attck_validate(["T1055", "T9999.001", "T1547.001"])
         assert [row["id"] for row in result["invalid"]] == ["T9999.001"]

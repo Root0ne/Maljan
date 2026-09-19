@@ -1,8 +1,9 @@
 """No component may quietly rewrite what an agent decided.
 
-This is the phase's direction, enforced rather than described. Five names carry
-a decision somebody made: a claim's ``technique_id`` and ``confidence``, and a
-report's ``severity``, ``malware_category`` and ``family``. Every layer that
+This is the phase's direction, enforced rather than described. Six names carry
+a decision somebody made: a claim's ``technique_id`` and ``confidence``, the
+judge's own ``verdict``, and a report's ``severity``, ``malware_category`` and
+``family``. Every layer that
 used to write one of them wrote it over an answer that already existed — the
 cascade over the analyst's confidence, the autocorrect over its technique id,
 the report builder's arithmetic over a severity the judge was never asked for.
@@ -12,7 +13,9 @@ the whole of ``agents/judge_postprocess.py`` and an override there would be
 ``obj["confidence"] = …`` rather than an attribute write.
 
 Three places may still write them, because in each the write *is* the answer
-rather than a correction of one:
+rather than a correction of one, and two acts below the scan's reach are driven
+here instead: declining to export an object, and moving one of the judge's own
+blocks to the property the schema reads it from:
 
 * ``schemas/`` — the models these live on, where a field is constructed.
 * ``tools/`` — a tool reporting what it found.
@@ -33,10 +36,17 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 SRC = Path(__file__).resolve().parents[2] / "src" / "maljan"
 
-# The names that carry a decision.
-GUARDED = frozenset({"technique_id", "confidence", "severity", "malware_category", "family"})
+# The names that carry a decision. ``verdict`` is the one the whole run is
+# printed under: the judge states it, the pipeline reads it and nothing else
+# may write it, which is how a signed utility came to be published as malware
+# over a judge that had called it benign.
+GUARDED = frozenset(
+    {"technique_id", "confidence", "severity", "malware_category", "family", "verdict"}
+)
 
 # Where a write to one of them is the answer rather than an override of one.
 EXEMPT_PATHS = ("schemas/", "tools/", "pipeline/validation.py")
@@ -396,7 +406,151 @@ class TestABundleShapeDoesNotOverrideAVerdict:
         assert decide_from_bundle(bundle) == "Malware"
 
 
+class TestAnObjectDeclinedIsRecordedNotRewritten:
+    """The fourth allowed act: declining to *export* an object, out loud.
+
+    The judge that called a signed utility benign still wrote a ``malware``
+    object, and its own rationale said why: "the 'malware' classification is
+    used here strictly as a container for the object type in STIX". A bundle is
+    consumed by tooling that reads the object and not the rationale, so the
+    export leaves it out — and says so, under its own code, with the judge's
+    bundle unchanged behind it. Nothing is edited: the verdict published is the
+    one the judge stated, and the object is still on the record.
+    """
+
+    @staticmethod
+    def _rendered() -> tuple[Any, Any, Any]:
+        from maljan.reporting.builder import MalwareReportBuilder
+        from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+        from maljan.schemas.stix_models import Bundle
+
+        judged = Bundle.model_validate(
+            {
+                "objects": [
+                    {
+                        "type": "malware",
+                        "id": "malware--0f1e2d3c-4b5a-4968-8776-655443332211",
+                        "name": "PuTTY",
+                        "is_family": False,
+                        "description": "Legitimate open-source terminal emulator.",
+                    }
+                ],
+                "x_maljan_assessment": {
+                    "verdict": "Benign",
+                    "severity": {"rating": "Informational", "rationale": "signed and clean"},
+                    "malware_category": "legitimate-utility",
+                    "confidence": 1.0,
+                },
+            }
+        )
+        report = MalwareReportBuilder(
+            file_hash="d" * 64,
+            file_name="utility.exe",
+            sample_path=None,
+            sandbox_report={},
+            reports={},
+            isr_reports={},
+            stix_output=judged.model_dump(mode="json"),
+            run_summary={},
+            discussion_history=[],
+            final_decision="Benign",
+            overall_confidence=1.0,
+            judge_assessment=judged.x_maljan_assessment,
+            malware_category="legitimate-utility",
+            evidence_ledger=[],
+        ).build_deterministic()
+        renderer = ExtendedSTIXRenderer()
+        return judged, renderer, renderer.render(report, base_bundle=judged)
+
+    def test_the_stated_verdict_is_what_is_published(self) -> None:
+        from maljan.pipeline.outcome import decide_from_bundle
+
+        judged, _renderer, _exported = self._rendered()
+
+        assert decide_from_bundle(judged) == "Benign"
+
+    def test_the_object_is_not_in_the_export(self) -> None:
+        _judged, _renderer, exported = self._rendered()
+
+        assert "malware" not in [getattr(obj, "type", "") for obj in exported.objects]
+
+    def test_the_decline_is_recorded_under_its_own_code(self) -> None:
+        _judged, renderer, _exported = self._rendered()
+
+        assert [code for code, _why in renderer.declined] == ["stix.malware_object_under_benign"]
+
+    def test_the_judge_own_bundle_still_carries_it(self) -> None:
+        judged, _renderer, _exported = self._rendered()
+
+        assert [getattr(obj, "type", "") for obj in judged.objects] == ["malware"]
+        assert judged.objects[0].name == "PuTTY"
+
+
+class TestARelocationMovesAndDoesNotEdit:
+    """The fifth: moving the judge's own block to where the schema reads it.
+
+    The block is the judge's words and it arrives complete; what is wrong is
+    where in the answer it sits. Moving it is not deciding anything — the
+    alternative was failing the whole bundle and extracting a verdict from the
+    answer's prose, which is the pipeline deciding — and the move is published
+    as settled rather than done quietly.
+    """
+
+    @staticmethod
+    def _lifted() -> tuple[dict[str, Any], list[Any]]:
+        from maljan.agents.judge_postprocess import lift_misplaced_extensions
+
+        block = {
+            "type": "x_maljan_assessment",
+            "verdict": "Malware",
+            "severity": {"rating": "High", "rationale": "it hollows a process"},
+            "confidence": 0.8,
+        }
+        data = {
+            "type": "bundle",
+            "objects": [
+                {
+                    "type": "malware",
+                    "id": "malware--0f1e2d3c-4b5a-4968-8776-655443332211",
+                    "name": "loader",
+                },
+                block,
+            ],
+        }
+        return data, lift_misplaced_extensions(data)
+
+    def test_the_block_arrives_unchanged(self) -> None:
+        data, _found = self._lifted()
+
+        assert data["x_maljan_assessment"]["verdict"] == "Malware"
+        assert data["x_maljan_assessment"]["confidence"] == 0.8
+        assert data["x_maljan_assessment"]["severity"] == {
+            "rating": "High",
+            "rationale": "it hollows a process",
+        }
+
+    def test_the_move_is_recorded(self) -> None:
+        _data, found = self._lifted()
+
+        assert [v.code for v in found] == ["verdict.assessment_relocated"]
+        assert found[0].path == "x_maljan_assessment"
+
+    def test_the_objects_beside_it_are_kept(self) -> None:
+        data, _found = self._lifted()
+
+        assert [obj["type"] for obj in data["objects"]] == ["malware"]
+
+
 class TestARejectedIdIsDroppedAndNeverRewritten:
+    @pytest.fixture(autouse=True)
+    def _the_shared_attck_index(self, real_attck_index: None) -> None:
+        """Building a capability matrix resolves technique names and tactics.
+
+        It does that through ``ATTCKValidator.get_instance()``, which builds
+        the shared ATT&CK index from the corpus. The unit tree holds that
+        build shut; this class asks for it by name.
+        """
+
     """The published technique list carries no id the catalogue rejected.
 
     Dropping a row from what is published is not a rewrite: the id the producer

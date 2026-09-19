@@ -18,9 +18,54 @@ an ``x_``-prefixed name is how the spec says to add to it.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 SEVERITY_RATINGS: tuple[str, ...] = ("Critical", "High", "Medium", "Low", "Informational")
+
+# The verdicts the judge may state, and the whole vocabulary the pipeline has:
+# ``pipeline.outcome`` reads a run's verdict against these three and nothing
+# else, and ``INCONCLUSIVE_VERDICT`` there is one of them rather than a fourth.
+VERDICT_VALUES: tuple[str, ...] = ("Malware", "Suspicious", "Benign")
+
+# What the sample's own hash indicator claims about the sample, per published
+# verdict, in STIX 2.1's ``indicator-type-ov`` vocabulary. An exported bundle
+# is acted on by tooling that reads the indicator and not the prose around it,
+# so an indicator typed ``malicious-activity`` under a Benign verdict tells
+# every blocklist the opposite of what the run concluded — a stronger
+# contradiction than the malware object the export already declines, because a
+# consumer blocks on the indicator.
+#
+# Here beside the vocabulary it is keyed on, so the two cannot drift. A verdict
+# this table does not name is ``unknown``, which is the vocabulary's own word
+# for a claim nobody is making.
+INDICATOR_TYPE_BY_VERDICT: dict[str, str] = {
+    "Malware": "malicious-activity",
+    "Suspicious": "anomalous-activity",
+    "Benign": "benign",
+}
+UNKNOWN_INDICATOR_TYPE = "unknown"
+
+# Every value ``indicator-type-ov`` defines. The conformance test reads it; so
+# does anything that wants to check an indicator this project emits against the
+# vocabulary it claims to use.
+INDICATOR_TYPES: frozenset[str] = frozenset(
+    {
+        "anomalous-activity",
+        "anonymization",
+        "attribution",
+        "benign",
+        "compromised",
+        "malicious-activity",
+        UNKNOWN_INDICATOR_TYPE,
+    }
+)
+
+
+def indicator_type_for(verdict: Any) -> str:
+    """What the sample's own indicator claims, for the verdict being published."""
+    return INDICATOR_TYPE_BY_VERDICT.get(str(verdict or "").strip(), UNKNOWN_INDICATOR_TYPE)
 
 
 class SeverityVerdict(BaseModel):
@@ -52,13 +97,37 @@ class FamilyVerdict(BaseModel):
 
 
 class JudgeAssessment(BaseModel):
-    """The non-STIX part of the verdict: severity, category, family.
+    """The non-STIX part of the verdict: the verdict itself, severity, category, family.
 
     Every field is optional because the judge is allowed to abstain, and an
     abstention has to survive to the report. A missing severity prints as "not
     assessed"; it does not fall back to a number some other component made up.
+
+    ``verdict`` is asked for and is not optional in any other sense: the prompt
+    requires it, ``pipeline.validation`` records a bundle that states none, and
+    ``pipeline.outcome`` falls back to reading the object set only because a
+    stored run may predate the field.
+
+    Its annotation is ``Any`` and that is the point, for the reason
+    ``SeverityVerdict.rating`` is a plain string: a ``Literal`` would fail the
+    whole bundle over one wrong word, and the run would go down the text
+    fallback with all of its objects, which is the failure the relocation pass
+    exists to prevent. A type is one wrong word by another spelling — a judge
+    answering ``["Malware"]`` or ``1`` to a field with three allowed values
+    cost the same twenty-five objects while this was ``str | None``. Anything
+    that is not one of the three words is read as stated and unrecognised, and
+    the judge is told so with its own answer quoted back.
     """
 
+    verdict: Any = Field(
+        None,
+        description=(
+            " | ".join(VERDICT_VALUES)
+            + ". Exactly one of those words and nothing else — no qualifier, no "
+            "parenthesis, no sentence. The verdict this bundle states; the object set "
+            "follows it. Anything to qualify it with goes in severity.rationale."
+        ),
+    )
     severity: SeverityVerdict | None = Field(
         None, description="The severity rating and its rationale."
     )
@@ -73,7 +142,8 @@ class JudgeAssessment(BaseModel):
         ge=0.0,
         le=1.0,
         description=(
-            "How sure the judge is of this verdict overall. The report's "
-            "overall confidence, when the judge gives one."
+            "How sure the judge is of the verdict it stated above. The "
+            "report's overall confidence, and the only source of it: a "
+            "verdict the judge put no number on is published with none."
         ),
     )

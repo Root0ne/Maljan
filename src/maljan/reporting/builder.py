@@ -27,7 +27,11 @@ from typing import TYPE_CHECKING, Any
 from maljan.core.logger import logger
 from maljan.extractors.attribution import build_family_attribution
 from maljan.extractors.capability_matrix import build_capability_matrix, unmapped_behaviours
-from maljan.pipeline.outcome import INCONCLUSIVE_REASONS
+from maljan.pipeline.outcome import (
+    INCONCLUSIVE_REASONS,
+    INCONCLUSIVE_VERDICT,
+    normalise_verdict,
+)
 from maljan.reporting.dedupe import MergeTally
 from maljan.reporting.ledger_projection import (
     dynamic_from_ledger,
@@ -149,6 +153,10 @@ class MalwareReportBuilder:
         cells, mappings = build_capability_matrix(
             stix_output=self.stix_output,
             isr_reports=self.isr_reports,
+            # The routed minimum, which is what the analyst loop and the
+            # judge's bundle check were given: a technique from a domain this
+            # sample cannot host is kept in the matrix and left unpublished.
+            sample={"platform": self.sample_platform, "file_type": self.sample_file_type},
         )
         severity = self._severity_from_judge(static, dynamic, identity)
         verdict = self._verdict_literal(self.final_decision)
@@ -405,12 +413,17 @@ class MalwareReportBuilder:
 
     @staticmethod
     def _verdict_literal(decision: str) -> Any:
-        normalised = (decision or "").strip().lower()
-        if normalised.startswith("malw"):
-            return "Malware"
-        if normalised.startswith("benign"):
-            return "Benign"
-        return "Suspicious"
+        """The decision as the report's own enum, through the one reading of it.
+
+        The prefix rule this used to hold itself is now
+        ``pipeline.outcome.normalise_verdict``, which the verdict statement is
+        read with as well: two readings of one word is how a judge that wrote
+        "Benign (legitimate utility)" was published as Malware while the
+        renderer two layers down would have called it Benign. A word neither
+        can read falls to ``Suspicious``, which is what the pipeline has
+        already decided for it by the time this runs.
+        """
+        return normalise_verdict(decision) or INCONCLUSIVE_VERDICT
 
     def _severity_from_judge(
         self,

@@ -252,6 +252,16 @@ class ReportDetailResponse(BaseModel):
     id: uuid.UUID
     job_id: uuid.UUID
     verdict: str
+    # How the verdict above was read, as one word: ``stated`` when the judge
+    # wrote it, ``unrecognised`` when it wrote something this pipeline could
+    # not read, ``unstated`` when it wrote nothing and the bundle's objects
+    # answered, ``fallback`` when the answer was not a bundle at all. The two
+    # middle readings publish the inconclusive verdict, which is one of the
+    # same three words a judge may state — so without this a client cannot
+    # tell "the judge concluded Suspicious" from "the judge's conclusion could
+    # not be read", and the difference lives only in a free-text degradation
+    # sentence. ``None`` for a report stored before the field existed.
+    verdict_reading: str | None = None
     # ``None`` when nothing assessed one. A client shows "not assessed" for it
     # rather than 0, which is a confidence and a different statement.
     overall_confidence: float | None

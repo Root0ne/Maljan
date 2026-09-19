@@ -236,25 +236,7 @@ function DomainCard({ domain }: { domain: NetworkDomain }) {
                 DGA {domain.dga_score.toFixed(2)}
               </span>
             )}
-            {/* A name the sandbox watched the sample resolve and a run of
-                bytes shaped like a hostname were drawn identically, and only
-                the first is an observation of infrastructure. The second is
-                also held out of the exported bundle, so a reader comparing
-                the two needs to see which this is. */}
-            {domain.source && (
-              <span
-                className="text-[11px] px-1.5 py-0.5 rounded bg-bg-active text-text-muted shrink-0"
-                title={
-                  domain.source === "strings"
-                    ? "Found in the sample's bytes, not observed on the wire"
-                    : domain.source === "sandbox"
-                      ? "Resolved or requested by the sample under the sandbox"
-                      : "Recorded by an analyst"
-                }
-              >
-                {domain.source}
-              </span>
-            )}
+            <SourceBadge source={domain.source} />
           </div>
           {domain.reason && (
             <div className="text-xs text-text-muted mt-1">{domain.reason}</div>
@@ -308,11 +290,39 @@ function IPCard({ ip }: { ip: NetworkIP }) {
                 {ip.asn}
               </span>
             )}
+            <SourceBadge source={ip.source} />
           </div>
         </div>
         {ip.reputation && <ReputationBadge rep={ip.reputation as Record<string, unknown>} />}
       </div>
     </div>
+  );
+}
+
+/* Where an endpoint came from.
+ *
+ * A name or an address the sandbox watched the sample reach and a run of bytes
+ * shaped like one were drawn identically, and only the first is an observation
+ * of infrastructure. The second is also held out of the exported bundle until a
+ * second source knows it, so a reader comparing two rows needs to see which
+ * this is. The same badge for every network kind, because the rule that reads
+ * it is the same rule.
+ */
+function SourceBadge({ source }: { source?: string | null }) {
+  if (!source) return null;
+  const why =
+    source === "strings"
+      ? "Found in the sample's bytes, not observed on the wire"
+      : source === "sandbox"
+        ? "Resolved or requested by the sample under the sandbox"
+        : "Recorded by an analyst";
+  return (
+    <span
+      className="text-[11px] px-1.5 py-0.5 rounded bg-bg-active text-text-muted shrink-0"
+      title={why}
+    >
+      {source}
+    </span>
   );
 }
 

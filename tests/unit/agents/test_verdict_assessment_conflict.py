@@ -1,14 +1,21 @@
-"""A verdict and the judge's own severity may not say different things.
+"""A verdict and the rest of the judge's own answer may not say different things.
 
 A live run returned Malware at 0.6 confidence with its own severity rated
 Informational and a rationale reading "there is no evidence of malicious
 functionality". Both fields are the judge's and both reached the report, which
 printed them side by side with nothing saying they disagree.
 
-It is one feedback turn now, naming both fields and asking which was meant.
-Neither field is ever rewritten: a contradiction that survives the turn is
-recorded, because choosing one of the two for the judge would be the silent
-override this layer exists to replace.
+Another returned Malware at 1.0 over a signed PuTTY, with the category
+``legitimate-utility`` and a ``malware`` object the judge's own rationale
+called "a container for the object type in STIX". Three facts about one sample
+and two answers between them.
+
+The check compares the verdict the judge stated with each of the three: the
+severity rating, the category, and whether a malware object is in the bundle.
+It is one feedback turn, naming both sides and asking which was meant. Nothing
+is ever rewritten: a contradiction that survives the turn is recorded, the
+stated verdict is published, and the export declines to carry a malware object
+under a Benign one.
 """
 
 from __future__ import annotations
@@ -21,25 +28,28 @@ from maljan.schemas.judgement import JudgeAssessment, SeverityVerdict
 from maljan.schemas.stix_models import AttackPattern, Bundle, Malware
 
 
-def _malware_bundle(rating: str) -> Bundle:
+def _malware_bundle(rating: str, verdict: str = "Malware", category: str | None = None) -> Bundle:
     return Bundle(
         objects=[Malware(id=f"malware--{'a' * 8}-0000-4000-8000-{'b' * 12}", name="loader")],
         x_maljan_assessment=JudgeAssessment(
-            severity=SeverityVerdict(rating=rating, rationale="stated by the judge")
+            verdict=verdict,
+            malware_category=category,
+            severity=SeverityVerdict(rating=rating, rationale="stated by the judge"),
         ),
     )
 
 
-def _empty_bundle(rating: str) -> Bundle:
+def _empty_bundle(rating: str, verdict: str = "Benign") -> Bundle:
     return Bundle(
         objects=[],
         x_maljan_assessment=JudgeAssessment(
-            severity=SeverityVerdict(rating=rating, rationale="stated by the judge")
+            verdict=verdict,
+            severity=SeverityVerdict(rating=rating, rationale="stated by the judge"),
         ),
     )
 
 
-class TestTheTwoDirections:
+class TestTheSeverityDirections:
     def test_malware_rated_informational_is_a_conflict(self) -> None:
         violations = assessment_conflict_violations(_malware_bundle("Informational"))
 
@@ -59,6 +69,62 @@ class TestTheTwoDirections:
         assert "Reconcile them" in message
 
 
+class TestTheCategoryDirection:
+    def test_a_malware_verdict_categorised_as_legitimate_is_a_conflict(self) -> None:
+        bundle = _malware_bundle("High", category="legitimate-utility")
+
+        violations = assessment_conflict_violations(bundle)
+
+        assert [v.code for v in violations] == [ASSESSMENT_CONFLICT_CODE]
+        assert violations[0].path == "x_maljan_assessment.malware_category"
+        assert "legitimate-utility" in violations[0].message
+
+    def test_an_ordinary_category_passes(self) -> None:
+        for category in ("ransomware", "loader", "infostealer", "remote access trojan"):
+            bundle = _malware_bundle("High", category=category)
+            assert assessment_conflict_violations(bundle) == [], category
+
+    def test_a_benign_verdict_may_describe_what_the_sample_is(self) -> None:
+        """The mirrored rule is not written: a category is free text, and
+        deciding that some word in it means malicious would be this check
+        classifying the sample."""
+        bundle = Bundle(
+            objects=[],
+            x_maljan_assessment=JudgeAssessment(verdict="Benign", malware_category="ssh client"),
+        )
+
+        assert assessment_conflict_violations(bundle) == []
+
+
+class TestTheMalwareObjectDirection:
+    def test_a_benign_verdict_carrying_a_malware_object_is_a_conflict(self) -> None:
+        violations = assessment_conflict_violations(_malware_bundle("Informational", "Benign"))
+
+        assert [v.code for v in violations] == [ASSESSMENT_CONFLICT_CODE]
+        assert violations[0].path == "objects"
+        assert "malware object" in violations[0].message
+
+    def test_a_malware_verdict_without_one_is_not_questioned(self) -> None:
+        """The object illustrates the verdict; its absence contradicts nothing."""
+        bundle = Bundle(
+            objects=[
+                AttackPattern(
+                    id=f"attack-pattern--{'a' * 8}-0000-4000-8000-{'c' * 12}", name="T1055"
+                )
+            ],
+            x_maljan_assessment=JudgeAssessment(verdict="Malware", malware_category="loader"),
+        )
+
+        assert assessment_conflict_violations(bundle) == []
+
+    def test_every_disagreeing_fact_gets_its_own_row(self) -> None:
+        bundle = _malware_bundle("High", "Benign", category="ransomware")
+
+        violations = assessment_conflict_violations(bundle)
+
+        assert {v.path for v in violations} == {"x_maljan_assessment.severity.rating", "objects"}
+
+
 class TestWhatIsNotAConflict:
     def test_a_rating_that_matches_the_verdict_passes(self) -> None:
         assert assessment_conflict_violations(_malware_bundle("High")) == []
@@ -76,7 +142,8 @@ class TestWhatIsNotAConflict:
                     )
                 ],
                 x_maljan_assessment=JudgeAssessment(
-                    severity=SeverityVerdict(rating=rating, rationale="stated")
+                    verdict="Suspicious",
+                    severity=SeverityVerdict(rating=rating, rationale="stated"),
                 ),
             )
             assert assessment_conflict_violations(bundle) == [], rating
@@ -89,7 +156,9 @@ class TestWhatIsNotAConflict:
     def test_a_judge_that_abstained_on_severity_is_not_in_conflict(self) -> None:
         bundle = Bundle(
             objects=[],
-            x_maljan_assessment=JudgeAssessment(malware_category="loader", confidence=0.4),
+            x_maljan_assessment=JudgeAssessment(
+                verdict="Benign", malware_category="loader", confidence=0.4
+            ),
         )
         assert assessment_conflict_violations(bundle) == []
 
@@ -104,7 +173,8 @@ class TestTheJudgeIsAskedOnce:
         conflicting = (
             '{"type": "bundle", "objects": [{"type": "malware", '
             '"id": "malware--aaaaaaaa-0000-4000-8000-bbbbbbbbbbbb", "name": "loader"}], '
-            '"x_maljan_assessment": {"severity": {"rating": "Informational", '
+            '"x_maljan_assessment": {"verdict": "Malware", '
+            '"severity": {"rating": "Informational", '
             '"rationale": "no evidence of malicious functionality"}, '
             '"malware_category": "loader", "confidence": 0.6}}'
         )

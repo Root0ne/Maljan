@@ -40,9 +40,10 @@ from maljan.pipeline.events import (
     VALIDATION_SURVIVED,
     EventSink,
     emit_validation_feedback,
+    safe_finding_value,
 )
 from maljan.schemas.evidence import entry_ids_in
-from maljan.schemas.judgement import SEVERITY_RATINGS
+from maljan.schemas.judgement import SEVERITY_RATINGS, VERDICT_VALUES
 
 # How many alternatives a suggestion list carries. Three is what fits in one
 # line of feedback; a longer list reads as a menu and the model picks from the
@@ -264,7 +265,8 @@ def validate_isr(
                 Violation(
                     code="isr.confidence_range",
                     message=(
-                        f"CONFIDENCE is {confidence!r}; it must be a number between 0.0 and 1.0."
+                        f"CONFIDENCE is {safe_finding_value(confidence)!r}; it must be a number "
+                        "between 0.0 and 1.0."
                     ),
                     path=path,
                 )
@@ -296,8 +298,9 @@ def validate_isr(
                 Violation(
                     code=UNGROUNDED_TECHNIQUE_CODE,
                     message=(
-                        f"TECHNIQUE {tid} cites no evidence id from this run. Name the "
-                        f"ledger entry it was read from, for example {shown}, or drop the "
+                        f"TECHNIQUE {safe_finding_value(tid)} cites no evidence id from this "
+                        f"run. Name the ledger entry it was read from, for example {shown}, "
+                        "or drop the "
                         "technique: a technique nothing in the run establishes is read "
                         "downstream as a finding."
                     ),
@@ -315,7 +318,7 @@ def validate_isr(
                 Violation(
                     code="attck.unknown_id",
                     message=(
-                        f"TECHNIQUE {tid} is not in the MITRE ATT&CK catalogue"
+                        f"TECHNIQUE {safe_finding_value(tid)} is not in the MITRE ATT&CK catalogue"
                         f"{_retired_note(tid, attck)}.{hint} "
                         "Use one of them, or omit the technique id."
                     ),
@@ -401,10 +404,27 @@ def platform_mismatch_message(
 
     The catalogue's own domain and platforms for the id, against the routed
     ones. Two ways to miss: the id belongs to another domain, or it declares
-    platforms and none of them is the sample's. An id the catalogue carries
-    no platforms for is not questioned — no information is not a mismatch —
-    and neither is a technique whose only platform is ``PRE``: it happens
-    before any host is touched, so no sample's platform can contradict it.
+    platforms and none of them is the sample's.
+
+    Four things are not a miss, and the function answers ``""`` for each in
+    turn before it compares anything. A sample whose platform the router could
+    not settle, or that is cross-platform, has no scope to check against. A
+    knowledge object with no lookup cannot be asked. A lookup that raises or
+    answers something other than a mapping has not answered. And a technique
+    whose only platform is ``PRE`` happens before any host is touched, so no
+    sample's platform can contradict it — including its *domain*, which is why
+    that carve-out is asked before the domain comparison and not after it.
+    ATT&CK keeps every PRE technique in the enterprise matrix and mobile has
+    none, so asking the domain first made every PRE id cross-domain on an
+    Android sample. While this check only annotated, that produced a warning;
+    now that the report reads it to decide what to publish, it removed real
+    techniques — ``T1583 Acquire Infrastructure`` off an Android infostealer's
+    C2 registration — from every published surface.
+
+    A fifth is not a miss on the platform comparison alone: a technique the
+    catalogue carries no platforms for is not questioned there, because no
+    information is not a mismatch. It is still questioned on its domain, which
+    the catalogue did answer.
 
     ``attck_scope`` is asked first: it answers from the vendored files and
     loads nothing, which is what lets this run inside an analyst's turn.
@@ -425,18 +445,21 @@ def platform_mismatch_message(
         return ""
     domain = str(answer.get("domain") or "").strip().lower()
     platforms = [str(p) for p in (answer.get("platforms") or []) if str(p).strip()]
+    if _pre_only(platforms):
+        return ""
     sample_words = f"{expected_domain}-domain, {'/'.join(expected_platforms) or 'any platform'}"
     if domain and domain != expected_domain:
         return (
-            f"TECHNIQUE {technique_id} belongs to the ATT&CK {domain} domain"
+            f"TECHNIQUE {safe_finding_value(technique_id)} belongs to the ATT&CK {domain} domain"
             f"{f' (platforms {", ".join(platforms)})' if platforms else ''}; this sample is "
             f"{sample_words}. Use a technique from the sample's domain, or drop the technique id."
         )
-    if expected_platforms and platforms and not _pre_only(platforms):
+    if expected_platforms and platforms:
         wanted = {p.lower() for p in expected_platforms}
         if not any(p.lower() in wanted for p in platforms):
             return (
-                f"TECHNIQUE {technique_id} declares the platforms {', '.join(platforms)}; this "
+                f"TECHNIQUE {safe_finding_value(technique_id)} declares the platforms "
+                f"{', '.join(platforms)}; this "
                 f"sample is {sample_words}. Use a technique that applies to it, or drop the "
                 "technique id."
             )
@@ -602,10 +625,11 @@ def _weak_alignment(
         return ""
     ranked = ", ".join(f"{c['technique_id']} ({c['score_gate']:.2f})" for c in disagreeing)
     return (
-        f"TECHNIQUE {tid} aligns weakly with the claim's own text (gate score "
+        f"TECHNIQUE {safe_finding_value(tid)} aligns weakly with the claim's own text (gate score "
         f"{gate_score:.2f}, threshold {threshold:.2f}), and the ATT&CK index ranks "
         f"{best['technique_id']} ({best['score_gate']:.2f}) and other techniques from this "
-        f"sample's own domain above it: {ranked}. Keep {tid} if the evidence says so and say "
+        f"sample's own domain above it: {ranked}. Keep {safe_finding_value(tid)} if the evidence "
+        "says so and say "
         "why in the claim, choose one of the ranked techniques, or drop the technique id."
     )
 
@@ -906,7 +930,7 @@ def schema_violations(model: Any, payload: Any, *, code: str) -> list[Violation]
             for error in exc.errors()
         ][:MAX_SCHEMA_VIOLATIONS]
     except Exception as exc:  # noqa: BLE001 — a coercion failure is still a finding
-        return [Violation(code=code, message=str(exc))]
+        return [Violation(code=code, message=safe_finding_value(exc))]
     return []
 
 
@@ -1322,8 +1346,9 @@ def validate_verdict_bundle(
                     Violation(
                         code="stix.ungrounded_indicator",
                         message=(
-                            f"{problem} Emit indicators only for values a tool in this run "
-                            "actually saw, and prefer zero indicators to an invented one."
+                            f"{safe_finding_value(problem)} Emit indicators only for values a "
+                            "tool in this run actually saw, and prefer zero indicators to an "
+                            "invented one."
                         ),
                         path=f"objects[{index}]",
                     )
@@ -1343,7 +1368,8 @@ def validate_verdict_bundle(
                     Violation(
                         code=MISSING_ID_CODE,
                         message=(
-                            f"the attack-pattern {name!r} names no MITRE ATT&CK technique id. "
+                            f"the attack-pattern {safe_finding_value(name)!r} names no MITRE "
+                            "ATT&CK technique id. "
                             "Give its external_references a mitre-attack entry with the "
                             "external_id (T#### or T####.###), or drop the object and say "
                             "what was observed in the assessment: a behaviour with no "
@@ -1358,8 +1384,8 @@ def validate_verdict_bundle(
                     Violation(
                         code="stix.unknown_technique",
                         message=(
-                            f"the attack-pattern names {tid}, which is not shaped like a "
-                            "MITRE ATT&CK technique id (T#### or T####.###)."
+                            f"the attack-pattern names {safe_finding_value(tid)}, which is "
+                            "not shaped like a MITRE ATT&CK technique id (T#### or T####.###)."
                         ),
                         path=f"objects[{index}]",
                     )
@@ -1369,8 +1395,8 @@ def validate_verdict_bundle(
                     Violation(
                         code="stix.unknown_technique",
                         message=(
-                            f"the attack-pattern names {tid}, which the MITRE ATT&CK "
-                            f"catalogue has no entry for in any domain"
+                            f"the attack-pattern names {safe_finding_value(tid)}, which the "
+                            "MITRE ATT&CK catalogue has no entry for in any domain"
                             f"{_retired_note(tid, attck)}. Use a real technique id or "
                             "drop the attack-pattern."
                         ),
@@ -1396,7 +1422,7 @@ def validate_verdict_bundle(
             Violation(
                 code="verdict.severity_enum",
                 message=(
-                    f"severity.rating is {rating!r}; it must be one of "
+                    f"severity.rating is {safe_finding_value(rating)!r}; it must be one of "
                     f"{', '.join(SEVERITY_RATINGS)}."
                 ),
                 path="severity.rating",
@@ -1410,7 +1436,7 @@ def validate_verdict_bundle(
                 Violation(
                     code="attribution.ungrounded_family",
                     message=(
-                        f"family {family.name!r} cites no evidence ids; list "
+                        f"family {safe_finding_value(family.name)!r} cites no evidence ids; list "
                         "the ledger entries the name came from, or drop the attribution."
                     ),
                     path="family.evidence_ids",
@@ -1461,7 +1487,10 @@ def _schema_message(model: Any, error: Mapping[str, Any]) -> str:
     list is short, it is exactly what the model needs to answer again, and it
     costs one line of the feedback turn.
     """
-    message = str(error.get("msg") or "is not valid")
+    # Pydantic's own sentence about the field. It does not normally echo the
+    # value, and a finding row is not the place to find out that it sometimes
+    # does.
+    message = safe_finding_value(error.get("msg") or "is not valid")
     kind = str(error.get("type") or "")
     if kind not in ("extra_forbidden", "missing"):
         return message
@@ -1485,9 +1514,20 @@ ASSESSMENT_MISSING_CODE = "verdict.assessment_missing"
 # What the judge is told to add, in the shape the bundle reads it in.
 ASSESSMENT_MISSING_MESSAGE = (
     'Add x_maljan_assessment at the top level of the bundle, as a sibling of "objects" '
-    "and not inside it, with severity {rating, rationale}, malware_category, "
+    "and not inside it, with verdict, severity {rating, rationale}, malware_category, "
     "family {name, confidence, evidence_ids} and confidence. "
     "Omit only a field the evidence cannot support."
+)
+
+# The fields whose presence means the block said something. A block carrying
+# only the verdict has still answered the question the report leads with, and a
+# judge that abstained on the other four has answered too.
+_ASSESSMENT_FIELDS: tuple[str, ...] = (
+    "verdict",
+    "severity",
+    "malware_category",
+    "family",
+    "confidence",
 )
 
 
@@ -1495,9 +1535,11 @@ def assessment_violations(bundle: Any) -> list[Violation]:
     """Whether the judge said what it thinks, beyond the STIX objects.
 
     The message names the top level of the bundle because that is where
-    ``Bundle.x_maljan_assessment`` is read from. A block placed inside
-    ``objects`` instead is discarded by ``Bundle.model_validate`` and the
-    report says "not assessed" — the very failure the retry exists to fix.
+    ``Bundle.x_maljan_assessment`` is read from. A block the judge placed
+    inside ``objects`` instead is lifted to the top level before validation
+    (``agents.judge_postprocess.lift_misplaced_extensions``) and the lift is
+    recorded; this check then sees the block where the bundle keeps it. Only a
+    bundle that carries no assessment at all reaches the violation below.
 
     Severity, category, family and the judge's own confidence are the judge's
     to decide and nothing downstream computes them, so a bundle without them
@@ -1510,8 +1552,7 @@ def assessment_violations(bundle: Any) -> list[Violation]:
     """
     assessment = getattr(bundle, "x_maljan_assessment", None)
     if assessment is not None and any(
-        getattr(assessment, field, None) is not None
-        for field in ("severity", "malware_category", "family", "confidence")
+        getattr(assessment, field, None) is not None for field in _ASSESSMENT_FIELDS
     ):
         return []
     return [
@@ -1519,6 +1560,69 @@ def assessment_violations(bundle: Any) -> list[Violation]:
             code=ASSESSMENT_MISSING_CODE,
             message=ASSESSMENT_MISSING_MESSAGE,
             path="x_maljan_assessment",
+        )
+    ]
+
+
+UNSTATED_VERDICT_CODE = "verdict.unstated"
+UNRECOGNISED_VERDICT_CODE = "verdict.unrecognised"
+
+
+def stated_verdict_violations(bundle: Any) -> list[Violation]:
+    """Whether the judge stated a verdict, and whether it can be read.
+
+    Two different faults with two different consequences, so two codes.
+
+    The field is **absent**: the object set decides, because there is nothing
+    else to go on. A ``malware`` object written "strictly as a container for
+    the object type in STIX" then becomes a Malware verdict, which is the
+    fail-safe and not an answer — so `verdict.unstated` records that it was
+    used. The fallback stays for stored runs and for a model that omitted the
+    field.
+
+    The field **says something this pipeline cannot read**: the objects decide
+    nothing. The run publishes the inconclusive verdict, the judge's own word
+    travels to the report beside it, and `verdict.unrecognised` asks once for a
+    word from the vocabulary — quoting what the judge wrote, because a
+    correction that does not repeat the mistake is one the model cannot locate.
+
+    A bundle this pipeline built out of text states its own verdict in
+    ``x_maljan_fallback_verdict`` and is not asked for a second one.
+    """
+    if getattr(bundle, "x_maljan_fallback_verdict", None) is not None:
+        return []
+    from maljan.pipeline.outcome import INCONCLUSIVE_VERDICT, read_stated_verdict
+
+    stated = read_stated_verdict(bundle)
+    if stated.recognised is not None:
+        return []
+    listed = ", ".join(VERDICT_VALUES)
+    if stated.unrecognised:
+        return [
+            Violation(
+                code=UNRECOGNISED_VERDICT_CODE,
+                message=(
+                    f"x_maljan_assessment.verdict says {safe_finding_value(stated.written)!r}, "
+                    f"which is not one of {listed}. Answer with exactly one of those three words "
+                    "and nothing else — no qualifier, no parenthesis, no sentence; put anything "
+                    "you want to qualify it with in severity.rationale. Until it is one of them "
+                    f"this run publishes {INCONCLUSIVE_VERDICT} and no confidence, and your own "
+                    "answer is printed beside it."
+                ),
+                path="x_maljan_assessment.verdict",
+            )
+        ]
+    return [
+        Violation(
+            code=UNSTATED_VERDICT_CODE,
+            message=(
+                "x_maljan_assessment states no verdict. State it: set "
+                f"x_maljan_assessment.verdict to one of {listed}, and set "
+                "x_maljan_assessment.confidence to how sure you are of it. Write a malware "
+                "object only for a sample you conclude is malware; without the field the "
+                "verdict is read off the objects, which is a guess at what you meant."
+            ),
+            path="x_maljan_assessment.verdict",
         )
     ]
 
@@ -1535,38 +1639,104 @@ _CONFLICTING_RATINGS: dict[str, frozenset[str]] = {
     "Benign": frozenset({"High", "Critical"}),
 }
 
+# The words a category uses to say the sample is not malware. Checked against a
+# Malware verdict only, and against this short list only: a category is free
+# text, and the mirrored rule — deciding that some word in it means malicious —
+# would be this module classifying the sample. PuTTY's was
+# ``legitimate-utility`` beside a Malware verdict and an Informational rating.
+_BENIGN_CATEGORY_WORDS: tuple[str, ...] = (
+    "legitimate",
+    "benign",
+    "clean",
+    "harmless",
+    "not malware",
+    "no malware",
+    "non malicious",
+    "not malicious",
+)
+
+
+def _category_says_benign(category: str) -> bool:
+    """Whether a free-text category asserts the sample is not malware."""
+    words = re.sub(r"[^a-z0-9]+", " ", category.lower()).strip()
+    return any(word in words for word in _BENIGN_CATEGORY_WORDS)
+
 
 def assessment_conflict_violations(bundle: Any) -> list[Violation]:
-    """Whether the judge's verdict and its own severity say the same thing.
+    """Whether the judge's stated verdict and the rest of its answer agree.
 
-    Both fields are the judge's, and neither is touched here: what the judge
-    gets is one turn in which both are named and it is asked which it meant.
-    A contradiction that survives the turn is recorded rather than resolved,
-    because picking one of the two for the judge would be exactly the silent
-    override this module exists to replace.
+    Three comparisons, all of them against the verdict the judge stated: the
+    severity rating, the malware category, and whether a ``malware`` object is
+    in the bundle. Every field is the judge's and none is touched here — what
+    the judge gets is one turn in which both sides are named and it is asked
+    which it meant. A contradiction that survives the turn is recorded rather
+    than resolved, because picking one of the two for the judge would be
+    exactly the silent override this module exists to replace. The verdict is
+    then published as stated, and the STIX export declines to carry a malware
+    object under a Benign one.
+
+    One row per disagreeing fact, each with its own path, so the console folds
+    them apart and the judge reads what each one is about.
     """
     from maljan.pipeline.outcome import decide_from_bundle
 
     verdict = decide_from_bundle(bundle)
-    conflicting = _CONFLICTING_RATINGS.get(verdict)
-    if not conflicting:
-        return []
     assessment = getattr(bundle, "x_maljan_assessment", None)
+    found: list[Violation] = []
+
     rating = str(getattr(getattr(assessment, "severity", None), "rating", "") or "").strip()
-    if rating not in conflicting:
-        return []
-    return [
-        Violation(
-            code=ASSESSMENT_CONFLICT_CODE,
-            message=(
-                f"The bundle's objects say {verdict} and x_maljan_assessment.severity.rating "
-                f"says {rating}; those are two different answers about the same sample. "
-                "Reconcile them: either the objects or the rating is what you meant, and "
-                "the rationale should support whichever it is."
-            ),
-            path="x_maljan_assessment.severity.rating",
+    if rating and rating in _CONFLICTING_RATINGS.get(verdict, frozenset()):
+        found.append(
+            Violation(
+                code=ASSESSMENT_CONFLICT_CODE,
+                message=(
+                    f"This bundle's verdict is {verdict} and "
+                    f"x_maljan_assessment.severity.rating says {rating}; those are two "
+                    "different answers about the same sample. Reconcile them: either the "
+                    "verdict or the rating is what you meant, and the rationale should "
+                    "support whichever it is."
+                ),
+                path="x_maljan_assessment.severity.rating",
+            )
         )
-    ]
+
+    category = str(getattr(assessment, "malware_category", "") or "").strip()
+    if verdict == "Malware" and category and _category_says_benign(category):
+        found.append(
+            Violation(
+                code=ASSESSMENT_CONFLICT_CODE,
+                message=(
+                    f"This bundle's verdict is Malware and x_maljan_assessment."
+                    f"malware_category says {safe_finding_value(category)!r}, which says it is "
+                    "not. Reconcile them: give the verdict the category describes, or a category "
+                    "that describes the verdict."
+                ),
+                path="x_maljan_assessment.malware_category",
+            )
+        )
+
+    if verdict == "Benign" and _malware_object_index(bundle) is not None:
+        found.append(
+            Violation(
+                code=ASSESSMENT_CONFLICT_CODE,
+                message=(
+                    "This bundle's verdict is Benign and it carries a malware object. A "
+                    "malware object is written for a sample you conclude is malware; under "
+                    "a Benign verdict it is not published and the report says so. Drop the "
+                    "object, or state the verdict it belongs to."
+                ),
+                path="objects",
+            )
+        )
+    return found
+
+
+def _malware_object_index(bundle: Any) -> int | None:
+    """Where the bundle's first ``malware`` object sits, or ``None``."""
+    for index, obj in enumerate(getattr(bundle, "objects", None) or []):
+        if str(getattr(obj, "type", "") or "") == "malware":
+            return index
+    return None
 
 
 UNSUPPORTED_BENIGN_CODE = "verdict.unsupported_benign"
@@ -1666,6 +1836,10 @@ def _indicator_problem(
 
     if not pattern.strip():
         return "the indicator has an empty pattern."
+    # Raw here, deliberately: these are what the denylists and the corpus are
+    # matched against, and a scrubbed path would answer a different question
+    # from the one this check asks. The sentence they end up in is what the
+    # caller wraps, because that is what is stored and shown.
     literals = [str(v).strip() for v in _PATTERN_LITERAL_RE.findall(pattern) if str(v).strip()]
     if not literals:
         return "the indicator pattern quotes no value."
@@ -1680,17 +1854,29 @@ def _indicator_problem(
         for literal in literals:
             host = _url_host(literal)
             if host and any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
-                return f"the URL host in {literal!r} is documentation or vendor infrastructure."
+                return (
+                    f"the URL host in {safe_finding_value(literal)!r} is documentation or "
+                    "vendor infrastructure."
+                )
         if not any(_found(literal) for literal in literals):
-            return f"the URL {literals[0]!r} appears nowhere in this run's evidence."
+            return (
+                f"the URL {safe_finding_value(literals[0])!r} appears nowhere in this run's "
+                "evidence."
+            )
         return ""
 
     if stripped.startswith("[file:name"):
         for literal in literals:
             if COMPILE_ARTIFACT_RE.search(literal):
-                return f"{literal!r} is a compiler or toolchain artefact, not an indicator."
+                return (
+                    f"{safe_finding_value(literal)!r} is a compiler or toolchain artefact, "
+                    "not an indicator."
+                )
             if FOREIGN_CLASS_REF_RE.match(literal):
-                return f"{literal!r} is a class reference from a library, not a file on disk."
+                return (
+                    f"{safe_finding_value(literal)!r} is a class reference from a library, "
+                    "not a file on disk."
+                )
         for literal in literals:
             lowered = literal.lower()
             if (
@@ -1701,7 +1887,8 @@ def _indicator_problem(
             ):
                 return ""
         return (
-            f"{literals[0]!r} has no file extension, no filesystem anchor and was not "
+            f"{safe_finding_value(literals[0])!r} has no file extension, no filesystem anchor "
+            "and was not "
             "observed at runtime, so nothing says it is a real path."
         )
 
@@ -1712,7 +1899,8 @@ def _indicator_problem(
     if any(_found(literal) for literal in literals):
         return ""
     return (
-        f"the indicator pattern names {', '.join(literals)}, which appears nowhere "
+        f"the indicator pattern names {safe_finding_value(', '.join(literals))}, which "
+        "appears nowhere "
         "in the evidence this run collected."
     )
 
@@ -1903,6 +2091,26 @@ def announce_unresolved(
     feed = _feed(sink, agent, stage)
     if feed is not None and violations:
         feed.outcome([], violations, retry_index)
+
+
+def announce_resolved(
+    sink: EventSink | None,
+    *,
+    agent: str,
+    stage: str,
+    violations: Sequence[Violation],
+    retry_index: int = 0,
+) -> None:
+    """Publish findings the pipeline settled itself, as findings that are settled.
+
+    For an act this pipeline is allowed to perform without asking — moving the
+    judge's own assessment block to the property the schema reads it from,
+    unchanged. Nobody is corrected and no turn is spent, and the line says so
+    rather than leaving a reader to find out from a bundle that parsed.
+    """
+    feed = _feed(sink, agent, stage)
+    if feed is not None and violations:
+        feed.outcome(violations, [], retry_index)
 
 
 def _feed(sink: EventSink | None, agent: str, stage: str) -> _FeedbackFeed | None:

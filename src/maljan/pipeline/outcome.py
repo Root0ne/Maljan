@@ -14,8 +14,12 @@ about what the run was.
 
 from __future__ import annotations
 
+import json
 import re
+from dataclasses import dataclass
 from typing import Any
+
+from maljan.schemas.judgement import VERDICT_VALUES
 
 # What the run summary and the report header say about a verdict drawn from an
 # empty run. It is a degradation reason and not an override: the judge made no
@@ -76,8 +80,185 @@ def _one_line(text: str, limit: int = _MESSAGE_LIMIT) -> str:
     return flattened[:limit]
 
 
+# What is taken off a written verdict before it is compared: the punctuation
+# and the markdown emphasis a model wraps a word in. Every one of these says
+# nothing about the word itself — ``**Benign**`` is Benign and ``"Suspicious"``
+# is Suspicious.
+#
+# A question mark is deliberately not among them, and neither is a bracket or a
+# comma. ``Malware?`` is not a decorated "Malware": it is doubt, and reading
+# doubt as the confident word is the whole class of fault this rule exists to
+# close. So is a bracket, which opens a qualifier.
+_VERDICT_TRIM = " \t\r\n.\"'`*_"
+
+_RECOGNISED_VERDICTS: dict[str, str] = {value.lower(): value for value in VERDICT_VALUES}
+
+
+def normalise_verdict(written: Any) -> str | None:
+    """One of :data:`VERDICT_VALUES` for what somebody wrote, or ``None``.
+
+    The single reading of a verdict word, shared by the pipeline and by the
+    report builder that renders it. The whole value has to *be* one of the
+    three words once whitespace, case and the decoration above are taken off:
+    ``"Malware."``, ``**Benign**`` and ``" suspicious\\n"`` are the words they
+    are wrapped in, and anything more than a word is not one of them.
+
+    This was a prefix match, which is the right rule for the builder — whose
+    input the pipeline has already reduced to one of three words — and a
+    dangerous one for free model text, because a prefix cannot see what comes
+    after the stem. ``malware-free``, ``Malware (false positive)`` and
+    ``malwarebytes detected nothing`` all read as Malware, and
+    ``Benignware is unlikely; malware`` read as Benign: the published verdict
+    was the inverse of what the judge wrote, with no code and no feedback turn.
+
+    Nothing here interprets a qualifier. A value this cannot match is answered
+    ``None`` — stated and unrecognised, which the caller publishes
+    conservatively and the judge is asked about once.
+    """
+    if written is None:
+        return None
+    text = " ".join(str(written).split()).strip(_VERDICT_TRIM).lower()
+    return _RECOGNISED_VERDICTS.get(text)
+
+
+@dataclass(frozen=True)
+class StatedVerdict:
+    """What a bundle's assessment says about the verdict, in three answers.
+
+    ``written`` is the judge's own word, kept exactly as written so the report
+    can show it; ``recognised`` is what this pipeline reads it as. An empty
+    ``written`` means the field is absent, which is the only case where the
+    object set decides. A ``written`` that is not ``recognised`` is a statement
+    this pipeline cannot act on — the judge said something, so the objects say
+    nothing.
+    """
+
+    written: str = ""
+    recognised: str | None = None
+
+    @property
+    def absent(self) -> bool:
+        """Whether the judge wrote no verdict at all."""
+        return not self.written
+
+    @property
+    def unrecognised(self) -> bool:
+        """Whether the judge wrote a word this pipeline cannot read."""
+        return bool(self.written) and self.recognised is None
+
+
+def written_verdict_text(raw: Any) -> str:
+    """What the judge put in the field, as one line of text, or ``""``.
+
+    The field takes anything, because a type is one wrong word by another
+    spelling and losing the bundle over either is the failure this schema was
+    shaped to avoid. A list, a number or an object is written back to the judge
+    and shown in the report as its own compact JSON, which is what the judge
+    wrote rather than a Python repr of it.
+    """
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        return " ".join(raw.split())
+    try:
+        return json.dumps(raw, separators=(",", ":"), default=str)
+    except (TypeError, ValueError):
+        return " ".join(str(raw).split())
+
+
+def read_stated_verdict(bundle: Any) -> StatedVerdict:
+    """The verdict statement on a bundle, read once for every reader of it.
+
+    The pipeline, the conflict check, the confidence and the export all take
+    the judge at its word through this, so none of them can disagree about
+    what the judge said.
+    """
+    assessment = getattr(bundle, "x_maljan_assessment", None)
+    if assessment is None:
+        return StatedVerdict()
+    raw = getattr(assessment, "verdict", None)
+    return StatedVerdict(written=written_verdict_text(raw), recognised=normalise_verdict(raw))
+
+
+def stated_confidence(bundle: Any) -> float | None:
+    """The judge's confidence for a verdict it stated and this pipeline read.
+
+    ``None`` whenever there is no such verdict: a number the judge put on an
+    assessment whose verdict nobody can read, or on no verdict at all, does not
+    belong to the verdict the run then publishes. That was how a signed utility
+    came to be published as "Malware @ 1.00" — the number was the judge's, and
+    the verdict beside it was the object set's.
+
+    ``None`` too for a judge that stated a verdict and no number, which the
+    report prints as "not assessed". Nothing stands in: a confidence averaged
+    from the analysts belongs to the analysts' own claims.
+    """
+    if read_stated_verdict(bundle).recognised is None:
+        return None
+    assessment = getattr(bundle, "x_maljan_assessment", None)
+    declared = getattr(assessment, "confidence", None) if assessment is not None else None
+    if declared is None:
+        return None
+    try:
+        return float(declared)
+    except (TypeError, ValueError):
+        return None
+
+
+# How a run's verdict was arrived at, as one word. The degradation reasons
+# already say it in a sentence, and a sentence is not something an API client
+# or a console can branch on: ``Suspicious`` with no confidence is the judge's
+# own conclusion on one run and "the judge's answer could not be read" on the
+# next, and those are different facts about the sample.
+VERDICT_READ_STATED = "stated"
+VERDICT_READ_UNRECOGNISED = "unrecognised"
+VERDICT_READ_UNSTATED = "unstated"
+VERDICT_READ_FALLBACK = "fallback"
+
+
+def verdict_reading(bundle: Any) -> str:
+    """Which of the four ways :func:`decide_from_bundle` read this bundle.
+
+    The same order it reads them in, so the answer cannot disagree with the
+    verdict beside it. A stored run that predates the field carries none, and a
+    reader that finds none draws nothing new.
+    """
+    if getattr(bundle, "x_maljan_fallback_verdict", None) is not None:
+        return VERDICT_READ_FALLBACK
+    stated = read_stated_verdict(bundle)
+    if stated.recognised is not None:
+        return VERDICT_READ_STATED
+    return VERDICT_READ_UNRECOGNISED if stated.unrecognised else VERDICT_READ_UNSTATED
+
+
+def unrecognised_verdict_reason(bundle: Any) -> str:
+    """Why this run's verdict is the inconclusive one, or ``""``.
+
+    The judge's own word, verbatim, beside the verdict the run publishes in its
+    place. It joins the degradation reasons, which the report header prints
+    directly under the verdict, so a reader who sees "Suspicious" over a run
+    whose judge wrote "Malicious" is told that in the same breath.
+    """
+    from maljan.pipeline.events import safe_finding_value
+
+    stated = read_stated_verdict(bundle)
+    if not stated.unrecognised:
+        return ""
+    # The judge's own text, and it is the judge's own text that makes this
+    # worth scrubbing: a model echoing a credentialled URL it was shown into
+    # the verdict field would otherwise put the credential in the stored report
+    # and on the analysis page, under the verdict, where the header prints it.
+    return _one_line(
+        f"the judge stated the verdict {safe_finding_value(stated.written)!r}, which is not one "
+        f"of {', '.join(VERDICT_VALUES)}; the verdict reported is {INCONCLUSIVE_VERDICT} and no "
+        "confidence is published for it"
+    )
+
+
 def decide_from_bundle(bundle: Any) -> str:
-    """Map a final STIX bundle to a high-level verdict.
+    """The verdict a final STIX bundle carries.
+
+    Four readings, in this order, and the order is the whole function.
 
     A bundle carrying ``x_maljan_fallback_verdict`` was built by this pipeline
     because the judge's answer was not a bundle, and it states its verdict
@@ -86,7 +267,26 @@ def decide_from_bundle(bundle: Any) -> str:
     decision, so reading it back would only be this function agreeing with
     itself — and when it did not, a judge that timed out produced "Malware".
 
-    For a bundle a judge produced, the heuristic:
+    Then the judge's own statement, ``x_maljan_assessment.verdict``. A signed,
+    clean PuTTY was published as "Malware @ 1.0" over a judge that had rated
+    it Informational, categorised it ``legitimate-utility`` and written that
+    the assessment confirms it is benign — because the bundle carried a
+    ``malware`` object and the object set was read as the answer. The judge
+    decides; the objects illustrate the decision.
+
+    Then a statement this pipeline cannot read. The judge wrote something, so
+    the objects have nothing to say: the answer is the inconclusive verdict
+    this module already defines for a run whose outcome it cannot tell, the
+    judge's own word travels to the report beside it
+    (:func:`unrecognised_verdict_reason`), and ``pipeline.validation`` asks the
+    judge once for a word it knows. Reading the objects here instead would
+    publish Malware over a judge that wrote "Not malware" and Benign over one
+    that wrote "Malicious", which is the defect this function exists to remove
+    wearing one word of different phrasing.
+
+    The object set is read only for a bundle whose field is truly absent — a
+    stored run, or a model that omitted it, which ``pipeline.validation``
+    records as ``verdict.unstated``:
       * a ``malware`` object marks the sample malicious.
       * an ``indicator``/``attack-pattern``/``relationship`` set with no
         ``malware`` object but suspicious confidence is "Suspicious".
@@ -98,10 +298,16 @@ def decide_from_bundle(bundle: Any) -> str:
     that asks whether the judge's own severity agrees with its verdict has to
     read the verdict the same way the pipeline does.
     """
-    stated = getattr(bundle, "x_maljan_fallback_verdict", None)
-    if stated is not None:
-        decision = str(getattr(stated, "decision", "") or "").strip()
+    fallback = getattr(bundle, "x_maljan_fallback_verdict", None)
+    if fallback is not None:
+        decision = str(getattr(fallback, "decision", "") or "").strip()
         return decision or INCONCLUSIVE_VERDICT
+
+    stated = read_stated_verdict(bundle)
+    if stated.recognised is not None:
+        return stated.recognised
+    if stated.unrecognised:
+        return INCONCLUSIVE_VERDICT
 
     has_malware = False
     has_suspicious_indicator = False

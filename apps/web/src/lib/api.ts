@@ -98,10 +98,27 @@ export interface AgentFindingDTO {
   status_reason?: string | null;
 }
 
+/**
+ * How a run's verdict was arrived at.
+ *
+ * `stated` is the judge's own word. `unrecognised` is a judge that wrote
+ * something this pipeline could not read, `unstated` a judge that wrote
+ * nothing and left the bundle's objects to answer, `fallback` an answer that
+ * was not a bundle at all. The last three all publish the inconclusive
+ * verdict, which is one of the same three words a judge may state — so the
+ * value beside `verdict` is the only thing that tells "the judge concluded
+ * Suspicious" from "the judge's conclusion could not be read".
+ *
+ * Absent on a report stored before the field existed, and a reader that finds
+ * none draws nothing new.
+ */
+export type VerdictReading = "stated" | "unrecognised" | "unstated" | "fallback";
+
 export interface ReportDetailDTO {
   id: string;
   job_id: string;
   verdict: string;
+  verdict_reading?: VerdictReading | null;
   /** `null` when nothing assessed one: a verdict the pipeline wrote
    *  because the judge never answered has no confidence. */
   overall_confidence: number | null;
