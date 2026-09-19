@@ -522,10 +522,18 @@ change landed on `main`.
   a stated count rather than as a cut-off string, and `structured` is populated
   for those entries for the first time — so evidence sections, corroboration
   and the triage pack begin to see calls they have never seen, and a report
-  over the same sample can carry more than it did. Anything that is not a JSON
-  object (decompilation, plain text) takes the same character cut as before,
-  byte for byte. The run summary's truncation block counts the new outcome
-  separately as `tool_output_shortened`.
+  over the same sample can carry more than it did. A large **string** value is
+  shortened the same way, which is the decompilation shape. Bookkeeping goes
+  under one reserved top-level key, `shortened`, mapping each shortened value's
+  path to `kept`/`omitted` (or `kept_chars`/`omitted_chars`); nothing is written
+  into the tool's own vocabulary but the `truncated` flag it already has, and a
+  tool that already uses the name keeps it. Anything that is not a JSON object
+  (decompilation as plain text, any prose) reaches the `FunctionSummarizer` and
+  then the same character cut as before, byte for byte — but a JSON object no
+  longer reaches the summariser, because its answer is prose and prose is what
+  leaves the record with nothing structured in it. The run summary's truncation
+  block counts the new outcome as `tool_output_shortened`, and a shortening that
+  ran past its wall as `tool_output_shortening_timeouts`.
 
 - **Deprecated: `react_agent_max_steps_overrides` and
   `react_agent_timeout_overrides`.** A budget belongs to the agent that spends

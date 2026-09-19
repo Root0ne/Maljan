@@ -159,6 +159,7 @@ class TruncationMetrics:
     # A JSON answer shortened by dropping list elements rather than characters.
     # Defaulted because a summary read back from storage predates the outcome.
     tool_output_shortened: int = 0
+    tool_output_shortening_timeouts: int = 0
 
     @property
     def any_bound_hit(self) -> bool:
@@ -506,6 +507,7 @@ class RunSummary:
                 f"| — summarised | {trunc.tool_output_summarised} |",
                 f"| — hard truncated | {trunc.tool_output_hard_truncated} |",
                 f"| — shortened as a document | {trunc.tool_output_shortened} |",
+                f"| — shortening gave up on its clock | {trunc.tool_output_shortening_timeouts} |",
                 f"| Characters dropped | {trunc.tool_output_chars_dropped} |",
                 f"| ReAct step cap | {trunc.react_step_cap_hits} / {trunc.react_invocations} |",
                 f"| Judge token cap | {trunc.judge_token_cap_hits} / {trunc.judge_invocations} |",
@@ -595,6 +597,7 @@ class RunSummary:
                 "tool_output_summarised": t.tool_output_summarised,
                 "tool_output_hard_truncated": t.tool_output_hard_truncated,
                 "tool_output_shortened": t.tool_output_shortened,
+                "tool_output_shortening_timeouts": t.tool_output_shortening_timeouts,
                 "tool_output_chars_dropped": t.tool_output_chars_dropped,
                 "react_invocations": t.react_invocations,
                 "react_step_cap_hits": t.react_step_cap_hits,
@@ -793,6 +796,7 @@ class RunSummaryBuilder:
             tool_output_summarised=int(snapshot.get("tool_output_summarised", 0)),
             tool_output_hard_truncated=int(snapshot.get("tool_output_hard_truncated", 0)),
             tool_output_shortened=int(snapshot.get("tool_output_shortened", 0)),
+            tool_output_shortening_timeouts=int(snapshot.get("tool_output_shortening_timeouts", 0)),
             tool_output_chars_dropped=int(snapshot.get("tool_output_chars_dropped", 0)),
             react_invocations=int(snapshot.get("react_invocations", 0)),
             react_step_cap_hits=int(snapshot.get("react_step_cap_hits", 0)),

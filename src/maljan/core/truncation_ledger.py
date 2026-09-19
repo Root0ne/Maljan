@@ -70,6 +70,7 @@ def record_guardrail_outcome(
     summarised: bool = False,
     hard_truncated: bool = False,
     shortened: bool = False,
+    shortening_timed_out: bool = False,
 ) -> None:
     """Record one tool-output guardrail decision on ``ledger``.
 
@@ -90,6 +91,7 @@ def record_guardrail_outcome(
             summarised=summarised,
             hard_truncated=hard_truncated,
             shortened=shortened,
+            shortening_timed_out=shortening_timed_out,
         )
     except Exception:  # noqa: BLE001 — telemetry must never break a tool call
         return
@@ -179,6 +181,11 @@ class TruncationLedger:
         # characters: still a document, still parsed into the ledger's
         # ``structured``, and saying how many rows it handed over.
         self.tool_output_shortened = 0
+        # A shortening that ran past its wall and gave way to the character
+        # cut. Counted apart because it is a cost signal, not a shape one: a
+        # run with any of these was spending an analyst's budget on
+        # serialisation.
+        self.tool_output_shortening_timeouts = 0
         self.tool_output_chars_in = 0
         self.tool_output_chars_kept = 0
 
@@ -211,6 +218,7 @@ class TruncationLedger:
         summarised: bool = False,
         hard_truncated: bool = False,
         shortened: bool = False,
+        shortening_timed_out: bool = False,
     ) -> None:
         """Record one guardrail decision.
 
@@ -229,6 +237,8 @@ class TruncationLedger:
                 self.tool_output_hard_truncated += 1
             if shortened:
                 self.tool_output_shortened += 1
+            if shortening_timed_out:
+                self.tool_output_shortening_timeouts += 1
 
     # -- loop / generation ceilings ----------------------------------------
 
@@ -289,6 +299,7 @@ class TruncationLedger:
                 "tool_output_summarised": self.tool_output_summarised,
                 "tool_output_hard_truncated": self.tool_output_hard_truncated,
                 "tool_output_shortened": self.tool_output_shortened,
+                "tool_output_shortening_timeouts": self.tool_output_shortening_timeouts,
                 "tool_output_chars_in": self.tool_output_chars_in,
                 "tool_output_chars_kept": self.tool_output_chars_kept,
                 "tool_output_chars_dropped": chars_dropped(

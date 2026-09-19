@@ -1107,6 +1107,31 @@ That stamp is what makes a report checkable: the model can cite the call it read
 a fact from, a report section lists the entries it was built from, and `GET
 /api/v1/jobs/{id}/evidence` serves those entries back.
 
+**An answer wider than the prompt allows.** Before any of that, a tool result
+over `preprocessing.max_tool_output_chars` meets the output guardrail, which
+now has three outcomes rather than two. A JSON object is **shortened as a
+document**: elements come off the end of its largest lists, then characters off
+the end of its largest long strings, until it fits. No key is ever dropped, the
+answer's own `truncated` flag is set, and one reserved top-level key —
+`shortened` — maps each shortened value's path to what was kept and what was
+left out, so a count can be reconciled without reading it against one of the
+tool's own numbers that means something else. Nothing else is written into the
+tool's vocabulary. Anything that is not a JSON object — a decompilation, any
+plain text — goes to the `FunctionSummarizer` when
+`preprocessing.use_function_summarizer` is on and to the character cut
+otherwise, exactly as before.
+
+The shortening runs **before** the summariser, and for a JSON object it is the
+better of the two: the summariser answers in English prose, and prose is what
+leaves the record with no `structured` at all — which is the defect the
+shortening exists to remove. For the decompilation the summariser was written
+for, which arrives as plain text, nothing changed. Deciding what to drop is
+arithmetic over sizes measured in one walk, it runs on a thread rather than the
+event loop, and a monotonic wall backstops it; a document the shortening cannot
+help (its keys alone over the limit) is recognised by one subtraction and takes
+the character cut at once. `run_summary.truncation` counts the three outcomes
+apart, and the wall firing among them.
+
 Two bounds keep the ledger from becoming the thing it records. Each output is
 trimmed on the way in, and each agent gets a byte budget
 (`report.evidence_budget_bytes`); past the budget an entry keeps its arguments,

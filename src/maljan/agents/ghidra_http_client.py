@@ -13,6 +13,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -188,7 +189,9 @@ class GhidraHTTPClient:
         if path == "/load_program":
             await self._activate_loaded_program(output)
 
-        return self._apply_output_guardrail(output)
+        # On a thread: shortening a large answer is CPU-bound and synchronous,
+        # and this is a coroutine serving an agent.
+        return await asyncio.to_thread(self._apply_output_guardrail, output)
 
     async def _activate_loaded_program(self, load_output: str) -> None:
         """Make a freshly loaded program the *current* one.
@@ -293,14 +296,18 @@ class GhidraHTTPClient:
         including the pass-through: pitfall P6 asks for truncation *frequency*,
         and a frequency needs its denominator.
 
-        A JSON document is shortened as a document: elements come off the end
-        of its largest lists until it fits, no key is dropped, and it says how
-        many rows it handed over (``maljan.agents.output_shortening``). A cut
-        made in characters ends a document mid-array, which reaches the model
-        as a prefix it cannot read the metadata of and the ledger as prose
-        with no ``structured`` at all — so the calls that found the most were
-        the ones the report never saw. Everything that is not a JSON object
-        takes the character cut exactly as it always did.
+        A JSON object is shortened as a document: elements come off the end of
+        its largest lists, then characters off the end of its largest long
+        strings, until it fits, and one reserved key says what was left out
+        (``maljan.agents.output_shortening``). A cut made in characters ends a
+        document mid-array, which reaches the model as a prefix it cannot read
+        the metadata of and the ledger as prose with no ``structured`` at all.
+
+        This runs **before** the summariser, and for a JSON object it is the
+        better of the two: the summariser answers in English prose, and prose
+        is exactly what leaves the record with nothing structured in it. A
+        decompilation that arrives as plain text still reaches the summariser
+        and then the character cut, byte for byte as before.
         """
         from maljan.agents.output_shortening import shorten_json_document
         from maljan.core.truncation_ledger import record_guardrail_outcome
@@ -322,16 +329,16 @@ class GhidraHTTPClient:
             self._max_output_chars,
         )
 
-        shortened, was_shortened = shorten_json_document(output, self._max_output_chars)
-        if was_shortened:
+        attempt = shorten_json_document(output, self._max_output_chars)
+        if attempt.shortened:
             record_guardrail_outcome(
                 self._truncation_ledger,
                 chars_in=chars_in,
-                chars_kept=len(shortened),
+                chars_kept=len(attempt.text),
                 over_limit=True,
                 shortened=True,
             )
-            return shortened
+            return attempt.text
 
         if self._output_guardrail is not None:
             try:
@@ -355,5 +362,6 @@ class GhidraHTTPClient:
             chars_kept=len(result),
             over_limit=True,
             hard_truncated=True,
+            shortening_timed_out=attempt.timed_out,
         )
         return result

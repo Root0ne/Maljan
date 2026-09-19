@@ -12,6 +12,7 @@ supported:
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from contextlib import suppress
 from typing import Any
@@ -227,7 +228,9 @@ class MCPLangChainToolkit:
                         f'"detail": {result.content!r}}}'
                     )
                 output = "\n".join(c.text for c in result.content if hasattr(c, "text"))
-                return self._apply_output_guardrail(output)
+                # On a thread: shortening a five-megabyte answer is CPU-bound
+                # and synchronous, and this is a coroutine serving an agent.
+                return await asyncio.to_thread(self._apply_output_guardrail, output)
             except Exception as exc:
                 logger.warning("MCP tool '%s' raised %s: %s", tool_name, type(exc).__name__, exc)
                 return (
@@ -308,14 +311,20 @@ class MCPLangChainToolkit:
         much as the cut: pitfall P6 asks for truncation *frequency*, and a
         frequency needs its denominator.
 
-        A JSON document is shortened as a document: elements come off the end
-        of its largest lists until it fits, no key is dropped, and it says how
-        many rows it handed over (``maljan.agents.output_shortening``). A cut
-        made in characters ends a document mid-array, which reaches the model
-        as a prefix it cannot read the metadata of and the ledger as prose
-        with no ``structured`` at all — so the calls that found the most were
-        the ones the report never saw. Everything that is not a JSON object
-        takes the character cut exactly as it always did.
+        A JSON object is shortened as a document: elements come off the end of
+        its largest lists, then characters off the end of its largest long
+        strings, until it fits, and one reserved key says what was left out
+        (``maljan.agents.output_shortening``). A cut made in characters ends a
+        document mid-array, which reaches the model as a prefix it cannot read
+        the metadata of and the ledger as prose with no ``structured`` at all —
+        so the calls that found the most were the ones the report never saw.
+
+        This runs **before** the summariser, and for a JSON object it is the
+        better of the two: the summariser answers in English prose, and prose
+        is exactly what leaves the record with nothing structured in it.
+        Everything that is not a JSON object — a decompilation, any plain text
+        — reaches the summariser and then the character cut exactly as it
+        always did, byte for byte.
 
         Args:
             output: Raw tool output text.
@@ -337,10 +346,10 @@ class MCPLangChainToolkit:
             self._max_output_chars,
         )
 
-        shortened, was_shortened = shorten_json_document(output, self._max_output_chars)
-        if was_shortened:
-            self._record_guardrail(chars_in, len(shortened), over_limit=True, shortened=True)
-            return shortened
+        attempt = shorten_json_document(output, self._max_output_chars)
+        if attempt.shortened:
+            self._record_guardrail(chars_in, len(attempt.text), over_limit=True, shortened=True)
+            return attempt.text
 
         if self._output_guardrail is not None:
             try:
@@ -353,7 +362,13 @@ class MCPLangChainToolkit:
 
         # Fallback: simple truncation with a marker
         result = output[: self._max_output_chars] + "\n\n[OUTPUT TRUNCATED]"
-        self._record_guardrail(chars_in, len(result), over_limit=True, hard_truncated=True)
+        self._record_guardrail(
+            chars_in,
+            len(result),
+            over_limit=True,
+            hard_truncated=True,
+            shortening_timed_out=attempt.timed_out,
+        )
         return result
 
     def _record_guardrail(
@@ -365,6 +380,7 @@ class MCPLangChainToolkit:
         summarised: bool = False,
         hard_truncated: bool = False,
         shortened: bool = False,
+        shortening_timed_out: bool = False,
     ) -> None:
         """Record one guardrail decision; no-op without a ledger, never raises."""
         from maljan.core.truncation_ledger import record_guardrail_outcome
@@ -377,4 +393,5 @@ class MCPLangChainToolkit:
             summarised=summarised,
             hard_truncated=hard_truncated,
             shortened=shortened,
+            shortening_timed_out=shortening_timed_out,
         )

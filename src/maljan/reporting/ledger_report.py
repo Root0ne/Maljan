@@ -31,6 +31,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from maljan.agents.output_shortening import BOOKKEEPING_KEY
 from maljan.analysis.technique_ids import sigma_technique_ids
 from maljan.reporting.dedupe import (
     MergeTally,
@@ -105,10 +106,17 @@ class _Sections:
         First writer wins: two tools that both contribute to a merged section
         are both cited, and the section is named after the one that opened it
         rather than whichever happened to run last.
+
+        An entry whose answer this system had to shorten says so here, under
+        the section it filled: every builder ends by crediting, so the one
+        sentence reaches a table a dedicated builder drew as surely as a
+        generic one, and a reader is never shown a page of a list as if it
+        were the list.
         """
         if not section.source:
             section.source = f"tool:{entry.tool}"
         self.cite(section, entry.id)
+        note_if_shortened(section, entry.structured)
 
     def add_row(self, section: EvidenceSection, row: list[str]) -> None:
         if len(section.rows) >= MAX_ROWS:
@@ -204,10 +212,56 @@ def _text(value: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
+# What this system said about its own handling of an answer, rather than what
+# the tool said about the sample. A key-value table is a table of facts about
+# the sample, and a row reading "shortened | {'/strings': …}" is neither a fact
+# about the sample nor something a reader of this report can act on; the
+# sentence below the table says it in words instead.
+_OUR_OWN_WORDS = frozenset({BOOKKEEPING_KEY, "truncated"})
+
+
+def _shortened_sentence(data: dict[str, Any]) -> str:
+    """One sentence for an answer this system had to shorten, or ``""``.
+
+    The tool answered in full and the guardrail kept what fits, so the table
+    below is a page of the answer rather than all of it. Said once, in words,
+    because the reader of a report needs to know a list is partial far more
+    than they need the arithmetic.
+    """
+    book = data.get(BOOKKEEPING_KEY)
+    if not isinstance(book, dict) or not book:
+        return ""
+    named = []
+    for path, row in list(book.items())[:3]:
+        if not isinstance(row, dict):
+            continue
+        left = int(row.get("omitted") or row.get("omitted_chars") or 0)
+        what = "rows" if "omitted" in row else "characters"
+        named.append(f"{path} ({left} {what} not shown)")
+    if not named:
+        return ""
+    return "This answer was shortened to fit the analyst's budget: " + ", ".join(named) + "."
+
+
+def note_if_shortened(section: Any, data: Any) -> None:
+    """Put the sentence under the section, once.
+
+    Called from ``credit``, so it reaches the section a dedicated builder
+    filled as well as the generic key-value one: ``strings`` and ``pe_info``
+    are exactly the tools whose answers are large enough to be shortened, and
+    they are the ones with builders of their own.
+    """
+    if not isinstance(data, dict):
+        return
+    said = _shortened_sentence(data)
+    if said and said not in (section.text or ""):
+        section.text = f"{section.text}\n\n{said}".strip() if section.text else said
+
+
 def _identity(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     section = acc.get("identity", "Sample identity", "kv", columns=["Field", "Value"])
     for key, value in data.items():
-        if key in {"error", "tool"} or value in (None, "", [], {}):
+        if key in {"error", "tool"} or key in _OUR_OWN_WORDS or value in (None, "", [], {}):
             continue
         acc.add_row(section, [key.replace("_", " "), _text(value)])
     acc.credit(section, entry)
@@ -766,7 +820,7 @@ def _generic_kv(
         columns=["Field", "Value"],
     )
     for name, value in data.items():
-        if name in {"tool"} or value in (None, "", [], {}):
+        if name in {"tool"} or name in _OUR_OWN_WORDS or value in (None, "", [], {}):
             continue
         if isinstance(value, list) and value and all(isinstance(v, dict) for v in value):
             _generic_table(
