@@ -2454,6 +2454,17 @@ change landed on `main`.
   seeding now happens in the publisher, once per job, before the first number
   it hands out for a job whose feed is being persisted; no call site has to
   remember it.
+- **An endpoint label keeps its IPv6 brackets.** `http://[::1]:8080/v1` was
+  named `http://::1:8080` in the submit gate's refusal and on the console — an
+  address that cannot be typed back in and whose port cannot be told from its
+  last group, so an operator could not find the failing pair. The label is now
+  re-bracketed; it still carries no userinfo, path or query.
+- **The model probe's five minutes covers the catalogue listing.** The budget
+  was taken after the provider's model list came back, so the real wall was
+  five minutes plus the listing per provider and the sentence naming untried
+  pairs understated it. The deadline is now taken as the probe begins.
+- **The Ollama probe's failure detail reads as two sentences.** It joined
+  "answered nothing" to the remedy with no separator.
 
 ### Removed
 

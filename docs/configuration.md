@@ -270,7 +270,9 @@ and asks to be run again once the model is warm.
 **What it costs.** The `llm` probe asks its pairs one after another — a single
 local server told to load several models at once is the failure this project
 has already diagnosed — with ninety seconds for each call and five minutes for
-the whole probe. A pair there was no room left to ask is named in the answer as
+the whole probe, counted from the moment the probe starts, so the catalogue
+listing in front of the calls comes out of the same five minutes rather than
+being added to them. A pair there was no room left to ask is named in the answer as
 not tried and files no row, exactly as a timeout does; pressing **Test** again
 asks it. In a failing pair's sentence an endpoint is printed as its scheme and
 host, so a base URL that carries credentials does not reach the screen or the
