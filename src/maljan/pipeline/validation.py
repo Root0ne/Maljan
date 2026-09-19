@@ -1310,6 +1310,7 @@ def validate_verdict_bundle(
     *,
     attck: Any = None,
     sample: Any = None,
+    shortened_tools: Iterable[str] = (),
 ) -> list[Violation]:
     """What is wrong with the judge's answer, in the judge's own terms.
 
@@ -1326,6 +1327,10 @@ def validate_verdict_bundle(
     address would otherwise ground an indicator for it. A pattern is grounded
     when one of its quoted values is found, in the corpus or in the identity,
     as it always was for the corpus alone; the denylists run first either way.
+
+    ``shortened_tools`` names the tools whose answers reached the corpus with
+    rows missing. It changes no verdict: it is one sentence added to an
+    absence, so a judge reading one knows which call to narrow.
     """
     violations: list[Violation] = []
     objects = list(getattr(bundle, "objects", None) or [])
@@ -1334,19 +1339,21 @@ def validate_verdict_bundle(
     haystack = " ".join(sorted(evidence_corpus)).lower() if evidence_corpus else ""
     identity = {value.lower() for value in sample_identity_values(sample)}
     runtime_paths = _runtime_paths(evidence_corpus)
+    partial = shortened_evidence_note(shortened_tools)
     for index, obj in enumerate(objects):
         kind = str(getattr(obj, "type", "") or "")
         if kind == "indicator" and evidence_corpus is not None:
             pattern = str(getattr(obj, "pattern", "") or "")
             problem = _indicator_problem(pattern, haystack, runtime_paths, identity)
             if problem:
+                caveat = partial if ABSENT_FROM_THE_EVIDENCE in problem else ""
                 violations.append(
                     Violation(
                         code="stix.ungrounded_indicator",
                         message=(
                             f"{safe_finding_value(problem)} Emit indicators only for values a "
                             "tool in this run actually saw, and prefer zero indicators to an "
-                            "invented one."
+                            f"invented one.{caveat}"
                         ),
                         path=f"objects[{index}]",
                     )
@@ -1945,6 +1952,37 @@ def _whole_token_in(literal: str, haystack: str, own: set[str]) -> bool:
             return True
         start = haystack.find(lowered, start + 1)
     return False
+
+
+# The words every corpus-miss sentence in :func:`_indicator_problem` shares.
+# The caveat below is added to those and to no other problem: a denylisted
+# host, a malformed digest and a literal that is not written as a place are
+# refused on their own account, and no amount of evidence would change one.
+ABSENT_FROM_THE_EVIDENCE = "appears nowhere"
+
+
+def shortened_evidence_note(tools: Iterable[str]) -> str:
+    """What to add to an absence when part of the evidence searched was shortened.
+
+    A shortened answer is still the answer the model read — the shortener hands
+    one string to both the model and the ledger — so "this value is in no tool
+    output" stays true and the grounding rule is unchanged. What is not true is
+    that the search was over everything the tool found: a shortened document
+    handed over fewer rows than the call produced. Naming the tools lets the
+    judge ask one of them again with a narrower argument instead of guessing
+    whether its value was in the part that did not fit.
+
+    Empty when nothing was shortened, so a clean run's feedback is unchanged.
+    """
+    named = sorted({str(tool).strip() for tool in tools if str(tool).strip()})
+    if not named:
+        return ""
+    return (
+        " The evidence searched includes shortened answers from "
+        f"{safe_finding_value(', '.join(named))}: those calls did not fit and were "
+        "handed over with rows missing. Narrow one of them and ask again before "
+        "withdrawing a value on this."
+    )
 
 
 def _indicator_problem(

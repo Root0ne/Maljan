@@ -910,6 +910,7 @@ class JudgeAgent(BudgetMeter):
         degradation_note: str = "",
         memory_store: MemoryStore | None = None,
         evidence_corpus: set[str] | None = None,
+        shortened_tools: Sequence[str] = (),
         current_sample_id: str | None = None,
         sample: Any = None,
         ledger_ids: Sequence[str] | None = None,
@@ -1135,7 +1136,13 @@ class JudgeAgent(BudgetMeter):
                 # ``_parse``, and a retry for it would be a turn spent on a
                 # problem that no longer exists.
                 *(v for v in shape if v.code != ASSESSMENT_RELOCATED_CODE),
-                *validate_verdict_bundle(bundle, evidence_corpus, attck=_knowledge, sample=sample),
+                *validate_verdict_bundle(
+                    bundle,
+                    evidence_corpus,
+                    attck=_knowledge,
+                    sample=sample,
+                    shortened_tools=shortened_tools,
+                ),
                 *assessment_violations(bundle),
                 *assessment_conflict_violations(bundle),
                 *_verdict_checks(bundle),

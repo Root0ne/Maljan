@@ -942,6 +942,13 @@ change landed on `main`.
   backslash or two is a root now. In the other direction the check no longer
   admits a drive-relative `C:Windows`, which names no place on the analysed
   machine, nor a URL's fragment or query read as a step (`/#frag`, `/?q=1`).
+- **An absence over evidence the run knows is partial says so.** The output
+  shortener hands one string to the model and to the ledger, so a value in
+  neither is a value the model never saw and the grounding rule is unchanged.
+  What changes is the feedback: when an entry the grounding check searched came
+  back shortened, the `stix.ungrounded_indicator` row names the tools whose
+  answers were handed over with rows missing, so the judge can narrow one and
+  ask again instead of guessing.
 ### Fixed
 
 - **A process that has finished its work is not ended by its own watchdog.** The

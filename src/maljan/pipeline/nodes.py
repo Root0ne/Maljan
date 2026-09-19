@@ -287,6 +287,30 @@ def _sandbox_fed(role: str) -> bool:
     return role not in SAMPLE_FED_ROLES
 
 
+def _tools_that_were_shortened(ledger: Any) -> set[str]:
+    """The tools whose answers reached the evidence corpus with rows missing.
+
+    Read off the stored document rather than off a counter: the shortener puts
+    its own map into the answer under a reserved key, and that is the one thing
+    that says *this* answer is partial. A ledger entry with no parsed document
+    cannot have been shortened — shortening is what keeps an answer parseable.
+    """
+    from maljan.agents.output_shortening import our_key_in
+
+    found: set[str] = set()
+    for entry in ledger or ():
+        structured = getattr(entry, "structured", None)
+        if not isinstance(structured, dict):
+            continue
+        try:
+            if our_key_in(structured):
+                found.add(str(getattr(entry, "tool", "") or "").strip())
+        except Exception:  # noqa: BLE001 — a feedback sentence is never worth a run
+            continue
+    found.discard("")
+    return found
+
+
 def _violations_from_rows(rows: Any) -> list[Violation]:
     """Rebuild the violations an analyst node put on the state channel."""
     out: list[Violation] = []
@@ -2936,6 +2960,14 @@ def make_judge_node(
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Evidence corpus build skipped: %s", exc)
 
+            # A shortened answer is the one the model read — the shortener
+            # hands one string to the model and to the ledger — so nothing
+            # about the grounding rule changes. What changes is what an
+            # absence is allowed to sound like: the tools whose answers went
+            # in with rows missing are named, so the judge can ask one of them
+            # again with a narrower argument.
+            shortened_tools = sorted(_tools_that_were_shortened(_ledger))
+
             # Failure signals, computed before the verdict rather than after
             # it: the judge is told why the run is thin so it can weigh its own
             # confidence, which is the whole point of not capping the number
@@ -3141,6 +3173,10 @@ def make_judge_node(
                 degradation_note=degradation_note,
                 memory_store=memory_store,
                 evidence_corpus=evidence_corpus or None,
+                # Which of those answers reached the corpus with rows missing.
+                # The judge is not told a different rule, it is told which call
+                # to narrow before it withdraws a value.
+                shortened_tools=shortened_tools,
                 current_sample_id=state.get("file_hash"),
                 sample=_sample_identity(state),
                 # What the run recorded, so a verdict that says the sample is

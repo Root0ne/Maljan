@@ -644,3 +644,65 @@ class TestTheMarkerReachesTheJudge:
 
         assert "(T1055)" in summary
         assert UNVERIFIED_TECHNIQUE_MARKER not in summary
+
+
+class TestAnAbsenceOverEvidenceTheRunKnowsIsPartial:
+    """A shortened answer does not change the rule; it changes the sentence.
+
+    The output shortener hands one string to the model and to the ledger, so a
+    value that is in neither is a value the model never saw and the grounding
+    rule stands. What the judge is not told, and needs, is that one of the
+    answers searched came back with rows missing — which call to narrow before
+    it withdraws a value it believes in.
+    """
+
+    URL = "[url:value = 'http://gate.example.org/a']"
+
+    @staticmethod
+    def _message(pattern: str, corpus: set[str], tools: tuple[str, ...]) -> str:
+        bundle = Bundle(objects=[Indicator(pattern=pattern)])  # type: ignore[list-item]
+        found = validate_verdict_bundle(bundle, corpus, shortened_tools=tools)
+        return found[0].message if found else ""
+
+    def test_nothing_shortened_leaves_the_feedback_as_it_was(self) -> None:
+        message = self._message(self.URL, {"unrelated"}, ())
+
+        assert "appears nowhere" in message
+        assert "shortened" not in message
+
+    def test_a_shortened_answer_names_the_tool_it_came_from(self) -> None:
+        message = self._message(self.URL, {"unrelated"}, ("strings", "list_imports"))
+
+        assert "appears nowhere" in message
+        assert "shortened answers from" in message
+        assert "list_imports, strings" in message
+        assert "Narrow one of them and ask again" in message
+
+    def test_the_value_is_still_refused(self) -> None:
+        """The rule is unchanged: the row is written, not withheld."""
+        bundle = Bundle(objects=[Indicator(pattern=self.URL)])  # type: ignore[list-item]
+
+        found = validate_verdict_bundle(bundle, {"unrelated"}, shortened_tools=("strings",))
+
+        assert [v.code for v in found] == ["stix.ungrounded_indicator"]
+
+    def test_a_grounded_value_is_told_nothing(self) -> None:
+        message = self._message(
+            self.URL, {"the beacon reached http://gate.example.org/a"}, ("strings",)
+        )
+
+        assert message == ""
+
+    def test_a_problem_no_evidence_could_answer_does_not_get_the_caveat(self) -> None:
+        """A literal that is not written as a place is refused on its own account."""
+        message = self._message(
+            "[directory:path = 'application/json']", {"unrelated"}, ("strings",)
+        )
+
+        assert "is not written as a directory" in message
+        assert "shortened" not in message
+
+    def test_the_row_stays_within_the_limit_it_is_held_to(self) -> None:
+        message = self._message(self.URL, {"unrelated"}, tuple(f"tool_{i:03d}" for i in range(60)))
+
+        assert len(message) < 800

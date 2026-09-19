@@ -268,6 +268,7 @@ MESSAGE_BUILDERS: frozenset[str] = frozenset(
         "_schema_message",
         "_indicator_problem",
         "prefixed_within_the_bound",
+        "shortened_evidence_note",
     }
 )
 
