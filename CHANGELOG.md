@@ -2469,7 +2469,9 @@ change landed on `main`.
   operator and the literal of every quoted value, keeps `file:hashes.'MD5'` and
   `file:extensions['pe']` as keys, leaves a `START '…' STOP '…'` qualifier's
   timestamps out of the comparison before it, and reports what it cannot read
-  as unreadable so it is declined rather than guessed at.
+  as unreadable so it is declined rather than guessed at. The digest check
+  (`malformed_hash_in`) reads through it too, and the dead fourth reader in
+  `judge_postprocess` is gone, so the pattern really is read in one place.
 
 - **An endpoint written through a reference is asked the host question.** A
   judge-written `[network-traffic:dst_ref.value = '127.0.0.1']` reached no
@@ -2479,21 +2481,31 @@ change landed on `main`.
   `resolves_to_refs[*].value` shapes are now asked the same question as the
   four direct kinds, and asked whichever of host or address fits the value.
 
-- **A directory is no longer refused for having no file extension.** The
-  grounding check put `directory:path` in the `file:name` branch, so the judge
-  read *"has no file extension, no filesystem anchor … so nothing says it is a
-  real path"* about a directory it had written, retried on it and lost the row.
-  A directory is now asked whether it is written as a place — a root with a
-  step under it — or was watched at runtime, and refused with a sentence that
-  is true of one.
+- **A directory is asked whether it is a place, and then whether this run saw
+  one.** The grounding check put `directory:path` in the `file:name` branch, so
+  the judge read *"has no file extension, no filesystem anchor … so nothing
+  says it is a real path"* about a directory it had written, retried on it and
+  lost the row. A directory is now asked two questions and told which one it
+  failed. Validity: it has a root — a POSIX slash, a drive with either
+  separator, a share, an environment variable, a home tilde, a registry hive —
+  and at least one named step under it, every step written the way a name is
+  rather than as whitespace or as a format specifier the sample was compiled
+  with. `/tmp` passes where it used to be refused; `/`, `C:\`, `/%s/%s` and
+  `/ /` do not. Grounding: the literal is then asked the corpus question every
+  other literal is asked, as a whole value and under the spellings that mean
+  the same location, so a shape alone no longer stands in for evidence.
 
-- **A value at the end of a sentence is found in the evidence.**
-  `whole_value_in` read `.` and `:` as value characters at both ends, so
-  `a@b.com` written before a full stop and a host written after `mailto:`
-  were reported as appearing nowhere and the row was withheld from the bundle
-  with a sentence saying nothing corroborates it. A `.`, `:` or `,` that
-  nothing continues now closes a value and a URI scheme's colon opens one,
-  while the `.` of `192.168.1.1` still keeps `168.1.1` from being found in it.
+- **A value is found at its own boundaries in the evidence.**
+  `whole_value_in` read `/`, `\` and `:` as part of a label, so a host written
+  inside a URL, a host written before its port, a mailbox after `mailto:` and
+  an address at the end of a sentence were all reported as appearing nowhere
+  and the row was withheld from the bundle with a sentence saying nothing
+  corroborates it. Those three characters join the parts of a compound value
+  rather than extend a part, so each of them now bounds a part, and a `.` that
+  nothing continues is the sentence's full stop. A `.` that something
+  continues is still the value's, so `168.1.1` is still not found inside
+  `192.168.1.1` and `evil.com` is still not found inside `notevil.com`,
+  `sub.evil.com` or `evil.com.br`.
 
 - **What the indicator cap orphans is counted.** The integrity pass runs a
   second time after the cap to sweep the relationships it left pointing at
@@ -2507,9 +2519,11 @@ change landed on `main`.
   constructions in four other modules were never inspected, a row written as
   `Violation(code, message)` was invisible, and a local spelled like a message
   builder was trusted for its name. It now walks every module in the tree that
-  builds one, matches positional arguments, trusts a local only when it is
-  assigned from a builder's own call, and fails if a sixth module starts
-  building rows.
+  builds one, matches positional arguments, resolves the constructor under an
+  import alias (the resolution shared with the sibling guard that already did
+  it), revokes a module-level name the moment a function binds that spelling
+  itself, trusts a local only for the value it was given, and fails if a sixth
+  module starts building rows.
 
 ### Removed
 

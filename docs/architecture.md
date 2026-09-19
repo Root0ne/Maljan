@@ -1621,22 +1621,32 @@ property name — and neither read an escaped quote, so `[file:name =
 appears nowhere in the evidence. A quote that opens where the object path is
 still being written is a key (`file:hashes.'MD5'`, `file:extensions['pe']`);
 a qualifier's own literal (`START '…' STOP '…'`) belongs to the qualifier and
-is not credited to the comparison before it. A syntactically routable address the judge invented passes this
-question by design; whether any evidence holds it up is
-`stix.ungrounded_indicator`'s question, and that check is asked of every
+is not credited to the comparison before it. A syntactically routable address
+the judge invented passes this question by design; whether any evidence holds
+it up is `stix.ungrounded_indicator`'s question, and that check is asked of every
 indicator the judge writes.
 
 The same validity questions reach the judge's other kinds. An `email-addr`
 pattern is asked whether it is a mailbox at all and whether its domain part
 could exist; a `file:name` pattern is asked whether it names a file rather than
 a directory or a root — both declined as `stix.unpublishable_artefact` when
-they are not. The grounding check asks a `directory:path` comparison a question
-of its own: a directory carries no extension, so what is asked is whether it is
-written as a place — a root with a step under it — or was watched at runtime.
-It used to be refused with the file-name sentence, which told the judge its own
-directory row *has no file extension … so nothing says it is a real path*, and
-the judge spent its one retry on an untruth. A `file:hashes` comparison is asked whether the literal is a
-digest of the algorithm it is written under, by length and alphabet
+they are not. A `directory:path` comparison is asked two questions of its own,
+and told which one it failed. The first is validity — could this be a place on
+a machine: it has a root (a POSIX slash, a drive with either separator, a
+share, an environment variable, a home tilde, a registry hive) and at least one
+named step under it, and every step is written the way a name is, not empty,
+not whitespace, not a format specifier a sample was compiled with, with at
+least one of them carrying two characters running. `/tmp` is a directory; `/`
+and `C:\` are roots with nothing under them, and `/%s/%s` and `/ /` are what a
+strings table produces by the dozen. The second is grounding: the literal is
+asked the corpus question every other literal is asked, as a whole value and
+under the spellings that mean the same location (`reporting.dedupe`'s own path
+normalisation), because a path is written with whichever separator its writer's
+platform uses. A directory used to be refused with the file-name sentence,
+which told the judge its own directory row *has no file extension … so nothing
+says it is a real path*, and the judge spent its one retry on an untruth. A `file:hashes` comparison is
+asked whether the literal is a digest of the algorithm it is written under, by
+length and alphabet
 (`HASH_HEX_LENGTHS`), and declined as `stix.malformed_hash` when it is not: one
 run exported sixteen of the thirty-two characters of an MD5, a value a consumer
 matching on MD5 can never match. The grounding check asks the same question
@@ -1662,10 +1672,11 @@ block and the judge's own bundle both left unchanged. One question, one code,
 and the sentence beside it names the kind: the same decision used to be filed
 under `stix.unpublishable_url` and `stix.unpublishable_domain`, with the second
 of them covering addresses too. A run stored before that keeps the row it
-wrote, and the console reads all three as the export's own decision. A row held back
-only for want of a second source is the rule working and is not a finding, and
-neither is a string sweep's own cut-off: a report carries up to forty of them,
-and forty unresolved findings nobody can act on bury the ones somebody can.
+wrote, and the console reads all three as the export's own decision. A row
+held back only for want of a second source is the rule working and is not a
+finding, and neither is a string sweep's own cut-off: a report carries up to
+forty of them, and forty unresolved findings nobody can act on bury the ones
+somebody can.
 
 Every model-written value on this path — a URL echoed into a decline, the
 judge's own verdict word, the category it invented, the type of an object the
