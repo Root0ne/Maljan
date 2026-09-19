@@ -3270,6 +3270,7 @@ def make_judge_node(
                     .set_triage(_triage_facts)
                     .set_nudge(state.get("nudge_retry_modes") or {})
                     .set_budget(state.get("budget_records") or {})
+                    .set_tool_latency(state.get("evidence_ledger") or [])
                     .build()
                 )
                 run_summary_dict = summary.to_dict()

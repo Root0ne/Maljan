@@ -473,6 +473,27 @@ def _definition_budget(cfg: Any, agent_name: str) -> tuple[int | None, int | Non
     return values[0], values[1]
 
 
+def slowest_call(entries: Any) -> str:
+    """`, slowest <tool> 12.3s`, or `""` when nothing in the loop was timed.
+
+    The loop's own elapsed time says a run was slow; it does not say whether
+    the model or a tool was. The ledger's per-call clock does, and the slowest
+    call is the one an operator looks for first. A clause rather than a line of
+    its own, so the three existing lines keep their shape.
+    """
+    slowest = None
+    for entry in entries or []:
+        try:
+            ms = int(getattr(entry, "duration_ms", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if ms > 0 and (slowest is None or ms > slowest[0]):
+            slowest = (ms, str(getattr(entry, "tool", "") or ""))
+    if slowest is None or not slowest[1]:
+        return ""
+    return f", slowest {slowest[1]} {slowest[0] / 1000.0:.1f}s"
+
+
 def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[int, int]:
     """``(timeout, max_steps)`` for one loop of ``agent_name``.
 
@@ -2721,40 +2742,43 @@ class BaseAnalyst(BudgetMeter, ABC):
             if getattr(_m, "type", "") == "ai":
                 record_response_usage(self.token_ledger, _m)
         elapsed = _time.monotonic() - _t0
-        # PERF-STATIC-ANALYST-LATENCY-01 minimal viable: emit a WARNING
-        # when the analyst either hit the configured timeout's 90%
-        # ceiling OR exceeded a hard per-run Ghidra budget. Operators get
-        # a single grep target instead of having to derive latency from
-        # raw timestamps. TODO(audit-2026-05-19): per-step timing in a
-        # deeper refactor — add a LangGraph callback that times each
-        # tool round-trip individually.
+        # A loop that overran is a slow model or a slow tool, and the loop's
+        # own elapsed time cannot tell them apart. Every ledger entry carries
+        # the clock of its own round trip, so the line names the single
+        # slowest call and the tool that answered it; the run summary carries
+        # the same three numbers per agent (``tool_latency``), and the ledger
+        # itself has every call.
+        slowest = slowest_call(recorder.entries)
         cfg_obj = get_settings()
         _budget = getattr(cfg_obj, "react_agent_tool_call_budget", 20)
         if tool_call_count > _budget:
             self.logger.warning(
-                "%s ReAct loop spent %d tool calls (budget=%d, elapsed=%.1fs).",
+                "%s ReAct loop spent %d tool calls (budget=%d, elapsed=%.1fs)%s.",
                 self.name,
                 tool_call_count,
                 _budget,
                 elapsed,
+                slowest,
             )
         elif elapsed > 0.9 * float(timeout):
             self.logger.warning(
                 "%s ReAct loop close to timeout: elapsed=%.1fs, "
-                "timeout=%ds, tool_calls=%d, messages=%d.",
+                "timeout=%ds, tool_calls=%d, messages=%d%s.",
                 self.name,
                 elapsed,
                 timeout,
                 tool_call_count,
                 len(msgs),
+                slowest,
             )
         else:
             self.logger.info(
-                "%s ReAct loop: elapsed=%.1fs, tool_calls=%d, messages=%d.",
+                "%s ReAct loop: elapsed=%.1fs, tool_calls=%d, messages=%d%s.",
                 self.name,
                 elapsed,
                 tool_call_count,
                 len(msgs),
+                slowest,
             )
 
         final_message = msgs[-1]

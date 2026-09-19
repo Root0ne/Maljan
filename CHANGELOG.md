@@ -489,6 +489,13 @@ change landed on `main`.
   every start, and once it has lapsed the startup check warns until both
   settings are cleared. `docs/deployment.md` has the three-step runbook.
   Nothing rotates on its own.
+- **Per-tool-call timing, per agent.** The run summary carries `tool_latency`
+  — for each agent how many tool calls it made, what they cost together, and
+  the single slowest with the tool that answered it, computed from the clock
+  each ledger entry already carried — and the summary's header draws a **Tool
+  calls** line beside **Per stage**. The analyst-latency log line names that
+  slowest call, so a run that overran says whether the model was slow or a
+  tool was.
 
 ### Changed
 
@@ -2497,6 +2504,12 @@ change landed on `main`.
   pairs understated it. The deadline is now taken as the probe begins.
 - **The Ollama probe's failure detail reads as two sentences.** It joined
   "answered nothing" to the remedy with no separator.
+- **A carved-file answer names the file before anything a cut would take.** The
+  analysis sidecar puts `read_path` first in every answer to a `carved_path`
+  call. It was appended, so an answer wider than the caller's output guardrail
+  lost it: one measured run's `strings` over a carved PE came back with 150
+  rows, was cut at six thousand characters before anything recorded it, and
+  stored no `read_path` while its shorter siblings each carried one.
 - **The console reads the required environment names from the API.** The names
   a built-in sidecar is always started with were written down a second time in
   TypeScript with nothing pinning the two lists together, so a change on the

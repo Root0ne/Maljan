@@ -184,6 +184,29 @@ def stage_duration_lines(stages: Any) -> list[str]:
     return [f"**Per stage**: {spent}  "] if spent else []
 
 
+def tool_latency_lines(latency: Any) -> list[str]:
+    """What each agent's tool calls cost, and which single call cost the most.
+
+    Beside the per-stage line, because the two answer one question between
+    them: a stage that took four minutes is a slow model or a slow tool, and
+    only this says which. An agent whose calls were never timed contributes
+    nothing rather than a row of zeros.
+    """
+    rows = []
+    for agent, row in sorted((latency or {}).items()):
+        if not isinstance(row, dict):
+            continue
+        slowest = row.get("slowest")
+        if not isinstance(slowest, dict):
+            continue
+        total = float(row.get("total_ms") or 0) / 1000.0
+        rows.append(
+            f"{agent} {int(row.get('calls') or 0)} calls in {total:.1f}s, "
+            f"slowest `{slowest.get('tool')}` {float(slowest.get('ms') or 0) / 1000.0:.1f}s"
+        )
+    return [f"**Tool calls**: {'; '.join(rows)}  "] if rows else []
+
+
 def _attribution_layers() -> list[str]:
     """The layer order the per-layer breakdown renders, profile first.
 
@@ -275,6 +298,12 @@ class RunSummary:
     # ``time``, ``repeats``, ``budget_seconds``). ``None`` on a run that
     # recorded no loop.
     budget: dict[str, Any] | None = None
+    # What each agent's tool calls cost, from the ledger's own per-call clock:
+    # ``{calls, total_ms, slowest: {tool, ms, id}}`` per agent. A run that
+    # overran used to leave a reader deriving latency from raw timestamps, and
+    # a slow tool could not be told from a slow model. ``None`` on a run whose
+    # ledger holds no timed call.
+    tool_latency: dict[str, Any] | None = None
     # ``dedupe`` is deliberately not a field here. What the report folded is
     # counted while the report's sections are built, which happens after this
     # object exists, so the report builder writes ``dedupe`` onto the summary
@@ -306,6 +335,7 @@ class RunSummary:
             f"**STIX objects**: {self.stix_object_count}  ",
             f"**Elapsed**: {self.elapsed_seconds:.1f}s  ",
             *stage_duration_lines(self.stages),
+            *tool_latency_lines(self.tool_latency),
             "",
         ]
 
@@ -533,6 +563,7 @@ class RunSummary:
             "triage": dict(self.triage) if self.triage else None,
             "nudge": dict(self.nudge) if self.nudge else None,
             "budget": dict(self.budget) if self.budget else None,
+            "tool_latency": dict(self.tool_latency) if self.tool_latency else None,
         }
 
         if self.validation:
@@ -616,6 +647,7 @@ class RunSummaryBuilder:
         self._triage: dict[str, Any] | None = None
         self._nudge: dict[str, Any] | None = None
         self._budget: dict[str, Any] | None = None
+        self._tool_latency: dict[str, Any] | None = None
 
     def set_budget(self, records: dict[str, list[dict[str, Any]]] | None) -> RunSummaryBuilder:
         """What each agent spent, summed over its loops, and the caps that ended them.
@@ -645,6 +677,44 @@ class RunSummaryBuilder:
                 "caps": caps,
             }
         self._budget = out or None
+        return self
+
+    def set_tool_latency(self, entries: Any) -> RunSummaryBuilder:
+        """What each agent's tool calls cost, per agent, from the ledger.
+
+        Every ledger entry carries the clock of its own round trip, so the
+        question "was the model slow or was the tool slow" is answerable
+        without deriving anything from raw timestamps. Three numbers per
+        agent — how many calls, how long they took together, and the single
+        slowest with the tool that answered it — because the slowest call is
+        what an operator looks for first when a run overran and a list of
+        every call is the ledger, which is already there.
+
+        A call with no measured duration contributes to the count and to
+        nothing else: a zero is not a measurement.
+        """
+        rows: dict[str, dict[str, Any]] = {}
+        for entry in entries or []:
+            row = entry if isinstance(entry, dict) else getattr(entry, "__dict__", None)
+            if not isinstance(row, dict):
+                continue
+            agent = str(row.get("agent") or "").strip()
+            tool = str(row.get("tool") or "").strip()
+            if not agent or not tool:
+                continue
+            try:
+                ms = int(row.get("duration_ms") or 0)
+            except (TypeError, ValueError):
+                ms = 0
+            seen = rows.setdefault(agent, {"calls": 0, "total_ms": 0, "slowest": None})
+            seen["calls"] += 1
+            if ms <= 0:
+                continue
+            seen["total_ms"] += ms
+            slowest = seen["slowest"]
+            if slowest is None or ms > int(slowest["ms"]):
+                seen["slowest"] = {"tool": tool, "ms": ms, "id": str(row.get("id") or "")}
+        self._tool_latency = rows or None
         return self
 
     def set_nudge(self, retry_modes: dict[str, str] | None) -> RunSummaryBuilder:
@@ -907,6 +977,7 @@ class RunSummaryBuilder:
             triage=self._triage,
             nudge=self._nudge,
             budget=self._budget,
+            tool_latency=self._tool_latency,
         )
 
 
