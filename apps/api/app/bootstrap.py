@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from cryptography.fernet import Fernet
 from pydantic import SecretStr
@@ -97,6 +98,24 @@ def validate_bootstrap(s: APISettings) -> BootstrapReport:
             problems.append("JWT_SECRET_KEY is a known placeholder value")
         elif len(jwt_secret) < 32:
             problems.append("JWT_SECRET_KEY is shorter than 32 characters")
+
+    # A grace-period signing secret with no end is a retired key this API
+    # accepts for the life of the deployment, which is the thing rotating was
+    # meant to remove. The end is written down or the secret is not set.
+    grace_secret = _secret_value(s.jwt_previous_secret_key).strip()
+    if grace_secret:
+        lapses = getattr(s, "jwt_previous_secret_not_after", None)
+        if lapses is None:
+            problems.append(
+                "JWT_PREVIOUS_SECRET_KEY is set with no JWT_PREVIOUS_SECRET_NOT_AFTER; "
+                "give the grace period an end (an ISO-8601 moment, UTC when it carries "
+                "no offset) or clear the previous secret"
+            )
+        elif (lapses if lapses.tzinfo else lapses.replace(tzinfo=UTC)) <= datetime.now(UTC):
+            warnings.append(
+                "JWT_PREVIOUS_SECRET_KEY is past JWT_PREVIOUS_SECRET_NOT_AFTER and is no "
+                "longer accepted; clear both to finish the rotation."
+            )
 
     encryption_key = _secret_value(s.settings_encryption_key).strip()
     if not encryption_key:

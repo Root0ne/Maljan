@@ -271,6 +271,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             logger.critical("Failed to seed dev user for AUTH_DISABLED: %s", exc, exc_info=True)
             raise
 
+    # A rotation in progress is said out loud at every start, so the wait in
+    # the middle of it is not a wait nobody is reminded of.
+    from app.api.v1.system import _grace_secret_state
+
+    grace = _grace_secret_state()
+    if grace is not None:
+        logger.info(
+            "A previous JWT signing secret (kid=%s) is %s and %s %s.",
+            grace["key_id"],
+            "accepted" if grace["accepted"] else "no longer accepted",
+            "lapses" if grace["accepted"] else "lapsed",
+            grace["not_after"],
+            extra={"component": "lifecycle"},
+        )
+
     logger.info(
         f"Maljan API v{settings.app_version} started successfully",
         extra={"component": "lifecycle"},

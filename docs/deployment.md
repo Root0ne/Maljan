@@ -54,6 +54,34 @@ Every published port binds to `BIND_ADDRESS`, which the example file sets to
 `127.0.0.1`. The stack is unreachable from the network until that is changed
 deliberately, behind a firewall or a reverse proxy you control.
 
+## Rotating the JWT signing secret
+
+Three steps and one wait. The wait is the part a rotation is usually forgotten
+in, so the deployment will not let you leave it open-ended.
+
+1. Move the current `JWT_SECRET_KEY` to `JWT_PREVIOUS_SECRET_KEY` and
+   `JWT_KEY_ID` to `JWT_PREVIOUS_KEY_ID`, put the new secret in
+   `JWT_SECRET_KEY` and a new id in `JWT_KEY_ID`, and set
+   `JWT_PREVIOUS_SECRET_NOT_AFTER` to the moment the old secret stops being
+   accepted — an ISO-8601 timestamp, read as UTC when it carries no offset.
+   Make it a little longer than the refresh-token lifetime
+   (`jwt_refresh_token_expire_days`), because that is the oldest token still in
+   circulation. Restart the API and the worker. A previous secret set with no
+   `JWT_PREVIOUS_SECRET_NOT_AFTER` is a bootstrap refusal and the process will
+   not start.
+2. Wait. New tokens are signed with the new secret and carry the new `kid`;
+   tokens already issued keep working until they expire. `GET
+   /api/v1/system/status` reports the rotation to an admin caller under
+   `jwt_grace_secret` — the previous `kid`, when it lapses and whether it is
+   still accepted — and the API logs the same line at every start.
+3. After the moment passes, a token signed with the old secret is refused and
+   `jwt_grace_secret.accepted` reads false; the startup check then warns until
+   you clear `JWT_PREVIOUS_SECRET_KEY` and `JWT_PREVIOUS_SECRET_NOT_AFTER`.
+
+Nothing rotates on its own. The point of the timestamp is that a secret you
+forget stops being honoured rather than being honoured for the life of the
+deployment.
+
 ## Health
 
 `GET /health` and `GET /healthz` are the same endpoint under two paths, so both

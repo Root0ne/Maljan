@@ -29,13 +29,44 @@ def _secret() -> str:
     return raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw)
 
 
-def _previous_secret() -> str:
-    """Return the previous secret if one is configured, else empty string.
+def grace_secret_not_after() -> datetime | None:
+    """When the grace secret stops being accepted, as an aware moment.
 
-    During a key rotation window
-    the previous secret is kept as a fallback in ``decode_token`` so
-    in-flight tokens stay valid until they naturally expire.
+    A naive value is read as UTC: an operator writing a date in a bootstrap
+    file is writing the deployment's clock, and reading it as local time would
+    move the wall by the container's timezone.
     """
+    moment = getattr(settings, "jwt_previous_secret_not_after", None)
+    if not isinstance(moment, datetime):
+        return None
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+
+
+def grace_secret_is_live(now: datetime | None = None) -> bool:
+    """Whether a grace secret is configured and still inside its window."""
+    raw = getattr(settings, "jwt_previous_secret_key", None)
+    secret = raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw or "")
+    if not secret:
+        return False
+    not_after = grace_secret_not_after()
+    if not_after is None:
+        return False
+    return (now or datetime.now(UTC)) < not_after
+
+
+def _previous_secret() -> str:
+    """The previous secret while its window is open, else empty string.
+
+    During a key rotation the previous secret is kept as a fallback in
+    ``decode_token`` so tokens minted before the rotation stay valid until
+    they expire. The window has a written end: past
+    ``jwt_previous_secret_not_after`` the old secret signs nothing this API
+    accepts, so an operator who forgets to clear it is not running a
+    deployment where a retired key is honoured for good. A secret configured
+    with no end is refused at startup, so it cannot reach here.
+    """
+    if not grace_secret_is_live():
+        return ""
     raw = getattr(settings, "jwt_previous_secret_key", None)
     if raw is None:
         return ""

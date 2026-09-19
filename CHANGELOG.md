@@ -481,8 +481,24 @@ change landed on `main`.
   budget its agents need rather than with five specialists to ask and the
   default ten steps to ask them in. Alembic revision `20260927000000` moves a
   stored override onto the definition it belongs to.
+- **A JWT rotation's grace period has a written end.**
+  `JWT_PREVIOUS_SECRET_NOT_AFTER` is the moment a token signed with the
+  previous secret stops being accepted; `GET /api/v1/system/status` reports the
+  rotation to an admin caller under `jwt_grace_secret` (the previous `kid`,
+  when it lapses, whether it is still accepted), the API logs the same line at
+  every start, and once it has lapsed the startup check warns until both
+  settings are cleared. `docs/deployment.md` has the three-step runbook.
+  Nothing rotates on its own.
 
 ### Changed
+
+- **A previous JWT signing secret must say when it stops being accepted.**
+  `JWT_PREVIOUS_SECRET_KEY` set without `JWT_PREVIOUS_SECRET_NOT_AFTER` now
+  refuses the start, naming both, because a grace secret nobody remembers to
+  clear is a retired key the deployment honours for good. If you are mid
+  rotation, set `JWT_PREVIOUS_SECRET_NOT_AFTER` to an ISO-8601 moment a little
+  past your refresh-token lifetime (read as UTC when it carries no offset)
+  before upgrading, or clear the previous secret.
 
 - **Deprecated: `react_agent_max_steps_overrides` and
   `react_agent_timeout_overrides`.** A budget belongs to the agent that spends
