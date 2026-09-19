@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { describeChange, formatScalar } from "../describeChange";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { DEFINITION_FIELDS, describeChange, formatScalar } from "../describeChange";
 import type { CatalogEntry } from "@/types/settings";
 
 function entry(overrides: Partial<CatalogEntry>): CatalogEntry {
@@ -225,6 +227,58 @@ describe("describeChange: core.mcp.servers", () => {
 });
 
 describe("describeChange: core.agents.definitions", () => {
+  const AGENT = {
+    role: "generic",
+    label: "Lead",
+    prompt: "p",
+    tools: [],
+    static_provider: null,
+    enabled: true,
+    max_steps: 40,
+    timeout_seconds: 1800,
+  };
+
+  it("names a budget edit, which the panel used to call no change at all", () => {
+    const before = { lead: { ...AGENT } };
+    const after = { lead: { ...AGENT, max_steps: 60, timeout_seconds: 3600 } };
+
+    const line = describeChange(definitionsEntry, before, after);
+
+    expect(line.summary).toBe("1 agent changed");
+    expect(line.detail).toEqual(["lead: changed: steps per loop, seconds per loop"]);
+  });
+
+  it("names a budget cleared back to the deployment's", () => {
+    const before = { lead: { ...AGENT } };
+    const after = { lead: { ...AGENT, max_steps: null } };
+
+    expect(describeChange(definitionsEntry, before, after).detail).toEqual([
+      "lead: changed: steps per loop",
+    ]);
+  });
+
+  /* Every editable field of a definition has to be here, or the review row is
+     drawn over an edit it does not name. The two budget fields were added
+     after this table and were missed, which is what this reads the type to
+     stop happening again. */
+  it("names every field of a definition except the switch it draws as a verb", () => {
+    const source = readFileSync(
+      resolve(__dirname, "../../../../../types/settings.ts"),
+      "utf8",
+    );
+    const block = /export interface AgentDefinitionEntry \{([\s\S]*?)\n\}/.exec(source);
+    expect(block).not.toBeNull();
+    const declared = [...block![1].matchAll(/^\s{2}(\w+)\??:/gm)].map((m) => m[1]);
+    expect(declared.length).toBeGreaterThan(5);
+
+    const named = new Set<string>(DEFINITION_FIELDS.map(([field]) => String(field)));
+    const missing = declared.filter((field) => field !== "enabled" && !named.has(field));
+
+    expect(missing).toEqual([]);
+    expect(named.has("enabled")).toBe(false);
+    expect(declared).toContain("max_steps");
+  });
+
   it("marks a cloned definition with its source", () => {
     const before = {
       network: { role: "network", label: "Network", prompt: "p", tools: [], static_provider: null, enabled: true, max_steps: null, timeout_seconds: null },

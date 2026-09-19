@@ -227,12 +227,24 @@ function describeServerMap(before: unknown, after: unknown): {
 // core.agents.definitions
 // ---------------------------------------------------------------------------
 
-const DEFINITION_FIELDS: [keyof AgentDefinitionEntry, string][] = [
+/**
+ * Every field of a definition the review names, and what it calls it.
+ *
+ * `enabled` is not here: it is drawn as its own word ("enabled" / "disabled")
+ * a few lines below, because a switch reads better as a verb than as a field
+ * that changed. Everything else on `AgentDefinitionEntry` belongs here — a
+ * field that is missing produces a review row reading "0 agents changed" over
+ * an edit that will be saved, which is the untruth this panel exists to
+ * remove. `__tests__/describeChange.test.ts` fails when the two drift apart.
+ */
+export const DEFINITION_FIELDS: [keyof AgentDefinitionEntry, string][] = [
   ["prompt", "prompt"],
   ["tools", "tools"],
   ["static_provider", "static provider"],
   ["label", "label"],
   ["role", "role"],
+  ["max_steps", "steps per loop"],
+  ["timeout_seconds", "seconds per loop"],
 ];
 
 function findCloneSource(

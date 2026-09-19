@@ -101,10 +101,11 @@ const RESOLVE_INPUTS = new Set<keyof AgentDefinitionEntry>([
 /**
  * A whole number a budget box may hold, or `null` for "inherit".
  *
- * An empty box is the inherit case and clears the field. Anything that is not
- * a whole number at least one is not staged at all, so a half-typed value
- * leaves the last good one in place rather than staging `NaN` for the API to
- * refuse.
+ * Anything that is not a whole number of at least one — an empty box, a `0`, a
+ * minus sign on its own — is `null`, which stages *inherit*: the field is
+ * cleared and the agent falls back to the deployment's budget. Nothing
+ * unstageable is ever staged, so the API is never sent a `NaN` or a value its
+ * own bound would refuse.
  */
 function wholeNumber(raw: string): number | null {
   if (raw.trim() === "") return null;
@@ -578,7 +579,8 @@ export function AgentDetail({
                 than in a map keyed by agent name elsewhere in the settings:
                 a lead that asks six specialists needs both raised, and a
                 clone of it used to arrive with the tools and the default
-                budget. Blank inherits the deployment's. */}
+                budget. Blank inherits the deployment's, and so does a reply
+                from an API old enough not to carry the fields at all. */}
             <label className="block">
               <span className="text-text-muted">Steps per loop</span>
               <input
@@ -589,7 +591,7 @@ export function AgentDetail({
                 aria-label={`${agentKey} max steps`}
                 disabled={locked}
                 placeholder="inherit"
-                value={agent.max_steps === null ? "" : String(agent.max_steps)}
+                value={agent.max_steps == null ? "" : String(agent.max_steps)}
                 onChange={(e) => put(agentKey, { max_steps: wholeNumber(e.target.value) })}
               />
               <FieldError message={fieldError("max_steps")} />
@@ -604,7 +606,7 @@ export function AgentDetail({
                 aria-label={`${agentKey} timeout seconds`}
                 disabled={locked}
                 placeholder="inherit"
-                value={agent.timeout_seconds === null ? "" : String(agent.timeout_seconds)}
+                value={agent.timeout_seconds == null ? "" : String(agent.timeout_seconds)}
                 onChange={(e) => put(agentKey, { timeout_seconds: wholeNumber(e.target.value) })}
               />
               <FieldError message={fieldError("timeout_seconds")} />
