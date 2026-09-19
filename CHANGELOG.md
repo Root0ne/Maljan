@@ -1058,6 +1058,19 @@ change landed on `main`.
   than 64, which is about 2,700 tool answers at the output cap against the few
   hundred a whole team makes — the ceiling now bounds the process cost rather
   than a quarter of it.
+- **The grounding check runs on whichever record the run has.** It was gated on
+  the sandbox token corpus alone, and the run's own tool answers had moved
+  beside that corpus rather than into it — so on every run with no sandbox
+  network block (mock mode, a static-only team, a failed submission, a sample
+  that made no network call) the `stix.ungrounded_indicator` check did not run
+  at all and an invented indicator was exported with nothing said about it. It
+  runs on either source now. With **neither** — no sandbox block and no tool
+  answers — nothing was searched, and a check that searched nothing may not
+  conclude from it: the row is written, it is advisory, and the judge keeps its
+  object, which is the same answer a partial corpus gets.
+  **Upgrading:** a run with no evidence at all now spends one correction turn
+  on an indicator it used to export unquestioned, and carries an advisory row
+  for it in `run_summary.validation.unresolved`. Nothing is dropped for it.
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was

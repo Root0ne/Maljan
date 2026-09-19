@@ -365,7 +365,7 @@ class ServiceContainer:
         # grounding check over the stored ledger told a judge that a C2 a tool
         # really returned appears nowhere. In memory, per job, dropped with
         # this container; never in the graph state and never persisted.
-        self._evidence_corpus = RunEvidenceCorpus(
+        self._evidence_corpus: RunEvidenceCorpus | None = RunEvidenceCorpus(
             int(getattr(config.reporting, "evidence_corpus_bytes", 0) or 0)
         )
 
@@ -646,8 +646,13 @@ class ServiceContainer:
         """Return the per-run truncation ledger (pitfall P6)."""
         return self._truncation_ledger
 
-    def get_evidence_corpus(self) -> RunEvidenceCorpus:
-        """Return the per-job record of what the run's tools actually answered."""
+    def get_evidence_corpus(self) -> RunEvidenceCorpus | None:
+        """Return the per-job record of what the run's tools answered, or ``None``.
+
+        ``None`` once the container is closed. Every reader takes that as "no
+        corpus", which is the answer that makes an absence a note rather than a
+        reason to remove something.
+        """
         return self._evidence_corpus
 
     def get_evidence_counter(self) -> EvidenceCounter:
@@ -979,7 +984,12 @@ class ServiceContainer:
         # run's whole tool output with it. Every reader of the corpus runs
         # before teardown: the run summary is built in the judge node and the
         # export's second-source test in the report node, both inside the run.
-        self._evidence_corpus = RunEvidenceCorpus(0)
+        #
+        # ``None`` rather than an empty corpus. An empty one reports itself
+        # complete, so anything grounding after teardown would be told the
+        # evidence was whole — a sentinel that fails open on the one rule this
+        # whole thread exists to protect. No corpus reads as no corpus.
+        self._evidence_corpus = None
 
     def get_narrative_agent(self) -> Any | None:
         """Return the singleton NarrativeAgent or ``None`` in mock mode.

@@ -1,5 +1,5 @@
 {
-  "_note": "One reading of what the exported STIX bundle lost, pinned for both surfaces. The report builds this sentence in src/maljan/analysis/run_summary.py and the console in apps/web/src/lib/report-utils.ts; a line that printed integrity_objects_removed called the indicator cap's orphaned relationships repairs, and said 10 where the console said 4. Each case is the counts of one of the eight bundle shapes the reconciliation was measured on.",
+  "_note": "THIS FILE IS THE SOURCE OF THE SENTENCE. Both surfaces are pinned against it and neither may be reworded alone: change the wording here first, then make src/maljan/analysis/run_summary.py:bundle_loss_sentence and apps/web/src/lib/report-utils.ts:bundleLossSentence agree with it. One reading of what the exported STIX bundle lost, pinned for both surfaces. The report builds this sentence in src/maljan/analysis/run_summary.py and the console in apps/web/src/lib/report-utils.ts; a line that printed integrity_objects_removed called the indicator cap's orphaned relationships repairs, and said 10 where the console said 4. Each case is the counts of one of the eight bundle shapes the reconciliation was measured on.",
   "cases": [
     {
       "shape": "under the cap",
