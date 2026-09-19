@@ -18,6 +18,7 @@ later anyway.
 from __future__ import annotations
 
 import asyncio
+import pathlib
 import threading
 import time
 from typing import Any
@@ -141,10 +142,15 @@ class TestTheWatchdogThreadCannotThrow:
         assert escaped == [], "the watchdog let an exception out of its thread"
 
     def test_the_watchdog_is_a_daemon_that_says_what_it_is(self) -> None:
-        """Named, so a thread dump at exit says which thread is still awake."""
+        """Named, so a thread dump at exit says which thread is still awake.
+
+        Read from the module's file rather than from the function object: the
+        object may be wrapped by whatever is instrumenting the run, and what is
+        pinned here is what the module says.
+        """
         import inspect
 
-        source = inspect.getsource(base_agent._cancel_and_watch)
+        source = pathlib.Path(inspect.getfile(base_agent)).read_text(encoding="utf-8")
 
         assert 'name="maljan-agent-loop-watchdog"' in source
         assert "daemon=True" in source
