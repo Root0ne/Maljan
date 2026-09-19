@@ -949,6 +949,16 @@ change landed on `main`.
   back shortened, the `stix.ungrounded_indicator` row names the tools whose
   answers were handed over with rows missing, so the judge can narrow one and
   ask again instead of guessing.
+- **The two deprecated per-agent budget maps name the release they go in, and
+  cannot hold a budget nothing can use.** `react_agent_timeout_overrides` and
+  `react_agent_max_steps_overrides` are deleted in the release after the next
+  promotion to main, said identically in the two source comments and in
+  `docs/configuration.md`. A map entry that is not a whole number of at least
+  one — the bound a definition's own budget fields already carry — is dropped
+  when the settings are built, with the agent and the value logged. Dropped
+  rather than refused: a settings build that raises is a deployment that
+  cannot serve, and the agent falls back to the deployment's own budget, which
+  is what the reader did with such a value anyway.
 ### Fixed
 
 - **A process that has finished its work is not ended by its own watchdog.** The

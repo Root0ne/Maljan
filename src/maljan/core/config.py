@@ -2817,8 +2817,9 @@ class Settings(BaseSettings):
 
     # Deprecated: a budget belongs to the agent that spends it, so
     # ``agents.definitions.<key>.timeout_seconds`` is where one is set now and
-    # a definition's own value wins. This map is still read, for one release,
-    # so a deployment that set a budget here keeps it.
+    # a definition's own value wins. This map is still read until the release
+    # after the next promotion to main, so a deployment that set a budget here
+    # keeps it.
     # Per-agent timeout overrides. The default ``react_agent_timeout`` is
     # tuned for the network/dynamic analysts (~1-3 tool calls). The
     # static analyst attaches the Ghidra MCP server with many tools, so
@@ -2871,8 +2872,8 @@ class Settings(BaseSettings):
 
     # Deprecated, as ``react_agent_timeout_overrides`` is: set a step budget on
     # the agent's own definition (``agents.definitions.<key>.max_steps``),
-    # which wins over this map. Read for one release so a deployment that set
-    # one here keeps it.
+    # which wins over this map. Read until the release after the next promotion
+    # to main, so a deployment that set one here keeps it.
     # Per-agent ReAct recursion-step overrides. The default
     # ``react_agent_max_steps`` (10) suits the network/dynamic analysts (0-3
     # tool calls), but the static analyst runs a full Ghidra MCP ReAct loop
@@ -2918,6 +2919,36 @@ class Settings(BaseSettings):
             "network": 6,
         }
     )
+
+    @field_validator("react_agent_timeout_overrides", "react_agent_max_steps_overrides")
+    @classmethod
+    def _drop_a_budget_the_maps_cannot_hold(cls, value: dict[str, int]) -> dict[str, int]:
+        """The ``ge=1`` the definition's own budget fields carry, on the maps too.
+
+        ``dict[str, int]`` accepts a zero, a negative and a boolean through the
+        settings PATCH, and a loop given one of those does not run at all. The
+        entry is dropped and the reason logged rather than refused: a build
+        that raises is a deployment that cannot serve, and every one of these
+        maps is read on the path that starts every loop. What is dropped falls
+        through to the deployment's own budget, which is what the reader did
+        with it anyway — the difference is that the store no longer holds a
+        number nothing will ever use, and the operator is told.
+        """
+        if not isinstance(value, dict):
+            return value
+        kept: dict[str, int] = {}
+        for agent, budget in value.items():
+            if _is_a_budget(budget):
+                kept[agent] = budget
+                continue
+            logger.warning(
+                "Agent %r has a per-agent budget of %r in a deprecated override map, which "
+                "is not a whole number of at least one; it is ignored and the deployment's "
+                "own budget is used.",
+                agent,
+                budget,
+            )
+        return kept
 
     # LangChain / LangSmith Tracing
     # Enable with: LANGCHAIN_TRACING_V2=true, LANGCHAIN_API_KEY=ls_xxx
