@@ -248,6 +248,14 @@ class TruncationLedger:
         self.indicator_cap_invocations = 0
         self.indicator_cap_removed = 0
 
+        # What the run's grounding corpus could not hold, as the judge node
+        # found it. Not a bound on a model's input — it is how much of this
+        # run's own record a grounding check could not search, which is what
+        # makes an absence a note rather than a finding.
+        self.evidence_corpus_missing_answers = 0
+        self.evidence_corpus_missing_tools: tuple[str, ...] = ()
+        self.evidence_corpus_partial_reason = ""
+
     # -- tool output --------------------------------------------------------
 
     def record_tool_output(
@@ -349,6 +357,23 @@ class TruncationLedger:
                 if reason in self.integrity_dropped:
                     self.integrity_dropped[reason] += max(0, int(count))
 
+    # -- the grounding corpus -----------------------------------------------
+
+    def record_evidence_corpus(
+        self, *, missing_answers: int, missing_tools: tuple[str, ...], reason: str
+    ) -> None:
+        """Record how whole the evidence a grounding check searched was.
+
+        Recorded once, from the node that builds the corpus the judge is
+        grounded against. Nothing here is a count of calls: a run whose corpus
+        held everything records zeroes, which is the answer an operator needs
+        as much as a number is.
+        """
+        with self._lock:
+            self.evidence_corpus_missing_answers = max(0, int(missing_answers))
+            self.evidence_corpus_missing_tools = tuple(missing_tools)
+            self.evidence_corpus_partial_reason = str(reason or "")
+
     # -- indicator cap ------------------------------------------------------
 
     def record_indicator_cap(self, *, removed: int) -> None:
@@ -409,6 +434,9 @@ class TruncationLedger:
                     0, self.judge_integrity_objects_in - self.judge_integrity_objects_out
                 ),
                 "judge_integrity_dropped": dict(self.judge_integrity_dropped),
+                "evidence_corpus_missing_answers": self.evidence_corpus_missing_answers,
+                "evidence_corpus_missing_tools": list(self.evidence_corpus_missing_tools),
+                "evidence_corpus_partial_reason": self.evidence_corpus_partial_reason,
             }
 
     @property

@@ -146,9 +146,21 @@ class ValidationTally:
             self.by_code[violation.code] = self.by_code.get(violation.code, 0) + 1
 
     def record_unresolved(self, producer: str, violations: Sequence[Violation]) -> None:
-        """Keep what survived the retry, as a row naming who was told."""
+        """Keep what survived the retry, as a row naming who was told.
+
+        ``advisory`` travels with it. Rebuilt without the flag, a row the
+        platform explicitly declined to act on was stored, printed and drawn as
+        an ordinary unfixed finding, and an operator had to read inside the
+        message to learn that nothing had been dropped for it.
+        """
         self.unresolved.extend(
-            {"agent": producer, "code": v.code, "message": v.message} for v in violations
+            {
+                "agent": producer,
+                "code": v.code,
+                "message": v.message,
+                **({"advisory": "true"} if v.advisory else {}),
+            }
+            for v in violations
         )
 
     def merge(self, other: ValidationTally) -> None:
@@ -1349,6 +1361,7 @@ def validate_verdict_bundle(
     attck: Any = None,
     sample: Any = None,
     shortened_tools: Iterable[str] = (),
+    searched: Iterable[str] = (),
     corpus_state: CorpusState | None = None,
 ) -> list[Violation]:
     """What is wrong with the judge's answer, in the judge's own terms.
@@ -1371,6 +1384,11 @@ def validate_verdict_bundle(
     rows missing. It changes no verdict: it is one sentence added to an
     absence, so a judge reading one knows which call to narrow.
 
+    ``searched`` is what the run's own tools answered, each answer as itself
+    and already lower-cased by the corpus that kept it. It is passed beside
+    ``evidence_corpus`` rather than inside it because joining the run's whole
+    record into one token copied it twice more for nothing.
+
     ``corpus_state`` says whether the evidence searched is this run's whole
     record. When it is not — the in-memory corpus hit its ceiling, or there is
     no corpus and the stored entries fell back on had been blanked by the byte
@@ -1383,12 +1401,19 @@ def validate_verdict_bundle(
     objects = list(getattr(bundle, "objects", None) or [])
     scope = expected_technique_scope(sample)
 
-    haystack = " ".join(sorted(evidence_corpus)).lower() if evidence_corpus else ""
+    # The token corpus and the run's own answers, each as itself. The tokens
+    # are short and are joined once; the answers are searched where they are.
+    haystack = Haystack(
+        [
+            " ".join(sorted(evidence_corpus)).lower() if evidence_corpus else "",
+            *(str(part) for part in searched),
+        ]
+    )
     identity = {value.lower() for value in sample_identity_values(sample)}
     runtime_paths = _runtime_paths(evidence_corpus)
     partial = shortened_evidence_note(shortened_tools)
-    searched = corpus_state or CorpusState()
-    not_searched = partial_evidence_note(searched)
+    how_whole = corpus_state or CorpusState()
+    not_searched = partial_evidence_note(how_whole)
     for index, obj in enumerate(objects):
         kind = str(getattr(obj, "type", "") or "")
         if kind == "indicator" and evidence_corpus is not None:
@@ -1410,7 +1435,7 @@ def validate_verdict_bundle(
                         # evidence searched was partial. A denylisted host or a
                         # malformed digest is refused on its own account and no
                         # amount of evidence would change it.
-                        advisory=absent and searched.partial,
+                        advisory=absent and how_whole.partial,
                     )
                 )
         elif kind == "attack-pattern":
@@ -1964,7 +1989,7 @@ def reads_as_a_place(value: str) -> bool:
 
 
 def _place_in_the_evidence(
-    literal: str, haystack: str, runtime_paths: set[str], own: set[str]
+    literal: str, haystack: Haystack, runtime_paths: set[str], own: set[str]
 ) -> bool:
     """Whether the run recorded this place, however either side spelled it.
 
@@ -1974,7 +1999,6 @@ def _place_in_the_evidence(
     the report's own path rows go through — and each is asked as a whole value
     rather than as a substring.
     """
-    from maljan.agents._indicator_denylists import whole_value_in
     from maljan.reporting.dedupe import canonical_path
 
     lowered = literal.lower()
@@ -1986,27 +2010,68 @@ def _place_in_the_evidence(
     }
     spellings |= {spelling.rstrip("/\\") for spelling in spellings if len(spelling) > 1}
     return any(
-        spelling in own or spelling in runtime_paths or whole_value_in(spelling, haystack)
+        spelling in own or spelling in runtime_paths or haystack.holds_value(spelling)
         for spelling in spellings
         if spelling
     )
 
 
-def _whole_token_in(literal: str, haystack: str, own: set[str]) -> bool:
-    """Whether ``literal`` appears in the corpus as a value rather than a prefix."""
-    lowered = literal.lower()
-    if lowered in own:
-        return True
-    start = haystack.find(lowered)
+class Haystack:
+    """The evidence a grounding check searches, as the parts it came in.
+
+    Never one joined string. A value never spans two tool answers — joining
+    them put a space between them and a space bounds a value — so asking each
+    part is exactly the search the joined string performed. Joining was not
+    free: on 400 answers of 6 000 characters the run's record was copied on the
+    way into the corpus's cache, again as an element of the token set, and a
+    third time into the string that was finally searched.
+
+    Everything here is compared lower-cased, which is the corpus's own rule and
+    is why the run's answers are folded once, at the moment they are recorded.
+    """
+
+    __slots__ = ("parts",)
+
+    def __init__(self, parts: Iterable[str]) -> None:
+        self.parts: tuple[str, ...] = tuple(part for part in parts if part)
+
+    def __contains__(self, needle: str) -> bool:
+        return any(needle in part for part in self.parts)
+
+    def __bool__(self) -> bool:
+        return bool(self.parts)
+
+    def holds_value(self, value: str) -> bool:
+        """Whether the evidence holds ``value`` as a value of its own."""
+        from maljan.agents._indicator_denylists import whole_value_in
+
+        return any(whole_value_in(value, part) for part in self.parts)
+
+    def holds_token(self, value: str) -> bool:
+        """Whether ``value`` stands between two boundaries rather than inside a run."""
+        return any(_token_in(value, part) for part in self.parts)
+
+
+def _token_in(lowered: str, part: str) -> bool:
+    """Whether ``lowered`` is a whole token of ``part``."""
+    start = part.find(lowered)
     while start != -1:
-        before = haystack[start - 1] if start else ""
-        after = haystack[start + len(lowered) : start + len(lowered) + 1]
+        before = part[start - 1] if start else ""
+        after = part[start + len(lowered) : start + len(lowered) + 1]
         if not _TOKEN_BOUNDARY_RE.match(before or " ") and not _TOKEN_BOUNDARY_RE.match(
             after or " "
         ):
             return True
-        start = haystack.find(lowered, start + 1)
+        start = part.find(lowered, start + 1)
     return False
+
+
+def _whole_token_in(literal: str, haystack: Haystack, own: set[str]) -> bool:
+    """Whether ``literal`` appears in the corpus as a value rather than a prefix."""
+    lowered = literal.lower()
+    if lowered in own:
+        return True
+    return haystack.holds_token(lowered)
 
 
 # The words every corpus-miss sentence in :func:`_indicator_problem` shares.
@@ -2092,8 +2157,27 @@ def partial_evidence_note(state: CorpusState) -> str:
     )
 
 
+def partial_grounding_reason(state: CorpusState) -> str:
+    """One sentence saying grounding was advisory in this run, or ``""``.
+
+    A degradation reason rather than a finding: it is a fact about the run's
+    record, not about the sample. It names the remedy — which of the three
+    reasons it is — because an operator who set the ceiling and an operator
+    whose run was resumed have different things to do about it.
+    """
+    if state.complete:
+        return ""
+    reason = state.why or "the evidence searched was not this run's whole record"
+    named = f" ({', '.join(state.missing_tools)})" if state.missing_tools else ""
+    return (
+        f"grounding searched less than this run produced — {reason}: "
+        f"{state.missing_answers} answer(s) not kept{named}. "
+        "An absence measured against it is recorded as a note and drops nothing."
+    )
+
+
 def _indicator_problem(
-    pattern: str, haystack: str, runtime_paths: set[str], identity: Iterable[str] = ()
+    pattern: str, haystack: Haystack, runtime_paths: set[str], identity: Iterable[str] = ()
 ) -> str:
     """Why this indicator is not grounded, in words the judge can act on, or "".
 
@@ -2604,7 +2688,17 @@ def validation_metrics(
     rows: list[dict[str, str]] = []
     for agent, violation in unresolved:
         by_code[violation.code] = by_code.get(violation.code, 0) + 1
-        rows.append({"agent": agent, "code": violation.code, "message": violation.message})
+        rows.append(
+            {
+                "agent": agent,
+                "code": violation.code,
+                "message": violation.message,
+                # The second place a row is rebuilt for the record. A row the
+                # platform declined to act on, stored without the flag, reads
+                # downstream as a producer's own unfixed finding.
+                **({"advisory": "true"} if violation.advisory else {}),
+            }
+        )
     return {
         "retries": int(retries),
         "by_code": dict(sorted(by_code.items())),

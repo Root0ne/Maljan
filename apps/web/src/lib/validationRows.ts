@@ -40,6 +40,19 @@ export interface ValidationRow {
   agent: string;
   code: string;
   message: string;
+  /** The platform declined to act on this row: it measured an absence against
+   *  evidence it knows is partial, so the producer's object was kept. Absent
+   *  on an ordinary row and on a run stored before the flag existed.
+   *
+   *  A string on the wire: the channel that carries a finding row is a map of
+   *  strings on the Python side, so the flag travels as `"true"` and the
+   *  absence of the key is the other answer. */
+  advisory?: boolean | string;
+}
+
+/** Whether the platform declined to act on this row. */
+export function isAdvisory(row: { advisory?: boolean | string }): boolean {
+  return row.advisory === true || row.advisory === "true";
 }
 
 /** Whether this row records what the export left out rather than what a producer kept. */
@@ -49,6 +62,13 @@ export function isExportDecision(code: string): boolean {
 
 /** The one line the Run record draws for an unresolved validation row. */
 export function validationRowText(row: ValidationRow): string {
+  // A note, not an unfixed finding: the platform could not search this run's
+  // whole record, so it wrote the row down and dropped nothing for it. Read as
+  // "left unfixed" it accused a producer of ignoring a correction it was right
+  // to ignore.
+  if (isAdvisory(row)) {
+    return `noted for ${row.agent}, nothing dropped — ${row.code}: ${row.message}`;
+  }
   if (isExportDecision(row.code)) {
     return `the export did not publish ${row.code}: ${row.message}`;
   }

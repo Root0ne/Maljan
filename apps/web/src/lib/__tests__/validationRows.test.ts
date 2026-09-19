@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isExportDecision, validationRowText } from "@/lib/validationRows";
+import { isAdvisory, isExportDecision, validationRowText } from "@/lib/validationRows";
 
 /**
  * Who a run's unresolved rows say acted.
@@ -86,5 +86,36 @@ describe("what an unresolved row says", () => {
     expect(
       validationRowText({ agent: "static", code: "attck.unknown_id", message: "no entry" }),
     ).toBe("static left attck.unknown_id unfixed: no entry");
+  });
+});
+
+describe("an advisory row", () => {
+  it("is read from the string the wire carries", () => {
+    expect(isAdvisory({ advisory: "true" })).toBe(true);
+    expect(isAdvisory({ advisory: true })).toBe(true);
+    expect(isAdvisory({})).toBe(false);
+    expect(isAdvisory({ advisory: "" })).toBe(false);
+  });
+
+  it("is not drawn as a producer's unfixed finding", () => {
+    const text = validationRowText({
+      agent: "judge",
+      code: "stix.ungrounded_indicator",
+      message: "gate.example.org appears nowhere in the evidence this run collected.",
+      advisory: "true",
+    });
+
+    expect(text).toContain("nothing dropped");
+    expect(text).not.toContain("left stix.ungrounded_indicator unfixed");
+  });
+
+  it("leaves an ordinary row reading as it did", () => {
+    const text = validationRowText({
+      agent: "static",
+      code: "isr.confidence_range",
+      message: "a confidence outside 0..1",
+    });
+
+    expect(text).toBe("static left isr.confidence_range unfixed: a confidence outside 0..1");
   });
 });

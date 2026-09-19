@@ -181,6 +181,13 @@ class TruncationMetrics:
     judge_integrity_invocations: int = 0
     judge_integrity_objects_removed: int = 0
     judge_integrity_dropped: dict[str, int] = field(default_factory=dict)
+    # What the run's grounding corpus could not hold. Not truncation of a
+    # model's input: it is how much of the run's own record the grounding
+    # checks could not search, which is why an absence this run stated may be
+    # a note rather than a finding.
+    evidence_corpus_missing_answers: int = 0
+    evidence_corpus_missing_tools: list[str] = field(default_factory=list)
+    evidence_corpus_partial_reason: str = ""
 
     @property
     def any_bound_hit(self) -> bool:
@@ -188,6 +195,54 @@ class TruncationMetrics:
         return bool(
             self.tool_output_over_limit or self.react_step_cap_hits or self.judge_token_cap_hits
         )
+
+
+def count_label(count: int, singular: str, plural: str = "") -> str:
+    """ "1 object", "2 objects" — a count and its noun, agreeing.
+
+    The console has the same helper, and the two sentences below are pinned
+    against one shared fixture so the wordings cannot drift apart.
+    """
+    return f"{count} {singular if count == 1 else (plural or singular + 's')}"
+
+
+def bundle_loss_sentence(truncation: Any) -> str:
+    """What the exported STIX bundle lost, as one sentence, or ``""``.
+
+    Built from the reasons, never from the total. ``integrity_objects_removed``
+    counts both integrity passes, and the second one runs after the indicator
+    cap and removes nothing but relationships the cap orphaned — so a line that
+    printed the total called six orphaned relationships "repaired away", and
+    the console, which had already learned to subtract them, disagreed with the
+    report about the same run. One reading, two surfaces.
+    """
+    dropped = getattr(truncation, "integrity_dropped", None) or {}
+
+    def _count(value: Any) -> int:
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    orphaned = _count(dropped.get("cap_orphan"))
+    repaired = max(0, _count(getattr(truncation, "integrity_objects_removed", 0)) - orphaned)
+    capped = _count(getattr(truncation, "indicator_cap_removed", 0))
+    refs = _count(getattr(truncation, "integrity_refs_trimmed", 0))
+
+    parts: list[str] = []
+    if repaired:
+        parts.append(f"{count_label(repaired, 'object')} repaired away as malformed or duplicated")
+    if capped:
+        parts.append(
+            f"{count_label(capped, 'indicator')} over the export's total cap, lowest priority first"
+        )
+    if orphaned:
+        parts.append(f"{count_label(orphaned, 'relationship')} left pointing at a capped indicator")
+    if refs:
+        parts.append(f"{count_label(refs, 'reference')} trimmed from a report or a note")
+    if not parts:
+        return ""
+    return f"The exported STIX bundle is shorter than what the run produced: {'; '.join(parts)}."
 
 
 def stage_duration_lines(stages: Any) -> list[str]:
@@ -532,13 +587,31 @@ class RunSummary:
                 f"| Characters dropped | {trunc.tool_output_chars_dropped} |",
                 f"| ReAct step cap | {trunc.react_step_cap_hits} / {trunc.react_invocations} |",
                 f"| Judge token cap | {trunc.judge_token_cap_hits} / {trunc.judge_invocations} |",
-                f"| STIX objects repaired away | {trunc.integrity_objects_removed} |",
                 f"| STIX indicators over the cap | {trunc.indicator_cap_removed} |",
                 f"| STIX references trimmed | {trunc.integrity_refs_trimmed} |",
                 f"| Judge bundles repaired | {trunc.judge_integrity_objects_removed}"
                 f" over {trunc.judge_integrity_invocations} attempt(s) |",
                 "",
             ]
+            if trunc.evidence_corpus_partial_reason:
+                lines += [
+                    "Grounding searched less than this run produced "
+                    f"({trunc.evidence_corpus_partial_reason}): "
+                    f"{trunc.evidence_corpus_missing_answers} answer(s) not kept"
+                    + (
+                        f", from {', '.join(trunc.evidence_corpus_missing_tools)}"
+                        if trunc.evidence_corpus_missing_tools
+                        else ""
+                    )
+                    + ". An absence measured against it is a note and drops nothing.",
+                    "",
+                ]
+            # The reasons, never the total: a line printing
+            # ``integrity_objects_removed`` called the cap's orphaned
+            # relationships repairs, and said 10 where the console said 4.
+            loss = bundle_loss_sentence(trunc)
+            if loss:
+                lines += [loss, ""]
             if any(trunc.integrity_dropped.values()):
                 reasons = ", ".join(
                     f"{k}={v}" for k, v in sorted(trunc.integrity_dropped.items()) if v
@@ -637,6 +710,9 @@ class RunSummary:
                 "judge_integrity_invocations": t.judge_integrity_invocations,
                 "judge_integrity_objects_removed": t.judge_integrity_objects_removed,
                 "judge_integrity_dropped": dict(t.judge_integrity_dropped),
+                "evidence_corpus_missing_answers": t.evidence_corpus_missing_answers,
+                "evidence_corpus_missing_tools": list(t.evidence_corpus_missing_tools),
+                "evidence_corpus_partial_reason": t.evidence_corpus_partial_reason,
                 "any_bound_hit": t.any_bound_hit,
             }
 
@@ -844,6 +920,13 @@ class RunSummaryBuilder:
             judge_integrity_objects_removed=int(snapshot.get("judge_integrity_objects_removed", 0)),
             judge_integrity_dropped=(
                 dict(judge_dropped) if isinstance(judge_dropped, dict) else {}
+            ),
+            evidence_corpus_missing_answers=int(snapshot.get("evidence_corpus_missing_answers", 0)),
+            evidence_corpus_missing_tools=[
+                str(tool) for tool in (snapshot.get("evidence_corpus_missing_tools") or [])
+            ],
+            evidence_corpus_partial_reason=str(
+                snapshot.get("evidence_corpus_partial_reason", "") or ""
             ),
         )
         return self
