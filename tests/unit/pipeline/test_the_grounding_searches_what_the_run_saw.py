@@ -731,3 +731,136 @@ class TestTheFlagSurvivesEveryPlaceARowIsRebuilt:
         # ``dict(row)`` rather than three named keys, which is what keeps a
         # field nobody edited here from being dropped on the way back.
         assert 'unresolved=[dict(row) for row in v_data.get("unresolved") or []]' in source
+
+
+class TestTheCheckRunsOnWhicheverSourceTheRunHas:
+    """A run with no sandbox network block still has a record to ground against.
+
+    The token corpus holds the sandbox report's ``network`` entries and nothing
+    else; the run's own answers travel beside it. A gate that asked only
+    whether the token corpus existed therefore skipped the whole indicator
+    branch on every run without a sandbox network block — mock mode, a
+    static-only team, a failed submission, a sample that made no network call —
+    and the judge could export an invented indicator with no finding row at
+    all. The inverse of the absence this file's first class is about: that one
+    stated something it could not, this one stated nothing.
+
+    Driven through the arguments the judge node itself passes, which is the gap
+    that let it through a green suite.
+    """
+
+    @staticmethod
+    def _as_the_node_passes_it(
+        sandbox_report: dict[str, Any] | None, answers: list[str]
+    ) -> list[Violation]:
+        from maljan.agents.judge_postprocess import build_evidence_corpus
+
+        # ``interesting_strings`` is None at the node's call site, so the token
+        # set is the sandbox report's network entries and nothing else.
+        token_corpus = build_evidence_corpus(
+            interesting_strings=None,
+            sandbox_report=sandbox_report if isinstance(sandbox_report, dict) else None,
+        )
+        bundle = Bundle(objects=[Indicator(pattern=PATTERN)])  # type: ignore[list-item]
+        return validate_verdict_bundle(
+            bundle,
+            # The node collapses an empty set to None, as it always has.
+            token_corpus or None,
+            searched=answers,
+            corpus_state=CorpusState(),
+        )
+
+    def test_a_run_with_no_sandbox_block_still_checks_the_judge(self) -> None:
+        """Mock mode, a static-only team, a failed submission."""
+        violations = self._as_the_node_passes_it({}, ["the tool answered about something else"])
+
+        assert [v.code for v in violations] == ["stix.ungrounded_indicator"]
+        assert violations[0].advisory is False
+
+    def test_and_grounds_a_value_the_run_really_saw(self) -> None:
+        violations = self._as_the_node_passes_it({}, [f"resolved {C2}"])
+
+        assert violations == []
+
+    def test_no_sandbox_report_at_all_is_the_same(self) -> None:
+        violations = self._as_the_node_passes_it(None, ["an answer about something else"])
+
+        assert [v.code for v in violations] == ["stix.ungrounded_indicator"]
+
+    def test_a_sandbox_block_with_no_corpus_still_checks_the_judge(self) -> None:
+        """The mirror: the token corpus is the only source this run has."""
+        report = {"network": {"dns": [{"request": "unrelated.example.org"}]}}
+
+        violations = self._as_the_node_passes_it(report, [])
+
+        assert [v.code for v in violations] == ["stix.ungrounded_indicator"]
+
+    def test_a_sandbox_block_that_holds_the_value_grounds_it(self) -> None:
+        report = {"network": {"dns": [{"request": C2}]}}
+
+        violations = self._as_the_node_passes_it(report, [])
+
+        assert violations == []
+
+    def test_neither_source_says_so_rather_than_passing_in_silence(self) -> None:
+        """Nothing was searched, so nothing may be asserted — and it is recorded.
+
+        A run with no sandbox block and no answers at all searched an empty
+        record. Staying silent would export the judge's object with nothing
+        said about it; asserting an absence would state something over evidence
+        that does not exist. The row is written and it is advisory, which is
+        the same answer a partial corpus gets.
+        """
+        violations = self._as_the_node_passes_it(None, [])
+
+        assert [v.code for v in violations] == ["stix.ungrounded_indicator"]
+        assert violations[0].advisory is True
+        assert "nothing is dropped for it" in violations[0].message
+
+    def test_and_the_object_survives_it(self) -> None:
+        bundle = Bundle(objects=[Indicator(pattern=PATTERN)])  # type: ignore[list-item]
+        violations = validate_verdict_bundle(bundle, None, searched=[], corpus_state=CorpusState())
+
+        assert drop_ungrounded_indicators(bundle, violations) == 0
+        assert len(bundle.objects) == 1
+
+
+class TestTheClosedContainerFailsSafe:
+    """A closed container's corpus reads as no corpus, not as a whole one.
+
+    The drop replaced it with an empty ``RunEvidenceCorpus``, which with
+    nothing recorded reports ``complete=True`` — so anything grounding after
+    teardown would have been told the evidence was whole. Unreachable today,
+    because every reader runs inside the graph, and a sentinel that fails open
+    on this rule is the wrong sentinel whether or not anything reaches it.
+    """
+
+    @staticmethod
+    def _container() -> Any:
+        from maljan.core.config import Settings
+        from maljan.core.container import ServiceContainer
+
+        return ServiceContainer(config=Settings(_env_file=None), mock=True)
+
+    def test_a_live_container_hands_out_a_corpus(self) -> None:
+        container = self._container()
+
+        assert container.get_evidence_corpus() is not None
+
+    @pytest.mark.asyncio
+    async def test_a_closed_one_hands_out_nothing(self) -> None:
+        container = self._container()
+        await container.aclose()
+
+        assert container.get_evidence_corpus() is None
+
+    @pytest.mark.asyncio
+    async def test_and_a_check_after_teardown_searches_nothing_and_says_so(self) -> None:
+        container = self._container()
+        await container.aclose()
+
+        seen, state = _what_the_run_saw(container, [])
+
+        assert seen == []
+        assert state.partial
+        assert state.why == "run resumed without its corpus"

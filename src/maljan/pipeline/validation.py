@@ -30,7 +30,7 @@ from pydantic import ValidationError
 
 # The row helpers live with the shape (``analysis.corroboration``) and are
 # re-exported here, where every reader of a run's validation looks for them.
-from maljan.agents.run_evidence_corpus import CorpusState
+from maljan.agents.run_evidence_corpus import CorpusState, both_searched
 from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
 from maljan.analysis.technique_ids import TECHNIQUE_ID_EXACT_RE
@@ -1413,10 +1413,20 @@ def validate_verdict_bundle(
     runtime_paths = _runtime_paths(evidence_corpus)
     partial = shortened_evidence_note(shortened_tools)
     how_whole = corpus_state or CorpusState()
+    # Neither source. The token corpus holds the sandbox report's network
+    # entries and the run's own answers travel beside it, so a run with no
+    # sandbox block and no answers searched nothing at all — and a check that
+    # searched nothing may not conclude from it. It says so instead: the row is
+    # written, it is advisory, and the judge keeps its object. Gating the whole
+    # branch on the token corpus alone skipped the check outright on mock mode,
+    # a static-only team, a failed submission and any sample that made no
+    # network call, and an invented indicator was exported with nothing said.
+    if not haystack:
+        how_whole = both_searched(how_whole, NOTHING_SEARCHED)
     not_searched = partial_evidence_note(how_whole)
     for index, obj in enumerate(objects):
         kind = str(getattr(obj, "type", "") or "")
-        if kind == "indicator" and evidence_corpus is not None:
+        if kind == "indicator":
             pattern = str(getattr(obj, "pattern", "") or "")
             problem = _indicator_problem(pattern, haystack, runtime_paths, identity)
             if problem:
@@ -2074,6 +2084,12 @@ def _whole_token_in(literal: str, haystack: Haystack, own: set[str]) -> bool:
     return haystack.holds_token(lowered)
 
 
+# What a check that had nothing to search says about what it searched. Not the
+# same as a corpus that lost answers — there were none to lose — but the same
+# conclusion: an absence measured over nothing is a note, never a reason to
+# remove a model's object.
+NOTHING_SEARCHED = CorpusState(complete=False, why="no evidence was searched")
+
 # The words every corpus-miss sentence in :func:`_indicator_problem` shares.
 # Kept for readers grepping for the phrase; nothing decides anything by it.
 ABSENT_FROM_THE_EVIDENCE = "appears nowhere"
@@ -2144,9 +2160,12 @@ def partial_evidence_note(state: CorpusState) -> str:
     if state.complete:
         return ""
     if not state.missing_tools:
+        # No tool to name — the corpus is gone, or there was never anything to
+        # search — so the reason is what the sentence carries instead. One of
+        # this module's own words either way, never a producer's.
         return (
-            " The evidence searched is not this run's whole record, so this is a note rather "
-            "than a finding and nothing is dropped for it."
+            f" The evidence searched is not this run's whole record ({state.why}), so this is a "
+            "note rather than a finding and nothing is dropped for it."
         )
     named = safe_finding_value(", ".join(state.missing_tools))
     answers = "answer" if state.missing_answers == 1 else "answers"
