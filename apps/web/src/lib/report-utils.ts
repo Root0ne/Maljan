@@ -137,22 +137,36 @@ export function countLabel(
 /**
  * What the exported STIX bundle lost, as one sentence, or null.
  *
- * Two bounds take objects out of the bundle after the judge and the renderer
- * have written it: the integrity pass repairs malformed and duplicated
- * objects away, and the total indicator cap drops the lowest-priority
- * indicators when there are more than the export carries. Both are counted on
- * the run summary; a reader comparing the bundle against the report's own IOC
- * tables has no other way to learn that the difference is deliberate.
+ * Built from the reasons, never from the total. `integrity_objects_removed`
+ * counts both integrity passes, and the second one runs after the indicator
+ * cap and removes nothing but relationships the cap orphaned — so on the very
+ * shape this sentence exists for, "6 objects repaired away as malformed or
+ * duplicated" was six relationships that were neither. Each reason is named
+ * with its own count: what the pass repaired, what the cap orphaned, what the
+ * cap removed, and the references a report or a note lost without any object
+ * leaving.
  *
  * Null when nothing was removed, so a clean run says nothing rather than
- * saying zero.
+ * saying zero, and null for a stored run written before the counters existed.
  */
-export function bundleLossSentence(
-  truncation: { integrity_objects_removed?: number; indicator_cap_removed?: number } | null,
-): string | null {
-  const repaired = Math.max(0, Number(truncation?.integrity_objects_removed ?? 0) || 0);
-  const capped = Math.max(0, Number(truncation?.indicator_cap_removed ?? 0) || 0);
-  if (repaired === 0 && capped === 0) return null;
+interface TruncationCounts {
+  integrity_objects_removed?: number;
+  indicator_cap_removed?: number;
+  integrity_refs_trimmed?: number;
+  integrity_dropped?: Record<string, number>;
+}
+
+export function bundleLossSentence(truncation: TruncationCounts | null): string | null {
+  const dropped = truncation?.integrity_dropped ?? {};
+  const count = (value: unknown) => Math.max(0, Number(value ?? 0) || 0);
+
+  // The pass's own repairs: everything it removed except what it swept up
+  // after the cap, which is the cap's loss and is named as such below.
+  const orphaned = count(dropped.cap_orphan);
+  const repaired = Math.max(0, count(truncation?.integrity_objects_removed) - orphaned);
+  const capped = count(truncation?.indicator_cap_removed);
+  const refs = count(truncation?.integrity_refs_trimmed);
+
   const parts: string[] = [];
   if (repaired > 0) {
     parts.push(`${countLabel(repaired, "object")} repaired away as malformed or duplicated`);
@@ -162,5 +176,12 @@ export function bundleLossSentence(
       `${countLabel(capped, "indicator")} over the export's total cap, lowest priority first`,
     );
   }
+  if (orphaned > 0) {
+    parts.push(`${countLabel(orphaned, "relationship")} left pointing at a capped indicator`);
+  }
+  if (refs > 0) {
+    parts.push(`${countLabel(refs, "reference")} trimmed from a report or a note`);
+  }
+  if (parts.length === 0) return null;
   return `The exported STIX bundle is shorter than what the run produced: ${parts.join("; ")}.`;
 }
