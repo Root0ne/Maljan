@@ -30,6 +30,7 @@ from pydantic import ValidationError
 
 # The row helpers live with the shape (``analysis.corroboration``) and are
 # re-exported here, where every reader of a run's validation looks for them.
+from maljan.agents.run_evidence_corpus import CorpusState
 from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
 from maljan.analysis.technique_ids import TECHNIQUE_ID_EXACT_RE
@@ -77,9 +78,24 @@ class Violation:
     code: str
     message: str
     path: str = ""
+    # A finding the producer is shown and asked about, that nothing acts on by
+    # removing something. It exists for one situation: the check could not
+    # search this run's whole record — the grounding corpus hit its ceiling,
+    # or there is no corpus and the stored entries it fell back to had been
+    # blanked by the evidence byte budget — so "this value is in no tool
+    # output" is not a statement the platform is entitled to make. The row
+    # says what was searched and what was not; the object stays.
+    advisory: bool = False
 
     def to_dict(self) -> dict[str, str]:
-        return {"code": self.code, "message": self.message, "path": self.path}
+        return {
+            "code": self.code,
+            "message": self.message,
+            "path": self.path,
+            # A string, because every other value in the row is one and the
+            # channel that carries it is ``dict[str, list[dict[str, str]]]``.
+            "advisory": "true" if self.advisory else "",
+        }
 
 
 @dataclass
@@ -1311,6 +1327,7 @@ def validate_verdict_bundle(
     attck: Any = None,
     sample: Any = None,
     shortened_tools: Iterable[str] = (),
+    corpus_state: CorpusState | None = None,
 ) -> list[Violation]:
     """What is wrong with the judge's answer, in the judge's own terms.
 
@@ -1331,6 +1348,14 @@ def validate_verdict_bundle(
     ``shortened_tools`` names the tools whose answers reached the corpus with
     rows missing. It changes no verdict: it is one sentence added to an
     absence, so a judge reading one knows which call to narrow.
+
+    ``corpus_state`` says whether the evidence searched is this run's whole
+    record. When it is not — the in-memory corpus hit its ceiling, or there is
+    no corpus and the stored entries fell back on had been blanked by the byte
+    budget — an absence is written as an **advisory** row: the judge is told
+    once, in a sentence that says what was searched and what was not, and
+    nothing drops its object for it. Passing ``None`` means the caller knows
+    the corpus was whole, which is the default every existing caller had.
     """
     violations: list[Violation] = []
     objects = list(getattr(bundle, "objects", None) or [])
@@ -1340,13 +1365,16 @@ def validate_verdict_bundle(
     identity = {value.lower() for value in sample_identity_values(sample)}
     runtime_paths = _runtime_paths(evidence_corpus)
     partial = shortened_evidence_note(shortened_tools)
+    searched = corpus_state or CorpusState()
+    not_searched = partial_evidence_note(searched)
     for index, obj in enumerate(objects):
         kind = str(getattr(obj, "type", "") or "")
         if kind == "indicator" and evidence_corpus is not None:
             pattern = str(getattr(obj, "pattern", "") or "")
             problem = _indicator_problem(pattern, haystack, runtime_paths, identity)
             if problem:
-                caveat = partial if ABSENT_FROM_THE_EVIDENCE in problem else ""
+                absent = _is_an_absence(problem)
+                caveat = f"{partial}{not_searched}" if absent else ""
                 violations.append(
                     Violation(
                         code="stix.ungrounded_indicator",
@@ -1356,6 +1384,11 @@ def validate_verdict_bundle(
                             f"invented one.{caveat}"
                         ),
                         path=f"objects[{index}]",
+                        # Only an absence goes advisory, and only when the
+                        # evidence searched was partial. A denylisted host or a
+                        # malformed digest is refused on its own account and no
+                        # amount of evidence would change it.
+                        advisory=absent and searched.partial,
                     )
                 )
         elif kind == "attack-pattern":
@@ -1955,10 +1988,33 @@ def _whole_token_in(literal: str, haystack: str, own: set[str]) -> bool:
 
 
 # The words every corpus-miss sentence in :func:`_indicator_problem` shares.
-# The caveat below is added to those and to no other problem: a denylisted
-# host, a malformed digest and a literal that is not written as a place are
-# refused on their own account, and no amount of evidence would change one.
+# Kept for readers grepping for the phrase; nothing decides anything by it.
 ABSENT_FROM_THE_EVIDENCE = "appears nowhere"
+
+
+class _Problem(str):
+    """A refusal sentence, and whether the refusal is an absence.
+
+    A ``str``, so the sentence is still just the sentence everywhere it is
+    read. The flag rides on the object rather than in its text because what
+    the caveat and the advisory rule key on is *what the check concluded*, and
+    keying on the words would let a model-written indicator value carrying the
+    phrase attract a caveat it did not earn.
+    """
+
+    absent: bool = False
+
+
+def _an_absence(sentence: str) -> _Problem:
+    """A refusal whose whole content is that the evidence does not hold it."""
+    found = _Problem(sentence)
+    found.absent = True
+    return found
+
+
+def _is_an_absence(problem: str) -> bool:
+    """Whether this refusal is "the evidence does not hold it" and nothing else."""
+    return bool(getattr(problem, "absent", False))
 
 
 def shortened_evidence_note(tools: Iterable[str]) -> str:
@@ -1982,6 +2038,35 @@ def shortened_evidence_note(tools: Iterable[str]) -> str:
         f"{safe_finding_value(', '.join(named))}: those calls did not fit and were "
         "handed over with rows missing. Narrow one of them and ask again before "
         "withdrawing a value on this."
+    )
+
+
+def partial_evidence_note(state: CorpusState) -> str:
+    """What an absence may say when the evidence searched was not the whole run.
+
+    The platform does not assert an absence over evidence it knows is partial.
+    When the run's in-memory corpus hit its ceiling, or there is no corpus and
+    the stored entries fell back on had been blanked by the byte budget, the
+    row says how much was not searched and whose it was — counts and tool
+    names only, because a sentence naming a value would put a tool's output
+    back into the row the value was withheld from — and says that nothing is
+    dropped for it.
+
+    Empty when the corpus was whole, so an ordinary absence reads as it did.
+    """
+    if state.complete:
+        return ""
+    if not state.missing_tools:
+        return (
+            " The evidence searched is not this run's whole record, so this is a note rather "
+            "than a finding and nothing is dropped for it."
+        )
+    named = safe_finding_value(", ".join(state.missing_tools))
+    answers = "answer" if state.missing_answers == 1 else "answers"
+    return (
+        f" The evidence searched is not this run's whole record: {state.missing_answers} "
+        f"{answers} from {named} were not kept. This is a note rather than a finding, and "
+        "nothing is dropped for it."
     )
 
 
@@ -2054,7 +2139,7 @@ def _indicator_problem(
         if path.startswith("file:hashes") or path.endswith("imphash"):
             if _HEX_TOKEN_RE.match(literal) and len(literal) in _DIGEST_LENGTHS:
                 if not _whole_token_in(literal, haystack, own):
-                    return (
+                    return _an_absence(
                         f"the indicator pattern names {safe_finding_value(literal)}, which "
                         "appears nowhere in the evidence this run collected as a value of its "
                         "own."
@@ -2079,7 +2164,7 @@ def _indicator_problem(
                     "vendor infrastructure."
                 )
             if not _found(literal):
-                return (
+                return _an_absence(
                     f"the URL {safe_finding_value(literal)!r} appears nowhere in this run's "
                     "evidence."
                 )
@@ -2115,7 +2200,7 @@ def _indicator_problem(
                         "step under it."
                     )
                 if not _place_in_the_evidence(literal, haystack, runtime_paths, own):
-                    return (
+                    return _an_absence(
                         f"{safe_finding_value(literal)!r} appears nowhere in the evidence "
                         "this run collected as a value of its own."
                     )
@@ -2147,7 +2232,7 @@ def _indicator_problem(
     # the company it keeps.
     if grounded:
         return ""
-    return (
+    return _an_absence(
         f"the indicator pattern names {safe_finding_value(', '.join(literals))}, which "
         "appears nowhere "
         "in the evidence this run collected."
@@ -2194,11 +2279,21 @@ def drop_ungrounded_indicators(bundle: Any, violations: Sequence[Violation]) -> 
     consumed by detection tooling that has no way to read a label. It is
     dropped here and recorded in ``run_summary.validation.unresolved``, so the
     false positive is visible as a run fact rather than as a blocking rule.
+
+    An **advisory** row drops nothing. The platform states an absence only over
+    evidence it searched whole; when it could not, the judge is told so and
+    keeps its object.
     """
     indices = {
         index
         for index in (
-            _object_index(v.path) for v in violations if v.code == "stix.ungrounded_indicator"
+            _object_index(v.path)
+            for v in violations
+            # Never on an advisory row. An advisory absence is one the platform
+            # measured against evidence it knows is partial, and dropping the
+            # judge's object over it is exactly the wrong statement made
+            # expensive: the value may well be in the part that was not kept.
+            if v.code == "stix.ungrounded_indicator" and not v.advisory
         )
         if index is not None
     }

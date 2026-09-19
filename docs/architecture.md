@@ -1690,6 +1690,26 @@ longer run of hexadecimal, because a truncated digest is not "present in the
 evidence" however the substring search answers. An algorithm the table does not
 name is left alone.
 
+**What the corpus is.** The grounding checks search what the run *saw*, not
+what its ledger kept. `reporting.evidence_budget_bytes` blanks an entry's
+output once an agent's answers pass it — after the model has read them — so a
+corpus built from stored entries once told a judge that a C2 a tool really
+returned appears nowhere, and the indicator was dropped. The container keeps
+every tool answer as the model received it (after the output shortener, before
+the budget) in memory, for the length of the job, never in the graph state and
+never persisted, bounded by `reporting.evidence_corpus_bytes`. The judge's
+grounding corpus and the export's second-source test both read it; the stored
+entries are the fallback for a run whose corpus is gone.
+
+**And what an absence may say.** Past the ceiling, with no corpus at all, or
+over stored entries of which any was blanked, the evidence searched is not the
+run's whole record — and the platform does not assert an absence over evidence
+it knows is partial. The finding is then **advisory**: the judge is told once,
+in a sentence naming how many answers were not kept and from which tools, and
+nothing drops its object for it. `drop_ungrounded_indicators` reads the flag,
+and a source guard fails any other consumer that decides a removal from an
+ungrounded row without asking.
+
 Two rows that mean one path are one row. `reporting.dedupe.canonical_path`
 normalises the separators, collapses runs of them, drops a trailing one and
 folds the case of a Windows path — Windows filesystems are case-insensitive, a

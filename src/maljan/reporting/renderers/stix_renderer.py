@@ -514,6 +514,7 @@ class ExtendedSTIXRenderer:
         base_bundle: Bundle | None = None,
         *,
         ledger: Any | None = None,
+        corpus: Any = None,
     ) -> Bundle:
         """Render the extended bundle.
 
@@ -732,7 +733,7 @@ class ExtendedSTIXRenderer:
         # the network block's own answer for a name, and everything some other
         # producer in this run wrote down for every other kind.
         publishable_domains = _publishable_domains(report)
-        corroborating = _corroborating_values(report)
+        corroborating = _corroborating_values(report, corpus)
 
         # Apply the same acceptance-based filter
         # used by the judge bundle postprocess so deterministic
@@ -1316,7 +1317,7 @@ def _section_text(section: Any) -> list[str]:
     return parts
 
 
-def _corroborating_values(report: Any) -> str:
+def _corroborating_values(report: Any, corpus: Any = None) -> str:
     """Everything a second source in this run recorded, lowercased, built once.
 
     One haystack per render, searched for whole values rather than by
@@ -1354,6 +1355,9 @@ def _corroborating_values(report: Any) -> str:
 
     sections = list(getattr(report, "sections", None) or [])
     cited: set[str] = set()
+    # The cited entries a section already contributed text for, so the corpus
+    # is read only where the stored record has nothing left.
+    drawn: set[str] = set()
     for section in sections:
         origin = str(getattr(section, "source", "") or "").strip().lower()
         if origin.startswith(_ANALYST_SECTION_SOURCES):
@@ -1366,7 +1370,23 @@ def _corroborating_values(report: Any) -> str:
             continue
         if not cited.intersection(str(eid) for eid in (section.evidence_ids or [])):
             continue
+        drawn.update(str(eid) for eid in (section.evidence_ids or []))
         parts.extend(_section_text(section))
+
+    # What the run saw, for the cited entries whose stored output is gone. The
+    # evidence byte budget blanks an entry after the model has read it, so an
+    # answer an analyst cited can leave no section at all and a value a tool
+    # really returned stops corroborating anything. The narrowing is unchanged
+    # — an analyst has to have cited it, and the string sweep's own entries are
+    # still not a second source — only the place the text is read from.
+    if corpus is not None:
+        for entry_id in sorted(cited - drawn):
+            try:
+                if str(corpus.tool_of(entry_id) or "") in _STRING_SWEEP_TOOLS:
+                    continue
+                parts.append(str(corpus.text_for(entry_id) or ""))
+            except Exception:  # noqa: BLE001 — a weaker haystack, never a failed render
+                continue
     return " ".join(part for part in parts if part).lower()
 
 

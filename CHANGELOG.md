@@ -971,6 +971,24 @@ change landed on `main`.
   knowledge sidecar started from a container built anywhere else kept the
   module default. It is announced by the container, beside the tracing values,
   which is the one place a sidecar's environment is decided from settings.
+- **A grounding check searches what the run saw, not what the ledger kept.**
+  `reporting.evidence_budget_bytes` blanks an entry's output after the model has
+  read it, so the judge could be told that a C2 a tool really returned "appears
+  nowhere in the evidence this run collected" — and the indicator was dropped
+  from the exported bundle over it. The container now keeps every tool answer as
+  the model received it, in memory, for the length of the job, bounded by the new
+  `reporting.evidence_corpus_bytes` (64 MB); the judge's grounding corpus and the
+  export's second-source test read that.
+  **Upgrading:** nothing to do. The corpus is never persisted and never enters
+  the graph state; set `reporting.evidence_corpus_bytes` lower to cap the memory,
+  and to zero to keep none — which makes every absence advisory, below.
+- **The platform does not assert an absence over evidence it knows is partial.**
+  When the corpus hit its ceiling, when there is no corpus (a report rebuilt
+  later, a run resumed in another process), or when the stored entries fell back
+  on include one the byte budget blanked, a `stix.ungrounded_indicator` row is
+  **advisory**: it says how many answers were not searched and from which tools,
+  it is fed back once like any finding, and the judge's object is not dropped for
+  it. `Violation` carries the flag and `drop_ungrounded_indicators` honours it.
 ### Fixed
 
 - **A process that has finished its work is not ended by its own watchdog.** The

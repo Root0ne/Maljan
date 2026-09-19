@@ -2624,6 +2624,16 @@ class ReportingConfig(BaseModel):
     # and stays well inside what a JSONB column and a context window tolerate.
     evidence_budget_bytes: Annotated[int, Field(ge=0)] = 524288
 
+    # How much of a run's tool output is kept in memory, for the length of the
+    # job, so a grounding check can ask what the run SAW rather than what the
+    # ledger kept. The budget above blanks an entry after the model has already
+    # read it, and a check that searched only what survived told a judge its
+    # own C2 "appears nowhere in the evidence". This corpus is never written to
+    # the graph state, never persisted and dropped when the job ends. Past it
+    # the corpus reports itself incomplete, and an absence measured against an
+    # incomplete corpus is advisory rather than a reason to drop anything.
+    evidence_corpus_bytes: Annotated[int, Field(ge=0)] = 67108864
+
 
 class TriageConfig(BaseModel):
     """The triage pack: the deterministic tools the pipeline runs before any analyst.

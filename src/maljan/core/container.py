@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any, cast
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from maljan.agents.registry import AgentRegistry
+from maljan.agents.run_evidence_corpus import RunEvidenceCorpus
 from maljan.core.config import PROMPT_ROLES, REPORTER_AGENT_KEY, Settings
 from maljan.core.exceptions import ConfigurationError
 from maljan.core.logger import logger
@@ -351,6 +352,15 @@ class ServiceContainer:
         # Truncation is designed into this pipeline and has never been counted.
         self._truncation_ledger = TruncationLedger()
 
+        # What this run SAW, as opposed to what its ledger keeps. The evidence
+        # byte budget blanks an entry after the model has read it, so a
+        # grounding check over the stored ledger told a judge that a C2 a tool
+        # really returned appears nowhere. In memory, per job, dropped with
+        # this container; never in the graph state and never persisted.
+        self._evidence_corpus = RunEvidenceCorpus(
+            int(getattr(config.reporting, "evidence_corpus_bytes", 0) or 0)
+        )
+
         # Per-job source of evidence-ledger ids. One counter for the whole job
         # so ``ev_0007`` names one tool call rather than one per agent.
         self._evidence_counter = EvidenceCounter()
@@ -628,6 +638,10 @@ class ServiceContainer:
         """Return the per-run truncation ledger (pitfall P6)."""
         return self._truncation_ledger
 
+    def get_evidence_corpus(self) -> RunEvidenceCorpus:
+        """Return the per-job record of what the run's tools actually answered."""
+        return self._evidence_corpus
+
     def get_evidence_counter(self) -> EvidenceCounter:
         """Return the per-job counter that issues evidence-ledger ids."""
         return self._evidence_counter
@@ -765,6 +779,7 @@ class ServiceContainer:
             agent.token_ledger = getattr(self, "_token_ledger", None)
             agent.truncation_ledger = getattr(self, "_truncation_ledger", None)
             agent.evidence_counter = getattr(self, "_evidence_counter", None)
+            agent.evidence_corpus = getattr(self, "_evidence_corpus", None)
             # Hand the agent a way back to this container. The static analyst
             # used to construct a *whole new* ServiceContainer on every failed
             # MCP init — per chunk, so up to ten of them per run.
@@ -791,6 +806,7 @@ class ServiceContainer:
                 cached.token_ledger = getattr(self, "_token_ledger", None)
                 cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
                 cached.evidence_counter = getattr(self, "_evidence_counter", None)
+                cached.evidence_corpus = getattr(self, "_evidence_corpus", None)
                 # Hand the judge a way back to this container, the same way
                 # ``get_agent`` does above. Without this, ``_server_registry()``
                 # always read ``None`` and the judge ran with zero threat-intel

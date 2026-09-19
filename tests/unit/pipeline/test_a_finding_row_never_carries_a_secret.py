@@ -238,6 +238,10 @@ CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
     ("pipeline/validation.py", "assessment_conflict_violations"): frozenset({"verdict", "rating"}),
     # A position in a list this function is walking.
     ("agents/judge_postprocess.py", "lift_misplaced_extensions"): frozenset({"index"}),
+    # The corpus's own tally of what it could not hold: a count it incremented
+    # itself. The tool names beside it are wrapped, because a tool name comes
+    # from a server rather than from this repository.
+    ("pipeline/validation.py", "partial_evidence_note"): frozenset({"state"}),
 }
 
 # A builtin that answers about its argument in this interpreter's own words: a
@@ -269,6 +273,7 @@ MESSAGE_BUILDERS: frozenset[str] = frozenset(
         "_indicator_problem",
         "prefixed_within_the_bound",
         "shortened_evidence_note",
+        "partial_evidence_note",
     }
 )
 

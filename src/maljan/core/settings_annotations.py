@@ -1121,6 +1121,18 @@ ANNOTATIONS: dict[str, Annotation] = {
         "subgroup": "Report content",
         "advanced": True,
     },
+    "reporting.evidence_corpus_bytes": {
+        "title": "Grounding corpus per run (bytes)",
+        "description": (
+            "How much of a run's tool output is held in memory, for the length of the job, "
+            "so a grounding check asks what the run saw rather than what the evidence "
+            "budget kept. Past this ceiling the corpus reports itself incomplete, and an "
+            "absence measured against an incomplete corpus is written as a note and drops "
+            "nothing. Zero keeps no corpus, which makes every absence a note."
+        ),
+        "subgroup": "Report content",
+        "advanced": True,
+    },
     "reporting.html_export_enabled": {
         "title": "HTML export enabled",
         "description": ("Enables server-side HTML-to-PDF export of the generated report."),
