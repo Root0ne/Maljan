@@ -37,6 +37,7 @@ class CatalogEntryDTO(BaseModel):
     editor: str | None = None
     subgroup: str | None = None
     advanced: bool = False
+    required_env: dict[str, list[str]] | None = None
 
 
 class GroupDTO(BaseModel):

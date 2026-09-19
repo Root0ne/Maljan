@@ -429,6 +429,36 @@ REPAIRED_NOTICE = (
 )
 
 
+def shortened_notice(text: str, *, tool: str, unused_args: Sequence[str] = ()) -> str:
+    """What the model is told when its answer had to be shortened, or ``""``.
+
+    On the result rather than only in the ledger, for the same reason the
+    repaired-arguments notice is: the model is the one that can ask again for
+    the part it did not get. The answer already carries the arithmetic under
+    its own key; this says what that key is and what to do about it, in the
+    same words the repeat notice uses to name the arguments this tool can be
+    narrowed with.
+    """
+    from maljan.agents.output_shortening import BOOKKEEPING_KEY, our_key_in
+
+    if BOOKKEEPING_KEY not in text:
+        return ""
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError, RecursionError):
+        return ""
+    # Whichever key the map ended up under: a tool that owns the ordinary name
+    # keeps it, and the sentence has to name the one the model will find.
+    ours = our_key_in(parsed)
+    if not ours:
+        return ""
+    return (
+        f"\n\nThis answer did not fit and was shortened; `{ours}` says which parts "
+        f"were cut and how much of each is missing. To see the rest, "
+        f"{_do_something_else(tool, unused_args)}"
+    )
+
+
 # What both notices say on the call before the loop ends. One sentence, in one
 # place, because the model reads it from whichever branch it lands in.
 _ENDING_SENTENCE = (
@@ -660,8 +690,12 @@ def _record_tool(
             args_raw=raw,
         )
         _note(kwargs, entry.id)
+        # Read off the answer itself, before any notice is appended to it: a
+        # notice is prose and prose does not parse.
+        shortened = shortened_notice(text, tool=name, unused_args=_unused(kwargs))
         if raw is not None:
             text = f"{text}{REPAIRED_NOTICE}"
+        text = f"{text}{shortened}"
         # ``text``, not ``entry.output``: the ledger trims what it stores, and
         # what the model reads is not the ledger's business. The size of a tool
         # result in a prompt is decided where it has always been decided —

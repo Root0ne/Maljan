@@ -473,8 +473,77 @@ change landed on `main`.
   waiting and the setting it is waiting on, `api.enrichment_dedicated_worker`.
   Nothing is drawn where enrichment runs beside the analyses, where its worker
   is up, or against an API that does not answer with the field.
+- **An agent carries its own step and time budget.** `max_steps` and
+  `timeout_seconds` on an agent definition, drawn on its card in the console as
+  **Steps per loop** and **Seconds per loop**; blank inherits the deployment's
+  `react_agent_max_steps` / `react_agent_timeout`. The seeded lead's 40 steps
+  and 1800 s move onto its definition, so a clone of a team arrives with the
+  budget its agents need rather than with five specialists to ask and the
+  default ten steps to ask them in. Alembic revision `20260927000000` moves a
+  stored override onto the definition it belongs to — only a value the field
+  accepts, so a `0` or a negative left in an old override map stays there and
+  is named in the migration's log rather than making every later settings read
+  raise — and the save review names a budget edit like any other field. A
+  stored budget the field would refuse is read as absent, with the reason
+  logged, so one agent's number cannot take a deployment down.
+- **A JWT rotation's grace period can be given a written end.**
+  `JWT_PREVIOUS_SECRET_NOT_AFTER` is optional; when it is set it is enforced,
+  and past that moment a token signed with the previous secret is refused.
+  `GET /api/v1/system/status` reports the rotation to an admin caller under
+  `jwt_grace_secret` (the previous `kid`, when it lapses, whether it is still
+  accepted, and whether an end was written down at all), and the API says the
+  same at every start. A grace secret with no end is accepted as before and
+  warned about at every start; one whose window has run out is warned about
+  until both settings are cleared. `docs/deployment.md` has the three-step
+  runbook. Nothing rotates on its own.
+- **Per-tool-call timing, per agent.** The run summary carries `tool_latency`
+  — for each agent how many tool calls it made, what they cost together, and
+  the single slowest with the tool that answered it, computed from the clock
+  each ledger entry already carried — and the summary's header draws a **Tool
+  calls** line beside **Per stage**. The analyst-latency log line names that
+  slowest call, so a run that overran says whether the model was slow or a
+  tool was.
 
 ### Changed
+
+- **A tool answer too big for the prompt is shortened, not cut in half.** A
+  JSON result over `preprocessing.max_tool_output_chars` was cut as text, which
+  ended the document mid-array: the model got a prefix with none of the
+  answer's own metadata (`total`, `next_offset`, `read_path`) and the ledger
+  got prose it could not parse, so `structured` was empty. Every reader of the
+  record — the evidence sections, corroboration, the triage pack — skips an
+  entry with no `structured`, so an analyst's *largest* answers, the ones that
+  found the most, contributed nothing to the report and nothing said so. Such
+  an answer is now shortened as a document: elements come off the end of its
+  largest lists until it fits, no key is ever dropped, `truncated` is set and
+  each shortened list says how many rows came back (`<key>_returned` beside a
+  `total` the tool already emits, otherwise `<key>_omitted`). **What changes
+  for a consumer:** a large result now reads as valid JSON with fewer rows and
+  a stated count rather than as a cut-off string, and `structured` is populated
+  for those entries for the first time — so evidence sections, corroboration
+  and the triage pack begin to see calls they have never seen, and a report
+  over the same sample can carry more than it did. A large **string** value is
+  shortened the same way, which is the decompilation shape. Bookkeeping goes
+  under one reserved top-level key, `shortened`, mapping each shortened value's
+  path to `kept`/`omitted` (or `kept_chars`/`omitted_chars`); nothing is written
+  into the tool's own vocabulary but the `truncated` flag it already has, and a
+  tool that already uses the name keeps it. Anything that is not a JSON object
+  (decompilation as plain text, any prose) reaches the `FunctionSummarizer` and
+  then the same character cut as before, byte for byte — but a JSON object no
+  longer reaches the summariser, because its answer is prose and prose is what
+  leaves the record with nothing structured in it. The run summary's truncation
+  block counts the new outcome as `tool_output_shortened`, and a shortening that
+  ran past its wall as `tool_output_shortening_timeouts`. The report says in a
+  sentence above the section's table, rather than as a row in it, that an
+  answer was shortened and by how much.
+
+- **Deprecated: `react_agent_max_steps_overrides` and
+  `react_agent_timeout_overrides`.** A budget belongs to the agent that spends
+  it, so it is set on the agent's definition now. Both maps are still read for
+  an agent whose definition sets neither, and a definition's own value wins
+  over them; move any budget you keep in them onto the agent's card, because a
+  later release drops them. The seeded entries for `lead` are already gone —
+  the lead's budget is on its definition.
 
 - **A run's watchers are no longer drawn as members of its team.** The
   mediator and the sycophancy detector publish as `pipeline` with
@@ -2470,6 +2539,38 @@ change landed on `main`.
   request from the stored report, so there is no second copy to go stale; a
   report stored before this keeps the figures it was stored with, and its
   run-summary column — what the console draws — was always the final one.
+- **A late event continues its job's numbering whoever publishes it.** The
+  per-job sequence counter lives 24 hours and the rows it numbers do not, so a
+  task publishing for an older job — enrichment was the only one, and it
+  carried its own seeding call — started again at 1, collided with that job's
+  first stored event and lost the row to a feed that never fails a run. The
+  seeding now happens in the publisher, once per job, before the first number
+  it hands out for a job whose feed is being persisted; no call site has to
+  remember it.
+- **An endpoint label keeps its IPv6 brackets.** `http://[::1]:8080/v1` was
+  named `http://::1:8080` in the submit gate's refusal and on the console — an
+  address that cannot be typed back in and whose port cannot be told from its
+  last group, so an operator could not find the failing pair. The label is now
+  re-bracketed; it still carries no userinfo, path or query.
+- **The model probe's five minutes covers the catalogue listing.** The budget
+  was taken after the provider's model list came back, so the real wall was
+  five minutes plus the listing per provider and the sentence naming untried
+  pairs understated it. The deadline is now taken as the probe begins.
+- **The Ollama probe's failure detail reads as two sentences.** It joined
+  "answered nothing" to the remedy with no separator.
+- **A carved-file answer names the file before anything a cut would take.** The
+  analysis sidecar puts `read_path` first in every answer to a `carved_path`
+  call. It was appended, so an answer wider than the caller's output guardrail
+  lost it: one measured run's `strings` over a carved PE came back with 150
+  rows, was cut at six thousand characters before anything recorded it, and
+  stored no `read_path` while its shorter siblings each carried one.
+- **The console reads the required environment names from the API.** The names
+  a built-in sidecar is always started with were written down a second time in
+  TypeScript with nothing pinning the two lists together, so a change on the
+  Python side would have left the editor drawing the wrong names as fixed and
+  silently restoring ones it had offered as removable. The server-map catalog
+  entry now carries `required_env`, resolved from `REQUIRED_ENV_ALLOW` the way
+  `choices` is resolved, and the console's copy is gone.
 
 - **One reader of a STIX pattern, and it reads an escaped quote.** The
   validator and the STIX renderer each split a pattern on its quotes, and

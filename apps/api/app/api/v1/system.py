@@ -74,6 +74,20 @@ class SystemStatusResponse(BaseModel):
             "callers only — omitted for anonymous requests."
         ),
     )
+    jwt_grace_secret: dict[str, object] | None = Field(
+        default=None,
+        description=(
+            "The signing-secret rotation in progress, if any: the previous "
+            "key id, the moment it stops being accepted, whether it is still "
+            "accepted, and whether an end was written down at all. An "
+            "unbounded window is accepted and never ends, which is a "
+            "different state from a lapsed one and is why `bounded` is here "
+            "beside `accepted`. A rotation nobody finishes leaves a retired "
+            "key accepted, so it is on the status an operator reads. Admin "
+            "callers only — omitted for anonymous requests, and omitted "
+            "entirely when no previous secret is set."
+        ),
+    )
 
 
 # One client for this module, reused by every status call. The console polls
@@ -114,6 +128,37 @@ async def _enrichment_worker_state() -> str:
     return "up" if alive else "down"
 
 
+def _grace_secret_state() -> dict[str, object] | None:
+    """The rotation window, or ``None`` when no previous secret is configured.
+
+    A rotation is two steps and a wait, and the wait is where one is forgotten.
+    Naming the moment here is what lets an operator see, without reading a
+    bootstrap file, that the deployment is still carrying a retired key and
+    when it stops carrying it — or that nobody said when, which is the state
+    ``bounded`` exists to tell apart from a window that has run out.
+
+    The key id is here and in no log line: this answers an authenticated admin
+    on request, which is not the same as writing an operator\'s label into a
+    file on disk. Nothing here opens the secret\'s box — ``grace_secret_configured``
+    is the one place that does, and it answers yes or no.
+    """
+    from app.auth.jwt import (
+        grace_secret_configured,
+        grace_secret_is_live,
+        grace_secret_not_after,
+    )
+
+    if not grace_secret_configured():
+        return None
+    not_after = grace_secret_not_after()
+    return {
+        "key_id": str(getattr(settings, "jwt_previous_key_id", "")),
+        "not_after": not_after.isoformat() if not_after else None,
+        "accepted": grace_secret_is_live(),
+        "bounded": not_after is not None,
+    }
+
+
 @router.get("/status", response_model=SystemStatusResponse, response_model_exclude_none=True)
 async def system_status(
     user: User | None = Depends(optional_current_user),
@@ -142,6 +187,7 @@ async def system_status(
         has_abuseipdb_key=bool(abuse_key),
         throttle=throttle_state() if is_admin else None,
         audit_write_failures=observability.counters.audit_write_failures if is_admin else None,
+        jwt_grace_secret=_grace_secret_state() if is_admin else None,
     )
 
 

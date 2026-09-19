@@ -9,7 +9,7 @@ import type { AgentDefinitionEntry } from "@/types/settings";
 
 /** A built-in as the store holds it after a seed gained a tool the row predates. */
 function staleBuiltin(role: AgentDefinitionEntry["role"], label: string): AgentDefinitionEntry {
-  return { role, label, prompt: null, tools: [], static_provider: null, enabled: true };
+  return { role, label, prompt: null, tools: [], static_provider: null, enabled: true, max_steps: null, timeout_seconds: null };
 }
 
 const saved: Record<string, AgentDefinitionEntry> = {
@@ -20,6 +20,8 @@ const saved: Record<string, AgentDefinitionEntry> = {
     tools: [{ kind: "mcp", server: "analysis", name: null }],
     static_provider: null,
     enabled: true,
+    max_steps: null,
+    timeout_seconds: null,
   },
   dynamic: staleBuiltin("dynamic", "Dynamic analyst"),
   network: staleBuiltin("network", "Network analyst"),
@@ -34,6 +36,8 @@ const ahmet: AgentDefinitionEntry = {
   tools: [],
   static_provider: null,
   enabled: true,
+  max_steps: null,
+  timeout_seconds: null,
 };
 
 describe("what an agent-map edit sends", () => {
@@ -128,6 +132,8 @@ describe("cloning a built-in from what the guide holds", () => {
       tools: [],
       static_provider: null,
       enabled: true,
+      max_steps: null,
+      timeout_seconds: null,
     });
   });
 });

@@ -113,6 +113,50 @@ def _config_readiness() -> dict[str, str]:
     return {"bootstrap": "ok", "encryption": "ok"}
 
 
+def log_jwt_rotation() -> None:
+    """Say at every start that a signing-secret rotation is still open.
+
+    The wait in the middle of a rotation is where one is forgotten, so it is
+    said on every boot rather than only when it is started.
+
+    Built from three functions that each answer one thing, and from nothing
+    that has read the secret: ``grace_secret_configured`` answers yes or no,
+    ``grace_secret_not_after`` reads a setting of its own and parses it, and
+    ``grace_secret_is_live`` compares that moment to the clock. The key id is
+    not here at all — an operator who wants it reads it from
+    ``/system/status``, where it answers an authenticated admin instead of
+    going into a file on disk.
+    """
+    from app.auth.jwt import (
+        grace_secret_configured,
+        grace_secret_is_live,
+        grace_secret_not_after,
+    )
+
+    if not grace_secret_configured():
+        return
+    not_after = grace_secret_not_after()
+    if not_after is None:
+        # No end was written down, so nothing will ever end it. Warning, not
+        # info: this is the line that has to be noticed.
+        logger.warning(
+            "A JWT rotation has no end: sessions signed with the previous secret are "
+            "accepted indefinitely. Set JWT_PREVIOUS_SECRET_NOT_AFTER or clear the "
+            "previous secret.",
+            extra={"component": "lifecycle"},
+        )
+        return
+    live = grace_secret_is_live()
+    logger.info(
+        "A JWT rotation is in progress: sessions signed with the previous secret are "
+        "%s, and the window %s %s.",
+        "accepted" if live else "no longer accepted",
+        "lapses" if live else "lapsed",
+        not_after.isoformat(),
+        extra={"component": "lifecycle"},
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifecycle: startup and shutdown events."""
@@ -270,6 +314,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as exc:
             logger.critical("Failed to seed dev user for AUTH_DISABLED: %s", exc, exc_info=True)
             raise
+
+    # A rotation in progress is said out loud at every start, so the wait in
+    # the middle of it is not a wait nobody is reminded of.
+    log_jwt_rotation()
 
     logger.info(
         f"Maljan API v{settings.app_version} started successfully",

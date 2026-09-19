@@ -60,6 +60,15 @@ export interface CatalogEntry {
   subgroup: string | null;
   /** Hidden behind an "Advanced" disclosure until the operator opens it. */
   advanced: boolean;
+  /** For the tool-server map alone: per built-in server, the environment names
+   *  the API always passes it whatever the stored registry says
+   *  (`REQUIRED_ENV_ALLOW`). Resolved by the API as it serialises the catalog,
+   *  the way `choices` is, so the editor draws the rule the save enforces
+   *  rather than a copy of it. Null on every other entry, and absent from an
+   *  API older than the field — which the editor reads as "no fixed names",
+   *  so a server card from such an API offers every name as removable rather
+   *  than failing to draw. */
+  required_env?: Record<string, readonly string[]> | null;
 }
 
 /**
@@ -127,6 +136,13 @@ export interface AgentDefinitionEntry {
   tools: ToolRefEntry[];
   static_provider: string | null;
   enabled: boolean;
+  /** How many ReAct steps one loop of this agent may take, and how long it may
+   *  run. `null` means the deployment-wide default. A lead that asks six
+   *  specialists needs both raised, and before they were fields of the
+   *  definition an operator cloning that team got the tools and none of the
+   *  budget to use them in. */
+  max_steps: number | null;
+  timeout_seconds: number | null;
 }
 
 /** How hard one debate stage argues before it hands over, mirroring

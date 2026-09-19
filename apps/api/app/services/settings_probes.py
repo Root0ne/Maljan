@@ -109,7 +109,17 @@ COMPLETION_TIMEOUT = 90.0
 # at a button is asked to wait. A pair there was no room left to ask is named
 # in the answer and files no row: it was not tried, which is neither a pass nor
 # a failure, and pressing Test again asks it.
+#
+# The clock starts where the probe starts, not where the completions start:
+# the catalogue listing in front of them is part of the wait an operator is
+# counting, and a budget measured from after it is a wall the answer does not
+# keep.
 LLM_PROBE_BUDGET_SECONDS = 300.0
+
+
+def probe_deadline() -> float:
+    """The monotonic moment by which an ``llm`` probe entering now is done."""
+    return time.monotonic() + LLM_PROBE_BUDGET_SECONDS
 
 
 async def complete_one_turn(
@@ -174,7 +184,10 @@ async def complete_one_turn(
         # A 2xx with nothing in it is the failure this check exists for: a
         # proxy that answers politely for a model it cannot serve, a response
         # whose only candidate was filtered away.
-        return False, f"{model!r} answered nothing" + _thinking_remediation(
+        # The full stop belongs to this sentence, not to the remedy that may
+        # follow it: without it the two ran together as
+        # "…answered nothing A reasoning model answers…".
+        return False, f"{model!r} answered nothing." + _thinking_remediation(
             provider, disable_thinking
         )
     return True, f"{model!r} answered"
@@ -375,6 +388,7 @@ def _listing_failed(endpoint: str, detail: str) -> str:
 
 async def _probe_llm_openai(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
+    deadline = probe_deadline()
     base = endpoint_where("openai", openai_base_url=v.get("base_url"))
     headers = {"Authorization": f"Bearer {v.get('api_key') or 'none'}"}
     ok, detail, r = await _get(f"{base}/models", headers)
@@ -391,6 +405,7 @@ async def _probe_llm_openai(v: dict[str, Any]) -> ProbeResult:
         "openai",
         pairs,
         str(v.get("api_key") or ""),
+        deadline=deadline,
         disable_thinking=bool(v.get("disable_thinking")),
         compat=str(v.get("compat") or "auto"),
     )
@@ -399,6 +414,7 @@ async def _probe_llm_openai(v: dict[str, Any]) -> ProbeResult:
 
 async def _probe_llm_anthropic(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
+    deadline = probe_deadline()
     headers = {
         "x-api-key": str(v.get("anthropic_api_key") or ""),
         "anthropic-version": ANTHROPIC_VERSION,
@@ -413,7 +429,7 @@ async def _probe_llm_anthropic(v: dict[str, Any]) -> ProbeResult:
     # and not another.
     pairs = _pairs_to_file(v, "anthropic", endpoint_where("anthropic"), str(model))
     reached, broken, untried = await _complete_each_pair(
-        "anthropic", pairs, str(v.get("anthropic_api_key") or "")
+        "anthropic", pairs, str(v.get("anthropic_api_key") or ""), deadline=deadline
     )
     return _completed(t0, reached, broken, untried, f"{len(models)} models listed", models)
 
@@ -498,6 +514,7 @@ async def _complete_each_pair(
     pairs: dict[tuple[str, str], str],
     api_key: str,
     *,
+    deadline: float,
     disable_thinking: bool = False,
     compat: str = "auto",
 ) -> tuple[list[dict[str, Any]], list[str], list[str]]:
@@ -514,11 +531,13 @@ async def _complete_each_pair(
     probe's, so the request cannot run past that however many cold models are
     named; the rest are handed back as not tried, under the same rule as a
     timeout — no row, and a sentence saying to ask again.
+
+    ``deadline`` is taken by the caller as the probe begins, so the seconds the
+    catalogue listing spent are seconds this loop no longer has.
     """
     reached: list[dict[str, Any]] = []
     broken: list[str] = []
     untried: list[str] = []
-    deadline = time.monotonic() + LLM_PROBE_BUDGET_SECONDS
     for (endpoint, model), label in pairs.items():
         if time.monotonic() + COMPLETION_TIMEOUT > deadline:
             untried.append(label)
@@ -550,6 +569,7 @@ async def _complete_each_pair(
 
 async def _probe_llm_ollama(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
+    deadline = probe_deadline()
     base = endpoint_where("ollama", ollama_base_url=v.get("ollama_base_url"))
     ok, detail, r = await _get(f"{base}/api/tags")
     if not ok or r is None:
@@ -567,6 +587,7 @@ async def _probe_llm_ollama(v: dict[str, Any]) -> ProbeResult:
         "ollama",
         pairs,
         "",
+        deadline=deadline,
         disable_thinking=bool(v.get("ollama_disable_thinking")),
     )
     return _completed(t0, reached, broken, untried, f"{len(models)} models available", models)
@@ -609,6 +630,7 @@ def _completed(
 
 async def _probe_llm_gemini(v: dict[str, Any]) -> ProbeResult:
     t0 = time.perf_counter()
+    deadline = probe_deadline()
     headers = {"x-goog-api-key": str(v.get("gemini_api_key") or "")}
     ok, detail, r = await _get("https://generativelanguage.googleapis.com/v1beta/models", headers)
     if not ok or r is None:
@@ -619,7 +641,7 @@ async def _probe_llm_gemini(v: dict[str, Any]) -> ProbeResult:
     model = v.get("gemini_expert_model") or (models[0] if models else "")
     pairs = _pairs_to_file(v, "gemini", endpoint_where("gemini"), str(model))
     reached, broken, untried = await _complete_each_pair(
-        "gemini", pairs, str(v.get("gemini_api_key") or "")
+        "gemini", pairs, str(v.get("gemini_api_key") or ""), deadline=deadline
     )
     return _completed(t0, reached, broken, untried, f"{len(models)} models listed", models)
 

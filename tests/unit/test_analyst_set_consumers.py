@@ -145,6 +145,7 @@ class TestTheRunSummaryRecordsTheProfileThatRan:
             "triage",
             "nudge",
             "budget",
+            "tool_latency",
         }
 
     def test_the_per_layer_attribution_lists_the_profiles_analysts_then_the_rule_layers(
