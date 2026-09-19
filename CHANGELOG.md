@@ -767,6 +767,18 @@ change landed on `main`.
   `GET /reports/{id}/iocs` must now ask for `include=all`, which returns
   exactly what the route returned before.
 
+- **One code for one export decision about an endpoint.** A URL, a name and an
+  address the host question refuses are one class of decline, and the run
+  summary recorded them under `stix.unpublishable_url` and
+  `stix.unpublishable_domain` — with the second of the two also covering
+  addresses, which is not what it is called. All three are now
+  `stix.unpublishable_endpoint`, and the sentence beside the row names the
+  kind. Nothing is migrated: a run stored before this keeps the code it wrote,
+  and the console reads all three as the export's own decision.
+  **Upgrading:** a consumer filtering `run_summary.validation` on
+  `stix.unpublishable_url` or `stix.unpublishable_domain` must also accept
+  `stix.unpublishable_endpoint` to keep seeing new runs.
+
 ### Fixed
 
 - **Enrichment stopped taking the slot an analysis was waiting for.** The
@@ -2446,6 +2458,58 @@ change landed on `main`.
   request from the stored report, so there is no second copy to go stale; a
   report stored before this keeps the figures it was stored with, and its
   run-summary column — what the console draws — was always the final one.
+
+- **One reader of a STIX pattern, and it reads an escaped quote.** The
+  validator and the STIX renderer each split a pattern on its quotes, and
+  neither undid an escape: `[file:name = 'it\'s.exe']` was read as the value
+  `it\`, the judge was told its own row appears nowhere in the evidence, and
+  it spent its one retry on that. They had also drifted about what a quoted key
+  is — one decided it structurally, the other from the property name. Both now
+  ask `schemas.stix_pattern.read_comparisons`, which gives the object path, the
+  operator and the literal of every quoted value, keeps `file:hashes.'MD5'` and
+  `file:extensions['pe']` as keys, leaves a `START '…' STOP '…'` qualifier's
+  timestamps out of the comparison before it, and reports what it cannot read
+  as unreadable so it is declined rather than guessed at.
+
+- **An endpoint written through a reference is asked the host question.** A
+  judge-written `[network-traffic:dst_ref.value = '127.0.0.1']` reached no
+  check at all, so loopback, private and documentation addresses in that
+  pattern shape were exported with nothing in the run summary saying so.
+  `network-traffic:src_ref.value`, `dst_ref.value` and the
+  `resolves_to_refs[*].value` shapes are now asked the same question as the
+  four direct kinds, and asked whichever of host or address fits the value.
+
+- **A directory is no longer refused for having no file extension.** The
+  grounding check put `directory:path` in the `file:name` branch, so the judge
+  read *"has no file extension, no filesystem anchor … so nothing says it is a
+  real path"* about a directory it had written, retried on it and lost the row.
+  A directory is now asked whether it is written as a place — a root with a
+  step under it — or was watched at runtime, and refused with a sentence that
+  is true of one.
+
+- **A value at the end of a sentence is found in the evidence.**
+  `whole_value_in` read `.` and `:` as value characters at both ends, so
+  `a@b.com` written before a full stop and a host written after `mailto:`
+  were reported as appearing nowhere and the row was withheld from the bundle
+  with a sentence saying nothing corroborates it. A `.`, `:` or `,` that
+  nothing continues now closes a value and a URI scheme's colon opens one,
+  while the `.` of `192.168.1.1` still keeps `168.1.1` from being found in it.
+
+- **What the indicator cap orphans is counted.** The integrity pass runs a
+  second time after the cap to sweep the relationships it left pointing at
+  nothing, and that run was given no truncation ledger, so the aggregate
+  under-reported what had left the bundle and a reader could not reconcile the
+  object count. It reports now, under `cap_orphan` — its own reason, because it
+  is the cap's loss rather than a defect of anybody's bundle.
+
+- **The finding-row guard looks at every place a row is built.** It read the
+  `message=` keyword in `validation.py` alone, so seven `Violation`
+  constructions in four other modules were never inspected, a row written as
+  `Violation(code, message)` was invisible, and a local spelled like a message
+  builder was trusted for its name. It now walks every module in the tree that
+  builds one, matches positional arguments, trusts a local only when it is
+  assigned from a builder's own call, and fails if a sixth module starts
+  building rows.
 
 ### Removed
 
