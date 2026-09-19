@@ -153,3 +153,69 @@ class TestTheRunSummaryPrintsBothNumbers:
 
         assert "TTPs: 3 claimed, 0 published" in rendered
         assert "claimed, not published" in rendered
+
+
+class TestTheReportNodeWritesItDown:
+    """The first node holding both lists is the one that compares them."""
+
+    @staticmethod
+    def _report(published: list[str], reasons: dict[str, str]) -> Any:
+        from maljan.reporting.models import (
+            CapabilityCell,
+            FileHashes,
+            MalwareReport,
+            SampleIdentity,
+            TTPMapping,
+        )
+
+        return MalwareReport(
+            verdict="Malware",
+            identity=SampleIdentity(hashes=FileHashes(sha256="f" * 64), file_name="package.apk"),
+            executive_summary="",
+            ttp_mappings=[
+                TTPMapping(technique_id=tid, technique_name=tid, tactic="TA0005")
+                for tid in published
+            ],
+            capability_matrix=[
+                CapabilityCell(
+                    tactic="TA0005",
+                    tactic_name="Defense Evasion",
+                    technique_id=tid,
+                    technique_name=tid,
+                    not_published=reason,
+                )
+                for tid, reason in reasons.items()
+            ],
+            run_summary={
+                "corroboration": {
+                    tid: {"asserted_by": [], "claimed_by": ["static"]} for tid in ENTERPRISE_ONLY
+                }
+            },
+        )
+
+    def test_the_reason_the_matrix_wrote_reaches_the_summary(self) -> None:
+        from maljan.pipeline.nodes import _corroboration_with_publication
+
+        marked = _corroboration_with_publication(
+            self._report([], {"T1027": "outside the sample's ATT&CK domain"}), {}
+        )
+
+        assert marked is not None
+        assert marked["T1027"]["not_published"] == "outside the sample's ATT&CK domain"
+        assert marked["T1055"]["not_published"] == UNPUBLISHED_WITHOUT_A_REASON
+
+    def test_a_published_technique_is_left_plain(self) -> None:
+        from maljan.pipeline.nodes import _corroboration_with_publication
+
+        marked = _corroboration_with_publication(self._report(["T1027"], {}), {})
+
+        assert marked is not None
+        assert "not_published" not in marked["T1027"]
+
+    def test_a_run_that_named_nothing_amends_nothing(self) -> None:
+        from maljan.pipeline.nodes import _corroboration_with_publication
+
+        report = self._report([], {})
+        report.run_summary = {}
+
+        assert _corroboration_with_publication(report, {}) is None
