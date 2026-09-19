@@ -920,21 +920,30 @@ change landed on `main`.
 - **Everything the exported STIX bundle loses now leaves under a name.** The
   total indicator cap removed indicators with a log line and nothing else, and
   the integrity pass trimmed a report's or a note's `object_refs` without
-  recording it, so the run summary's removal total could not be reconciled with
-  the bundle a reader holds. Both are counted: `truncation.indicator_cap_removed`
-  and `truncation.integrity_refs_trimmed` on the run summary, two rows in the
-  report's Bounds Hit table, and one sentence in the console's run record when
-  the bundle is shorter than what the run produced.
-  **Upgrading:** `run_summary.truncation` carries three new keys
-  (`indicator_cap_invocations`, `indicator_cap_removed`, `integrity_refs_trimmed`);
-  a summary stored before this release has none of them and reads as zero.
+  recording it, so what the **export** removed could not be totalled. Both are
+  counted: `truncation.indicator_cap_removed` and
+  `truncation.integrity_refs_trimmed` on the run summary, two rows in the
+  report's Bounds Hit table, and one sentence in the console's run record
+  naming each reason with its own count. What reconciles is the export's own
+  figures: the objects the assembled bundle lost equal
+  `integrity_objects_removed` plus `indicator_cap_removed`. The judge path runs
+  the same pass once per verdict *attempt*, discarded retries included, so its
+  removals are counted apart under `judge_integrity_*` and are not part of that
+  total.
+  **Upgrading:** `run_summary.truncation` carries six new keys
+  (`indicator_cap_invocations`, `indicator_cap_removed`, `integrity_refs_trimmed`,
+  `judge_integrity_invocations`, `judge_integrity_objects_removed`,
+  `judge_integrity_dropped`); a summary stored before this release has none of
+  them and reads as zero. `integrity_objects_removed` no longer counts the judge
+  path's own passes, so on a run with a judge retry it is smaller than before.
 
 - **A finding row handed up a chain of delegations stays inside its limit.**
   Each hand-over put the callee's name in front of the row, and nothing bounded
   the result, so a row five levels deep was longer than the eight hundred
   characters every validator's own row is held to. The chain is cut instead,
   oldest step first and marked with an ellipsis; the finding's own sentence is
-  never cut.
+  never cut. The route and the sentence are carried as two values, so the bound
+  can only ever shorten the route.
 - **A UNC share written the way a judge writes it reads as a place.** A STIX
   literal `'\\server\share'` is unescaped by the pattern reader to
   `\server\share`, and the directory check refused a single leading backslash,
@@ -958,14 +967,19 @@ change landed on `main`.
   when the settings are built, with the agent and the value logged. Dropped
   rather than refused: a settings build that raises is a deployment that
   cannot serve, and the agent falls back to the deployment's own budget, which
-  is what the reader did with such a value anyway.
+  is what the reader did with such a value anyway. The bound runs before
+  pydantic's coercion, so a `2.5`, a `"lots"` and a nested dict are dropped too
+  rather than raising, while a `"40"` written through the environment is kept.
 - **Two import rules for one technique are two rows again.** `api_capability_hits`
   keyed a row by technique id and name, and the catalogue's own name is on both
   of the `T1685` rules, so they pooled: one rule's matched APIs counted toward
   the other's `min_apis`, and a technique could be asserted on a combination no
   single rule ever cleared. A row is a rule — the rule's own label is part of
   the key and is on the row, and the report's import-technique table carries a
-  **Rule** column. Corroboration keys on the technique id and is unchanged.
+  **Rule** column, as does the console's ATT&CK-from-imports table.
+  Corroboration keys on the technique id and is unchanged, and so is every
+  count of techniques: the console's heading, the narrative's prompt and the
+  report's facts count distinct technique ids rather than rows.
 - **The ATT&CK index retry interval reaches a sidecar from any entry point.**
   `MALJAN_INDEX_RETRY_SECONDS` was exported in `MaljanApp.arun` alone, so a
   knowledge sidecar started from a container built anywhere else kept the
