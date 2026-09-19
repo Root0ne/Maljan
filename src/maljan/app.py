@@ -63,6 +63,10 @@ class MaljanApp:
         agents own their MCP toolkits — so the release has to start here. Never
         raises: this runs from a ``finally`` around a completed analysis, and
         teardown must not be able to turn a finished run into a failed one.
+
+        The container takes this run's staging directory away as the last thing
+        it does, so a caller with no worker behind it — the command line — has
+        a teardown that leaves nothing on disk.
         """
         try:
             await self.container.aclose()

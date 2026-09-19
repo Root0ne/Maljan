@@ -914,6 +914,7 @@ class TestALiveJobKeepsItsDirectory:
         monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
         directory = staging.job_staging_dir(tmp_path / "staging", "live")
         directory.mkdir(parents=True)
+        staging.note_job_directory("live", directory)
         long_ago = time.time() - 7200
         os.utime(directory, (long_ago, long_ago))
 
@@ -927,6 +928,23 @@ class TestALiveJobKeepsItsDirectory:
 
         assert staging.touch_job_staging("never") is False
 
+    def test_it_touches_what_the_spawn_recorded_and_not_the_workers_own_base(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An operator may set the base in a server's own ``env`` map alone,
+        and then the directory the sidecar sweeps is not the one this process
+        would compute for itself. The marker has to reach the swept one."""
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "the-workers-base"))
+        theirs = staging.job_staging_dir(tmp_path / "the-servers-base", "split")
+        theirs.mkdir(parents=True)
+        staging.note_job_directory("split", theirs)
+        long_ago = time.time() - 7200
+        os.utime(theirs, (long_ago, long_ago))
+
+        assert staging.touch_job_staging("split") is True
+        assert theirs.lstat().st_mtime > long_ago + 3000
+        assert not staging.job_staging_dir(tmp_path / "the-workers-base", "split").exists()
+
     def test_a_touched_directory_survives_another_workers_sweep(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -936,6 +954,7 @@ class TestALiveJobKeepsItsDirectory:
         monkeypatch.setenv(staging.STAGING_TTL_ENV, "1")
         directory = staging.job_staging_dir(base, "long-run")
         directory.mkdir(parents=True)
+        staging.note_job_directory("long-run", directory)
         stale = directory / "ffffffffffffffff_old.exe"
         stale.write_bytes(b"STAGED-AT-THE-START\x00")
         long_ago = time.time() - 7200
@@ -1246,3 +1265,248 @@ class TestTheSidecarThatStagesNothingIsUnaffected:
 
         assert env["MALJAN_INDEX_RETRY_SECONDS"] == "900"
         assert staging.STAGING_JOB_ENV not in env
+
+
+class TestARunWithNoJobIdEndsLikeOne:
+    """The command line has no worker behind it, so its own teardown is the
+    only thing between a finished run and a directory of live malware."""
+
+    def test_the_key_is_per_run_and_a_recycled_pid_inherits_nothing(self) -> None:
+        from maljan.core.config import Settings
+        from maljan.core.container import ServiceContainer
+
+        first = ServiceContainer(Settings(_env_file=None), mock=True)
+        second = ServiceContainer(Settings(_env_file=None), mock=True)
+
+        assert first.job_key() != second.job_key()
+        assert staging.job_directory_name(first.job_key()) != staging.job_directory_name(
+            second.job_key()
+        )
+
+    def test_the_container_takes_its_staging_with_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.core.config import Settings
+        from maljan.core.container import ServiceContainer
+
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
+        container = ServiceContainer(Settings(_env_file=None), mock=True)
+        captures = staging.open_capture_dir(container.job_key())
+        (captures / "rest_1.pcap").write_bytes(EMPTY_CAPTURE)
+        directory = captures.parent
+
+        asyncio.run(container.aclose())
+
+        assert not directory.exists()
+
+    def test_the_command_line_releases_its_run_on_every_way_out(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Driven through the command's own entry function, with the pipeline
+        replaced: what is under test is the ``finally``, not the analysis."""
+        import typer
+
+        from maljan import cli
+
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
+        released: list[str] = []
+        made: list[Any] = []
+        ending: list[BaseException] = []
+
+        class _App:
+            def __init__(self, **_kwargs: Any) -> None:
+                from maljan.core.config import Settings
+                from maljan.core.container import ServiceContainer
+
+                self.container = ServiceContainer(Settings(_env_file=None), mock=True)
+                self.captures = staging.open_capture_dir(self.container.job_key())
+                (self.captures / "rest_1.pcap").write_bytes(EMPTY_CAPTURE)
+                made.append(self)
+
+            def run(self, **_kwargs: Any) -> dict[str, Any]:
+                raise ending[-1]
+
+            async def aclose(self) -> None:
+                released.append(self.container.job_key())
+                staging.remove_job_staging(self.container.job_key())
+
+        monkeypatch.setattr(cli, "MaljanApp", _App)
+        for how_it_ends in (RuntimeError("the pipeline failed"), KeyboardInterrupt()):
+            ending.append(how_it_ends)
+            with pytest.raises((typer.Exit, KeyboardInterrupt)):
+                cli.analyze(file_hash="a" * 64, mock=True)
+
+        assert len(released) == 2, "both ways out released the run"
+        for app in made:
+            assert not app.captures.parent.exists()
+
+    def test_a_run_that_never_started_releases_nothing(self) -> None:
+        from maljan import cli
+
+        assert cli._release(None) is None
+
+
+class TestAProbeLeafIsPerCall:
+    def test_two_calls_on_one_server_do_not_share_a_directory(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One operator's cleanup must not take away another's directory."""
+        import inspect
+
+        from apps.api.app.services import settings_probes
+
+        source = inspect.getsource(settings_probes.handshake)
+        assert 'probe_key = f"probe-{name}-{uuid.uuid4().hex[:8]}"' in source
+        assert source.count("probe_key") >= 4, "the same key opens, detaches and is removed"
+
+    def test_the_timeout_path_removes_it_too(self) -> None:
+        """The branch that raises is the one on which a server really started."""
+        import ast
+        import inspect
+
+        from apps.api.app.services import settings_probes
+
+        tree = ast.parse(inspect.getsource(settings_probes.handshake).lstrip())
+        guarded = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Try)
+            for statement in node.finalbody
+            if "remove_job_staging" in ast.dump(statement)
+            for raised in ast.walk(node)
+            if isinstance(raised, ast.Raise)
+        ]
+
+        assert guarded, "the timeout raises inside the block that removes"
+
+    def test_the_agent_probe_carries_one_identity_for_the_whole_call(self) -> None:
+        import inspect
+
+        from apps.api.app.services import settings_probes
+
+        source = inspect.getsource(settings_probes.probe_agent)
+        assert 'job_key = f"probe-{name}-{uuid.uuid4().hex[:8]}"' in source
+        assert "ServiceContainer(settings, mock=True, job_id=job_key)" in source
+
+
+class TestTheCaptureDirectoryIsHeldToTheSameRuleAsStaging:
+    def test_a_base_somebody_else_owns_is_refused_by_name(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path / "staging"))
+        monkeypatch.setattr(staging.os, "getuid", lambda: -1)
+
+        with pytest.raises(RuntimeError, match="owned by another user"):
+            staging.open_capture_dir("one")
+
+    def test_a_symlink_planted_at_the_capture_directory_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        base = tmp_path / "staging"
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(base))
+        captures = staging.job_capture_dir("one")
+        captures.parent.mkdir(mode=0o700, parents=True)
+        captures.symlink_to(elsewhere)
+
+        with pytest.raises(RuntimeError, match="symlink"):
+            staging.open_capture_dir("one")
+        assert list(elsewhere.iterdir()) == []
+
+    def test_one_rule_serves_both_sides(self) -> None:
+        """The sidecar's own check is the same function, not a second copy."""
+        import inspect
+
+        server = TestTheSweepReachesAJobDirectory._server()
+
+        assert "staging.private_dir" in inspect.getsource(server._private_dir)
+
+
+class TestACaptureIsPrivateFromItsFirstByte:
+    class _Response:
+        def __init__(self, chunks: list[bytes], boom: bool = False) -> None:
+            self._chunks = chunks
+            self._boom = boom
+
+        def iter_bytes(self, _size: int) -> Any:
+            yield from self._chunks
+            if self._boom:
+                raise OSError("the connection went away")
+
+    def test_it_is_created_0600_rather_than_chmodded_afterwards(self, tmp_path: Path) -> None:
+        from maljan.providers.sandbox.limits import stream_to_file_capped
+
+        out = tmp_path / "rest_1.pcap"
+        modes: list[int] = []
+
+        class _Watching(TestACaptureIsPrivateFromItsFirstByte._Response):
+            def iter_bytes(self, size: int) -> Any:
+                for chunk in super().iter_bytes(size):
+                    modes.append(stat.S_IMODE(out.lstat().st_mode))
+                    yield chunk
+
+        stream_to_file_capped(_Watching([b"A" * 32, b"B" * 32]), out, what="The capture")
+
+        assert modes and set(modes) == {0o600}, "private while it is being written"
+        assert stat.S_IMODE(out.lstat().st_mode) == 0o600
+
+    def test_a_stream_that_fails_leaves_no_partial(self, tmp_path: Path) -> None:
+        from maljan.providers.sandbox.limits import stream_to_file_capped
+
+        out = tmp_path / "rest_2.pcap"
+
+        with pytest.raises(OSError, match="went away"):
+            stream_to_file_capped(self._Response([b"A" * 32], boom=True), out, what="The capture")
+
+        assert not out.exists()
+
+    def test_a_symlink_at_the_destination_is_not_followed(self, tmp_path: Path) -> None:
+        from maljan.providers.sandbox.limits import stream_to_file_capped
+
+        target = tmp_path / "somebody-elses"
+        target.write_bytes(b"NOT-THIS\x00")
+        out = tmp_path / "rest_3.pcap"
+        out.symlink_to(target)
+
+        with pytest.raises(OSError):
+            stream_to_file_capped(self._Response([b"A" * 32]), out, what="The capture")
+
+        assert target.read_bytes() == b"NOT-THIS\x00"
+
+    def test_a_capture_too_small_to_read_is_not_left_on_disk(self, tmp_path: Path) -> None:
+        """Every provider answers ``None`` for a capture under the libpcap
+        header's own length; the bytes go with the answer."""
+        import inspect
+
+        from maljan.loaders import cape2_client
+        from maljan.providers.sandbox import rest, triage
+
+        for source in (
+            inspect.getsource(rest.RestSandboxProvider.fetch_pcap),
+            inspect.getsource(triage.TriageSandboxProvider.fetch_pcap),
+            inspect.getsource(cape2_client.CAPEv2Client.fetch_pcap),
+        ):
+            assert source.count("unlink(missing_ok=True)") >= 2, source[:80]
+
+
+class TestTheLegacyCaptureDirectoryCanActuallyGo:
+    def test_a_link_left_in_it_is_unlinked_and_the_directory_follows(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        server = TestTheSweepReachesAJobDirectory._server()
+        base = tmp_path / "staging"
+        base.mkdir(parents=True)
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(base))
+        monkeypatch.setenv(staging.STAGING_TTL_ENV, "1")
+        monkeypatch.setattr(server.tempfile, "gettempdir", lambda: str(tmp_path))
+        legacy = tmp_path / staging.LEGACY_CAPTURE_DIR_NAME
+        legacy.mkdir()
+        elsewhere = tmp_path / "somebody-elses.pcap"
+        elsewhere.write_bytes(EMPTY_CAPTURE)
+        (legacy / "pointer.pcap").symlink_to(elsewhere)
+
+        server._prune_staging(base)
+
+        assert not legacy.exists(), "the directory goes once the link is out of it"
+        assert elsewhere.exists(), "and the link was never followed"

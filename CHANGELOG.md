@@ -957,6 +957,18 @@ change landed on `main`.
   whole thing goes with the job's staging directory. **What an operator does:**
   nothing. What an earlier release left in `maljan-cape-pcap` under the system
   temp directory is swept on the staging TTL, and nothing writes there any more.
+  A capture is created 0600 with `O_NOFOLLOW` rather than written and then
+  chmodded, and a fetch that fails or returns too few bytes to be a capture
+  leaves none behind.
+
+- **A run with no job id of its own removes what it staged.** The command line,
+  a settings probe and any script that builds a container used to compose a
+  staging directory and leave it for the TTL — and the name was derived from
+  the process, so a second run that drew a recycled pid inside that window
+  inherited the first one's uploads, carved payloads and capture. The name is
+  now per run, the container takes its directory away as the last thing it
+  closes, and `maljan analyze` releases the run in a `finally` that covers a
+  completed analysis, a failed one and an interrupted one alike.
 
 - **A retirement of the shared agent loop no longer costs a grace period per
   abandoned tool server.** When that loop is retired, every handle bound to it

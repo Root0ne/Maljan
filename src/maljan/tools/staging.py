@@ -167,6 +167,36 @@ def job_capture_dir(job_id: str, environ: Mapping[str, str] | None = None) -> Pa
     return job_staging_dir(staging_base(environ), job_id) / CAPTURES_DIRECTORY
 
 
+def private_dir(path: Path, *, what: str = "staging path") -> Path:
+    """``path`` as a directory only this user may enter, or an error.
+
+    Created with ``mkdir(mode=0o700)`` rather than created-then-chmodded, and
+    refused if what is already there is a symlink or belongs to somebody else.
+    These names are predictable and the system temp directory is shared, so
+    without those checks another local user could plant a directory or a link
+    at one of them and receive live malware into a location of their choosing —
+    and the chmod would then be applied to their target.
+
+    One function for every directory this project creates under the base, so
+    the capture directory the worker opens is held to exactly what the sidecar
+    holds its own staging directory to.
+    """
+    try:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except FileExistsError as exc:  # a non-directory already sits at that path
+        raise RuntimeError(f"{what} {path} is not a directory") from exc
+    if path.is_symlink():
+        raise RuntimeError(f"{what} {path} is a symlink")
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode):
+        raise RuntimeError(f"{what} {path} is not a directory")
+    if info.st_uid != os.getuid():
+        raise RuntimeError(f"{what} {path} is owned by another user")
+    if info.st_mode & 0o077:
+        path.chmod(0o700)
+    return path
+
+
 def open_capture_dir(job_id: str) -> Path:
     """This job's capture directory, created 0o700, readable by this job's sidecars.
 
@@ -176,16 +206,17 @@ def open_capture_dir(job_id: str) -> Path:
     a directory the platform filled. The root is this job's own and is dropped
     when the job ends, so no later job inherits it; the shared, permanent root
     of the release before this is what let one job read another's capture.
+
+    Every level is opened through ``private_dir``, so a base or a job directory
+    somebody else owns, or a symlink planted at one of them, is refused with a
+    sentence saying which rather than ending in a ``PermissionError`` from a
+    chmod that happened to fail.
     """
     from maljan.tools.roots import add_sample_root
 
     captures = job_capture_dir(job_id)
     for directory in (captures.parent.parent, captures.parent, captures):
-        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if directory.is_symlink() or not directory.is_dir():
-            raise RuntimeError(f"capture path {directory} is not a directory")
-        if directory.lstat().st_mode & 0o077:
-            directory.chmod(0o700)
+        private_dir(directory, what="capture path")
     note_job_directory(job_id, captures.parent)
     add_sample_root(captures)
     return captures
@@ -218,14 +249,24 @@ def touch_job_staging(job_id: str) -> bool:
     pass, a slow sandbox — could have its directory, carved payloads and all,
     removed under it by a *second* worker's sidecar sharing the base.
 
-    Returns whether there was a directory to touch.
+    The directories touched are the ones this process *recorded* — what the
+    spawn composed from the child's own environment, and what the capture fetch
+    opened — rather than one re-derived here from the worker's environment.
+    Where an operator sets ``MALJAN_STAGING_DIR`` in a server's own ``env`` map
+    alone, those two are different directories, and the one that matters is the
+    one the sidecar will sweep. It is the same list the removal walks.
+
+    Returns whether there was a directory to touch. Nothing recorded means no
+    sidecar was ever pointed anywhere, so there is nothing to protect.
     """
-    directory = job_staging_dir(staging_base(), job_id)
-    try:
-        os.utime(directory, None, follow_symlinks=False)
-    except OSError:  # nothing staged yet, or a directory somebody else owns
-        return False
-    return True
+    touched = False
+    for directory in job_directories(job_id):
+        try:
+            os.utime(directory, None, follow_symlinks=False)
+        except OSError:  # nothing staged yet, or a directory somebody else owns
+            continue
+        touched = True
+    return touched
 
 
 def make_private(path: Path) -> None:

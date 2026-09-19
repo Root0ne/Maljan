@@ -1039,10 +1039,18 @@ TTL below the longest run this deployment can have and that marker is the only
 thing standing between a live job and its own directory; there is no reason to.
 
 The sandbox capture a job fetches lands in a `captures/` child of the same
-directory and obeys every rule above: 0700, removed with the job, swept by the
-same TTL, and unreachable from another job. The directory an earlier release
-used, `maljan-cape-pcap` under the system temp directory, is swept as well and
-is no longer written.
+directory and obeys every rule above: 0700, files 0600 from their first byte,
+removed with the job, swept by the same TTL, and unreachable from another job.
+The directory an earlier release used, `maljan-cape-pcap` under the system temp
+directory, is swept as well and is no longer written.
+
+One configuration would widen this if nothing else stopped it: a
+`MALJAN_SAMPLE_ROOTS` entry containing the staging base — the deployment's
+whole samples directory, say, with the base inside it — which names every
+job's directory as one a sidecar may read. `confined_to_this_job` refuses it
+anyway: a path argument resolving under the base but outside this job's own
+directory is refused whatever the roots say, so the job directory is the
+boundary and the roots cannot loosen it.
 
 ### Which directories a sidecar may read
 

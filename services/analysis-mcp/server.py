@@ -952,27 +952,11 @@ def _staging_root() -> Path:
 def _private_dir(path: Path) -> Path:
     """``path`` as a directory only this user may enter, or an error.
 
-    Created with ``mkdir(mode=0o700)`` rather than created-then-chmodded, and
-    refused if what is already there is a symlink or belongs to somebody else.
-    The default name is predictable and the system temp directory is shared, so
-    without those checks another local user could plant a directory or a link
-    at that path and receive live malware into a location of their choosing —
-    and the chmod would then be applied to their target.
+    The rule lives in ``maljan.tools.staging`` so the worker's capture
+    directory is opened under exactly the same checks this server opens its
+    own staging directory under.
     """
-    try:
-        path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    except FileExistsError as exc:  # a non-directory already sits at that path
-        raise RuntimeError(f"staging path {path} is not a directory") from exc
-    if path.is_symlink():
-        raise RuntimeError(f"staging path {path} is a symlink")
-    info = path.lstat()
-    if not stat.S_ISDIR(info.st_mode):
-        raise RuntimeError(f"staging path {path} is not a directory")
-    if info.st_uid != os.getuid():
-        raise RuntimeError(f"staging path {path} is owned by another user")
-    if info.st_mode & 0o077:
-        path.chmod(0o700)
-    return path
+    return staging.private_dir(path)
 
 
 def _staging_dir() -> Path:
@@ -1037,7 +1021,13 @@ def _prune_legacy_captures(cutoff: float) -> int:
     for entry in root.iterdir():
         try:
             info = entry.lstat()
-            if stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+            if stat.S_ISDIR(info.st_mode):
+                continue
+            # A link is unlinked, never followed and never counted: whatever
+            # it points at is somebody else's, and leaving it would keep the
+            # directory alive for as long as the link was there.
+            if stat.S_ISLNK(info.st_mode):
+                entry.unlink()
                 continue
             if info.st_mtime >= cutoff:
                 continue

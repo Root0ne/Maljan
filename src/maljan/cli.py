@@ -4,6 +4,7 @@ The CLI only parses arguments and delegates to the application layer.
 It does not mutate global settings or know about internal architecture.
 """
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any, cast, get_args
@@ -62,13 +63,21 @@ def analyze(
         config.llm.provider = cast(Any, provider)
     config.negotiation.max_iterations = max_iterations
 
-    # Create and run
+    # Create and run. The ``finally`` covers the whole of it — a completed
+    # run, a failed one and an interrupted one alike — because what the run
+    # staged is live malware and there is no worker behind this to take it
+    # away: the tool servers it opened and the directory they staged in belong
+    # to this run and end with it (``MaljanApp.aclose``). Everything below the
+    # block only reads ``result``.
+    maljan_app: MaljanApp | None = None
     try:
         maljan_app = MaljanApp(config=config, mock=mock)
         result = maljan_app.run(file_hash=file_hash, file_name=file_name, sample_path=sample_path)
     except Exception as e:
         logger.error(f"Pipeline execution failed: {e}")
         raise typer.Exit(code=1) from None
+    finally:
+        _release(maljan_app)
 
     # Core verdict
     decision = result.get("final_decision", "Unknown")
@@ -254,6 +263,24 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
 
     except Exception as e:
         logger.warning(f"Failed to write report: {e}")
+
+
+def _release(maljan_app: MaljanApp | None) -> None:
+    """Close a run's tool servers and take away what it staged. Never raises.
+
+    The command line has no worker teardown behind it, so this is the only
+    place a run's sidecars are released and the only place its staging
+    directory, carved payloads and sandbox capture go away. A failure here
+    costs the caller nothing it can act on — the analysis is already done or
+    already lost — so it is logged and swallowed, and the staging sweep takes
+    whatever is left.
+    """
+    if maljan_app is None:
+        return
+    try:
+        asyncio.run(maljan_app.aclose())
+    except Exception as exc:  # noqa: BLE001 — a cleanup never fails a finished run
+        logger.warning("Releasing this run failed (non-fatal): %s", exc)
 
 
 @app.command()
