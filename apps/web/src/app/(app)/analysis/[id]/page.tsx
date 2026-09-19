@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import {
   bundleLossSentence,
   countLabel,
+  partialGroundingSentence,
   downloadBlob,
   downloadObject,
 } from "@/lib/report-utils";
@@ -468,6 +469,7 @@ function RunRecord({
   const validation = runSummary.validation ?? null;
   const retryMode = Object.entries(runSummary.nudge?.retry_mode ?? {});
   const bundleLoss = bundleLossSentence(runSummary.truncation ?? null);
+  const partialGrounding = partialGroundingSentence(runSummary.truncation ?? null);
   const configRows = Object.entries(config ?? {}).filter(
     ([key]) => !SHOWN_IN_THE_HEADER.has(key),
   );
@@ -512,6 +514,7 @@ function RunRecord({
                 : "No producer needed a correction turn."}
             </li>
             {bundleLoss && <li className="text-text-muted">{bundleLoss}</li>}
+            {partialGrounding && <li className="text-text-muted">{partialGrounding}</li>}
             {(validation?.unresolved ?? []).map((item, i) => (
               <li key={i} className="text-status-orange">
                 {validationRowText(item)}

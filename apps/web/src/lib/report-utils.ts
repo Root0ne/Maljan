@@ -150,6 +150,9 @@ export function countLabel(
  * saying zero, and null for a stored run written before the counters existed.
  */
 interface TruncationCounts {
+  evidence_corpus_missing_answers?: number;
+  evidence_corpus_missing_tools?: string[];
+  evidence_corpus_partial_reason?: string;
   integrity_objects_removed?: number;
   indicator_cap_removed?: number;
   integrity_refs_trimmed?: number;
@@ -184,4 +187,28 @@ export function bundleLossSentence(truncation: TruncationCounts | null): string 
   }
   if (parts.length === 0) return null;
   return `The exported STIX bundle is shorter than what the run produced: ${parts.join("; ")}.`;
+}
+
+/**
+ * What the run's grounding could not search, as one sentence, or null.
+ *
+ * A run whose corpus could not hold everything states every absence as a note
+ * and drops nothing for it. Said here because the alternative is an operator
+ * reading it inside one finding's message, and because such a run otherwise
+ * looks exactly like one whose grounding was whole.
+ *
+ * Null when the grounding searched the whole record, and null for a run stored
+ * before the counters existed.
+ */
+export function partialGroundingSentence(truncation: TruncationCounts | null): string | null {
+  const reason = (truncation?.evidence_corpus_partial_reason ?? "").trim();
+  if (!reason) return null;
+  const missing = Math.max(0, Number(truncation?.evidence_corpus_missing_answers ?? 0) || 0);
+  const tools = (truncation?.evidence_corpus_missing_tools ?? []).filter(Boolean);
+  const named = tools.length > 0 ? `, from ${tools.join(", ")}` : "";
+  return (
+    `Grounding searched less than the run produced — ${reason}: ` +
+    `${countLabel(missing, "answer")} not kept${named}. ` +
+    `An absence measured against it is a note and drops nothing.`
+  );
 }
