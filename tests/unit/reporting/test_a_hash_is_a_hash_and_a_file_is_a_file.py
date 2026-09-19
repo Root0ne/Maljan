@@ -51,6 +51,53 @@ class TestAHashIsItsAlgorithmsLength:
         assert found == ("MD5", TRUNCATED_MD5)
         assert malformed_hash_in(f"[file:hashes.'MD5' = '{FULL_MD5}']") is None
 
+    def test_a_list_of_digests_is_asked_the_same_question_as_one(self) -> None:
+        """``IN`` asserts every member, and the length rule read ``=`` alone."""
+        found = malformed_hash_in(f"[file:hashes.'MD5' IN ('{TRUNCATED_MD5}', '{FULL_MD5}')]")
+
+        assert found == ("MD5", TRUNCATED_MD5)
+
+    def test_a_list_whose_members_are_all_digests_is_carried(self) -> None:
+        other = "a" * 32
+        assert malformed_hash_in(f"[file:hashes.'MD5' IN ('{FULL_MD5}', '{other}')]") is None
+
+    def test_an_operator_that_asserts_no_value_is_asked_nothing(self) -> None:
+        assert malformed_hash_in("[file:hashes.'MD5' MATCHES '^[0-9a-f]+$']") is None
+
+    def test_a_list_under_an_algorithm_with_no_length_is_left_alone(self) -> None:
+        assert malformed_hash_in("[file:hashes.'SSDEEP' IN ('3:ab:cd', '6:ef:gh')]") is None
+
+    def test_the_export_declines_a_malformed_member_of_a_list(self) -> None:
+        problem = _judge_indicator_problem(
+            _indicator(f"[file:hashes.'MD5' IN ('{TRUNCATED_MD5}', '{FULL_MD5}')]")
+        )
+
+        assert problem is not None
+        code, sentence = problem
+        assert code == MALFORMED_HASH_CODE
+        assert TRUNCATED_MD5 in sentence
+        assert "32 hexadecimal characters" in sentence
+
+    def test_the_grounding_check_declines_a_malformed_member_of_a_list(self) -> None:
+        bundle = Bundle(
+            objects=[_indicator(f"[file:hashes.'MD5' IN ('{TRUNCATED_MD5}', '{FULL_MD5}')]")]
+        )
+
+        found = [v.message for v in validate_verdict_bundle(bundle, {FULL_MD5, TRUNCATED_MD5})]
+
+        assert found and TRUNCATED_MD5 in found[0]
+        assert "is not a MD5 digest" in found[0]
+
+    def test_a_list_member_the_evidence_does_not_carry_is_ungrounded(self) -> None:
+        """Every member is asked the whole-token question the ``=`` form is."""
+        other = "b" * 32
+        bundle = Bundle(objects=[_indicator(f"[file:hashes.'MD5' IN ('{FULL_MD5}', '{other}')]")])
+
+        found = [v.message for v in validate_verdict_bundle(bundle, {FULL_MD5})]
+
+        assert found and other in found[0]
+        assert "appears nowhere in the evidence" in found[0]
+
     def test_the_export_declines_the_judge_s_own_truncated_digest(self) -> None:
         problem = _judge_indicator_problem(_indicator(f"[file:hashes.'MD5' = '{TRUNCATED_MD5}']"))
 

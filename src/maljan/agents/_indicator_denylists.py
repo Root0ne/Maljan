@@ -195,6 +195,14 @@ HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
 # writes it plainly.
 _HASH_ALGORITHM_RE = re.compile(r"^hashes\.(?:'(?P<quoted>.*)'|(?P<bare>[a-z0-9_-]+))$")
 
+# The operators that assert a literal *is* a digest of the algorithm it is
+# written under. ``IN`` is one of them: a judge with two candidate digests
+# writes them as a list, and every member of that list is a value a consumer
+# will try to match. The length question was asked of the ``=`` form alone, so
+# the same truncated digest that is refused written one way was carried
+# written the other.
+_ASSERTING_OPERATORS = ("=", "in")
+
 
 def hash_literal_is_wellformed(algorithm: object, value: object) -> bool:
     """Whether ``value`` is a digest of ``algorithm``, by length and alphabet.
@@ -210,6 +218,16 @@ def hash_literal_is_wellformed(algorithm: object, value: object) -> bool:
     return len(literal) == expected and HEX_RE.match(literal) is not None
 
 
+def _asserts_a_value(operator: str) -> bool:
+    """Whether this comparison says a literal is the thing the path names.
+
+    ``=`` and ``IN (…)``. A regular expression or a subset test says something
+    about a shape rather than about a digest, and a digest question asked of
+    one would refuse a pattern for a reason that is not true of it.
+    """
+    return operator.split("(")[0].strip() in _ASSERTING_OPERATORS
+
+
 def malformed_hash_in(pattern: str) -> tuple[str, str] | None:
     """The first ``(algorithm, literal)`` in ``pattern`` that is not that digest.
 
@@ -221,7 +239,7 @@ def malformed_hash_in(pattern: str) -> tuple[str, str] | None:
     from maljan.schemas.stix_pattern import read_comparisons
 
     for comparison in read_comparisons(pattern or ""):
-        if comparison.object_type != "file" or comparison.operator != "=":
+        if comparison.object_type != "file" or not _asserts_a_value(comparison.operator):
             continue
         named = _HASH_ALGORITHM_RE.match(comparison.prop)
         if named is None:
