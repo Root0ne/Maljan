@@ -2294,7 +2294,11 @@ change landed on `main`.
   veto rather than an acceptance, asked of every comparison in the pattern
   rather than of whichever one the pattern started with — a grounded digest
   beside `[url:value = …]` used to turn off the URL denylist and the file-name
-  anchor rule for the whole expression. A `file:name` naming a directory or
+  anchor rule for the whole expression. A hash the algorithm table gives no
+  length for — an ssdeep, a TLSH — is asked the corpus question rather than
+  skipped: skipping it told a judge that the ssdeep the `hashes` tool had just
+  reported "appears nowhere in the evidence", which spent the one retry and
+  then dropped the object. A `file:name` naming a directory or
   a root (`/Users/`) is declined as `stix.unpublishable_artefact`, as is an
   `email-addr` that is not a mailbox. The judge's own objects are declined and
   recorded, never rewritten; the platform mints none of them. Dedupe compares
@@ -2341,12 +2345,27 @@ change landed on `main`.
   argument on the fourteen analysis tools that read a file — `identify_file`,
   `hashes`, `signing_info`, `strings`, `iocs_from_file`, `pe_info`, `elf_info`,
   `macho_info`, `apk_info`, `carve_payloads`, `archive_list`, `document_info`,
-  `yara_scan`, `capa`. It is confined to the staging base alone, not to
-  `MALJAN_SAMPLE_ROOTS`: a relative value is a name inside it, an absolute one
-  must already be inside it, and a traversal, a path outside it or a symlink
-  out of it meets the existing `path_outside_roots` refusal. Given, that file
-  is read in place of the sample and the answer carries `read_path`; left out,
-  the sample is read. It is qualified, so the path pinning leaves it alone.
+  `yara_scan`, `capa`. It is confined to `<staging>/carved/<sha256 of the file
+  the call is pinned to>/` and to that file itself — not the staging base,
+  which one server process shares across every job it handles, and not
+  `MALJAN_SAMPLE_ROOTS`. A run therefore reaches the payloads it carved and
+  nothing another run carved or uploaded; two runs of the same sample share
+  one tree, which is the same bytes read twice. The absolute path
+  `carve_payloads` returned and the tail of it both work; a traversal, a path
+  outside the tree or a symlink out of it meets the existing
+  `path_outside_roots` refusal, and a value that resolves onto a directory, a
+  FIFO, a device or a socket is refused as `bad_argument` rather than opened.
+  Given, that file is read in place of the sample and the answer carries
+  `read_path`; left out, the sample is read. It is qualified, so the path
+  pinning leaves it alone. A payload carved out of a carved payload nests
+  under the sample's own tree rather than opening one of its own.
+- **Carved payloads expire.** The analysis sidecar's TTL sweep deleted files
+  under the staging directory and stepped over directories, and everything
+  `carve_payloads` writes lives a level down in `carved/<sha256>/` — so no
+  carved payload ever expired and a long-lived host accumulated them
+  indefinitely. The sweep now prunes those trees on the same
+  `MALJAN_STAGING_TTL_HOURS`, removes a tree the pruning leaves empty, and
+  never follows a symlink.
 - **The report composer shows each section the object it has to answer with.**
   Six runs on two unrelated models authored zero professional sections between
   them, answering every section with renamed or superset keys. On the

@@ -1838,12 +1838,18 @@ def _comparisons(pattern: str) -> list[tuple[str, str]]:
     """
     found: list[tuple[str, str]] = []
     path = ""
+    inside_the_path = False
     for index, chunk in enumerate(pattern.split("'")):
         if index % 2 == 0:
             paths = list(_COMPARISON_PATH_RE.finditer(chunk))
             if paths:
                 path = paths[-1].group(1).lower()
-        elif chunk.strip():
+            # A quote that opens where the object path is still being written
+            # holds a key, not a value: ``file:hashes.'MD5'`` names the
+            # algorithm and ``file:extensions['pe']`` names the extension. The
+            # value is what follows the comparison operator.
+            inside_the_path = chunk.rstrip().endswith((".", "["))
+        elif chunk.strip() and not inside_the_path:
             found.append((path, chunk.strip()))
     return found
 
@@ -1931,15 +1937,24 @@ def _indicator_problem(
     grounded = False
     for path, literal in _comparisons(pattern):
         if path.startswith("file:hashes") or path.endswith("imphash"):
-            if not (_HEX_TOKEN_RE.match(literal) and len(literal) in _DIGEST_LENGTHS):
-                # The algorithm the comparison names, quoted beside its digest.
+            if _HEX_TOKEN_RE.match(literal) and len(literal) in _DIGEST_LENGTHS:
+                if not _whole_token_in(literal, haystack, own):
+                    return (
+                        f"the indicator pattern names {safe_finding_value(literal)}, which "
+                        "appears nowhere in the evidence this run collected as a value of its "
+                        "own."
+                    )
+                grounded = True
                 continue
-            if not _whole_token_in(literal, haystack, own):
-                return (
-                    f"the indicator pattern names {safe_finding_value(literal)}, which appears "
-                    "nowhere in the evidence this run collected as a value of its own."
-                )
-            grounded = True
+            # A fuzzy hash is not a run of hex and has no length this code
+            # knows — an ssdeep carries block sizes and slashes, a TLSH opens
+            # with its version — so the prefix question the whole-token rule
+            # answers does not arise for it. It is asked the corpus question
+            # every other value is asked, and skipping it told a judge that the
+            # ssdeep the ``hashes`` tool had just reported "appears nowhere in
+            # the evidence", spent the one retry on that and dropped the
+            # object.
+            grounded = grounded or _found(literal)
             continue
         if path.startswith("url:"):
             host = _url_host(literal)

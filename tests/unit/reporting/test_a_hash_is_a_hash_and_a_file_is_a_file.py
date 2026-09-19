@@ -204,3 +204,68 @@ class TestEveryComparisonIsAsked:
     def test_an_algorithm_name_is_not_read_as_a_value(self) -> None:
         """``file:hashes.'MD5'`` quotes the algorithm beside the digest."""
         assert self._problem(f"[file:hashes.'SHA-256' = '{GROUNDED_SHA256}']") == []
+
+
+# A fuzzy hash is a hash with no length. An ssdeep carries its block size and
+# two slash-separated chunks; a TLSH opens with its version. Neither is a run
+# of hex, so the prefix question the whole-token rule answers does not arise
+# for either — and asking the length question of them would refuse every one.
+# Skipping them entirely, which the per-comparison walk did at first, told a
+# judge that the ssdeep the ``hashes`` tool had just reported appears nowhere
+# in the evidence: a deterministic statement that is false, which spends the
+# one retry and then drops the object.
+SSDEEP = "3:abcd:efgh"
+TLSH = "t1abc123def456"
+FUZZY_EVIDENCE = f"hashes: ssdeep {SSDEEP}; tlsh {TLSH}"
+
+
+class TestAHashWithNoLength:
+    @staticmethod
+    def _problem(pattern: str, evidence: str = FUZZY_EVIDENCE) -> list[str]:
+        bundle = Bundle(objects=[_indicator(pattern)])
+        return [v.code for v in validate_verdict_bundle(bundle, evidence_corpus={evidence})]
+
+    def test_a_grounded_fuzzy_hash_is_accepted(self) -> None:
+        for algorithm, value in (("SSDEEP", SSDEEP), ("TLSH", TLSH)):
+            assert self._problem(f"[file:hashes.'{algorithm}' = '{value}']") == [], algorithm
+
+    def test_an_invented_one_is_still_refused(self) -> None:
+        for algorithm, value in (("SSDEEP", "9:zzzz:yyyy"), ("TLSH", "t1ffffffffffff")):
+            assert self._problem(f"[file:hashes.'{algorithm}' = '{value}']") == [
+                "stix.ungrounded_indicator"
+            ], algorithm
+
+    def test_its_length_is_not_asserted(self) -> None:
+        """The table gives no length for it, so nothing claims one."""
+        assert self._problem(f"[file:hashes.'SSDEEP' = '{SSDEEP}']") == []
+
+    def test_it_grounds_a_compound_pattern_in_either_order(self) -> None:
+        fuzzy = f"[file:hashes.'SSDEEP' = '{SSDEEP}']"
+        named = "[file:name = '/tmp/dropper.so']"
+        for pattern in (f"{fuzzy} AND {named}", f"{named} AND {fuzzy}"):
+            assert self._problem(pattern) == [], pattern
+
+    def test_an_ungrounded_one_beside_a_refusable_comparison_still_reports_that_one(self) -> None:
+        fuzzy = "[file:hashes.'SSDEEP' = '9:zzzz:yyyy']"
+        vendor = "[url:value = 'https://pypi.org/simple/requests/']"
+        for pattern in (f"{fuzzy} AND {vendor}", f"{vendor} AND {fuzzy}"):
+            bundle = Bundle(objects=[_indicator(pattern)])
+            found = [
+                v.message for v in validate_verdict_bundle(bundle, evidence_corpus={FUZZY_EVIDENCE})
+            ]
+            assert found and "vendor infrastructure" in found[0], pattern
+
+    def test_the_algorithm_name_is_not_asked_the_question(self) -> None:
+        """``file:hashes.'SSDEEP'`` names the algorithm inside the object path."""
+        from maljan.pipeline.validation import _comparisons
+
+        assert _comparisons(f"[file:hashes.'SSDEEP' = '{SSDEEP}']") == [("file:hashes.", SSDEEP)]
+
+    def test_a_named_algorithm_still_answers_for_its_length(self) -> None:
+        bundle = Bundle(objects=[_indicator("[file:hashes.'MD5' = '3:abcd:efgh']")])
+
+        found = [
+            v.message for v in validate_verdict_bundle(bundle, evidence_corpus={FUZZY_EVIDENCE})
+        ]
+
+        assert found and "MD5 is 32 hexadecimal characters" in found[0]

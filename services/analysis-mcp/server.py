@@ -17,6 +17,7 @@ and gets back the path to pass to every other tool here.
 from __future__ import annotations
 
 import base64
+import contextlib
 import copy
 import hashlib
 import os
@@ -204,6 +205,74 @@ _PATH_ARGUMENTS = ("path", "pcap_path")
 # of a returned path is understood rather than refused.
 CARVED_ARGUMENT = "carved_path"
 
+# What ``carved_path`` may reach: the carved tree of the file this call is
+# already reading, and that file itself. **Not** the whole staging base, which
+# every job on this host shares — a sample carrying another sample's digest in
+# its own bytes, and one instruction to read it, was enough to pull another
+# run's carved payload into this run's evidence, and another run's upload is
+# named by sixteen hex characters and the original file name. The digest is
+# the one thing this server can derive from what it was given, and it is
+# exactly the key ``carve_payloads`` writes under, so a run reaches everything
+# it produced and nothing any other run produced. Two runs of the same sample
+# share one tree, which is the same bytes read twice.
+CARVED_DIRECTORY = "carved"
+
+# What a caller is told when the argument resolves onto something that is not
+# a file to read. Its own sentence rather than the roots one, which would be
+# untrue of a directory that really is inside the staging area.
+NOT_A_REGULAR_FILE_MESSAGE = (
+    "the carved_path argument does not name a regular file; pass one of the paths "
+    "carve_payloads returned"
+)
+
+# How many sample digests are remembered at once. One per sample a long-lived
+# server sees, and a digest is sixty-four characters: the bound is against a
+# process that runs for weeks, not against a run.
+_MAX_REMEMBERED_DIGESTS = 64
+_DIGESTS: dict[tuple[str, int, int], str] = {}
+
+
+class NotARegularFile(Exception):
+    """A path argument resolved onto something that cannot be read as a file."""
+
+    def __init__(self, message: str = NOT_A_REGULAR_FILE_MESSAGE) -> None:
+        super().__init__(message)
+
+
+def _digest_of(target: Path) -> str:
+    """The sha256 of a file, remembered while its size and mtime are unchanged.
+
+    Read in pieces, because this runs on live samples and the upload ceiling
+    admits two gigabytes of them, and remembered because every tool call on the
+    same sample would otherwise hash it again.
+    """
+    try:
+        info = target.stat()
+    except OSError:
+        return ""
+    key = (str(target), info.st_size, info.st_mtime_ns)
+    remembered = _DIGESTS.get(key)
+    if remembered is not None:
+        return remembered
+    hasher = hashlib.sha256()
+    try:
+        with target.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                hasher.update(block)
+    except OSError:
+        return ""
+    digest = hasher.hexdigest()
+    if len(_DIGESTS) >= _MAX_REMEMBERED_DIGESTS:
+        _DIGESTS.clear()
+    _DIGESTS[key] = digest
+    return digest
+
+
+def _carved_tree(digest: str) -> Path:
+    """Where everything carved out of one sample lands."""
+    return _staging_base() / CARVED_DIRECTORY / digest
+
+
 # What every tool that takes it says about it, appended once so the fourteen
 # descriptions cannot come to disagree.
 CARVED_NOTE = (
@@ -254,17 +323,63 @@ def _confined(kwargs: dict[str, Any]) -> dict[str, Any]:
     # one is not a parameter of the implementation, so the general reading of
     # those words above never sees it.
     carved = out.pop(CARVED_ARGUMENT, None)
+    sample = Path(out["path"]) if isinstance(out.get("path"), str) and out["path"] else None
+    # ``carve_payloads`` writes under the sample's own tree whatever file it
+    # was pointed at, so a payload carved out of a payload stays inside the
+    # one directory this run may read.
+    if "sample_digest" in out:
+        out["sample_digest"] = _digest_of(sample) if sample is not None else ""
     if isinstance(carved, str) and not _means_absent(carved):
-        # Resolved against the staging base and nowhere else, so a traversal, an
-        # absolute path outside it and a symlink planted under it all land where
-        # they really point and are refused there by the one rule.
-        base = _staging_base()
-        asked = Path(carved.strip())
-        out["path"] = str(resolve_under(asked if asked.is_absolute() else base / asked, (base,)))
+        out["path"] = str(_carved_file(carved.strip(), sample))
     corpus = out.get(_CORPUS_ARGUMENT)
     if isinstance(corpus, str) and corpus not in _CORPUS_WORDS:
         resolve_under_roots(resolve_data(corpus), extra_roots=rule_tools.corpus_roots())
     return out
+
+
+def _carved_file(asked: str, sample: Path | None) -> Path:
+    """The file ``carved_path`` names, held to what this sample produced.
+
+    Two spellings are understood, because both are things a model writes: the
+    absolute path ``carve_payloads`` handed back, and the tail of it — relative
+    to the staging base or to the sample's own carved directory. Whichever it
+    is, the resolved path has to land inside that directory or on the sample
+    itself; symlinks are followed on both sides first, so a link planted under
+    staging and a climb out of it land where they really point and are refused
+    there.
+    """
+    if sample is None:
+        raise PathOutsideRoots()
+    tree = _carved_tree(_digest_of(sample))
+    roots = (tree, sample)
+    target = Path(asked)
+    candidates = [target] if target.is_absolute() else [tree / target, _staging_base() / target]
+    missing: Path | None = None
+    other: Path | None = None
+    for candidate in candidates:
+        try:
+            resolved = resolve_under(candidate, roots)
+        except PathOutsideRoots:
+            continue
+        # A spelling that lands inside the tree but names nothing is not the
+        # one the caller meant: the other spelling is tried before the answer
+        # is decided, so a tail written against the staging base is not read
+        # as a tail against the tree that happens to be inside it too.
+        if resolved.is_file():
+            return resolved
+        if resolved.exists():
+            other = other or resolved
+        else:
+            missing = missing or resolved
+    # A directory, a FIFO, a device or a socket is not a file to read, and a
+    # reader that opened a FIFO with no writer would wait for one forever.
+    if other is not None:
+        raise NotARegularFile()
+    if missing is not None:
+        # Inside the tree and not there: the tool's own "no such file" is the
+        # true answer, and inventing a refusal would say something else.
+        return missing
+    raise PathOutsideRoots()
 
 
 def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
@@ -296,6 +411,8 @@ def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
         return answer
     except PathOutsideRoots as refusal:
         return tool_error(PATH_OUTSIDE_ROOTS, str(refusal), tool=tool)
+    except NotARegularFile as refusal:
+        return tool_error(BAD_ARGUMENT, str(refusal), tool=tool)
     except Exception as exc:  # noqa: BLE001 — a tool server answers, it does not raise
         return tool_error(code_for_exception(exc), f"{type(exc).__name__}: {exc}", tool=tool)
 
@@ -505,31 +622,41 @@ def carve_payloads(path: str, carved_path: str = "") -> dict[str, Any]:
     carved/<sha256 of the sample>/, and the returned paths point there; the
     destination is not an argument.
     """
-    return _guard("carve_payloads", _carve_under_staging, path=path, carved_path=carved_path)
+    return _guard(
+        "carve_payloads",
+        _carve_under_staging,
+        path=path,
+        carved_path=carved_path,
+        sample_digest="",
+    )
 
 
-def _carve_under_staging(path: str) -> dict[str, Any]:
+def _carve_under_staging(path: str, sample_digest: str = "") -> dict[str, Any]:
     """Carve into ``<staging>/carved/<sha256>/``, created private like the staging dir.
 
     A model-chosen destination let a tool write live malware anywhere the
     sidecar could write, and one live run wrote a carved PE body into the
     sidecar's own cwd. The sample's hash names the directory, so two samples
     never share one and a re-run lands in the same place.
+
+    ``sample_digest`` is the digest of the file this call was *pinned* to,
+    which is the sample; the guard fills it. A payload carved out of a carved
+    payload nests under the sample's own directory rather than opening a
+    directory of its own, so everything one run produces is one tree — the
+    tree that run may read back, and the tree the sweep prunes.
     """
     target = Path(path)
     if not target.is_file():
         return {"error": f"no such file: {path}", "tool": "carve_payloads"}
-    # Read in pieces rather than whole: this runs on live samples, and the
-    # upload ceiling above admits 2 GiB of them.
-    hasher = hashlib.sha256()
-    with target.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            hasher.update(block)
-    digest = hasher.hexdigest()
-    destination = _staging_dir() / "carved"
-    for directory in (destination, destination / digest):
-        directory.mkdir(mode=0o700, exist_ok=True)
-    return binary_tools._carve_into(path, destination / digest)
+    digest = _digest_of(target)
+    anchor = sample_digest or digest
+    destination = _carved_tree(anchor)
+    if digest != anchor:
+        destination = destination / digest
+    _staging_dir()
+    for directory in (destination.parent, destination):
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return binary_tools._carve_into(path, destination)
 
 
 @mcp.tool()
@@ -676,11 +803,41 @@ def _prune_staging(base: Path) -> int:
     for entry in base.iterdir():
         try:
             info = entry.lstat()
-            if stat.S_ISDIR(info.st_mode) or info.st_mtime >= cutoff:
+            if stat.S_ISDIR(info.st_mode):
+                continue
+            if info.st_mtime >= cutoff:
                 continue
             entry.unlink()
             removed += 1
         except OSError:  # a file another call already removed
+            continue
+    return removed + _prune_carved(base / CARVED_DIRECTORY, cutoff)
+
+
+def _prune_carved(root: Path, cutoff: float) -> int:
+    """Delete carved payloads past their TTL, and the trees left empty by it.
+
+    The sweep above skips directories, which is right for the staging base —
+    nothing else there is one — and meant the carved trees never expired at
+    all: every run that carved anything left its payloads on disk for the life
+    of the host. Only files this server wrote are unlinked; a symlink is left
+    exactly where it is rather than followed.
+    """
+    removed = 0
+    if not root.is_dir():
+        return 0
+    for tree in sorted(root.rglob("*"), key=lambda entry: len(entry.parts), reverse=True):
+        try:
+            info = tree.lstat()
+            if stat.S_ISDIR(info.st_mode):
+                with contextlib.suppress(OSError):  # a tree still holding payloads
+                    tree.rmdir()
+                continue
+            if stat.S_ISLNK(info.st_mode) or info.st_mtime >= cutoff:
+                continue
+            tree.unlink()
+            removed += 1
+        except OSError:  # an entry another call already removed
             continue
     return removed
 

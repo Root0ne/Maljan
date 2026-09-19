@@ -934,7 +934,7 @@ transport on another host. Two environment variables configure that, and with
 | variable | default | meaning |
 | :-- | :-- | :-- |
 | `MALJAN_STAGING_DIR` | a `maljan-analysis-mcp` directory under the system temp dir | where uploads land |
-| `MALJAN_STAGING_TTL_HOURS` | `24` | how long a staged sample is kept; `0` disables pruning |
+| `MALJAN_STAGING_TTL_HOURS` | `24` | how long a staged sample, and a payload carved out of one, is kept; `0` disables pruning |
 
 The directory is created with mode 0o700 and refused if what is already at that
 path is a symlink or belongs to another user — the default name is predictable
@@ -954,6 +954,14 @@ anything that lands outside the directories they were given:
 * the staging directory `MALJAN_STAGING_DIR` names, where their own uploads
   land, and
 * every directory in `MALJAN_SAMPLE_ROOTS`.
+
+`carved_path` on the `analysis` sidecar is narrower than both, because it is
+the one file argument a *model* chooses rather than the platform: it is held to
+`<staging>/carved/<sha256 of the file the call is pinned to>/` and to that file
+itself, so a run reaches the payloads it carved and nothing another run
+carved or uploaded. One staging directory serves every job a server process
+handles, which is why the base is not the bound. The resolved value must be a
+regular file; a directory, a FIFO, a device or a socket is refused.
 
 | variable | default | meaning | seen by |
 | :-- | :-- | :-- | :-- |

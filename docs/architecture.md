@@ -983,16 +983,40 @@ returns the paths, and with `path` gone there was nothing left to pass one to.
 analysis tools that read a file — `identify_file`, `hashes`, `signing_info`,
 `strings`, `iocs_from_file`, `pe_info`, `elf_info`, `macho_info`, `apk_info`,
 `carve_payloads`, `archive_list`, `document_info`, `yara_scan` and `capa`. It
-is held to the **staging base alone**, not to `MALJAN_SAMPLE_ROOTS`: a relative
-value is read as a name inside it, an absolute one must already be inside it,
-and a traversal, a path outside it and a symlink out of it all land where they
-really point and meet the existing remediation-bearing refusal. Given, it is
-read in place of the sample and the answer carries `read_path` saying which
-file that was; left out, the sample is read. `pin_paths` needs no rule for it —
-a qualified name is not in `SAMPLE_ARG_NAMES`, which is what the naming rule
-was built for. No tool extracts an archive member anywhere today, so a member
-stays the business of the tools that already take a member name; when one does,
-it writes to the same staging directory and the same argument serves it.
+is held to **the carved tree of the file this call is pinned to, and that file
+itself** — `<staging>/carved/<the sample's sha256>/`, which is exactly the key
+`carve_payloads` writes under and which the sidecar derives from the bytes it
+was handed. Not the staging base: one staging directory serves every job on the
+host, `put_sample` writes `<staging>/<sha16>_<name>` into it and every sample's
+carved tree sits beside every other's, so a base-wide bound let a run read
+another run's payload and another run's upload. A sample is adversary-authored
+content this model reads, and it can carry another sample's digest in its own
+bytes beside one instruction to point a tool at it; samples are not only
+malware, either, since an operator submits a suspicious document that may hold
+somebody's data. Two runs of the same sample share one tree, which is the same
+bytes read twice.
+
+Both spellings a model writes are understood — the absolute path
+`carve_payloads` returned, and the tail of it relative to the staging base or
+to the tree — and whichever it is, the resolved path must land inside the tree
+or on the sample. Symlinks are followed on both sides first, so a link planted
+under staging and a climb out of it land where they really point and meet the
+existing remediation-bearing refusal. The value must resolve onto a **regular
+file**: a directory, a FIFO, a device or a socket is refused with its own
+sentence, because a reader that opened a FIFO with no writer would wait for one
+forever. Given, the file is read in place of the sample and the answer carries
+`read_path` saying which; left out, the sample is read.
+
+`pin_paths` needs no rule for it — a qualified name is not in
+`SAMPLE_ARG_NAMES`, which is what the naming rule was built for. A payload
+carved out of a carved payload nests under the sample's own tree rather than
+opening one of its own, so everything a run produces is the one tree it may
+read back and the one tree the staging sweep prunes — which it now does: the
+sweep deleted files and skipped directories, and everything carved lives a
+level down, so carved payloads never expired at all. No tool extracts an
+archive member anywhere today, so a member stays the business of the tools that
+already take a member name; when one does, it writes into the same tree and the
+same argument serves it.
 
 ## Providers
 
@@ -1497,6 +1521,21 @@ this order:
   section. The report's own tool sections are deliberately not in it: they are
   the string sweep arriving under another heading, and a haystack holding them
   would answer yes to everything.
+
+**Validity removes what cannot be the thing; corroboration decides the rest.**
+For a string-derived value the second question is the one that carries the
+weight, and it is meant to. The validity questions are deliberately shallow —
+could anything answer for this host, is this syntax a mailbox, does this name a
+file — because a string sweep produces values nothing can tell apart from the
+real thing by looking. `z@d.setdefault` is a fragment of Python written
+entirely in lower case, and there is no honest rule that separates it from a
+mailbox at a two-label name: the last-label test is a shape rather than a list
+of TLDs for the reason given above, and a list of language keywords or method
+names would be a guess dressed as a check, wrong for every language nobody
+wrote down and wrong the day one of them names a real host. So it is not
+written. Such a value is published only when a second source records it, and a
+reader who finds one in the report's own string table and not in the bundle is
+looking at the rule working.
 
 **What a minted indicator claims** is one function, `minted_indicator_type`,
 for every kind. The sample's own hash indicator is the verdict's word exactly
