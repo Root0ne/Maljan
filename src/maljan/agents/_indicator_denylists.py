@@ -227,6 +227,17 @@ def malformed_hash_in(pattern: str) -> tuple[str, str] | None:
 # a slice of a longer value and is not.
 _VALUE_CHARACTER_RE = re.compile(r"[A-Za-z0-9._\-@:/\\+%~]")
 
+# The punctuation a value is written with and a sentence ends with. Either
+# reading is possible for the same character, and which one it is shows in what
+# follows it: ``a@b.com.`` ends a sentence, ``a@b.com.tr`` is a longer name.
+_TERMINAL_PUNCTUATION = (".", ":", ",")
+
+# A URI scheme and the colon that closes it, at the end of the text before a
+# value. ``mailto:`` introduces a mailbox and ``ssh://`` a host, and neither is
+# part of the value it introduces — while the dot of ``192.168.`` is. Anchored
+# to a boundary of its own so the tail of a longer token cannot pass as one.
+_SCHEME_END_RE = re.compile(r"(?:^|[^A-Za-z0-9._\-@:/\\+%~])[A-Za-z][A-Za-z0-9+.\-]*:$")
+
 
 def whole_value_in(literal: str, haystack: str) -> bool:
     """Whether ``literal`` appears in ``haystack`` as a value of its own.
@@ -236,15 +247,40 @@ def whole_value_in(literal: str, haystack: str) -> bool:
     token happens to spell it. Both are the same mistake: the run recorded
     something else that this value is a slice of. Both arguments are compared
     lowercased, because the corpus is.
+
+    The boundary rule, in one place because both ends read it. A value ends
+    where a character that cannot be part of one begins — and also at a ``.``,
+    ``:`` or ``,`` that nothing continues, because that one is the sentence's
+    and not the value's. A value begins where a character that cannot be part
+    of one ends — and also after a URI scheme's colon, because ``mailto:`` and
+    ``ssh://`` introduce a value rather than extend one. Everything else that
+    could continue a value does: the ``.`` of ``192.168.1.1`` keeps ``168.1.1``
+    from being found in it, which is the whole point of asking.
     """
     lowered = str(literal or "").lower()
     if not lowered:
         return False
     start = haystack.find(lowered)
     while start != -1:
-        before = haystack[start - 1] if start else " "
-        after = haystack[start + len(lowered) : start + len(lowered) + 1] or " "
-        if not _VALUE_CHARACTER_RE.match(before) and not _VALUE_CHARACTER_RE.match(after):
+        if _opens_a_value(haystack, start) and _closes_a_value(haystack, start + len(lowered)):
             return True
         start = haystack.find(lowered, start + 1)
     return False
+
+
+def _opens_a_value(haystack: str, start: int) -> bool:
+    """Whether a value may begin at ``start`` rather than continue a longer one."""
+    if start == 0 or not _VALUE_CHARACTER_RE.match(haystack[start - 1]):
+        return True
+    return _SCHEME_END_RE.search(haystack[:start]) is not None
+
+
+def _closes_a_value(haystack: str, end: int) -> bool:
+    """Whether a value may end at ``end`` rather than run on into a longer one."""
+    after = haystack[end : end + 1]
+    if not after or not _VALUE_CHARACTER_RE.match(after):
+        return True
+    if after not in _TERMINAL_PUNCTUATION:
+        return False
+    following = haystack[end + 1 : end + 2]
+    return not following or not _VALUE_CHARACTER_RE.match(following)
