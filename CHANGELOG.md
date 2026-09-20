@@ -1105,7 +1105,11 @@ change landed on `main`.
   `tool_output_no_room`. That sentence is said once and charged like any
   answer, and the agent's tool phase ends there: further calls are not run, the
   run-state block carries the fact every turn, and the loop is salvaged into an
-  answer from what it already gathered with `no_room` on its budget record. A positive value is an explicit operator cap and
+  answer from what it already gathered with `no_room` on its budget record.
+  Both notices come out of the tool budget — the window less the room kept back
+  for the model's reply — and are withheld when they would not fit, so the
+  reserve the forced synthesis writes its answer in is never spent on saying
+  that the room ran out. A positive value is an explicit operator cap and
   behaves exactly as this setting always did. The window itself is learned free
   of charge and without asking the operator anything:
   llama.cpp's `/props`, Ollama's `/api/show`, an OpenAI-compatible

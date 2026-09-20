@@ -115,18 +115,23 @@ class TestALoopCannotOutspendItsOwnWindow:
         assert spent < _whole_loop_chars(32768)
 
 
+# A standing run-state block, charged once because it is replaced on every
+# model turn rather than appended to the conversation.
+_RUN_STATE_BLOCK = 200
+
+
 def _loop(window: int, rounds: int, preload: int = 0) -> int:
     """One agent's conversation after ``rounds``, in tokens, notices included.
 
     Drives the real budget the way the guardrail and the tool wrapper do:
     an answer is capped and charged, the first cap of zero is met with the
-    sentence, and every call after that is refused with the short notice —
-    charged too, and withheld when even it would not fit.
+    sentence, and every call after that is refused with the short notice.
+    Both notices are charged, and both are withheld when they would not fit.
     """
     sentence = len(cw.no_room_sentence(120_000))
     ended = len(cw.TOOL_PHASE_ENDED_NOTICE)
     budget = cw.ContextBudget(cw.WindowFact(window, cw.PROBED, "props"), reply_tokens=8192)
-    held = preload * cw.CHARS_PER_TOKEN
+    held = preload * cw.CHARS_PER_TOKEN + _RUN_STATE_BLOCK + len(cw.NO_ROOM_RUN_STATE)
     with cw.answering_for("static"):
         budget.note_conversation("static", held)
         for _ in range(rounds):
@@ -137,42 +142,70 @@ def _loop(window: int, rounds: int, preload: int = 0) -> int:
                 continue
             cap = budget.chars_for_one_answer()
             if cap == 0:
+                budget.note_no_room()
                 if budget.room_for(sentence, "static"):
                     budget.charge(sentence)
                     held += sentence
-                budget.note_no_room()
             else:
                 held += cap
+    assert held == budget.held_chars("static"), (held, budget.held_chars("static"))
     return held // cw.CHARS_PER_TOKEN
 
 
-class TestNothingTheplatformHandsAModelOutrunsItsWindow:
-    """Answers *and* refusals, over every shipped window, at three loop lengths.
+class TestTheReplyReserveIsNeverSpentOnSayingTheRoomRanOut:
+    """Answers *and* refusals stay inside the tool budget, not just the window.
 
-    The round that introduced the refusal sentence left it uncharged, and 274
-    characters a round put a 4,096-token window 346 tokens past itself at
-    twenty rounds and a shipped 8,192 row 746 past at forty. Everything the
-    platform hands a model is charged now, and a refusal that would not fit is
-    not handed over at all.
+    Two rounds of this: first the refusal sentence was uncharged, which put a
+    4,096-token window past itself; then it was charged but measured against
+    the whole window, so on the shipped 8,192 rows the refusals took half the
+    reply reserve and on 4,096 three quarters — leaving the forced synthesis,
+    which is this design's own answer to a full conversation, 257 tokens to
+    write in. Both notices are now measured against the window less the
+    reserve, which is the same budget a cap comes out of.
     """
 
     ROUNDS = (20, 40, 60)
 
-    def test_no_shipped_window_is_reached_at_any_loop_length(self) -> None:
+    def test_the_tool_budget_is_never_exceeded_on_any_shipped_window(self) -> None:
         for window in _shipped_windows():
+            budget = _whole_loop_chars(window) // cw.CHARS_PER_TOKEN
             for rounds in self.ROUNDS:
-                assert _loop(window, rounds) < window, (window, rounds)
+                assert _loop(window, rounds) <= budget, (window, rounds)
 
-    def test_a_loop_that_starts_with_a_chunk_in_it_stays_inside_too(self) -> None:
+    def test_the_whole_reply_reserve_survives_the_longest_loop(self) -> None:
+        for window in _shipped_windows():
+            reserve = cw.reply_reserve_tokens(window, 8192)
+            assert window - _loop(window, 60) >= reserve, window
+
+    def test_a_loop_that_starts_with_a_chunk_in_it_keeps_its_reserve_too(self) -> None:
         for window, preload in ((32768, 24000), (32768, 4000), (16384, 4000), (8192, 2000)):
+            reserve = cw.reply_reserve_tokens(window, 8192)
             for rounds in self.ROUNDS:
-                assert _loop(window, rounds, preload) < window, (window, preload, rounds)
+                assert window - _loop(window, rounds, preload) >= reserve, (window, preload)
 
-    def test_the_refusal_is_withheld_once_even_it_would_not_fit(self) -> None:
+    def test_a_preload_past_the_budget_is_handed_nothing_at_all(self) -> None:
+        """The operator put more prompt in than the window holds; nothing is added."""
+        held = [_loop(4096, rounds, 4000) for rounds in self.ROUNDS]
+        assert len(set(held)) == 1, held
+
+    def test_a_wide_fan_out_stays_inside_the_tool_budget_on_a_tiny_window(self) -> None:
         budget = cw.ContextBudget(cw.WindowFact(4096, cw.PROBED, "props"), reply_tokens=8192)
         with cw.answering_for("static"):
-            budget.note_conversation("static", 4096 * cw.CHARS_PER_TOKEN)
+            budget.note_conversation("static", 0)
+            spent = sum(budget.chars_for_one_answer() for _ in range(128))
+        assert spent <= budget.tool_budget_chars()
+
+    def test_both_notices_are_withheld_once_they_would_reach_the_reserve(self) -> None:
+        budget = cw.ContextBudget(cw.WindowFact(8192, cw.PROBED, "props"), reply_tokens=8192)
+        with cw.answering_for("static"):
+            budget.note_conversation("static", budget.tool_budget_chars())
             assert budget.room_for(len(cw.TOOL_PHASE_ENDED_NOTICE)) is False
+            assert budget.room_for(len(cw.no_room_sentence(1))) is False
+
+    def test_the_budget_a_notice_is_measured_against_is_not_the_window(self) -> None:
+        budget = cw.ContextBudget(cw.WindowFact(8192, cw.PROBED, "props"), reply_tokens=8192)
+        assert budget.tool_budget_chars() == (8192 - budget.reply_tokens) * cw.CHARS_PER_TOKEN
+        assert budget.tool_budget_chars() < 8192 * cw.CHARS_PER_TOKEN
 
     def test_an_unknown_window_never_withholds_a_refusal(self) -> None:
         """Nothing was measured, so nothing may be refused on its strength."""

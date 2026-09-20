@@ -124,8 +124,14 @@ class TestAConversationWithNoRoomLeft:
 
     @staticmethod
     def _full_budget() -> Any:
+        """A conversation with no room for an answer, and room for the sentence.
+
+        Nine hundred characters left: under ``NO_ROOM_BELOW_CHARS``, so the cap
+        is zero and the tool phase ends, and over the sentence, so it is said
+        rather than withheld.
+        """
         budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "props"), reply_tokens=8192)
-        budget.note_conversation("static", (32768 - 8192) * cw.CHARS_PER_TOKEN)
+        budget.note_conversation("static", budget.tool_budget_chars() - 900)
         return budget
 
     def test_the_model_is_told_rather_than_handed_a_fragment(self) -> None:
@@ -208,6 +214,21 @@ class TestAConversationWithNoRoomLeft:
         assert said == cw.TOOL_PHASE_ENDED_NOTICE
         assert recorder.entries == [], "a refused call is not citable evidence"
 
+    def test_the_sentence_is_withheld_when_it_would_reach_the_reserve(self) -> None:
+        """The long sentence is gated the way the short line is, on the same budget."""
+        from maljan.agents.mcp_client import MCPLangChainToolkit
+
+        budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "props"), reply_tokens=8192)
+        budget.note_conversation("static", budget.tool_budget_chars())
+        toolkit = MCPLangChainToolkit(max_output_chars=0, context_budget=budget)
+
+        with cw.answering_for("static"):
+            said = toolkit._apply_output_guardrail(_answer(400))
+
+        assert said == ""
+        assert budget.held_chars("static") <= budget.tool_budget_chars()
+        assert budget.out_of_room("static") is True, "the phase ends whether or not it was said"
+
     def test_a_refusal_that_would_not_fit_is_not_handed_over(self) -> None:
         from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
 
@@ -241,6 +262,90 @@ class TestAConversationWithNoRoomLeft:
 
         toolkit = MCPLangChainToolkit(max_output_chars=6000, context_budget=self._full_budget())
         assert toolkit._apply_output_guardrail(_answer(400)) != cw.no_room_sentence(0)
+
+
+class TestTheGuardrailIsAlwaysReachedThroughTheWrapper:
+    """A charge and a mark belong to an agent, and the wrapper is what names one.
+
+    The guardrail is two layers below the agent, behind a toolkit every agent
+    of the job shares, so it learns whose answer it is sizing from the context
+    the tool wrapper sets. Nothing reaches a guardrail any other way today.
+    Were that to change, the failure would be the bad kind — the charge lands
+    under a key nobody reads, the mark never reaches the agent, its tool phase
+    never ends and the long sentence is repeated on every call — so the
+    invariant is pinned here and the breach is loud rather than silent.
+    """
+
+    @staticmethod
+    def _tool(budget: Any) -> Any:
+        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+
+        def strings(path: str) -> str:
+            """List printable runs."""
+            return _answer(400)
+
+        recorder = EvidenceRecorder("static")
+        return record_tools([_langchain_tool(strings, "strings")], recorder, context_budget=budget)[
+            0
+        ]
+
+    def test_every_place_that_hands_tools_to_a_loop_wraps_them(self) -> None:
+        """The two callers, and neither hands a raw tool to a model."""
+        import inspect
+
+        from maljan.agents import base_agent, judge_agent
+
+        for module in (base_agent, judge_agent):
+            source = inspect.getsource(module)
+            assert "record_tools(" in source, module.__name__
+
+    def test_the_wrapper_names_the_agent_for_the_length_of_the_call(self) -> None:
+        """What the guardrail two layers down reads to charge the right agent."""
+        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+
+        seen: list[str] = []
+
+        def strings(path: str) -> str:
+            """List printable runs."""
+            seen.append(cw.current_agent())
+            return "{}"
+
+        wrapped = record_tools([_langchain_tool(strings, "strings")], EvidenceRecorder("static"))[0]
+
+        assert cw.current_agent() == ""
+        wrapped.invoke({"path": "/samples/evil.exe"})
+
+        assert seen == ["static"]
+        assert cw.current_agent() == "", "the name outlived the call"
+
+    def test_a_charge_made_through_the_wrapper_lands_on_that_agent(self) -> None:
+        budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "props"), reply_tokens=8192)
+        budget.note_conversation("static", 0)
+        budget.note_conversation("network", 0)
+
+        with cw.answering_for("static"):
+            budget.charge(1200)
+
+        assert budget.held_chars("static") == 1200
+        assert budget.held_chars("network") == 0, "the charge landed on somebody else"
+
+    def test_a_guardrail_reached_outside_the_wrapper_is_not_filed_under_nothing(
+        self, caplog: Any
+    ) -> None:
+        """The failure mode, made loud: the mark still reaches an agent."""
+        import logging
+
+        from maljan.agents.mcp_client import MCPLangChainToolkit
+
+        budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "props"), reply_tokens=8192)
+        budget.note_conversation("static", (32768 - 8192) * cw.CHARS_PER_TOKEN)
+        toolkit = MCPLangChainToolkit(max_output_chars=0, context_budget=budget)
+
+        with caplog.at_level(logging.WARNING):
+            toolkit._apply_output_guardrail(_answer(400))
+
+        assert budget.out_of_room("static") is True, "the phase would never have ended"
+        assert any("outside the wrapper" in record.message for record in caplog.records)
 
 
 class TestALoopReportsWhatItHolds:

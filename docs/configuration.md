@@ -493,11 +493,34 @@ The share decides how large the first answer is and how quickly they shrink: at
 32,768 tokens the first is 9,216 characters and about twelve clear the floor;
 at 131,072 the first is 46,080; at a million, 371,928. At the floor the answer
 meets the structural shortener exactly as any other does and carries the same
-notice naming the arguments that would narrow it. Below about a thousand
-characters an answer cannot survive its own notice, so nothing is handed over:
-the model is told, in one sentence, that the conversation has no room left for
-a tool answer, the whole answer stays on the evidence ledger under the call's
-id, and the run summary counts it.
+notice naming the arguments that would narrow it.
+
+**When the room runs out, the tool phase ends.** Below about a thousand
+characters an answer cannot survive its own notice, so nothing of it is handed
+over. The model is told once, in one sentence, that the conversation has no
+room left for a tool answer; the whole answer stays on the evidence ledger
+under the call's id, and the run summary counts it as `tool_output_no_room`.
+From there that agent's tool calls are **not run** — a server's time is not
+spent on an answer with nowhere to go — and a call made anyway returns one
+short line. The run-state block carries the same fact on every model turn,
+replaced rather than appended, so it costs the same whether the loop reads it
+once or forty times. The loop then ends the way a repeating loop already does:
+`no_room` on its budget record with the reason, and the forced synthesis turns
+what was gathered into the answer instead of a "need more steps" non-answer.
+
+Both notices come out of the **tool budget** — the window less the room kept
+back for the model's reply — and are withheld when they would not fit. That is
+what leaves the reply reserve whole: the forced synthesis above is this
+design's answer to a full conversation, and spending its room on saying that
+the room ran out would take it from the one thing left to do. Measured over
+every window the vendored table ships, at twenty, forty and sixty rounds and
+with a chunk preloaded: nothing reaches the tool budget, and the whole reserve
+survives — 8,192 tokens on a 131,072-token window, 2,048 on 8,192, 1,024 on
+4,096.
+
+What is outside that guarantee is the model's own output: its tool requests and
+its prose are not the platform's to cap, and on a very small window they reach
+the window before the platform's text does.
 
 The window itself is learned free of charge and without asking the operator
 anything. In order:

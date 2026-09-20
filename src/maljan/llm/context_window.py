@@ -64,9 +64,12 @@ measured rather than asserted:
   turn's room between them however wide its fan-out, and one analyst's turn
   cannot clear the total another is still spending against.
 
-Everything this module hands a model is charged, refusals included, and a
-refusal is withheld when it would not fit. Past the point where there is no
-room for an answer the agent is told once and its tool phase ends.
+Everything this module hands a model is charged, refusals included, and both
+are measured against the same budget: the window less the room kept back for
+the model's reply. Past the point where there is no room for an answer the
+agent is told once, its tool phase ends, and the reserve is still whole —
+which matters because the forced synthesis that answers for a full
+conversation is written in it.
 """
 
 from __future__ import annotations
@@ -199,7 +202,9 @@ ANSWER_SHARE = 0.125
 #
 # A run where this bound is visible: the smallest cap in force equals this
 # number. A run where the room ran out entirely is visible too — see
-# :data:`NO_ROOM_BELOW_CHARS` and ``tool_output_no_room`` on the ledger.
+# :data:`NO_ROOM_BELOW_CHARS` and ``tool_output_no_room`` on the ledger. The
+# room that runs out is the tool budget, not the window: an agent's tool phase
+# ends with the whole reply reserve unspent, which is what the salvage needs.
 MIN_TOOL_OUTPUT_CHARS = 2000
 
 # What is held back for the model's own reply when nothing configures it. The
@@ -312,15 +317,21 @@ def derive_tool_output_chars(
     8,192-token window finished 5,248 tokens past the window it was sizing
     itself against.
 
-    The claim is about the cap, and about the answers a cap governs. The
-    platform's own refusals are not caps and are not free: they are charged
-    through :meth:`ContextBudget.charge` and withheld entirely when they would
-    not fit (:meth:`ContextBudget.room_for`), which is what keeps a loop that
-    has stopped being given answers from walking past its window a line at a
-    time. Measured over every window the vendored table ships, at 20, 40 and
-    60 rounds, empty and preloaded: nothing reaches its window. What the
-    refusals do spend, past the point where answers stop, is the reply
-    reserve.
+    The platform's own refusals are not caps and are not free: they are
+    charged through :meth:`ContextBudget.charge` and withheld entirely when
+    they would not fit, and what they are measured against is the same tool
+    budget a cap comes out of — the window less the reply reserve
+    (:meth:`ContextBudget.room_for`). So the whole of what this platform hands
+    a model, answers and refusals together, stays inside the tool budget, and
+    the reserve the forced synthesis writes its answer in is never spent on
+    saying that the room ran out. Measured over every window the vendored
+    table ships, at 20, 40 and 60 rounds, empty and preloaded: nothing reaches
+    the tool budget, let alone the window.
+
+    What is outside the claim is the model's own output — its tool requests and
+    its prose. The platform does not hand those over and cannot cap them, and
+    on a very small window they exceed the window before the platform's text
+    does.
 
     A window of zero — nothing known — is the floor, because nothing is being
     measured and the caller is not deriving anything from it.
@@ -658,8 +669,15 @@ def _body_within_bounds(answer: httpx.Response, what: str) -> bytes | None:
 
 
 def _read_answer(ask: Ask, answer: httpx.Response, model: str) -> tuple[int, str]:
-    """The window this answer reports, or zero."""
+    """The window this answer reports, or zero.
+
+    The response is streamed, so a body nobody reads is closed rather than
+    left to the client's own teardown: a 404 is the ordinary answer to
+    ``/info`` on a llama.cpp server, and three of them a plan is three
+    connections held for no reason.
+    """
     if answer.status_code >= 400:
+        answer.close()
         return 0, ""
     body = _body_within_bounds(answer, ask.what)
     if body is None:
@@ -1276,23 +1294,66 @@ class ContextBudget:
         uncharged is how a loop that had stopped being given answers kept
         growing with nothing accounting for it.
         """
-        key = str(agent) or current_agent()
         with self._lock:
+            key = self._whose(agent)
             self._handed[key] = self._handed.get(key, 0) + max(0, int(chars))
 
     def note_no_room(self, agent: str = "") -> None:
         """Record that this agent has been told the room is gone."""
         with self._lock:
-            self._no_room.add(str(agent) or current_agent())
+            self._no_room.add(self._whose(agent))
+
+    def _whose(self, agent: str) -> str:
+        """The agent a charge or a mark belongs to. Called with the lock held.
+
+        The invariant: a guardrail is reached from inside the tool wrapper,
+        which names the agent for the length of the call
+        (:func:`answering_for`). Nothing in the tree reaches one any other way
+        — both places that wrap tools wrap every tool, and the name survives
+        the thread the guardrail is handed to.
+
+        If that ever stopped being true the failure would be the bad kind: the
+        charge lands under a key nobody reads, the mark never reaches the
+        agent, its tool phase never ends and the long sentence is repeated on
+        every call. So an unnamed call is not quietly filed under the empty
+        string. It is attributed to the conversation the cap was computed
+        against — the fullest one — and it says so, loudly enough to find.
+        """
+        named = str(agent) or current_agent()
+        if named:
+            return named
+        fullest = max(self._held, key=lambda key: self._held[key], default="")
+        logger.warning(
+            "a tool answer was sized outside the wrapper that names its agent; "
+            "the charge is attributed to the fullest conversation (%r).",
+            fullest,
+        )
+        return fullest
+
+    def tool_budget_chars(self) -> int:
+        """Everything a conversation may hold before the reply reserve begins."""
+        return max(0, self.window.tokens - self.reply_tokens) * self.chars_per_token
 
     def room_for(self, chars: int, agent: str = "") -> bool:
-        """Whether ``chars`` of text would still fit inside the served window.
+        """Whether ``chars`` of the platform's own text still fits the tool budget.
 
-        Asked about the platform's own notices rather than about an answer.
-        A refusal is text like any other, and a loop whose model keeps asking
-        after its tool phase ended would otherwise grow by one line a round
-        with nothing able to stop it. Where even a line does not fit, the
-        honest thing to hand over is nothing.
+        Asked about a notice rather than about an answer. A refusal is text
+        like any other, and a loop whose model keeps asking after its tool
+        phase ended would otherwise grow by one line a round with nothing able
+        to stop it. Where a line does not fit, the honest thing to hand over is
+        nothing.
+
+        **Measured against the window less the reply reserve, not against the
+        window.** The reserve is the room the forced synthesis writes its
+        answer in, and that synthesis is this design's own answer to a
+        conversation that has run out — so spending the reserve on saying that
+        it has run out takes the room from the one thing left to do. Measured
+        against the whole window instead, the refusals took half the reserve on
+        a shipped 8,192-token row and three quarters of it on 4,096, which left
+        the salvage 257 tokens to write in. A cap already comes out of this
+        same budget, so with the notices inside it too, the whole of what the
+        platform hands a model stays in the tool budget and the reserve is
+        untouched.
 
         Always true where no window was measured: there is nothing to measure
         against, and refusing to speak on the strength of a number nobody has
@@ -1300,9 +1361,7 @@ class ContextBudget:
         """
         if not self.derives:
             return True
-        return (
-            self.held_chars(agent) + max(0, int(chars)) <= self.window.tokens * self.chars_per_token
-        )
+        return self.held_chars(agent) + max(0, int(chars)) <= self.tool_budget_chars()
 
     def out_of_room(self, agent: str = "") -> bool:
         """Whether this agent's tool phase has ended for want of room."""

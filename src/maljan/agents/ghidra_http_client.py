@@ -305,14 +305,24 @@ class GhidraHTTPClient:
         Charged to the budget, because it is text that enters the conversation
         like any answer, and the agent is marked so its tool phase ends rather
         than paying for this sentence on every remaining round.
+
+        Withheld when it would not fit, on the same rule as the shorter line a
+        later call gets: a conversation already at its budget took a constant
+        few hundred characters to be told it had none, which is the one claim
+        this design makes about its own text and has to hold for the long
+        sentence as well as the short one. The agent is marked either way —
+        the phase ends whether or not there was room to say so.
         """
         from maljan.llm.context_window import ContextBudget, no_room_sentence
 
         said = no_room_sentence(chars_in)
         budget = getattr(self, "_context_budget", None)
-        if isinstance(budget, ContextBudget):
-            budget.charge(len(said))
-            budget.note_no_room()
+        if not isinstance(budget, ContextBudget):
+            return said
+        budget.note_no_room()
+        if not budget.room_for(len(said)):
+            return ""
+        budget.charge(len(said))
         return said
 
     def _apply_output_guardrail(self, output: str, narrowing: Sequence[str] = ()) -> str:
