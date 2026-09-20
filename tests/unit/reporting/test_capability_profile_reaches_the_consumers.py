@@ -69,12 +69,25 @@ class TestTheMarkdownReport:
 
     def test_the_row_says_how_much_ordinary_software_the_same_rule_fires_on(self) -> None:
         """A deterministic association printed without its base rate reads as a
-        finding. The last cell is the measurement, with the corpus named."""
+        finding. The last cell is the measurement, with the corpus named and the
+        support beside it: a rule that is rare in ordinary software and has
+        fired on no held-out malware has told a reader both halves or neither.
+        """
         report, _entry_id = _report()
         md = MarkdownRenderer().render(report)
         assert (
             "fires on 0.5% of benign software (13 of 2730 freely distributed Windows binaries"
         ) in md
+        assert "held-out malware profiles support it" in md
+
+    def test_the_profile_line_is_no_longer_a_count_with_nothing_to_weigh_it(self) -> None:
+        """``process_injection ×3`` says nothing until a reader knows the group
+        is on two ordinary Windows binaries in three."""
+        report, _entry_id = _report()
+        md = MarkdownRenderer().render(report)
+        assert "process_injection ×3 (65.6%)" in md
+        assert "The bracketed share is how much of 2730 freely distributed Windows" in md
+        assert "nothing about how likely this sample is to be benign" in md
 
 
 class TestTheNarrativePrompt:

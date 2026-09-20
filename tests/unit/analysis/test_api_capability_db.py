@@ -320,6 +320,52 @@ class TestAnAssociationCarriesWhatItWasMeasuredAt:
         assert _measured({"seen_on_benign_percent": 0.0, "seen_on_benign_files": 0}) is not None
 
 
+class TestTheFloorIsReadStrictlyRatherThanCoerced:
+    """``min_apis`` is what stands between an import and a claim.
+
+    The data file is hand-editable and the loader used to run it through
+    ``max(1, int(...))``, which turned a ``0``, a negative, ``true`` or ``1.4``
+    into 1 — and a floor of one on a sixteen-name rule makes it fire on any
+    single one of them. A floor of one is allowed only where the rule names one
+    API, which is the shape the tool's own documentation promises.
+    """
+
+    def setup_method(self) -> None:
+        reset_cache()
+
+    @staticmethod
+    def _row(**over: object) -> dict:
+        row = {
+            "technique_id": "T1055",
+            "name": "Process Injection",
+            "apis": ["WriteProcessMemory", "CreateRemoteThread"],
+            "min_apis": 2,
+        }
+        row.update(over)
+        return row
+
+    def test_a_floor_that_is_not_a_whole_number_of_names_drops_the_rule(self) -> None:
+        from maljan.analysis.api_capability_db import _parse_rule
+
+        assert _parse_rule(self._row()) is not None
+        for bad in (0, -1, True, 1.4, "2", None):
+            assert _parse_rule(self._row(min_apis=bad)) is None, bad
+
+    def test_one_name_is_a_floor_only_for_a_rule_that_names_one(self) -> None:
+        from maljan.analysis.api_capability_db import _parse_rule
+
+        assert _parse_rule(self._row(min_apis=1)) is None
+        alone = _parse_rule(self._row(min_apis=1, apis=["IcmpSendEcho"]))
+        assert alone is not None and alone.min_apis == 1
+
+    def test_the_shipped_catalogue_has_exactly_one_such_rule(self) -> None:
+        table = load_api_attck_map(_ATTCK)
+        assert table is not None
+        single = [r for r in table.techniques if r.min_apis == 1]
+        assert [r.technique_id for r in single] == ["T1095"]
+        assert len(single[0].apis) == 1
+
+
 class TestALabelWaitsForTheCombinationThatEarnsIt:
     """One labelled category per platform, and each waits for a second name.
 

@@ -307,12 +307,28 @@ class MarkdownRenderer:
         if static.api_capabilities:
             ordered = sorted(static.api_capabilities.items(), key=lambda kv: -kv[1])
             cited = ", ".join(static.api_capabilities_evidence_ids)
+            rates = static.api_capability_rates
+
+            def _profile(category: str, count: int) -> str:
+                share = rates.get(category)
+                return f"{category} ×{count}" + (f" ({share:.1f}%)" if share is not None else "")
+
             lines.append(
                 "**Import capability profile**"
                 + (f" ({cited})" if cited else "")
                 + ": "
-                + ", ".join(f"{cat} ×{count}" for cat, count in ordered)
+                + ", ".join(_profile(cat, count) for cat, count in ordered)
             )
+            if static.api_capability_corpus:
+                # Said once rather than under every category. A count of
+                # imports in a group is not a fact about the sample until a
+                # reader knows how much ordinary software is in the same group.
+                lines.append("")
+                lines.append(
+                    "_The bracketed share is how much of "
+                    f"{static.api_capability_corpus} the category appears on; it says "
+                    "nothing about how likely this sample is to be benign._"
+                )
             lines.append("")
 
         if static.api_technique_hits:
@@ -351,8 +367,8 @@ class MarkdownRenderer:
                 # both. A producer that has no such label leaves the cell bare.
                 lines.append(
                     f"| {hit.get('technique_id', '?')} | {hit.get('name', '-')} "
-                    f"| {hit.get('rule') or '-'} | {source} | {apis} "
-                    f"| {hit.get('benign_rate') or 'not measured'} |"
+                    f"| {_cell(hit.get('rule')) or '-'} | {source} | {apis} "
+                    f"| {_cell(hit.get('benign_rate')) or 'not measured'} |"
                 )
             lines.append("")
 
@@ -1111,6 +1127,20 @@ def _unmapped_behaviour_lines(report: MalwareReport) -> list[str]:
         "asked for. They are not ATT&CK techniques and are not counted as any._"
     )
     return lines
+
+
+def _cell(value: Any) -> str:
+    """One table cell's text, with the column separator escaped out of it.
+
+    The strings in the import-technique table come from a vendored catalogue
+    today, so nothing in them is a pipe — but they are free text reaching a
+    Markdown table through a tool payload, and a single ``|`` anywhere in one
+    splits the row and shifts every column after it. Cheaper to escape than to
+    trust the producer.
+    """
+    if value is None:
+        return ""
+    return str(value).replace("|", "\\|").replace("\n", " ")
 
 
 def _truncate(value: str, length: int) -> str:

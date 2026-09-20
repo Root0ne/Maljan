@@ -35,8 +35,11 @@ same corpus can be measured again after the files are gone. An inventory is
 gzipped JSON lines, one object per binary, and the two fields that matter are
 ``sha256`` and ``imports`` — anything else in the row is carried along and
 ignored, so an inventory built elsewhere works as long as it has those two.
-Deduplication is by ``sha256``: a suite that ships the same runtime DLL in
-twenty packages is one binary, not twenty, which is what the percentages are of.
+Deduplication is by ``sha256`` on both platforms: a suite that ships the same
+runtime library in twenty packages is one binary, not twenty, which is what the
+percentages are of. On Linux that is beside the symlink skip, not instead of it
+— a multicall binary behind twenty names has twenty paths and one inode, and a
+copied library has two of each.
 
 Usage::
 
@@ -72,21 +75,20 @@ from maljan.tools.knowledge import (  # noqa: E402
 )
 
 
-def elf_imports(path: Path) -> list[str] | None:
+def elf_imports(blob: bytes) -> list[str] | None:
     """The undefined ``.dynsym`` names of one ELF, or ``None`` when it is not one.
 
     Undefined is what makes a symbol an import: a defined one is the binary's
     own code, and counting it would credit a library with using itself.
+
+    Takes the bytes rather than the path, as ``pe_imports`` does, so the caller
+    reads each file once and can hash what it read.
     """
     try:
         from elftools.elf.elffile import ELFFile
         from elftools.elf.sections import SymbolTableSection
     except ImportError:  # pragma: no cover - the analysis extra is not installed
         raise SystemExit("this needs pyelftools; run it with the tools extra") from None
-    try:
-        blob = path.read_bytes()
-    except OSError:
-        return None
     if blob[:4] != b"\x7fELF":
         return None
     try:
@@ -166,7 +168,9 @@ def walk_elf(roots: list[str]) -> Iterator[dict]:
     """One row per ELF under the given directories.
 
     Symlinks are skipped so a multicall binary behind twenty names is counted
-    once rather than twenty times, which is what the percentages are of.
+    once rather than twenty times, and the digest goes on the row so a copy
+    that is not a symlink is counted once too — the percentages are of distinct
+    binaries, not of paths.
     """
     for root in roots:
         base = Path(root)
@@ -176,9 +180,17 @@ def walk_elf(roots: list[str]) -> Iterator[dict]:
         for entry in sorted(base.rglob("*")):
             if not entry.is_file() or entry.is_symlink():
                 continue
-            names = elf_imports(entry)
+            try:
+                blob = entry.read_bytes()
+            except OSError:
+                continue
+            names = elf_imports(blob)
             if names:
-                yield {"name": entry.name, "imports": names}
+                yield {
+                    "name": entry.name,
+                    "sha256": hashlib.sha256(blob).hexdigest(),
+                    "imports": names,
+                }
 
 
 def walk_pe(roots: list[str]) -> Iterator[dict]:

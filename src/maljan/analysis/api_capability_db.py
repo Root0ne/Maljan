@@ -20,9 +20,12 @@ case-consistent: forwarded exports and ordinal-resolved names routinely differ
 in case from the canonical MSDN spelling.
 
 Degradation is the point of the fallback path: a missing or malformed data file
-logs and returns ``None``, and ``pe_extractor`` then falls back to its hardcoded
-51-entry table. An analysis that loses depth is acceptable; an analysis that
-fails because a JSON file moved is not.
+logs and returns ``None``, and ``tools.knowledge.api_capability`` — the one
+consumer, since the sidecar migration moved the import layer behind it — answers
+with empty rows and a ``reason`` naming the file. An analysis that loses depth
+is acceptable; an analysis that fails because a JSON file moved is not. A single
+malformed row degrades the same way and no further: it is dropped with a warning
+and the rest of the catalogue loads.
 """
 
 from __future__ import annotations
@@ -548,12 +551,28 @@ def _parse_rule(row: Any) -> TechniqueRule | None:
         return None
 
     try:
-        min_apis = max(1, int(row.get("min_apis", 2)))
         conf_base = float(row.get("confidence_base", 0.40))
         conf_max = float(row.get("confidence_max", 0.60))
     except (TypeError, ValueError):
         logger.warning("api-attck: %s has non-numeric thresholds — skipped.", tid)
         return None
+
+    # ``min_apis`` is what stands between "this binary imports one name the
+    # catalogue knows" and "this binary performs the technique", so it is read
+    # strictly rather than coerced. It used to be ``max(1, int(...))``, which
+    # turned a hand-edited ``0``, a negative, ``true`` or ``1.4`` into 1 — and
+    # 1 on a sixteen-name rule makes it fire on any one of them.
+    floor = row.get("min_apis", 2)
+    if isinstance(floor, bool) or not isinstance(floor, int) or floor < 1:
+        logger.warning("api-attck: %s has a min_apis of %r — skipped.", tid, floor)
+        return None
+    # A floor of one is allowed only where the single name *is* the act, which
+    # a rule states by naming nothing else. Anything wider asking for one name
+    # is the data file having drifted from what the tool documents.
+    if floor == 1 and len(apis) > 1:
+        logger.warning("api-attck: %s asks for one of %d names — skipped.", tid, len(apis))
+        return None
+    min_apis = floor
 
     # The ceiling is enforced here as well as in the builder, because the data
     # file is editable in place and a hand-edited 0.95 would otherwise let an

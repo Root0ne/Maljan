@@ -65,7 +65,19 @@ class TestWhatTheScriptReads:
         assert list(_script().walk_elf([str(tmp_path / "absent")])) == []
 
     def test_a_file_that_is_not_an_elf_yields_nothing(self, corpus: Path) -> None:
-        assert _script().elf_imports(corpus / "not-an-elf") is None
+        assert _script().elf_imports((corpus / "not-an-elf").read_bytes()) is None
+
+    def test_a_copy_that_is_not_a_symlink_is_counted_once_too(self, tmp_path: Path) -> None:
+        """Skipping symlinks catches a multicall binary behind twenty names and
+        misses a package that ships the same library twice. The percentages are
+        of distinct binaries, so both platforms deduplicate on the digest."""
+        script = _script()
+        blob = _elf_with_imports("ptrace", "process_vm_writev", "open")
+        (tmp_path / "one").write_bytes(blob)
+        (tmp_path / "a-copy-of-one").write_bytes(blob)
+        (tmp_path / "other").write_bytes(_elf_with_imports("open", "read"))
+        read = [row["name"] for row in script.corpus([str(tmp_path)], "linux")]
+        assert read == ["a-copy-of-one", "other"]
 
 
 class TestWhatTheScriptCounts:

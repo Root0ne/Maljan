@@ -259,21 +259,37 @@ export default function StaticTab() {
             </div>
           )}
           {capabilityProfile.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-2 items-center">
-              {capabilityProfile.map(([cat, count]) => (
-                <span
-                  key={cat}
-                  className="text-[11px] px-1.5 py-0.5 rounded bg-bg-hover text-text-secondary font-mono"
-                >
-                  {cat} ×{count}
-                </span>
-              ))}
-              {(staticData.api_capabilities_evidence_ids ?? []).length > 0 && (
-                <span className="text-[11px] text-text-muted font-mono">
-                  from {(staticData.api_capabilities_evidence_ids ?? []).join(", ")}
-                </span>
+            <>
+              <div className="flex flex-wrap gap-1.5 mt-2 items-center">
+                {capabilityProfile.map(([cat, count]) => {
+                  const share = (staticData.api_capability_rates ?? {})[cat];
+                  return (
+                    <span
+                      key={cat}
+                      className="text-[11px] px-1.5 py-0.5 rounded bg-bg-hover text-text-secondary font-mono"
+                    >
+                      {cat} ×{count}
+                      {typeof share === "number" && ` (${share.toFixed(1)}%)`}
+                    </span>
+                  );
+                })}
+                {(staticData.api_capabilities_evidence_ids ?? []).length > 0 && (
+                  <span className="text-[11px] text-text-muted font-mono">
+                    from {(staticData.api_capabilities_evidence_ids ?? []).join(", ")}
+                  </span>
+                )}
+              </div>
+              {/* Said once rather than on every chip. A count of imports in a
+                * group is not a fact about the sample until a reader knows how
+                * much ordinary software is in the same group. */}
+              {staticData.api_capability_corpus && (
+                <div className="text-[11px] text-text-muted mt-1.5">
+                  The bracketed share is how much of {staticData.api_capability_corpus} the
+                  category appears on; it says nothing about how likely this sample is to be
+                  benign.
+                </div>
               )}
-            </div>
+            </>
           )}
           {staticData.obfuscation_indicators.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-1">
