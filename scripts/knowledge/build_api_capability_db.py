@@ -1524,15 +1524,28 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     # more often on malware than on ordinary software. Those fifteen are named
     # where they used to stand, so the same rule is not written twice.
     #
-    # Three more are gone for a different reason, and it is the harder one. A
-    # rule can carry information and still not be worth a reader's attention: a
-    # reference association earns its place by changing what a reader would
-    # believe, and one that appears on a fifteenth of all benign software while
-    # barely favouring malware does not. So a rule above 4% of ordinary Windows
-    # software ships only when its size-matched lift reaches 3 and it fires on
-    # at least one profile it was not chosen on. The imports themselves are in
-    # the triage pack either way, so deleting such an association removes noise
-    # and no evidence with it.
+    # Three more are gone, and each on its own argument rather than on a shared
+    # threshold. A rule above 4% of ordinary Windows software with a
+    # size-matched lift under 3 is worth re-arguing, because a reference
+    # association earns its place by changing what a reader would believe — but
+    # *the rate is not itself the reason*, and treating it as one would undo the
+    # point of carrying the rate at all, which is that a common association can
+    # ship honestly because the reader is told how common it is. What removed
+    # these three:
+    #   - File and Directory Discovery is **redundant**. It is the sole row on
+    #     zero malware profiles: every profile it fires on already carries
+    #     another row, so its 175 benign rows cost a reader attention and buy
+    #     nothing. A second corpus could not rescue it.
+    #   - Debugger Evasion is weak **on its own numbers**: a likelihood ratio of
+    #     1.84 over the whole corpus, barely above the bar that deletes a rule
+    #     for carrying no information, and the sole row on one profile.
+    #   - Time Based Evasion is the R3 failure its own refusal already
+    #     described. The evasion is the *duration* a program waits and no import
+    #     carries a duration, so the act the names describe is not the act the
+    #     technique describes. It is the only one of the three with unique
+    #     coverage — as a sole row its likelihood ratio is 4.93 — and deleting
+    #     it for being common would have implied it would be fine if it were
+    #     rarer, which it would not.
     #
     # Of the twenty-nine left, fourteen carry a narrower combination than they
     # shipped with. A name was taken out of a rule only where the act it names
@@ -1674,15 +1687,16 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "NtEnumerateKey",
         ],
     },
-    # T1083 File and Directory Discovery stood here and is gone. It is not
-    # noise — it clears the bar that deletes a rule for carrying no information
-    # at all — but at 6.41% of ordinary software against a size-matched lift of
-    # 2.98 it appears on one benign binary in sixteen while barely favouring
-    # malware, and a reference association earns its place by changing what a
-    # reader would believe. Narrowing it to the enumeration calls alone was
-    # written and not applied for a separate reason: looking in a specific
-    # location is inside this technique's own description, so the only thing
-    # the narrower list had going for it was its rate.
+    # T1083 File and Directory Discovery stood here and is gone, for
+    # redundancy. It is the sole row on **zero** malware profiles: every profile
+    # it fires on already carries another row, so the 175 benign rows it adds —
+    # 29 of them a binary's only row — cost a reader attention and tell nobody
+    # anything another row does not. Its rate, 6.41%, and its size-matched lift,
+    # 2.98, are how it came up for review and not why it went; a second corpus
+    # that moved either would not make it say something new. Narrowing it to the
+    # enumeration calls alone was written and not applied for a separate reason:
+    # looking in a specific location is inside this technique's own description,
+    # so the only thing the narrower list had going for it was its rate.
     {
         "technique_id": "T1010",
         "name": "Application Window Discovery",
@@ -1947,14 +1961,16 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     # and the rule appeared on ordinary software and on malware at the same
     # rate. The Linux rule of the same id survives on ``memfd_create``, which
     # names the act rather than a means to it.
-    # T1622 Debugger Evasion stood here and is gone: 7.51% of ordinary software
-    # against a size-matched lift of 2.28. Narrowing it to the questions asked
-    # about *another* process's debug port was written and not applied, because
-    # this technique's own description names ``IsDebuggerPresent`` and the
-    # output-debug trick and removing them would have been a statement about how
-    # common they are — which left the ungated rule, and the ungated rule is one
-    # a reader could have guessed from the fact that the binary is a Windows
-    # program compiled by a C runtime.
+    # T1622 Debugger Evasion stood here and is gone, on its own numbers: a
+    # likelihood ratio of 1.84 over the whole corpus, barely above the bar that
+    # deletes a rule for carrying no information at all, and the sole row on one
+    # malware profile. Narrowing it to the questions asked about *another*
+    # process's debug port was written and not applied, because this technique's
+    # own description names ``IsDebuggerPresent`` and the output-debug trick and
+    # removing them would have been a statement about how common they are —
+    # which left the ungated rule, and the ungated rule is one a reader could
+    # have guessed from the fact that the binary is a Windows program compiled
+    # by a C runtime.
     {
         # ``IsProcessorFeaturePresent`` is the C runtime asking whether the
         # processor has an instruction set, at startup, in two out of five
@@ -1986,12 +2002,20 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "GetCursorPos",
         ],
     },
-    # T1497.003 Time Based Evasion stood here and is gone, on the highest benign
-    # rate in the catalogue — 9.56%, one ordinary binary in ten — against a
-    # size-matched lift of 2.30. Nothing could be taken out of it: all eight
-    # names are ordinary timing calls and all eight are equally this
-    # technique's, because the evasion is the *duration* a program waits, which
-    # no import carries.
+    # T1497.003 Time Based Evasion stood here and is gone, because the act its
+    # names describe is not the act the technique describes: the evasion is the
+    # *duration* a program waits, and no import carries a duration. That is the
+    # same test that decides whether a name may be taken out of a rule, applied
+    # to the whole rule — nothing could be taken out of this one, since all
+    # eight names are ordinary timing calls and all eight are equally this
+    # technique's, so what failed the test was the rule itself.
+    #
+    # Its rate, 9.56%, was the highest in the catalogue and is not the reason.
+    # This is the one of the three deletions that costs something real: twelve
+    # malware profiles and six held-out profiles lose their only row, and as a
+    # sole row its likelihood ratio is 4.93, higher than its marginal lift,
+    # because the binaries it alone speaks about are the small-import ones the
+    # rest of the block cannot see.
     {
         # Keeping only the hive calls was written and not applied. Writing a
         # value *is* modifying the registry; loading a hive is a rarer sibling,
@@ -2484,6 +2508,14 @@ _CONFIDENCE_CEILING = 0.65
 # informational, carrying the count so a reader knows how thin it is.
 _HELD_OUT_FLOOR = 3
 
+# The technique ids allowed to fire from a single name, because that name is
+# the act and nothing beside it makes it more so. An echo request is ICMP by
+# construction. Everything else needs two, which is what makes asking the tool
+# about one import safe, and that promise is worth more than prose: a rule
+# written with ``min_apis: 1`` over sixteen names would fire on any one of
+# them, silently, and the loader refuses the same shape for the same reason.
+_SINGLE_NAME_RULES = frozenset({"T1095"})
+
 
 def _vendored_ids() -> set[str]:
     """Every active technique id the vendored catalogue carries."""
@@ -2582,6 +2614,11 @@ def _validate(techniques: list[dict[str, Any]]) -> list[str]:
             problems.append(f"{tid} confidence_base above confidence_max")
         if tech["min_apis"] > len(tech["apis"]):
             problems.append(f"{tid} min_apis exceeds its own api list")
+        if tech["min_apis"] < 2:
+            if tid not in _SINGLE_NAME_RULES:
+                problems.append(f"{tid} asks for one name and is not one of the rules allowed to")
+            elif len(tech["apis"]) != 1:
+                problems.append(f"{tid} may key on a single name and names {len(tech['apis'])}")
         # An ATT&CK entry naming an API the behaviour table has never heard of is
         # almost always a typo, and a typo here is silent: the technique simply
         # never fires.

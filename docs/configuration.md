@@ -402,17 +402,19 @@ hook, raw-input device or whole-keyboard read that is the capture rather than
 the key-state poll a game does every frame. A technique rule is kept only where
 its combination is the act the technique describes.
 
-**Two bars, and a rule clears both or it is not in the catalogue.** The first
-asks whether a rule carries information: one whose size-matched lift over a
-known-bad corpus is at or below 1.5 fires no more often on malware than on
-ordinary software, and it goes. The second asks whether a rule that does carry
-information is worth a reader's attention: above 4% of ordinary Windows
-software, a rule ships only when its lift reaches 3 and it fires on at least one
-profile the combination was not chosen on. A reference association earns its
-place by changing what a reader would believe, and one that appears in a
-fifteenth of all benign software while barely favouring malware does not — the
-imports are in the triage pack either way, so removing the association removes
-noise and no evidence with it.
+**One bar, and one trigger for a second look.** The bar asks whether a rule
+carries information: one whose size-matched lift over a known-bad corpus is at
+or below 1.5 fires no more often on malware than on ordinary software, and it
+goes. The trigger is a rule above 4% of ordinary Windows software whose lift is
+under 3 — not a threshold that deletes it, because the measured rate is carried
+precisely so a common association can ship honestly and let the reader weigh it,
+but a sign that the rule should be argued on its own terms. Three were, and each
+went for a different reason: one was the sole row on no malware profile at all
+and so told a reader nothing another row did not; one was weak on its own
+numbers; one failed the test that decides whether a name belongs in a rule,
+applied to the whole rule, because the act its names describe is not the act the
+technique describes. A rule is deleted when one of those arguments carries, and
+not for its rate.
 
 **Every association carries the rate it was measured at**, under `measured`:
 `seen_on_benign_percent` is the share of a named benign corpus the association

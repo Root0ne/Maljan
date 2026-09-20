@@ -1090,15 +1090,20 @@ change landed on `main`.
   names fired no more often on malware than on ordinary software (T1003, T1016,
   T1027, T1049, T1053.005, T1071.004, T1087, T1106, T1140, T1222, T1546.003,
   T1555, T1620 on Windows, and the two rules on the scanning and tracing
-  provider calls that ATT&CK 19.2 folded into T1685). Three carried information
-  and were still not worth a reader's attention: above 4% of ordinary Windows
-  software a rule ships only where its size-matched lift reaches 3 and it fires
-  on a profile it was not chosen on, and **T1497.003** (9.56%, lift 2.30),
-  **T1622** (7.51%, 2.28) and **T1083** (6.41%, 2.98) clear none of that. A
-  reference association earns its place by changing what a reader would believe,
-  and one that appears in a fifteenth of all benign software while barely
-  favouring malware does not; the imports themselves are in the triage pack
-  either way, so removing the association removes noise and no evidence.
+  provider calls that ATT&CK 19.2 folded into T1685). Three more were above 4%
+  of ordinary Windows software with a size-matched lift under 3, which is the
+  shape that gets a rule re-argued rather than a threshold that deletes it —
+  the rate is carried precisely so a common association can ship honestly — and
+  each went on its own argument. **T1083** (6.41%) is the sole row on *zero*
+  malware profiles: every profile it fires on already carries another row, so
+  its 175 benign rows buy a reader nothing. **T1622** (7.51%) is weak on its own
+  numbers, a likelihood ratio of 1.84 over the whole corpus and the sole row on
+  one profile. **T1497.003** (9.56%) fails the same test that decides whether a
+  name may be taken out of a rule, applied to the whole rule: the evasion is the
+  *duration* a program waits and no import carries a duration, so the act its
+  names describe is not the act the technique describes. That one costs
+  something — it is the only one of the three with unique coverage — and it is
+  deleted anyway, because a rule that cannot be made right does not ship.
   **Fourteen of the twenty-nine that remain keep a narrower combination**, and a
   name was removed from one only where the act it names is not the act the
   technique describes — `TerminateProcess` ends a process and not a service,
@@ -1150,11 +1155,21 @@ change landed on `main`.
   `catalog_flags: ["suspicious"]` now appears on a Windows import only where the
   `keylogging` gate is met, so an `api_capability` consumer that treated the flag
   as its trigger sees it on roughly one binary in fifty rather than on nearly
-  every one. The `api_capability` answer gains `measured` on a technique row,
+  every one. A generated YARA rule carries fewer import strings for the same
+  sample, because `reporting/detection_signatures.py` draws its `$s` strings
+  from the matched imports of the rules that fired.
+  The `api_capability` answer gains `measured` on a technique row,
   `behaviour_rates` per category and `corpora` at the top; `api_technique_hits`
-  rows gain `benign_rate`, a sentence, absent on a producer with no measurement
-  — absent means not measured, never "never fires". No behaviour category was
-  renamed or removed, so a consumer reading `category` alone is unaffected.
+  rows gain `benign_rate`, a sentence carrying the share, the file count and the
+  held-out support, absent on a producer with no measurement — absent means not
+  measured, never "never fires". `StaticAnalysis` gains
+  `api_capability_rates` and `api_capability_corpus`, both empty on a report
+  stored before them, and the profile line then prints the counts alone as it
+  always did. The knowledge sidecar's `api_capability` description is now the
+  in-process docstring verbatim rather than a two-sentence summary, so the
+  caveats reach the model that actually reads it; the tool's name, arguments and
+  answer shape are unchanged. No behaviour category was renamed or removed, so a
+  consumer reading `category` alone is unaffected.
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was

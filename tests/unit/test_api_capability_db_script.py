@@ -266,8 +266,8 @@ class TestTheLinuxBlock:
             "rule": "",
             "ordinary_use": "",
             "platforms": ["linux"],
-            "apis": ["ptrace"],
-            "min_apis": 1,
+            "apis": ["ptrace", "process_vm_readv"],
+            "min_apis": 2,
         }
         assert script._validate([bare]) == [
             "T1055.008 has no rule label",
@@ -357,6 +357,21 @@ class TestTheLinuxBlock:
         assert script._validate([silent]) == [
             "T1055 does not say how many held-out profiles support it"
         ]
+
+    def test_only_a_named_rule_may_fire_from_a_single_name(self) -> None:
+        """What made asking the tool about one import safe was an invariant, and
+        for a while after T1095 it was prose in two docstrings with nothing
+        behind it. A rule written with a floor of one over sixteen WinINet names
+        would fire on any one of them, silently.
+        """
+        script = _script()
+        assert script._SINGLE_NAME_RULES == {"T1095"}
+        wide = {**_rule("T1055"), "min_apis": 1}
+        assert "T1055 asks for one name and is not one of the rules allowed to" in script._validate(
+            [wide]
+        )
+        allowed_but_wide = {**_rule("T1095"), "min_apis": 1, "apis": ["socket", "connect"]}
+        assert "T1095 may key on a single name and names 2" in script._validate([allowed_but_wide])
 
     def test_a_rule_whose_mechanism_cannot_be_told_from_its_opposite_is_absent(self) -> None:
         """Debugger Evasion is a process tracing itself. An import list shows
