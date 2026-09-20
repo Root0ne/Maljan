@@ -569,11 +569,9 @@ change landed on `main`.
   get on an empty conversation. It spends no tokens: behind it are the metadata
   endpoints in `maljan.llm.context_window`, cached per provider, endpoint and
   model, and an endpoint that says nothing falls to the vendored table and then
-  to the stated fallback rather than to an error. The `llm` probe's result
-  carries the same block under `details.context_window`, so pressing **Test**
-  on the model card says how much of a tool answer that model can be handed,
-  and the Settings page prints it beside
-  `core.preprocessing.max_tool_output_chars`.
+  to the stated fallback rather than to an error. The Settings page prints it
+  beside `core.preprocessing.max_tool_output_chars`, with the source word
+  itself, and says which setting would fix an unknown window.
 
 ### Changed
 
@@ -1095,34 +1093,48 @@ change landed on `main`.
   the room kept back for the model's own reply, converted at three characters
   per token — measured, from a recorded conversation of 114,000 characters the
   server reported at 38,868 tokens — and multiplied by the eighth of what is
-  free that one answer may take. An answer is measured against what is free and
-  the next one is measured again, so the answers of one conversation sum to
-  less than the room it began with; below a floor of 2,000 characters the cap
-  stops falling, and an answer at the floor meets the structural shortener and
-  its notice exactly as any other does. A positive value is an explicit
-  operator cap and behaves exactly as this setting always did. The window
-  itself is learned free of charge and without asking the operator anything:
+  free that one answer may take. An answer is measured against what is free,
+  what it takes is charged as soon as it is handed out — a turn may call
+  several tools at once — and the next one is measured again, so the answers of
+  one conversation sum to less than the room it began with on every window the
+  vendored table ships. **A cap never exceeds the room that is really left:** a
+  floor of 2,000 characters applies while the room affords it, and where what
+  is left cannot hold an answer at all the model is handed no answer and one
+  sentence saying the conversation has no room left, with the whole answer
+  still on the evidence ledger under the call's id and the outcome counted as
+  `tool_output_no_room`. A positive value is an explicit operator cap and
+  behaves exactly as this setting always did. The window itself is learned free
+  of charge and without asking the operator anything:
   llama.cpp's `/props`, Ollama's `/api/show`, an OpenAI-compatible
   `/v1/models` for vLLM and OpenRouter, Text Generation Inference's `/info`,
   then a vendored table keyed by model family
-  (`data/model_context_windows_v1.json`), then a conservative 8,192. No
-  generation call is ever made, and a guard test drives every request the
-  probe can plan through a transport that refuses anything but those four
-  metadata suffixes. `run_summary.truncation` carries the window, where it was
-  learned, the characters-per-token figure and the smallest and largest cap
-  that applied; the report's Bounds Hit section says the same in a sentence;
-  and the Settings page prints the detected window beside the field.
+  (`data/model_context_windows_v1.json`). A settings-named window short-
+  circuits none of that: where one was also probed the smaller of the two wins,
+  so a model that holds less than `num_ctx` asks for, and a `context_size` left
+  behind by a server restarted smaller, cannot overflow the real window. Where
+  **nothing** answered, nothing is derived — the documented 6,000-character cap
+  applies and every surface says the window is unknown and names the setting
+  that would fix it. A reported window is believed only up to ten million
+  tokens; past that the figure is refused with the reason in words, because a
+  proxy reporting its window in bytes produces a cap larger than any answer
+  there will ever be and switches the guardrail off for a whole run. No
+  generation call is ever made, and a guard test drives both probe entry points
+  themselves through a transport that records every request, refusing any path
+  but the four metadata suffixes and any method but GET except the one metadata
+  POST. `run_summary.truncation` carries the window, where it was learned, the
+  characters-per-token figure and the smallest and largest cap that applied;
+  the report's Bounds Hit section says the same in a sentence; and the Settings
+  page prints the detected window beside the field.
   **Upgrading:** the default changes behaviour. On a 32,768-token window one
   answer may now take **9,216** characters where it took 6,000, and on a
   131,072-token window **46,080** — richer observations, and a conversation
-  that fills faster. Where nothing reports a window and the model is not in the
-  vendored table, the conservative 8,192-token fallback gives **2,304**
-  characters, which is *less* than the old default: such a deployment either
-  sets `core.llm.openai.context_size` to the window its server was started
-  with, or sets `core.preprocessing.max_tool_output_chars` to 6,000 to keep
-  exactly today's behaviour. `run_summary.truncation` gains three keys
-  (`tool_output_limit_smallest`, `tool_output_limit_largest`,
-  `context_window`); a summary stored before this release has none of them.
+  that fills faster. A deployment whose window cannot be learned keeps exactly
+  today's 6,000, and the only change it sees is that the run summary and the
+  settings page now say the window is unknown; setting
+  `core.llm.openai.context_size` turns that into a derived cap.
+  `run_summary.truncation` gains four keys (`tool_output_limit_smallest`,
+  `tool_output_limit_largest`, `tool_output_no_room`, `context_window`); a
+  summary stored before this release has none of them.
 - **The two memory ceilings are re-argued against the derived cap, and not
   scaled with it.** `reporting.evidence_budget_bytes` (512 KiB per agent) and
   `reporting.evidence_corpus_bytes` (16 MB per run) were both sized against
@@ -1142,6 +1154,26 @@ change landed on `main`.
   the ledger entry keeps the call and drops the output and the report says how
   many, and the corpus reports itself incomplete so an absence measured against
   it is advisory.
+- **The evidence ledger stores the answer the model was handed, whole.** Every
+  stored output was cut at 6,000 characters on the way in — a trailing ellipsis,
+  no `truncated` flag, nothing counted — which was defensible while the
+  tool-output guardrail handed the model the same 6,000. It no longer does, and
+  for a plain-text answer (a decompilation, a `strings` dump) the stored prefix
+  is the entire durable record: what `GET /api/v1/jobs/{id}/evidence` serves,
+  what the report sections are built from, and what an `ev_0007` citation
+  points at. A model that read 46,080 characters left a record of the first
+  6,000 and nothing said so. `reporting.evidence_budget_bytes` is now the one
+  storage decision, and it announces itself: past it the entry keeps the call,
+  drops the output, sets `truncated` and is counted. A caller that passes a
+  ceiling of its own still gets a cut, and that entry is flagged too.
+  **Upgrading:** stored evidence entries get larger, up to the per-agent byte
+  budget, and that budget now binds where the silent cut used to pre-empt it —
+  so a deep reversing loop on a large window may report trimmed entries where it
+  previously reported none. Raise `reporting.evidence_budget_bytes`, or set it
+  to `0` to keep every output. `reporting.upstream_findings_max_chars` is a
+  third copy of the same constant and is deliberately unchanged: it bounds a
+  prompt rather than a record, the block it cuts says so, and the whole findings
+  stay in the run state and the report.
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was

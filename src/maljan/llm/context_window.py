@@ -21,7 +21,10 @@ Where the window comes from, in order:
 ``declared``
     ``core.llm.openai.context_size`` for an OpenAI-compatible endpoint, and
     ``core.llm.ollama.num_ctx`` for Ollama. The Ollama one is not an opinion:
-    the provider sends it with every call, so it *is* the served window.
+    the provider sends it with every call, so it is one half of the served
+    window — the other half is what the weights hold, which is why a
+    settings-named window short-circuits nothing and the two are combined by
+    taking the smaller.
 ``probed``
     ``GET /props`` on llama.cpp, whose ``default_generation_settings.n_ctx``
     is the window the server was started with (``n_ctx_per_seq`` on the builds
@@ -37,19 +40,28 @@ Where the window comes from, in order:
     for an open-weight tag behind a proxy that says nothing. The file says how
     to correct a row it has wrong.
 ``fallback``
-    :data:`FALLBACK_WINDOW_TOKENS`, when nothing above answered.
+    Nothing answered, and **nothing is derived**. A cap computed from a window
+    nobody measured is the platform stating what it does not know; the
+    documented :data:`UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS` applies instead and
+    every surface says the window is unknown and names
+    :data:`UNKNOWN_WINDOW_REMEDY`.
 
 A probe never fails a run and never blocks a settings save. Everything it can
 end with becomes a :class:`WindowFact` with the reason in words, so an operator
-reading a run summary sees which of the four applied and why.
+reading a run summary sees which of the four applied and why. A number an
+endpoint reports is untrusted input and is believed only up to
+:data:`MAX_BELIEVABLE_WINDOW_TOKENS` — see :func:`believable`.
 
 **What the window buys.** :func:`derive_tool_output_chars` is the whole
-arithmetic and is tested on its own. It has one property worth stating: an
-answer takes :data:`ANSWER_SHARE` of what is *left*, and what is left is
-measured again before the next answer, so the answers of one conversation sum
-to strictly less than the room that conversation started with. The share
-decides how many answers fit before the floor, not whether the window holds
-them.
+arithmetic and is tested on its own. Two properties hold, and both are
+measured rather than asserted:
+
+* a cap never exceeds the room that is really left, so the answers of one
+  conversation sum to strictly less than the room it began with — the floor
+  included, which is what the share and both memory ceilings rest on;
+* room is charged as it is handed out rather than only at the next model turn,
+  so a turn that requests several tools at once spends one turn's room between
+  them rather than each of them spending all of it.
 """
 
 from __future__ import annotations
@@ -154,40 +166,32 @@ CHARS_PER_TOKEN = 3
 # than stopping.
 ANSWER_SHARE = 0.125
 
-# The smallest cap a tool answer is ever given, however full the conversation.
+# The cap a tool answer is given once the share falls below it — while the
+# room affords it, and no further.
 #
-# Below this an answer stops being one. The notice a shortened answer carries
-# costs at most 477 characters (``output_shortening.MAX_SENTENCE_ROOM``), so
-# two thousand leaves at least 1,523 for the document itself — three times the
-# 512 characters below which that module treats a string as a label rather than
-# a payload, which is what lets one long value survive beside the answer's own
-# account of itself. When the floor binds, nothing new happens to the answer:
-# it meets the structural shortener at this size, comes back as a document with
-# its ``shortened`` map, and carries the notice naming the arguments that
-# narrow it.
+# Below this an answer stops being worth shortening. The notice a shortened
+# answer carries costs at most 477 characters
+# (``output_shortening.MAX_SENTENCE_ROOM``), so two thousand leaves at least
+# 1,523 for the document itself — three times the 512 characters below which
+# that module treats a string as a label rather than a payload, which is what
+# lets one long value survive beside the answer's own account of itself. When
+# the floor binds, nothing new happens to the answer: it meets the structural
+# shortener at this size, comes back as a document with its ``shortened`` map,
+# and carries the notice naming the arguments that narrow it.
 #
-# What the floor costs is stated rather than hidden. It is the one place the
-# derivation stops being self-limiting: everywhere else an answer takes a share
-# of what is *free*, so the answers of one conversation sum to less than the
-# room it began with, and at the floor they no longer do. Two thousand
-# characters is about 667 tokens, so a conversation that has reached the floor
-# grows by that much per further answer whatever is left — and what it spends
-# first is the reply reserve, not the window.
+# This is a floor on the *share*, never on the room. An earlier cut of it
+# overrode the room, and the consequence was not theoretical: a twenty-round
+# loop on an 8,192-token window — a window the vendored table itself ships for
+# two model families — finished 5,248 tokens past the window it was sizing
+# itself against, and any window under about 24,000 overran once the
+# conversation started with a chunk in it. Measured over the largest loop the
+# settings configure, the static analyst's twenty tool rounds, every window in
+# the shipped table now finishes inside its own free room; the tightest margin
+# is 4,096 tokens, which finishes exactly at it.
 #
-# Measured over the largest loop the settings configure, the static analyst's
-# twenty tool rounds:
-#
-#   window    floor first reached   conversation after 20 rounds
-#   131,072   never                 114,375 tokens, 16,697 under the window
-#    32,768   the 13th answer        24,958 tokens, 382 into the reply reserve
-#     8,192   the 3rd answer         13,440 tokens, 5,248 past the window
-#
-# So on every window that was reported or looked up the floor costs a few
-# hundred tokens of the reply's own room at worst. Where it genuinely overruns
-# is the 8,192-token fallback — the case where nothing reported a window at
-# all, which the run summary names as the fallback and which one field fixes
-# (``core.llm.openai.context_size``). A run where the floor bound is visible
-# either way: the smallest cap in force equals this number.
+# A run where this bound is visible: the smallest cap in force equals this
+# number. A run where the room ran out entirely is visible too — see
+# :data:`NO_ROOM_BELOW_CHARS` and ``tool_output_no_room`` on the ledger.
 MIN_TOOL_OUTPUT_CHARS = 2000
 
 # What is held back for the model's own reply when nothing configures it. The

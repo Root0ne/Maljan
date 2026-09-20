@@ -475,45 +475,63 @@ the served window, less the tokens held back for the model's own reply (the
 larger of `core.llm.expert_max_tokens` and `core.llm.judge_max_tokens`, never
 more than a quarter of the window), less what the conversation already holds,
 converted at **3 characters per token**, times the **eighth** of what is left
-that one answer may take, and never below **2,000 characters**. Three
-characters per token is measured rather than assumed — a recorded conversation
-of about 114,000 characters was reported by the server at 38,868 tokens — and
-is deliberately denser than the four the token estimate uses for prose, because
-what this bounds is JSON and decompiled C.
+that one answer may take. Three characters per token is measured rather than
+assumed — a recorded conversation of about 114,000 characters was reported by
+the server at 38,868 tokens — and is deliberately denser than the four the
+token estimate uses for prose, because what this bounds is JSON and decompiled
+C.
 
-Because each answer is measured against what is free *at that moment*, the
-answers of one conversation add up to less than the room it started with. The
-share decides how large the first answer is and how quickly they shrink: at
+**A cap never exceeds the room that is really left.** Below **2,000
+characters** the share stops falling and the floor applies, but only while the
+room affords it; where it does not, the cap is what is left. Because each
+answer is measured against what is free *at that moment*, and because what it
+takes is charged as soon as it is handed out — a model turn may call several
+tools at once — the answers of one conversation add up to less than the room it
+started with, on every window the vendored table ships.
+
+The share decides how large the first answer is and how quickly they shrink: at
 32,768 tokens the first is 9,216 characters and about twelve clear the floor;
 at 131,072 the first is 46,080; at a million, 371,928. At the floor the answer
 meets the structural shortener exactly as any other does and carries the same
-notice naming the arguments that would narrow it.
+notice naming the arguments that would narrow it. Below about a thousand
+characters an answer cannot survive its own notice, so nothing is handed over:
+the model is told, in one sentence, that the conversation has no room left for
+a tool answer, the whole answer stays on the evidence ledger under the call's
+id, and the run summary counts it.
 
 The window itself is learned free of charge and without asking the operator
 anything. In order:
 
 | Source | Where it comes from |
 |---|---|
-| `declared` | `core.llm.ollama.num_ctx`, which the provider sends with every call, or `core.llm.openai.context_size` where an operator has set it |
+| `declared` | `core.llm.ollama.num_ctx`, which the provider sends with every call, or `core.llm.openai.context_size` where an operator has set it. It does **not** short-circuit the probe: where a window was also probed, the smaller of the two wins, so a model that holds less than `num_ctx` asks for — and a `context_size` left behind by a server restarted smaller — cannot overflow the real window |
 | `probed` | llama.cpp `GET /props` (`default_generation_settings.n_ctx`, then `n_ctx_per_seq`); an OpenAI-compatible `GET /v1/models` (`max_model_len` for vLLM, `context_length` for OpenRouter); Ollama `POST /api/show` (`model_info.<arch>.context_length`, with a Modelfile `num_ctx` winning); Text Generation Inference `GET /info` (`max_total_tokens`) |
 | `table` | `data/model_context_windows_v1.json`, keyed by model-id family, for the vendor APIs that publish a window without serving it |
-| `fallback` | 8,192 tokens, when nothing above answered |
+| `fallback` | nothing answered, and **nothing is derived from it**: one tool answer is capped at the documented 6,000 characters — exactly what this platform did before the window was learned at all — and every surface says the window is unknown |
 
 No generation call is ever made — the probe reads metadata endpoints only, a
-guard test enforces it, and a probe that fails never fails a run and never
-blocks a settings save. Answers are cached per provider, base URL and model, so
-changing any of the three asks again.
+guard test drives both entry points through a transport that records every
+request, and a probe that fails never fails a run and never blocks a settings
+save. One question is asked per `(provider, endpoint, model)` rather than per
+agent, both outcomes are remembered for fifteen minutes, and the whole plan
+runs under one four-second wall clock.
+
+A window an endpoint reports is untrusted input and is believed only up to ten
+million tokens. Past that the figure is refused rather than clamped, with the
+reason in words, because a proxy reporting its window in bytes produces a cap
+larger than any answer there will ever be — and a cap that large makes every
+answer fit, which switches the shortener, the summariser and the character cut
+off for the whole run.
 
 A run whose agents sit on different models takes the **smallest** of their
 windows, because one cap is handed to every tool server the job opens.
 
 Where to see what applied: the Settings page prints the detected window beside
-the field, the `llm` connection test carries the same block, and
-`run_summary.truncation` records the window, its source, the
-characters-per-token figure and the smallest and largest cap the run used. A
-run that landed on `fallback` is the one to act on — set
-`core.llm.openai.context_size` to the window the server was started with, and
-the derived cap follows.
+the field, with the source word itself, and `run_summary.truncation` records
+the window, its source, the characters-per-token figure and the smallest and
+largest cap the run used. A run that landed on `fallback` is the one to act on
+— set `core.llm.openai.context_size` to the window the server was started with,
+and the cap is derived from then on.
 
 ### The evidence budget
 

@@ -1104,6 +1104,11 @@ model with the entry's id stamped on the front:
 {"machine": 332, "sections": [...], "imports": [...]}
 ```
 
+The entry holds the answer the model was handed, whole — a second cut here
+would make the stored record smaller than the thing the citation points at, and
+the one bound on it is the per-agent byte budget, which keeps the call, drops
+the output, flags the entry `truncated` and is counted.
+
 Ids (`ev_0007`) are monotonic across the whole job. The triage pack's calls
 are the first entries of every run that has one, under `agent="pipeline"`, and
 the judge's own calls — threat intel on a disputed indicator, a knowledge
@@ -1136,16 +1141,23 @@ a fact from, a report section lists the entries it was built from, and `GET
 worked out at the moment of each call from the context window the served model
 was found to have, less what the conversation already holds and the room kept
 back for the model's own reply, converted at a measured three characters per
-token and multiplied by the eighth of what is free that one answer may take,
-with a floor of 2,000 characters. A positive value is an operator's own cap and
-is used unchanged. The window is learned free of charge from the server's own
-metadata endpoint, from a vendored table, or from a stated fallback — never
-from a generation call — and `run_summary.truncation` records which of the four
-applied and the smallest and largest cap the run used. The whole arithmetic and
-the probe are `maljan.llm.context_window`; the job's budget travels with every
-attach the way the truncation ledger does, and the run-state refresher tells it
-what the loop's conversation weighs before every model turn. See
-*docs/configuration.md* for the numbers.
+token and multiplied by the eighth of what is free that one answer may take.
+A positive value is an operator's own cap and is used unchanged. The limit
+never exceeds the room that is really left: a floor of 2,000 characters applies
+while the room affords it, and when what is left cannot hold an answer at all
+the model is handed no answer and one sentence saying the conversation has no
+room left — a deterministic fact, with the whole answer still on the evidence
+ledger under the call's id. The window is learned free of charge from the
+server's own metadata endpoint or from a vendored table — never from a
+generation call — and where nothing answered, nothing is derived: the
+documented 6,000-character cap applies and every surface says the window is
+unknown. `run_summary.truncation` records which of the four applied and the
+smallest and largest cap the run used. The whole arithmetic and the probe are
+`maljan.llm.context_window`; the job's budget travels with every attach the way
+the truncation ledger does, the run-state refresher tells it what the loop's
+conversation weighs before every model turn, and what it hands out is charged
+as it goes so a turn that calls several tools spends one turn's room between
+them. See *docs/configuration.md* for the numbers.
 
 **An answer wider than the prompt allows.** Before any of that, a tool result
 over that limit meets the output guardrail, which
