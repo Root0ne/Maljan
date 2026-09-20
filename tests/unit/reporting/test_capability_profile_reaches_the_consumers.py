@@ -10,9 +10,18 @@ detection string when one of the table's technique rules fired on it.
 
 from __future__ import annotations
 
+import re
+
+import pytest
+
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.detection_signatures import _build_yara
-from maljan.reporting.models import MalwareReport
+from maljan.reporting.models import (
+    FileHashes,
+    MalwareReport,
+    SampleIdentity,
+    StaticAnalysis,
+)
 from maljan.reporting.narrative_agent import build_prompt_text
 from maljan.reporting.renderers.markdown import MarkdownRenderer
 from maljan.schemas.evidence import EvidenceCounter
@@ -145,3 +154,67 @@ class TestWithoutThePackEntry:
         assert report.static.api_capabilities == {}
         assert "  (none stated)" in _prompt_lines(report)
         assert "Import capability profile" not in MarkdownRenderer().render(report)
+
+
+class TestASampleCannotReshapeTheTableItIsDescribedIn:
+    """An import name is the sample's own bytes.
+
+    ``pe_extractor`` decodes it with ``errors="replace"`` and asserts nothing
+    else about it, and the import-technique table writes it into a Markdown
+    cell. A pipe there adds a column and shifts every cell after it; a newline
+    ends the row and orphans every row below — in a table a human reads to make
+    a call. The same holds for the technique name, which comes from the data
+    file, and for the producer key in the source column.
+    """
+
+    @staticmethod
+    def _rows(**over: object) -> list[str]:
+        hit: dict[str, object] = {
+            "technique_id": "T1113",
+            "name": "Screen Capture",
+            "rule": "pulling the pixels back out",
+            "matched_apis": ["GetDIBits", "PrintWindow"],
+            "source": "api_capability",
+            "benign_rate": "fires on 0.3% of benign software (8 of 2730 binaries)",
+        }
+        hit.update(over)
+        report = MalwareReport(
+            verdict="Malware",
+            identity=SampleIdentity(file_name="s.exe", hashes=FileHashes(sha256="a" * 64)),
+            static=StaticAnalysis(api_technique_hits=[hit]),
+        )
+        md = MarkdownRenderer().render(report)
+        head = md.index("### ATT&CK Techniques Derived From Imports")
+        return [
+            line
+            for line in md[head:].splitlines()
+            if line.startswith("|") and not line.startswith("|---")
+        ]
+
+    @staticmethod
+    def _separators(row: str) -> int:
+        """Pipes that still divide cells — an escaped one is text, not a column."""
+        return len(re.findall(r"(?<!\\)\|", row))
+
+    def test_an_undamaged_row_has_six_cells(self) -> None:
+        assert [self._separators(row) for row in self._rows()] == [7, 7]
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("matched_apis", ["Get|DIBits", "PrintWindow"]),
+            ("matched_apis", ["Get\nDIBits", "PrintWindow"]),
+            ("name", "Screen | Capture"),
+            ("name", "Screen\nCapture"),
+            ("source", "api|capability"),
+            ("rule", "a rule | with a pipe"),
+            ("benign_rate", "fires on 0.3% | of benign software"),
+            ("technique_id", "T1113|T1055"),
+        ],
+    )
+    def test_neither_a_pipe_nor_a_newline_moves_a_column(self, field: str, value: object) -> None:
+        rows = self._rows(**{field: value})
+        # One header and one data row, each with the cell count an undamaged
+        # table has: nothing gained a column and nothing was cut in half.
+        assert len(rows) == 2, rows
+        assert [self._separators(row) for row in rows] == [7, 7], rows

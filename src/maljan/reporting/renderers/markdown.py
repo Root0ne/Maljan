@@ -198,27 +198,27 @@ class MarkdownRenderer:
         lines = ["## Sample Identification", ""]
         lines.append("| Field | Value |")
         lines.append("|---|---|")
-        lines.append(f"| File name | `{ident.file_name or 'unknown'}` |")
+        lines.append(f"| File name | `{_cell(ident.file_name) or 'unknown'}` |")
         lines.append(f"| File size | {ident.file_size_bytes:,} bytes |")
-        lines.append(f"| File type | {ident.file_type} |")
+        lines.append(f"| File type | {_cell(ident.file_type)} |")
         if ident.mime_type:
-            lines.append(f"| MIME | {ident.mime_type} |")
+            lines.append(f"| MIME | {_cell(ident.mime_type)} |")
         if ident.compile_timestamp:
             lines.append(f"| Compile timestamp | {ident.compile_timestamp.isoformat()} |")
         if ident.language_or_compiler:
-            lines.append(f"| Language / compiler | {ident.language_or_compiler} |")
+            lines.append(f"| Language / compiler | {_cell(ident.language_or_compiler)} |")
         # Extracted since the model existed and printed nowhere. It is what
         # lets a reader disagree with `file_type`: a .doc whose first bytes are
         # `4d5a` is the finding, and the type string alone hides it.
         if ident.magic_bytes:
-            lines.append(f"| Magic bytes | `{ident.magic_bytes}` |")
+            lines.append(f"| Magic bytes | `{_cell(ident.magic_bytes)}` |")
         signing = ident.signing
         cited = f" ({signing.evidence_id})" if signing.evidence_id else ""
         lines.append(f"| Signed | {'yes' if signing.is_signed else 'no'}{cited} |")
         if signing.signer_subject:
-            lines.append(f"| Signer | {signing.signer_subject} |")
+            lines.append(f"| Signer | {_cell(signing.signer_subject)} |")
         if signing.signer_issuer:
-            lines.append(f"| Signer issuer | {signing.signer_issuer} |")
+            lines.append(f"| Signer issuer | {_cell(signing.signer_issuer)} |")
         if signing.signature_valid is not None:
             lines.append(
                 f"| Signature chain | {'valid' if signing.signature_valid else 'invalid'} |"
@@ -287,11 +287,12 @@ class MarkdownRenderer:
             lines.append("| Name | Kind | Confidence | Evidence |")
             lines.append("|---|---|---|---|")
             for pm in static.packer_matches[:6]:
-                evidence = ", ".join(f"`{e}`" for e in (pm.get("evidence") or [])[:4]) or "-"
+                evidence = ", ".join(f"`{_cell(e)}`" for e in (pm.get("evidence") or [])[:4])
                 lines.append(
-                    f"| {pm.get('name', '?')} | {pm.get('kind', '-')} | "
-                    f"{float(pm.get('confidence') or 0.0):.2f} ({pm.get('method', '-')}) "
-                    f"| {evidence} |"
+                    f"| {_cell(pm.get('name')) or '?'} | {_cell(pm.get('kind')) or '-'} | "
+                    f"{float(pm.get('confidence') or 0.0):.2f} "
+                    f"({_cell(pm.get('method')) or '-'}) "
+                    f"| {evidence or '-'} |"
                 )
             lines.append("")
         elif static.packer_hint:
@@ -358,15 +359,21 @@ class MarkdownRenderer:
                 ),
             )
             for hit in ordered_hits[:25]:
-                apis = ", ".join(f"`{a}`" for a in (hit.get("matched_apis") or [])[:6])
-                source = str(hit.get("source") or "-")
+                # Every cell here is escaped, and the one that most needs it is
+                # the import names: they are the sample's own bytes, decoded
+                # with replacement and otherwise arbitrary, so a crafted PE
+                # whose import table carries a pipe adds a column to a table a
+                # human reads to make a call, and one carrying a newline cuts
+                # the row in half and orphans every row after it.
+                apis = ", ".join(f"`{_cell(a)}`" for a in (hit.get("matched_apis") or [])[:6])
+                source = _cell(hit.get("source")) or "-"
                 if hit.get("evidence_id"):
-                    source = f"{source} ({hit['evidence_id']})"
+                    source = f"{source} ({_cell(hit['evidence_id'])})"
                 # The rule's own label, because two rules can name one
                 # technique by two mechanisms and the catalogue's name is on
                 # both. A producer that has no such label leaves the cell bare.
                 lines.append(
-                    f"| {hit.get('technique_id', '?')} | {hit.get('name', '-')} "
+                    f"| {_cell(hit.get('technique_id')) or '?'} | {_cell(hit.get('name')) or '-'} "
                     f"| {_cell(hit.get('rule')) or '-'} | {source} | {apis} "
                     f"| {_cell(hit.get('benign_rate')) or 'not measured'} |"
                 )
@@ -406,7 +413,7 @@ class MarkdownRenderer:
             lines.append("| Kind | Value |")
             lines.append("|---|---|")
             for ioc in static.interesting_strings[:50]:
-                lines.append(f"| {ioc.kind} | `{_truncate(ioc.value, 100)}` |")
+                lines.append(f"| {ioc.kind} | `{_cell(_truncate(ioc.value, 100))}` |")
             lines.append("")
 
         if static.embedded_resources:
@@ -427,8 +434,9 @@ class MarkdownRenderer:
                 lines.append("|---|---|---|---|---|")
                 for res in carved[:10]:
                     lines.append(
-                        f"| {res.get('type', '?')} | `{res.get('id', '?')}` "
-                        f"({res.get('source', '-')}) | {res.get('size', 0)} bytes "
+                        f"| {_cell(res.get('type')) or '?'} "
+                        f"| `{_cell(res.get('id')) or '?'}` "
+                        f"({_cell(res.get('source')) or '-'}) | {res.get('size', 0)} bytes "
                         f"| {res.get('entropy', 0.0)} | `{str(res.get('sha256', ''))[:32]}…` |"
                     )
                 lines.append("")
@@ -480,7 +488,7 @@ class MarkdownRenderer:
                 if not isinstance(op, dict):
                     continue
                 lines.append(
-                    f"| `{_truncate(str(op.get('path', '')), 80)}` | "
+                    f"| `{_cell(_truncate(str(op.get('path', '')), 80))}` | "
                     f"{op.get('operation', '-')} | {op.get('api', '-')} |"
                 )
             lines.append("")
@@ -574,8 +582,9 @@ class MarkdownRenderer:
         lines.append("|---|---|---|---|")
         for mech in mechanisms[:40]:
             lines.append(
-                f"| {mech.kind} | `{_truncate(mech.target, 80)}` | "
-                f"`{_truncate(mech.payload, 80)}` | {mech.technique_id or '-'} |"
+                f"| {mech.kind} | `{_cell(_truncate(mech.target, 80))}` | "
+                f"`{_cell(_truncate(mech.payload, 80))}` | "
+                f"{_cell(mech.technique_id) or '-'} |"
             )
         return "\n".join(lines)
 
@@ -607,8 +616,9 @@ class MarkdownRenderer:
                 # is printed as it was written, with the reason beside it.
                 marker = "" if cell.technique_id_valid else f" _({UNVERIFIED_TECHNIQUE_MARKER})_"
                 lines.append(
-                    f"| {tactic} | {cell.technique_id} {cell.technique_name}{marker} | "
-                    f"{cell.confidence:.2f} | {layers} |"
+                    f"| {_cell(tactic)} "
+                    f"| {_cell(cell.technique_id)} {_cell(cell.technique_name)}{marker} | "
+                    f"{cell.confidence:.2f} | {_cell(layers)} |"
                 )
             lines.append("")
 
@@ -672,12 +682,13 @@ class MarkdownRenderer:
             lines.append("|---|---|---|---|")
             for match in attr.function_hash_matches[:10]:
                 examples = (
-                    ", ".join(f"`{f}`" for f in (match.get("example_functions") or [])[:3]) or "-"
+                    ", ".join(f"`{_cell(f)}`" for f in (match.get("example_functions") or [])[:3])
+                    or "-"
                 )
                 lines.append(
-                    f"| {match.get('family', '?')} "
+                    f"| {_cell(match.get('family')) or '?'} "
                     f"| {float(match.get('confidence') or 0.0):.2f} "
-                    f"| {match.get('shared_functions', '-')} | {examples} |"
+                    f"| {_cell(match.get('shared_functions')) or '-'} | {examples} |"
                 )
         if attr.family_rag_candidates:
             lines.append("")
@@ -687,10 +698,10 @@ class MarkdownRenderer:
             lines.append("|---|---|---|---|")
             for cand in attr.family_rag_candidates[:10]:
                 lines.append(
-                    f"| {cand.get('family', '?')} "
+                    f"| {_cell(cand.get('family')) or '?'} "
                     f"| {float(cand.get('similarity') or 0.0):.3f} "
-                    f"| {cand.get('malware_category', '-')} "
-                    f"| {cand.get('sample_count', '-')} |"
+                    f"| {_cell(cand.get('malware_category')) or '-'} "
+                    f"| {_cell(cand.get('sample_count')) or '-'} |"
                 )
         if attr.similar_samples:
             lines.append("")
@@ -702,7 +713,9 @@ class MarkdownRenderer:
                 sha = str(sample.get("sha256", "?"))
                 dist = sample.get("distance")
                 dist_str = f"{dist:.3f}" if isinstance(dist, int | float) else "-"
-                lines.append(f"| `{sha}` | {dist_str} | {sample.get('source', '-')} |")
+                lines.append(
+                    f"| `{_cell(sha)}` | {dist_str} | {_cell(sample.get('source')) or '-'} |"
+                )
         return "\n".join(lines)
 
     def _section_detection_signatures(self, rules: list[DetectionRule]) -> str:
@@ -802,7 +815,7 @@ class MarkdownRenderer:
             lines.append("| Flag | Meaning |")
             lines.append("|---|---|")
             for flag in ta.cli_flags[:20]:
-                lines.append(f"| `{flag.flag}` | {flag.description or '-'} |")
+                lines.append(f"| `{_cell(flag.flag)}` | {_cell(flag.description) or '-'} |")
             lines.append("")
 
         spk = ta.service_process_kill
@@ -852,7 +865,7 @@ class MarkdownRenderer:
                 lines.append("| Property | Value |")
                 lines.append("|---|---|")
                 for label, value in present:
-                    lines.append(f"| {label} | {value} |")
+                    lines.append(f"| {_cell(label)} | {_cell(value)} |")
                 lines.append("")
 
         note = ta.ransom_note
@@ -891,8 +904,9 @@ class MarkdownRenderer:
         lines.append("|---|---|---|---|---|")
         for ch in report.c2_channels[:10]:
             lines.append(
-                f"| {ch.name} | {ch.protocol or '-'} | {ch.encryption or '-'} "
-                f"| {ch.packet_layout or '-'} | {ch.beacon_format or '-'} |"
+                f"| {_cell(ch.name)} | {_cell(ch.protocol) or '-'} "
+                f"| {_cell(ch.encryption) or '-'} "
+                f"| {_cell(ch.packet_layout) or '-'} | {_cell(ch.beacon_format) or '-'} |"
             )
         return "\n".join(lines)
 
@@ -1035,7 +1049,10 @@ class MarkdownRenderer:
                     asserted_by, claimed_by = "—", ", ".join(str(s) for s in row) or "—"
                     associated = "—"
                 label = technique_label(str(tid), row if isinstance(row, dict) else None)
-                lines.append(f"| {label} | {asserted_by} | {claimed_by} | {associated} |")
+                lines.append(
+                    f"| {_cell(label)} | {_cell(asserted_by)} "
+                    f"| {_cell(claimed_by)} | {_cell(associated)} |"
+                )
             lines.append("")
         return "\n".join(lines)
 
@@ -1078,7 +1095,7 @@ def _evidence_rows(section: Any) -> list[str]:
             "|" + "---|" * len(columns),
         ]
         for row in section.rows:
-            cells = [_truncate(str(cell), 160) for cell in row]
+            cells = [_cell(_truncate(str(cell), 160)) for cell in row]
             cells += [""] * (len(columns) - len(cells))
             out.append("| " + " | ".join(cells[: len(columns)]) + " |")
         return out
@@ -1130,17 +1147,23 @@ def _unmapped_behaviour_lines(report: MalwareReport) -> list[str]:
 
 
 def _cell(value: Any) -> str:
-    """One table cell's text, with the column separator escaped out of it.
+    """One table cell's text, with what would break the table taken out of it.
 
-    The strings in the import-technique table come from a vendored catalogue
-    today, so nothing in them is a pipe — but they are free text reaching a
-    Markdown table through a tool payload, and a single ``|`` anywhere in one
-    splits the row and shifts every column after it. Cheaper to escape than to
-    trust the producer.
+    Every string in this report that a sample, a sandbox, a tool payload or a
+    model wrote is free text, and a Markdown table is one of the few places
+    where free text is structural: a single ``|`` adds a column and shifts
+    every cell after it, and a newline ends the row and orphans every row
+    below. The worst case is not theoretical — an import name is the sample's
+    own bytes and a URL, a registry key and a dropped file's path all come
+    from the sample too — and the table it would wreck is one a human reads to
+    make a call. Cheaper to escape at the cell than to trust each producer.
+
+    Not a security control. ``markdown-it`` runs with ``html=False`` and React
+    escapes text, so nothing here is about injection; this is table integrity.
     """
     if value is None:
         return ""
-    return str(value).replace("|", "\\|").replace("\n", " ")
+    return str(value).replace("|", "\\|").replace("\r", " ").replace("\n", " ")
 
 
 def _truncate(value: str, length: int) -> str:
@@ -1169,15 +1192,16 @@ def _process_tree_lines(node: ProcessNode, depth: int) -> list[str]:
 def _registry_row(reg: RegistryMod) -> str:
     value_name = reg.value_name or "-"
     return (
-        f"| {reg.hive} | `{_truncate(reg.key, 80)}` | `{_truncate(value_name, 40)}` | "
-        f"{reg.operation} |"
+        f"| {_cell(reg.hive)} | `{_cell(_truncate(reg.key, 80))}` "
+        f"| `{_cell(_truncate(value_name, 40))}` | "
+        f"{_cell(reg.operation)} |"
     )
 
 
 def _signature_row(sig: SandboxSignature) -> str:
-    ttps = ", ".join(sig.technique_ids) if sig.technique_ids else "-"
-    desc = _truncate(sig.description or sig.name, 60)
-    return f"| {sig.name} ({desc}) | {sig.severity} | {ttps} | {len(sig.marks)} |"
+    ttps = _cell(", ".join(sig.technique_ids)) if sig.technique_ids else "-"
+    desc = _cell(_truncate(sig.description or sig.name, 60))
+    return f"| {_cell(sig.name)} ({desc}) | {_cell(sig.severity)} | {ttps} | {len(sig.marks)} |"
 
 
 def _domain_row(d: NetworkDomain) -> str:
@@ -1207,20 +1231,23 @@ def _domain_row(d: NetworkDomain) -> str:
     # identically. Such a name is also kept out of the exported bundle, so a
     # reader comparing the table with the bundle needs the column to see why.
     source = d.source or "-"
-    return f"| `{d.fqdn}` | {source} | {flag} | {reason} | {ips} | {pids} |"
+    return (
+        f"| `{_cell(d.fqdn)}` | {_cell(source)} | {flag} "
+        f"| {_cell(reason)} | {_cell(ips)} | {pids} |"
+    )
 
 
 def _ip_row(ip: NetworkIP) -> str:
     return (
-        f"| `{ip.address}` | {ip.port or '-'} | {ip.transport or '-'} | "
-        f"{ip.asn or '-'} | {ip.geo or '-'} |"
+        f"| `{_cell(ip.address)}` | {ip.port or '-'} | {_cell(ip.transport) or '-'} | "
+        f"{_cell(ip.asn) or '-'} | {_cell(ip.geo) or '-'} |"
     )
 
 
 def _url_row(u: NetworkURL) -> str:
     return (
-        f"| {u.method} | `{_truncate(u.url, 120)}` | {u.status or '-'} | "
-        f"{_truncate(u.user_agent or '-', 60)} |"
+        f"| {_cell(u.method)} | `{_cell(_truncate(u.url, 120))}` | {u.status or '-'} | "
+        f"{_cell(_truncate(u.user_agent or '-', 60))} |"
     )
 
 
