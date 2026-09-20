@@ -61,7 +61,18 @@ class TestTheMarkdownReport:
     def test_the_rule_that_fired_is_a_row_with_its_source_and_entry(self) -> None:
         report, entry_id = _report()
         md = MarkdownRenderer().render(report)
-        assert f"| T1055 | Process Injection | - | api_capability ({entry_id}) |" in md
+        assert (
+            "| T1055 | Process Injection "
+            "| allocating or writing memory in another process and starting a thread in it "
+            f"| api_capability ({entry_id}) " in md
+        )
+
+    def test_the_row_says_how_much_ordinary_software_the_same_rule_fires_on(self) -> None:
+        """A deterministic association printed without its base rate reads as a
+        finding. The last cell is the measurement, with the corpus named."""
+        report, _entry_id = _report()
+        md = MarkdownRenderer().render(report)
+        assert "0.5% of benign software (13 of 2730 freely distributed Windows binaries" in md
 
 
 class TestTheNarrativePrompt:
@@ -70,7 +81,7 @@ class TestTheNarrativePrompt:
         text = build_prompt_text(report)
         assert "Import capability profile" in text
         assert f"process_injection x3, registry x1 [{entry_id}]" in text
-        assert "- T1055 Process Injection: " in text
+        assert "- T1055 Process Injection (allocating or writing memory in another process" in text
         assert "Suspicious imports" not in text
 
 

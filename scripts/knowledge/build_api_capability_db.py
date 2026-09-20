@@ -46,9 +46,16 @@ _TECHNIQUES = _ROOT / "data" / "attck_techniques.json"
 # Calling it *suspicious* is not: every Windows program opens registry keys, and
 # a "suspicious imports" table that lists all of them tells a reader nothing.
 #
-# Rule of thumb applied below: a category is high/medium when its presence in an
-# import table is itself unusual for ordinary software, and informational when
-# the API is ubiquitous and only the *pattern* of use carries signal.
+# The rule of thumb is now a measurement, on both platforms. A category is
+# labelled only when its own measured rate separates software that is a sample
+# from software that is not, and only behind the combination its ``flags_with``
+# names. Measured over the two Windows corpora described in ``MEASURED``, the
+# nine Windows categories that carried a bare ``high`` or ``medium`` appeared on
+# 97.73% of ordinary Windows software against 93.50% of malware — the label was
+# very slightly more common on the benign side, which is no signal at all. Every
+# one of them is informational here and says what would give it weight;
+# ``keylogging`` is the one that keeps a label, behind the input hook or
+# raw-input device that is the capture.
 
 HIGH = "high"
 MEDIUM = "medium"
@@ -61,6 +68,88 @@ INFO = "informational"
 # in the manifest as ``corroborated_by`` and ``api_capability`` puts them on
 # the row. Only categories that need it are listed.
 WINDOWS_CORROBORATORS: dict[str, list[str]] = {
+    # Allocating and protecting memory is what a just-in-time compiler and a
+    # trampoline do; what makes it injection is a thread started elsewhere.
+    "process_injection": [
+        "CreateRemoteThread",
+        "CreateRemoteThreadEx",
+        "NtCreateThreadEx",
+        "NtQueueApcThread",
+        "QueueUserAPC",
+        "RtlCreateUserThread",
+    ],
+    # A handle read and an exception filter are a C runtime starting up; the
+    # evasion is the scanner or the tracing provider turned off beside them.
+    "evasion": [
+        "AmsiScanBuffer",
+        "EtwEventWrite",
+        "NtSetInformationProcess",
+        "RtlSetProcessIsCritical",
+        "Wow64DisableWow64FsRedirection",
+    ],
+    # Loading a library and resolving an export is every program on the
+    # platform; what gives it weight is code fetched over the network or
+    # started inside another process.
+    "execution": [
+        "CreateRemoteThread",
+        "NtCreateThreadEx",
+        "URLDownloadToFileA",
+        "URLDownloadToFileW",
+        "WriteProcessMemory",
+    ],
+    # Reading the clock and asking about the program's own debug state is a
+    # runtime routing its diagnostics; the question about another process's
+    # debug port, or a thread hidden from the debugger, is not.
+    "anti_debug": [
+        "CheckRemoteDebuggerPresent",
+        "DebugActiveProcess",
+        "NtQueryInformationProcess",
+        "NtSetInformationThread",
+    ],
+    # A socket is a socket. What the traffic is for shows in what the same
+    # binary does with the clipboard, the screen or a shell.
+    "network": [
+        "CryptEncrypt",
+        "GetClipboardData",
+        "URLDownloadToFileA",
+        "URLDownloadToFileW",
+        "WinExec",
+    ],
+    # Encryption beside a directory walk and a rename is the shape of
+    # ransomware; encryption on its own is how a program stores a secret.
+    "crypto": [
+        "DeleteFileA",
+        "FindFirstFileA",
+        "MoveFileExA",
+        "connect",
+        "socket",
+    ],
+    # Reading your own token is how a program finds out whether it is elevated.
+    "privilege": [
+        "CreateRemoteThread",
+        "DuplicateTokenEx",
+        "ImpersonateLoggedOnUser",
+        "WriteProcessMemory",
+    ],
+    # A mutex and an event are how a program keeps one copy of itself running;
+    # persistence is arranging to be started again by something else.
+    "persistence": [
+        "CreateServiceA",
+        "CreateServiceW",
+        "RegSetValueExA",
+        "RegSetValueExW",
+        "SHSetValueA",
+    ],
+    # Reading a credential store is what a password manager and a mail client
+    # do; what gives it weight is the same binary capturing input or sending
+    # what it found somewhere.
+    "credential": [
+        "CryptUnprotectData",
+        "GetClipboardData",
+        "SetWindowsHookExA",
+        "SetWindowsHookExW",
+        "WinHttpSendRequest",
+    ],
     "screen_capture": [
         "AttachThreadInput",
         "GetAsyncKeyState",
@@ -100,7 +189,7 @@ WINDOWS_CORROBORATORS: dict[str, list[str]] = {
 WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
     # ---------------------------------------------------------------- frozen 8
     "process_injection": (
-        HIGH,
+        INFO,
         [
             "VirtualAlloc",
             "VirtualAllocEx",
@@ -150,7 +239,7 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
         ],
     ),
     "anti_debug": (
-        HIGH,
+        INFO,
         [
             "IsDebuggerPresent",
             "CheckRemoteDebuggerPresent",
@@ -180,7 +269,7 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
         ],
     ),
     "network": (
-        MEDIUM,
+        INFO,
         [
             "WSAStartup",
             "WSACleanup",
@@ -280,7 +369,7 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
         ],
     ),
     "crypto": (
-        MEDIUM,
+        INFO,
         [
             "CryptAcquireContextA",
             "CryptAcquireContextW",
@@ -528,7 +617,7 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
         ],
     ),
     "privilege": (
-        HIGH,
+        INFO,
         [
             "AdjustTokenPrivileges",
             "OpenProcessToken",
@@ -589,7 +678,7 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
         ],
     ),
     "execution": (
-        MEDIUM,
+        INFO,
         [
             "WinExec",
             "ShellExecuteA",
@@ -788,7 +877,7 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
         ],
     ),
     "persistence": (
-        HIGH,
+        INFO,
         [
             "CreateServiceA",
             "CreateServiceW",
@@ -902,7 +991,7 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
         ],
     ),
     "evasion": (
-        HIGH,
+        INFO,
         [
             "NtSetInformationProcess",
             "ZwSetInformationProcess",
@@ -970,7 +1059,7 @@ WINDOWS_CATEGORIES: dict[str, tuple[str, list[str]]] = {
         ],
     ),
     "credential": (
-        HIGH,
+        INFO,
         [
             "CredEnumerateA",
             "CredEnumerateW",
@@ -1314,13 +1403,31 @@ LINUX_CORROBORATORS: dict[str, list[str]] = {
 }
 
 # Per category, the names whose presence beside it turns the catalogue's own
-# ``suspicious`` label on. A category with no entry here is labelled by its
-# tier alone, which is every Windows category and how the flag has always
-# worked. ``process_injection`` has one because ``memfd_create`` by itself is
-# ordinary in the graphics and service stacks, while the same symbol beside a
-# call that reaches into another process is not.
+# ``suspicious`` label on. A category with no entry here is informational and
+# is never labelled. ``process_injection`` has one because ``memfd_create`` by
+# itself is ordinary in the graphics and service stacks, while the same symbol
+# beside a call that reaches into another process is not.
 LINUX_FLAG_GATES: dict[str, list[str]] = {
     "process_injection": ["process_vm_readv", "process_vm_writev", "ptrace"],
+}
+
+# The Windows counterpart, and the only Windows category that carries a label.
+# Asking for the state of one key, naming a key for a key-binding screen, or
+# closing the clipboard is what an editor, a game and a hotkey manager do every
+# frame. The capture is the channel: an input hook, a raw-input device, or a
+# read of the whole keyboard at once, which delivers keystrokes the program was
+# never sent.
+WINDOWS_FLAG_GATES: dict[str, list[str]] = {
+    "keylogging": [
+        "AttachThreadInput",
+        "GetAsyncKeyState",
+        "GetKeyboardState",
+        "GetRawInputData",
+        "RegisterRawInputDevices",
+        "SetWinEventHook",
+        "SetWindowsHookExA",
+        "SetWindowsHookExW",
+    ],
 }
 
 CORROBORATORS_BY_PLATFORM: dict[str, dict[str, list[str]]] = {
@@ -1329,16 +1436,119 @@ CORROBORATORS_BY_PLATFORM: dict[str, dict[str, list[str]]] = {
 }
 
 FLAG_GATES_BY_PLATFORM: dict[str, dict[str, list[str]]] = {
-    "windows": {},
+    "windows": WINDOWS_FLAG_GATES,
     "linux": LINUX_FLAG_GATES,
 }
 
 
+# ---------------------------------------------------------------------------
+# What each association was measured on
+# ---------------------------------------------------------------------------
+# The number a surviving association carries is the share of *benign* software
+# it fires on, measured through the production loader over a named corpus, and
+# it travels with the association to the model, to the report and to the
+# console. It is the fact the platform states; the model weighs it.
+#
+# What it is not. There is no technique-level ground truth for either malware
+# corpus: what was measured is discrimination between binaries already known to
+# be bad and binaries already known to be good, never that a sample performs
+# the technique a rule names. 29.2% of the Windows malware corpus imports
+# nothing an import rule can see — packed, .NET, or resolving everything
+# through ``GetProcAddress`` — so neither the recall nor the gates generalise
+# beyond this pair of corpora. Every gate below was chosen from a written
+# sentence about behaviour and then measured, not searched for.
+
+BENIGN_CORPORA: dict[str, str] = {
+    "windows": "2730 freely distributed Windows binaries from 25 independent vendors",
+    "linux": "1842 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin",
+}
+
+# The malware side, where there is one. A profile is a distinct import set, not
+# a file: 201 parsed Windows samples collapse to 123 sets, and the held-out part
+# is the half of them the combinations were not chosen on. There is no Linux
+# malware corpus, so a Linux row carries a benign rate and says nothing about
+# recall rather than implying one.
+HELD_OUT_CORPORA: dict[str, str] = {
+    "windows": "46 distinct import profiles the combinations were not chosen on",
+}
+
+# Per platform and category, how much of that corpus the category appears on,
+# and — where the category is labelled — how much of it the gate labels.
+MEASURED_CATEGORIES: dict[str, dict[str, dict[str, Any]]] = {
+    "windows": {
+        "process_injection": {"benign_percent": 65.6, "benign_files": 1790},
+        "anti_debug": {"benign_percent": 36.6, "benign_files": 1000},
+        "network": {"benign_percent": 14.4, "benign_files": 392},
+        "crypto": {"benign_percent": 19.0, "benign_files": 520},
+        "filesystem": {"benign_percent": 35.6, "benign_files": 972},
+        "registry": {"benign_percent": 13.2, "benign_files": 359},
+        "privilege": {"benign_percent": 9.8, "benign_files": 267},
+        "execution": {"benign_percent": 93.5, "benign_files": 2552},
+        "discovery": {"benign_percent": 56.4, "benign_files": 1541},
+        "persistence": {"benign_percent": 16.8, "benign_files": 460},
+        "keylogging": {
+            "benign_percent": 4.0,
+            "benign_files": 110,
+            "labelled_percent": 2.0,
+            "labelled_files": 55,
+            "held_out_malware_profiles": 7,
+        },
+        "screen_capture": {"benign_percent": 5.2, "benign_files": 143},
+        "message_loop": {"benign_percent": 5.7, "benign_files": 155},
+        "evasion": {"benign_percent": 79.6, "benign_files": 2174},
+        "credential": {"benign_percent": 1.2, "benign_files": 33},
+    },
+    "linux": {
+        "process_injection": {
+            "benign_percent": 0.9,
+            "benign_files": 17,
+            "labelled_percent": 0.3,
+            "labelled_files": 5,
+        },
+        "anti_debug": {"benign_percent": 1.2, "benign_files": 22},
+        "network": {"benign_percent": 15.6, "benign_files": 287},
+        "crypto": {"benign_percent": 2.4, "benign_files": 44},
+        "filesystem": {"benign_percent": 79.3, "benign_files": 1461},
+        "discovery": {"benign_percent": 47.8, "benign_files": 881},
+        "privilege": {"benign_percent": 7.9, "benign_files": 146},
+        "execution": {"benign_percent": 22.7, "benign_files": 418},
+        "process": {"benign_percent": 18.6, "benign_files": 342},
+    },
+}
+
+
 ATTCK_TECHNIQUES: list[dict[str, Any]] = [
+    # Every Windows rule below was measured in its shipped form over both
+    # corpora, and fifteen of the forty-seven are gone because that measurement
+    # found nothing in them: within the size-matched band their names fired no
+    # more often on malware than on ordinary software. Those fifteen are named
+    # where they used to stand, so the same rule is not written twice.
+    #
+    # Of the thirty-two left, fourteen carry a narrower combination than they
+    # shipped with. A name was taken out of a rule only where the act it names
+    # is not the act the technique describes — ``TerminateProcess`` ends a
+    # process and not a service, ``MoveFileEx`` renames a file and does not
+    # delete it, ``IsProcessorFeaturePresent`` is the C runtime asking about the
+    # processor at startup. A name was never taken out for being common: a
+    # combination chosen because it happened to separate these two corpora best
+    # is a number, not a reason, and eight such combinations were written,
+    # measured and then not applied.
+    #
+    # Every row states what it is: ``rule`` is the combination in words,
+    # ``ordinary_use`` names the software that is not a sample and imports the
+    # same names, and ``measured`` is how much of the benign corpus the rule
+    # fires on. A technique association is a reference association — never a
+    # finding, never a verdict, never a label of its own.
     # ---------------------------------------------------------------- Discovery
     {
         "technique_id": "T1057",
         "name": "Process Discovery",
+        "rule": "walking the process list and naming the executables behind it",
+        "ordinary_use": (
+            "a task manager, an installer looking for a copy of itself already "
+            "running, and every updater walk the same snapshot"
+        ),
+        "measured": {"benign_percent": 1.5, "benign_files": 42, "held_out_malware_profiles": 6},
         "min_apis": 2,
         "confidence_base": 0.42,
         "confidence_max": 0.62,
@@ -1355,8 +1565,18 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
         ],
     },
     {
+        # ``GetSystemMetrics`` was taken out and put back. It returns the screen
+        # geometry, which is how a window lays itself out — but it is also a
+        # system metric, and this technique is reading system information. The
+        # only argument for removing it was that it is common.
         "technique_id": "T1082",
         "name": "System Information Discovery",
+        "rule": "reading the host's version, hardware and volume identity",
+        "ordinary_use": (
+            "a crash reporter, an installer and a licence check collect the same "
+            "facts about the machine they are on"
+        ),
+        "measured": {"benign_percent": 4.1, "benign_files": 111, "held_out_malware_profiles": 9},
         "min_apis": 3,
         "confidence_base": 0.40,
         "confidence_max": 0.58,
@@ -1379,6 +1599,12 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     {
         "technique_id": "T1033",
         "name": "System Owner/User Discovery",
+        "rule": "asking which account the program is running as",
+        "ordinary_use": (
+            "an installer, a licence check and any program writing into a user "
+            "profile ask the same question"
+        ),
+        "measured": {"benign_percent": 1.6, "benign_files": 45, "held_out_malware_profiles": 3},
         "min_apis": 2,
         "confidence_base": 0.42,
         "confidence_max": 0.60,
@@ -1392,24 +1618,21 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "WTSQuerySessionInformationA",
         ],
     },
+    # T1087 Account Discovery stood here and is gone: it fired on no malware
+    # profile in the corpus at all, at any import-table size.
     {
-        "technique_id": "T1087",
-        "name": "Account Discovery",
-        "min_apis": 2,
-        "confidence_base": 0.44,
-        "confidence_max": 0.62,
-        "apis": [
-            "NetUserEnum",
-            "NetLocalGroupGetMembers",
-            "NetUserGetInfo",
-            "LookupAccountNameA",
-            "CheckTokenMembership",
-            "DsGetDcNameA",
-        ],
-    },
-    {
+        # The native spellings could have been kept alone, which would have put
+        # the rule under a tenth of a percent of ordinary software. Reading a
+        # key through ntdll rather than advapi32 is a different route to the
+        # same act, and the route is not the technique.
         "technique_id": "T1012",
         "name": "Query Registry",
+        "rule": "reading values out of the registry",
+        "ordinary_use": (
+            "every program that remembers a setting reads it back with these "
+            "calls, and an import table does not carry which key was read"
+        ),
+        "measured": {"benign_percent": 4.4, "benign_files": 119, "held_out_malware_profiles": 12},
         "min_apis": 2,
         "confidence_base": 0.38,
         "confidence_max": 0.55,
@@ -1426,8 +1649,18 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
         ],
     },
     {
+        # Narrowing this to the enumeration calls alone — dropping the ones that
+        # ask about a single named file — was written and not applied: looking
+        # in a specific location is inside this technique's own description, so
+        # the only thing the narrower list had going for it was its rate.
         "technique_id": "T1083",
         "name": "File and Directory Discovery",
+        "rule": "walking directories and reading the attributes of what is in them",
+        "ordinary_use": (
+            "a search tool, a backup agent, an installer and every archiver walk "
+            "a tree the same way"
+        ),
+        "measured": {"benign_percent": 6.4, "benign_files": 175, "held_out_malware_profiles": 14},
         "min_apis": 3,
         "confidence_base": 0.38,
         "confidence_max": 0.55,
@@ -1446,6 +1679,12 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     {
         "technique_id": "T1010",
         "name": "Application Window Discovery",
+        "rule": "enumerating the windows on the desktop and reading their titles and classes",
+        "ordinary_use": (
+            "an accessibility tool, a window manager and a program looking for "
+            "its own running copy walk the same list"
+        ),
+        "measured": {"benign_percent": 2.6, "benign_files": 70, "held_out_malware_profiles": 7},
         "min_apis": 2,
         "confidence_base": 0.44,
         "confidence_max": 0.60,
@@ -1460,41 +1699,18 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "EnumDesktopWindows",
         ],
     },
-    {
-        "technique_id": "T1016",
-        "name": "System Network Configuration Discovery",
-        "min_apis": 2,
-        "confidence_base": 0.42,
-        "confidence_max": 0.58,
-        "apis": [
-            "GetAdaptersInfo",
-            "GetAdaptersAddresses",
-            "GetIfTable",
-            "gethostname",
-            "GetNetworkParams",
-            "SendARP",
-            "NetWkstaGetInfo",
-        ],
-    },
-    {
-        "technique_id": "T1049",
-        "name": "System Network Connections Discovery",
-        "min_apis": 2,
-        "confidence_base": 0.44,
-        "confidence_max": 0.60,
-        "apis": [
-            "GetTcpTable",
-            "GetExtendedTcpTable",
-            "GetUdpTable",
-            "NetShareEnum",
-            "WNetOpenEnumA",
-            "WNetEnumResourceA",
-            "NetServerEnum",
-        ],
-    },
+    # T1016 System Network Configuration Discovery and T1049 System Network
+    # Connections Discovery stood here and are gone: neither fired on a single
+    # malware profile.
     {
         "technique_id": "T1007",
         "name": "System Service Discovery",
+        "rule": "opening the service manager and listing the services on the host",
+        "ordinary_use": (
+            "an installer, a monitoring agent and every service-control panel "
+            "enumerate services the same way"
+        ),
+        "measured": {"benign_percent": 0.8, "benign_files": 23, "held_out_malware_profiles": 1},
         "min_apis": 2,
         "confidence_base": 0.44,
         "confidence_max": 0.60,
@@ -1509,6 +1725,9 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     {
         "technique_id": "T1614",
         "name": "System Location Discovery",
+        "rule": "reading the locale, the keyboard layout and the time zone",
+        "ordinary_use": "every program that formats a date or a number reads the same settings",
+        "measured": {"benign_percent": 6.8, "benign_files": 185, "held_out_malware_profiles": 8},
         "min_apis": 2,
         "confidence_base": 0.44,
         "confidence_max": 0.58,
@@ -1525,26 +1744,40 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     },
     # ------------------------------------------------------------- Persistence
     {
+        # Opening the service manager, starting a service, sending it a control
+        # code and removing it are administration, which is not what this
+        # technique names. Creating a service and rewriting an existing one's
+        # configuration is.
         "technique_id": "T1543.003",
         "name": "Create or Modify System Process: Windows Service",
+        "rule": "creating a service, or rewriting an existing service's configuration",
+        "ordinary_use": (
+            "an installer and a management agent create and reconfigure their "
+            "own services the same way"
+        ),
+        "measured": {"benign_percent": 0.3, "benign_files": 7, "held_out_malware_profiles": 0},
         "min_apis": 2,
         "confidence_base": 0.48,
         "confidence_max": 0.65,
         "apis": [
             "CreateServiceA",
             "CreateServiceW",
-            "OpenSCManagerA",
-            "OpenSCManagerW",
-            "StartServiceA",
             "ChangeServiceConfigA",
             "ChangeServiceConfig2A",
-            "DeleteService",
-            "ControlService",
         ],
     },
     {
+        # No narrower combination was applied, because there is none to write:
+        # every name here is the act of writing the registry, and the Run key
+        # that makes the write persistence is a path.
         "technique_id": "T1547.001",
         "name": "Boot or Logon Autostart Execution: Registry Run Keys",
+        "rule": "creating a registry key and writing a value into it",
+        "ordinary_use": (
+            "every program that saves a setting writes a value, and the key that "
+            "would make this persistence is a path an import table does not carry"
+        ),
+        "measured": {"benign_percent": 4.0, "benign_files": 108, "held_out_malware_profiles": 12},
         "min_apis": 2,
         "confidence_base": 0.42,
         "confidence_max": 0.60,
@@ -1557,71 +1790,72 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "NtSetValueKey",
         ],
     },
-    {
-        "technique_id": "T1053.005",
-        "name": "Scheduled Task/Job: Scheduled Task",
-        "min_apis": 2,
-        "confidence_base": 0.48,
-        "confidence_max": 0.65,
-        "apis": [
-            "NetScheduleJobAdd",
-            "NetScheduleJobEnum",
-            "ITaskScheduler",
-            "ITaskService",
-            "IRegisteredTask",
-            "ITaskFolder",
-        ],
-    },
-    {
-        "technique_id": "T1546.003",
-        "name": "Event Triggered Execution: WMI Event Subscription",
-        "min_apis": 2,
-        "confidence_base": 0.48,
-        "confidence_max": 0.65,
-        "apis": ["IWbemLocator", "IWbemServices", "IWbemClassObject", "CoSetProxyBlanket"],
-    },
+    # T1053.005 Scheduled Task and T1546.003 WMI Event Subscription stood here
+    # and are gone. Most of what they keyed on were COM interface names, which
+    # are never in an import table — a GUID passed to CoCreateInstance is not a
+    # symbol — so each had one or two real exports behind a floor of two and
+    # neither could fire on anything, benign or otherwise. That evidence belongs
+    # to a layer that reads strings.
     # --------------------------------------------------------- Privilege Esc.
     {
+        # Opening a token and enabling a privilege the account already holds is
+        # what a backup tool, a service and an installer do; and setting a
+        # token's integrity level is how a launcher sandboxes its own child.
+        # Manipulation in the sense this technique names is duplicating a token
+        # and running or impersonating with it.
         "technique_id": "T1134",
         "name": "Access Token Manipulation",
+        "rule": "duplicating an access token and running or impersonating with it",
+        "ordinary_use": (
+            "a service running work as the logged-on user, a named-pipe server "
+            "and a task launcher duplicate tokens the same way"
+        ),
+        "measured": {"benign_percent": 0.4, "benign_files": 11, "held_out_malware_profiles": 4},
         "min_apis": 2,
         "confidence_base": 0.48,
         "confidence_max": 0.65,
         "apis": [
-            "OpenProcessToken",
-            "OpenThreadToken",
-            "AdjustTokenPrivileges",
             "DuplicateTokenEx",
             "DuplicateToken",
             "SetThreadToken",
             "ImpersonateLoggedOnUser",
             "CreateProcessWithTokenW",
             "CreateProcessAsUserA",
-            "SetTokenInformation",
-            "RtlAdjustPrivilege",
-            "NtAdjustPrivilegesToken",
             "ImpersonateNamedPipeClient",
         ],
     },
     {
+        # Checking whether you are already an administrator and asking the shell
+        # to run something elevated is how a program *requests* elevation, with
+        # the consent prompt the user sees. The bypass is binding to an object
+        # that is already elevated, through its moniker.
         "technique_id": "T1548.002",
         "name": "Abuse Elevation Control Mechanism: Bypass UAC",
+        "rule": "binding to an already elevated COM object through its moniker",
+        "ordinary_use": (
+            "a setup program and a management console bind to an elevated COM "
+            "object to do one privileged step"
+        ),
+        "measured": {"benign_percent": 0.0, "benign_files": 0, "held_out_malware_profiles": 2},
         "min_apis": 2,
         "confidence_base": 0.45,
         "confidence_max": 0.62,
-        "apis": [
-            "ShellExecuteExA",
-            "ShellExecuteExW",
-            "CoGetObject",
-            "CLSIDFromProgID",
-            "CheckTokenMembership",
-            "GetTokenInformation",
-        ],
+        "apis": ["CoGetObject", "CLSIDFromProgID"],
     },
     # ------------------------------------------------------- Defense Evasion
     {
+        # Opening a handle to another process is what a task manager, a debugger
+        # and an updater do. Installing a global input hook is input capture's
+        # own mechanism and is counted there; whether the hook's module lands in
+        # another process is a runtime fact.
         "technique_id": "T1055",
         "name": "Process Injection",
+        "rule": "allocating or writing memory in another process and starting a thread in it",
+        "ordinary_use": (
+            "a debugger, a profiler, an anti-cheat and an accessibility shim "
+            "reach into another process with the same calls"
+        ),
+        "measured": {"benign_percent": 0.5, "benign_files": 13, "held_out_malware_profiles": 5},
         "min_apis": 2,
         "confidence_base": 0.48,
         "confidence_max": 0.65,
@@ -1634,15 +1868,26 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "RtlCreateUserThread",
             "QueueUserAPC",
             "NtQueueApcThread",
-            "SetWindowsHookEx",
             "NtWriteVirtualMemory",
             "NtAllocateVirtualMemory",
-            "OpenProcess",
         ],
     },
     {
+        # Reading a thread's context is what a crash reporter does and resuming
+        # a suspended child is how every launcher starts one. Writing the
+        # context is redirecting execution, and unmapping the image is replacing
+        # it.
         "technique_id": "T1055.012",
         "name": "Process Injection: Process Hollowing",
+        "rule": (
+            "unmapping a new process's image, or writing over it and pointing "
+            "its thread at the replacement"
+        ),
+        "ordinary_use": (
+            "a launcher that patches a child before it runs and an emulator that "
+            "loads its own image use the same calls"
+        ),
+        "measured": {"benign_percent": 0.4, "benign_files": 10, "held_out_malware_profiles": 3},
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
@@ -1650,31 +1895,28 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "NtUnmapViewOfSection",
             "ZwUnmapViewOfSection",
             "SetThreadContext",
-            "GetThreadContext",
-            "ResumeThread",
             "WriteProcessMemory",
             "CreateProcessInternalW",
         ],
     },
+    # T1620 Reflective Code Loading stood here on the section and file-mapping
+    # calls and is gone: mapping a section is how a program reads a large file,
+    # and the rule appeared on ordinary software and on malware at the same
+    # rate. The Linux rule of the same id survives on ``memfd_create``, which
+    # names the act rather than a means to it.
     {
-        "technique_id": "T1620",
-        "name": "Reflective Code Loading",
-        "min_apis": 2,
-        "confidence_base": 0.45,
-        "confidence_max": 0.62,
-        "apis": [
-            "NtCreateSection",
-            "ZwCreateSection",
-            "NtMapViewOfSection",
-            "MapViewOfFile",
-            "CreateFileMappingA",
-            "LdrLoadDll",
-            "LdrGetProcedureAddress",
-        ],
-    },
-    {
+        # Narrowing this to the questions asked about *another* process's debug
+        # port was written and not applied: this technique's own description
+        # names ``IsDebuggerPresent`` and the output-debug trick, so removing
+        # them would have been a statement about how common they are.
         "technique_id": "T1622",
         "name": "Debugger Evasion",
+        "rule": "asking whether a debugger is attached and taking the debug path",
+        "ordinary_use": (
+            "a C runtime routes an assertion this way, and a crash reporter, a "
+            "profiler and a debugger itself call the same functions"
+        ),
+        "measured": {"benign_percent": 7.5, "benign_files": 205, "held_out_malware_profiles": 6},
         "min_apis": 2,
         "confidence_base": 0.48,
         "confidence_max": 0.65,
@@ -1689,8 +1931,20 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
         ],
     },
     {
+        # ``IsProcessorFeaturePresent`` is the C runtime asking whether the
+        # processor has an instruction set, at startup, in two out of five
+        # binaries ever compiled. It is not a question about a virtual machine.
         "technique_id": "T1497",
         "name": "Virtualization/Sandbox Evasion",
+        "rule": (
+            "reading the firmware tables, enumerating device instances, or "
+            "checking whether a person is at the machine"
+        ),
+        "ordinary_use": (
+            "a hardware inventory tool, a driver installer, a screensaver and a "
+            "presentation program ask the same questions"
+        ),
+        "measured": {"benign_percent": 0.5, "benign_files": 13, "held_out_malware_profiles": 1},
         "min_apis": 2,
         "confidence_base": 0.42,
         "confidence_max": 0.60,
@@ -1701,12 +1955,22 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "SetupDiEnumDeviceInfo",
             "GetLastInputInfo",
             "GetCursorPos",
-            "IsProcessorFeaturePresent",
         ],
     },
     {
+        # Nothing was taken out and nothing could be: all eight are ordinary
+        # timing calls and all eight are equally this technique's, because the
+        # evasion is the *duration* a program waits, which no import carries.
+        # This is the highest benign rate in the catalogue and it is stated
+        # rather than tuned away.
         "technique_id": "T1497.003",
         "name": "Virtualization/Sandbox Evasion: Time Based Evasion",
+        "rule": "reading the clock and the performance counters",
+        "ordinary_use": (
+            "every program that measures how long something took reads the same "
+            "counters, and the evasion is a duration an import table cannot show"
+        ),
+        "measured": {"benign_percent": 9.6, "benign_files": 261, "held_out_malware_profiles": 14},
         "min_apis": 3,
         "confidence_base": 0.40,
         "confidence_max": 0.58,
@@ -1722,8 +1986,17 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
         ],
     },
     {
+        # Keeping only the hive calls was written and not applied. Writing a
+        # value *is* modifying the registry; loading a hive is a rarer sibling,
+        # not a purer form of the same act.
         "technique_id": "T1112",
         "name": "Modify Registry",
+        "rule": "writing or deleting registry keys and values",
+        "ordinary_use": (
+            "every program that saves a setting writes the registry, and an "
+            "import table does not carry which key was written"
+        ),
+        "measured": {"benign_percent": 4.9, "benign_files": 135, "held_out_malware_profiles": 13},
         "min_apis": 2,
         "confidence_base": 0.40,
         "confidence_max": 0.58,
@@ -1740,67 +2013,23 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "RegLoadKeyA",
         ],
     },
+    # T1222 File and Directory Permissions Modification stood here and is gone:
+    # it appeared on ordinary software twice as often as on malware.
+    #
+    # Two rules on the scanning and tracing provider calls — the pair ATT&CK
+    # 19.2 folded into T1685 — stood here and are gone. Neither fired on a
+    # malware profile; between them they appeared on three benign binaries.
     {
-        # Only the write-side APIs appear here. The read-side spellings
-        # (GetFileSecurity, GetAclInformation, GetAce) are categorised under
-        # `discovery` and deliberately excluded: reading a DACL is what every
-        # security-aware program does, and mapping it to T1222 would fire on
-        # most signed software in the corpus.
-        "technique_id": "T1222",
-        "name": "File and Directory Permissions Modification",
-        "min_apis": 2,
-        "confidence_base": 0.42,
-        "confidence_max": 0.60,
-        "apis": [
-            "SetFileSecurityA",
-            "SetFileSecurityW",
-            "SetNamedSecurityInfoA",
-            "SetNamedSecurityInfoW",
-            "SetSecurityInfo",
-            "SetEntriesInAclA",
-            "SetEntriesInAclW",
-            "SetSecurityDescriptorDacl",
-            "AddAccessAllowedAce",
-            "AddAccessDeniedAce",
-            "DeleteAce",
-        ],
-    },
-    {
-        # ATT&CK 19.2 folded this and Indicator Blocking below into T1685, and
-        # the builder follows the vendored set's revoked-by to it. The id here
-        # is the one the rule was curated against; ``name`` is the catalogue's
-        # own name for the id it ends up on, and ``rule`` is what distinguishes
-        # two rules that evidence the same technique from different imports. A
-        # surface printing the id beside the name must print a name the
-        # catalogue agrees with.
-        "technique_id": "T1562.001",
-        "name": "Disable or Modify Tools",
-        "rule": "scanning and tracing provider calls",
-        "min_apis": 2,
-        "confidence_base": 0.50,
-        "confidence_max": 0.65,
-        "apis": [
-            "AmsiScanBuffer",
-            "AmsiInitialize",
-            "AmsiOpenSession",
-            "EtwEventWrite",
-            "EtwEventRegister",
-            "EtwEventUnregister",
-            "EventWrite",
-        ],
-    },
-    {
-        "technique_id": "T1562.006",
-        "name": "Disable or Modify Tools",
-        "rule": "tracing provider calls and the event log",
-        "min_apis": 2,
-        "confidence_base": 0.46,
-        "confidence_max": 0.62,
-        "apis": ["EtwEventUnregister", "EtwEventRegister", "EventWrite", "ReportEventA"],
-    },
-    {
+        # ``MoveFileEx`` renames a file. It is in this rule for the flag that
+        # defers the move until reboot, and the flag is an argument, not an
+        # import.
         "technique_id": "T1070.004",
         "name": "Indicator Removal: File Deletion",
+        "rule": "deleting a file through more than one of the deletion calls",
+        "ordinary_use": (
+            "an uninstaller, a cache cleaner and a build tool delete their own files the same way"
+        ),
+        "measured": {"benign_percent": 0.5, "benign_files": 13, "held_out_malware_profiles": 9},
         "min_apis": 2,
         "confidence_base": 0.38,
         "confidence_max": 0.55,
@@ -1808,7 +2037,6 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "DeleteFileA",
             "DeleteFileW",
             "SHFileOperationA",
-            "MoveFileExA",
             "DeleteFileTransactedA",
             "NtDeleteFile",
         ],
@@ -1816,45 +2044,21 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     {
         "technique_id": "T1070.006",
         "name": "Indicator Removal: Timestomp",
+        "rule": "reading a file's timestamps and writing them onto another",
+        "ordinary_use": (
+            "an archiver, a copy tool and a build system restore the original "
+            "timestamps with exactly this pair"
+        ),
+        "measured": {"benign_percent": 0.5, "benign_files": 14, "held_out_malware_profiles": 3},
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
         "apis": ["SetFileTime", "GetFileTime", "NtSetInformationFile"],
     },
-    {
-        # VirtualProtect deliberately absent. It is in every packer *and* in
-        # every JIT, every hot-patcher and much of the CRT, so including it
-        # would make this rule fire on ordinary software — and this particular
-        # technique is one the local model already over-claims, which is why
-        # capability_matrix caps it. Feeding that cap a noisy signal would be
-        # worse than leaving the rule out.
-        "technique_id": "T1027",
-        "name": "Obfuscated Files or Information",
-        "min_apis": 2,
-        "confidence_base": 0.40,
-        "confidence_max": 0.58,
-        "apis": [
-            "CryptStringToBinaryA",
-            "CryptBinaryToStringA",
-            "RtlDecompressBuffer",
-            "RtlCompressBuffer",
-        ],
-    },
-    {
-        "technique_id": "T1140",
-        "name": "Deobfuscate/Decode Files or Information",
-        "min_apis": 2,
-        "confidence_base": 0.40,
-        "confidence_max": 0.58,
-        "apis": [
-            "CryptStringToBinaryA",
-            "CryptUnprotectData",
-            "RtlDecompressBuffer",
-            "CryptDecrypt",
-            "BCryptDecrypt",
-            "SystemFunction036",
-        ],
-    },
+    # T1027 Obfuscated Files or Information and T1140 Deobfuscate/Decode stood
+    # here and are gone: between them they appeared on nine benign binaries and
+    # on no malware profile at all.
+    #
     # T1036 (Masquerading) and T1218 (System Binary Proxy Execution) are
     # deliberately absent. Masquerading is a property of a file's *name and
     # appearance*, which an import table cannot see — SetFileAttributes and
@@ -1863,8 +2067,16 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     # inferring it from "this binary can start a process" would fire on nearly
     # everything and add nothing the LOLBin layer does not do properly.
     {
+        # Asking whether a window is visible is not hiding one. What is left is
+        # the second desktop, which the user never sees.
         "technique_id": "T1564.003",
         "name": "Hide Artifacts: Hidden Window",
+        "rule": "creating a second desktop, or moving a thread onto one",
+        "ordinary_use": (
+            "a login screen, a screensaver host and an automation harness run "
+            "their work on a desktop of their own"
+        ),
+        "measured": {"benign_percent": 0.1, "benign_files": 4, "held_out_malware_profiles": 0},
         "min_apis": 2,
         "confidence_base": 0.44,
         "confidence_max": 0.60,
@@ -1873,112 +2085,103 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "SwitchDesktop",
             "SetThreadDesktop",
             "OpenDesktopA",
-            "IsWindowVisible",
         ],
     },
     # ----------------------------------------------------- Credential Access
     {
+        # Asking for the state of one key is reading input the thread was
+        # already sent, and naming a key or mapping its scan code is what a
+        # key-binding screen does. The capture is the channel: a hook, a
+        # raw-input device, or a read of the whole keyboard at once.
         "technique_id": "T1056.001",
         "name": "Input Capture: Keylogging",
+        "rule": "an input hook, a raw-input device or a read of the whole keyboard's state",
+        "ordinary_use": (
+            "a hotkey manager, an on-screen keyboard, a game and a "
+            "remote-desktop client install the same hooks"
+        ),
+        "measured": {"benign_percent": 1.2, "benign_files": 34, "held_out_malware_profiles": 5},
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
         "apis": [
             "GetAsyncKeyState",
-            "GetKeyState",
             "GetKeyboardState",
             "RegisterRawInputDevices",
             "GetRawInputData",
             "SetWindowsHookExA",
             "SetWindowsHookExW",
             "AttachThreadInput",
-            "MapVirtualKeyA",
             "ToUnicodeEx",
-            "GetKeyNameTextA",
             "SetWinEventHook",
         ],
     },
+    # T1555 Credentials from Password Stores and T1003 OS Credential Dumping
+    # stood here and are gone. Both read as the sharpest rules in the block and
+    # neither fired on one malware profile: the credential theft in this corpus
+    # is done by code that resolves those names at runtime, or by a .NET
+    # assembly with no import table to read.
     {
-        "technique_id": "T1555",
-        "name": "Credentials from Password Stores",
-        "min_apis": 2,
-        "confidence_base": 0.48,
-        "confidence_max": 0.65,
-        "apis": [
-            "CryptUnprotectData",
-            "CredEnumerateA",
-            "CredEnumerateW",
-            "CredReadA",
-            "CredReadW",
-            "CredFree",
-            "CertOpenSystemStoreA",
-            "PFXImportCertStore",
-            "SystemFunction036",
-            "sqlite3_open",
-            "sqlite3_prepare_v2",
-        ],
-    },
-    {
-        "technique_id": "T1003",
-        "name": "OS Credential Dumping",
-        "min_apis": 2,
-        "confidence_base": 0.50,
-        "confidence_max": 0.65,
-        "apis": [
-            "LsaOpenPolicy",
-            "LsaRetrievePrivateData",
-            "LsaEnumerateLogonSessions",
-            "LsaGetLogonSessionData",
-            "LsaCallAuthenticationPackage",
-            "SamConnect",
-            "SamEnumerateDomainsInSamServer",
-            "MsvpPasswordValidate",
-        ],
-    },
-    {
+        # Binding a socket and receiving a datagram is every UDP program, and
+        # ``ioctlsocket`` is how a socket is put into non-blocking mode. The
+        # sniff is the adapter itself, reconfigured through WSAIoctl on a socket
+        # made by WSASocket.
         "technique_id": "T1040",
         "name": "Network Sniffing",
+        "rule": "a socket created through WSASocket and reconfigured through WSAIoctl",
+        "ordinary_use": (
+            "a packet-capture library, a network monitor and a VPN client create "
+            "and reconfigure sockets this way"
+        ),
+        "measured": {"benign_percent": 1.0, "benign_files": 26, "held_out_malware_profiles": 0},
         "min_apis": 2,
         "confidence_base": 0.48,
         "confidence_max": 0.65,
-        "apis": ["WSAIoctl", "ioctlsocket", "bind", "WSASocketA", "recvfrom"],
+        "apis": ["WSAIoctl", "WSASocketA"],
     },
     # --------------------------------------------------------------- Collection
     {
+        # A blit between two device contexts is how every program with a window
+        # draws, and which context it reads from is an argument. The capture is
+        # the readback: the pixels copied into the program's own memory, another
+        # window's device context taken, or a window asked to render itself.
         "technique_id": "T1113",
         "name": "Screen Capture",
+        "rule": "pulling the pixels back out of a window or screen device context",
+        "ordinary_use": (
+            "a screenshot tool, a remote-desktop server and a screen recorder "
+            "read a device context the same way"
+        ),
+        "measured": {"benign_percent": 0.3, "benign_files": 8, "held_out_malware_profiles": 6},
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
-        "apis": [
-            "BitBlt",
-            "StretchBlt",
-            "CreateCompatibleBitmap",
-            "CreateCompatibleDC",
-            "GetDC",
-            "GetWindowDC",
-            "GetDIBits",
-            "PrintWindow",
-        ],
+        "apis": ["GetDIBits", "GetWindowDC", "PrintWindow"],
     },
     {
+        # Opening and closing the clipboard brackets every copy and every paste,
+        # and putting something on it is not taking something off it.
         "technique_id": "T1115",
         "name": "Clipboard Data",
+        "rule": "reading what is on the clipboard, or asking to be told each time it changes",
+        "ordinary_use": (
+            "a clipboard manager, a password manager and an editor's paste path "
+            "read the clipboard the same way"
+        ),
+        "measured": {"benign_percent": 0.6, "benign_files": 17, "held_out_malware_profiles": 4},
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
-        "apis": [
-            "OpenClipboard",
-            "GetClipboardData",
-            "SetClipboardData",
-            "CloseClipboard",
-            "IsClipboardFormatAvailable",
-            "AddClipboardFormatListener",
-        ],
+        "apis": ["GetClipboardData", "IsClipboardFormatAvailable", "AddClipboardFormatListener"],
     },
     {
         "technique_id": "T1123",
         "name": "Audio Capture",
+        "rule": "opening a wave input device and starting it",
+        "ordinary_use": (
+            "a voice-chat client, a dictation tool and a recorder open the microphone the same way"
+        ),
+        "measured": {"benign_percent": 0.2, "benign_files": 5, "held_out_malware_profiles": 1},
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
@@ -1988,6 +2191,12 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     {
         "technique_id": "T1071.001",
         "name": "Application Layer Protocol: Web Protocols",
+        "rule": "speaking HTTP through the WinINet or WinHTTP stack",
+        "ordinary_use": (
+            "an updater, a licence check, a telemetry client and every "
+            "downloader use the same stack"
+        ),
+        "measured": {"benign_percent": 0.7, "benign_files": 19, "held_out_malware_profiles": 7},
         "min_apis": 2,
         "confidence_base": 0.44,
         "confidence_max": 0.62,
@@ -2010,37 +2219,34 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "URLDownloadToFileW",
         ],
     },
+    # T1071.004 Application Layer Protocol: DNS stood here and is gone: it fired
+    # on no malware profile.
     {
-        "technique_id": "T1071.004",
-        "name": "Application Layer Protocol: DNS",
-        "min_apis": 2,
-        "confidence_base": 0.46,
-        "confidence_max": 0.62,
-        "apis": ["DnsQuery_A", "DnsQuery_W", "DnsQueryEx", "DnsFree", "getaddrinfo"],
-    },
-    {
+        # The ten Berkeley and Winsock names this rule shipped with are gone.
+        # They label one benign binary in twenty and more than a third of
+        # everything that touches a network, and a raw socket and a TCP socket
+        # are the same import — the protocol is an argument to ``socket``. One
+        # name is left and it is the only one that names the act: an echo
+        # request is ICMP by construction. It fires on one benign binary in a
+        # thousand and needs no second name to say so, so the floor is one.
         "technique_id": "T1095",
         "name": "Non-Application Layer Protocol",
-        "min_apis": 3,
+        "rule": "sending an ICMP echo request",
+        "ordinary_use": (
+            "ping, a network diagnostic tool and a reachability check send the same echo request"
+        ),
+        "measured": {"benign_percent": 0.1, "benign_files": 2, "held_out_malware_profiles": 2},
+        "min_apis": 1,
         "confidence_base": 0.40,
         "confidence_max": 0.58,
-        "apis": [
-            "socket",
-            "connect",
-            "send",
-            "recv",
-            "WSASocketA",
-            "WSAConnect",
-            "WSASend",
-            "WSARecv",
-            "sendto",
-            "recvfrom",
-            "IcmpSendEcho",
-        ],
+        "apis": ["IcmpSendEcho"],
     },
     {
         "technique_id": "T1105",
         "name": "Ingress Tool Transfer",
+        "rule": "fetching a file over HTTP or FTP straight to disk",
+        "ordinary_use": "an updater and an installer download their payload with the same calls",
+        "measured": {"benign_percent": 0.0, "benign_files": 0, "held_out_malware_profiles": 0},
         "min_apis": 2,
         "confidence_base": 0.46,
         "confidence_max": 0.62,
@@ -2055,8 +2261,17 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     },
     # ------------------------------------------------------------------ Impact
     {
+        # Dropping ``CryptAcquireContextA`` was written and not applied. The
+        # floor of two already stops the provider handle firing on its own, and
+        # acquiring it is part of the same chain as the key and the encryption.
         "technique_id": "T1486",
         "name": "Data Encrypted for Impact",
+        "rule": "deriving or generating a symmetric key and encrypting with it",
+        "ordinary_use": (
+            "a backup tool, a password manager and any program storing a secret "
+            "at rest encrypt the same way"
+        ),
+        "measured": {"benign_percent": 0.4, "benign_files": 12, "held_out_malware_profiles": 1},
         "min_apis": 2,
         "confidence_base": 0.48,
         "confidence_max": 0.65,
@@ -2072,41 +2287,46 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
         ],
     },
     {
+        # This rule's four names are the union of file deletion and service
+        # stop, and no subset of them is shadow-copy destruction — that is a
+        # command line. The row says what it keys on so a reader is not left
+        # with the technique's name alone.
         "technique_id": "T1490",
         "name": "Inhibit System Recovery",
+        "rule": "deleting a file and stopping or removing a service",
+        "ordinary_use": (
+            "an uninstaller removes its service and deletes its files with the "
+            "same pair, and the recovery data this technique destroys is reached "
+            "through a command line rather than an import"
+        ),
+        "measured": {"benign_percent": 1.8, "benign_files": 50, "held_out_malware_profiles": 9},
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
         "apis": ["DeleteFileA", "SHFileOperationA", "ControlService", "DeleteService"],
     },
     {
+        # ``TerminateProcess`` ends a process, and which process it ends is an
+        # argument; overwhelmingly it is a child the program started itself. A
+        # service is stopped through the service manager.
         "technique_id": "T1489",
         "name": "Service Stop",
+        "rule": "opening a service and stopping or removing it",
+        "ordinary_use": (
+            "an installer, an uninstaller and every service-control panel stop "
+            "services the same way"
+        ),
+        "measured": {"benign_percent": 1.7, "benign_files": 46, "held_out_malware_profiles": 1},
         "min_apis": 2,
         "confidence_base": 0.46,
         "confidence_max": 0.62,
-        "apis": ["ControlService", "OpenServiceA", "DeleteService", "TerminateProcess"],
+        "apis": ["ControlService", "OpenServiceA", "DeleteService"],
     },
     # ---------------------------------------------------------------- Execution
-    {
-        "technique_id": "T1106",
-        "name": "Native API",
-        "min_apis": 3,
-        "confidence_base": 0.38,
-        "confidence_max": 0.55,
-        "apis": [
-            "NtCreateUserProcess",
-            "NtCreateFile",
-            "NtWriteFile",
-            "NtOpenKey",
-            "NtSetValueKey",
-            "NtQuerySystemInformation",
-            "NtAllocateVirtualMemory",
-            "NtProtectVirtualMemory",
-            "LdrLoadDll",
-            "RtlCreateProcessParameters",
-        ],
-    },
+    # T1106 Native API stood here and is gone: it fired on one benign binary and
+    # on no malware profile. Malware that goes straight to ntdll resolves those
+    # names at runtime, which is the one thing an import rule cannot see.
+    #
     # T1129 (Shared Modules) is deliberately absent for the same reason, only
     # more so: LoadLibrary + GetProcAddress appear in essentially every PE ever
     # compiled, so a rule keyed on them fires always and therefore carries zero
@@ -2117,9 +2337,9 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     # Only where the mapping is uncontroversial: the symbols are the technique's
     # own mechanism rather than one plausible use of them. Every id here is
     # valid in the vendored catalogue and declares Linux, which a test checks,
-    # and every one was measured against this machine's own ELF binaries before
-    # it was kept — a rule that fires on more than one in a hundred ordinary
-    # programs is not evidence of anything and was dropped.
+    # and every one was measured against a host's own ELF binaries before it was
+    # kept — a rule that fires on more than one in a hundred ordinary programs
+    # is not evidence of anything and was dropped.
     #
     # Four rules were written and removed on that measurement, and the reasons
     # are worth keeping so they are not written again:
@@ -2131,7 +2351,8 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     #     dangerous one: a privilege drop published as an escalation.
     #   - Non-Application Layer Protocol on the BSD socket calls. Those calls
     #     evidence "it talks over a network" and nothing narrower; 5.8%,
-    #     ``ping`` included.
+    #     ``ping`` included. The Windows block reached the same place from the
+    #     other direction and is down to the one ICMP name.
     #   - System Owner/User Discovery (``getuid`` and friends) at 12.9% and
     #     System Information Discovery (``uname`` and friends) at 4.6%. Every
     #     program that prints a prompt asks who it is running as.
@@ -2141,14 +2362,14 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     #     linking libssl "it speaks TLS", and the techniques are about a
     #     command channel. ``curl`` and ``openssl`` themselves cleared them.
     #
-    # What is left is three rules whose symbols are the technique's own
-    # mechanism and nothing else, the worst of which appears on 0.2% of the
-    # measured binaries.
+    # What is left is two rules whose symbols are the technique's own mechanism
+    # and nothing else, the worse of which appears on 0.2% of the measured
+    # binaries.
     #
-    # Each of the two carries the sentence a reader needs beside it. The rule
-    # states a mechanism, and the same mechanism is the ordinary working of
-    # software that is not a sample; a row that does not say so reads as an
-    # accusation, which is not what a reference lookup may be.
+    # Each carries the sentence a reader needs beside it, and the rate it was
+    # measured at. The rule states a mechanism, and the same mechanism is the
+    # ordinary working of software that is not a sample; a row that does not say
+    # so reads as an accusation, which is not what a reference lookup may be.
     {
         "technique_id": "T1055.008",
         "name": "Ptrace System Calls",
@@ -2157,6 +2378,7 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "a debugger, a tracer and a crash reporter reach into another process "
             "with exactly this pair"
         ),
+        "measured": {"benign_percent": 0.2, "benign_files": 3},
         "platforms": ["linux"],
         "min_apis": 2,
         "confidence_base": 0.50,
@@ -2171,6 +2393,7 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "a language runtime, a just-in-time compiler and a sandbox launcher "
             "execute anonymous memory the same way"
         ),
+        "measured": {"benign_percent": 0.1, "benign_files": 1},
         "platforms": ["linux"],
         "min_apis": 2,
         "confidence_base": 0.50,
@@ -2188,6 +2411,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
 ]
 
 _CONFIDENCE_CEILING = 0.65
+
+# How many held-out malware profiles a combination needs behind it before the
+# catalogue is willing to label on it. Below this the association still ships,
+# informational, carrying the count so a reader knows how thin it is.
+_HELD_OUT_FLOOR = 3
 
 
 def _vendored_ids() -> set[str]:
@@ -2305,14 +2533,16 @@ def _validate(techniques: list[dict[str, Any]]) -> list[str]:
                 problems.append(
                     f"{tid} is filed under {platform} and the catalogue does not list it"
                 )
-        # A Linux rule states a mechanism, and every mechanism here is also the
+        # A rule states a mechanism, and every mechanism here is also the
         # ordinary working of software that is not a sample. A rule with no
-        # label and no sentence naming that software reads as an accusation.
-        if "linux" in platforms:
-            if not str(tech.get("rule") or "").strip():
-                problems.append(f"{tid} has no rule label")
-            if not str(tech.get("ordinary_use") or "").strip():
-                problems.append(f"{tid} names no ordinary user of the same symbols")
+        # label and no sentence naming that software reads as an accusation,
+        # and one with no measured rate states a technique association without
+        # saying how often it fires on software that is not a sample.
+        if not str(tech.get("rule") or "").strip():
+            problems.append(f"{tid} has no rule label")
+        if not str(tech.get("ordinary_use") or "").strip():
+            problems.append(f"{tid} names no ordinary user of the same symbols")
+        problems += _measurement_problems(f"{tid}", tech.get("measured"))
 
     # Two rules on one id are allowed and one rule twice is not: a release that
     # folds two sub-techniques into one technique — 19.2 folded Disable or
@@ -2354,11 +2584,53 @@ def _validate(techniques: list[dict[str, Any]]) -> list[str]:
                     f"{platform} {api!r} claimed by more than one category: {sorted(cats)}"
                 )
 
+    # A category is labelled only behind a named combination, and only where the
+    # combination was measured against enough held-out malware to be worth a
+    # label; three profiles is the floor, below which the row is informational
+    # and says how many profiles it has. Everything else the block carries is a
+    # reference association.
+    for platform, categories in CATEGORIES_BY_PLATFORM.items():
+        gates = FLAG_GATES_BY_PLATFORM.get(platform, {})
+        measured = MEASURED_CATEGORIES.get(platform, {})
+        for category, (tier, _apis) in categories.items():
+            problems += _measurement_problems(f"{platform} {category}", measured.get(category))
+            if tier == INFO:
+                continue
+            if not gates.get(category):
+                problems.append(f"{platform} {category} is tiered {tier} with no flags_with gate")
+            if platform not in HELD_OUT_CORPORA:
+                continue
+            support = (measured.get(category) or {}).get("held_out_malware_profiles")
+            if not isinstance(support, int) or support < _HELD_OUT_FLOOR:
+                problems.append(
+                    f"{platform} {category} is tiered {tier} on {support} held-out profiles"
+                )
+
+    return problems
+
+
+def _measurement_problems(what: str, measured: Any) -> list[str]:
+    """Whether one association's measured rate is complete, or absent and silent.
+
+    An absent block is allowed and means the association has not been measured;
+    the surfaces then say so. A present one has to carry both the share and the
+    count behind it, because a share rounded to one decimal place reads as zero
+    for a rule that fires on one file in three thousand.
+    """
+    if measured is None:
+        return []
+    if not isinstance(measured, dict):
+        return [f"{what} has a measured block that is not an object"]
+    problems = []
+    if not isinstance(measured.get("benign_percent"), int | float):
+        problems.append(f"{what} has no measured benign share")
+    if not isinstance(measured.get("benign_files"), int):
+        problems.append(f"{what} has no measured benign count")
     return problems
 
 
 def _block(platform: str, category: str) -> dict[str, object]:
-    """One category as the catalog carries it, corroborators included."""
+    """One category as the catalog carries it, corroborators and rate included."""
     tier, apis = CATEGORIES_BY_PLATFORM[platform][category]
     block: dict[str, object] = {"tier": tier}
     corroborators = CORROBORATORS_BY_PLATFORM.get(platform, {}).get(category)
@@ -2367,8 +2639,36 @@ def _block(platform: str, category: str) -> dict[str, object]:
     gate = FLAG_GATES_BY_PLATFORM.get(platform, {}).get(category)
     if gate:
         block["flags_with"] = sorted(set(gate))
+    measured = MEASURED_CATEGORIES.get(platform, {}).get(category)
+    if measured:
+        block["measured"] = _with_corpora(platform, measured)
     block["apis"] = sorted(set(apis))
     return block
+
+
+def _with_corpora(platform: str, measured: dict[str, Any]) -> dict[str, Any]:
+    """A measured block with the corpora its numbers are shares of named beside them.
+
+    The corpus is written beside the rate rather than once at the top of the
+    file, because the rate travels: it reaches the model in the
+    ``api_capability`` answer, the report's import-technique table and the
+    console's cell, and in each of those the number is useless without what it
+    is a share of.
+    """
+    out = {**measured, "benign_corpus": BENIGN_CORPORA[platform]}
+    if "held_out_malware_profiles" in out and platform in HELD_OUT_CORPORA:
+        out["held_out_malware_corpus"] = HELD_OUT_CORPORA[platform]
+    return out
+
+
+def _emitted(tech: dict[str, Any]) -> dict[str, Any]:
+    """One technique rule as the catalog carries it, its corpora named."""
+    platforms = [str(p) for p in tech.get("platforms") or ["windows"]]
+    row = {**tech, "platforms": platforms, "apis": sorted(set(tech["apis"]))}
+    measured = tech.get("measured")
+    if measured:
+        row["measured"] = _with_corpora(platforms[0], measured)
+    return row
 
 
 def main() -> int:
@@ -2394,10 +2694,7 @@ def main() -> int:
     attck = {
         "schema": "maljan-api-attck/v1",
         "version": "1.0",
-        "techniques": [
-            {**t, "platforms": t.get("platforms") or ["windows"], "apis": sorted(set(t["apis"]))}
-            for t in techniques
-        ],
+        "techniques": [_emitted(t) for t in techniques],
     }
 
     _BEHAVIOUR_OUT.write_text(json.dumps(behaviour, indent=2) + "\n", encoding="utf-8")

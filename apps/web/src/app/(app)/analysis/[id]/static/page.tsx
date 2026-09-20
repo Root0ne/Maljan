@@ -174,7 +174,9 @@ export default function StaticTab() {
             </h2>
             <p className="text-[11px] text-text-muted mt-1">
               Derived from the import table alone — no sandbox, no model. This is the
-              audit trail behind the capability matrix.
+              audit trail behind the capability matrix. A row is an association, not a
+              finding: the last column is how much ordinary software the same rule
+              fires on, measured.
             </p>
           </div>
           <table className="w-full">
@@ -185,6 +187,7 @@ export default function StaticTab() {
                 <Th>Rule</Th>
                 <Th>Confidence</Th>
                 <Th>Imports</Th>
+                <Th>In benign software</Th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border-light">
@@ -204,6 +207,12 @@ export default function StaticTab() {
                     {(h.matched_apis ?? []).slice(0, 4).join(", ")}
                     {(h.matched_apis ?? []).length > 4 &&
                       ` +${(h.matched_apis ?? []).length - 4}`}
+                  </td>
+                  {/* An unmeasured rule says so. A blank cell here would read
+                      as a rule that never fires on anything benign, which is
+                      the opposite of what an absent measurement means. */}
+                  <td className="px-4 py-2 text-xs text-text-secondary">
+                    {h.benign_rate || "not measured"}
                   </td>
                 </tr>
               ))}

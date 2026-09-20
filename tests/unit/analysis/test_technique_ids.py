@@ -76,6 +76,47 @@ class TestApiCapabilityHits:
         assert api_capability_hits({"capabilities": "nope"}) == []
 
 
+class TestTheRateTravelsWithTheRow:
+    """A deterministic association reaches the report with the share of
+    ordinary software the same rule fires on, or it says it was not measured.
+
+    The rate is copied down here rather than looked up again later, because the
+    report has to show what the catalogue said when the tool was asked.
+    """
+
+    @staticmethod
+    def _payload(measured: dict | None, corpus: str = "2730 binaries from 25 vendors") -> dict:
+        rule: dict = {
+            "technique_id": "T1113",
+            "name": "Screen Capture",
+            "rule": "pulling the pixels back out",
+            "matched": ["GetDIBits", "PrintWindow"],
+            "min_apis": 2,
+        }
+        if measured is not None:
+            rule["measured"] = measured
+        return {
+            "capabilities": [{"api": api, "techniques": [rule]} for api in rule["matched"]],
+            "corpora": {"benign": corpus},
+        }
+
+    def test_the_share_and_the_count_behind_it_are_both_on_the_row(self) -> None:
+        (hit,) = api_capability_hits(self._payload({"benign_percent": 0.3, "benign_files": 8}))
+        assert hit["benign_rate"] == "0.3% of benign software (8 of 2730 binaries from 25 vendors)"
+
+    def test_a_rate_that_rounds_to_zero_still_says_how_many_files(self) -> None:
+        """One file in three thousand is 0.0% to one decimal place, and a
+        reader who saw only that would read it as a rule that never fires."""
+        (hit,) = api_capability_hits(self._payload({"benign_percent": 0.0, "benign_files": 1}))
+        assert "(1 of 2730" in hit["benign_rate"]
+
+    def test_an_unmeasured_rule_carries_no_rate_rather_than_a_zero(self) -> None:
+        (hit,) = api_capability_hits(self._payload(None))
+        assert "benign_rate" not in hit
+        (hit,) = api_capability_hits(self._payload({"benign_percent": 0.3}))
+        assert "benign_rate" not in hit
+
+
 class TestTwoRulesForOneTechniqueStayTwoRows:
     """The catalogue's name is on both, so the name cannot tell them apart.
 

@@ -321,11 +321,14 @@ class MarkdownRenderer:
             lines.append(
                 "_Deterministic: each row is a rule that fired over the import table — "
                 "capa's, or the knowledge table's — no sandbox, no model. The pack's "
-                "rows cite their ledger entry._"
+                "rows cite their ledger entry. A row is an association, not a "
+                "finding: the last column is how much ordinary software the same "
+                "rule fires on, measured, and a blank there means the rule has not "
+                "been measured rather than that it never fires._"
             )
             lines.append("")
-            lines.append("| Technique | Name | Rule | Source | Imports |")
-            lines.append("|---|---|---|---|---|")
+            lines.append("| Technique | Name | Rule | Source | Imports | In benign software |")
+            lines.append("|---|---|---|---|---|---|")
             # By source, then technique: a stated order, so a capa-heavy binary
             # cannot push the pack's rows off the end of the audit trail.
             ordered_hits = sorted(
@@ -346,7 +349,8 @@ class MarkdownRenderer:
                 # both. A producer that has no such label leaves the cell bare.
                 lines.append(
                     f"| {hit.get('technique_id', '?')} | {hit.get('name', '-')} "
-                    f"| {hit.get('rule') or '-'} | {source} | {apis} |"
+                    f"| {hit.get('rule') or '-'} | {source} | {apis} "
+                    f"| {hit.get('benign_rate') or 'not measured'} |"
                 )
             lines.append("")
 

@@ -67,9 +67,16 @@ def api_capability_hits(payload: Mapping[str, Any] | None) -> list[dict[str, Any
     The tool answers per API and repeats a rule under every API it matched;
     here the matched APIs are pooled per rule and the rule counts only when
     they clear its own ``min_apis``. Each row: ``technique_id``, ``name``,
-    ``rule``, ``matched_apis`` in first-seen order. Corroboration and the
-    report's projection both read this, so what one calls asserted the other
-    shows.
+    ``rule``, ``matched_apis`` in first-seen order, and ``benign_rate`` —
+    what share of a named benign corpus the rule fires on, which is the fact
+    the platform states about a deterministic association and the thing a
+    reader needs to weigh one. Corroboration and the report's projection both
+    read this, so what one calls asserted the other shows.
+
+    The rate is carried down here, and not looked up again later, because the
+    answer that produced the row is the answer the run recorded: the report has
+    to show what the catalogue said when the tool was asked, not what a
+    catalogue edited since would say.
 
     **A row is a rule, not a technique.** Two rules can name one technique by
     two mechanisms — the catalogue's own name is on both, so the name does not
@@ -82,7 +89,11 @@ def api_capability_hits(payload: Mapping[str, Any] | None) -> list[dict[str, Any
     """
     if not isinstance(payload, Mapping):
         return []
-    rules: dict[tuple[str, str, str], tuple[int, list[str]]] = {}
+    corpus = ""
+    corpora = payload.get("corpora")
+    if isinstance(corpora, Mapping):
+        corpus = str(corpora.get("benign") or "")
+    rules: dict[tuple[str, str, str], tuple[int, list[str], str]] = {}
     for row in payload.get("capabilities") or []:
         if not isinstance(row, Mapping):
             continue
@@ -93,16 +104,44 @@ def api_capability_hits(payload: Mapping[str, Any] | None) -> list[dict[str, Any
             if not ids:
                 continue
             key = (ids[0], str(rule.get("name") or ""), str(rule.get("rule") or ""))
-            _floor, apis = rules.setdefault(key, (_min_apis(rule), []))
+            _floor, apis, _rate = rules.setdefault(
+                key, (_min_apis(rule), [], _benign_rate(rule, corpus))
+            )
             for api in rule.get("matched") or []:
                 name = str(api).strip()
                 if name and name not in apis:
                     apis.append(name)
-    return [
-        {"technique_id": tid, "name": name, "rule": label, "matched_apis": apis}
-        for (tid, name, label), (floor, apis) in rules.items()
-        if len(apis) >= floor
-    ]
+    out: list[dict[str, Any]] = []
+    for (tid, name, label), (floor, apis, rate) in rules.items():
+        if len(apis) < floor:
+            continue
+        row_out: dict[str, Any] = {
+            "technique_id": tid,
+            "name": name,
+            "rule": label,
+            "matched_apis": apis,
+        }
+        if rate:
+            row_out["benign_rate"] = rate
+        out.append(row_out)
+    return out
+
+
+def _benign_rate(rule: Mapping[str, Any], corpus: str) -> str:
+    """One sentence for how common a rule is in software that is not a sample.
+
+    A share and the count behind it, because a share rounded to one decimal
+    place reads as zero for a rule that fires on one file in three thousand,
+    and a rule with no measurement gets no sentence rather than a zero.
+    """
+    measured = rule.get("measured")
+    if not isinstance(measured, Mapping):
+        return ""
+    percent, files = measured.get("benign_percent"), measured.get("benign_files")
+    if not isinstance(percent, int | float) or not isinstance(files, int):
+        return ""
+    of = f" of {corpus}" if corpus else ""
+    return f"{percent:.1f}% of benign software ({files}{of})"
 
 
 def _min_apis(rule: Mapping[str, Any]) -> int:
