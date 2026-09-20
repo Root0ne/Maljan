@@ -487,16 +487,20 @@ _ENDING_SENTENCE = (
 )
 
 
-def _do_something_else(tool: str, unused_args: Sequence[str]) -> str:
+def _do_something_else(tool: str, narrowing: Sequence[str]) -> str:
     """The half of both notices that says what to do instead.
 
-    The arguments come from the tool's own schema, so the sentence names what
-    this tool can actually be asked differently — ``pattern``, ``start`` and
-    ``end`` for ``strings`` — rather than a hint written for one tool and
-    repeated at every other.
+    The arguments are the ones the tool's own schema offers for narrowing or
+    paging an answer — ``limit``, ``offset`` and ``pattern`` for ``strings`` —
+    so the sentence names what this tool can actually be asked differently
+    rather than a hint written for one tool and repeated at every other. The
+    shortening notice reads the same list, so one tool has one answer to the
+    question however the model arrives at it.
     """
-    if unused_args:
-        named = ", ".join(f"`{name}`" for name in unused_args)
+    from maljan.agents.output_shortening import narrowing_arguments
+
+    named = ", ".join(f"`{name}`" for name in narrowing_arguments(narrowing))
+    if named:
         return f"narrow it with {named}, or call another tool."
     return "call it with different arguments, or call another tool."
 
@@ -504,7 +508,7 @@ def _do_something_else(tool: str, unused_args: Sequence[str]) -> str:
 def repeat_notice(
     tool: str,
     entry_id: str,
-    unused_args: Sequence[str] = (),
+    narrowing: Sequence[str] = (),
     *,
     last_warning: bool = False,
     failed: bool = False,
@@ -532,14 +536,14 @@ def repeat_notice(
     )
     return (
         f"{where}. Do not call it again with these arguments; "
-        f"{_do_something_else(tool, unused_args)}{_ENDING_SENTENCE if last_warning else ''}"
+        f"{_do_something_else(tool, narrowing)}{_ENDING_SENTENCE if last_warning else ''}"
     )
 
 
 def served_repeat_notice(
     tool: str,
     entry_id: str,
-    unused_args: Sequence[str] = (),
+    narrowing: Sequence[str] = (),
     *,
     last_warning: bool = False,
     failed: bool = False,
@@ -567,7 +571,7 @@ def served_repeat_notice(
     )
     return (
         f"{what_happened}. A third will not be run: "
-        f"{_do_something_else(tool, unused_args)}{_ENDING_SENTENCE if last_warning else ''}"
+        f"{_do_something_else(tool, narrowing)}{_ENDING_SENTENCE if last_warning else ''}"
     )
 
 
@@ -609,30 +613,14 @@ def _record_tool(
     server = server_of(tool) or None
     accepted = tuple(getattr(args_schema, "model_fields", {}) or {})
 
-    required = tuple(
-        name
-        for name, field in (getattr(args_schema, "model_fields", {}) or {}).items()
-        if getattr(field, "is_required", lambda: False)()
-    )
     # The arguments of this tool that reach a part its answer left out, read
     # off the same schema the model was offered. Per tool rather than per call:
-    # what narrows an answer is a property of the tool, and the guardrail that
-    # shortens the answer reserves room for the sentence naming exactly these.
+    # what narrows an answer is a property of the tool, and every notice that
+    # tells the model to ask differently names this one list — a model told to
+    # narrow with one set of arguments on one turn and another set on the next
+    # is being given two accounts of the same tool. The guardrail that shortens
+    # an answer reserves room for the sentence naming exactly these.
     narrowing = narrowing_arguments(accepted)
-
-    def _unused(kwargs: dict[str, Any]) -> tuple[str, ...]:
-        """The arguments this tool takes that the call did not really set.
-
-        Truthiness rather than presence: langchain fills a tool's defaults
-        before calling it, so a caller that asked nothing of ``start`` still
-        arrives here with ``start=0``, and a hint that omitted it would omit
-        every optional argument the model has not thought to use.
-
-        The schema's required fields are excluded, because for those the same
-        reading is wrong: a call that correctly passed ``offset=0`` set it, and
-        offering it back as a way to narrow the search is noise.
-        """
-        return tuple(arg for arg in accepted if arg not in required and not kwargs.get(arg))
 
     def _already_answered(kwargs: dict[str, Any]) -> str | None:
         """The note for a call that has been made twice already, if it has."""
@@ -648,7 +636,7 @@ def _record_tool(
         return repeat_notice(
             name,
             first,
-            _unused(kwargs),
+            narrowing,
             last_warning=repeats.warning_of_the_end(),
             failed=recorder.entry_failed(first),
         )
@@ -690,7 +678,7 @@ def _record_tool(
         notice = served_repeat_notice(
             name,
             repeated,
-            _unused(kwargs),
+            narrowing,
             last_warning=repeats.warning_of_the_end(),
             failed=failed,
         )

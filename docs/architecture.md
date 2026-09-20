@@ -1169,9 +1169,24 @@ was left out — `limit`, `offset` and `pattern` for `strings`, nothing at all
 for a tool that offers no such argument, which the sentence then says. The
 arguments are read off the schema the tool offered
 (`agents.output_shortening.narrowing_arguments`), never guessed per tool, and
-the shortening keeps room for the sentence, so an answer and its notice
-together are inside the limit the answer was cut to. Nothing re-issues a call
-and nothing edits an argument: the text is the model's to act on.
+the same list is what the repeat notices name, so one tool has one answer to
+"ask it differently" however the model arrives at the question. Nothing
+re-issues a call and nothing edits an argument: the text is the model's to act
+on.
+
+A parameter name is a tool server's own text on its way into the model's
+context, so only a plain identifier of at most forty characters is ever named,
+at most six of them, in schema order; anything else is left out rather than
+escaped or trimmed, because a name this refuses is one the model could not pass
+anyway. That bound is also what makes the sentence priceable: both guardrails —
+the MCP toolkits' and the Ghidra HTTP client's — shorten to
+`output_shortening.shorten_target(limit, narrowing)`, one function, so an
+answer and the notice appended to it are together inside the limit the operator
+set. The room the sentence may take is capped at `MAX_SENTENCE_ROOM`, the exact
+width of the widest sentence those bounds allow, so a server declaring two
+hundred long parameters cannot shrink the budget its own answer is shortened
+into. An answer no guardrail saw — an in-process tool's — is not shortened at
+all and carries no notice.
 
 The sentence a reader sees is drawn above the section's table, not as a row in
 it: the bookkeeping is this system's account of its own handling, and a

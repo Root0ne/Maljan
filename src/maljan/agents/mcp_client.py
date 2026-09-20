@@ -345,10 +345,7 @@ class MCPLangChainToolkit:
         Returns:
             Potentially shortened output.
         """
-        from maljan.agents.output_shortening import (
-            shorten_json_document,
-            shortening_sentence_room,
-        )
+        from maljan.agents.output_shortening import shorten_json_document, shorten_target
 
         chars_in = len(output)
 
@@ -362,8 +359,7 @@ class MCPLangChainToolkit:
             self._max_output_chars,
         )
 
-        room = shortening_sentence_room(narrowing)
-        attempt = shorten_json_document(output, max(1, self._max_output_chars - room))
+        attempt = shorten_json_document(output, shorten_target(self._max_output_chars, narrowing))
         if attempt.shortened:
             self._record_guardrail(chars_in, len(attempt.text), over_limit=True, shortened=True)
             return attempt.text

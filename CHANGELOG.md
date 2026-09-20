@@ -2924,9 +2924,15 @@ change landed on `main`.
   identical call returns the identical shortened answer and names the
   arguments of *that* tool that narrow or page it, read off the schema the tool
   offered; a tool with no such argument is said to have none, and nothing more
-  is offered. The shortening keeps room for the sentence, so an answer and its
-  notice together stay inside the limit the answer was cut to. No code
-  re-issues a call or edits an argument.
+  is offered. The repeat notices name the same list, so one tool no longer has
+  two answers to "ask it differently". A parameter name is a tool server's own
+  text, so only a plain identifier of at most forty characters is named, at
+  most six of them, and anything else is left out; both guardrails — the MCP
+  toolkits' and the Ghidra HTTP client's — reserve the room the sentence needs
+  through one shared `shorten_target`, capped so no schema can shrink the
+  budget its own answer is shortened into, so an answer and its notice together
+  stay inside the limit the answer was cut to. No code re-issues a call or
+  edits an argument.
 
 - **The grounding corpus records what it held, not only what it missed.**
   `run_summary.truncation` gains `evidence_corpus_answers`,
