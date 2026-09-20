@@ -44,7 +44,7 @@ from maljan.pipeline.events import (
     safe_finding_value,
 )
 from maljan.schemas.evidence import entry_ids_in
-from maljan.schemas.judgement import SEVERITY_RATINGS, VERDICT_VALUES
+from maljan.schemas.judgement import BENIGN_VERDICT, SEVERITY_RATINGS, VERDICT_VALUES
 from maljan.schemas.stix_pattern import read_comparisons
 
 # How many alternatives a suggestion list carries. Three is what fits in one
@@ -1387,7 +1387,7 @@ def indicator_type_contradicts_verdict(
     is not the same statement: an indicator is a claim about the value it
     names, and a malicious sample may well touch something harmless.
     """
-    if verdict != "Benign":
+    if verdict != BENIGN_VERDICT:
         return []
     types = [str(t).strip().lower() for t in (getattr(obj, "indicator_types", None) or [])]
     if _MALICIOUS_ACTIVITY not in types:
@@ -1401,8 +1401,8 @@ def indicator_type_contradicts_verdict(
             code=INDICATOR_TYPE_CONTRADICTS_VERDICT_CODE,
             message=(
                 f"the indicator {safe_finding_value(named)!r} is typed "
-                f"{_MALICIOUS_ACTIVITY!r} while the verdict you stated is Benign, so this "
-                "bundle publishes the value as malicious activity to whoever consumes it. "
+                f"{_MALICIOUS_ACTIVITY!r} while the verdict you stated is {BENIGN_VERDICT}, "
+                "so this bundle publishes the value as malicious activity to whoever reads it. "
                 f"The indicator-type vocabulary also has {', '.join(_MILDER_INDICATOR_TYPES)}. "
                 "Retype it, or restate the verdict, or keep the type as it is — whichever "
                 "you answer is what this run publishes, and a type you keep is recorded "

@@ -429,9 +429,10 @@ class ChunkingConfig(BaseModel):
     # analysis on EVERY chunk (see static_analyst._ISR_SYSTEM step 1), each of
     # the 27 chunks burned its full 1200s budget — jobs never finished (live
     # job 95d88f7e/task 10, 2026-07-11: chunk 1/27 alone hit the hard cap).
-    # llama-server now serves 128K (``-c 131072``); budgeting ~80K for the
-    # static loop's 40 tool observations (max_tool_output_chars=8000 each), ~4K
-    # system and ~8K generation leaves ~36K headroom, so 20K/chunk is safe and
+    # llama-server now serves 128K (``-c 131072``); budgeting ~60K for the
+    # static loop's 40 tool observations (``max_tool_output_chars`` below, 6000
+    # each and now applied to every tool server), ~4K system and ~8K generation
+    # leaves ~56K headroom, so 20K/chunk is safe and
     # collapses that same PE to ~8 chunks. Override via
     # ``CHUNKING__MAX_TOKENS_PER_CHUNK``.
     max_tokens_per_chunk: Annotated[int, Field(ge=1)] = 20000

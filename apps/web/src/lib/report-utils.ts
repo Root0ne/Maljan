@@ -203,6 +203,19 @@ export function bundleLossSentence(truncation: TruncationCounts | null): string 
  * Null when the grounding searched the whole record, and null for a run stored
  * before the counters existed.
  */
+export function partialGroundingSentence(truncation: TruncationCounts | null): string | null {
+  const reason = (truncation?.evidence_corpus_partial_reason ?? "").trim();
+  if (!reason) return null;
+  const missing = Math.max(0, Number(truncation?.evidence_corpus_missing_answers ?? 0) || 0);
+  const tools = (truncation?.evidence_corpus_missing_tools ?? []).filter(Boolean);
+  const named = tools.length > 0 ? `, from ${tools.join(", ")}` : "";
+  return (
+    `Grounding searched less than the run produced — ${reason}: ` +
+    `${countLabel(missing, "answer")} not kept${named}. ` +
+    `An absence measured against it is a note and drops nothing.`
+  );
+}
+
 /**
  * Past this share of the ceiling the figures are printed unasked: a corpus
  * holding more than half of what it may hold is one whose ceiling is a number
@@ -230,17 +243,4 @@ export function corpusHeldSentence(truncation: TruncationCounts | null): string 
   const partial = (truncation?.evidence_corpus_partial_reason ?? "").trim() !== "";
   if (!partial && !(ceiling > 0 && held > ceiling * CORPUS_LOUD_SHARE)) return null;
   return `The grounding corpus held ${countLabel(answers, "answer")}, ${held} of ${ceiling} bytes.`;
-}
-
-export function partialGroundingSentence(truncation: TruncationCounts | null): string | null {
-  const reason = (truncation?.evidence_corpus_partial_reason ?? "").trim();
-  if (!reason) return null;
-  const missing = Math.max(0, Number(truncation?.evidence_corpus_missing_answers ?? 0) || 0);
-  const tools = (truncation?.evidence_corpus_missing_tools ?? []).filter(Boolean);
-  const named = tools.length > 0 ? `, from ${tools.join(", ")}` : "";
-  return (
-    `Grounding searched less than the run produced — ${reason}: ` +
-    `${countLabel(missing, "answer")} not kept${named}. ` +
-    `An absence measured against it is a note and drops nothing.`
-  );
 }

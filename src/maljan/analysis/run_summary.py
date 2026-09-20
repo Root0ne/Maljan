@@ -204,6 +204,18 @@ class TruncationMetrics:
         )
 
 
+def _recorded_calls(latency: Any) -> int:
+    """How many calls the per-agent latency table counts, across every agent."""
+    total = 0
+    for row in (latency or {}).values():
+        if isinstance(row, dict):
+            try:
+                total += max(0, int(row.get("calls") or 0))
+            except (TypeError, ValueError):
+                continue
+    return total
+
+
 def _optional_count(value: Any) -> int | None:
     """A recorded count, or ``None`` when nothing was recorded.
 
@@ -641,11 +653,18 @@ class RunSummary:
                 f"| Judge bundles repaired | {trunc.judge_integrity_objects_removed}"
                 f" over {trunc.judge_integrity_invocations} attempt(s) |",
                 "",
-                "Tool output calls are the answers a tool server returned through the "
-                "guardrail. The per-call latency table counts every recorded call, so it "
-                "also holds the ones answered in process, which no guardrail sees.",
-                "",
             ]
+            # Said only where the two counts could be read against each other
+            # and disagree, or where something was actually cut. On a run that
+            # hit no bound and counted the same calls twice it is a paragraph
+            # explaining a difference the reader cannot see.
+            if trunc.any_bound_hit or _recorded_calls(self.tool_latency) != trunc.tool_output_calls:
+                lines += [
+                    "Tool output calls are the answers a tool server returned through the "
+                    "guardrail. The per-call latency table counts every recorded call, so it "
+                    "also holds the ones answered in process, which no guardrail sees.",
+                    "",
+                ]
             if trunc.evidence_corpus_partial_reason:
                 lines += [
                     "Grounding searched less than this run produced "
