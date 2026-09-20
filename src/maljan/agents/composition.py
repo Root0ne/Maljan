@@ -252,6 +252,7 @@ def _provider_tools(container: Any, definition: AgentDefinition, provider_id: st
             job_key=container.job_key(),
             max_output_chars=int(container.config.preprocessing.max_tool_output_chars),
             truncation_ledger=container.get_truncation_ledger(),
+            context_budget=container.get_context_budget(),
         )
     )
     return list(provider.get_tools())

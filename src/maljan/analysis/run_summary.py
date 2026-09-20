@@ -195,6 +195,18 @@ class TruncationMetrics:
     evidence_corpus_answers: int | None = None
     evidence_corpus_bytes_held: int | None = None
     evidence_corpus_bytes_ceiling: int | None = None
+    # The cap that was actually in force on a tool answer, smallest and
+    # largest. Derived from what the window had left at the moment of each
+    # call, so the two differ inside one run and a reader asking why one answer
+    # was cut and another was not is asking about these.
+    tool_output_limit_smallest: int = 0
+    tool_output_limit_largest: int = 0
+    # The window those caps were worked out from: how many tokens, where that
+    # was learned (declared, probed, table, fallback) in words, the
+    # characters-per-token figure and the room kept back for the model's reply.
+    # Empty on a run whose cap was an operator's own number, because no window
+    # was consulted then.
+    context_window: dict[str, Any] = field(default_factory=dict)
 
     @property
     def any_bound_hit(self) -> bool:
@@ -255,6 +267,35 @@ def corpus_held_sentence(truncation: Any) -> str:
     return (
         f"The grounding corpus held {count_label(int(answers), 'answer')}, "
         f"{int(held)} of {int(ceiling)} bytes."
+    )
+
+
+def cap_in_force_sentence(truncation: Any) -> str:
+    """The cap one tool answer was measured against, and where it came from.
+
+    The cap is no longer a constant a reader can look up: derived, it is worked
+    out per call from what the served window had left, so the run has to say
+    what was in force while it ran. A run whose cap was an operator's own
+    number consulted no window, and says that instead.
+    """
+    smallest = int(getattr(truncation, "tool_output_limit_smallest", 0) or 0)
+    largest = int(getattr(truncation, "tool_output_limit_largest", 0) or 0)
+    if largest <= 0:
+        return ""
+    window = getattr(truncation, "context_window", None) or {}
+    tokens = int(window.get("tokens", 0) or 0) if isinstance(window, dict) else 0
+    if tokens <= 0:
+        return f"One tool answer was capped at {largest:,} characters, the number this run was set."
+    span = (
+        f"{largest:,} characters"
+        if smallest == largest
+        else f"between {smallest:,} and {largest:,} characters"
+    )
+    return (
+        f"One tool answer was capped at {span}, derived from a context window of "
+        f"{tokens:,} tokens ({window.get('source', '')} — {window.get('detail', '')}) at "
+        f"{int(window.get('chars_per_token', 0) or 0)} characters per token, with "
+        f"{int(window.get('reply_tokens', 0) or 0):,} tokens held back for the model's reply."
     )
 
 
@@ -654,6 +695,9 @@ class RunSummary:
                 f" over {trunc.judge_integrity_invocations} attempt(s) |",
                 "",
             ]
+            cap = cap_in_force_sentence(trunc)
+            if cap:
+                lines += [cap, ""]
             # Said only where the two counts could be read against each other
             # and disagree, or where something was actually cut. On a run that
             # hit no bound and counted the same calls twice it is a paragraph
@@ -788,6 +832,9 @@ class RunSummary:
                 "evidence_corpus_missing_answers": t.evidence_corpus_missing_answers,
                 "evidence_corpus_missing_tools": list(t.evidence_corpus_missing_tools),
                 "evidence_corpus_partial_reason": t.evidence_corpus_partial_reason,
+                "tool_output_limit_smallest": t.tool_output_limit_smallest,
+                "tool_output_limit_largest": t.tool_output_limit_largest,
+                "context_window": dict(t.context_window),
                 "any_bound_hit": t.any_bound_hit,
             }
             # Absent rather than zero when this run recorded nothing about
@@ -1017,6 +1064,11 @@ class RunSummaryBuilder:
             evidence_corpus_bytes_held=_optional_count(snapshot.get("evidence_corpus_bytes_held")),
             evidence_corpus_bytes_ceiling=_optional_count(
                 snapshot.get("evidence_corpus_bytes_ceiling")
+            ),
+            tool_output_limit_smallest=int(snapshot.get("tool_output_limit_smallest", 0)),
+            tool_output_limit_largest=int(snapshot.get("tool_output_limit_largest", 0)),
+            context_window=(
+                dict(window) if isinstance(window := snapshot.get("context_window"), dict) else {}
             ),
         )
         return self

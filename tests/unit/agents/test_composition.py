@@ -104,6 +104,9 @@ class _Container:
         from maljan.core.truncation_ledger import TruncationLedger
 
         self._truncation_ledger = TruncationLedger()
+        from maljan.llm.context_window import budget_for_settings
+
+        self._context_budget = budget_for_settings(cfg, ["static"], probe=False)
 
     def get_agent_llm(self, name: str) -> Any:
         return self.llm
@@ -118,6 +121,10 @@ class _Container:
     def get_truncation_ledger(self) -> Any:
         """The job's own bound-hit ledger, which every attach carries."""
         return self._truncation_ledger
+
+    def get_context_budget(self) -> Any:
+        """The job's own window budget, which every attach carries too."""
+        return self._context_budget
 
     def get_server_registry(self) -> Any:
         return self._registry
@@ -216,6 +223,7 @@ def test_a_generic_agents_provider_is_opened_with_the_jobs_ledger_and_limit():
     assert job.job_key == "job-under-test"
     assert job.truncation_ledger is container.get_truncation_ledger()
     assert job.max_output_chars == cfg.preprocessing.max_tool_output_chars
+    assert job.context_budget is container.get_context_budget()
 
 
 def test_a_built_in_role_never_opens_its_provider_during_resolution():

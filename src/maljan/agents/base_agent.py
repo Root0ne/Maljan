@@ -2263,6 +2263,48 @@ class BaseAnalyst(BudgetMeter, ABC):
             return None
         return container.get_server_registry()
 
+    def _context_budget(self) -> Any | None:
+        """The job's context budget, or None when this agent runs bare.
+
+        What the tool paths ask how many characters of an answer this model may
+        read now, and what this loop reports its own conversation size to.
+        """
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        try:
+            return container.get_context_budget()
+        except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
+            self.logger.debug("%s: the context budget is unavailable (%s).", self.name, exc)
+            return None
+
+    def _note_conversation(self, messages: list) -> None:
+        """Tell the job's budget what this loop's conversation now weighs.
+
+        Called from the run-state refresher, which already runs before every
+        model turn and already holds the messages. Measured with
+        ``_message_chars``, the same rule the salvage trim uses: an assistant
+        turn that requests tools carries its whole request outside ``content``,
+        and counting the text alone under-reported a ReAct transcript fourfold.
+        """
+        budget = self._context_budget()
+        if budget is None:
+            return
+        try:
+            budget.note_conversation(self.name, sum(_message_chars(m) for m in messages))
+        except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
+            self.logger.debug("%s: the conversation size was not recorded (%s).", self.name, exc)
+
+    def _forget_conversation(self) -> None:
+        """Let go of this loop's size, so a finished loop stops binding the cap."""
+        budget = self._context_budget()
+        if budget is None:
+            return
+        try:
+            budget.forget_conversation(self.name)
+        except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
+            self.logger.debug("%s: the conversation size was not released (%s).", self.name, exc)
+
     def _job_key(self) -> str:
         """A per-job identity for the handles' same-job short circuit."""
         return self._job_id or "job"
@@ -2434,6 +2476,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             # Counted on every turn whether or not there is a block to show
             # it in: the budget is what an ask from inside this loop reads.
             ledger.note_turns(messages)
+            # And what the conversation weighs, which is what the next tool
+            # answer's cap is measured against.
+            self._note_conversation(messages)
             # The meter, every few steps: a tick per turn would be a stream
             # of near-identical events on a forty-step loop.
             used = steps_used(messages)
@@ -2776,6 +2821,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             # because the last one timed out is the opposite of a ledger.
             self._finish_evidence(recorder)
             self.loop_budget = None
+            # The loop is over and its conversation is gone, so it stops
+            # deciding how much of an answer the next one may read. In the same
+            # ``finally`` and for the same reason: a loop that died still held
+            # a conversation, and leaving its size behind would shrink every
+            # later stage's answers against a window nothing is using.
+            self._forget_conversation()
 
         if thread_result is None:
             raise AnalystError(f"{self.name} ReAct agent returned no result")

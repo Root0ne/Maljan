@@ -1001,7 +1001,11 @@ class TestAServersParameterNameIsUntrustedText:
         narrowing = ("limit", "offset", "pattern")
         for module in (mcp_client, ghidra_http_client):
             source = inspect.getsource(module)
-            assert "shorten_target(self._max_output_chars, narrowing)" in source, module.__name__
+            # One limit, read once per call, and one function that reads it:
+            # the operator's cap when there is one, and otherwise what the
+            # served window has left for this answer.
+            assert 'output_limit(self._max_output_chars, getattr(self, "_context_budget"' in source
+            assert "shorten_target(limit, narrowing)" in source, module.__name__
 
         from maljan.agents.evidence_recorder import shortened_notice
         from maljan.agents.ghidra_http_client import GhidraHTTPClient

@@ -199,6 +199,7 @@ class StaticAnalyst(BaseAnalyst):
             output_guardrail=guardrail,
             max_output_chars=cfg.preprocessing.max_tool_output_chars,
             truncation_ledger=getattr(self, "truncation_ledger", None),
+            context_budget=self._context_budget(),
         )
 
     def _static_capabilities(self) -> Any:

@@ -91,6 +91,7 @@ __all__ = [
     "generation_reserve",
     "learn_window",
     "model_family",
+    "output_limit",
     "probe_plan",
     "probe_window",
     "reply_reserve_tokens",
@@ -784,9 +785,9 @@ class ContextBudget:
         with self._lock:
             smallest, largest = self._smallest, self._largest
         return {
-            "window_tokens": self.window.tokens,
-            "window_source": self.window.source,
-            "window_detail": self.window.detail,
+            "tokens": self.window.tokens,
+            "source": self.window.source,
+            "detail": self.window.detail,
             "chars_per_token": self.chars_per_token,
             "reply_tokens": self.reply_tokens,
             "answer_share": self.share,
@@ -815,3 +816,17 @@ def budget_or_unknown(budget: Any) -> ContextBudget:
     model nobody identified is the fallback window's share of itself.
     """
     return budget if isinstance(budget, ContextBudget) else _UNKNOWN_BUDGET
+
+
+def output_limit(configured: int, budget: Any) -> int:
+    """How many characters of one tool answer may reach the model right now.
+
+    One function for both tool paths — the MCP toolkit's guardrail and the
+    Ghidra HTTP client's — because they support one claim: what the model reads
+    is inside the limit in force for this call. A positive ``configured`` is the
+    operator having set ``core.preprocessing.max_tool_output_chars`` themselves
+    and is used unchanged; zero asks the window.
+    """
+    if int(configured) > 0:
+        return int(configured)
+    return budget_or_unknown(budget).chars_for_one_answer()

@@ -373,6 +373,12 @@ class ServiceContainer:
         # so ``ev_0007`` names one tool call rather than one per agent.
         self._evidence_counter = EvidenceCounter()
 
+        # The window this job's models were served with, and the cap it gives
+        # one tool answer. Built on first use rather than here: learning the
+        # window costs a metadata request to the operator's own endpoint, and a
+        # container that never attaches a tool server should never make it.
+        self._context_budget: Any | None = None
+
         _LIVE_CONTAINERS.add(self)
         _register_retirement_hook()
 
@@ -618,14 +624,18 @@ class ServiceContainer:
         providers already have.
 
         It carries this job's truncation ledger, so every toolkit it opens
-        records its guardrail decisions where the run summary reads them.
+        records its guardrail decisions where the run summary reads them, and
+        this job's context budget, so every answer those toolkits hand back is
+        sized against the window the served model was found to have.
         """
         with self._lock:
             if self._server_registry_cache is None:
                 from maljan.providers.servers import ServerRegistry
 
                 self._server_registry_cache = ServerRegistry(
-                    self.config, truncation_ledger=self._truncation_ledger
+                    self.config,
+                    truncation_ledger=self._truncation_ledger,
+                    context_budget=self.get_context_budget(),
                 )
                 logger.info(
                     "Tool servers: %s.",
@@ -650,6 +660,56 @@ class ServiceContainer:
     def get_truncation_ledger(self) -> TruncationLedger:
         """Return the per-run truncation ledger (pitfall P6)."""
         return self._truncation_ledger
+
+    def get_context_budget(self) -> Any:
+        """The window this job's models serve, and what one tool answer may take.
+
+        Built once, on first use, because learning the window means asking the
+        operator's own endpoint for its metadata — free, but a request, and a
+        container that attaches no tool server never makes it. A mock container
+        does not ask at all: nothing it builds reaches a model, and a unit test
+        must not put a request on the network to find that out.
+
+        The failure mode is a smaller answer, never a failed job: an endpoint
+        that says nothing falls to the vendored table and then to the stated
+        fallback, and the run summary carries which of them applied.
+        """
+        with self._lock:
+            if self._context_budget is None:
+                from maljan.agents.composition import analyst_keys
+                from maljan.llm.context_window import budget_for_settings
+
+                agents = [*analyst_keys(self.config), "judge"]
+                self._context_budget = budget_for_settings(
+                    self.config, agents, probe=self._cap_is_derived() and not self.mock
+                )
+                window = self._context_budget.window
+                logger.info(
+                    "Context window: %d tokens (%s — %s); one tool answer may take %d chars.",
+                    window.tokens,
+                    window.source,
+                    window.detail,
+                    self._context_budget.chars_for_one_answer(),
+                )
+            return self._context_budget
+
+    def _cap_is_derived(self) -> bool:
+        """Whether the tool-output cap comes from the window rather than a setting."""
+        return int(getattr(self.config.preprocessing, "max_tool_output_chars", 0) or 0) <= 0
+
+    def context_budget_snapshot(self) -> dict[str, Any]:
+        """The window this job's tool-output caps were derived from, or ``{}``.
+
+        Empty on a job that attached no tool server, because none was built,
+        and empty on one whose operator set the cap themselves, because then no
+        window decided anything and reporting one would describe a number
+        nothing used. Never builds a budget: a record of what happened does not
+        go and find out.
+        """
+        budget = self._context_budget
+        if budget is None or not self._cap_is_derived():
+            return {}
+        return dict(budget.snapshot())
 
     def get_evidence_corpus(self) -> RunEvidenceCorpus | None:
         """Return the per-job record of what the run's tools answered, or ``None``.

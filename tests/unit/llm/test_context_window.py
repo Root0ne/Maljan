@@ -266,8 +266,8 @@ class TestTheBudgetOneRunSpends:
         budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "props"), reply_tokens=8192)
         assert budget.chars_for_one_answer() == 9216
         snapshot = budget.snapshot()
-        assert snapshot["window_tokens"] == 32768
-        assert snapshot["window_source"] == cw.PROBED
+        assert snapshot["tokens"] == 32768
+        assert snapshot["source"] == cw.PROBED
         assert snapshot["chars_per_token"] == cw.CHARS_PER_TOKEN
         assert snapshot["cap_largest"] == 9216
 

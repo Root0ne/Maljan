@@ -495,31 +495,38 @@ class PreprocessingConfig(BaseModel):
     summarizer_max_words:
         Maximum words in each chunk summary.
     max_tool_output_chars:
-        Maximum character length for MCP tool outputs. When a tool
-        returns text exceeding this limit, the output is either
-        summarized (if FunctionSummarizer is enabled) or truncated.
+        Maximum character length for MCP tool outputs. Zero — the default —
+        derives it per call from the context window the served model was
+        found to have; a positive value is an explicit operator cap.
     """
 
     use_function_summarizer: bool = False
     summarizer_provider: Literal["openai", "anthropic", "ollama", "gemini"] = "ollama"
     summarizer_model: str = "llama3.2:3b"
     summarizer_max_words: Annotated[int, Field(ge=1)] = 150
-    # 2026-07-13 — restored 3000 -> 6000 (was 8000 before the 2026-07-11 cut).
-    # The cut to 3000 blamed "SWA re-prefill", a MISDIAGNOSIS: the served model
-    # is a hybrid Gated-DeltaNet (recurrent) MoE, not sliding-window, and the
-    # real re-prefill cause was parallel analysts clobbering the single slot's
-    # recurrent state (fixed by parallel_analysts=False; see LLMConfig). With
-    # sequential analysts each ReAct step reuses the prior context, so richer
-    # observations no longer inflate re-prefill cost. 6000 chars (~1500 tokens)
-    # per Ghidra observation lets a full priority function's pseudo-C survive
-    # untruncated. NOT 8000: there is no in-loop context pruning, so at the
-    # restored static max_steps=40 the worst-case accumulation is ~40*1500 tool
-    # tokens + 20k chunk + ~12k system/gen ~= 90-95k — a safe ~36k under
-    # n_ctx=131072. 8000 would push the peak to ~112k, and crossing 131072
-    # triggers a silent server context-shift that drops the earliest tokens (the
-    # load_program framing) — catastrophic and invisible. Override via
-    # ``PREPROCESSING__MAX_TOOL_OUTPUT_CHARS``.
-    max_tool_output_chars: Annotated[int, Field(ge=1)] = 6000
+    # Zero means "derive it", and zero is the default.
+    #
+    # The number this replaces was 6,000 characters, and every argument for it
+    # was an argument about one deployment: at the static analyst's 40 steps,
+    # 40 observations of ~1,500 tokens plus a 20k chunk plus ~12k of system and
+    # generation came to ~90-95k, a safe margin under the 131,072 that server
+    # was started with. Every part of that is a fact about one model. On a
+    # model served with 32,768 tokens the same constant does not fit; on one
+    # with a million it throws information away for nothing.
+    #
+    # Derived, the cap is worked out at the moment of the call from the window
+    # the served model was found to have, less what the conversation already
+    # holds and the room kept back for the model's own reply, converted at a
+    # measured characters-per-token figure, times the share one answer may
+    # take. The whole arithmetic, its numbers and where each came from are in
+    # ``maljan.llm.context_window``; the window itself is learned from the
+    # server's own metadata endpoint, from a vendored table, or from a stated
+    # fallback, and the run summary says which.
+    #
+    # A positive value is the operator saying the number themselves, and it
+    # behaves exactly as this setting always did: that cap, on every answer,
+    # whatever the window. Override via ``PREPROCESSING__MAX_TOOL_OUTPUT_CHARS``.
+    max_tool_output_chars: Annotated[int, Field(ge=0)] = 0
 
     # Sink-reachability triage (Maltracker-inspired). When enabled, the static
     # analyst runs a deterministic pre-pass over the Ghidra call graph to find

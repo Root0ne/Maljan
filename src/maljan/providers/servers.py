@@ -367,6 +367,7 @@ class ServerHandle:
         output_guardrail: Callable[[str], str] | None,
         max_output_chars: int,
         truncation_ledger: Any | None,
+        context_budget: Any | None = None,
     ) -> Any:
         """Everything ``open`` does except awaiting ``initialize``.
 
@@ -411,6 +412,7 @@ class ServerHandle:
                 output_guardrail=output_guardrail,
                 max_output_chars=max_output_chars,
                 truncation_ledger=truncation_ledger,
+                context_budget=context_budget,
             )
         # An http/sse transport has no child of ours to reap.
         self._launch_argv = ()
@@ -423,6 +425,7 @@ class ServerHandle:
             output_guardrail=output_guardrail,
             max_output_chars=max_output_chars,
             truncation_ledger=truncation_ledger,
+            context_budget=context_budget,
         )
 
     def open(
@@ -430,8 +433,9 @@ class ServerHandle:
         job_id: str,
         *,
         output_guardrail: Callable[[str], str] | None = None,
-        max_output_chars: int = 8000,
+        max_output_chars: int = 0,
         truncation_ledger: Any | None = None,
+        context_budget: Any | None = None,
     ) -> None:
         """Attach for ``job_id``. Same id is a no-op; a different id reattaches."""
         if self._toolkit is not None:
@@ -447,7 +451,9 @@ class ServerHandle:
             logger.info("mcp server '%s' is disabled.", self.name)
             return
 
-        toolkit = self._build_toolkit(output_guardrail, max_output_chars, truncation_ledger)
+        toolkit = self._build_toolkit(
+            output_guardrail, max_output_chars, truncation_ledger, context_budget
+        )
 
         before = _own_child_pids()
         try:
@@ -518,8 +524,9 @@ class ServerHandle:
             return
         toolkit = self._build_toolkit(
             context.get("output_guardrail"),
-            int(context.get("max_output_chars", 8000)),
+            int(context.get("max_output_chars", 0)),
             context.get("truncation_ledger"),
+            context.get("context_budget"),
         )
         # Recorded *before* ``initialize``, so the failure path below unwinds
         # on the loop that wound the partial attach too.
@@ -1067,7 +1074,13 @@ class ServerHandle:
 class ServerRegistry:
     """The tool servers one job may attach, built from ``cfg.mcp.servers``."""
 
-    def __init__(self, cfg: Settings, *, truncation_ledger: Any | None = None) -> None:
+    def __init__(
+        self,
+        cfg: Settings,
+        *,
+        truncation_ledger: Any | None = None,
+        context_budget: Any | None = None,
+    ) -> None:
         self._handles = {
             name: ServerHandle(name, config) for name, config in cfg.mcp.servers.items()
         }
@@ -1075,9 +1088,14 @@ class ServerRegistry:
         # put on every toolkit this registry opens. Both used to be left to the
         # caller: every attach but the static provider's passed neither, so the
         # guardrail on a tool server's answer counted on nothing and cut at the
-        # signature's own 8000 rather than at the number the operator set.
+        # signature's own default rather than at the number the operator set.
         self._truncation_ledger = truncation_ledger
         self._max_output_chars = int(getattr(cfg.preprocessing, "max_tool_output_chars", 0) or 0)
+        # What that limit means when it is zero: the window the served model
+        # was found to have, spent per call. The budget travels with the attach
+        # for the same reason the ledger does — a toolkit opened without it
+        # would size its answers against a window nobody measured.
+        self._context_budget = context_budget
         # A handle is bound to the loop that opened it, so a caller on another
         # running loop cannot be handed it — see ``_handle_for``. These are
         # the extra handles that answer for those callers, keyed by server and
@@ -1094,12 +1112,18 @@ class ServerRegistry:
         self.degradation_reasons: list[str] = []
 
     def _attach(self, context: dict[str, Any]) -> dict[str, Any]:
-        """The attach context, with this job's ledger and limit in it.
+        """The attach context, with this job's ledger, limit and budget in it.
 
         One ledger per job: the registry's is the job's, so a toolkit it opens
         records where the run summary reads, whatever the caller thought to
         pass. A caller naming a different ledger is told, because a second
         ledger is a count that reaches no reader.
+
+        The limit is written unconditionally, zero included. Zero is the
+        operator asking for the derived cap, and a ``setdefault`` guarded on a
+        positive number would have left that request looking exactly like a
+        caller who said nothing — which is how every attach but one came to cut
+        at a signature default in the first place.
         """
         out = dict(context)
         if self._truncation_ledger is not None:
@@ -1110,8 +1134,9 @@ class ServerRegistry:
                     "the job's ledger is used."
                 )
             out["truncation_ledger"] = self._truncation_ledger
-        if self._max_output_chars > 0:
-            out.setdefault("max_output_chars", self._max_output_chars)
+        out["max_output_chars"] = self._max_output_chars
+        if self._context_budget is not None:
+            out["context_budget"] = self._context_budget
         return out
 
     def _handle_for(self, handle: ServerHandle, loop: asyncio.AbstractEventLoop) -> ServerHandle:

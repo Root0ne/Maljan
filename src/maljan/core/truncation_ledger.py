@@ -97,6 +97,7 @@ def record_guardrail_outcome(
     hard_truncated: bool = False,
     shortened: bool = False,
     shortening_timed_out: bool = False,
+    limit: int = 0,
 ) -> None:
     """Record one tool-output guardrail decision on ``ledger``.
 
@@ -104,6 +105,11 @@ def record_guardrail_outcome(
     exists twice — ``MCPLangChainToolkit`` (stdio) and ``GhidraHTTPClient``
     (HTTP, the production path) each carry their own copy. One implementation
     of the swallow-everything contract is better than two that drift.
+
+    ``limit`` is the cap that was in force for this one call. It is recorded
+    because the cap is no longer a constant an operator can read off the
+    settings page: derived, it is worked out per call from what the window has
+    left, so a reader asking why an answer was cut needs the number that cut it.
 
     No-op when ``ledger`` is None; never raises.
     """
@@ -118,6 +124,7 @@ def record_guardrail_outcome(
             hard_truncated=hard_truncated,
             shortened=shortened,
             shortening_timed_out=shortening_timed_out,
+            limit=limit,
         )
     except Exception:  # noqa: BLE001 — telemetry must never break a tool call
         return
@@ -214,6 +221,16 @@ class TruncationLedger:
         self.tool_output_shortening_timeouts = 0
         self.tool_output_chars_in = 0
         self.tool_output_chars_kept = 0
+        # The caps that were actually in force, smallest and largest. With the
+        # cap derived from what the window has left they differ within one run,
+        # and a reader asking why one answer was cut and another was not is
+        # asking about these two numbers rather than about a setting.
+        self.tool_output_limit_smallest = 0
+        self.tool_output_limit_largest = 0
+        # Where the window those caps came from was learned, as the context
+        # budget reported it. Empty on a run whose caps were an operator's own
+        # number, because then no window was consulted.
+        self.context_window: dict[str, object] = {}
 
         # ReAct loop step ceiling (agents/base_agent, LangGraph recursion_limit).
         self.react_invocations = 0
@@ -275,16 +292,25 @@ class TruncationLedger:
         hard_truncated: bool = False,
         shortened: bool = False,
         shortening_timed_out: bool = False,
+        limit: int = 0,
     ) -> None:
         """Record one guardrail decision.
 
         ``over_limit`` false means the output passed through untouched; the call
-        is still counted, because a frequency needs its denominator.
+        is still counted, because a frequency needs its denominator. ``limit``
+        is the cap this one call was measured against, kept as the smallest and
+        the largest the run saw.
         """
         with self._lock:
             self.tool_output_calls += 1
             self.tool_output_chars_in += max(0, int(chars_in))
             self.tool_output_chars_kept += max(0, int(chars_kept))
+            if int(limit) > 0:
+                smallest = self.tool_output_limit_smallest
+                self.tool_output_limit_smallest = (
+                    int(limit) if smallest == 0 else min(smallest, int(limit))
+                )
+                self.tool_output_limit_largest = max(self.tool_output_limit_largest, int(limit))
             if over_limit:
                 self.tool_output_over_limit += 1
             if summarised:
@@ -295,6 +321,16 @@ class TruncationLedger:
                 self.tool_output_shortened += 1
             if shortening_timed_out:
                 self.tool_output_shortening_timeouts += 1
+
+    def note_context_window(self, snapshot: dict[str, object] | None) -> None:
+        """Record the window the derived caps were worked out from.
+
+        Written once per run, from the job's context budget. A run whose caps
+        came from an operator's own number records nothing here, and the
+        absence is the answer: no window was consulted.
+        """
+        with self._lock:
+            self.context_window = dict(snapshot or {})
 
     # -- loop / generation ceilings ----------------------------------------
 
@@ -427,6 +463,9 @@ class TruncationLedger:
                 "tool_output_truncation_rate": truncation_rate(
                     self.tool_output_over_limit, self.tool_output_calls
                 ),
+                "tool_output_limit_smallest": self.tool_output_limit_smallest,
+                "tool_output_limit_largest": self.tool_output_limit_largest,
+                "context_window": dict(self.context_window),
                 "react_invocations": self.react_invocations,
                 "react_step_cap_hits": self.react_step_cap_hits,
                 "react_step_cap_rate": truncation_rate(

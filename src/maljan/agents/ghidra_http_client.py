@@ -33,8 +33,9 @@ class GhidraHTTPClient:
         base_url: str,
         auth_token: str = "",
         output_guardrail: Any | None = None,
-        max_output_chars: int = 8000,
+        max_output_chars: int = 0,
         truncation_ledger: Any | None = None,
+        context_budget: Any | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         # Callers pass a plain string (``SecretStr.get_secret_value()`` already
@@ -44,10 +45,16 @@ class GhidraHTTPClient:
         self._tools: list[BaseTool] = []
         self._schema: list[dict[str, Any]] = []
         self._output_guardrail = output_guardrail
+        # Zero is the ordinary case and means "ask the budget below". A
+        # positive number is the operator's own cap and wins over it.
         self._max_output_chars = max_output_chars
         # Optional TruncationLedger (pitfall P6); None disables counting. This is
         # the production Ghidra transport, so this is where the numbers come from.
         self._truncation_ledger = truncation_ledger
+        # The job's context budget, which knows the window the served model has
+        # and what the conversation currently holds. None outside a job, and the
+        # conservative window then answers.
+        self._context_budget = context_budget
         # Single long-lived AsyncClient — re-using the connection pool across
         # tool calls cuts TLS/TCP handshake overhead and avoids the previous
         # "new client per tool call" anti-pattern.
@@ -295,6 +302,12 @@ class GhidraHTTPClient:
     def _apply_output_guardrail(self, output: str, narrowing: Sequence[str] = ()) -> str:
         """Limit tool output size to prevent LLM context overflow.
 
+        The limit is ``_max_output_chars`` when the operator set one, and
+        otherwise what the served model's context window has left for one
+        answer at this moment (``maljan.llm.context_window.output_limit``),
+        read once so the whole of one call's decision is taken against one
+        number.
+
         ``narrowing`` names this tool's own arguments that reach what a
         shortening leaves out. The recorder appends a sentence naming them to a
         shortened answer, and the room that sentence needs is kept back here
@@ -320,25 +333,28 @@ class GhidraHTTPClient:
         """
         from maljan.agents.output_shortening import shorten_json_document, shorten_target
         from maljan.core.truncation_ledger import record_guardrail_outcome
+        from maljan.llm.context_window import output_limit
 
         chars_in = len(output)
+        limit = output_limit(self._max_output_chars, getattr(self, "_context_budget", None))
 
-        if chars_in <= self._max_output_chars:
+        if chars_in <= limit:
             record_guardrail_outcome(
                 self._truncation_ledger,
                 chars_in=chars_in,
                 chars_kept=chars_in,
                 over_limit=False,
+                limit=limit,
             )
             return output
 
         logger.warning(
             "Ghidra tool output exceeds limit (%d > %d chars). Applying guardrail.",
             chars_in,
-            self._max_output_chars,
+            limit,
         )
 
-        attempt = shorten_json_document(output, shorten_target(self._max_output_chars, narrowing))
+        attempt = shorten_json_document(output, shorten_target(limit, narrowing))
         if attempt.shortened:
             record_guardrail_outcome(
                 self._truncation_ledger,
@@ -346,6 +362,7 @@ class GhidraHTTPClient:
                 chars_kept=len(attempt.text),
                 over_limit=True,
                 shortened=True,
+                limit=limit,
             )
             return attempt.text
 
@@ -361,10 +378,11 @@ class GhidraHTTPClient:
                     chars_kept=len(summarised),
                     over_limit=True,
                     summarised=True,
+                    limit=limit,
                 )
                 return summarised
 
-        result = output[: self._max_output_chars] + "\n\n[OUTPUT TRUNCATED]"
+        result = output[:limit] + "\n\n[OUTPUT TRUNCATED]"
         record_guardrail_outcome(
             self._truncation_ledger,
             chars_in=chars_in,
@@ -372,5 +390,6 @@ class GhidraHTTPClient:
             over_limit=True,
             hard_truncated=True,
             shortening_timed_out=attempt.timed_out,
+            limit=limit,
         )
         return result

@@ -153,9 +153,14 @@ class TestToolkitConstructorDefaults:
     """Verify constructor defaults for guardrail parameters."""
 
     def test_default_no_guardrail(self, server_params: MagicMock) -> None:
+        """Zero is not "no cap": it is the served window's share of itself."""
+        from maljan.llm.context_window import MIN_TOOL_OUTPUT_CHARS, output_limit
+
         toolkit = MCPLangChainToolkit(server_params)
         assert toolkit._output_guardrail is None
-        assert toolkit._max_output_chars == 8000
+        assert toolkit._max_output_chars == 0
+        assert toolkit._context_budget is None
+        assert output_limit(toolkit._max_output_chars, None) >= MIN_TOOL_OUTPUT_CHARS
 
     def test_custom_max_chars(self, server_params: MagicMock) -> None:
         toolkit = MCPLangChainToolkit(server_params, max_output_chars=4000)
