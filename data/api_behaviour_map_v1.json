@@ -14,8 +14,8 @@
           "RtlCreateUserThread"
         ],
         "measured": {
-          "benign_percent": 65.6,
-          "benign_files": 1790,
+          "seen_on_benign_percent": 65.6,
+          "seen_on_benign_files": 1790,
           "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
         },
         "apis": [
@@ -75,8 +75,8 @@
           "NtSetInformationThread"
         ],
         "measured": {
-          "benign_percent": 36.6,
-          "benign_files": 1000,
+          "seen_on_benign_percent": 36.6,
+          "seen_on_benign_files": 1000,
           "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
         },
         "apis": [
@@ -117,8 +117,8 @@
           "WinExec"
         ],
         "measured": {
-          "benign_percent": 14.4,
-          "benign_files": 392,
+          "seen_on_benign_percent": 14.4,
+          "seen_on_benign_files": 392,
           "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
         },
         "apis": [
@@ -229,8 +229,8 @@
           "socket"
         ],
         "measured": {
-          "benign_percent": 19.0,
-          "benign_files": 520,
+          "seen_on_benign_percent": 19.0,
+          "seen_on_benign_files": 520,
           "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
         },
         "apis": [
@@ -320,8 +320,8 @@
       "filesystem": {
         "tier": "informational",
         "measured": {
-          "benign_percent": 35.6,
-          "benign_files": 972,
+          "seen_on_benign_percent": 35.6,
+          "seen_on_benign_files": 972,
           "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
         },
         "apis": [
@@ -418,8 +418,8 @@
       "registry": {
         "tier": "informational",
         "measured": {
-          "benign_percent": 13.2,
-          "benign_files": 359,
+          "seen_on_benign_percent": 13.2,
+          "seen_on_benign_files": 359,
           "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
         },
         "apis": [
@@ -484,8 +484,8 @@
           "WriteProcessMemory"
         ],
         "measured": {
-          "benign_percent": 9.8,
-          "benign_files": 267,
+          "seen_on_benign_percent": 9.8,
+          "seen_on_benign_files": 267,
           "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
         },
         "apis": [
@@ -551,8 +551,8 @@
           "WriteProcessMemory"
         ],
         "measured": {
-          "benign_percent": 93.5,
-          "benign_files": 2552,
+          "seen_on_benign_percent": 93.5,
+          "seen_on_benign_files": 2552,
           "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
         },
         "apis": [
@@ -615,8 +615,8 @@
       "discovery": {
         "tier": "informational",
         "measured": {
-          "benign_percent": 56.4,
-          "benign_files": 1541,
+          "seen_on_benign_percent": 56.4,
+          "seen_on_benign_files": 1541,
           "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
         },
         "apis": [
@@ -747,8 +747,8 @@
           "SHSetValueA"
         ],
         "measured": {
-          "benign_percent": 16.8,
-          "benign_files": 460,
+          "seen_on_benign_percent": 16.8,
+          "seen_on_benign_files": 460,
           "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
         },
         "apis": [
@@ -811,10 +811,10 @@
           "SetWindowsHookExW"
         ],
         "measured": {
-          "benign_percent": 4.0,
-          "benign_files": 110,
-          "labelled_percent": 2.0,
-          "labelled_files": 55,
+          "seen_on_benign_percent": 4.0,
+          "seen_on_benign_files": 110,
+          "labels_benign_percent": 2.0,
+          "labels_benign_files": 55,
           "held_out_malware_profiles": 7,
           "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
           "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
@@ -866,8 +866,8 @@
           "SetWindowsHookExW"
         ],
         "measured": {
-          "benign_percent": 5.2,
-          "benign_files": 143,
+          "seen_on_benign_percent": 5.2,
+          "seen_on_benign_files": 143,
           "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
         },
         "apis": [
@@ -897,8 +897,8 @@
           "SetWindowsHookExW"
         ],
         "measured": {
-          "benign_percent": 5.7,
-          "benign_files": 155,
+          "seen_on_benign_percent": 5.7,
+          "seen_on_benign_files": 155,
           "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
         },
         "apis": [
@@ -919,8 +919,8 @@
           "Wow64DisableWow64FsRedirection"
         ],
         "measured": {
-          "benign_percent": 79.6,
-          "benign_files": 2174,
+          "seen_on_benign_percent": 79.6,
+          "seen_on_benign_files": 2174,
           "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
         },
         "apis": [
@@ -999,8 +999,8 @@
           "WinHttpSendRequest"
         ],
         "measured": {
-          "benign_percent": 1.2,
-          "benign_files": 33,
+          "seen_on_benign_percent": 1.2,
+          "seen_on_benign_files": 33,
           "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
         },
         "apis": [
@@ -1041,10 +1041,10 @@
           "ptrace"
         ],
         "measured": {
-          "benign_percent": 0.9,
-          "benign_files": 17,
-          "labelled_percent": 0.3,
-          "labelled_files": 5,
+          "seen_on_benign_percent": 0.9,
+          "seen_on_benign_files": 17,
+          "labels_benign_percent": 0.3,
+          "labels_benign_files": 5,
           "benign_corpus": "1842 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
         },
         "apis": [
@@ -1062,8 +1062,8 @@
           "process_vm_writev"
         ],
         "measured": {
-          "benign_percent": 1.2,
-          "benign_files": 22,
+          "seen_on_benign_percent": 1.2,
+          "seen_on_benign_files": 22,
           "benign_corpus": "1842 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
         },
         "apis": [
@@ -1081,8 +1081,8 @@
           "system"
         ],
         "measured": {
-          "benign_percent": 15.6,
-          "benign_files": 287,
+          "seen_on_benign_percent": 15.6,
+          "seen_on_benign_files": 287,
           "benign_corpus": "1842 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
         },
         "apis": [
@@ -1130,8 +1130,8 @@
           "unlink"
         ],
         "measured": {
-          "benign_percent": 2.4,
-          "benign_files": 44,
+          "seen_on_benign_percent": 2.4,
+          "seen_on_benign_files": 44,
           "benign_corpus": "1842 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
         },
         "apis": [
@@ -1175,8 +1175,8 @@
       "filesystem": {
         "tier": "informational",
         "measured": {
-          "benign_percent": 79.3,
-          "benign_files": 1461,
+          "seen_on_benign_percent": 79.3,
+          "seen_on_benign_files": 1461,
           "benign_corpus": "1842 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
         },
         "apis": [
@@ -1232,8 +1232,8 @@
       "discovery": {
         "tier": "informational",
         "measured": {
-          "benign_percent": 47.8,
-          "benign_files": 881,
+          "seen_on_benign_percent": 47.8,
+          "seen_on_benign_files": 881,
           "benign_corpus": "1842 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
         },
         "apis": [
@@ -1271,8 +1271,8 @@
           "ptrace"
         ],
         "measured": {
-          "benign_percent": 7.9,
-          "benign_files": 146,
+          "seen_on_benign_percent": 7.9,
+          "seen_on_benign_files": 146,
           "benign_corpus": "1842 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
         },
         "apis": [
@@ -1303,8 +1303,8 @@
           "socket"
         ],
         "measured": {
-          "benign_percent": 22.7,
-          "benign_files": 418,
+          "seen_on_benign_percent": 22.7,
+          "seen_on_benign_files": 418,
           "benign_corpus": "1842 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
         },
         "apis": [
@@ -1332,8 +1332,8 @@
           "system"
         ],
         "measured": {
-          "benign_percent": 18.6,
-          "benign_files": 342,
+          "seen_on_benign_percent": 18.6,
+          "seen_on_benign_files": 342,
           "benign_corpus": "1842 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
         },
         "apis": [

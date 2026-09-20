@@ -1476,43 +1476,43 @@ HELD_OUT_CORPORA: dict[str, str] = {
 # and — where the category is labelled — how much of it the gate labels.
 MEASURED_CATEGORIES: dict[str, dict[str, dict[str, Any]]] = {
     "windows": {
-        "process_injection": {"benign_percent": 65.6, "benign_files": 1790},
-        "anti_debug": {"benign_percent": 36.6, "benign_files": 1000},
-        "network": {"benign_percent": 14.4, "benign_files": 392},
-        "crypto": {"benign_percent": 19.0, "benign_files": 520},
-        "filesystem": {"benign_percent": 35.6, "benign_files": 972},
-        "registry": {"benign_percent": 13.2, "benign_files": 359},
-        "privilege": {"benign_percent": 9.8, "benign_files": 267},
-        "execution": {"benign_percent": 93.5, "benign_files": 2552},
-        "discovery": {"benign_percent": 56.4, "benign_files": 1541},
-        "persistence": {"benign_percent": 16.8, "benign_files": 460},
+        "process_injection": {"seen_on_benign_percent": 65.6, "seen_on_benign_files": 1790},
+        "anti_debug": {"seen_on_benign_percent": 36.6, "seen_on_benign_files": 1000},
+        "network": {"seen_on_benign_percent": 14.4, "seen_on_benign_files": 392},
+        "crypto": {"seen_on_benign_percent": 19.0, "seen_on_benign_files": 520},
+        "filesystem": {"seen_on_benign_percent": 35.6, "seen_on_benign_files": 972},
+        "registry": {"seen_on_benign_percent": 13.2, "seen_on_benign_files": 359},
+        "privilege": {"seen_on_benign_percent": 9.8, "seen_on_benign_files": 267},
+        "execution": {"seen_on_benign_percent": 93.5, "seen_on_benign_files": 2552},
+        "discovery": {"seen_on_benign_percent": 56.4, "seen_on_benign_files": 1541},
+        "persistence": {"seen_on_benign_percent": 16.8, "seen_on_benign_files": 460},
         "keylogging": {
-            "benign_percent": 4.0,
-            "benign_files": 110,
-            "labelled_percent": 2.0,
-            "labelled_files": 55,
+            "seen_on_benign_percent": 4.0,
+            "seen_on_benign_files": 110,
+            "labels_benign_percent": 2.0,
+            "labels_benign_files": 55,
             "held_out_malware_profiles": 7,
         },
-        "screen_capture": {"benign_percent": 5.2, "benign_files": 143},
-        "message_loop": {"benign_percent": 5.7, "benign_files": 155},
-        "evasion": {"benign_percent": 79.6, "benign_files": 2174},
-        "credential": {"benign_percent": 1.2, "benign_files": 33},
+        "screen_capture": {"seen_on_benign_percent": 5.2, "seen_on_benign_files": 143},
+        "message_loop": {"seen_on_benign_percent": 5.7, "seen_on_benign_files": 155},
+        "evasion": {"seen_on_benign_percent": 79.6, "seen_on_benign_files": 2174},
+        "credential": {"seen_on_benign_percent": 1.2, "seen_on_benign_files": 33},
     },
     "linux": {
         "process_injection": {
-            "benign_percent": 0.9,
-            "benign_files": 17,
-            "labelled_percent": 0.3,
-            "labelled_files": 5,
+            "seen_on_benign_percent": 0.9,
+            "seen_on_benign_files": 17,
+            "labels_benign_percent": 0.3,
+            "labels_benign_files": 5,
         },
-        "anti_debug": {"benign_percent": 1.2, "benign_files": 22},
-        "network": {"benign_percent": 15.6, "benign_files": 287},
-        "crypto": {"benign_percent": 2.4, "benign_files": 44},
-        "filesystem": {"benign_percent": 79.3, "benign_files": 1461},
-        "discovery": {"benign_percent": 47.8, "benign_files": 881},
-        "privilege": {"benign_percent": 7.9, "benign_files": 146},
-        "execution": {"benign_percent": 22.7, "benign_files": 418},
-        "process": {"benign_percent": 18.6, "benign_files": 342},
+        "anti_debug": {"seen_on_benign_percent": 1.2, "seen_on_benign_files": 22},
+        "network": {"seen_on_benign_percent": 15.6, "seen_on_benign_files": 287},
+        "crypto": {"seen_on_benign_percent": 2.4, "seen_on_benign_files": 44},
+        "filesystem": {"seen_on_benign_percent": 79.3, "seen_on_benign_files": 1461},
+        "discovery": {"seen_on_benign_percent": 47.8, "seen_on_benign_files": 881},
+        "privilege": {"seen_on_benign_percent": 7.9, "seen_on_benign_files": 146},
+        "execution": {"seen_on_benign_percent": 22.7, "seen_on_benign_files": 418},
+        "process": {"seen_on_benign_percent": 18.6, "seen_on_benign_files": 342},
     },
 }
 
@@ -1524,7 +1524,17 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     # more often on malware than on ordinary software. Those fifteen are named
     # where they used to stand, so the same rule is not written twice.
     #
-    # Of the thirty-two left, fourteen carry a narrower combination than they
+    # Three more are gone for a different reason, and it is the harder one. A
+    # rule can carry information and still not be worth a reader's attention: a
+    # reference association earns its place by changing what a reader would
+    # believe, and one that appears on a fifteenth of all benign software while
+    # barely favouring malware does not. So a rule above 4% of ordinary Windows
+    # software ships only when its size-matched lift reaches 3 and it fires on
+    # at least one profile it was not chosen on. The imports themselves are in
+    # the triage pack either way, so deleting such an association removes noise
+    # and no evidence with it.
+    #
+    # Of the twenty-nine left, fourteen carry a narrower combination than they
     # shipped with. A name was taken out of a rule only where the act it names
     # is not the act the technique describes — ``TerminateProcess`` ends a
     # process and not a service, ``MoveFileEx`` renames a file and does not
@@ -1548,7 +1558,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "a task manager, an installer looking for a copy of itself already "
             "running, and every updater walk the same snapshot"
         ),
-        "measured": {"benign_percent": 1.5, "benign_files": 42, "held_out_malware_profiles": 6},
+        "measured": {
+            "seen_on_benign_percent": 1.5,
+            "seen_on_benign_files": 42,
+            "held_out_malware_profiles": 6,
+        },
         "min_apis": 2,
         "confidence_base": 0.42,
         "confidence_max": 0.62,
@@ -1576,7 +1590,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "a crash reporter, an installer and a licence check collect the same "
             "facts about the machine they are on"
         ),
-        "measured": {"benign_percent": 4.1, "benign_files": 111, "held_out_malware_profiles": 9},
+        "measured": {
+            "seen_on_benign_percent": 4.1,
+            "seen_on_benign_files": 111,
+            "held_out_malware_profiles": 9,
+        },
         "min_apis": 3,
         "confidence_base": 0.40,
         "confidence_max": 0.58,
@@ -1604,7 +1622,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "an installer, a licence check and any program writing into a user "
             "profile ask the same question"
         ),
-        "measured": {"benign_percent": 1.6, "benign_files": 45, "held_out_malware_profiles": 3},
+        "measured": {
+            "seen_on_benign_percent": 1.6,
+            "seen_on_benign_files": 45,
+            "held_out_malware_profiles": 3,
+        },
         "min_apis": 2,
         "confidence_base": 0.42,
         "confidence_max": 0.60,
@@ -1632,7 +1654,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "every program that remembers a setting reads it back with these "
             "calls, and an import table does not carry which key was read"
         ),
-        "measured": {"benign_percent": 4.4, "benign_files": 119, "held_out_malware_profiles": 12},
+        "measured": {
+            "seen_on_benign_percent": 4.4,
+            "seen_on_benign_files": 119,
+            "held_out_malware_profiles": 12,
+        },
         "min_apis": 2,
         "confidence_base": 0.38,
         "confidence_max": 0.55,
@@ -1648,34 +1674,15 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "NtEnumerateKey",
         ],
     },
-    {
-        # Narrowing this to the enumeration calls alone — dropping the ones that
-        # ask about a single named file — was written and not applied: looking
-        # in a specific location is inside this technique's own description, so
-        # the only thing the narrower list had going for it was its rate.
-        "technique_id": "T1083",
-        "name": "File and Directory Discovery",
-        "rule": "walking directories and reading the attributes of what is in them",
-        "ordinary_use": (
-            "a search tool, a backup agent, an installer and every archiver walk "
-            "a tree the same way"
-        ),
-        "measured": {"benign_percent": 6.4, "benign_files": 175, "held_out_malware_profiles": 14},
-        "min_apis": 3,
-        "confidence_base": 0.38,
-        "confidence_max": 0.55,
-        "apis": [
-            "FindFirstFileA",
-            "FindFirstFileW",
-            "FindNextFileA",
-            "FindNextFileW",
-            "GetFileAttributesA",
-            "GetLogicalDriveStringsA",
-            "GetDriveTypeA",
-            "PathFileExistsA",
-            "SHGetFolderPathA",
-        ],
-    },
+    # T1083 File and Directory Discovery stood here and is gone. It is not
+    # noise — it clears the bar that deletes a rule for carrying no information
+    # at all — but at 6.41% of ordinary software against a size-matched lift of
+    # 2.98 it appears on one benign binary in sixteen while barely favouring
+    # malware, and a reference association earns its place by changing what a
+    # reader would believe. Narrowing it to the enumeration calls alone was
+    # written and not applied for a separate reason: looking in a specific
+    # location is inside this technique's own description, so the only thing
+    # the narrower list had going for it was its rate.
     {
         "technique_id": "T1010",
         "name": "Application Window Discovery",
@@ -1684,7 +1691,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "an accessibility tool, a window manager and a program looking for "
             "its own running copy walk the same list"
         ),
-        "measured": {"benign_percent": 2.6, "benign_files": 70, "held_out_malware_profiles": 7},
+        "measured": {
+            "seen_on_benign_percent": 2.6,
+            "seen_on_benign_files": 70,
+            "held_out_malware_profiles": 7,
+        },
         "min_apis": 2,
         "confidence_base": 0.44,
         "confidence_max": 0.60,
@@ -1710,7 +1721,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "an installer, a monitoring agent and every service-control panel "
             "enumerate services the same way"
         ),
-        "measured": {"benign_percent": 0.8, "benign_files": 23, "held_out_malware_profiles": 1},
+        "measured": {
+            "seen_on_benign_percent": 0.8,
+            "seen_on_benign_files": 23,
+            "held_out_malware_profiles": 1,
+        },
         "min_apis": 2,
         "confidence_base": 0.44,
         "confidence_max": 0.60,
@@ -1727,7 +1742,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
         "name": "System Location Discovery",
         "rule": "reading the locale, the keyboard layout and the time zone",
         "ordinary_use": "every program that formats a date or a number reads the same settings",
-        "measured": {"benign_percent": 6.8, "benign_files": 185, "held_out_malware_profiles": 8},
+        "measured": {
+            "seen_on_benign_percent": 6.8,
+            "seen_on_benign_files": 185,
+            "held_out_malware_profiles": 8,
+        },
         "min_apis": 2,
         "confidence_base": 0.44,
         "confidence_max": 0.58,
@@ -1755,7 +1774,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "an installer and a management agent create and reconfigure their "
             "own services the same way"
         ),
-        "measured": {"benign_percent": 0.3, "benign_files": 7, "held_out_malware_profiles": 0},
+        "measured": {
+            "seen_on_benign_percent": 0.3,
+            "seen_on_benign_files": 7,
+            "held_out_malware_profiles": 0,
+        },
         "min_apis": 2,
         "confidence_base": 0.48,
         "confidence_max": 0.65,
@@ -1777,7 +1800,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "every program that saves a setting writes a value, and the key that "
             "would make this persistence is a path an import table does not carry"
         ),
-        "measured": {"benign_percent": 4.0, "benign_files": 108, "held_out_malware_profiles": 12},
+        "measured": {
+            "seen_on_benign_percent": 4.0,
+            "seen_on_benign_files": 108,
+            "held_out_malware_profiles": 12,
+        },
         "min_apis": 2,
         "confidence_base": 0.42,
         "confidence_max": 0.60,
@@ -1810,7 +1837,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "a service running work as the logged-on user, a named-pipe server "
             "and a task launcher duplicate tokens the same way"
         ),
-        "measured": {"benign_percent": 0.4, "benign_files": 11, "held_out_malware_profiles": 4},
+        "measured": {
+            "seen_on_benign_percent": 0.4,
+            "seen_on_benign_files": 11,
+            "held_out_malware_profiles": 4,
+        },
         "min_apis": 2,
         "confidence_base": 0.48,
         "confidence_max": 0.65,
@@ -1836,7 +1867,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "a setup program and a management console bind to an elevated COM "
             "object to do one privileged step"
         ),
-        "measured": {"benign_percent": 0.0, "benign_files": 0, "held_out_malware_profiles": 2},
+        "measured": {
+            "seen_on_benign_percent": 0.0,
+            "seen_on_benign_files": 0,
+            "held_out_malware_profiles": 2,
+        },
         "min_apis": 2,
         "confidence_base": 0.45,
         "confidence_max": 0.62,
@@ -1855,7 +1890,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "a debugger, a profiler, an anti-cheat and an accessibility shim "
             "reach into another process with the same calls"
         ),
-        "measured": {"benign_percent": 0.5, "benign_files": 13, "held_out_malware_profiles": 5},
+        "measured": {
+            "seen_on_benign_percent": 0.5,
+            "seen_on_benign_files": 13,
+            "held_out_malware_profiles": 5,
+        },
         "min_apis": 2,
         "confidence_base": 0.48,
         "confidence_max": 0.65,
@@ -1887,7 +1926,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "a launcher that patches a child before it runs and an emulator that "
             "loads its own image use the same calls"
         ),
-        "measured": {"benign_percent": 0.4, "benign_files": 10, "held_out_malware_profiles": 3},
+        "measured": {
+            "seen_on_benign_percent": 0.4,
+            "seen_on_benign_files": 10,
+            "held_out_malware_profiles": 3,
+        },
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
@@ -1904,32 +1947,14 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
     # and the rule appeared on ordinary software and on malware at the same
     # rate. The Linux rule of the same id survives on ``memfd_create``, which
     # names the act rather than a means to it.
-    {
-        # Narrowing this to the questions asked about *another* process's debug
-        # port was written and not applied: this technique's own description
-        # names ``IsDebuggerPresent`` and the output-debug trick, so removing
-        # them would have been a statement about how common they are.
-        "technique_id": "T1622",
-        "name": "Debugger Evasion",
-        "rule": "asking whether a debugger is attached and taking the debug path",
-        "ordinary_use": (
-            "a C runtime routes an assertion this way, and a crash reporter, a "
-            "profiler and a debugger itself call the same functions"
-        ),
-        "measured": {"benign_percent": 7.5, "benign_files": 205, "held_out_malware_profiles": 6},
-        "min_apis": 2,
-        "confidence_base": 0.48,
-        "confidence_max": 0.65,
-        "apis": [
-            "IsDebuggerPresent",
-            "CheckRemoteDebuggerPresent",
-            "NtQueryInformationProcess",
-            "NtSetInformationThread",
-            "OutputDebugStringA",
-            "DebugActiveProcess",
-            "NtClose",
-        ],
-    },
+    # T1622 Debugger Evasion stood here and is gone: 7.51% of ordinary software
+    # against a size-matched lift of 2.28. Narrowing it to the questions asked
+    # about *another* process's debug port was written and not applied, because
+    # this technique's own description names ``IsDebuggerPresent`` and the
+    # output-debug trick and removing them would have been a statement about how
+    # common they are — which left the ungated rule, and the ungated rule is one
+    # a reader could have guessed from the fact that the binary is a Windows
+    # program compiled by a C runtime.
     {
         # ``IsProcessorFeaturePresent`` is the C runtime asking whether the
         # processor has an instruction set, at startup, in two out of five
@@ -1944,7 +1969,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "a hardware inventory tool, a driver installer, a screensaver and a "
             "presentation program ask the same questions"
         ),
-        "measured": {"benign_percent": 0.5, "benign_files": 13, "held_out_malware_profiles": 1},
+        "measured": {
+            "seen_on_benign_percent": 0.5,
+            "seen_on_benign_files": 13,
+            "held_out_malware_profiles": 1,
+        },
         "min_apis": 2,
         "confidence_base": 0.42,
         "confidence_max": 0.60,
@@ -1957,34 +1986,12 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "GetCursorPos",
         ],
     },
-    {
-        # Nothing was taken out and nothing could be: all eight are ordinary
-        # timing calls and all eight are equally this technique's, because the
-        # evasion is the *duration* a program waits, which no import carries.
-        # This is the highest benign rate in the catalogue and it is stated
-        # rather than tuned away.
-        "technique_id": "T1497.003",
-        "name": "Virtualization/Sandbox Evasion: Time Based Evasion",
-        "rule": "reading the clock and the performance counters",
-        "ordinary_use": (
-            "every program that measures how long something took reads the same "
-            "counters, and the evasion is a duration an import table cannot show"
-        ),
-        "measured": {"benign_percent": 9.6, "benign_files": 261, "held_out_malware_profiles": 14},
-        "min_apis": 3,
-        "confidence_base": 0.40,
-        "confidence_max": 0.58,
-        "apis": [
-            "GetTickCount",
-            "GetTickCount64",
-            "QueryPerformanceCounter",
-            "QueryPerformanceFrequency",
-            "GetSystemTimeAsFileTime",
-            "timeGetTime",
-            "NtQueryPerformanceCounter",
-            "NtYieldExecution",
-        ],
-    },
+    # T1497.003 Time Based Evasion stood here and is gone, on the highest benign
+    # rate in the catalogue — 9.56%, one ordinary binary in ten — against a
+    # size-matched lift of 2.30. Nothing could be taken out of it: all eight
+    # names are ordinary timing calls and all eight are equally this
+    # technique's, because the evasion is the *duration* a program waits, which
+    # no import carries.
     {
         # Keeping only the hive calls was written and not applied. Writing a
         # value *is* modifying the registry; loading a hive is a rarer sibling,
@@ -1996,7 +2003,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "every program that saves a setting writes the registry, and an "
             "import table does not carry which key was written"
         ),
-        "measured": {"benign_percent": 4.9, "benign_files": 135, "held_out_malware_profiles": 13},
+        "measured": {
+            "seen_on_benign_percent": 4.9,
+            "seen_on_benign_files": 135,
+            "held_out_malware_profiles": 13,
+        },
         "min_apis": 2,
         "confidence_base": 0.40,
         "confidence_max": 0.58,
@@ -2029,7 +2040,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
         "ordinary_use": (
             "an uninstaller, a cache cleaner and a build tool delete their own files the same way"
         ),
-        "measured": {"benign_percent": 0.5, "benign_files": 13, "held_out_malware_profiles": 9},
+        "measured": {
+            "seen_on_benign_percent": 0.5,
+            "seen_on_benign_files": 13,
+            "held_out_malware_profiles": 9,
+        },
         "min_apis": 2,
         "confidence_base": 0.38,
         "confidence_max": 0.55,
@@ -2049,7 +2064,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "an archiver, a copy tool and a build system restore the original "
             "timestamps with exactly this pair"
         ),
-        "measured": {"benign_percent": 0.5, "benign_files": 14, "held_out_malware_profiles": 3},
+        "measured": {
+            "seen_on_benign_percent": 0.5,
+            "seen_on_benign_files": 14,
+            "held_out_malware_profiles": 3,
+        },
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
@@ -2076,7 +2095,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "a login screen, a screensaver host and an automation harness run "
             "their work on a desktop of their own"
         ),
-        "measured": {"benign_percent": 0.1, "benign_files": 4, "held_out_malware_profiles": 0},
+        "measured": {
+            "seen_on_benign_percent": 0.1,
+            "seen_on_benign_files": 4,
+            "held_out_malware_profiles": 0,
+        },
         "min_apis": 2,
         "confidence_base": 0.44,
         "confidence_max": 0.60,
@@ -2100,7 +2123,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "a hotkey manager, an on-screen keyboard, a game and a "
             "remote-desktop client install the same hooks"
         ),
-        "measured": {"benign_percent": 1.2, "benign_files": 34, "held_out_malware_profiles": 5},
+        "measured": {
+            "seen_on_benign_percent": 1.2,
+            "seen_on_benign_files": 34,
+            "held_out_malware_profiles": 5,
+        },
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
@@ -2133,7 +2160,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "a packet-capture library, a network monitor and a VPN client create "
             "and reconfigure sockets this way"
         ),
-        "measured": {"benign_percent": 1.0, "benign_files": 26, "held_out_malware_profiles": 0},
+        "measured": {
+            "seen_on_benign_percent": 1.0,
+            "seen_on_benign_files": 26,
+            "held_out_malware_profiles": 0,
+        },
         "min_apis": 2,
         "confidence_base": 0.48,
         "confidence_max": 0.65,
@@ -2152,7 +2183,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "a screenshot tool, a remote-desktop server and a screen recorder "
             "read a device context the same way"
         ),
-        "measured": {"benign_percent": 0.3, "benign_files": 8, "held_out_malware_profiles": 6},
+        "measured": {
+            "seen_on_benign_percent": 0.3,
+            "seen_on_benign_files": 8,
+            "held_out_malware_profiles": 6,
+        },
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
@@ -2168,7 +2203,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "a clipboard manager, a password manager and an editor's paste path "
             "read the clipboard the same way"
         ),
-        "measured": {"benign_percent": 0.6, "benign_files": 17, "held_out_malware_profiles": 4},
+        "measured": {
+            "seen_on_benign_percent": 0.6,
+            "seen_on_benign_files": 17,
+            "held_out_malware_profiles": 4,
+        },
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
@@ -2181,7 +2220,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
         "ordinary_use": (
             "a voice-chat client, a dictation tool and a recorder open the microphone the same way"
         ),
-        "measured": {"benign_percent": 0.2, "benign_files": 5, "held_out_malware_profiles": 1},
+        "measured": {
+            "seen_on_benign_percent": 0.2,
+            "seen_on_benign_files": 5,
+            "held_out_malware_profiles": 1,
+        },
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
@@ -2196,7 +2239,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "an updater, a licence check, a telemetry client and every "
             "downloader use the same stack"
         ),
-        "measured": {"benign_percent": 0.7, "benign_files": 19, "held_out_malware_profiles": 7},
+        "measured": {
+            "seen_on_benign_percent": 0.7,
+            "seen_on_benign_files": 19,
+            "held_out_malware_profiles": 7,
+        },
         "min_apis": 2,
         "confidence_base": 0.44,
         "confidence_max": 0.62,
@@ -2235,7 +2282,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
         "ordinary_use": (
             "ping, a network diagnostic tool and a reachability check send the same echo request"
         ),
-        "measured": {"benign_percent": 0.1, "benign_files": 2, "held_out_malware_profiles": 2},
+        "measured": {
+            "seen_on_benign_percent": 0.1,
+            "seen_on_benign_files": 2,
+            "held_out_malware_profiles": 2,
+        },
         "min_apis": 1,
         "confidence_base": 0.40,
         "confidence_max": 0.58,
@@ -2246,7 +2297,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
         "name": "Ingress Tool Transfer",
         "rule": "fetching a file over HTTP or FTP straight to disk",
         "ordinary_use": "an updater and an installer download their payload with the same calls",
-        "measured": {"benign_percent": 0.0, "benign_files": 0, "held_out_malware_profiles": 0},
+        "measured": {
+            "seen_on_benign_percent": 0.0,
+            "seen_on_benign_files": 0,
+            "held_out_malware_profiles": 0,
+        },
         "min_apis": 2,
         "confidence_base": 0.46,
         "confidence_max": 0.62,
@@ -2271,7 +2326,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "a backup tool, a password manager and any program storing a secret "
             "at rest encrypt the same way"
         ),
-        "measured": {"benign_percent": 0.4, "benign_files": 12, "held_out_malware_profiles": 1},
+        "measured": {
+            "seen_on_benign_percent": 0.4,
+            "seen_on_benign_files": 12,
+            "held_out_malware_profiles": 1,
+        },
         "min_apis": 2,
         "confidence_base": 0.48,
         "confidence_max": 0.65,
@@ -2299,7 +2358,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "same pair, and the recovery data this technique destroys is reached "
             "through a command line rather than an import"
         ),
-        "measured": {"benign_percent": 1.8, "benign_files": 50, "held_out_malware_profiles": 9},
+        "measured": {
+            "seen_on_benign_percent": 1.8,
+            "seen_on_benign_files": 50,
+            "held_out_malware_profiles": 9,
+        },
         "min_apis": 2,
         "confidence_base": 0.50,
         "confidence_max": 0.65,
@@ -2316,7 +2379,11 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "an installer, an uninstaller and every service-control panel stop "
             "services the same way"
         ),
-        "measured": {"benign_percent": 1.7, "benign_files": 46, "held_out_malware_profiles": 1},
+        "measured": {
+            "seen_on_benign_percent": 1.7,
+            "seen_on_benign_files": 46,
+            "held_out_malware_profiles": 1,
+        },
         "min_apis": 2,
         "confidence_base": 0.46,
         "confidence_max": 0.62,
@@ -2378,7 +2445,7 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "a debugger, a tracer and a crash reporter reach into another process "
             "with exactly this pair"
         ),
-        "measured": {"benign_percent": 0.2, "benign_files": 3},
+        "measured": {"seen_on_benign_percent": 0.2, "seen_on_benign_files": 3},
         "platforms": ["linux"],
         "min_apis": 2,
         "confidence_base": 0.50,
@@ -2393,7 +2460,7 @@ ATTCK_TECHNIQUES: list[dict[str, Any]] = [
             "a language runtime, a just-in-time compiler and a sandbox launcher "
             "execute anonymous memory the same way"
         ),
-        "measured": {"benign_percent": 0.1, "benign_files": 1},
+        "measured": {"seen_on_benign_percent": 0.1, "seen_on_benign_files": 1},
         "platforms": ["linux"],
         "min_apis": 2,
         "confidence_base": 0.50,
@@ -2543,6 +2610,14 @@ def _validate(techniques: list[dict[str, Any]]) -> list[str]:
         if not str(tech.get("ordinary_use") or "").strip():
             problems.append(f"{tid} names no ordinary user of the same symbols")
         problems += _measurement_problems(f"{tid}", tech.get("measured"))
+        # Silence is not support. A rule on a platform with a malware corpus
+        # states how many held-out profiles it fires on even when that is none,
+        # because an absent count and a count of zero read the same to a reader
+        # and mean opposite things.
+        measured = tech.get("measured")
+        if isinstance(measured, dict) and any(p in HELD_OUT_CORPORA for p in platforms):
+            if not isinstance(measured.get("held_out_malware_profiles"), int):
+                problems.append(f"{tid} does not say how many held-out profiles support it")
 
     # Two rules on one id are allowed and one rule twice is not: a release that
     # folds two sub-techniques into one technique — 19.2 folded Disable or
@@ -2622,9 +2697,9 @@ def _measurement_problems(what: str, measured: Any) -> list[str]:
     if not isinstance(measured, dict):
         return [f"{what} has a measured block that is not an object"]
     problems = []
-    if not isinstance(measured.get("benign_percent"), int | float):
+    if not isinstance(measured.get("seen_on_benign_percent"), int | float):
         problems.append(f"{what} has no measured benign share")
-    if not isinstance(measured.get("benign_files"), int):
+    if not isinstance(measured.get("seen_on_benign_files"), int):
         problems.append(f"{what} has no measured benign count")
     return problems
 

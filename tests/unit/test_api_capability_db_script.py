@@ -281,13 +281,18 @@ class TestTheLinuxBlock:
         """
         script = _script()
         assert script._measurement_problems("T1", None) == []
-        assert script._measurement_problems("T1", {"benign_percent": 0.4}) == [
+        assert script._measurement_problems("T1", {"seen_on_benign_percent": 0.4}) == [
             "T1 has no measured benign count"
         ]
-        assert script._measurement_problems("T1", {"benign_files": 4}) == [
+        assert script._measurement_problems("T1", {"seen_on_benign_files": 4}) == [
             "T1 has no measured benign share"
         ]
-        assert script._measurement_problems("T1", {"benign_percent": 0.0, "benign_files": 0}) == []
+        assert (
+            script._measurement_problems(
+                "T1", {"seen_on_benign_percent": 0.0, "seen_on_benign_files": 0}
+            )
+            == []
+        )
 
     def test_a_label_needs_a_gate_and_enough_held_out_support_behind_it(self) -> None:
         """Three held-out profiles is the floor for a label. Below it the row
@@ -308,6 +313,50 @@ class TestTheLinuxBlock:
             ]
         finally:
             script.MEASURED_CATEGORIES["windows"] = original
+
+    def test_an_association_too_common_to_change_a_reader_s_mind_is_not_shown_at_all(self) -> None:
+        """Carrying information and being worth a reader's attention are two
+        bars, and the second one deleted three rules the first one kept.
+
+        A rule above 4% of ordinary Windows software ships only where its
+        size-matched lift reaches 3 and it fires on a profile it was not chosen
+        on. Time Based Evasion at 9.56% and lift 2.30, Debugger Evasion at
+        7.51% and 2.28, and File and Directory Discovery at 6.41% and 2.98 all
+        clear the noise bar and none of them changes what a reader would
+        believe; the imports themselves stay in the triage pack either way.
+        """
+        script = _script()
+        windows = {
+            t["technique_id"]
+            for t in script.ATTCK_TECHNIQUES
+            if "linux" not in (t.get("platforms") or [])
+        }
+        assert not windows & {"T1497.003", "T1622", "T1083"}
+        # Whatever is above the bar cleared it on support at least, which is
+        # the half of the rule the shipped data can still be checked against.
+        for tech in script.ATTCK_TECHNIQUES:
+            measured = tech.get("measured") or {}
+            if measured.get("seen_on_benign_percent", 0) > 4.0:
+                assert measured.get("held_out_malware_profiles", 0) >= 1, tech["technique_id"]
+
+    def test_a_rule_that_fires_on_no_held_out_malware_says_zero_rather_than_nothing(self) -> None:
+        """An absent count and a count of zero read the same and mean opposite
+        things. Four rules fire on no held-out profile at all and each says so.
+        """
+        script = _script()
+        for tech in script.ATTCK_TECHNIQUES:
+            if "linux" in (tech.get("platforms") or []):
+                continue
+            assert isinstance(tech["measured"]["held_out_malware_profiles"], int), tech[
+                "technique_id"
+            ]
+        silent = {
+            **_rule("T1055"),
+            "measured": {"seen_on_benign_percent": 9.0, "seen_on_benign_files": 1},
+        }
+        assert script._validate([silent]) == [
+            "T1055 does not say how many held-out profiles support it"
+        ]
 
     def test_a_rule_whose_mechanism_cannot_be_told_from_its_opposite_is_absent(self) -> None:
         """Debugger Evasion is a process tracing itself. An import list shows
