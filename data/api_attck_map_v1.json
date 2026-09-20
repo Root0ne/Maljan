@@ -798,7 +798,7 @@
       "measured": {
         "seen_on_benign_percent": 0.2,
         "seen_on_benign_files": 3,
-        "benign_corpus": "1842 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
+        "benign_corpus": "1837 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
       },
       "platforms": [
         "linux"
@@ -820,7 +820,7 @@
       "measured": {
         "seen_on_benign_percent": 0.1,
         "seen_on_benign_files": 1,
-        "benign_corpus": "1842 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
+        "benign_corpus": "1837 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
       },
       "platforms": [
         "linux"

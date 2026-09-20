@@ -372,6 +372,11 @@ class TestTheLinuxBlock:
         )
         allowed_but_wide = {**_rule("T1095"), "min_apis": 1, "apis": ["socket", "connect"]}
         assert "T1095 may key on a single name and names 2" in script._validate([allowed_but_wide])
+        # A floor below one is a build failure even on an allowed id: the
+        # loader would drop such a rule, and a catalogue silently missing T1095
+        # is a worse outcome than a build that refuses to write it.
+        none_at_all = {**_rule("T1095"), "min_apis": 0, "apis": ["IcmpSendEcho"]}
+        assert "T1095 asks for 0 names" in script._validate([none_at_all])
 
     def test_a_rule_whose_mechanism_cannot_be_told_from_its_opposite_is_absent(self) -> None:
         """Debugger Evasion is a process tracing itself. An import list shows

@@ -351,6 +351,15 @@ class TestTheFloorIsReadStrictlyRatherThanCoerced:
         for bad in (0, -1, True, 1.4, "2", None):
             assert _parse_rule(self._row(min_apis=bad)) is None, bad
 
+    def test_a_whole_number_written_as_a_float_is_a_whole_number(self) -> None:
+        """JSON has one number type. A catalogue round-tripped through a
+        serialiser that emits ``2.0`` would otherwise lose the rule, and the
+        real guard here is structural rather than a matter of spelling."""
+        from maljan.analysis.api_capability_db import _parse_rule
+
+        rule = _parse_rule(self._row(min_apis=2.0))
+        assert rule is not None and rule.min_apis == 2
+
     def test_one_name_is_a_floor_only_for_a_rule_that_names_one(self) -> None:
         from maljan.analysis.api_capability_db import _parse_rule
 

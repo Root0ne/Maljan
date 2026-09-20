@@ -562,7 +562,13 @@ def _parse_rule(row: Any) -> TechniqueRule | None:
     # strictly rather than coerced. It used to be ``max(1, int(...))``, which
     # turned a hand-edited ``0``, a negative, ``true`` or ``1.4`` into 1 — and
     # 1 on a sixteen-name rule makes it fire on any one of them.
+    # JSON has one number type, so a catalogue round-tripped through a
+    # serialiser that emits ``2.0`` must not lose the rule. A float that is a
+    # whole number is that number; a fractional one, a bool, a string or
+    # anything below one is not a count of names and the rule is dropped.
     floor = row.get("min_apis", 2)
+    if isinstance(floor, float) and floor.is_integer():
+        floor = int(floor)
     if isinstance(floor, bool) or not isinstance(floor, int) or floor < 1:
         logger.warning("api-attck: %s has a min_apis of %r — skipped.", tid, floor)
         return None

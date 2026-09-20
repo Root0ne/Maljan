@@ -1460,7 +1460,7 @@ FLAG_GATES_BY_PLATFORM: dict[str, dict[str, list[str]]] = {
 
 BENIGN_CORPORA: dict[str, str] = {
     "windows": "2730 freely distributed Windows binaries from 25 independent vendors",
-    "linux": "1842 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin",
+    "linux": "1837 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin",
 }
 
 # The malware side, where there is one. A profile is a distinct import set, not
@@ -1506,13 +1506,13 @@ MEASURED_CATEGORIES: dict[str, dict[str, dict[str, Any]]] = {
             "labels_benign_files": 5,
         },
         "anti_debug": {"seen_on_benign_percent": 1.2, "seen_on_benign_files": 22},
-        "network": {"seen_on_benign_percent": 15.6, "seen_on_benign_files": 287},
+        "network": {"seen_on_benign_percent": 15.5, "seen_on_benign_files": 285},
         "crypto": {"seen_on_benign_percent": 2.4, "seen_on_benign_files": 44},
-        "filesystem": {"seen_on_benign_percent": 79.3, "seen_on_benign_files": 1461},
-        "discovery": {"seen_on_benign_percent": 47.8, "seen_on_benign_files": 881},
-        "privilege": {"seen_on_benign_percent": 7.9, "seen_on_benign_files": 146},
-        "execution": {"seen_on_benign_percent": 22.7, "seen_on_benign_files": 418},
-        "process": {"seen_on_benign_percent": 18.6, "seen_on_benign_files": 342},
+        "filesystem": {"seen_on_benign_percent": 79.3, "seen_on_benign_files": 1456},
+        "discovery": {"seen_on_benign_percent": 47.7, "seen_on_benign_files": 876},
+        "privilege": {"seen_on_benign_percent": 7.8, "seen_on_benign_files": 144},
+        "execution": {"seen_on_benign_percent": 22.6, "seen_on_benign_files": 416},
+        "process": {"seen_on_benign_percent": 18.5, "seen_on_benign_files": 339},
     },
 }
 
@@ -2614,7 +2614,14 @@ def _validate(techniques: list[dict[str, Any]]) -> list[str]:
             problems.append(f"{tid} confidence_base above confidence_max")
         if tech["min_apis"] > len(tech["apis"]):
             problems.append(f"{tid} min_apis exceeds its own api list")
-        if tech["min_apis"] < 2:
+        if tech["min_apis"] < 1:
+            # Checked before the allow-list, and unconditionally: a floor of
+            # zero on an allowed id passed both arms below, the builder emitted
+            # it and the loader then dropped the whole rule — fail-safe, and the
+            # symptom is a rule silently missing from the catalogue rather than
+            # a build that refuses to write one.
+            problems.append(f"{tid} asks for {tech['min_apis']} names")
+        elif tech["min_apis"] < 2:
             if tid not in _SINGLE_NAME_RULES:
                 problems.append(f"{tid} asks for one name and is not one of the rules allowed to")
             elif len(tech["apis"]) != 1:
