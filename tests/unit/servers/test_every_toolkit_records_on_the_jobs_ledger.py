@@ -21,10 +21,10 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.composition import resolve_agent
+from maljan.agents.composition import aresolve_agent, resolve_agent
 from maljan.agents.mcp_client import MCPLangChainToolkit
 from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.config import MCPServerConfig, Settings
+from maljan.core.config import MCPServerConfig, Settings, ToolRef
 from maljan.core.container import ServiceContainer
 
 
@@ -119,12 +119,67 @@ def test_a_run_that_shortened_an_answer_says_so_in_its_run_summary(attached):
     assert truncation["any_bound_hit"] is True
 
 
-def test_every_toolkit_of_the_job_holds_the_containers_own_ledger(attached):
-    container = ServiceContainer(_settings(), mock=True)
+def _resolve_synchronously(container: ServiceContainer) -> None:
+    """The analysts' own path: the shared agent loop, through composition."""
     for key in ("static", "network"):
         resolve_agent(key, container, container.job_key())
 
-    assert attached, "the resolution opened at least one toolkit"
+
+def _resolve_on_the_callers_loop(container: ServiceContainer) -> None:
+    """The judge's path: attached with a plain await on the graph's own loop."""
+    asyncio.run(aresolve_agent("network", container, container.job_key()))
+
+
+def _attach_a_bound_server_on_a_loop(container: ServiceContainer) -> None:
+    """``atools_for`` on its own, as the judge's initialize calls it."""
+    registry = container.get_server_registry()
+
+    async def _go() -> None:
+        await registry.atools_for("network", container.job_key())
+
+    asyncio.run(_go())
+
+
+def _attach_a_referenced_server_on_a_loop(container: ServiceContainer) -> None:
+    """``atools_for_ref``, the half a definition's own reference reaches."""
+    registry = container.get_server_registry()
+
+    async def _go() -> None:
+        await registry.atools_for_ref(ToolRef(kind="mcp", server="analysis"), container.job_key())
+
+    asyncio.run(_go())
+
+
+def _attach_a_referenced_server(container: ServiceContainer) -> None:
+    """``tools_for_ref``, the synchronous half of the same reference."""
+    container.get_server_registry().tools_for_ref(
+        ToolRef(kind="mcp", server="analysis"), container.job_key()
+    )
+
+
+ATTACH_PATHS = (
+    _resolve_synchronously,
+    _resolve_on_the_callers_loop,
+    _attach_a_bound_server_on_a_loop,
+    _attach_a_referenced_server_on_a_loop,
+    _attach_a_referenced_server,
+)
+
+
+@pytest.mark.parametrize("attach", ATTACH_PATHS, ids=[f.__name__.strip("_") for f in ATTACH_PATHS])
+def test_every_toolkit_of_the_job_holds_the_containers_own_ledger(attached, attach):
+    """Each way a job attaches a server, asked the same two questions.
+
+    Parametrised rather than folded into one call so that one path forgetting
+    the job's ledger or the job's limit fails on its own name: the awaited
+    halves were uncovered while the synchronous one was tested, and they are
+    the judge's.
+    """
+    container = ServiceContainer(_settings(), mock=True)
+
+    attach(container)
+
+    assert attached, "the attach opened at least one toolkit"
     ledger = container.get_truncation_ledger()
     assert all(toolkit._truncation_ledger is ledger for toolkit in attached)
     assert all(

@@ -902,6 +902,10 @@ class TestAHandleOpensUnderTheJobsIdentity:
 
         source = inspect.getsource(composition._provider_tools)
         assert "job_key=container.job_key()" in source
+        # And the rest of the context that attach carries, so a provider a
+        # generic agent opens is counted and bounded like every other.
+        assert "truncation_ledger=container.get_truncation_ledger()" in source
+        assert "max_output_chars=" in source
 
 
 class TestALiveJobKeepsItsDirectory:
