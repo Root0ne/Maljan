@@ -82,18 +82,36 @@ def _elf_with_imports(*functions: str) -> bytes:
     return ehdr + dynstr + dynsym + shstrtab + sections
 
 
-def _pe(import_rva: int = 0x1000, delay: bool = True, delay_rva: int = 0x2000) -> bytes:
+def _pe(
+    import_rva: int = 0x1000,
+    delay: bool = True,
+    delay_rva: int = 0x2000,
+    ordinal: int | None = None,
+) -> bytes:
     """A 32-bit PE with one real import and, optionally, one delay-load import.
 
     Hand-built rather than checked in as a fixture: the point of the damaged
     case is that the import directory RVA is wrong and everything else is
     right, and that is one argument here instead of a second binary nobody can
     read in a diff.
+
+    ``ordinal`` adds a second import resolved by ordinal rather than by name,
+    which is what a reader of an import table has to keep in the denominator:
+    a binary that imports everything that way has no names at all, and a parser
+    that drops it drops the binary.
     """
     idata = bytearray(0x200)
-    idata[0x00:0x14] = struct.pack("<IIIII", 0x1028, 0, 0, 0x1060, 0x1030)
-    idata[0x28:0x30] = struct.pack("<II", 0x1040, 0)
-    idata[0x30:0x38] = struct.pack("<II", 0x1040, 0)
+    if ordinal is None:
+        idata[0x00:0x14] = struct.pack("<IIIII", 0x1028, 0, 0, 0x1060, 0x1030)
+        idata[0x28:0x30] = struct.pack("<II", 0x1040, 0)
+        idata[0x30:0x38] = struct.pack("<II", 0x1040, 0)
+    else:
+        # Two thunks and a terminator need more room than the eight bytes
+        # between the one-entry arrays above, so both arrays move up.
+        by_ordinal = 0x80000000 | ordinal
+        idata[0x00:0x14] = struct.pack("<IIIII", 0x1080, 0, 0, 0x1060, 0x1090)
+        idata[0x80:0x8C] = struct.pack("<III", 0x1040, by_ordinal, 0)
+        idata[0x90:0x9C] = struct.pack("<III", 0x1040, by_ordinal, 0)
     idata[0x40:0x4E] = struct.pack("<H", 0) + b"CreateFileA\x00"
     idata[0x60:0x6D] = b"KERNEL32.dll\x00"
 
