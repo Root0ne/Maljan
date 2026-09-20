@@ -1102,7 +1102,10 @@ change landed on `main`.
   is left cannot hold an answer at all the model is handed no answer and one
   sentence saying the conversation has no room left, with the whole answer
   still on the evidence ledger under the call's id and the outcome counted as
-  `tool_output_no_room`. A positive value is an explicit operator cap and
+  `tool_output_no_room`. That sentence is said once and charged like any
+  answer, and the agent's tool phase ends there: further calls are not run, the
+  run-state block carries the fact every turn, and the loop is salvaged into an
+  answer from what it already gathered with `no_room` on its budget record. A positive value is an explicit operator cap and
   behaves exactly as this setting always did. The window itself is learned free
   of charge and without asking the operator anything:
   llama.cpp's `/props`, Ollama's `/api/show`, an OpenAI-compatible
@@ -1169,8 +1172,13 @@ change landed on `main`.
   **Upgrading:** stored evidence entries get larger, up to the per-agent byte
   budget, and that budget now binds where the silent cut used to pre-empt it —
   so a deep reversing loop on a large window may report trimmed entries where it
-  previously reported none. Raise `reporting.evidence_budget_bytes`, or set it
-  to `0` to keep every output. `reporting.upstream_findings_max_chars` is a
+  previously reported none. Measured on a 131,072-token window: an entry can
+  hold 46,080 bytes, so 512 KiB holds 11 entries of 20 where the silent 6,000
+  cut let about 87 through. A trimmed entry loses its parsed `structured`
+  result as well as its text, so the report sections built from `structured`
+  lose data they previously kept — the in-run grounding corpus is unaffected.
+  Raise `reporting.evidence_budget_bytes`, or set it to `0` to keep every
+  output. `reporting.upstream_findings_max_chars` is a
   third copy of the same constant and is deliberately unchanged: it bounds a
   prompt rather than a record, the block it cuts says so, and the whole findings
   stay in the run state and the report.

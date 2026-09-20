@@ -60,16 +60,24 @@ measured rather than asserted:
   conversation sum to strictly less than the room it began with — the floor
   included, which is what the share and both memory ceilings rest on;
 * room is charged as it is handed out rather than only at the next model turn,
-  so a turn that requests several tools at once spends one turn's room between
-  them rather than each of them spending all of it.
+  and per agent, so a turn that requests several tools at once spends one
+  turn's room between them however wide its fan-out, and one analyst's turn
+  cannot clear the total another is still spending against.
+
+Everything this module hands a model is charged, refusals included, and a
+refusal is withheld when it would not fit. Past the point where there is no
+room for an answer the agent is told once and its tool phase ends.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
+import re
 import threading
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -295,13 +303,24 @@ def derive_tool_output_chars(
     converted at ``chars_per_token``. ``reply_tokens`` is what is kept back for
     the model's own reply; zero asks :func:`reply_reserve_tokens` for it.
 
-    **The result never exceeds the room that is really left.** The floor
-    applies while the room affords it and is reduced to the room when it does
-    not, and when what is left cannot hold an answer at all the result is
-    ``0`` — the caller then hands the model no answer and says so
-    (:func:`no_room_sentence`). A floor that overrode the room was how a
-    twenty-round loop on a shipped 8,192-token window finished 5,248 tokens
-    past the window it was sizing itself against.
+    **The cap never exceeds the room that is really left.** The floor applies
+    while the room affords it and is reduced to the room when it does not, and
+    when what is left cannot hold an answer at all the result is ``0`` — the
+    caller then hands the model no answer and says so once
+    (:func:`no_room_sentence`), after which that agent's tool phase ends. A
+    floor that overrode the room was how a twenty-round loop on a shipped
+    8,192-token window finished 5,248 tokens past the window it was sizing
+    itself against.
+
+    The claim is about the cap, and about the answers a cap governs. The
+    platform's own refusals are not caps and are not free: they are charged
+    through :meth:`ContextBudget.charge` and withheld entirely when they would
+    not fit (:meth:`ContextBudget.room_for`), which is what keeps a loop that
+    has stopped being given answers from walking past its window a line at a
+    time. Measured over every window the vendored table ships, at 20, 40 and
+    60 rounds, empty and preloaded: nothing reaches its window. What the
+    refusals do spend, past the point where answers stop, is the reply
+    reserve.
 
     A window of zero — nothing known — is the floor, because nothing is being
     measured and the caller is not deriving anything from it.
@@ -324,19 +343,37 @@ def derive_tool_output_chars(
 def no_room_sentence(chars_in: int) -> str:
     """What the model is told instead of an answer the conversation cannot hold.
 
-    A deterministic fact about this conversation, not a judgement about the
-    tool: the call was made, it answered, and there is no room left to show any
-    of it. Saying so is the only alternative to handing over a fragment too
-    small to read or overflowing the window the whole derivation exists to fit
-    inside. The tool's own arguments are not named here — narrowing the answer
-    would not help, because the room is gone rather than the answer too large.
+    Said **once** per loop. A deterministic fact about this conversation, not a
+    judgement about the tool: the call was made, it answered, and there is no
+    room left to show any of it. Saying so is the only alternative to handing
+    over a fragment too small to read or overflowing the window the whole
+    derivation exists to fit inside. The tool's own arguments are not named —
+    narrowing the answer would not help, because the room is gone rather than
+    the answer too large.
+
+    Its length is charged to the budget like any answer, because it is text
+    that enters the conversation; and the loop's tool phase ends after it, so
+    nothing pays for this sentence twice.
     """
     return (
         f"This tool answered with {chars_in:,} characters and none of them could be added: "
         "the conversation has no room left for a tool answer. Nothing was left out of the "
         "record — the evidence ledger holds the whole answer under this call's id. "
-        "Answer from what has already been gathered."
+        "The tool phase of this stage ends here; answer from what has already been gathered."
     )
+
+
+# What a tool call made after the room ran out is answered with. The tool is
+# not run, so nothing of its answer enters the conversation; what enters is
+# this line, and it is charged. Short on purpose: the sentence above is said
+# once, the run-state block repeats the fact every turn at no cumulative cost,
+# and this is what a model that asks anyway pays.
+TOOL_PHASE_ENDED_NOTICE = "[no room] Not run: the tool phase ended. Answer now."
+
+# The line the run-state block carries once the room is gone. Replaced with
+# the rest of the block on every model turn, so it costs the same whether the
+# loop reads it once or forty times.
+NO_ROOM_RUN_STATE = "no room left for tool answers: answer from what has been gathered"
 
 
 # ---------------------------------------------------------------------------
@@ -396,11 +433,7 @@ def table_window(model: object) -> WindowFact | None:
     if not matches:
         return None
     key = max(matches, key=len)
-    return WindowFact(
-        rows[key],
-        TABLE,
-        f"the vendored table's {key!r} row; the endpoint reported no window",
-    )
+    return WindowFact(rows[key], TABLE, f"the vendored table's {key!r} row was used instead")
 
 
 # ---------------------------------------------------------------------------
@@ -425,10 +458,12 @@ PROBE_PATHS: tuple[str, ...] = (
 # so it is short. A metadata endpoint that has not answered in two seconds is
 # one the fallback answers for.
 #
-# This bounds each *operation* — httpx applies a plain float to connect, read,
-# write and pool separately — so a server that sends one byte every 1.9 s never
-# trips it. ``PROBE_BUDGET_SECONDS`` is the wall around the whole plan, which
-# is what makes the two seconds a real bound rather than a stated one.
+# A plain float bounds each *operation* — httpx applies it to connect, read,
+# write and pool separately — so on its own a server that sends one byte every
+# 1.9 s is never cut off. ``PROBE_BUDGET_SECONDS`` is the wall around the whole
+# plan, and each request is given what is left of it rather than a fresh two
+# seconds, so the plan cannot outlive its budget however slowly one endpoint
+# drips.
 PROBE_TIMEOUT_SECONDS = 2.0
 PROBE_BUDGET_SECONDS = 4.0
 
@@ -604,23 +639,34 @@ def _headers(api_key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
 
-def _read_answer(ask: Ask, answer: httpx.Response, model: str) -> tuple[int, str]:
-    """The window this answer reports, or zero, with the body bounded.
+def _body_within_bounds(answer: httpx.Response, what: str) -> bytes | None:
+    """The body, read a chunk at a time and abandoned past the bound.
 
-    The body is measured before it is parsed. A metadata answer is kilobytes —
-    the largest legitimate one, a public model catalogue, is a couple of
-    megabytes — and a broken or hostile endpoint's is unbounded, so a probe
-    that read it whole would be a memory cost nobody asked for on a machine
-    that is also running a model.
+    Read rather than materialised: a metadata answer is kilobytes, the largest
+    legitimate one is a couple of megabytes, and a broken or hostile endpoint's
+    is unbounded. Checking the length after ``.content`` would already have
+    downloaded whatever was sent, on a machine that is also running a model.
     """
+    held = bytearray()
+    for chunk in answer.iter_bytes():
+        held.extend(chunk)
+        if len(held) > MAX_METADATA_BYTES:
+            logger.debug("context window: %s answered with more than the probe reads", what)
+            answer.close()
+            return None
+    return bytes(held)
+
+
+def _read_answer(ask: Ask, answer: httpx.Response, model: str) -> tuple[int, str]:
+    """The window this answer reports, or zero."""
     if answer.status_code >= 400:
         return 0, ""
-    if len(answer.content) > MAX_METADATA_BYTES:
-        logger.debug("context window: %s answered with more than the probe reads", ask.what)
+    body = _body_within_bounds(answer, ask.what)
+    if body is None:
         return 0, ""
     try:
-        payload = answer.json()
-    except ValueError:
+        payload = json.loads(body)
+    except (ValueError, TypeError):
         return 0, ""
     try:
         reported = ask.read(payload, model)
@@ -694,7 +740,7 @@ def probe_window(
                     logger.debug("context window: the probe ran out of time before %s", ask.what)
                     break
                 try:
-                    answer = _send(client, ask, api_key)
+                    answer = _send(client, ask, api_key, deadline)
                 except httpx.HTTPError as exc:
                     logger.debug("context window: %s did not answer (%s)", ask.what, type(exc))
                     continue
@@ -724,7 +770,7 @@ async def aprobe_window(
                     logger.debug("context window: the probe ran out of time before %s", ask.what)
                     break
                 try:
-                    answer = await _asend(client, ask, api_key)
+                    answer = await _asend(client, ask, api_key, deadline)
                 except httpx.HTTPError as exc:
                     logger.debug("context window: %s did not answer (%s)", ask.what, type(exc))
                     continue
@@ -754,16 +800,39 @@ def _nothing_believable(plan: Iterable[Ask], refused: str) -> WindowFact | None:
     return None
 
 
-def _send(client: httpx.Client, ask: Ask, api_key: str) -> httpx.Response:
-    if ask.method == "POST":
-        return client.post(ask.url, json=ask.body or {}, headers=_headers(api_key))
-    return client.get(ask.url, headers=_headers(api_key))
+def _left(deadline: float) -> float:
+    """What is left of the plan's budget, as a per-request timeout.
+
+    httpx applies a plain float per *operation* — connect, read, write, pool —
+    so a server that sends one chunk every 1.9 s never trips the two seconds.
+    Handing each request what remains of the plan's own wall clock is what
+    makes the budget bound the plan rather than the gaps between its asks.
+    """
+    return max(0.05, deadline - time.monotonic())
 
 
-async def _asend(client: httpx.AsyncClient, ask: Ask, api_key: str) -> httpx.Response:
-    if ask.method == "POST":
-        return await client.post(ask.url, json=ask.body or {}, headers=_headers(api_key))
-    return await client.get(ask.url, headers=_headers(api_key))
+def _send(client: httpx.Client, ask: Ask, api_key: str, deadline: float) -> httpx.Response:
+    request = client.build_request(
+        ask.method,
+        ask.url,
+        headers=_headers(api_key),
+        json=ask.body if ask.method == "POST" else None,
+        timeout=_left(deadline),
+    )
+    return client.send(request, stream=True)
+
+
+async def _asend(
+    client: httpx.AsyncClient, ask: Ask, api_key: str, deadline: float
+) -> httpx.Response:
+    request = client.build_request(
+        ask.method,
+        ask.url,
+        headers=_headers(api_key),
+        json=ask.body if ask.method == "POST" else None,
+        timeout=_left(deadline),
+    )
+    return await client.send(request, stream=True)
 
 
 # ---------------------------------------------------------------------------
@@ -865,14 +934,20 @@ def _preferred(learned: WindowFact | None, model: str) -> WindowFact | None:
     """What the endpoint said, or the table, in that order.
 
     A probed answer wins. Anything else the probe produced is a refusal
-    carrying its reason, and the vendored table is a better window than a
-    refusal — but the refusal stands when the table does not name the model,
-    so the reason reaches the run summary instead of being replaced by a
-    generic one.
+    carrying its reason, and the vendored table is a better *number* than a
+    refusal — but the reason travels with it. An endpoint reporting a window
+    in the wrong unit for a model the table happens to name used to be
+    reported as "the endpoint reported no window", which is the opposite of
+    what happened, in the one place an operator most needs the truth.
     """
     if learned is not None and learned.source == PROBED:
         return learned
-    return table_window(model) or learned
+    table = table_window(model)
+    if table is None:
+        return learned
+    if learned is not None and learned.source == FALLBACK and learned.detail:
+        return WindowFact(table.tokens, TABLE, f"{learned.detail}; {table.detail}")
+    return table
 
 
 def _combined(declared: int, declared_is_default: bool, learned: WindowFact | None) -> WindowFact:
@@ -924,6 +999,56 @@ def _remembered(key: tuple[str, str, str], fact: WindowFact | None) -> WindowFac
     with _learned_lock:
         _learned[key] = (time.monotonic(), fact)
     return fact
+
+
+# What a server says when a request did not fit the window it is serving. Every
+# OpenAI-compatible server and every vendor API words it differently; what they
+# share is naming the length. Matched loosely on purpose — a false positive
+# costs one re-probe and a false negative costs a stale window.
+_OVERFLOW_SIGNATURES = (
+    "context length",
+    "context window",
+    "context size",
+    "maximum context",
+    "n_ctx",
+    "max_model_len",
+    "too many tokens",
+    "prompt is too long",
+)
+
+_OVERFLOW_RE = re.compile("|".join(re.escape(word) for word in _OVERFLOW_SIGNATURES))
+
+
+def note_provider_error(message: object) -> bool:
+    """Retire the learned windows when a server says a request did not fit.
+
+    The cache believes a probed answer for :data:`WINDOW_CACHE_SECONDS`, and a
+    server restarted with a smaller window inside that time is sized against
+    the figure it used to serve — which the room check cannot catch, because
+    the room check measures against the believed window. The server itself
+    says so the first time a request overflows, and that sentence is the one
+    free correction available: the entries are dropped and the next question
+    is asked again.
+
+    Every entry, not one: the message names a length and not an endpoint, and
+    a re-probe costs three metadata requests once. Returns whether anything
+    was retired, and never raises — this runs on an error path.
+    """
+    try:
+        text = str(message or "").lower()
+        if not text or not _OVERFLOW_RE.search(text):
+            return False
+        with _learned_lock:
+            if not _learned:
+                return False
+            _learned.clear()
+        logger.info(
+            "a server reported a request past its context length; "
+            "the learned context windows were dropped and will be asked again."
+        )
+        return True
+    except Exception:  # noqa: BLE001 — a correction never breaks the error path
+        return False
 
 
 def declared_window(settings: Any, provider: str) -> tuple[int, bool]:
@@ -1032,6 +1157,30 @@ def generation_reserve(settings: Any) -> int:
 # What one run spends
 # ---------------------------------------------------------------------------
 
+# Whose answer the guardrail is sizing right now. Set by the tool wrapper
+# around each call — the one layer that knows both the agent and the call —
+# and read by the budget, so the guardrails need to know nothing about agents
+# to be charged against the right one. A context variable rather than an
+# argument because the two are separated by the toolkit, which is shared by
+# every agent of the job; it survives the ``asyncio.to_thread`` both tool
+# paths hand the guardrail to, because that copies the context.
+_ANSWERING_FOR: ContextVar[str] = ContextVar("maljan_answering_for", default="")
+
+
+def current_agent() -> str:
+    """The agent whose tool call is being answered, or ``""`` outside one."""
+    return _ANSWERING_FOR.get()
+
+
+@contextlib.contextmanager
+def answering_for(agent: str) -> Iterator[None]:
+    """Name the agent whose call is being answered, for the length of the call."""
+    token = _ANSWERING_FOR.set(str(agent or ""))
+    try:
+        yield
+    finally:
+        _ANSWERING_FOR.reset(token)
+
 
 class ContextBudget:
     """One run's window, and the cap it gives the tool answer arriving now.
@@ -1071,13 +1220,18 @@ class ContextBudget:
         self.reply_tokens = reply_reserve_tokens(window.tokens, reply_tokens)
         self._lock = threading.Lock()
         self._held: dict[str, int] = {}
-        # What has been handed out since a conversation was last measured. A
-        # model turn may request several tools at once and every answer it
-        # produces is measured before the next turn is framed, so without this
-        # each of them would be measured against the same free room and the
-        # turn as a whole could spend it k times over. Cleared by the next
-        # measurement, which already contains the answers it is clearing.
-        self._handed = 0
+        # What each agent has been handed since its own conversation was last
+        # measured. A model turn may request several tools at once and every
+        # answer it produces is measured before the next turn is framed, so
+        # without this each of them would be measured against the same free
+        # room and the turn as a whole could spend it k times over. Cleared by
+        # that agent's next measurement, which already contains the answers it
+        # is clearing — and per agent, because one process-wide slot let a
+        # second analyst's refresh clear a total the first was still spending
+        # against, which under fan-out gave back the whole free room.
+        self._handed: dict[str, int] = {}
+        # The agents that have been told the room is gone. Told once each.
+        self._no_room: set[str] = set()
         self._smallest = 0
         self._largest = 0
 
@@ -1088,21 +1242,72 @@ class ContextBudget:
 
     def note_conversation(self, agent: str, chars: int) -> None:
         """Record what one agent's conversation weighs as of this turn."""
+        key = str(agent)
         with self._lock:
-            self._held[str(agent)] = max(0, int(chars))
-            self._handed = 0
+            self._held[key] = max(0, int(chars))
+            self._handed.pop(key, None)
 
     def forget_conversation(self, agent: str) -> None:
         """Forget a loop that has finished, so its size stops binding."""
+        key = str(agent)
         with self._lock:
-            self._held.pop(str(agent), None)
-            if not self._held:
-                self._handed = 0
+            self._held.pop(key, None)
+            self._handed.pop(key, None)
+            self._no_room.discard(key)
 
-    def held_chars(self) -> int:
-        """The fullest live conversation, plus what this turn has already spent."""
+    def held_chars(self, agent: str = "") -> int:
+        """What an answer for ``agent`` is measured against, in characters.
+
+        The fullest live conversation, because one cap serves every agent and
+        the fullest has least room to spare, plus what **this** agent has been
+        handed since its own conversation was last measured. The second term is
+        per agent: it is this turn's own spending, and charging one agent for
+        another's would be as wrong as charging neither.
+        """
+        key = str(agent) or current_agent()
         with self._lock:
-            return max(self._held.values(), default=0) + self._handed
+            return max(self._held.values(), default=0) + self._handed.get(key, 0)
+
+    def charge(self, chars: int, agent: str = "") -> None:
+        """Charge text that entered the conversation without being a capped answer.
+
+        The refusal a tool call gets when the room has run out is text like any
+        other: it reaches the model, it costs the window, and leaving it
+        uncharged is how a loop that had stopped being given answers kept
+        growing with nothing accounting for it.
+        """
+        key = str(agent) or current_agent()
+        with self._lock:
+            self._handed[key] = self._handed.get(key, 0) + max(0, int(chars))
+
+    def note_no_room(self, agent: str = "") -> None:
+        """Record that this agent has been told the room is gone."""
+        with self._lock:
+            self._no_room.add(str(agent) or current_agent())
+
+    def room_for(self, chars: int, agent: str = "") -> bool:
+        """Whether ``chars`` of text would still fit inside the served window.
+
+        Asked about the platform's own notices rather than about an answer.
+        A refusal is text like any other, and a loop whose model keeps asking
+        after its tool phase ended would otherwise grow by one line a round
+        with nothing able to stop it. Where even a line does not fit, the
+        honest thing to hand over is nothing.
+
+        Always true where no window was measured: there is nothing to measure
+        against, and refusing to speak on the strength of a number nobody has
+        would be the same error as deriving a cap from one.
+        """
+        if not self.derives:
+            return True
+        return (
+            self.held_chars(agent) + max(0, int(chars)) <= self.window.tokens * self.chars_per_token
+        )
+
+    def out_of_room(self, agent: str = "") -> bool:
+        """Whether this agent's tool phase has ended for want of room."""
+        with self._lock:
+            return (str(agent) or current_agent()) in self._no_room
 
     def chars_for_one_answer(self) -> int:
         """The cap a tool answer arriving now is given, and reserve it.
@@ -1112,25 +1317,30 @@ class ContextBudget:
         looking fuller than it is, and the next measurement corrects it. The
         alternative — reserving nothing until the answer is sized — is what let
         eight tool calls in one turn each take an eighth of the same free room.
+
+        Which agent is being answered comes from :func:`current_agent`, set by
+        the tool wrapper around the call, so the guardrail needs to know
+        nothing about agents to be charged against the right one.
         """
         if not self.derives:
             return UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
+        agent = current_agent()
         cap = derive_tool_output_chars(
             window_tokens=self.window.tokens,
-            held_chars=self.held_chars(),
+            held_chars=self.held_chars(agent),
             reply_tokens=self.reply_tokens,
             chars_per_token=self.chars_per_token,
             share=self.share,
             floor=self.floor,
         )
         with self._lock:
-            self._handed += cap
+            self._handed[agent] = self._handed.get(agent, 0) + cap
             self._smallest = cap if self._smallest == 0 else min(self._smallest, cap)
             self._largest = max(self._largest, cap)
         return cap
 
-    def cap_without_recording(self) -> int:
-        """The cap as it stands, for a log line or a settings page.
+    def cap_without_recording(self, agent: str = "") -> int:
+        """The cap as it stands, for a log line, a settings page or a guard.
 
         The same arithmetic with nothing written down: reading it must not
         reserve room a tool answer never took, and must not leave a run that
@@ -1140,7 +1350,7 @@ class ContextBudget:
             return UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
         return derive_tool_output_chars(
             window_tokens=self.window.tokens,
-            held_chars=self.held_chars(),
+            held_chars=self.held_chars(agent),
             reply_tokens=self.reply_tokens,
             chars_per_token=self.chars_per_token,
             share=self.share,

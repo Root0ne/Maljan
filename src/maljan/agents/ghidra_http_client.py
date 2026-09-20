@@ -299,6 +299,22 @@ class GhidraHTTPClient:
         clean = " ".join(description.split())
         return f"[{cat}] {clean}"
 
+    def _no_room(self, chars_in: int) -> str:
+        """The sentence a conversation with no room left gets, said once.
+
+        Charged to the budget, because it is text that enters the conversation
+        like any answer, and the agent is marked so its tool phase ends rather
+        than paying for this sentence on every remaining round.
+        """
+        from maljan.llm.context_window import ContextBudget, no_room_sentence
+
+        said = no_room_sentence(chars_in)
+        budget = getattr(self, "_context_budget", None)
+        if isinstance(budget, ContextBudget):
+            budget.charge(len(said))
+            budget.note_no_room()
+        return said
+
     def _apply_output_guardrail(self, output: str, narrowing: Sequence[str] = ()) -> str:
         """Limit tool output size to prevent LLM context overflow.
 
@@ -338,13 +354,13 @@ class GhidraHTTPClient:
         """
         from maljan.agents.output_shortening import shorten_json_document, shorten_target
         from maljan.core.truncation_ledger import record_guardrail_outcome
-        from maljan.llm.context_window import no_room_sentence, output_limit
+        from maljan.llm.context_window import output_limit
 
         chars_in = len(output)
         limit = output_limit(self._max_output_chars, self._context_budget)
 
         if limit <= 0:
-            said = no_room_sentence(chars_in)
+            said = self._no_room(chars_in)
             record_guardrail_outcome(
                 self._truncation_ledger,
                 chars_in=chars_in,

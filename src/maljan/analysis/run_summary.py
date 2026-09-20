@@ -281,6 +281,11 @@ def corpus_held_sentence(truncation: Any) -> str:
 # otherwise need. Pinned against the provider module by a test.
 UNKNOWN_WINDOW_SOURCE = "fallback"
 
+# How a window that was *refused* is told from one that was never reported.
+# Both are unknown windows; only the first has something an operator can go
+# and fix at the endpoint. Pinned against the sentence the probe writes.
+REFUSAL_MARK = "refused"
+
 
 def cap_in_force_sentence(truncation: Any) -> str:
     """The cap one tool answer was measured against, and where it came from.
@@ -302,12 +307,19 @@ def cap_in_force_sentence(truncation: Any) -> str:
     if str(window.get("source", "")) == UNKNOWN_WINDOW_SOURCE:
         # Nothing was measured, so nothing is derived and nothing derived is
         # printed: no characters-per-token figure and no reply reserve, because
-        # neither decided anything. What an operator can act on is the remedy.
-        return (
+        # neither decided anything. What an operator can act on is the remedy —
+        # and, where the window is unknown because a figure was *refused*
+        # rather than because nothing answered, the reason. That is the one
+        # case with a concrete and unusual problem behind it, and a generic
+        # sentence would send its operator looking for the wrong thing.
+        why = str(window.get("detail", "") or "")
+        said = (
             f"The served context window is unknown, so one tool answer was capped at the "
-            f"documented {largest:,} characters rather than derived. To derive it, "
-            f"{window.get('remedy', '')}."
-        ).replace(" .", ".")
+            f"documented {largest:,} characters rather than derived"
+        )
+        if REFUSAL_MARK in why:
+            said = f"{said} ({why})"
+        return f"{said}. To derive it, {window.get('remedy', '')}.".replace(" .", ".")
     span = (
         f"{largest:,} characters"
         if smallest == largest

@@ -22,6 +22,13 @@ from maljan.core.container import ServiceContainer
 from maljan.llm import context_window as cw
 
 
+def _langchain_tool(func: Any, name: str) -> Any:
+    """One plain LangChain tool over ``func``, the way an analyst's tools arrive."""
+    from langchain_core.tools import StructuredTool
+
+    return StructuredTool.from_function(func=func, name=name)
+
+
 def _answer(rows: int) -> str:
     return json.dumps(
         {
@@ -162,6 +169,71 @@ class TestAConversationWithNoRoomLeft:
         assert summary.truncation is not None
         assert summary.truncation.any_bound_hit is True
         assert "no room left for the answer | 1" in summary.to_markdown()
+
+    def test_the_sentence_is_charged_like_any_answer(self) -> None:
+        from maljan.agents.mcp_client import MCPLangChainToolkit
+
+        budget = self._full_budget()
+        before = budget.held_chars("static")
+        toolkit = MCPLangChainToolkit(max_output_chars=0, context_budget=budget)
+        answer = _answer(400)
+
+        with cw.answering_for("static"):
+            said = toolkit._apply_output_guardrail(answer)
+
+        assert budget.held_chars("static") == before + len(said)
+        assert budget.out_of_room("static") is True
+
+    def test_the_tool_phase_ends_rather_than_repeating_the_sentence(self) -> None:
+        """A call made after the room ran out does not run, and costs one line."""
+        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+
+        budget = self._full_budget()
+        budget.note_no_room("static")
+        ran: list[str] = []
+
+        def strings(path: str) -> str:
+            """List printable runs."""
+            ran.append(path)
+            return _answer(400)
+
+        recorder = EvidenceRecorder("static")
+        wrapped = record_tools(
+            [_langchain_tool(strings, "strings")], recorder, context_budget=budget
+        )[0]
+
+        said = wrapped.invoke({"path": "/samples/evil.exe"})
+
+        assert ran == [], "the tool was run after the room had gone"
+        assert said == cw.TOOL_PHASE_ENDED_NOTICE
+        assert recorder.entries == [], "a refused call is not citable evidence"
+
+    def test_a_refusal_that_would_not_fit_is_not_handed_over(self) -> None:
+        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+
+        budget = cw.ContextBudget(cw.WindowFact(4096, cw.PROBED, "props"), reply_tokens=8192)
+        budget.note_conversation("static", 4096 * cw.CHARS_PER_TOKEN)
+        budget.note_no_room("static")
+
+        def strings(path: str) -> str:
+            """List printable runs."""
+            return "x"
+
+        wrapped = record_tools(
+            [_langchain_tool(strings, "strings")],
+            EvidenceRecorder("static"),
+            context_budget=budget,
+        )[0]
+
+        assert wrapped.invoke({"path": "/samples/evil.exe"}) == ""
+
+    def test_the_run_state_block_carries_the_fact_every_turn(self) -> None:
+        budget = self._full_budget()
+        budget.note_no_room("static")
+        analyst = TestALoopReportsWhatItHolds._analyst(budget)
+        analyst.run_state_block = "stage: reversing"
+
+        assert cw.NO_ROOM_RUN_STATE in analyst._run_state_body(3, 60.0)
 
     def test_an_operator_cap_never_produces_it(self) -> None:
         """A number the operator set is theirs, and it is never zero."""
@@ -331,6 +403,46 @@ class TestTheRunSaysWhatWasInForce:
         assert "6,000 characters" in said
         assert "context_size" in said
         assert "characters per token" not in said, "nothing is derived from nothing"
+
+    def test_a_refused_figure_is_named_rather_than_read_as_a_silence(self) -> None:
+        """The operator whose proxy reports bytes has a concrete thing to fix."""
+        from maljan.core.truncation_ledger import TruncationLedger
+
+        refused = cw.unknown_window(
+            "the server description reported 1,000,000,000,000,000 tokens, which is past the "
+            "10,000,000 this platform will believe; the figure was refused"
+        )
+        ledger = TruncationLedger()
+        ledger.record_tool_output(
+            chars_in=10,
+            chars_kept=10,
+            over_limit=False,
+            limit=cw.UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS,
+        )
+        ledger.note_context_window(cw.ContextBudget(refused).snapshot())
+
+        said = cap_in_force_sentence(self._summary(ledger.snapshot()).truncation)
+
+        assert "refused" in said
+        assert "1,000,000,000,000,000" in said
+        assert "unknown" in said
+
+    def test_a_window_nothing_reported_says_only_that(self) -> None:
+        from maljan.core.truncation_ledger import TruncationLedger
+
+        ledger = TruncationLedger()
+        ledger.record_tool_output(
+            chars_in=10,
+            chars_kept=10,
+            over_limit=False,
+            limit=cw.UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS,
+        )
+        ledger.note_context_window(cw.ContextBudget(cw.unknown_window()).snapshot())
+
+        said = cap_in_force_sentence(self._summary(ledger.snapshot()).truncation)
+
+        assert "unknown" in said
+        assert "refused" not in said
 
     def test_a_run_with_an_operator_cap_says_that_instead(self) -> None:
         from maljan.core.truncation_ledger import TruncationLedger

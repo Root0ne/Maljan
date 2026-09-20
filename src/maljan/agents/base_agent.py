@@ -35,6 +35,7 @@ from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
+from maljan.llm.context_window import NO_ROOM_RUN_STATE
 from maljan.pipeline.validation import (
     ALIGNMENT_MARGIN,
     VALIDITY_CODE,
@@ -637,8 +638,27 @@ def _provider_fault(exc: BaseException) -> str:
     a provider that quotes the offending request back has quoted a credential
     back, and this line is written to a log file that outlives the run.
     """
+    note_a_window_that_moved(exc)
     status = getattr(exc, "status_code", None)
     return f"{type(exc).__name__}" + (f" {status}" if status else "")
+
+
+def note_a_window_that_moved(exc: BaseException) -> None:
+    """Retire the learned windows when a server says a request did not fit.
+
+    The learned window is believed for a while, so a server restarted with a
+    smaller one is sized against the figure it used to serve — and the room
+    check cannot catch that, because the room check measures against the
+    believed window. The server itself says so the first time a request
+    overflows, and that sentence is the only free correction there is.
+
+    The message is read here and nowhere else it could leak: what is taken
+    from it is a yes or a no, and nothing of it is logged or stored.
+    """
+    from maljan.llm.context_window import note_provider_error
+
+    with contextlib.suppress(Exception):
+        note_provider_error(str(exc))
 
 
 def _retry_after(exc: BaseException, default: int) -> int:
@@ -2412,7 +2432,13 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
 
     def _run_state_body(self, steps_left: int | None, seconds_left: float | None) -> str:
-        """The node's run-state lines plus this loop's remaining budget."""
+        """The node's run-state lines plus this loop's remaining budget.
+
+        Once the conversation has no room left for a tool answer the block
+        says so. Regenerated rather than appended, like the rest of it, so the
+        fact costs the same whether the loop reads it once or forty times —
+        which is what makes telling the model cheaper than refusing its calls.
+        """
         body = str(getattr(self, "run_state_block", "") or "").rstrip()
         if not body:
             return ""
@@ -2421,7 +2447,25 @@ class BaseAnalyst(BudgetMeter, ABC):
             budget.append(f"{max(0, int(steps_left))} model turns")
         if seconds_left is not None:
             budget.append(f"{max(0, int(seconds_left))} s")
-        return f"{body}\nbudget remaining: {', '.join(budget)}" if budget else body
+        if budget:
+            body = f"{body}\nbudget remaining: {', '.join(budget)}"
+        return f"{body}\n{NO_ROOM_RUN_STATE}" if self._out_of_room() else body
+
+    def _out_of_room(self) -> bool:
+        """Whether this agent's tool phase has ended for want of room.
+
+        The type is checked rather than the attribute: a stand-in container
+        answers every question with something truthy, and a loop that reported
+        itself out of room because a test handed it a mock would end early for
+        a reason that never happened.
+        """
+        from maljan.llm.context_window import ContextBudget
+
+        budget = self._context_budget()
+        try:
+            return isinstance(budget, ContextBudget) and budget.out_of_room(self.name)
+        except Exception:  # noqa: BLE001 — a budget is never worth a lost loop
+            return False
 
     def frame_messages(
         self,
@@ -2651,7 +2695,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return answer
             return repaired if repaired is not None else answer
 
-        recorded = record_tools(self.pinned_tools(), recorder, repeats, repairs)
+        recorded = record_tools(
+            self.pinned_tools(), recorder, repeats, repairs, self._context_budget()
+        )
         agent_executor = create_react_agent(
             _model_that_closes_off_truncated_calls(self.llm, recorded, _close_off_truncated_calls),
             recorded,
@@ -2812,6 +2858,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             except AnalystError:
                 raise
             except Exception as exc:
+                # A server that refused the request for its length is telling
+                # us the window it serves is not the one we learned; the
+                # learned figure is dropped so the next question is asked.
+                note_a_window_that_moved(exc)
                 self.logger.error("ReAct agent failed: %s (%s)", type(exc).__name__, exc)
                 raise AnalystError(f"{self.name} ReAct agent failed: {exc}") from exc
         finally:
@@ -2901,18 +2951,22 @@ class BaseAnalyst(BudgetMeter, ABC):
         # tool-calling and synthesise now, so the gathered evidence becomes real
         # claims instead of a useless "need more steps" non-answer.
         hit_step_cap = bool(_RECURSION_STOP_RE.search(content))
-        # A loop ended for repeating itself is in the same place as one that
-        # spent its steps: it has evidence and no answer, and the salvage is
-        # what turns the first into the second.
-        ended_early = repeats.ending_the_loop()
+        # A loop ended for repeating itself, or for running out of room to
+        # read another answer, is in the same place as one that spent its
+        # steps: it has evidence and no answer, and the salvage is what turns
+        # the first into the second.
+        no_room = self._out_of_room()
+        ended_early = repeats.ending_the_loop() or no_room
         self._record_react_loop(hit_step_cap=hit_step_cap)
-        cap = "repeats" if repeats.ending_the_loop() else "steps" if hit_step_cap else None
-        self._record_budget(
-            budget,
-            msgs,
-            cap,
-            detail=(f"{repeats.served_repeats} repeated tool call(s)" if cap == "repeats" else ""),
-        )
+        if repeats.ending_the_loop():
+            cap, why = "repeats", f"{repeats.served_repeats} repeated tool call(s)"
+        elif no_room:
+            cap, why = "no_room", "the conversation had no room left for a tool answer"
+        elif hit_step_cap:
+            cap, why = "steps", ""
+        else:
+            cap, why = None, ""
+        self._record_budget(budget, msgs, cap, detail=why)
         self._budget_tick(budget, msgs, final=True, ledger_entries=len(recorder.entries))
         if tool_call_count > 0 and (not content.strip() or hit_step_cap or ended_early):
             self.logger.warning(

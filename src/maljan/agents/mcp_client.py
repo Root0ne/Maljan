@@ -365,13 +365,13 @@ class MCPLangChainToolkit:
             Potentially shortened output.
         """
         from maljan.agents.output_shortening import shorten_json_document, shorten_target
-        from maljan.llm.context_window import no_room_sentence, output_limit
+        from maljan.llm.context_window import output_limit
 
         chars_in = len(output)
         limit = output_limit(self._max_output_chars, self._context_budget)
 
         if limit <= 0:
-            said = no_room_sentence(chars_in)
+            said = self._no_room(chars_in)
             self._record_guardrail(chars_in, len(said), over_limit=True, no_room=True, limit=limit)
             return said
 
@@ -414,6 +414,22 @@ class MCPLangChainToolkit:
             limit=limit,
         )
         return result
+
+    def _no_room(self, chars_in: int) -> str:
+        """The sentence a conversation with no room left gets, said once.
+
+        Charged to the budget, because it is text that enters the conversation
+        like any answer, and the agent is marked so its tool phase ends rather
+        than paying for this sentence on every remaining round.
+        """
+        from maljan.llm.context_window import ContextBudget, no_room_sentence
+
+        said = no_room_sentence(chars_in)
+        budget = getattr(self, "_context_budget", None)
+        if isinstance(budget, ContextBudget):
+            budget.charge(len(said))
+            budget.note_no_room()
+        return said
 
     def _record_guardrail(
         self,

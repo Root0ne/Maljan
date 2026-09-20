@@ -524,6 +524,68 @@ class TestTheArithmetic:
         assert round(measured) == cw.CHARS_PER_TOKEN
 
 
+class TestAWindowThatMovedUnderUs:
+    """A server restarted smaller says so, and that sentence is a correction."""
+
+    def setup_method(self) -> None:
+        cw.forget_learned_windows()
+
+    def teardown_method(self) -> None:
+        cw.forget_learned_windows()
+
+    def _remember(self) -> None:
+        cw._remembered(  # noqa: SLF001 - the cache is what is under test
+            ("openai", "http://x/v1", "m"), cw.WindowFact(131072, cw.PROBED, "props")
+        )
+
+    def test_a_server_naming_its_context_length_retires_what_was_learned(self) -> None:
+        for said in (
+            "This model's maximum context length is 32768 tokens",
+            "the request exceeds the available context size",
+            "ValueError: n_ctx is 32768 but the prompt is longer",
+            "prompt is too long: 40000 tokens > 32768",
+            "max_model_len (32768) exceeded",
+        ):
+            self._remember()
+            assert cw.note_provider_error(said) is True, said
+            assert cw._cached(("openai", "http://x/v1", "m")) == (False, None)  # noqa: SLF001
+
+    def test_an_ordinary_failure_retires_nothing(self) -> None:
+        self._remember()
+        for said in ("Connection refused", "HTTP 503", "", None, "rate limit exceeded"):
+            assert cw.note_provider_error(said) is False, said
+        assert cw._cached(("openai", "http://x/v1", "m"))[0] is True  # noqa: SLF001
+
+    def test_the_next_question_is_asked_again(self) -> None:
+        from maljan.core.config import Settings
+
+        settings = Settings(_env_file=None, llm={"openai": {"base_url": "http://127.0.0.1:1/v1"}})
+        _sent_by(lambda: cw.window_for_settings(settings, ["static"]))
+        assert _sent_by(lambda: cw.window_for_settings(settings, ["static"])) == []
+
+        cw.note_provider_error("maximum context length is 32768 tokens")
+
+        assert _sent_by(lambda: cw.window_for_settings(settings, ["static"])), "never asked again"
+
+
+class TestARefusalIsNotASilence:
+    def test_the_table_supplies_the_number_and_the_refusal_supplies_the_reason(self) -> None:
+        refused = cw.unknown_window(
+            "the server description reported 10 tokens; the figure was refused"
+        )
+        fact = cw._preferred(refused, "gpt-4o")  # noqa: SLF001 - the rule under test
+
+        assert fact is not None
+        assert (fact.tokens, fact.source) == (128000, cw.TABLE)
+        assert "refused" in fact.detail
+        assert "reported no window" not in fact.detail
+
+    def test_a_table_row_with_nothing_to_explain_reads_plainly(self) -> None:
+        fact = cw._preferred(None, "gpt-4o")  # noqa: SLF001
+        assert fact is not None
+        assert "refused" not in fact.detail
+
+
 class TestTheBudgetOneRunSpends:
     def test_an_empty_budget_reports_the_window_it_was_built_with(self) -> None:
         budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "props"), reply_tokens=8192)

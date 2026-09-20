@@ -86,10 +86,98 @@ class TestALoopCannotOutspendItsOwnWindow:
     def test_a_turn_that_calls_eight_tools_spends_one_turns_room(self) -> None:
         """Each answer is measured after the last, not all against the same figure."""
         budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "props"), reply_tokens=8192)
-        budget.note_conversation("static", 0)
-        caps = [budget.chars_for_one_answer() for _ in range(8)]
+        with cw.answering_for("static"):
+            budget.note_conversation("static", 0)
+            caps = [budget.chars_for_one_answer() for _ in range(8)]
         assert caps == sorted(caps, reverse=True), caps
         assert sum(caps) < _whole_loop_chars(32768)
+
+    def test_a_wide_fan_out_cannot_spend_the_room_twice(self) -> None:
+        """The sum saturates: no fan-out takes more than one turn's room."""
+        for fan_out in (8, 16, 32, 128):
+            budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "props"), reply_tokens=8192)
+            with cw.answering_for("static"):
+                budget.note_conversation("static", 0)
+                spent = sum(budget.chars_for_one_answer() for _ in range(fan_out))
+            assert spent < _whole_loop_chars(32768), fan_out
+
+    def test_a_second_analyst_cannot_clear_the_first_ones_spending(self) -> None:
+        """One process-wide slot gave back the whole free room at a fan-out of sixteen."""
+        budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "props"), reply_tokens=8192)
+        budget.note_conversation("static", 0)
+        budget.note_conversation("network", 0)
+        spent = 0
+        for _ in range(16):
+            with cw.answering_for("static"):
+                spent += budget.chars_for_one_answer()
+            # The other analyst refreshes between every one of A's calls.
+            budget.note_conversation("network", 0)
+        assert spent < _whole_loop_chars(32768)
+
+
+def _loop(window: int, rounds: int, preload: int = 0) -> int:
+    """One agent's conversation after ``rounds``, in tokens, notices included.
+
+    Drives the real budget the way the guardrail and the tool wrapper do:
+    an answer is capped and charged, the first cap of zero is met with the
+    sentence, and every call after that is refused with the short notice —
+    charged too, and withheld when even it would not fit.
+    """
+    sentence = len(cw.no_room_sentence(120_000))
+    ended = len(cw.TOOL_PHASE_ENDED_NOTICE)
+    budget = cw.ContextBudget(cw.WindowFact(window, cw.PROBED, "props"), reply_tokens=8192)
+    held = preload * cw.CHARS_PER_TOKEN
+    with cw.answering_for("static"):
+        budget.note_conversation("static", held)
+        for _ in range(rounds):
+            if budget.out_of_room("static"):
+                if budget.room_for(ended, "static"):
+                    budget.charge(ended)
+                    held += ended
+                continue
+            cap = budget.chars_for_one_answer()
+            if cap == 0:
+                if budget.room_for(sentence, "static"):
+                    budget.charge(sentence)
+                    held += sentence
+                budget.note_no_room()
+            else:
+                held += cap
+    return held // cw.CHARS_PER_TOKEN
+
+
+class TestNothingTheplatformHandsAModelOutrunsItsWindow:
+    """Answers *and* refusals, over every shipped window, at three loop lengths.
+
+    The round that introduced the refusal sentence left it uncharged, and 274
+    characters a round put a 4,096-token window 346 tokens past itself at
+    twenty rounds and a shipped 8,192 row 746 past at forty. Everything the
+    platform hands a model is charged now, and a refusal that would not fit is
+    not handed over at all.
+    """
+
+    ROUNDS = (20, 40, 60)
+
+    def test_no_shipped_window_is_reached_at_any_loop_length(self) -> None:
+        for window in _shipped_windows():
+            for rounds in self.ROUNDS:
+                assert _loop(window, rounds) < window, (window, rounds)
+
+    def test_a_loop_that_starts_with_a_chunk_in_it_stays_inside_too(self) -> None:
+        for window, preload in ((32768, 24000), (32768, 4000), (16384, 4000), (8192, 2000)):
+            for rounds in self.ROUNDS:
+                assert _loop(window, rounds, preload) < window, (window, preload, rounds)
+
+    def test_the_refusal_is_withheld_once_even_it_would_not_fit(self) -> None:
+        budget = cw.ContextBudget(cw.WindowFact(4096, cw.PROBED, "props"), reply_tokens=8192)
+        with cw.answering_for("static"):
+            budget.note_conversation("static", 4096 * cw.CHARS_PER_TOKEN)
+            assert budget.room_for(len(cw.TOOL_PHASE_ENDED_NOTICE)) is False
+
+    def test_an_unknown_window_never_withholds_a_refusal(self) -> None:
+        """Nothing was measured, so nothing may be refused on its strength."""
+        budget = cw.ContextBudget(cw.unknown_window())
+        assert budget.room_for(10_000_000) is True
 
 
 class TestThePerAgentLedgerBudget:
