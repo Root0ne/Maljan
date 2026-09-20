@@ -82,7 +82,9 @@ __all__ = [
     "TABLE_PATH",
     "WindowFact",
     "Ask",
+    "alearn_window",
     "aprobe_window",
+    "awindow_for_settings",
     "budget_for_settings",
     "budget_or_unknown",
     "declared_window",
@@ -612,11 +614,7 @@ def learn_window(
     fallback, without touching the network.
     """
     if int(declared) > 0:
-        return WindowFact(
-            int(declared),
-            DECLARED,
-            "the window this deployment's settings name for the endpoint",
-        )
+        return _declared_fact(int(declared))
     key = (str(provider), str(endpoint or ""), str(model or ""))
     with _learned_lock:
         cached = _learned.get(key)
@@ -625,13 +623,49 @@ def learn_window(
     fact: WindowFact | None = None
     if probe:
         fact = probe_window(provider, endpoint=endpoint, model=model, api_key=api_key)
-    if fact is None:
-        fact = table_window(model)
-    if fact is None:
-        fact = unknown_window()
-    # Only a probed answer is remembered. A table or fallback answer costs
-    # nothing to reach and caching it would mean a server that was down when
-    # the first job ran is never asked again for the life of the process.
+    return _remembered(key, fact or table_window(model) or unknown_window())
+
+
+async def alearn_window(
+    provider: str,
+    *,
+    endpoint: object,
+    model: str = "",
+    api_key: str = "",
+    declared: int = 0,
+    probe: bool = True,
+) -> WindowFact:
+    """:func:`learn_window` on the caller's loop, for the settings probe.
+
+    The same order, the same cache and the same rule about what is remembered;
+    only the transport differs, because the API is async and the worker is not.
+    """
+    if int(declared) > 0:
+        return _declared_fact(int(declared))
+    key = (str(provider), str(endpoint or ""), str(model or ""))
+    with _learned_lock:
+        cached = _learned.get(key)
+    if cached is not None:
+        return cached
+    fact: WindowFact | None = None
+    if probe:
+        fact = await aprobe_window(provider, endpoint=endpoint, model=model, api_key=api_key)
+    return _remembered(key, fact or table_window(model) or unknown_window())
+
+
+def _declared_fact(tokens: int) -> WindowFact:
+    return WindowFact(
+        tokens, DECLARED, "the window this deployment's settings name for the endpoint"
+    )
+
+
+def _remembered(key: tuple[str, str, str], fact: WindowFact) -> WindowFact:
+    """Cache a probed answer and hand it back; anything else is not cached.
+
+    A table or fallback answer costs nothing to reach, and remembering one
+    would mean a server that happened to be down when the first job ran is
+    never asked again for the life of the process.
+    """
     if fact.source == PROBED:
         with _learned_lock:
             _learned[key] = fact
@@ -688,6 +722,28 @@ def window_for_settings(settings: Any, agents: list[str], *, probe: bool = True)
                 probe=probe,
             )
         )
+    if not facts:
+        return unknown_window("this run names no model")
+    return min(facts, key=lambda fact: fact.tokens)
+
+
+async def awindow_for_settings(
+    settings: Any, agents: list[str], *, probe: bool = True
+) -> WindowFact:
+    """:func:`window_for_settings` on the caller's loop."""
+    from maljan.core.model_assignments import assignments_for
+
+    facts = [
+        await alearn_window(
+            assignment.provider,
+            endpoint=assignment.endpoint,
+            model=assignment.model,
+            api_key=_provider_key(settings, assignment.provider),
+            declared=declared_window(settings, assignment.provider),
+            probe=probe,
+        )
+        for assignment in assignments_for(settings, agents)
+    ]
     if not facts:
         return unknown_window("this run names no model")
     return min(facts, key=lambda fact: fact.tokens)

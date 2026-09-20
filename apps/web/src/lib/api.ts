@@ -9,6 +9,7 @@ import type {
 import { ApiError } from "@/lib/errors";
 import { SettingsValidationError } from "@/types/settings";
 import type {
+  ContextWindow,
   ImportRequest,
   MappingPreview,
   PatchResult,
@@ -594,6 +595,11 @@ class ApiClient {
       `/api/v1/settings?group=${encodeURIComponent(group)}`,
       { method: "DELETE" }
     );
+  }
+
+  /** The window the configured models serve. Read-only, and costs no tokens. */
+  getContextWindow() {
+    return this.request<ContextWindow>("/api/v1/settings/context-window");
   }
 
   testSettingsProbe(probe: string, values: Record<string, unknown>) {

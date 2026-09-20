@@ -120,6 +120,29 @@ class ProbeResponse(BaseModel):
     details: dict[str, Any] | None = None
 
 
+class ContextWindowResponse(BaseModel):
+    """The window the configured models serve, and what it buys one answer.
+
+    ``source`` is one of four words an operator can act on: ``declared`` (the
+    settings name it), ``probed`` (the server reported it), ``table`` (the
+    vendored figure for this model family) and ``fallback`` (nothing answered).
+    ``detail`` says the same thing in a sentence. ``cap`` is what one tool
+    answer may take on an empty conversation, which is the most it can be;
+    ``derived`` is false when the operator set the cap themselves, and ``cap``
+    is then their number and the window decides nothing.
+    """
+
+    tokens: int
+    source: str
+    detail: str
+    chars_per_token: int
+    reply_tokens: int
+    answer_share: float
+    cap: int
+    derived: bool
+    setting: int
+
+
 class VirustotalRegisterResponse(BaseModel):
     """The VirusTotal server as it stands after a registration.
 
