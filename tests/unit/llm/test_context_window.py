@@ -16,6 +16,7 @@ is started and none is asked for.
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import httpx
@@ -370,7 +371,8 @@ class TestOneQuestionPerEndpointAndModel:
         settings = Settings(_env_file=None, llm={"openai": {"base_url": "http://127.0.0.1:1/v1"}})
         _sent_by(lambda: cw.window_for_settings(settings, ["static"]))
         for key in list(cw._learned):  # noqa: SLF001 - the age is the thing under test
-            cw._learned[key] = (0.0, cw._learned[key][1])  # noqa: SLF001
+            stale = time.monotonic() - cw.WINDOW_CACHE_SECONDS - 1.0
+            cw._learned[key] = (stale, cw._learned[key][1])  # noqa: SLF001
         assert _sent_by(lambda: cw.window_for_settings(settings, ["static"])), "never asked again"
 
 
