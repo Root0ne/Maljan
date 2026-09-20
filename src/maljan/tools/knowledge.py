@@ -384,34 +384,22 @@ def api_capability(
     imports them. What comes back is an association a reader may weigh; it
     is never counted as a rule match or a source.
 
-    ``behaviours`` is the catalog's own category for the API; ``techniques``
-    are the technique rules the *whole* import set clears whose evidence
-    includes this API, each with the APIs it matched and its ``min_apis``.
-    The set is matched once and the rows point back into it. Almost every rule
-    needs two or more names, so asking about one name answers with no
-    technique at all; the exception is a rule whose single name *is* the act it
-    describes, which the catalogue states by setting ``min_apis`` to one, and
-    such a row carries the same rate and the same sentence as any other. Both
-    are lookups in a vendored table, so an API absent from the table comes back
-    with empty lists rather than a guess.
+    The whole import set is matched once and every row points back into it, so
+    a rule fires on the set and not on the name the row happens to hang under.
+    Almost every rule needs two or more names; the exception is a rule whose
+    single name *is* the act it describes, which says so by setting
+    ``min_apis`` to one. An API the table has never heard of comes back with
+    empty lists rather than a guess.
 
-    ``measured`` is what the association was measured at.
-    ``seen_on_benign_percent`` is the share of a named corpus of benign software
-    the rule fired on, ``seen_on_benign_files`` the count behind that share, and
-    ``held_out_malware_profiles`` how many profiles the combination was not
-    chosen on that it fires on — ``0`` where it fires on none, stated rather
-    than left out. ``corpora`` names what those shares are of, once per answer
-    rather than once per row, and ``behaviour_rates`` carries the same for each
-    category the answer mentions. An association with no measurement has no
-    ``measured`` key rather than a zero.
-
-    Read those numbers in the one direction they were measured in: they say how
-    often this *rule* fires on software that is not a sample. None of them is a
-    probability that *this* sample is benign, and nothing here is evidence about
-    this sample at all. None of the corpora carry technique-level ground truth
-    either, so what a malware number says is that a combination separates
+    Read every measured number in the one direction it was measured in: it says
+    how often this *rule* fires on software that is not a sample. None of them
+    is a probability that *this* sample is benign, and nothing here is evidence
+    about this sample at all. None of the corpora carry technique-level ground
+    truth either, so what a malware number says is that a combination separates
     binaries already known to be bad from binaries already known to be good,
-    never that this sample performs the technique.
+    never that this sample performs the technique. An association nobody
+    measured carries no ``measured`` key rather than a zero — an absent key is
+    "not measured" and never "never fires".
 
     ``catalog_flags`` carries the catalog's own labels — ``suspicious`` for an
     API in a category the catalogue tiers high or medium, and then only where
@@ -422,10 +410,7 @@ def api_capability(
 
     ``corroborated_by`` appears on a row whose category means nothing on its
     own — drawing to a device context, pumping a message queue — and lists the
-    APIs whose presence beside it would give it weight. The catalogue used to
-    file the GDI blit calls under keylogging and tier them high, so a signed
-    SSH client read as a keylogger; the category now says what it is and what
-    it is not.
+    APIs whose presence beside it would give it weight.
     """
     from maljan.analysis.api_capability_db import (
         canonical_name,

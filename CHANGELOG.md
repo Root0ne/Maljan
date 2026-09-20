@@ -1167,9 +1167,17 @@ change landed on `main`.
   stored before them, and the profile line then prints the counts alone as it
   always did. The knowledge sidecar's `api_capability` description is now the
   in-process docstring verbatim rather than a two-sentence summary, so the
-  caveats reach the model that actually reads it; the tool's name, arguments and
-  answer shape are unchanged. No behaviour category was renamed or removed, so a
-  consumer reading `category` alone is unaffected.
+  caveats reach the model that actually reads it — 2.3 kB, with the
+  field-by-field glossary dropped because every key in the answer names its own
+  direction and `corpora` ships the corpus sentences; what a payload cannot say
+  for itself stays. The tool's name, arguments and answer shape are unchanged.
+  Every cell of every Markdown table in the report is escaped now: an import
+  name is the sample's own bytes, and a pipe in one used to add a column while a
+  newline cut the row in half. The Linux block's rates were re-measured after the
+  same change gave the ELF walk content deduplication, so its corpus descriptor
+  reads `1837` where it read `1842` and five category shares move by one
+  rounding place; no Linux rule's rate moves at all. No behaviour category was
+  renamed or removed, so a consumer reading `category` alone is unaffected.
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was

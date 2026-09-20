@@ -149,16 +149,33 @@ def test_the_caveats_on_a_measured_number_reach_the_model_that_reads_them() -> N
     server = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(server)
 
-    described = server.api_capability.__doc__ or ""
-    assert described == knowledge_tools.api_capability.__doc__
+    # The *served* description, not ``__doc__``. Flip the two decorators and
+    # ``__doc__`` still holds the long text while the registered description is
+    # empty, so a test on the attribute protects nothing; this is what a client
+    # handshake returns and what the model is handed.
+    served = {tool.name: tool.description or "" for tool in asyncio.run(server.mcp.list_tools())}
+    assert served["api_capability"] == knowledge_tools.api_capability.__doc__
+    # Line wrapping is not the subject; the sentences are.
+    described = " ".join(served["api_capability"].split())
     for promise in (
-        "seen_on_benign_percent",
-        "held_out_malware_profiles",
-        "one direction they were measured in",
-        "probability that *this* sample is benign",
-        "technique-level ground truth",
+        # What the answer cannot say for itself, so it has to arrive before the
+        # call or not at all.
+        "asking the wrong one gives a libc symbol a Win32 category",
+        "A reference lookup, not an observation",
+        "A bare ``suspicious: true`` would be a verdict",
+        # What a reader of the numbers has to be told, because the misreading
+        # is silent and ends up in a report.
+        "in the one direction it was measured in",
+        "None of them is a probability that *this* sample is benign",
+        "None of the corpora carry technique-level ground truth",
+        "carries no ``measured`` key rather than a zero",
     ):
         assert promise in described, promise
+    # The field-by-field glossary is gone: every key in the answer names its own
+    # direction, `corpora` ships the corpus sentences, and a description paid
+    # for in every prompt should not repeat what the payload already says.
+    assert "seen_on_benign_percent" not in described
+    assert len(described) < 2600
 
 
 @pytest.mark.parametrize("name", TOOL_SIDECARS)
