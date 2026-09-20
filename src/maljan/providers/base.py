@@ -65,8 +65,12 @@ class StaticJobContext:
     file_type: str = "unknown"
     platform: str = "unknown"
     output_guardrail: Callable[[str], str] | None = None
-    max_output_chars: int = 8000
+    # Zero means the cap is derived from the served model's context window at
+    # the moment of each call; a positive number is the operator's own cap.
+    max_output_chars: int = 0
     truncation_ledger: Any | None = None
+    # The job's context budget, which answers what zero above means.
+    context_budget: Any | None = None
 
 
 @dataclass(frozen=True)

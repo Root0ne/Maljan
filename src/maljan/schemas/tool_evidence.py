@@ -16,11 +16,21 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# A hard cap so captured evidence can never blow the token / JSONB budget. The
-# tool outputs are already guardrail-capped inside ``ghidra_http_client`` /
-# ``max_tool_output_chars``; this is a second, report-facing ceiling. How much
-# an agent may keep is a byte budget now rather than a call count —
-# ``report.evidence_budget_bytes``, applied in ``schemas.evidence``.
+# What a producer of its *own* summary text cuts that text to.
+#
+# No longer what the evidence ledger stores. It was a second, report-facing
+# ceiling under a guardrail that capped every answer at the same six thousand,
+# and once the guardrail's cap came from the served context window the two
+# diverged silently: a model read forty thousand characters of a decompilation
+# and the durable record held the first six thousand with a trailing ellipsis
+# and no flag. ``schemas.evidence.build_entry`` stores what the model was
+# handed, whole, and ``report.evidence_budget_bytes`` is the one storage
+# decision the platform makes.
+#
+# What is left here is a default for a provider rendering text it composed
+# itself — ``capa_yara`` builds a rule listing and chooses how much of its own
+# listing to keep. Unrelated to the six thousand a run with an unknown context
+# window falls back to (``llm.context_window``), which bounds a prompt.
 MAX_OUTPUT_CHARS: int = 6000
 
 

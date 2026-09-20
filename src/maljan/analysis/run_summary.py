@@ -165,6 +165,9 @@ class TruncationMetrics:
     # Defaulted because a summary read back from storage predates the outcome.
     tool_output_shortened: int = 0
     tool_output_shortening_timeouts: int = 0
+    # Answers the conversation had no room left for at all: the model was
+    # handed one sentence saying so and the answer stayed on the ledger.
+    tool_output_no_room: int = 0
     # References the pass took out of a report's or a note's ``object_refs``.
     # No object left the bundle for these, which is why they are their own
     # number rather than a reason under ``integrity_dropped``.
@@ -195,12 +198,27 @@ class TruncationMetrics:
     evidence_corpus_answers: int | None = None
     evidence_corpus_bytes_held: int | None = None
     evidence_corpus_bytes_ceiling: int | None = None
+    # The cap that was actually in force on a tool answer, smallest and
+    # largest. Derived from what the window had left at the moment of each
+    # call, so the two differ inside one run and a reader asking why one answer
+    # was cut and another was not is asking about these.
+    tool_output_limit_smallest: int = 0
+    tool_output_limit_largest: int = 0
+    # The window those caps were worked out from: how many tokens, where that
+    # was learned (declared, probed, table, fallback) in words, the
+    # characters-per-token figure and the room kept back for the model's reply.
+    # Empty on a run whose cap was an operator's own number, because no window
+    # was consulted then.
+    context_window: dict[str, Any] = field(default_factory=dict)
 
     @property
     def any_bound_hit(self) -> bool:
         """The per-run P6 headline: did anything get cut at all?"""
         return bool(
-            self.tool_output_over_limit or self.react_step_cap_hits or self.judge_token_cap_hits
+            self.tool_output_over_limit
+            or self.tool_output_no_room
+            or self.react_step_cap_hits
+            or self.judge_token_cap_hits
         )
 
 
@@ -255,6 +273,63 @@ def corpus_held_sentence(truncation: Any) -> str:
     return (
         f"The grounding corpus held {count_label(int(answers), 'answer')}, "
         f"{int(held)} of {int(ceiling)} bytes."
+    )
+
+
+# The one source word from which nothing may be derived, spelled here rather
+# than imported so the reporting layer keeps no provider import it does not
+# otherwise need. Pinned against the provider module by a test.
+UNKNOWN_WINDOW_SOURCE = "fallback"
+
+# How a window that was *refused* is told from one that was never reported.
+# Both are unknown windows; only the first has something an operator can go
+# and fix at the endpoint. Pinned against the sentence the probe writes.
+REFUSAL_MARK = "refused"
+
+
+def cap_in_force_sentence(truncation: Any) -> str:
+    """The cap one tool answer was measured against, and where it came from.
+
+    The cap is no longer a constant a reader can look up: derived, it is worked
+    out per call from what the served window had left, so the run has to say
+    what was in force while it ran. A run whose cap was an operator's own
+    number consulted no window, and says that instead.
+    """
+    smallest = int(getattr(truncation, "tool_output_limit_smallest", 0) or 0)
+    largest = int(getattr(truncation, "tool_output_limit_largest", 0) or 0)
+    if largest <= 0:
+        return ""
+    window = getattr(truncation, "context_window", None) or {}
+    window = window if isinstance(window, dict) else {}
+    tokens = int(window.get("tokens", 0) or 0)
+    if not window:
+        return f"One tool answer was capped at {largest:,} characters, the number this run was set."
+    if str(window.get("source", "")) == UNKNOWN_WINDOW_SOURCE:
+        # Nothing was measured, so nothing is derived and nothing derived is
+        # printed: no characters-per-token figure and no reply reserve, because
+        # neither decided anything. What an operator can act on is the remedy —
+        # and, where the window is unknown because a figure was *refused*
+        # rather than because nothing answered, the reason. That is the one
+        # case with a concrete and unusual problem behind it, and a generic
+        # sentence would send its operator looking for the wrong thing.
+        why = str(window.get("detail", "") or "")
+        said = (
+            f"The served context window is unknown, so one tool answer was capped at the "
+            f"documented {largest:,} characters rather than derived"
+        )
+        if REFUSAL_MARK in why:
+            said = f"{said} ({why})"
+        return f"{said}. To derive it, {window.get('remedy', '')}.".replace(" .", ".")
+    span = (
+        f"{largest:,} characters"
+        if smallest == largest
+        else f"between {smallest:,} and {largest:,} characters"
+    )
+    return (
+        f"One tool answer was capped at {span}, derived from a context window of "
+        f"{tokens:,} tokens ({window.get('source', '')} — {window.get('detail', '')}) at "
+        f"{int(window.get('chars_per_token', 0) or 0)} characters per token, with "
+        f"{int(window.get('reply_tokens', 0) or 0):,} tokens held back for the model's reply."
     )
 
 
@@ -645,6 +720,7 @@ class RunSummary:
                 f"| — hard truncated | {trunc.tool_output_hard_truncated} |",
                 f"| — shortened as a document | {trunc.tool_output_shortened} |",
                 f"| — shortening gave up on its clock | {trunc.tool_output_shortening_timeouts} |",
+                f"| — no room left for the answer | {trunc.tool_output_no_room} |",
                 f"| Characters dropped | {trunc.tool_output_chars_dropped} |",
                 f"| ReAct step cap | {trunc.react_step_cap_hits} / {trunc.react_invocations} |",
                 f"| Judge token cap | {trunc.judge_token_cap_hits} / {trunc.judge_invocations} |",
@@ -654,6 +730,9 @@ class RunSummary:
                 f" over {trunc.judge_integrity_invocations} attempt(s) |",
                 "",
             ]
+            cap = cap_in_force_sentence(trunc)
+            if cap:
+                lines += [cap, ""]
             # Said only where the two counts could be read against each other
             # and disagree, or where something was actually cut. On a run that
             # hit no bound and counted the same calls twice it is a paragraph
@@ -771,6 +850,7 @@ class RunSummary:
                 "tool_output_hard_truncated": t.tool_output_hard_truncated,
                 "tool_output_shortened": t.tool_output_shortened,
                 "tool_output_shortening_timeouts": t.tool_output_shortening_timeouts,
+                "tool_output_no_room": t.tool_output_no_room,
                 "tool_output_chars_dropped": t.tool_output_chars_dropped,
                 "react_invocations": t.react_invocations,
                 "react_step_cap_hits": t.react_step_cap_hits,
@@ -788,6 +868,9 @@ class RunSummary:
                 "evidence_corpus_missing_answers": t.evidence_corpus_missing_answers,
                 "evidence_corpus_missing_tools": list(t.evidence_corpus_missing_tools),
                 "evidence_corpus_partial_reason": t.evidence_corpus_partial_reason,
+                "tool_output_limit_smallest": t.tool_output_limit_smallest,
+                "tool_output_limit_largest": t.tool_output_limit_largest,
+                "context_window": dict(t.context_window),
                 "any_bound_hit": t.any_bound_hit,
             }
             # Absent rather than zero when this run recorded nothing about
@@ -990,6 +1073,7 @@ class RunSummaryBuilder:
             tool_output_hard_truncated=int(snapshot.get("tool_output_hard_truncated", 0)),
             tool_output_shortened=int(snapshot.get("tool_output_shortened", 0)),
             tool_output_shortening_timeouts=int(snapshot.get("tool_output_shortening_timeouts", 0)),
+            tool_output_no_room=int(snapshot.get("tool_output_no_room", 0)),
             tool_output_chars_dropped=int(snapshot.get("tool_output_chars_dropped", 0)),
             react_invocations=int(snapshot.get("react_invocations", 0)),
             react_step_cap_hits=int(snapshot.get("react_step_cap_hits", 0)),
@@ -1017,6 +1101,11 @@ class RunSummaryBuilder:
             evidence_corpus_bytes_held=_optional_count(snapshot.get("evidence_corpus_bytes_held")),
             evidence_corpus_bytes_ceiling=_optional_count(
                 snapshot.get("evidence_corpus_bytes_ceiling")
+            ),
+            tool_output_limit_smallest=int(snapshot.get("tool_output_limit_smallest", 0)),
+            tool_output_limit_largest=int(snapshot.get("tool_output_limit_largest", 0)),
+            context_window=(
+                dict(window) if isinstance(window := snapshot.get("context_window"), dict) else {}
             ),
         )
         return self

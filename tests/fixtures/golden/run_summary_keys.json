@@ -106,6 +106,7 @@
   },
   "truncation": {
     "any_bound_hit": null,
+    "context_window": {},
     "evidence_corpus_answers": null,
     "evidence_corpus_bytes_ceiling": null,
     "evidence_corpus_bytes_held": null,
@@ -128,6 +129,9 @@
     "tool_output_calls": null,
     "tool_output_chars_dropped": null,
     "tool_output_hard_truncated": null,
+    "tool_output_limit_largest": null,
+    "tool_output_limit_smallest": null,
+    "tool_output_no_room": null,
     "tool_output_over_limit": null,
     "tool_output_shortened": null,
     "tool_output_shortening_timeouts": null,

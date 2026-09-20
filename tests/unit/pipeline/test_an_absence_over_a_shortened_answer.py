@@ -88,6 +88,7 @@ class TestTheModelAndTheLedgerReadTheSameAnswer:
 
         toolkit = MCPLangChainToolkit.__new__(MCPLangChainToolkit)
         toolkit._max_output_chars = 6000
+        toolkit._context_budget = None
         toolkit._output_guardrail = None
         toolkit._truncation_ledger = None
 
@@ -114,6 +115,7 @@ class TestTheModelAndTheLedgerReadTheSameAnswer:
 
         toolkit = MCPLangChainToolkit.__new__(MCPLangChainToolkit)
         toolkit._max_output_chars = 2000
+        toolkit._context_budget = None
         toolkit._output_guardrail = None
         toolkit._truncation_ledger = None
 

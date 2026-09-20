@@ -740,10 +740,11 @@ ANNOTATIONS: dict[str, Annotation] = {
     "preprocessing.max_tool_output_chars": {
         "title": "Max tool output characters",
         "description": (
-            "Maximum characters kept from an MCP tool's output (e.g. a Ghidra "
-            "decompile). Longer output is summarized (if the function summarizer is "
-            "enabled) or truncated; raising it risks pushing the accumulated ReAct "
-            "context past the model's window."
+            "Maximum characters kept from a tool's answer (e.g. a Ghidra decompile). "
+            "0 derives it per call from the context window the served model was found "
+            "to have, less what the conversation already holds and the room kept back "
+            "for the model's reply. A positive value caps every answer at that number "
+            "whatever the window."
         ),
         "subgroup": "Thresholds and limits",
     },

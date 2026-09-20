@@ -430,10 +430,12 @@ class ChunkingConfig(BaseModel):
     # the 27 chunks burned its full 1200s budget — jobs never finished (live
     # job 95d88f7e/task 10, 2026-07-11: chunk 1/27 alone hit the hard cap).
     # llama-server now serves 128K (``-c 131072``); budgeting ~60K for the
-    # static loop's 40 tool observations (``max_tool_output_chars`` below, 6000
-    # each and now applied to every tool server), ~4K system and ~8K generation
-    # leaves ~56K headroom, so 20K/chunk is safe and
-    # collapses that same PE to ~8 chunks. Override via
+    # static loop's 40 tool observations, ~4K system and ~8K generation leaves
+    # ~56K headroom, so 20K/chunk is safe and collapses that same PE to ~8
+    # chunks. That 60K no longer has to be budgeted by hand: a tool answer is
+    # measured against what the window has left at the moment of the call
+    # (``max_tool_output_chars`` below), and the chunk sitting in the
+    # conversation is part of what it is measured against. Override via
     # ``CHUNKING__MAX_TOKENS_PER_CHUNK``.
     max_tokens_per_chunk: Annotated[int, Field(ge=1)] = 20000
 
@@ -495,31 +497,38 @@ class PreprocessingConfig(BaseModel):
     summarizer_max_words:
         Maximum words in each chunk summary.
     max_tool_output_chars:
-        Maximum character length for MCP tool outputs. When a tool
-        returns text exceeding this limit, the output is either
-        summarized (if FunctionSummarizer is enabled) or truncated.
+        Maximum character length for MCP tool outputs. Zero — the default —
+        derives it per call from the context window the served model was
+        found to have; a positive value is an explicit operator cap.
     """
 
     use_function_summarizer: bool = False
     summarizer_provider: Literal["openai", "anthropic", "ollama", "gemini"] = "ollama"
     summarizer_model: str = "llama3.2:3b"
     summarizer_max_words: Annotated[int, Field(ge=1)] = 150
-    # 2026-07-13 — restored 3000 -> 6000 (was 8000 before the 2026-07-11 cut).
-    # The cut to 3000 blamed "SWA re-prefill", a MISDIAGNOSIS: the served model
-    # is a hybrid Gated-DeltaNet (recurrent) MoE, not sliding-window, and the
-    # real re-prefill cause was parallel analysts clobbering the single slot's
-    # recurrent state (fixed by parallel_analysts=False; see LLMConfig). With
-    # sequential analysts each ReAct step reuses the prior context, so richer
-    # observations no longer inflate re-prefill cost. 6000 chars (~1500 tokens)
-    # per Ghidra observation lets a full priority function's pseudo-C survive
-    # untruncated. NOT 8000: there is no in-loop context pruning, so at the
-    # restored static max_steps=40 the worst-case accumulation is ~40*1500 tool
-    # tokens + 20k chunk + ~12k system/gen ~= 90-95k — a safe ~36k under
-    # n_ctx=131072. 8000 would push the peak to ~112k, and crossing 131072
-    # triggers a silent server context-shift that drops the earliest tokens (the
-    # load_program framing) — catastrophic and invisible. Override via
-    # ``PREPROCESSING__MAX_TOOL_OUTPUT_CHARS``.
-    max_tool_output_chars: Annotated[int, Field(ge=1)] = 6000
+    # Zero means "derive it", and zero is the default.
+    #
+    # The number this replaces was 6,000 characters, and every argument for it
+    # was an argument about one deployment: at the static analyst's 40 steps,
+    # 40 observations of ~1,500 tokens plus a 20k chunk plus ~12k of system and
+    # generation came to ~90-95k, a safe margin under the 131,072 that server
+    # was started with. Every part of that is a fact about one model. On a
+    # model served with 32,768 tokens the same constant does not fit; on one
+    # with a million it throws information away for nothing.
+    #
+    # Derived, the cap is worked out at the moment of the call from the window
+    # the served model was found to have, less what the conversation already
+    # holds and the room kept back for the model's own reply, converted at a
+    # measured characters-per-token figure, times the share one answer may
+    # take. The whole arithmetic, its numbers and where each came from are in
+    # ``maljan.llm.context_window``; the window itself is learned from the
+    # server's own metadata endpoint, from a vendored table, or from a stated
+    # fallback, and the run summary says which.
+    #
+    # A positive value is the operator saying the number themselves, and it
+    # behaves exactly as this setting always did: that cap, on every answer,
+    # whatever the window. Override via ``PREPROCESSING__MAX_TOOL_OUTPUT_CHARS``.
+    max_tool_output_chars: Annotated[int, Field(ge=0)] = 0
 
     # Sink-reachability triage (Maltracker-inspired). When enabled, the static
     # analyst runs a deterministic pre-pass over the Ghidra call graph to find
@@ -2639,6 +2648,18 @@ class ReportingConfig(BaseModel):
     # of six stages would otherwise put the whole run into every prompt after
     # the second one, and the last stage would spend its context on a summary
     # of a summary instead of on the sample.
+    #
+    # The third copy of the six thousand the tool-output cap used to be, and it
+    # is the one that stays. The two it is not: the guardrail's number bounded
+    # a prompt and is now derived from the served window; the evidence ledger's
+    # bounded a *record* silently and is gone, because a stored prefix that
+    # does not say it is one cannot be cited. This bounds a prompt, like the
+    # first, and it announces itself — the block a stage reads ends in
+    # "[upstream findings truncated]" — and nothing is lost, because the whole
+    # findings stay in the run state, the transcript and the report. What it
+    # shares with the first is being a constant where the served window is
+    # knowable, and deriving it belongs with that cap rather than bolted on
+    # here.
     upstream_findings_max_chars: Annotated[int, Field(ge=0)] = 6000
     auto_generate_detection_rules: bool = True
 
@@ -2662,7 +2683,21 @@ class ReportingConfig(BaseModel):
     # Past it an entry still records the call — tool, arguments, outcome,
     # timing — and drops the output, and the report says how many entries it
     # is not showing. Half a megabyte holds a full Ghidra loop's decompilation
-    # and stays well inside what a JSONB column and a context window tolerate.
+    # and stays well inside what a JSONB column tolerates.
+    #
+    # This used to be argued against answers of at most 6,000 characters, and
+    # that number is gone: a tool answer is now measured against what the
+    # served window has left. The arithmetic that replaces it is the one
+    # property the derivation has — the answers of one conversation sum to
+    # less than the room it began with — so one loop can put at most
+    # ``(window - reply reserve) * 3`` characters through this budget. Half a
+    # megabyte therefore holds a loop's whole tool output up to a window of
+    # about 183,000 tokens, which covers every deployment this platform has
+    # been run on. Above that it begins to bind, and what it does then is what
+    # it has always done: the call is recorded, the output is not, and the
+    # report says how many entries it is not showing. A deployment on a very
+    # large window that wants the whole of it kept raises this, and pays for it
+    # in a JSONB column rather than in the model's context.
     evidence_budget_bytes: Annotated[int, Field(ge=0)] = 524288
 
     # How much of a run's tool output is kept in memory, for the length of the
@@ -2678,11 +2713,28 @@ class ReportingConfig(BaseModel):
     # one. A ceiling only bounds what it says it bounds if the text is not
     # copied: at 400 answers of 6 000 characters the corpus holds 2.07 MB for
     # 2.40 MB of text and one grounding check allocates 0.01 MB on top of it,
-    # so the process cost is the ceiling and not four times it. Every answer
-    # passes ``max_tool_output_chars`` (6 000), so 16 MB is about 2 700 of
-    # them, against the order-400 tool calls a whole team spends — several
-    # times the heaviest run measured, and still a bound a machine running a
-    # model beside the worker can afford.
+    # so the process cost is the ceiling and not four times it.
+    #
+    # What that measurement was read against has changed. An answer used to be
+    # at most 6 000 characters, so 16 MB was about 2 700 of them; a tool answer
+    # is now measured against what the served window has left, and one loop can
+    # put at most ``(window - reply reserve) * 3`` characters through it. On the
+    # 32,768-token window this deployment serves that is 74 KB a loop, so a team
+    # of six spends under half a megabyte; at 131,072 it is 369 KB a loop and
+    # the six come to 2.2 MB; at a million it is 3.0 MB a loop and the ceiling
+    # holds five and a half of them, so a six-agent team on a window that size
+    # reaches it — and so does a static analyst taking a loop per chunk, which
+    # is how a run has more loops than it has agents.
+    #
+    # This is deliberately **not** scaled with the window. The window is the
+    # model's; this is the worker's RAM, on a machine that also runs the model,
+    # and answering a bigger window by holding a proportionally bigger corpus
+    # is how a 30 GB laptop runs out of memory mid-analysis. What happens when
+    # it binds is unchanged and is said out loud: the corpus reports itself
+    # incomplete, the run summary carries how many answers it could not hold
+    # and from which tools, and an absence measured against an incomplete
+    # corpus is advisory rather than a reason to drop anything. A deployment
+    # with the memory to spare raises this setting.
     evidence_corpus_bytes: Annotated[int, Field(ge=0)] = 16777216
 
 

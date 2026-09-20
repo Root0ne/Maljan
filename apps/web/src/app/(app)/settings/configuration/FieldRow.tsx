@@ -7,6 +7,7 @@ import type {
   McpServerEntry,
   SettingValue,
 } from "@/types/settings";
+import ContextWindowNote, { TOOL_OUTPUT_KEY } from "./ContextWindowNote";
 import AgentDefinitionsEditor, {
   type AgentLLMOverride,
   type LlmGlobalFallback,
@@ -300,6 +301,10 @@ export default function FieldRow({
         </div>
       )}
       <Description text={entry.description} full={guide} about={entry.title} />
+      {/* The tool-output cap is the one field whose default value means
+          "work it out from something the operator cannot see on this page".
+          The window it is worked out from belongs beside it. */}
+      {entry.key === TOOL_OUTPUT_KEY && <ContextWindowNote />}
       {!entry.editable && entry.reason && (
         <p className="text-[11px] text-text-muted mt-1">{entry.reason}</p>
       )}

@@ -29,6 +29,30 @@ def lowercase_body(length: int = 32) -> str:
     return "".join(_ALPHABET[(index * _STRIDE + 3) % len(_ALPHABET)] for index in range(length))
 
 
+def password(length: int = 12, variant: int = 0) -> str:
+    """A plaintext password, past the minimum length an endpoint enforces.
+
+    ``variant`` gives a second value a test can tell from the first — what an
+    update path has to be checked against is the *difference* between the
+    password that went in and the one that was there, and two literals written
+    side by side are two lines a scanner reads as credentials.
+    """
+    return "".join(
+        _ALPHABET[(index * _STRIDE + 3 + variant) % len(_ALPHABET)] for index in range(length)
+    )
+
+
+def stored_hash(algorithm: str = "argon2") -> str:
+    """A stand-in for the hash a row already holds, assembled at call time.
+
+    A fixture needs one thing from it: that it is not the value the code under
+    test writes. Writing a realistic hash down would be the thing this module
+    exists to avoid, and writing an obviously fake one down is the same line to
+    a detector that reads shapes.
+    """
+    return f"${algorithm}$" + lowercase_body(24)
+
+
 def prefixed_key(prefix: str, body_length: int = 32) -> str:
     """A vendor key: the format's own prefix, and a body of the right shape.
 
