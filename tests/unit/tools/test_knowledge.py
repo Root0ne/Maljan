@@ -73,9 +73,10 @@ class TestApiCapability:
         assert knowledge.api_capability([]) == {"capabilities": [], "platform": "windows"}
 
     def test_a_rule_fires_over_the_whole_set_and_each_api_it_matched_cites_it(self) -> None:
-        """Every rule in the vendored map needs two or more APIs. Matched one
-        name at a time no rule can fire, which is how the pack's entry came to
-        list no technique on any sample; the set is matched once."""
+        """Almost every rule in the vendored map needs two or more APIs, so
+        matched one name at a time nearly none can fire — which is how the
+        pack's entry came to list no technique on any sample. The set is
+        matched once."""
         result = knowledge.api_capability(
             ["VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread", "RegQueryValueExA"]
         )
@@ -91,6 +92,26 @@ class TestApiCapability:
     def test_one_api_alone_clears_no_rule(self) -> None:
         row = knowledge.api_capability(["WriteProcessMemory"])["capabilities"][0]
         assert row["techniques"] == []
+
+    def test_the_one_name_that_is_the_act_itself_needs_no_second_name(self) -> None:
+        """An echo request is ICMP by construction, so nothing beside it makes
+        it more so. The ten socket names this rule shipped with are gone: they
+        labelled one benign binary in twenty and more than a third of
+        everything that touches a network, and the protocol is an argument to
+        ``socket`` rather than a name in the import table.
+
+        A one-name rule still answers as a reference association: it says what
+        the combination is, who else sends the same request, and the share of
+        ordinary Windows software that does.
+        """
+        row = knowledge.api_capability(["IcmpSendEcho"])["capabilities"][0]
+        (cited,) = row["techniques"]
+        assert cited["technique_id"] == "T1095"
+        assert cited["min_apis"] == 1
+        assert cited["rule"] == "sending an ICMP echo request"
+        assert "ping" in cited["ordinary_use"]
+        assert cited["measured"]["benign_files"] == 2
+        assert row["catalog_flags"] == []
 
 
 # The GDI and message-pump calls a Win32 program makes to put a window on the
