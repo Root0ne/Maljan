@@ -188,6 +188,13 @@ class TruncationMetrics:
     evidence_corpus_missing_answers: int = 0
     evidence_corpus_missing_tools: list[str] = field(default_factory=list)
     evidence_corpus_partial_reason: str = ""
+    # And what it did hold, against its ceiling. ``None`` rather than zero: a
+    # summary stored before these existed, or a run whose corpus was gone when
+    # the record was written, knows nothing about what was held, and zero would
+    # be a claim that nothing was.
+    evidence_corpus_answers: int | None = None
+    evidence_corpus_bytes_held: int | None = None
+    evidence_corpus_bytes_ceiling: int | None = None
 
     @property
     def any_bound_hit(self) -> bool:
@@ -195,6 +202,60 @@ class TruncationMetrics:
         return bool(
             self.tool_output_over_limit or self.react_step_cap_hits or self.judge_token_cap_hits
         )
+
+
+def _recorded_calls(latency: Any) -> int:
+    """How many calls the per-agent latency table counts, across every agent."""
+    total = 0
+    for row in (latency or {}).values():
+        if isinstance(row, dict):
+            try:
+                total += max(0, int(row.get("calls") or 0))
+            except (TypeError, ValueError):
+                continue
+    return total
+
+
+def _optional_count(value: Any) -> int | None:
+    """A recorded count, or ``None`` when nothing was recorded.
+
+    ``None`` and ``0`` are two different answers here: one says this run made
+    no record, the other says the record is zero.
+    """
+    if value is None:
+        return None
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+# Past this share of the ceiling the figures are printed unasked: a corpus
+# holding more than half of what it may hold is one whose ceiling is a number
+# the operator should know before the run that reaches it.
+CORPUS_LOUD_SHARE = 0.5
+
+
+def corpus_held_sentence(truncation: Any) -> str:
+    """What the run's grounding corpus held, as one sentence, or ``""``.
+
+    Printed only where it tells a reader something: a corpus that went partial
+    (the loss is stated beside it) or one past half its ceiling. Otherwise the
+    figures stay on the record and nothing is said, because a run with room to
+    spare has nothing to act on.
+    """
+    answers = getattr(truncation, "evidence_corpus_answers", None)
+    held = getattr(truncation, "evidence_corpus_bytes_held", None)
+    ceiling = getattr(truncation, "evidence_corpus_bytes_ceiling", None)
+    if answers is None or held is None or ceiling is None:
+        return ""
+    partial = bool(str(getattr(truncation, "evidence_corpus_partial_reason", "") or "").strip())
+    if not partial and not (ceiling > 0 and held > ceiling * CORPUS_LOUD_SHARE):
+        return ""
+    return (
+        f"The grounding corpus held {count_label(int(answers), 'answer')}, "
+        f"{int(held)} of {int(ceiling)} bytes."
+    )
 
 
 def count_label(count: int, singular: str, plural: str = "") -> str:
@@ -593,6 +654,17 @@ class RunSummary:
                 f" over {trunc.judge_integrity_invocations} attempt(s) |",
                 "",
             ]
+            # Said only where the two counts could be read against each other
+            # and disagree, or where something was actually cut. On a run that
+            # hit no bound and counted the same calls twice it is a paragraph
+            # explaining a difference the reader cannot see.
+            if trunc.any_bound_hit or _recorded_calls(self.tool_latency) != trunc.tool_output_calls:
+                lines += [
+                    "Tool output calls are the answers a tool server returned through the "
+                    "guardrail. The per-call latency table counts every recorded call, so it "
+                    "also holds the ones answered in process, which no guardrail sees.",
+                    "",
+                ]
             if trunc.evidence_corpus_partial_reason:
                 lines += [
                     "Grounding searched less than this run produced "
@@ -606,6 +678,9 @@ class RunSummary:
                     + ". An absence measured against it is a note and drops nothing.",
                     "",
                 ]
+            corpus_held = corpus_held_sentence(trunc)
+            if corpus_held:
+                lines += [corpus_held, ""]
             # The reasons, never the total: a line printing
             # ``integrity_objects_removed`` called the cap's orphaned
             # relationships repairs, and said 10 where the console said 4.
@@ -715,6 +790,16 @@ class RunSummary:
                 "evidence_corpus_partial_reason": t.evidence_corpus_partial_reason,
                 "any_bound_hit": t.any_bound_hit,
             }
+            # Absent rather than zero when this run recorded nothing about
+            # what its corpus held: a stored summary written before the
+            # figures existed must not read as a corpus that held nothing.
+            for key, value in (
+                ("evidence_corpus_answers", t.evidence_corpus_answers),
+                ("evidence_corpus_bytes_held", t.evidence_corpus_bytes_held),
+                ("evidence_corpus_bytes_ceiling", t.evidence_corpus_bytes_ceiling),
+            ):
+                if value is not None:
+                    result["truncation"][key] = value
 
         return result
 
@@ -927,6 +1012,11 @@ class RunSummaryBuilder:
             ],
             evidence_corpus_partial_reason=str(
                 snapshot.get("evidence_corpus_partial_reason", "") or ""
+            ),
+            evidence_corpus_answers=_optional_count(snapshot.get("evidence_corpus_answers")),
+            evidence_corpus_bytes_held=_optional_count(snapshot.get("evidence_corpus_bytes_held")),
+            evidence_corpus_bytes_ceiling=_optional_count(
+                snapshot.get("evidence_corpus_bytes_ceiling")
             ),
         )
         return self

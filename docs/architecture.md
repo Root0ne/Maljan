@@ -472,7 +472,22 @@ Four rules follow from the statement:
   is marked suspicious, `anomalous-activity` otherwise, and
   `anomalous-activity` for a `file:name` out of the string scan); a Benign run
   can carry them, because a benign sample still talks to hosts, and they are
-  exported as they are. A summary
+  exported as they are. A judge-written indicator keeps the type the judge
+  gave it, and on one shape the judge is asked about it first: a Benign verdict
+  beside an indicator the judge typed `malicious-activity` publishes a value as
+  malicious activity under a verdict that says the opposite — on a recorded run
+  it was the analysed vendor's own project domain. `stix.indicator_type_contradicts_verdict`
+  puts that to the judge once, through the same single retry the other verdict
+  checks share, naming the indicator, the verdict's own word and the
+  vocabulary's `benign` / `anomalous-activity` / `unknown`, and saying the type
+  may be kept. Whatever comes back is published: nothing retypes an indicator
+  and nothing drops one. A type the judge keeps stays in
+  `run_summary.validation.unresolved` and is printed with the other unresolved
+  findings, so a consumer reading the bundle beside the report sees the
+  contradiction was raised and kept. The mirror — a Malware verdict beside an
+  indicator typed `benign` — is not a contradiction and is not asked about: an
+  indicator is a claim about the value it names, and a malicious sample may
+  touch something harmless. A summary
   note then has no malware object to be about, so it refers to the indicator
   carrying the sample's own hash, which the cap keeps in a band of its own; a
   bundle holding nothing the note could truthfully refer to emits no note, and
@@ -1143,7 +1158,35 @@ wall cannot pre-empt the one parse everything depends on, and past the parse a
 monotonic wall checked at every phase. An answer this system has already
 shortened is not shortened again — a second map would count against a baseline
 the first one moved. `run_summary.truncation` counts the three outcomes apart,
-and the wall firing among them.
+and the wall firing among them — on the job's one truncation ledger, which the
+server registry puts on every toolkit it opens, so a bound a tool server's
+answer hit is counted where the run summary reads.
+
+**What the model is told about it.** A shortened answer carries one sentence
+for the model: the key the arithmetic is under, that an identical call returns
+the identical shortened answer, and this tool's own arguments that reach what
+was left out — `limit`, `offset` and `pattern` for `strings`, nothing at all
+for a tool that offers no such argument, which the sentence then says. The
+arguments are read off the schema the tool offered
+(`agents.output_shortening.narrowing_arguments`), never guessed per tool, and
+the same list is what the repeat notices name, so one tool has one answer to
+"ask it differently" however the model arrives at the question. Nothing
+re-issues a call and nothing edits an argument: the text is the model's to act
+on.
+
+A parameter name is a tool server's own text on its way into the model's
+context, so only a plain identifier of at most forty characters is ever named,
+at most six of them, in schema order; anything else is left out rather than
+escaped or trimmed, because a name this refuses is one the model could not pass
+anyway. That bound is also what makes the sentence priceable: both guardrails —
+the MCP toolkits' and the Ghidra HTTP client's — shorten to
+`output_shortening.shorten_target(limit, narrowing)`, one function, so an
+answer and the notice appended to it are together inside the limit the operator
+set. The room the sentence may take is capped at `MAX_SENTENCE_ROOM`, the exact
+width of the widest sentence those bounds allow, so a server declaring two
+hundred long parameters cannot shrink the budget its own answer is shortened
+into. An answer no guardrail saw — an in-process tool's — is not shortened at
+all and carries no notice.
 
 The sentence a reader sees is drawn above the section's table, not as a row in
 it: the bookkeeping is this system's account of its own handling, and a
@@ -1718,6 +1761,16 @@ in a sentence naming how many answers were not kept and from which tools, and
 nothing drops its object for it. `drop_ungrounded_indicators` reads the flag,
 and a source guard fails any other consumer that decides a removal from an
 ungrounded row without asking.
+
+**And what it held.** Beside the loss, `run_summary.truncation` carries
+`evidence_corpus_answers`, `evidence_corpus_bytes_held` and
+`evidence_corpus_bytes_ceiling`, read off the corpus while the container still
+has one. The three are **absent** on a run that recorded none of them — a
+summary stored before they existed, a run resumed without its corpus — because
+zero would say the corpus held nothing. The report's Bounds Hit section and the
+console's "what the run spent" print them only where they tell a reader
+something: a corpus that went partial, or one past half its ceiling. Otherwise
+the record carries them and both surfaces stay quiet.
 
 Two rows that mean one path are one row. `reporting.dedupe.canonical_path`
 normalises the separators, collapses runs of them, drops a trailing one and

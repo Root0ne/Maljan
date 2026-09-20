@@ -29,6 +29,11 @@ SEVERITY_RATINGS: tuple[str, ...] = ("Critical", "High", "Medium", "Low", "Infor
 # else, and ``INCONCLUSIVE_VERDICT`` there is one of them rather than a fourth.
 VERDICT_VALUES: tuple[str, ...] = ("Malware", "Suspicious", "Benign")
 
+# The three, each under a name, unpacked from the tuple rather than spelled
+# again: a check that compares a verdict to a literal of its own goes quiet the
+# day the canonical word is renamed, and says nothing while it does.
+MALWARE_VERDICT, SUSPICIOUS_VERDICT, BENIGN_VERDICT = VERDICT_VALUES
+
 # What the sample's own hash indicator claims about the sample, per published
 # verdict, in STIX 2.1's ``indicator-type-ov`` vocabulary. An exported bundle
 # is acted on by tooling that reads the indicator and not the prose around it,

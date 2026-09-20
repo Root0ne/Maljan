@@ -2900,6 +2900,72 @@ change landed on `main`.
   itself, trusts a local only for the value it was given, and fails if a sixth
   module starts building rows.
 
+- **A run that shortens an answer says so.** Every attach but the static
+  provider's opened its toolkit with no truncation ledger and no tool-output
+  limit, so the guardrail on a tool server's answer counted on nothing and cut
+  at the signature's own 8000 characters rather than at
+  `core.preprocessing.max_tool_output_chars`. A run whose analysts met six
+  shortened answers reported `tool_output_shortened = 0` and
+  `any_bound_hit = false`, and the Bounds Hit table, the console's "what the
+  run spent" and the `truncation_rate` aggregate were all built from those
+  zeros. The server registry now carries the job's ledger and the job's limit
+  onto every toolkit it opens, and an agent's own static provider is attached
+  the same way. The Bounds Hit section says in words what its call count
+  counts, because the per-call latency table also holds calls answered in
+  process, which no guardrail sees.
+  **Upgrading:** a tool server's answer is now cut at
+  `core.preprocessing.max_tool_output_chars` (6000 by default) rather than at
+  8000, so an operator who relied on the wider cut should raise the setting.
+
+- **The shortening notice names the way to narrow.** The sentence a model reads
+  on a shortened answer said what was missing and offered every optional
+  argument the call had not set, so a model that met the same 116-of-150 answer
+  three times re-issued the identical call each time. It now says that an
+  identical call returns the identical shortened answer and names the
+  arguments of *that* tool that narrow or page it, read off the schema the tool
+  offered; a tool with no such argument is said to have none, and nothing more
+  is offered. The repeat notices name the same list, so one tool no longer has
+  two answers to "ask it differently". A parameter name is a tool server's own
+  text, so only a plain identifier of at most forty characters is named, at
+  most six of them, and anything else is left out; both guardrails — the MCP
+  toolkits' and the Ghidra HTTP client's — reserve the room the sentence needs
+  through one shared `shorten_target`, capped so no schema can shrink the
+  budget its own answer is shortened into, so an answer and its notice together
+  stay inside the limit the answer was cut to. No code re-issues a call or
+  edits an argument.
+
+- **The grounding corpus records what it held, not only what it missed.**
+  `run_summary.truncation` gains `evidence_corpus_answers`,
+  `evidence_corpus_bytes_held` and `evidence_corpus_bytes_ceiling`, read off
+  the corpus while the container still has one, so a reader can see how close
+  a run came to `core.reporting.evidence_corpus_bytes` rather than only that it
+  did not reach it. The report's Bounds Hit section and the console's "what the
+  run spent" print one sentence for them where it says something — a corpus
+  that went partial, or one past half its ceiling — and stay quiet otherwise.
+  **Upgrading:** the three keys are **absent**, not zero, on a summary stored
+  before they existed or on a run resumed without its corpus; a consumer must
+  read a missing key as "not recorded" rather than as a corpus that held
+  nothing.
+
+- **A Benign verdict is asked about an indicator typed `malicious-activity`.**
+  On a run that concluded Benign for a signed vendor utility the judge typed
+  the vendor's own project domain `malicious-activity`, and the export — which
+  keeps a judge-written type by design — published it, so the domain reached a
+  consumer as malicious activity under a verdict saying the opposite. The new
+  validator `stix.indicator_type_contradicts_verdict` puts that to the judge
+  once, through the single retry the other verdict checks already share,
+  naming the indicator, the verdict's own word and the vocabulary's `benign`,
+  `anomalous-activity` and `unknown`, and saying the type may be kept. Whatever
+  the judge answers is published: nothing retypes an indicator and nothing
+  drops one. A type that is kept stays in `run_summary.validation.unresolved`
+  and is printed with the other unresolved findings. The mirror case — a
+  Malware verdict beside an indicator typed `benign` — is not a contradiction
+  and is not asked about.
+  **Upgrading:** a Benign run carrying such an indicator now spends its one
+  verdict correction turn on it and may carry a new code in
+  `run_summary.validation.unresolved`; a consumer that partitions on validation
+  codes should know the name.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**

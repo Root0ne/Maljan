@@ -106,6 +106,9 @@
   },
   "truncation": {
     "any_bound_hit": null,
+    "evidence_corpus_answers": null,
+    "evidence_corpus_bytes_ceiling": null,
+    "evidence_corpus_bytes_held": null,
     "evidence_corpus_missing_answers": null,
     "evidence_corpus_missing_tools": [],
     "evidence_corpus_partial_reason": null,

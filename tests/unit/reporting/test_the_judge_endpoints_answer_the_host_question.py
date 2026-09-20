@@ -427,7 +427,16 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
     # A ``stix.`` code a producer really can fix, and that the console is right
     # to draw as the producer's own unresolved finding: the judge was asked
     # about the object and kept it.
-    PRODUCER_FIXABLE = frozenset({"stix.ungrounded_indicator", "stix.unknown_object"})
+    # ``stix.indicator_type_contradicts_verdict`` is one of these too: the
+    # judge can retype the indicator or restate the verdict, and a row that
+    # survives is a type it was asked about and kept.
+    PRODUCER_FIXABLE = frozenset(
+        {
+            "stix.ungrounded_indicator",
+            "stix.unknown_object",
+            "stix.indicator_type_contradicts_verdict",
+        }
+    )
 
     @classmethod
     def _listed(cls) -> set[str]:

@@ -255,6 +255,13 @@ class TruncationLedger:
         self.evidence_corpus_missing_answers = 0
         self.evidence_corpus_missing_tools: tuple[str, ...] = ()
         self.evidence_corpus_partial_reason = ""
+        # And what it did hold, against the ceiling it held it under. ``None``
+        # until the node that reads the corpus records it: a run whose corpus
+        # was gone by then knows nothing about what it held, which is not the
+        # same statement as holding nothing.
+        self.evidence_corpus_answers: int | None = None
+        self.evidence_corpus_bytes_held: int | None = None
+        self.evidence_corpus_bytes_ceiling: int | None = None
 
     # -- tool output --------------------------------------------------------
 
@@ -360,7 +367,12 @@ class TruncationLedger:
     # -- the grounding corpus -----------------------------------------------
 
     def record_evidence_corpus(
-        self, *, missing_answers: int, missing_tools: tuple[str, ...], reason: str
+        self,
+        *,
+        missing_answers: int,
+        missing_tools: tuple[str, ...],
+        reason: str,
+        held: object | None = None,
     ) -> None:
         """Record how whole the evidence a grounding check searched was.
 
@@ -368,11 +380,20 @@ class TruncationLedger:
         grounded against. Nothing here is a count of calls: a run whose corpus
         held everything records zeroes, which is the answer an operator needs
         as much as a number is.
+
+        ``held`` is the corpus's own account of what it is holding, read while
+        the container still has one. Left out — a run resumed without its
+        corpus — the three figures stay absent rather than reading as zero.
         """
         with self._lock:
             self.evidence_corpus_missing_answers = max(0, int(missing_answers))
             self.evidence_corpus_missing_tools = tuple(missing_tools)
             self.evidence_corpus_partial_reason = str(reason or "")
+            if held is None:
+                return
+            self.evidence_corpus_answers = max(0, int(getattr(held, "answers", 0)))
+            self.evidence_corpus_bytes_held = max(0, int(getattr(held, "bytes_held", 0)))
+            self.evidence_corpus_bytes_ceiling = max(0, int(getattr(held, "ceiling", 0)))
 
     # -- indicator cap ------------------------------------------------------
 
@@ -437,6 +458,9 @@ class TruncationLedger:
                 "evidence_corpus_missing_answers": self.evidence_corpus_missing_answers,
                 "evidence_corpus_missing_tools": list(self.evidence_corpus_missing_tools),
                 "evidence_corpus_partial_reason": self.evidence_corpus_partial_reason,
+                "evidence_corpus_answers": self.evidence_corpus_answers,
+                "evidence_corpus_bytes_held": self.evidence_corpus_bytes_held,
+                "evidence_corpus_bytes_ceiling": self.evidence_corpus_bytes_ceiling,
             }
 
     @property

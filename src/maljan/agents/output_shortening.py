@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import time
 import unicodedata
 from typing import Any, NamedTuple
@@ -56,8 +57,14 @@ __all__ = [
     "MAX_SHORTENABLE_CHARS",
     "SHORTENING_BUDGET_SECONDS",
     "Shortening",
+    "MAX_NARROWING_NAMES",
+    "MAX_SENTENCE_ROOM",
+    "narrowing_arguments",
     "our_key_in",
     "shorten_json_document",
+    "shorten_target",
+    "shortening_sentence",
+    "shortening_sentence_room",
 ]
 
 # The key a sidecar already sets when it paged an answer itself. Reused rather
@@ -407,6 +414,147 @@ def _our_key(document: dict[str, Any]) -> str:
         if candidate not in document:
             return candidate
     return f"{BOOKKEEPING_KEY}_x"
+
+
+# The argument names that narrow or page an answer, read off the schema the
+# tool offered rather than guessed per tool. Kept as one list because it is one
+# question — which of this tool's own arguments reach the part that was left
+# out — and because the two places that ask it, the guardrail that reserves
+# room for the sentence and the recorder that writes it, must get one answer.
+# The built-in sidecars between them offer every name here: ``strings`` pages
+# with ``limit``/``offset`` and filters with ``pattern``/``start``/``end``, the
+# network tools bound with ``packet_limit``, the knowledge tools with ``k``,
+# and ``archive_list``/``apk_info`` with ``limit``.
+_NARROWING_NAMES = frozenset(
+    {
+        "end",
+        "filter",
+        "k",
+        "limit",
+        "offset",
+        "page",
+        "pattern",
+        "query",
+        "start",
+    }
+)
+
+# The same question for a name nobody listed: ``packet_limit``, ``max_rows``,
+# ``page_size``. A prefix or a suffix is enough, because these name the bound
+# rather than the subject. ``_size`` alone is not: ``buffer_size`` and
+# ``block_size`` name a machine detail and narrow nothing, so it counts only
+# under a name that already reads as a bound.
+_NARROWING_PREFIXES = ("max_",)
+_NARROWING_SUFFIXES = ("_limit", "_offset", "_page")
+_SIZE_SUFFIX = "_size"
+_SIZE_PREFIXES = ("page_", "max_")
+
+# A parameter name is a tool server's text, and this sentence goes into the
+# model's context. Only a plain identifier is named, and the rest are left out
+# rather than escaped or cut: a name this refuses is a name the model cannot
+# pass anyway, and a repaired one would be a parameter nobody offers. The
+# length is the same bound under another name — an identifier longer than this
+# is not one a schema writes.
+_PLAIN_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,39}$")
+MAX_NARROWING_NAME_CHARS = 40
+
+# How many are named. The sentence is a hint, not a manual: past a handful the
+# model is reading a list instead of narrowing a call, and the cap is what
+# bounds what a server can spend of the answer's own budget.
+MAX_NARROWING_NAMES = 6
+
+
+def narrowing_arguments(names: Any) -> tuple[str, ...]:
+    """The arguments of one tool's schema that narrow or page its answer.
+
+    In the order the schema declared them, so the sentence reads the way the
+    tool's own documentation does, and at most :data:`MAX_NARROWING_NAMES` of
+    them. A name that is not a plain identifier is not named at all. An empty
+    result means the tool offers no way to ask for a smaller answer, which is
+    itself worth telling the model.
+    """
+    found: list[str] = []
+    for raw in names or ():
+        name = str(raw)
+        if not _PLAIN_NAME_RE.match(name):
+            continue
+        lowered = name.lower()
+        sized = lowered.endswith(_SIZE_SUFFIX) and lowered.startswith(_SIZE_PREFIXES)
+        if (
+            lowered in _NARROWING_NAMES
+            or lowered.startswith(_NARROWING_PREFIXES)
+            or lowered.endswith(_NARROWING_SUFFIXES)
+            or sized
+        ):
+            found.append(name)
+        if len(found) == MAX_NARROWING_NAMES:
+            break
+    return tuple(found)
+
+
+def shortening_sentence(narrowing: Any = (), *, key: str = BOOKKEEPING_KEY) -> str:
+    """What the model is told about an answer that had to be shortened.
+
+    It names the key the arithmetic is under, says that asking again the same
+    way returns the same answer, and names this tool's own arguments that
+    reach what was left out. A tool that offers none says so and stops there:
+    a hint to "try different arguments" on a tool with nothing to vary is how
+    a loop spends its steps re-issuing one call.
+
+    Whatever is passed is filtered again here, so the one place that writes the
+    sentence is also the one place that decides what a name may look like.
+    """
+    named = ", ".join(f"`{name}`" for name in narrowing_arguments(narrowing))
+    head = (
+        f"\n\nThis answer did not fit and was shortened; `{key}` says which parts were cut "
+        "and how much of each is missing. An identical call returns the identical "
+        "shortened answer"
+    )
+    if not named:
+        return f"{head}, and this tool takes no argument that narrows or pages it."
+    return f"{head}; narrow it with {named}, or call another tool."
+
+
+# How much longer the sentence can be than the one written with the ordinary
+# key: the fallback name a tool that owns ``shortened`` pushes it to is at most
+# ``shortened_99``.
+_KEY_FALLBACK_ROOM = 3
+
+# The most the sentence can ever cost, and therefore the most a schema can take
+# out of the budget its own answer is shortened into. Six names of forty
+# characters each is what :func:`narrowing_arguments` will pass at its widest,
+# so the sentence written over those, plus the fallback key, is an exact
+# ceiling rather than an estimate — about four hundred characters, against a
+# limit in the thousands. Without it a server declaring two hundred long
+# parameters shrank the target to nothing and every answer it returned was cut
+# as text instead of shortened as a document.
+_WIDEST_NAME = "max_" + "n" * (MAX_NARROWING_NAME_CHARS - len("max_"))
+MAX_SENTENCE_ROOM = (
+    len(shortening_sentence((_WIDEST_NAME,) * MAX_NARROWING_NAMES)) + _KEY_FALLBACK_ROOM
+)
+
+
+def shortening_sentence_room(narrowing: Any = ()) -> int:
+    """What to keep back so the sentence fits inside the same limit.
+
+    The guardrail shortens to the limit and the recorder appends the sentence
+    afterwards, so the room the sentence needs is room the shortening has to
+    have already given up. An upper bound: the key it will actually name is
+    the ordinary one on every answer but the few that own the name. Never more
+    than :data:`MAX_SENTENCE_ROOM`, which the sentence itself cannot exceed.
+    """
+    return min(len(shortening_sentence(narrowing)) + _KEY_FALLBACK_ROOM, MAX_SENTENCE_ROOM)
+
+
+def shorten_target(limit: int, narrowing: Any = ()) -> int:
+    """The size to shorten an answer to so its notice still fits ``limit``.
+
+    One function for both guardrails — the MCP toolkit's and the HTTP client's
+    — because the claim they support is one claim: what the model reads, the
+    answer and the sentence appended to it, is inside the limit the operator
+    set.
+    """
+    return max(1, int(limit) - shortening_sentence_room(narrowing))
 
 
 def _row(candidate: _Candidate, kept: int) -> dict[str, int]:

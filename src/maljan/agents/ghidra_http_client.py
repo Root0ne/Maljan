@@ -14,12 +14,14 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from typing import Any
 
 import httpx
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import create_model
 
+from maljan.agents.output_shortening import narrowing_arguments
 from maljan.core.logger import logger
 
 
@@ -191,7 +193,8 @@ class GhidraHTTPClient:
 
         # On a thread: shortening a large answer is CPU-bound and synchronous,
         # and this is a coroutine serving an agent.
-        return await asyncio.to_thread(self._apply_output_guardrail, output)
+        narrowing = narrowing_arguments(pdef["name"] for pdef in param_defs)
+        return await asyncio.to_thread(self._apply_output_guardrail, output, narrowing)
 
     async def _activate_loaded_program(self, load_output: str) -> None:
         """Make a freshly loaded program the *current* one.
@@ -289,8 +292,14 @@ class GhidraHTTPClient:
         clean = " ".join(description.split())
         return f"[{cat}] {clean}"
 
-    def _apply_output_guardrail(self, output: str) -> str:
+    def _apply_output_guardrail(self, output: str, narrowing: Sequence[str] = ()) -> str:
         """Limit tool output size to prevent LLM context overflow.
+
+        ``narrowing`` names this tool's own arguments that reach what a
+        shortening leaves out. The recorder appends a sentence naming them to a
+        shortened answer, and the room that sentence needs is kept back here
+        through the same ``shorten_target`` the MCP toolkit uses, so the claim
+        that an answer and its notice fit the limit holds on both tool paths.
 
         Every outcome is recorded on ``_truncation_ledger`` when one is attached,
         including the pass-through: pitfall P6 asks for truncation *frequency*,
@@ -309,7 +318,7 @@ class GhidraHTTPClient:
         decompilation that arrives as plain text still reaches the summariser
         and then the character cut, byte for byte as before.
         """
-        from maljan.agents.output_shortening import shorten_json_document
+        from maljan.agents.output_shortening import shorten_json_document, shorten_target
         from maljan.core.truncation_ledger import record_guardrail_outcome
 
         chars_in = len(output)
@@ -329,7 +338,7 @@ class GhidraHTTPClient:
             self._max_output_chars,
         )
 
-        attempt = shorten_json_document(output, self._max_output_chars)
+        attempt = shorten_json_document(output, shorten_target(self._max_output_chars, narrowing))
         if attempt.shortened:
             record_guardrail_outcome(
                 self._truncation_ledger,
