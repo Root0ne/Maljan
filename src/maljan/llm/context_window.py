@@ -154,10 +154,33 @@ ANSWER_SHARE = 0.125
 # two thousand leaves at least 1,523 for the document itself — three times the
 # 512 characters below which that module treats a string as a label rather than
 # a payload, which is what lets one long value survive beside the answer's own
-# account of itself. When the floor binds, nothing new happens: the answer
-# meets the structural shortener at this size, comes back as a document with
+# account of itself. When the floor binds, nothing new happens to the answer:
+# it meets the structural shortener at this size, comes back as a document with
 # its ``shortened`` map, and carries the notice naming the arguments that
 # narrow it.
+#
+# What the floor costs is stated rather than hidden. It is the one place the
+# derivation stops being self-limiting: everywhere else an answer takes a share
+# of what is *free*, so the answers of one conversation sum to less than the
+# room it began with, and at the floor they no longer do. Two thousand
+# characters is about 667 tokens, so a conversation that has reached the floor
+# grows by that much per further answer whatever is left — and what it spends
+# first is the reply reserve, not the window.
+#
+# Measured over the largest loop the settings configure, the static analyst's
+# twenty tool rounds:
+#
+#   window    floor first reached   conversation after 20 rounds
+#   131,072   never                 114,375 tokens, 16,697 under the window
+#    32,768   the 13th answer        24,958 tokens, 382 into the reply reserve
+#     8,192   the 3rd answer         13,440 tokens, 5,248 past the window
+#
+# So on every window that was reported or looked up the floor costs a few
+# hundred tokens of the reply's own room at worst. Where it genuinely overruns
+# is the 8,192-token fallback — the case where nothing reported a window at
+# all, which the run summary names as the fallback and which one field fixes
+# (``core.llm.openai.context_size``). A run where the floor bound is visible
+# either way: the smallest cap in force equals this number.
 MIN_TOOL_OUTPUT_CHARS = 2000
 
 # What is held back for the model's own reply when nothing configures it. The

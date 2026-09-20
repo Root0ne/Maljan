@@ -1131,8 +1131,24 @@ That stamp is what makes a report checkable: the model can cite the call it read
 a fact from, a report section lists the entries it was built from, and `GET
 /api/v1/jobs/{id}/evidence` serves those entries back.
 
+**How wide the prompt allows.** What "too wide" means is not a constant.
+`preprocessing.max_tool_output_chars` is 0 by default, and 0 means the limit is
+worked out at the moment of each call from the context window the served model
+was found to have, less what the conversation already holds and the room kept
+back for the model's own reply, converted at a measured three characters per
+token and multiplied by the eighth of what is free that one answer may take,
+with a floor of 2,000 characters. A positive value is an operator's own cap and
+is used unchanged. The window is learned free of charge from the server's own
+metadata endpoint, from a vendored table, or from a stated fallback — never
+from a generation call — and `run_summary.truncation` records which of the four
+applied and the smallest and largest cap the run used. The whole arithmetic and
+the probe are `maljan.llm.context_window`; the job's budget travels with every
+attach the way the truncation ledger does, and the run-state refresher tells it
+what the loop's conversation weighs before every model turn. See
+*docs/configuration.md* for the numbers.
+
 **An answer wider than the prompt allows.** Before any of that, a tool result
-over `preprocessing.max_tool_output_chars` meets the output guardrail, which
+over that limit meets the output guardrail, which
 now has three outcomes rather than two. A JSON object is **shortened as a
 document**: elements come off the end of its largest lists, then characters off
 the end of its largest long strings, until it fits. No key is ever dropped, the

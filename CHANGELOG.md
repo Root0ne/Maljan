@@ -561,6 +561,19 @@ change landed on `main`.
   The value reaches the knowledge sidecar — the process where the build
   actually happens — as `MALJAN_INDEX_RETRY_SECONDS`, which that server is
   allowed to read and applies once at start-up.
+- **The served context window, learned for free and shown where it matters.**
+  `GET /api/v1/settings/context-window` answers with the window the configured
+  models serve, the four-word source it was learned from (`declared`, `probed`,
+  `table`, `fallback`), the sentence behind that word, the characters-per-token
+  figure, the tokens held back for a reply and the cap one tool answer would
+  get on an empty conversation. It spends no tokens: behind it are the metadata
+  endpoints in `maljan.llm.context_window`, cached per provider, endpoint and
+  model, and an endpoint that says nothing falls to the vendored table and then
+  to the stated fallback rather than to an error. The `llm` probe's result
+  carries the same block under `details.context_window`, so pressing **Test**
+  on the model card says how much of a tool answer that model can be handed,
+  and the Settings page prints it beside
+  `core.preprocessing.max_tool_output_chars`.
 
 ### Changed
 
@@ -1071,6 +1084,64 @@ change landed on `main`.
   **Upgrading:** a run with no evidence at all now spends one correction turn
   on an indicator it used to export unquestioned, and carries an advisory row
   for it in `run_summary.validation.unresolved`. Nothing is dropped for it.
+- **How much of a tool answer a model sees is the model's window, not a
+  constant.** `core.preprocessing.max_tool_output_chars` was 6,000 characters,
+  and every argument for that number was an argument about one deployment: a
+  local server started with a 131,072-token window and a forty-step reversing
+  loop. On a model served with 32,768 it does not fit; on one with a million it
+  throws information away for nothing. The setting now defaults to **0**, and 0
+  means the cap is worked out at the moment of each call from the window the
+  served model was found to have, less what the conversation already holds and
+  the room kept back for the model's own reply, converted at three characters
+  per token — measured, from a recorded conversation of 114,000 characters the
+  server reported at 38,868 tokens — and multiplied by the eighth of what is
+  free that one answer may take. An answer is measured against what is free and
+  the next one is measured again, so the answers of one conversation sum to
+  less than the room it began with; below a floor of 2,000 characters the cap
+  stops falling, and an answer at the floor meets the structural shortener and
+  its notice exactly as any other does. A positive value is an explicit
+  operator cap and behaves exactly as this setting always did. The window
+  itself is learned free of charge and without asking the operator anything:
+  llama.cpp's `/props`, Ollama's `/api/show`, an OpenAI-compatible
+  `/v1/models` for vLLM and OpenRouter, Text Generation Inference's `/info`,
+  then a vendored table keyed by model family
+  (`data/model_context_windows_v1.json`), then a conservative 8,192. No
+  generation call is ever made, and a guard test drives every request the
+  probe can plan through a transport that refuses anything but those four
+  metadata suffixes. `run_summary.truncation` carries the window, where it was
+  learned, the characters-per-token figure and the smallest and largest cap
+  that applied; the report's Bounds Hit section says the same in a sentence;
+  and the Settings page prints the detected window beside the field.
+  **Upgrading:** the default changes behaviour. On a 32,768-token window one
+  answer may now take **9,216** characters where it took 6,000, and on a
+  131,072-token window **46,080** — richer observations, and a conversation
+  that fills faster. Where nothing reports a window and the model is not in the
+  vendored table, the conservative 8,192-token fallback gives **2,304**
+  characters, which is *less* than the old default: such a deployment either
+  sets `core.llm.openai.context_size` to the window its server was started
+  with, or sets `core.preprocessing.max_tool_output_chars` to 6,000 to keep
+  exactly today's behaviour. `run_summary.truncation` gains three keys
+  (`tool_output_limit_smallest`, `tool_output_limit_largest`,
+  `context_window`); a summary stored before this release has none of them.
+- **The two memory ceilings are re-argued against the derived cap, and not
+  scaled with it.** `reporting.evidence_budget_bytes` (512 KiB per agent) and
+  `reporting.evidence_corpus_bytes` (16 MB per run) were both sized against
+  answers of at most 6,000 characters. The replacement arithmetic is the
+  derivation's own property: one loop's answers come to at most
+  `(window - reply reserve) x 3` characters. Half a megabyte therefore holds a
+  loop's whole tool output up to a window of about 183,000 tokens, and 16 MB
+  holds six such loops at 131,072 tokens and about five and a half at a
+  million. Neither number moved: they bound the worker's memory and a JSONB
+  column, not the model's context, and answering a bigger window by holding a
+  proportionally bigger corpus in RAM is how a machine that also runs the model
+  runs out of it. **Upgrading:** nothing to do on any window this platform has
+  been run on. A deployment on a very large window that wants every answer kept
+  whole raises `reporting.evidence_budget_bytes`; one that wants the grounding
+  corpus to hold a whole run raises `reporting.evidence_corpus_bytes`. Past
+  either, what happens is what has always happened and is still said out loud:
+  the ledger entry keeps the call and drops the output and the report says how
+  many, and the corpus reports itself incomplete so an absence measured against
+  it is advisory.
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was

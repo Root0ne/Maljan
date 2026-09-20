@@ -430,10 +430,12 @@ class ChunkingConfig(BaseModel):
     # the 27 chunks burned its full 1200s budget — jobs never finished (live
     # job 95d88f7e/task 10, 2026-07-11: chunk 1/27 alone hit the hard cap).
     # llama-server now serves 128K (``-c 131072``); budgeting ~60K for the
-    # static loop's 40 tool observations (``max_tool_output_chars`` below, 6000
-    # each and now applied to every tool server), ~4K system and ~8K generation
-    # leaves ~56K headroom, so 20K/chunk is safe and
-    # collapses that same PE to ~8 chunks. Override via
+    # static loop's 40 tool observations, ~4K system and ~8K generation leaves
+    # ~56K headroom, so 20K/chunk is safe and collapses that same PE to ~8
+    # chunks. That 60K no longer has to be budgeted by hand: a tool answer is
+    # measured against what the window has left at the moment of the call
+    # (``max_tool_output_chars`` below), and the chunk sitting in the
+    # conversation is part of what it is measured against. Override via
     # ``CHUNKING__MAX_TOKENS_PER_CHUNK``.
     max_tokens_per_chunk: Annotated[int, Field(ge=1)] = 20000
 
@@ -2669,7 +2671,21 @@ class ReportingConfig(BaseModel):
     # Past it an entry still records the call — tool, arguments, outcome,
     # timing — and drops the output, and the report says how many entries it
     # is not showing. Half a megabyte holds a full Ghidra loop's decompilation
-    # and stays well inside what a JSONB column and a context window tolerate.
+    # and stays well inside what a JSONB column tolerates.
+    #
+    # This used to be argued against answers of at most 6,000 characters, and
+    # that number is gone: a tool answer is now measured against what the
+    # served window has left. The arithmetic that replaces it is the one
+    # property the derivation has — the answers of one conversation sum to
+    # less than the room it began with — so one loop can put at most
+    # ``(window - reply reserve) * 3`` characters through this budget. Half a
+    # megabyte therefore holds a loop's whole tool output up to a window of
+    # about 183,000 tokens, which covers every deployment this platform has
+    # been run on. Above that it begins to bind, and what it does then is what
+    # it has always done: the call is recorded, the output is not, and the
+    # report says how many entries it is not showing. A deployment on a very
+    # large window that wants the whole of it kept raises this, and pays for it
+    # in a JSONB column rather than in the model's context.
     evidence_budget_bytes: Annotated[int, Field(ge=0)] = 524288
 
     # How much of a run's tool output is kept in memory, for the length of the
@@ -2685,11 +2701,28 @@ class ReportingConfig(BaseModel):
     # one. A ceiling only bounds what it says it bounds if the text is not
     # copied: at 400 answers of 6 000 characters the corpus holds 2.07 MB for
     # 2.40 MB of text and one grounding check allocates 0.01 MB on top of it,
-    # so the process cost is the ceiling and not four times it. Every answer
-    # passes ``max_tool_output_chars`` (6 000), so 16 MB is about 2 700 of
-    # them, against the order-400 tool calls a whole team spends — several
-    # times the heaviest run measured, and still a bound a machine running a
-    # model beside the worker can afford.
+    # so the process cost is the ceiling and not four times it.
+    #
+    # What that measurement was read against has changed. An answer used to be
+    # at most 6 000 characters, so 16 MB was about 2 700 of them; a tool answer
+    # is now measured against what the served window has left, and one loop can
+    # put at most ``(window - reply reserve) * 3`` characters through it. On the
+    # 32,768-token window this deployment serves that is 74 KB a loop, so a team
+    # of six spends under half a megabyte; at 131,072 it is 369 KB a loop and
+    # the six come to 2.2 MB; at a million it is 3.0 MB a loop and the ceiling
+    # holds five and a half of them, so a six-agent team on a window that size
+    # reaches it — and so does a static analyst taking a loop per chunk, which
+    # is how a run has more loops than it has agents.
+    #
+    # This is deliberately **not** scaled with the window. The window is the
+    # model's; this is the worker's RAM, on a machine that also runs the model,
+    # and answering a bigger window by holding a proportionally bigger corpus
+    # is how a 30 GB laptop runs out of memory mid-analysis. What happens when
+    # it binds is unchanged and is said out loud: the corpus reports itself
+    # incomplete, the run summary carries how many answers it could not hold
+    # and from which tools, and an absence measured against an incomplete
+    # corpus is advisory rather than a reason to drop anything. A deployment
+    # with the memory to spare raises this setting.
     evidence_corpus_bytes: Annotated[int, Field(ge=0)] = 16777216
 
 
