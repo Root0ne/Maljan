@@ -112,6 +112,38 @@ class TestTheRateTravelsWithTheRow:
             "fires on 0.3% of benign software (8 of 2730 binaries from 25 vendors)"
         )
 
+    def test_how_thin_the_support_is_travels_with_how_common_the_rule_is(self) -> None:
+        """A rule at 1.0% of ordinary software reads well until a reader learns
+        it has fired on no malware the combination was not chosen on. The two
+        halves of the measurement are read together or not at all, and the
+        report and the console read only this string."""
+        (hit,) = api_capability_hits(
+            self._payload(
+                {
+                    "seen_on_benign_percent": 1.0,
+                    "seen_on_benign_files": 26,
+                    "held_out_malware_profiles": 0,
+                }
+            )
+        )
+        assert hit["benign_rate"].endswith("; 0 held-out malware profiles support it")
+        (one,) = api_capability_hits(
+            self._payload(
+                {
+                    "seen_on_benign_percent": 0.3,
+                    "seen_on_benign_files": 8,
+                    "held_out_malware_profiles": 1,
+                }
+            )
+        )
+        assert one["benign_rate"].endswith("; 1 held-out malware profile supports it")
+
+    def test_a_platform_with_no_malware_corpus_says_nothing_rather_than_zero(self) -> None:
+        (hit,) = api_capability_hits(
+            self._payload({"seen_on_benign_percent": 0.2, "seen_on_benign_files": 3})
+        )
+        assert "held-out" not in hit["benign_rate"]
+
     def test_a_rate_that_rounds_to_zero_still_says_how_many_files(self) -> None:
         """One file in three thousand is 0.0% to one decimal place, and a
         reader who saw only that would read it as a rule that never fires."""

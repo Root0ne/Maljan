@@ -127,6 +127,40 @@ def test_the_live_sidecar_offers_exactly_the_pinned_manifest(name: str) -> None:
     assert {name: sorted(args) for name, args in live.items()} == payload["arguments"]
 
 
+def test_the_caveats_on_a_measured_number_reach_the_model_that_reads_them() -> None:
+    """The sidecar's docstring is the tool description in the default topology.
+
+    ``api_capability`` answers with a measured benign rate and a held-out
+    profile count. A model handed those without a glossary can read
+    ``held_out_malware_profiles: 6`` as six labelled samples the rule was
+    validated against, and no corpus behind this catalogue carries
+    technique-level ground truth. The sidecar reuses the in-process docstring
+    rather than paraphrasing it, because a paraphrase is one edit from saying
+    something the in-process one does not.
+    """
+    import importlib.util
+
+    from maljan.tools import knowledge as knowledge_tools
+
+    spec = importlib.util.spec_from_file_location(
+        "knowledge_sidecar", ROOT / "services" / "knowledge-mcp" / "server.py"
+    )
+    assert spec is not None and spec.loader is not None
+    server = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(server)
+
+    described = server.api_capability.__doc__ or ""
+    assert described == knowledge_tools.api_capability.__doc__
+    for promise in (
+        "seen_on_benign_percent",
+        "held_out_malware_profiles",
+        "one direction they were measured in",
+        "probability that *this* sample is benign",
+        "technique-level ground truth",
+    ):
+        assert promise in described, promise
+
+
 @pytest.mark.parametrize("name", TOOL_SIDECARS)
 def test_the_sidecar_is_registered_as_a_built_in_with_the_launch_parameters_it_needs(
     name: str,

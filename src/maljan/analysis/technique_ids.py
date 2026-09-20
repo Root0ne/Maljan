@@ -147,7 +147,19 @@ def _benign_rate(rule: Mapping[str, Any], corpus: str) -> str:
     if not isinstance(percent, int | float) or not isinstance(files, int):
         return ""
     of = f" of {corpus}" if corpus else " measured"
-    return f"fires on {percent:.1f}% of benign software ({files}{of})"
+    sentence = f"fires on {percent:.1f}% of benign software ({files}{of})"
+    # How thin the support is belongs beside how common the rule is, on the
+    # same string, because the two are read together or not at all: a rule at
+    # 1.0% of ordinary software reads well until you learn it has fired on no
+    # malware the combination was not chosen on. Absent where the platform has
+    # no malware corpus to count, which is not the same as a count of zero.
+    support = measured.get("held_out_malware_profiles")
+    if isinstance(support, int) and not isinstance(support, bool):
+        one = support == 1
+        sentence += (
+            f"; {support} held-out malware {'profile supports' if one else 'profiles support'} it"
+        )
+    return sentence
 
 
 def _min_apis(rule: Mapping[str, Any]) -> int:
