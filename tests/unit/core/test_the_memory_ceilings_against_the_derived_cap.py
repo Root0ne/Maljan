@@ -39,30 +39,57 @@ def _spent_by(window_tokens: int, answers: int, reply_tokens: int = 8192, floor:
     return held
 
 
+def _shipped_windows() -> list[int]:
+    """Every distinct window the vendored table can hand out, and the small ones.
+
+    Read from the file rather than listed, so a row added to it is a row this
+    is measured against: ``8192`` and ``16384`` are shipped rows, and a claim
+    about "the fallback only" was false because of exactly those two.
+    """
+    import json
+
+    from maljan.core.paths import resolve_data
+
+    raw = json.loads(resolve_data(cw.TABLE_PATH).read_text(encoding="utf-8"))
+    return sorted(set(raw["windows"].values()) | {cw.FALLBACK_WINDOW_TOKENS, 4096, 32768})
+
+
 class TestALoopCannotOutspendItsOwnWindow:
+    """The property both ceiling arguments rest on, measured rather than assumed."""
+
     def test_the_answers_never_sum_past_the_room_they_started_with(self) -> None:
-        for window in (8192, 32768, 131072, 1_000_000):
-            assert _spent_by(window, 60) < _whole_loop_chars(window), window
+        for window in _shipped_windows():
+            assert _spent_by(window, 60) <= _whole_loop_chars(window), window
 
-    def test_the_floor_is_where_that_stops_holding(self) -> None:
-        """Pinned because it is the one overspend the derivation allows."""
-        assert _spent_by(8192, 60, floor=cw.MIN_TOOL_OUTPUT_CHARS) > _whole_loop_chars(8192)
+    def test_the_floor_no_longer_breaks_it_on_any_shipped_window(self) -> None:
+        """The floor applies while the room affords it, and never past it."""
+        for window in _shipped_windows():
+            spent = _spent_by(window, 60, floor=cw.MIN_TOOL_OUTPUT_CHARS)
+            assert spent <= _whole_loop_chars(window), window
 
-    def test_what_the_floor_costs_the_largest_configured_loop(self) -> None:
-        """Twenty tool rounds is what the static analyst's forty steps buy.
-
-        The table in ``MIN_TOOL_OUTPUT_CHARS``'s own comment, as assertions:
-        on the windows a probe or the table answers for, the floor spends a
-        few hundred tokens of the reply's room at worst; on the fallback,
-        where nothing reported a window, it overruns.
-        """
-        for window, over_window in ((131072, False), (32768, False), (8192, True)):
+    def test_the_largest_configured_loop_stays_inside_every_shipped_window(self) -> None:
+        """Twenty tool rounds is what the static analyst's forty steps buy."""
+        for window in _shipped_windows():
             held = _spent_by(window, 20, floor=cw.MIN_TOOL_OUTPUT_CHARS)
-            held_tokens = held // cw.CHARS_PER_TOKEN
-            assert (held_tokens > window) is over_window, window
-            if not over_window:
-                # Past the free room only into the reply reserve, never far.
-                assert held_tokens - _whole_loop_chars(window) // cw.CHARS_PER_TOKEN < 1000
+            assert held // cw.CHARS_PER_TOKEN < window, window
+
+    def test_a_loop_that_starts_with_a_chunk_in_it_stays_inside_too(self) -> None:
+        """A static loop opens with a 20k-token chunk already in the conversation."""
+        for window, preloaded in ((32768, 24000), (32768, 4000), (16384, 4000), (8192, 2000)):
+            held = preloaded * cw.CHARS_PER_TOKEN
+            for _ in range(20):
+                held += cw.derive_tool_output_chars(
+                    window_tokens=window, reply_tokens=8192, held_chars=held
+                )
+            assert held // cw.CHARS_PER_TOKEN <= _whole_loop_chars(window) // cw.CHARS_PER_TOKEN
+
+    def test_a_turn_that_calls_eight_tools_spends_one_turns_room(self) -> None:
+        """Each answer is measured after the last, not all against the same figure."""
+        budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "props"), reply_tokens=8192)
+        budget.note_conversation("static", 0)
+        caps = [budget.chars_for_one_answer() for _ in range(8)]
+        assert caps == sorted(caps, reverse=True), caps
+        assert sum(caps) < _whole_loop_chars(32768)
 
 
 class TestThePerAgentLedgerBudget:

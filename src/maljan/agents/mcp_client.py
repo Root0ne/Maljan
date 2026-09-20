@@ -323,6 +323,11 @@ class MCPLangChainToolkit:
         shortening target, the summariser, the character cut and the ledger row
         — is taken against one number.
 
+        A limit of zero is not "cut to nothing": it is the conversation having
+        no room left for a tool answer at all. The model is handed one sentence
+        saying so — a deterministic fact about this conversation — and the
+        whole answer stays on the evidence ledger under the call's own id.
+
         If the output exceeds it:
           1. Call ``_output_guardrail`` (e.g. FunctionSummarizer) when available.
           2. Fall back to simple character truncation otherwise.
@@ -360,10 +365,15 @@ class MCPLangChainToolkit:
             Potentially shortened output.
         """
         from maljan.agents.output_shortening import shorten_json_document, shorten_target
-        from maljan.llm.context_window import output_limit
+        from maljan.llm.context_window import no_room_sentence, output_limit
 
         chars_in = len(output)
         limit = output_limit(self._max_output_chars, getattr(self, "_context_budget", None))
+
+        if limit <= 0:
+            said = no_room_sentence(chars_in)
+            self._record_guardrail(chars_in, len(said), over_limit=True, no_room=True, limit=limit)
+            return said
 
         if chars_in <= limit:
             self._record_guardrail(chars_in, chars_in, over_limit=False, limit=limit)
@@ -415,6 +425,7 @@ class MCPLangChainToolkit:
         hard_truncated: bool = False,
         shortened: bool = False,
         shortening_timed_out: bool = False,
+        no_room: bool = False,
         limit: int = 0,
     ) -> None:
         """Record one guardrail decision; no-op without a ledger, never raises."""
@@ -429,5 +440,6 @@ class MCPLangChainToolkit:
             hard_truncated=hard_truncated,
             shortened=shortened,
             shortening_timed_out=shortening_timed_out,
+            no_room=no_room,
             limit=limit,
         )

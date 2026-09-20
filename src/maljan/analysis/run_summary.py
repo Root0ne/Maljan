@@ -165,6 +165,9 @@ class TruncationMetrics:
     # Defaulted because a summary read back from storage predates the outcome.
     tool_output_shortened: int = 0
     tool_output_shortening_timeouts: int = 0
+    # Answers the conversation had no room left for at all: the model was
+    # handed one sentence saying so and the answer stayed on the ledger.
+    tool_output_no_room: int = 0
     # References the pass took out of a report's or a note's ``object_refs``.
     # No object left the bundle for these, which is why they are their own
     # number rather than a reason under ``integrity_dropped``.
@@ -212,7 +215,10 @@ class TruncationMetrics:
     def any_bound_hit(self) -> bool:
         """The per-run P6 headline: did anything get cut at all?"""
         return bool(
-            self.tool_output_over_limit or self.react_step_cap_hits or self.judge_token_cap_hits
+            self.tool_output_over_limit
+            or self.tool_output_no_room
+            or self.react_step_cap_hits
+            or self.judge_token_cap_hits
         )
 
 
@@ -270,6 +276,12 @@ def corpus_held_sentence(truncation: Any) -> str:
     )
 
 
+# The one source word from which nothing may be derived, spelled here rather
+# than imported so the reporting layer keeps no provider import it does not
+# otherwise need. Pinned against the provider module by a test.
+UNKNOWN_WINDOW_SOURCE = "fallback"
+
+
 def cap_in_force_sentence(truncation: Any) -> str:
     """The cap one tool answer was measured against, and where it came from.
 
@@ -283,9 +295,19 @@ def cap_in_force_sentence(truncation: Any) -> str:
     if largest <= 0:
         return ""
     window = getattr(truncation, "context_window", None) or {}
-    tokens = int(window.get("tokens", 0) or 0) if isinstance(window, dict) else 0
-    if tokens <= 0:
+    window = window if isinstance(window, dict) else {}
+    tokens = int(window.get("tokens", 0) or 0)
+    if not window:
         return f"One tool answer was capped at {largest:,} characters, the number this run was set."
+    if str(window.get("source", "")) == UNKNOWN_WINDOW_SOURCE:
+        # Nothing was measured, so nothing is derived and nothing derived is
+        # printed: no characters-per-token figure and no reply reserve, because
+        # neither decided anything. What an operator can act on is the remedy.
+        return (
+            f"The served context window is unknown, so one tool answer was capped at the "
+            f"documented {largest:,} characters rather than derived. To derive it, "
+            f"{window.get('remedy', '')}."
+        ).replace(" .", ".")
     span = (
         f"{largest:,} characters"
         if smallest == largest
@@ -686,6 +708,7 @@ class RunSummary:
                 f"| — hard truncated | {trunc.tool_output_hard_truncated} |",
                 f"| — shortened as a document | {trunc.tool_output_shortened} |",
                 f"| — shortening gave up on its clock | {trunc.tool_output_shortening_timeouts} |",
+                f"| — no room left for the answer | {trunc.tool_output_no_room} |",
                 f"| Characters dropped | {trunc.tool_output_chars_dropped} |",
                 f"| ReAct step cap | {trunc.react_step_cap_hits} / {trunc.react_invocations} |",
                 f"| Judge token cap | {trunc.judge_token_cap_hits} / {trunc.judge_invocations} |",
@@ -815,6 +838,7 @@ class RunSummary:
                 "tool_output_hard_truncated": t.tool_output_hard_truncated,
                 "tool_output_shortened": t.tool_output_shortened,
                 "tool_output_shortening_timeouts": t.tool_output_shortening_timeouts,
+                "tool_output_no_room": t.tool_output_no_room,
                 "tool_output_chars_dropped": t.tool_output_chars_dropped,
                 "react_invocations": t.react_invocations,
                 "react_step_cap_hits": t.react_step_cap_hits,
@@ -1037,6 +1061,7 @@ class RunSummaryBuilder:
             tool_output_hard_truncated=int(snapshot.get("tool_output_hard_truncated", 0)),
             tool_output_shortened=int(snapshot.get("tool_output_shortened", 0)),
             tool_output_shortening_timeouts=int(snapshot.get("tool_output_shortening_timeouts", 0)),
+            tool_output_no_room=int(snapshot.get("tool_output_no_room", 0)),
             tool_output_chars_dropped=int(snapshot.get("tool_output_chars_dropped", 0)),
             react_invocations=int(snapshot.get("react_invocations", 0)),
             react_step_cap_hits=int(snapshot.get("react_step_cap_hits", 0)),

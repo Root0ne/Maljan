@@ -628,6 +628,10 @@ class ServiceContainer:
         this job's context budget, so every answer those toolkits hand back is
         sized against the window the served model was found to have.
         """
+        # Built before the lock is taken, because building it may make a
+        # metadata request and no other thread's accessor should wait on a
+        # network round trip to a model server.
+        budget = self.get_context_budget()
         with self._lock:
             if self._server_registry_cache is None:
                 from maljan.providers.servers import ServerRegistry
@@ -635,7 +639,7 @@ class ServiceContainer:
                 self._server_registry_cache = ServerRegistry(
                     self.config,
                     truncation_ledger=self._truncation_ledger,
-                    context_budget=self.get_context_budget(),
+                    context_budget=budget,
                 )
                 logger.info(
                     "Tool servers: %s.",
@@ -671,27 +675,42 @@ class ServiceContainer:
         must not put a request on the network to find that out.
 
         The failure mode is a smaller answer, never a failed job: an endpoint
-        that says nothing falls to the vendored table and then to the stated
-        fallback, and the run summary carries which of them applied.
+        that says nothing falls to the vendored table, and a window nothing
+        could answer for is not derived from at all — the documented constant
+        applies and the run summary says the window is unknown.
+
+        The container's lock is **not** held while the window is learned. A
+        probe is a network round trip, and holding the lock across one blocks
+        every other accessor on every other thread for its whole duration;
+        the last writer wins instead, which costs at most one redundant probe
+        on the first two callers and is already answered from the cache.
         """
+        held = self._context_budget
+        if held is not None:
+            return held
+        from maljan.agents.composition import analyst_keys
+        from maljan.llm.context_window import budget_for_settings
+
+        agents = [*analyst_keys(self.config), "judge"]
+        budget = budget_for_settings(
+            self.config, agents, probe=self._cap_is_derived() and not self.mock
+        )
         with self._lock:
             if self._context_budget is None:
-                from maljan.agents.composition import analyst_keys
-                from maljan.llm.context_window import budget_for_settings
-
-                agents = [*analyst_keys(self.config), "judge"]
-                self._context_budget = budget_for_settings(
-                    self.config, agents, probe=self._cap_is_derived() and not self.mock
-                )
-                window = self._context_budget.window
-                logger.info(
-                    "Context window: %d (%s — %s); one tool answer may take %d characters.",
-                    window.tokens,
-                    window.source,
-                    window.detail,
-                    self._context_budget.chars_for_one_answer(),
-                )
-            return self._context_budget
+                self._context_budget = budget
+            budget = self._context_budget
+        window = budget.window
+        # ``cap_without_recording``: reading the figure for a log line must not
+        # reserve room a tool answer never took, nor leave a run that called no
+        # tool reporting a cap range nothing used.
+        logger.info(
+            "Context window: %d (%s — %s); one tool answer may take %d characters.",
+            window.tokens,
+            window.source,
+            window.detail,
+            budget.cap_without_recording(),
+        )
+        return budget
 
     def _cap_is_derived(self) -> bool:
         """Whether the tool-output cap comes from the window rather than a setting."""

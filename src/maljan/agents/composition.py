@@ -624,6 +624,12 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
         tools,
         seen,
     )
+    # Off the loop for the same reason, and before the registry asks for it:
+    # learning the window is a metadata request, and the first caller to build
+    # the budget pays for it. For every role but ``generic`` the provider call
+    # above returns nothing, so without this the registry below would be the
+    # first builder — on the caller's own loop.
+    await asyncio.to_thread(container.get_context_budget)
     _claim_in_process_tools(_sandbox_tools(container, definition), "sandbox", tools, seen)
     _claim_in_process_tools(_agent_tools(container, definition, key), "team", tools, seen)
     registry = container.get_server_registry()

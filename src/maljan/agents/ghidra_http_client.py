@@ -308,6 +308,11 @@ class GhidraHTTPClient:
         read once so the whole of one call's decision is taken against one
         number.
 
+        A limit of zero is not "cut to nothing": it is the conversation having
+        no room left for a tool answer at all. The model is handed one sentence
+        saying so — a deterministic fact about this conversation — and the
+        whole answer stays on the evidence ledger under the call's own id.
+
         ``narrowing`` names this tool's own arguments that reach what a
         shortening leaves out. The recorder appends a sentence naming them to a
         shortened answer, and the room that sentence needs is kept back here
@@ -333,10 +338,22 @@ class GhidraHTTPClient:
         """
         from maljan.agents.output_shortening import shorten_json_document, shorten_target
         from maljan.core.truncation_ledger import record_guardrail_outcome
-        from maljan.llm.context_window import output_limit
+        from maljan.llm.context_window import no_room_sentence, output_limit
 
         chars_in = len(output)
         limit = output_limit(self._max_output_chars, getattr(self, "_context_budget", None))
+
+        if limit <= 0:
+            said = no_room_sentence(chars_in)
+            record_guardrail_outcome(
+                self._truncation_ledger,
+                chars_in=chars_in,
+                chars_kept=len(said),
+                over_limit=True,
+                no_room=True,
+                limit=limit,
+            )
+            return said
 
         if chars_in <= limit:
             record_guardrail_outcome(

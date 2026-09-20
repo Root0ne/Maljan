@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,6 +75,8 @@ __all__ = [
     "DEFAULT_REPLY_TOKENS",
     "FALLBACK",
     "FALLBACK_WINDOW_TOKENS",
+    "MAX_BELIEVABLE_WINDOW_TOKENS",
+    "MAX_METADATA_BYTES",
     "MIN_TOOL_OUTPUT_CHARS",
     "PROBED",
     "PROBE_PATHS",
@@ -86,13 +89,17 @@ __all__ = [
     "aprobe_window",
     "awindow_for_settings",
     "budget_for_settings",
-    "budget_or_unknown",
+    "NO_ROOM_BELOW_CHARS",
+    "UNKNOWN_WINDOW_REMEDY",
+    "UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS",
+    "believable",
     "declared_window",
     "derive_tool_output_chars",
     "forget_learned_windows",
     "generation_reserve",
     "learn_window",
     "model_family",
+    "no_room_sentence",
     "output_limit",
     "probe_plan",
     "probe_window",
@@ -193,14 +200,41 @@ DEFAULT_REPLY_TOKENS = 8192
 # long, and every answer lands on the floor.
 REPLY_RESERVE_DIVISOR = 4
 
-# The window assumed when nothing reported one and the table does not name the
-# model. Small on purpose, and the direction matters: a window guessed too
+# Below this a cap stops being an answer and the model is handed a sentence
+# instead. The widest notice a shortened answer can carry is 477 characters
+# (``output_shortening.MAX_SENTENCE_ROOM``), and the shortener stops treating a
+# string as a payload at all below 512, so 989 characters is the exact point
+# under which nothing of the answer survives the notice. A thousand is that
+# boundary rounded up, and the relationship is pinned by a test rather than
+# restated here.
+NO_ROOM_BELOW_CHARS = 1000
+
+# The window recorded when nothing reported one. Nothing is derived from it —
+# see :data:`UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS` — and it exists so that the
+# surfaces have a number to show beside the word ``fallback`` rather than a
+# blank. Small on purpose, and the direction matters: a window guessed too
 # large overflows the server, which on llama.cpp is a silent context shift that
-# drops the oldest tokens — the framing the whole loop depends on — while a
-# window guessed too small only costs information. An operator who lands here
-# is told so by name in the run summary and fixes it in one field
-# (``core.llm.openai.context_size``).
+# drops the oldest tokens — the framing the whole loop depends on.
 FALLBACK_WINDOW_TOKENS = 8192
+
+# What a tool answer is capped at when the window is unknown.
+#
+# Not a derivation. Deriving a cap from a window nobody measured is the
+# platform stating a thing it does not know, dressed as arithmetic — and the
+# arithmetic makes it worse rather than better, because a guessed 8,192 put
+# through the formula produces a loop that overruns the very window it guessed.
+# So an unknown window uses the constant this platform shipped with for years
+# and says, on every surface, that the window is unknown and which setting
+# would fix it. Unrelated to ``schemas.tool_evidence``'s own six thousand,
+# which bounds a stored record rather than a prompt.
+UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS = 6000
+
+# The one thing an operator does about it, named wherever the word ``fallback``
+# is printed.
+UNKNOWN_WINDOW_REMEDY = (
+    "set core.llm.openai.context_size to the window the server was started with, "
+    "or add the model to the vendored context-window table"
+)
 
 # Where a window was learned. Four words, each of which an operator can act on.
 DECLARED = "declared"
@@ -257,19 +291,48 @@ def derive_tool_output_chars(
     converted at ``chars_per_token``. ``reply_tokens`` is what is kept back for
     the model's own reply; zero asks :func:`reply_reserve_tokens` for it.
 
-    The result is never below ``floor`` and never above what the window could
-    hold, and a window of zero — nothing known — is the floor.
+    **The result never exceeds the room that is really left.** The floor
+    applies while the room affords it and is reduced to the room when it does
+    not, and when what is left cannot hold an answer at all the result is
+    ``0`` — the caller then hands the model no answer and says so
+    (:func:`no_room_sentence`). A floor that overrode the room was how a
+    twenty-round loop on a shipped 8,192-token window finished 5,248 tokens
+    past the window it was sizing itself against.
+
+    A window of zero — nothing known — is the floor, because nothing is being
+    measured and the caller is not deriving anything from it.
     """
     window = max(0, int(window_tokens))
     if window <= 0:
         return floor
     per_token = max(1, int(chars_per_token))
     reserve = int(reply_tokens) if int(reply_tokens) > 0 else reply_reserve_tokens(window)
-    held_tokens = max(0, int(held_chars)) // per_token
-    free_tokens = window - reserve - held_tokens
-    if free_tokens <= 0:
-        return floor
-    return max(floor, int(free_tokens * per_token * max(0.0, float(share))))
+    # Subtracted in characters rather than converted to tokens and back: the
+    # round trip through integer division loses up to two characters a call,
+    # and those add up to a loop that finishes a character past the room it
+    # was measuring itself against.
+    free_chars = max(0, (window - reserve) * per_token - max(0, int(held_chars)))
+    share_of_it = int(free_chars * max(0.0, float(share)))
+    cap = share_of_it if share_of_it >= floor else min(floor, free_chars)
+    return cap if cap >= NO_ROOM_BELOW_CHARS else 0
+
+
+def no_room_sentence(chars_in: int) -> str:
+    """What the model is told instead of an answer the conversation cannot hold.
+
+    A deterministic fact about this conversation, not a judgement about the
+    tool: the call was made, it answered, and there is no room left to show any
+    of it. Saying so is the only alternative to handing over a fragment too
+    small to read or overflowing the window the whole derivation exists to fit
+    inside. The tool's own arguments are not named here — narrowing the answer
+    would not help, because the room is gone rather than the answer too large.
+    """
+    return (
+        f"This tool answered with {chars_in:,} characters and none of them could be added: "
+        "the conversation has no room left for a tool answer. Nothing was left out of the "
+        "record — the evidence ledger holds the whole answer under this call's id. "
+        "Answer from what has already been gathered."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +420,30 @@ PROBE_PATHS: tuple[str, ...] = (
 # A probe is on the path of a settings save and of a job's first tool attach,
 # so it is short. A metadata endpoint that has not answered in two seconds is
 # one the fallback answers for.
+#
+# This bounds each *operation* — httpx applies a plain float to connect, read,
+# write and pool separately — so a server that sends one byte every 1.9 s never
+# trips it. ``PROBE_BUDGET_SECONDS`` is the wall around the whole plan, which
+# is what makes the two seconds a real bound rather than a stated one.
 PROBE_TIMEOUT_SECONDS = 2.0
+PROBE_BUDGET_SECONDS = 4.0
+
+# The largest metadata answer the probe will read. A server description is
+# kilobytes; the largest legitimate one, a public model catalogue, is a couple
+# of megabytes. Past this the answer is not read at all, because a probe that
+# is free is not free if a broken endpoint can hand it a gigabyte.
+MAX_METADATA_BYTES = 8_000_000
+
+# The largest window this platform will believe an endpoint that reports one.
+#
+# Ten million tokens is more than an order of magnitude past the largest window
+# any model is served with, so nothing real is refused; what is refused is an
+# endpoint reporting its window in characters, in bytes, or with a units bug.
+# That matters because the consequence is not an over-estimate: a cap derived
+# from 10**18 is larger than any answer there will ever be, so the guardrail's
+# ``chars_in <= limit`` is always true and the shortener, the summariser and
+# the character cut all stop running for the whole run.
+MAX_BELIEVABLE_WINDOW_TOKENS = 10_000_000
 
 
 @dataclass(frozen=True)
@@ -514,17 +600,60 @@ def _headers(api_key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
 
-def _read_answer(ask: Ask, answer: httpx.Response, model: str) -> int:
+def _read_answer(ask: Ask, answer: httpx.Response, model: str) -> tuple[int, str]:
+    """The window this answer reports, or zero, with the body bounded.
+
+    The body is measured before it is parsed. A metadata answer is kilobytes —
+    the largest legitimate one, a public model catalogue, is a couple of
+    megabytes — and a broken or hostile endpoint's is unbounded, so a probe
+    that read it whole would be a memory cost nobody asked for on a machine
+    that is also running a model.
+    """
     if answer.status_code >= 400:
-        return 0
+        return 0, ""
+    if len(answer.content) > MAX_METADATA_BYTES:
+        logger.debug("context window: %s answered with more than the probe reads", ask.what)
+        return 0, ""
     try:
         payload = answer.json()
     except ValueError:
-        return 0
+        return 0, ""
     try:
-        return max(0, int(ask.read(payload, model)))
+        reported = ask.read(payload, model)
     except Exception:  # noqa: BLE001 — a shape nobody anticipated is not a window
+        return 0, ""
+    believed = believable(reported)
+    if believed > 0 or not isinstance(reported, int) or reported <= 0:
+        return believed, ""
+    return 0, (
+        f"{ask.what} reported {int(reported):,} tokens, which is past the "
+        f"{MAX_BELIEVABLE_WINDOW_TOKENS:,} this platform will believe; the figure was refused"
+    )
+
+
+def believable(tokens: object) -> int:
+    """``tokens`` as a window this platform will act on, or zero.
+
+    An endpoint's number is untrusted input. A proxy reporting a window in
+    characters, in bytes, or with a units bug produces an integer that is
+    perfectly well-formed and absurd, and the consequence is not a bad estimate
+    — a cap of 375 million million characters makes ``chars_in <= limit`` true
+    for every answer there will ever be, so the shortener, the summariser and
+    the character cut all stop running and a two-hundred-megabyte tool answer
+    goes straight into the conversation. One arithmetic accident switches the
+    guardrail off for a whole run.
+
+    So a window is believed only up to :data:`MAX_BELIEVABLE_WINDOW_TOKENS`,
+    and anything past it is refused rather than clamped: a number that far out
+    is not a large window reported badly, it is a different unit, and treating
+    it as a window of any size would be inventing one. ``True`` is excluded
+    explicitly, because it is an ``int`` and would read as a window of 1.
+    """
+    if isinstance(tokens, bool) or not isinstance(tokens, int):
         return 0
+    if tokens <= 0 or tokens > MAX_BELIEVABLE_WINDOW_TOKENS:
+        return 0
+    return tokens
 
 
 def _probed(ask: Ask, tokens: int) -> WindowFact:
@@ -539,7 +668,12 @@ def _nothing_answered(plan: Iterable[Ask]) -> str:
 def probe_window(
     provider: str, *, endpoint: object, model: str = "", api_key: str = ""
 ) -> WindowFact | None:
-    """Ask the endpoint what window it serves. ``None`` when it did not say.
+    """Ask the endpoint what window it serves.
+
+    ``None`` when nothing was learned and nothing needs saying. A
+    :data:`FALLBACK` fact when an endpoint answered with a number this platform
+    refuses to believe, because that is a thing an operator has to be told and
+    a silent fall to the table would not tell them.
 
     Synchronous, for the worker: a job resolves its window once, on a worker
     thread, before its first tool answer. Never raises.
@@ -547,22 +681,27 @@ def probe_window(
     plan = probe_plan(provider, endpoint, model)
     if not plan:
         return None
+    refused = ""
+    deadline = time.monotonic() + PROBE_BUDGET_SECONDS
     try:
         with httpx.Client(timeout=PROBE_TIMEOUT_SECONDS) as client:
             for ask in plan:
+                if time.monotonic() >= deadline:
+                    logger.debug("context window: the probe ran out of time before %s", ask.what)
+                    break
                 try:
                     answer = _send(client, ask, api_key)
                 except httpx.HTTPError as exc:
                     logger.debug("context window: %s did not answer (%s)", ask.what, type(exc))
                     continue
-                tokens = _read_answer(ask, answer, model)
+                tokens, said = _read_answer(ask, answer, model)
                 if tokens > 0:
                     return _probed(ask, tokens)
+                refused = refused or said
     except Exception as exc:  # noqa: BLE001 — a probe never fails a run
         logger.debug("the context-window probe could not be made: %s", exc)
         return None
-    logger.debug("context window: %s", _nothing_answered(plan))
-    return None
+    return _nothing_believable(plan, refused)
 
 
 async def aprobe_window(
@@ -572,20 +711,41 @@ async def aprobe_window(
     plan = probe_plan(provider, endpoint, model)
     if not plan:
         return None
+    refused = ""
+    deadline = time.monotonic() + PROBE_BUDGET_SECONDS
     try:
         async with httpx.AsyncClient(timeout=PROBE_TIMEOUT_SECONDS) as client:
             for ask in plan:
+                if time.monotonic() >= deadline:
+                    logger.debug("context window: the probe ran out of time before %s", ask.what)
+                    break
                 try:
                     answer = await _asend(client, ask, api_key)
                 except httpx.HTTPError as exc:
                     logger.debug("context window: %s did not answer (%s)", ask.what, type(exc))
                     continue
-                tokens = _read_answer(ask, answer, model)
+                tokens, said = _read_answer(ask, answer, model)
                 if tokens > 0:
                     return _probed(ask, tokens)
+                refused = refused or said
     except Exception as exc:  # noqa: BLE001 — a probe never blocks a settings save
         logger.debug("the context-window probe could not be made: %s", exc)
         return None
+    return _nothing_believable(plan, refused)
+
+
+def _nothing_believable(plan: Iterable[Ask], refused: str) -> WindowFact | None:
+    """What a probe that learned no window has to say for itself.
+
+    Nothing, when the endpoints simply did not report one — the table answers
+    next and there is no news. A fallback fact carrying the reason when one of
+    them reported a number that was refused: an operator whose proxy reports a
+    window in bytes needs to read that sentence rather than wonder why their
+    run is using the vendored figure.
+    """
+    if refused:
+        logger.warning("context window: %s", refused)
+        return unknown_window(refused)
     logger.debug("context window: %s", _nothing_answered(plan))
     return None
 
@@ -606,8 +766,16 @@ async def _asend(client: httpx.AsyncClient, ask: Ask, api_key: str) -> httpx.Res
 # Learning it once, per provider, endpoint and model
 # ---------------------------------------------------------------------------
 
+# How long an answer about one endpoint is believed. Long enough that the
+# several agents of a job, and the several jobs of a shift, ask once; short
+# enough that a server restarted with a different window, or one that was down
+# when the first job ran, is asked again without anybody restarting the worker.
+# Both outcomes are cached under it — a dead endpoint asked once per agent was
+# four plans and twenty-four seconds of a run.
+WINDOW_CACHE_SECONDS = 900.0
+
 _learned_lock = threading.Lock()
-_learned: dict[tuple[str, str, str], WindowFact] = {}
+_learned: dict[tuple[str, str, str], tuple[float, WindowFact | None]] = {}
 
 
 def forget_learned_windows() -> None:
@@ -623,30 +791,31 @@ def learn_window(
     model: str = "",
     api_key: str = "",
     declared: int = 0,
+    declared_is_default: bool = False,
     probe: bool = True,
 ) -> WindowFact:
     """The served window for one ``(provider, endpoint, model)``, learned once.
 
     Cached on exactly those three, so a changed endpoint or a changed model is
-    a different question and gets asked again. ``declared`` is the operator's
-    own statement of the window and short-circuits everything: for Ollama it is
-    what the provider sends with each call, and for an OpenAI-compatible
-    endpoint it is the operator naming a window no metadata endpoint offered.
+    a different question and gets asked again.
+
+    ``declared`` does **not** short-circuit the probe. Ollama is why: the
+    provider sends ``num_ctx`` with every call, so the served window is the
+    smaller of that and what the weights hold, and only ``/api/show`` knows the
+    second. The same rule protects an OpenAI-compatible endpoint from a stale
+    ``context_size`` left behind by a server that has since been restarted
+    smaller. :func:`_combined` is where the two meet.
 
     ``probe=False`` answers from what is already known, the table and the
     fallback, without touching the network.
     """
-    if int(declared) > 0:
-        return _declared_fact(int(declared))
     key = (str(provider), str(endpoint or ""), str(model or ""))
-    with _learned_lock:
-        cached = _learned.get(key)
-    if cached is not None:
-        return cached
-    fact: WindowFact | None = None
-    if probe:
-        fact = probe_window(provider, endpoint=endpoint, model=model, api_key=api_key)
-    return _remembered(key, fact or table_window(model) or unknown_window())
+    asked, learned = _cached(key)
+    if not asked and probe:
+        learned = _remembered(
+            key, probe_window(provider, endpoint=endpoint, model=model, api_key=api_key)
+        )
+    return _combined(int(declared), bool(declared_is_default), _preferred(learned, model))
 
 
 async def alearn_window(
@@ -656,61 +825,125 @@ async def alearn_window(
     model: str = "",
     api_key: str = "",
     declared: int = 0,
+    declared_is_default: bool = False,
     probe: bool = True,
 ) -> WindowFact:
     """:func:`learn_window` on the caller's loop, for the settings probe.
 
-    The same order, the same cache and the same rule about what is remembered;
-    only the transport differs, because the API is async and the worker is not.
+    The same order, the same cache and the same combination rule; only the
+    transport differs, because the API is async and the worker is not.
     """
-    if int(declared) > 0:
-        return _declared_fact(int(declared))
     key = (str(provider), str(endpoint or ""), str(model or ""))
-    with _learned_lock:
-        cached = _learned.get(key)
-    if cached is not None:
-        return cached
-    fact: WindowFact | None = None
-    if probe:
-        fact = await aprobe_window(provider, endpoint=endpoint, model=model, api_key=api_key)
-    return _remembered(key, fact or table_window(model) or unknown_window())
+    asked, learned = _cached(key)
+    if not asked and probe:
+        learned = _remembered(
+            key, await aprobe_window(provider, endpoint=endpoint, model=model, api_key=api_key)
+        )
+    return _combined(int(declared), bool(declared_is_default), _preferred(learned, model))
 
 
-def _declared_fact(tokens: int) -> WindowFact:
-    return WindowFact(
-        tokens, DECLARED, "the window this deployment's settings name for the endpoint"
-    )
+def _declared_fact(tokens: int, is_default: bool = False) -> WindowFact:
+    """What a settings-named window says about itself.
 
-
-def _remembered(key: tuple[str, str, str], fact: WindowFact) -> WindowFact:
-    """Cache a probed answer and hand it back; anything else is not cached.
-
-    A table or fallback answer costs nothing to reach, and remembering one
-    would mean a server that happened to be down when the first job ran is
-    never asked again for the life of the process.
+    A deployment that never touched the field is not an operator statement,
+    and saying so was how an untouched Ollama default came to be reported as
+    "this deployment's own setting" for a number nobody chose.
     """
-    if fact.source == PROBED:
+    said = (
+        "the context size this platform requests by default"
+        if is_default
+        else "the window this deployment's settings name for the endpoint"
+    )
+    return WindowFact(tokens, DECLARED, said)
+
+
+def _preferred(learned: WindowFact | None, model: str) -> WindowFact | None:
+    """What the endpoint said, or the table, in that order.
+
+    A probed answer wins. Anything else the probe produced is a refusal
+    carrying its reason, and the vendored table is a better window than a
+    refusal — but the refusal stands when the table does not name the model,
+    so the reason reaches the run summary instead of being replaced by a
+    generic one.
+    """
+    if learned is not None and learned.source == PROBED:
+        return learned
+    return table_window(model) or learned
+
+
+def _combined(declared: int, declared_is_default: bool, learned: WindowFact | None) -> WindowFact:
+    """One window out of what the settings name and what was found.
+
+    Where both are known and one was **probed**, the smaller wins: the server
+    is the authority on what it serves, and a settings value left behind by a
+    restart must not be allowed to overflow it. Where the other source is the
+    vendored table or the fallback, the settings win instead — a figure
+    published for a model family, or no figure at all, is not evidence against
+    an operator describing their own deployment.
+    """
+    if declared <= 0:
+        return learned or unknown_window()
+    stated = _declared_fact(declared, declared_is_default)
+    if learned is None or learned.source != PROBED:
+        return stated
+    return min((stated, learned), key=lambda fact: fact.tokens)
+
+
+def _cached(key: tuple[str, str, str]) -> tuple[bool, WindowFact | None]:
+    """``(asked recently, what came back)`` for one endpoint and model.
+
+    Two answers, not one: a remembered *failure* is a ``None`` that must not be
+    read as "never asked", or the failure cache would ask again every time and
+    the amplification it exists to stop would come straight back.
+    """
+    with _learned_lock:
+        held = _learned.get(key)
+    if held is None:
+        return False, None
+    learned_at, fact = held
+    if time.monotonic() - learned_at > WINDOW_CACHE_SECONDS:
         with _learned_lock:
-            _learned[key] = fact
+            _learned.pop(key, None)
+        return False, None
+    return True, fact
+
+
+def _remembered(key: tuple[str, str, str], fact: WindowFact | None) -> WindowFact | None:
+    """Remember what the endpoint said, including that it said nothing.
+
+    A failure is cached too, and that is deliberate: a job resolves several
+    agents against one endpoint, and a dead endpoint asked once per agent cost
+    a run four full plans. What keeps a recovered server from being written off
+    for the life of the process is the age check in :func:`_cached` rather than
+    a refusal to write the answer down.
+    """
+    with _learned_lock:
+        _learned[key] = (time.monotonic(), fact)
     return fact
 
 
-def declared_window(settings: Any, provider: str) -> int:
-    """The window this deployment's own settings name for ``provider``.
+def declared_window(settings: Any, provider: str) -> tuple[int, bool]:
+    """``(tokens, is_default)`` for the window this deployment's settings name.
 
-    Ollama's ``num_ctx`` is sent with every call, so it is the served window
-    rather than a description of one. The OpenAI-compatible ``context_size``
-    is the operator saying what their server was started with, and zero — its
-    default — means they have not said.
+    Ollama's ``num_ctx`` is sent with every call, so it is one half of the
+    served window whether or not anybody chose it — which is why the second
+    element exists: the field ships with a value, and reporting an untouched
+    default as an operator's statement was a claim nobody had made. The
+    OpenAI-compatible ``context_size`` ships at zero, so a positive value there
+    is always somebody's decision.
     """
     try:
         if provider == "ollama":
-            return int(settings.llm.ollama.num_ctx)
+            from maljan.core.config import OllamaConfig
+
+            value = int(settings.llm.ollama.num_ctx)
+            shipped = int(OllamaConfig.model_fields["num_ctx"].default)
+            return value, value == shipped
         if provider == "openai":
-            return int(getattr(settings.llm.openai, "context_size", 0) or 0)
+            return int(getattr(settings.llm.openai, "context_size", 0) or 0), False
     except Exception as exc:  # noqa: BLE001 — an unreadable setting is not a window
         logger.debug("context window: the declared window could not be read (%s)", exc)
-    return 0
+    return 0, False
 
 
 def _provider_key(settings: Any, provider: str) -> str:
@@ -723,6 +956,33 @@ def _provider_key(settings: Any, provider: str) -> str:
         return ""
 
 
+def _questions(settings: Any, agents: list[str]) -> list[dict[str, Any]]:
+    """The distinct windows this run has to learn, one per pair, in order.
+
+    Deduplicated on ``(provider, endpoint, model)`` — the cache's own key —
+    because that is the question, and a team of five agents on one endpoint is
+    one question asked once. Asked per agent instead, a dead endpoint cost a
+    run four full plans and twelve requests before it could start.
+    """
+    from maljan.core.model_assignments import assignments_for
+
+    asked: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for assignment in assignments_for(settings, agents):
+        declared, is_default = declared_window(settings, assignment.provider)
+        asked.setdefault(
+            (assignment.provider, assignment.endpoint, assignment.model),
+            {
+                "provider": assignment.provider,
+                "endpoint": assignment.endpoint,
+                "model": assignment.model,
+                "api_key": _provider_key(settings, assignment.provider),
+                "declared": declared,
+                "declared_is_default": is_default,
+            },
+        )
+    return list(asked.values())
+
+
 def window_for_settings(settings: Any, agents: list[str], *, probe: bool = True) -> WindowFact:
     """The window one run may count on, across every model its agents call.
 
@@ -731,20 +991,7 @@ def window_for_settings(settings: Any, agents: list[str], *, probe: bool = True)
     tightest. A run whose agents all sit on one endpoint — the ordinary shape —
     asks one question and gets one answer.
     """
-    from maljan.core.model_assignments import assignments_for
-
-    facts: list[WindowFact] = []
-    for assignment in assignments_for(settings, agents):
-        facts.append(
-            learn_window(
-                assignment.provider,
-                endpoint=assignment.endpoint,
-                model=assignment.model,
-                api_key=_provider_key(settings, assignment.provider),
-                declared=declared_window(settings, assignment.provider),
-                probe=probe,
-            )
-        )
+    facts = [learn_window(probe=probe, **question) for question in _questions(settings, agents)]
     if not facts:
         return unknown_window("this run names no model")
     return min(facts, key=lambda fact: fact.tokens)
@@ -754,18 +1001,8 @@ async def awindow_for_settings(
     settings: Any, agents: list[str], *, probe: bool = True
 ) -> WindowFact:
     """:func:`window_for_settings` on the caller's loop."""
-    from maljan.core.model_assignments import assignments_for
-
     facts = [
-        await alearn_window(
-            assignment.provider,
-            endpoint=assignment.endpoint,
-            model=assignment.model,
-            api_key=_provider_key(settings, assignment.provider),
-            declared=declared_window(settings, assignment.provider),
-            probe=probe,
-        )
-        for assignment in assignments_for(settings, agents)
+        await alearn_window(probe=probe, **question) for question in _questions(settings, agents)
     ]
     if not facts:
         return unknown_window("this run names no model")
@@ -806,8 +1043,12 @@ class ContextBudget:
     fullest live conversation decides, because one cap serves them all and the
     fullest is the one with least room to spare.
 
-    Reading is lock-protected and never raises: a budget that cannot answer
-    hands back the floor, which is a smaller answer rather than a failed call.
+    Reading is lock-protected and never raises.
+
+    A budget over an **unknown** window derives nothing. There is no
+    measurement to derive from, so it answers with
+    :data:`UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS` — the constant this platform
+    shipped with — and every surface says the window is unknown.
     """
 
     def __init__(
@@ -826,26 +1067,50 @@ class ContextBudget:
         self.reply_tokens = reply_reserve_tokens(window.tokens, reply_tokens)
         self._lock = threading.Lock()
         self._held: dict[str, int] = {}
+        # What has been handed out since a conversation was last measured. A
+        # model turn may request several tools at once and every answer it
+        # produces is measured before the next turn is framed, so without this
+        # each of them would be measured against the same free room and the
+        # turn as a whole could spend it k times over. Cleared by the next
+        # measurement, which already contains the answers it is clearing.
+        self._handed = 0
         self._smallest = 0
         self._largest = 0
+
+    @property
+    def derives(self) -> bool:
+        """Whether this budget has a measured window to derive a cap from."""
+        return self.window.source != FALLBACK
 
     def note_conversation(self, agent: str, chars: int) -> None:
         """Record what one agent's conversation weighs as of this turn."""
         with self._lock:
             self._held[str(agent)] = max(0, int(chars))
+            self._handed = 0
 
     def forget_conversation(self, agent: str) -> None:
         """Forget a loop that has finished, so its size stops binding."""
         with self._lock:
             self._held.pop(str(agent), None)
+            if not self._held:
+                self._handed = 0
 
     def held_chars(self) -> int:
-        """The fullest live conversation, in characters."""
+        """The fullest live conversation, plus what this turn has already spent."""
         with self._lock:
-            return max(self._held.values(), default=0)
+            return max(self._held.values(), default=0) + self._handed
 
     def chars_for_one_answer(self) -> int:
-        """The cap a tool answer arriving now is given."""
+        """The cap a tool answer arriving now is given, and reserve it.
+
+        Reserving the cap rather than the answer's real size is the
+        conservative direction: an answer smaller than its cap leaves the turn
+        looking fuller than it is, and the next measurement corrects it. The
+        alternative — reserving nothing until the answer is sized — is what let
+        eight tool calls in one turn each take an eighth of the same free room.
+        """
+        if not self.derives:
+            return UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
         cap = derive_tool_output_chars(
             window_tokens=self.window.tokens,
             held_chars=self.held_chars(),
@@ -855,9 +1120,28 @@ class ContextBudget:
             floor=self.floor,
         )
         with self._lock:
+            self._handed += cap
             self._smallest = cap if self._smallest == 0 else min(self._smallest, cap)
             self._largest = max(self._largest, cap)
         return cap
+
+    def cap_without_recording(self) -> int:
+        """The cap as it stands, for a log line or a settings page.
+
+        The same arithmetic with nothing written down: reading it must not
+        reserve room a tool answer never took, and must not leave a run that
+        called no tool reporting a cap range nothing used.
+        """
+        if not self.derives:
+            return UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
+        return derive_tool_output_chars(
+            window_tokens=self.window.tokens,
+            held_chars=self.held_chars(),
+            reply_tokens=self.reply_tokens,
+            chars_per_token=self.chars_per_token,
+            share=self.share,
+            floor=self.floor,
+        )
 
     def snapshot(self) -> dict[str, Any]:
         """What was in force, for the run summary."""
@@ -873,6 +1157,8 @@ class ContextBudget:
             "cap_floor": self.floor,
             "cap_smallest": smallest,
             "cap_largest": largest,
+            "derives": self.derives,
+            "remedy": "" if self.derives else UNKNOWN_WINDOW_REMEDY,
         }
 
 
@@ -884,28 +1170,26 @@ def budget_for_settings(settings: Any, agents: list[str], *, probe: bool = True)
     )
 
 
-_UNKNOWN_BUDGET = ContextBudget(unknown_window("no run context budget was attached"))
-
-
-def budget_or_unknown(budget: Any) -> ContextBudget:
-    """``budget`` when there is one, and the conservative budget when not.
-
-    A toolkit built outside a job — a test, a settings probe — still has to
-    answer "how much of this may the model read", and the honest answer for a
-    model nobody identified is the fallback window's share of itself.
-    """
-    return budget if isinstance(budget, ContextBudget) else _UNKNOWN_BUDGET
-
-
 def output_limit(configured: int, budget: Any) -> int:
     """How many characters of one tool answer may reach the model right now.
 
     One function for both tool paths — the MCP toolkit's guardrail and the
     Ghidra HTTP client's — because they support one claim: what the model reads
-    is inside the limit in force for this call. A positive ``configured`` is the
-    operator having set ``core.preprocessing.max_tool_output_chars`` themselves
-    and is used unchanged; zero asks the window.
+    is inside the limit in force for this call.
+
+    Three answers. A positive ``configured`` is the operator having set
+    ``core.preprocessing.max_tool_output_chars`` themselves, used unchanged. A
+    budget over a measured window derives the cap from what is left. Anything
+    else — no budget at all, or a budget over a window nothing reported — is
+    the documented constant, because a platform with no measurement has nothing
+    to derive from and deriving anyway would be stating what it does not know.
+
+    Deliberately no process-wide stand-in budget: one shared mutable object
+    recording caps across every job and thread is global state for a path that
+    needs a number rather than an object.
     """
     if int(configured) > 0:
         return int(configured)
-    return budget_or_unknown(budget).chars_for_one_answer()
+    if isinstance(budget, ContextBudget):
+        return budget.chars_for_one_answer()
+    return UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS

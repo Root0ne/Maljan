@@ -97,6 +97,7 @@ def record_guardrail_outcome(
     hard_truncated: bool = False,
     shortened: bool = False,
     shortening_timed_out: bool = False,
+    no_room: bool = False,
     limit: int = 0,
 ) -> None:
     """Record one tool-output guardrail decision on ``ledger``.
@@ -124,6 +125,7 @@ def record_guardrail_outcome(
             hard_truncated=hard_truncated,
             shortened=shortened,
             shortening_timed_out=shortening_timed_out,
+            no_room=no_room,
             limit=limit,
         )
     except Exception:  # noqa: BLE001 — telemetry must never break a tool call
@@ -219,6 +221,11 @@ class TruncationLedger:
         # run with any of these was spending an analyst's budget on
         # serialisation.
         self.tool_output_shortening_timeouts = 0
+        # An answer the conversation had no room left for at all. The model was
+        # handed one sentence saying so and the answer stayed on the ledger.
+        # Counted because it is the loudest thing the cap can do to a run, and
+        # a reader seeing thin late evidence needs to know it happened.
+        self.tool_output_no_room = 0
         self.tool_output_chars_in = 0
         self.tool_output_chars_kept = 0
         # The caps that were actually in force, smallest and largest. With the
@@ -292,6 +299,7 @@ class TruncationLedger:
         hard_truncated: bool = False,
         shortened: bool = False,
         shortening_timed_out: bool = False,
+        no_room: bool = False,
         limit: int = 0,
     ) -> None:
         """Record one guardrail decision.
@@ -321,6 +329,8 @@ class TruncationLedger:
                 self.tool_output_shortened += 1
             if shortening_timed_out:
                 self.tool_output_shortening_timeouts += 1
+            if no_room:
+                self.tool_output_no_room += 1
 
     def note_context_window(self, snapshot: dict[str, object] | None) -> None:
         """Record the window the derived caps were worked out from.
@@ -455,6 +465,7 @@ class TruncationLedger:
                 "tool_output_hard_truncated": self.tool_output_hard_truncated,
                 "tool_output_shortened": self.tool_output_shortened,
                 "tool_output_shortening_timeouts": self.tool_output_shortening_timeouts,
+                "tool_output_no_room": self.tool_output_no_room,
                 "tool_output_chars_in": self.tool_output_chars_in,
                 "tool_output_chars_kept": self.tool_output_chars_kept,
                 "tool_output_chars_dropped": chars_dropped(
@@ -508,6 +519,7 @@ class TruncationLedger:
         with self._lock:
             return bool(
                 self.tool_output_over_limit
+                or self.tool_output_no_room
                 or self.react_step_cap_hits
                 or self.judge_token_cap_hits
                 or self.evidence_trimmed

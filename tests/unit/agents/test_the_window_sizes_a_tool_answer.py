@@ -37,14 +37,14 @@ class TestTheDefaultIsToDerive:
 
     def test_zero_means_the_window_decides(self) -> None:
         budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "props"), reply_tokens=8192)
-        assert cw.output_limit(0, budget) == budget.chars_for_one_answer()
+        assert cw.output_limit(0, budget) == 9216
 
     def test_a_positive_setting_is_the_operators_own_cap(self) -> None:
         budget = cw.ContextBudget(cw.WindowFact(1_000_000, cw.PROBED, "props"), reply_tokens=8192)
         assert cw.output_limit(6000, budget) == 6000
 
-    def test_a_toolkit_outside_a_job_still_answers(self) -> None:
-        assert cw.output_limit(0, None) == cw.budget_or_unknown(None).chars_for_one_answer()
+    def test_a_toolkit_outside_a_job_gets_the_documented_constant(self) -> None:
+        assert cw.output_limit(0, None) == cw.UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
 
 
 class TestBothToolPathsCutAtTheDerivedNumber:
@@ -106,9 +106,10 @@ class TestBothToolPathsCutAtTheDerivedNumber:
         toolkit = self._toolkit(self.TIGHT)
         toolkit._truncation_ledger = ledger
 
+        expected = self.TIGHT.cap_without_recording()
         toolkit._apply_output_guardrail(_answer(400))
 
-        assert ledger.rows[-1]["limit"] == self.TIGHT.chars_for_one_answer()
+        assert ledger.rows[-1]["limit"] == expected
 
 
 class TestALoopReportsWhatItHolds:

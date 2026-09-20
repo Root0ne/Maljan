@@ -28,6 +28,91 @@ def _client(handler: Any) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
 
 
+# Anything a model produces on. A path is refused if it merely contains one of
+# these, so the list covers the shapes rather than the exact spellings: the
+# chat and legacy completion endpoints, the Responses API, both embedding
+# endpoints, Ollama's and Anthropic's and Gemini's own generation paths.
+FORBIDDEN = (
+    "completion",
+    "/chat",
+    "generate",
+    "/messages",
+    "generatecontent",
+    "/invoke",
+    "/v1/responses",
+    "embeddings",
+)
+
+# The only request this module may make that is not a GET, named rather than
+# inferred: Ollama describes a model on a POST because its body carries the
+# model's name. Everything else must be a GET, and a guard that allowed "any
+# POST to a listed path" would allow a POST to ``/v1/models``.
+ALLOWED_NON_GET = frozenset({("POST", "/api/show")})
+
+
+def _record_every_request() -> tuple[list[httpx.Request], Any]:
+    """A handler that writes down what it was asked and answers 404.
+
+    Records rather than asserts, deliberately: ``probe_window`` catches
+    ``Exception`` around its whole send loop, so an ``AssertionError`` raised
+    inside the transport would be swallowed and the guard would pass on
+    precisely the call it exists to catch.
+    """
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(404, json={})
+
+    return seen, handler
+
+
+def _sent_by(call: Any) -> list[httpx.Request]:
+    """Every request ``call`` makes through a synchronous client."""
+    seen, handler = _record_every_request()
+    real = httpx.Client
+
+    def stub(**_kwargs: Any) -> httpx.Client:
+        return real(transport=httpx.MockTransport(handler))
+
+    try:
+        httpx.Client = stub  # type: ignore[assignment,misc]
+        call()
+    finally:
+        httpx.Client = real  # type: ignore[misc]
+    return seen
+
+
+def _sent_by_await(call: Any) -> list[httpx.Request]:
+    """Every request ``call`` makes through an asynchronous client."""
+    import asyncio
+
+    seen, handler = _record_every_request()
+    real = httpx.AsyncClient
+
+    def stub(**_kwargs: Any) -> httpx.AsyncClient:
+        return real(transport=httpx.MockTransport(handler))
+
+    try:
+        httpx.AsyncClient = stub  # type: ignore[assignment,misc]
+        asyncio.run(call())
+    finally:
+        httpx.AsyncClient = real  # type: ignore[misc]
+    return seen
+
+
+def _nothing_but_metadata(sent: list[httpx.Request], where: Any) -> None:
+    """Every recorded request is a GET, or the one named POST, on a listed path."""
+    for request in sent:
+        url = str(request.url).lower()
+        path = request.url.path
+        assert path.endswith(cw.PROBE_PATHS), (where, str(request.url))
+        assert not any(word in url for word in FORBIDDEN), (where, str(request.url))
+        if request.method != "GET":
+            suffix = next(p for p in cw.PROBE_PATHS if path.endswith(p))
+            assert (request.method, suffix) in ALLOWED_NON_GET, (where, request.method, path)
+
+
 class TestWhatEachServerKindReports:
     """One shape per server kind, written the way the server writes it."""
 
@@ -115,34 +200,48 @@ class TestTheProbeCanReachNothingThatGenerates:
                 assert not configured or configured.startswith(root), (endpoint, ask.url)
 
     def test_no_planned_path_is_one_a_model_answers_on(self) -> None:
-        forbidden = ("completion", "/chat", "generate", "/messages", "generatecontent", "/invoke")
         for path in cw.PROBE_PATHS:
-            assert not any(word in path.lower() for word in forbidden), path
+            assert not any(word in path.lower() for word in FORBIDDEN), path
 
-    def test_a_probe_that_is_pointed_elsewhere_never_sends_the_request(self) -> None:
-        """Driven through a transport that refuses anything off the list."""
-        seen: list[str] = []
+    def test_the_real_probe_sends_nothing_but_metadata_requests(self) -> None:
+        """The whole of what ``probe_window`` puts on a wire, recorded.
 
-        def handler(request: httpx.Request) -> httpx.Response:
-            seen.append(request.url.path)
-            assert request.url.path.endswith(cw.PROBE_PATHS), request.url.path
-            return httpx.Response(404, json={})
-
+        ``probe_window`` itself is driven, not a second copy of its send loop:
+        a guard over a re-implementation guards the re-implementation. The
+        handler only *records* — an assertion inside it would be swallowed by
+        the probe's own catch-all and the guard would pass on a rogue call.
+        """
         for provider, endpoint, model in self.MATRIX:
-            with _client(handler) as client:
-                for ask in cw.probe_plan(provider, endpoint, model):
-                    if ask.method == "POST":
-                        client.post(ask.url, json=ask.body or {})
-                    else:
-                        client.get(ask.url)
-        assert seen, "the matrix planned nothing at all"
+            sent = _sent_by(
+                lambda p=provider, e=endpoint, m=model: cw.probe_window(p, endpoint=e, model=m)
+            )
+            _nothing_but_metadata(sent, (provider, endpoint))
+
+    def test_the_awaited_probe_sends_nothing_but_metadata_requests(self) -> None:
+        for provider, endpoint, model in self.MATRIX:
+            sent = _sent_by_await(
+                lambda p=provider, e=endpoint, m=model: cw.aprobe_window(p, endpoint=e, model=m)
+            )
+            _nothing_but_metadata(sent, (provider, endpoint))
+
+    def test_learning_a_window_end_to_end_sends_nothing_else(self) -> None:
+        """The path a job takes, from settings to a window, under the same watch."""
+        from maljan.core.config import Settings
+
+        cw.forget_learned_windows()
+        settings = Settings(
+            _env_file=None, llm={"openai": {"base_url": "http://127.0.0.1:8080/v1"}}
+        )
+        sent = _sent_by(lambda: cw.window_for_settings(settings, ["static", "judge"]))
+        _nothing_but_metadata(sent, ("settings",))
+        cw.forget_learned_windows()
 
     def test_the_module_never_asks_a_model_to_produce_anything(self) -> None:
         """The source itself carries no path a generation call is made on."""
         from pathlib import Path
 
         source = Path(cw.__file__).read_text(encoding="utf-8").lower()
-        for word in ("completions", "generatecontent", "/api/generate", "/v1/messages"):
+        for word in FORBIDDEN:
             assert word not in source, word
 
 
@@ -206,11 +305,48 @@ class TestTheArithmetic:
         )
         assert half < empty
 
-    def test_a_nearly_full_conversation_still_gets_a_usable_answer(self) -> None:
+    def test_a_nearly_full_conversation_gets_what_is_left_and_no_more(self) -> None:
+        """The floor applies while the room affords it, and shrinks to it when not."""
+        window, reply = 32768, 8192
+        free = (window - reply) * cw.CHARS_PER_TOKEN
+        # Held so that exactly 1,500 characters of room remain: under the
+        # floor, over the point at which an answer stops being one.
         cap = cw.derive_tool_output_chars(
-            window_tokens=32768, reply_tokens=8192, held_chars=10_000_000
+            window_tokens=window, reply_tokens=reply, held_chars=free - 1500
         )
-        assert cap == cw.MIN_TOOL_OUTPUT_CHARS
+        assert cap == 1500
+
+    def test_a_conversation_with_no_room_left_is_handed_no_answer(self) -> None:
+        window, reply = 32768, 8192
+        free = (window - reply) * cw.CHARS_PER_TOKEN
+        assert (
+            cw.derive_tool_output_chars(
+                window_tokens=window, reply_tokens=reply, held_chars=free - 100
+            )
+            == 0
+        )
+        assert (
+            cw.derive_tool_output_chars(
+                window_tokens=window, reply_tokens=reply, held_chars=10_000_000
+            )
+            == 0
+        )
+
+    def test_the_no_room_point_is_where_the_notice_leaves_no_payload(self) -> None:
+        """989 characters: the widest notice plus the smallest payload."""
+        from maljan.agents.output_shortening import (  # noqa: PLC2701
+            _MIN_SHORTENABLE_STRING,
+            MAX_SENTENCE_ROOM,
+        )
+
+        assert cw.NO_ROOM_BELOW_CHARS >= MAX_SENTENCE_ROOM + _MIN_SHORTENABLE_STRING
+        assert cw.NO_ROOM_BELOW_CHARS < cw.MIN_TOOL_OUTPUT_CHARS
+
+    def test_the_sentence_says_what_happened_without_naming_an_argument(self) -> None:
+        said = cw.no_room_sentence(120_000)
+        assert "120,000" in said
+        assert "no room left" in said
+        assert "`" not in said, "narrowing the call does not make room"
 
     def test_the_floor_leaves_room_for_the_notice_and_a_document(self) -> None:
         from maljan.agents.output_shortening import MAX_SENTENCE_ROOM, shorten_target
@@ -283,10 +419,14 @@ class TestTheBudgetOneRunSpends:
         budget.forget_conversation("static")
         assert budget.chars_for_one_answer() == 9216
 
-    def test_a_toolkit_without_a_budget_gets_the_conservative_one(self) -> None:
-        budget = cw.budget_or_unknown(None)
-        assert budget.window.source == cw.FALLBACK
-        assert budget.chars_for_one_answer() == 2304
+    def test_a_toolkit_without_a_budget_gets_the_documented_constant(self) -> None:
+        """Nothing is derived where nothing was measured."""
+        assert cw.output_limit(0, None) == cw.UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
+
+    def test_a_budget_over_an_unknown_window_derives_nothing_either(self) -> None:
+        budget = cw.ContextBudget(cw.unknown_window())
+        assert budget.derives is False
+        assert budget.chars_for_one_answer() == cw.UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
 
     def test_the_snapshot_records_the_smallest_and_largest_cap_in_force(self) -> None:
         budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "props"), reply_tokens=8192)
