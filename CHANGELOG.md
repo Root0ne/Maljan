@@ -1171,9 +1171,16 @@ change landed on `main`.
   field-by-field glossary dropped because every key in the answer names its own
   direction and `corpora` ships the corpus sentences; what a payload cannot say
   for itself stays. The tool's name, arguments and answer shape are unchanged.
-  Every cell of every Markdown table in the report is escaped now: an import
-  name is the sample's own bytes, and a pipe in one used to add a column while a
-  newline cut the row in half. The Linux block's rates were re-measured after the
+  Every row of every Markdown table in the report is now built by one helper
+  that escapes each cell as it composes the separators, and a guard fails the
+  build if anything else in the renderer writes a `|` into a string: an import
+  name and a PE section name are both the sample's own bytes, and a pipe in one
+  used to add a column while a newline cut the row in half. An HTML or PDF
+  export renders the escape back to a plain `|`; only someone reading the raw
+  `.md` sees the backslash, and only on a value that really carries a pipe.
+  A cell whose value was missing used to print Python's `None` into the report
+  and now prints the placeholder the column intends.
+  The Linux block's rates were re-measured after the
   same change gave the ELF walk content deduplication, so its corpus descriptor
   reads `1837` where it read `1842` and five category shares move by one
   rounding place; no Linux rule's rate moves at all. No behaviour category was
