@@ -685,7 +685,7 @@ class ServiceContainer:
                 )
                 window = self._context_budget.window
                 logger.info(
-                    "Context window: %d tokens (%s — %s); one tool answer may take %d chars.",
+                    "Context window: %d (%s — %s); one tool answer may take %d characters.",
                     window.tokens,
                     window.source,
                     window.detail,
