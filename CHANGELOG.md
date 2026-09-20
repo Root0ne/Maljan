@@ -1071,6 +1071,71 @@ change landed on `main`.
   **Upgrading:** a run with no evidence at all now spends one correction turn
   on an indicator it used to export unquestioned, and carries an advisory row
   for it in `run_summary.validation.unresolved`. Nothing is dropped for it.
+- **The Windows import block says what it measured, or it says nothing.** The
+  Linux half of the API catalogue was cut to what a measurement justified; the
+  Windows half never had been. Measured through the production loader over
+  2,730 freely distributed Windows binaries from 25 independent vendors and 201
+  Windows malware samples — 123 distinct import profiles, deduplicated, with
+  every combination chosen on the older half and scored on the newer — the
+  Windows behaviour block labelled **97.73% of ordinary software against 93.50%
+  of malware**. That is not a weak signal; it is no signal, stated as a fact.
+  Its nine labelled categories are informational now and each names in
+  `corroborated_by` what would give it weight; `keylogging` alone keeps a label
+  and carries `flags_with`, so it waits for the input hook, raw-input device or
+  whole-keyboard read that is the capture rather than the key-state poll a game
+  does every frame. The block now labels **2.01% of ordinary software and
+  21.14% of malware**.
+  **Fifteen of the forty-seven technique rules are gone**, each because its own
+  shipped measurement found nothing in it: within the size-matched band its
+  names fired no more often on malware than on ordinary software (T1003, T1016,
+  T1027, T1049, T1053.005, T1071.004, T1087, T1106, T1140, T1222, T1546.003,
+  T1555, T1620 on Windows, and the two rules on the scanning and tracing
+  provider calls that ATT&CK 19.2 folded into T1685). **Fourteen keep a
+  narrower combination**, and a name was removed from one only where the act it
+  names is not the act the technique describes — `TerminateProcess` ends a
+  process and not a service, `MoveFileEx` renames a file and does not delete
+  it, `IsProcessorFeaturePresent` is the C runtime asking about the processor
+  at startup. Eight further combinations were written, measured and **not**
+  applied, because the only argument for them was that they happened to
+  separate these two corpora best. T1095 keeps one name: the ten Berkeley and
+  Winsock names label one benign binary in twenty and more than a third of
+  everything that touches a network, and a raw socket and a TCP socket are the
+  same import, so what is left is `IcmpSendEcho`, which is ICMP by
+  construction. Over the same corpora the rule set now fires on **19.38% of
+  ordinary software and 59.35% of malware**, against 25.71% and 63.41% before.
+  **Every surviving association carries the rate it was measured at**, under
+  `measured`: the share of the named corpus it fires on, the count of files
+  behind that share, and how many held-out malware profiles support it. The
+  Linux block carries the same field from its own measurement. The rate reaches
+  the model in the `api_capability` answer, the report's import-technique table
+  and the console's cell, so a reader weighs an association instead of reading
+  it as a finding. Every Windows rule also gains the `rule` label and the
+  `ordinary_use` sentence the two Linux rules already had, and the builder
+  refuses a rule missing either.
+  What the numbers are not: neither malware corpus carries technique-level
+  ground truth, so what was measured is that a combination separates binaries
+  already known to be bad from binaries already known to be good, never that a
+  sample performs the technique. 29.2% of the malware corpus imports nothing an
+  import rule can see, and the combinations are tuned to this pair of corpora.
+  `scripts/knowledge/measure_api_behaviour_block.py` gains `--platform windows`
+  so the whole measurement is one command: it reads PE import tables with
+  `pefile` exactly as `extractors/pe_extractor.py` does, records an ordinal-only
+  import as `Ordinal_<n>`, deduplicates by content, takes a directory or an
+  inventory file, and `--write-inventory` saves what it read so the same corpus
+  can be measured again after the files are gone.
+  **Upgrading:** fifteen technique ids disappear from the Windows import layer
+  and fourteen more fire on fewer samples, so a saved report and a live run will
+  show fewer rows in the import-derived ATT&CK table and fewer catalogue
+  associations in the corroboration table; a dashboard counting those rows will
+  read lower for the same sample. `catalog_flags: ["suspicious"]` now appears on
+  a Windows import only where the `keylogging` gate is met, so an
+  `api_capability` consumer that treated the flag as its trigger sees it on
+  roughly one binary in fifty rather than on nearly every one. The
+  `api_capability` answer gains `measured` on a technique row,
+  `behaviour_rates` per category and `corpora` at the top; `api_technique_hits`
+  rows gain `benign_rate`, a sentence, absent on a producer with no measurement
+  — absent means not measured, never "never fires". Nothing was renamed and no
+  category was removed, so a consumer reading `category` alone is unaffected.
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was
