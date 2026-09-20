@@ -263,7 +263,13 @@ def build_prompt_text(report: MalwareReport) -> str:
         for hit in rule_hits:
             apis = ", ".join(str(a) for a in (hit.get("matched_apis") or [])[:4])
             cite = f" [{hit['evidence_id']}]" if hit.get("evidence_id") else ""
-            lines.append(f"  - {hit.get('technique_id', '?')} {hit.get('name', '')}: {apis}{cite}")
+            # The rule's own label, because a row is a rule: two rules for one
+            # technique carry the catalogue's name twice and rendered as two
+            # lines the model could only read as a duplicate.
+            rule = f" ({hit['rule']})" if hit.get("rule") else ""
+            lines.append(
+                f"  - {hit.get('technique_id', '?')} {hit.get('name', '')}{rule}: {apis}{cite}"
+            )
     else:
         lines.append("  (no static analysis)")
     lines.append("")

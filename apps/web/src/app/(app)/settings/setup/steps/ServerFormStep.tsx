@@ -166,6 +166,7 @@ export default function ServerFormStep({
         probe={probe}
         errors={ctx.errors}
         entryKey={SERVERS_KEY}
+        requiredEnv={entry.required_env ?? {}}
         editable={entry.editable}
         sections={[section]}
       />

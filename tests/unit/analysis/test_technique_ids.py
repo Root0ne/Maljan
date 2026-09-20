@@ -63,6 +63,7 @@ class TestApiCapabilityHits:
             {
                 "technique_id": "T1055",
                 "name": "Process Injection",
+                "rule": "",
                 "matched_apis": ["WriteProcessMemory", "CreateRemoteThread"],
             }
         ]
@@ -73,3 +74,69 @@ class TestApiCapabilityHits:
     def test_not_a_payload(self) -> None:
         assert api_capability_hits(None) == []
         assert api_capability_hits({"capabilities": "nope"}) == []
+
+
+class TestTwoRulesForOneTechniqueStayTwoRows:
+    """The catalogue's name is on both, so the name cannot tell them apart.
+
+    Keyed by technique and name alone the two pooled their matched APIs, and
+    the floor of whichever was seen first was applied to the pool — so a
+    technique could be asserted on a combination no single rule ever cleared.
+    """
+
+    @staticmethod
+    def _payload(*rules: dict) -> dict:
+        capabilities = []
+        for rule in rules:
+            for api in rule["matched"]:
+                capabilities.append({"api": api, "techniques": [rule]})
+        return {"capabilities": capabilities}
+
+    def _rule(self, label: str, matched: list[str], min_apis: int = 2) -> dict:
+        return {
+            "technique_id": "T1685",
+            "name": "Disable or Modify Tools",
+            "rule": label,
+            "matched": matched,
+            "min_apis": min_apis,
+        }
+
+    def test_each_rule_is_its_own_row(self) -> None:
+        hits = api_capability_hits(
+            self._payload(
+                self._rule(
+                    "scanning and tracing provider calls", ["AmsiScanBuffer", "EtwEventWrite"]
+                ),
+                self._rule("tracing provider registration", ["EtwEventRegister", "EventWrite"]),
+            )
+        )
+
+        assert len(hits) == 2
+        assert {hit["rule"] for hit in hits} == {
+            "scanning and tracing provider calls",
+            "tracing provider registration",
+        }
+        assert all(hit["technique_id"] == "T1685" for hit in hits)
+
+    def test_neither_rule_clears_its_floor_on_the_others_apis(self) -> None:
+        """One API each: pooled they would be two, and one row would fire."""
+        hits = api_capability_hits(
+            self._payload(
+                self._rule("scanning and tracing provider calls", ["AmsiScanBuffer"]),
+                self._rule("tracing provider registration", ["EtwEventRegister"]),
+            )
+        )
+
+        assert hits == []
+
+    def test_a_rule_repeated_under_every_api_is_still_one_row(self) -> None:
+        hits = api_capability_hits(
+            self._payload(
+                self._rule(
+                    "scanning and tracing provider calls", ["AmsiScanBuffer", "AmsiOpenSession"]
+                )
+            )
+        )
+
+        assert len(hits) == 1
+        assert hits[0]["matched_apis"] == ["AmsiScanBuffer", "AmsiOpenSession"]

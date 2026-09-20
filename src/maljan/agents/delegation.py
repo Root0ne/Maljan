@@ -50,6 +50,7 @@ spent by its specialists' work — only by the wall clock it waits through.
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
@@ -57,7 +58,7 @@ from pydantic import BaseModel, Field
 from maljan.agents.tool_pinning import SERVER_METADATA_KEY
 from maljan.core.logger import logger
 from maljan.pipeline.events import claims_to_payload, emit_agent_message, summarize_claims
-from maljan.pipeline.validation import Violation
+from maljan.pipeline.validation import ROUTE_SEPARATOR, Violation
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -564,6 +565,57 @@ def _task_turn(caller_name: str, task: str, context: str, callee: Any) -> str:
     return "\n\n".join(parts)
 
 
+# How long a handed-over finding row may be. The rows a validator writes are
+# already held to this: ``safe_finding_value`` bounds the value each quotes at
+# two hundred characters, and the sentence around it brings the whole to under
+# eight hundred. A hand-over adds the callee's name in front of the sentence,
+# and a chain of them adds one name per level — nothing bounded that, so a
+# delegation five deep wrote a row the guard's own limit does not describe.
+HANDED_OVER_LIMIT = 800
+# What a chain that had to be cut begins with. Not a name, so it cannot be
+# read as one, and short enough that the bound survives it.
+ELIDED_CHAIN = "…: "
+
+
+def joined_within_the_bound(
+    route: Sequence[str], sentence: str, limit: int = HANDED_OVER_LIMIT
+) -> tuple[str, tuple[str, ...]]:
+    """``route`` in front of ``sentence``, bounded, and the route that survived.
+
+    Two values in, so the bound can only ever shorten the route. ``sentence``
+    is what the producer is being told — a validator wrote it and
+    ``safe_finding_value`` already bounded the value inside it — and it is
+    returned whole, always. Nothing here reads it: an earlier shape parsed the
+    joined string looking for where the route ended, could not tell a route
+    step from a finding that opens ``T1055: ``, and deleted the identifier.
+
+    ``route`` is outermost first, so what is dropped when room runs out is the
+    outermost step: the one nearest the sentence is the agent that found the
+    thing, and the ones before it are the way the ask travelled. A route that
+    lost anything says so with :data:`ELIDED_CHAIN`, always — including when
+    nothing of it is left.
+    """
+    steps = [str(step).strip() for step in route if str(step).strip()]
+    if not steps:
+        return sentence, ()
+    whole = "".join(f"{step}: " for step in steps)
+    if len(whole) + len(sentence) <= limit:
+        return f"{whole}{sentence}", tuple(steps)
+
+    # The marker's own room is taken before any name's: a route that was cut
+    # and does not say so is worse than one name fewer.
+    room = limit - len(sentence) - len(ELIDED_CHAIN)
+    kept: list[str] = []
+    for step in reversed(steps):
+        cost = len(step) + 2
+        if cost > room:
+            break
+        kept.insert(0, step)
+        room -= cost
+    chain = "".join(f"{step}: " for step in kept)
+    return f"{ELIDED_CHAIN}{chain}{sentence}", tuple(kept)
+
+
 def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = True) -> None:
     """Move what the callee recorded onto the caller, so one node writes it all.
 
@@ -609,11 +661,21 @@ def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = Tru
         logger.debug("delegation: the callee's validation state could not be read (%s).", exc)
         return
     for row in rows:
+        # The route and the finding's own sentence, carried apart: the row the
+        # callee drained kept both, so this level prepends a name to a list
+        # rather than to a string and nothing ever reads the sentence looking
+        # for where the route ends.
+        sentence = str(row.get("sentence") or row.get("message") or "")
+        carried = [step for step in str(row.get("route") or "").split(ROUTE_SEPARATOR) if step]
+        message, route = joined_within_the_bound([str(callee.name), *carried], sentence)
         caller.validation_findings.append(
             Violation(
                 code=str(row.get("code", "")),
-                message=f"{callee.name}: {row.get('message', '')}",
+                message=message,
                 path=str(row.get("path", "")),
+                advisory=bool(row.get("advisory")),
+                route=route,
+                sentence=sentence,
             )
         )
     # The two counters are read-modify-write and this runs on an executor

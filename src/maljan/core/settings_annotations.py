@@ -968,6 +968,15 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Technique check",
     },
+    "validation.index_retry_seconds": {
+        "title": "Retry the ATT&CK index build after",
+        "description": (
+            "How many seconds a failed ATT&CK index build is believed before another is "
+            "attempted in the same worker. One unreachable network moment otherwise leaves "
+            "every later job in that worker without the index. 0 never re-attempts."
+        ),
+        "subgroup": "Technique check",
+    },
     "validation.alignment_threshold": {
         "title": "Alignment gate threshold",
         "description": (
@@ -1108,6 +1117,22 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Entries past the budget still record the call and its outcome but carry no "
             "output, and the report states how many were trimmed. Zero disables the "
             "budget and keeps every output."
+        ),
+        "subgroup": "Report content",
+        "advanced": True,
+    },
+    "reporting.evidence_corpus_bytes": {
+        "title": "Grounding corpus per run (bytes)",
+        "description": (
+            "How much of a run's tool output is held in memory, for the length of the job, "
+            "so a grounding check asks what the run saw rather than what the evidence "
+            "budget kept. This is what the process spends: the text is held once and a "
+            "check searches it where it lies, measured at 0.01 MB of working memory over "
+            "a 2.4 MB corpus. The default holds about 2,700 tool answers, against the few "
+            "hundred a whole team makes. Past the ceiling the corpus reports itself "
+            "incomplete, and an absence measured against an incomplete corpus is written "
+            "as a note and drops nothing rather than removing a model's object. Zero keeps "
+            "no corpus, which makes every absence a note."
         ),
         "subgroup": "Report content",
         "advanced": True,
@@ -1678,9 +1703,10 @@ ANNOTATIONS.update(
             "title": "Agent definitions",
             "description": (
                 "Every agent Maljan can run, keyed by a short name: its role, "
-                "its prompt, the tool servers it receives and the static "
-                "provider it reads. The built-ins are read-only apart from "
-                "their enabled switch; clone one to change it."
+                "its prompt, the tool servers it receives, the static "
+                "provider it reads and the step and time budget one of its "
+                "loops gets. The built-ins are read-only apart from their "
+                "enabled switch; clone one to change it."
             ),
             "group": "agents",
             "editor": "agent_definitions",

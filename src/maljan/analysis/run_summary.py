@@ -139,9 +139,14 @@ class TruncationMetrics:
     half the model's native 262,144 (findings-log §2.0) — and until 2026-08-09
     none of it was counted.
 
-    The last three fields are not truncation: they record what the STIX integrity
-    pass removed, because the claim that repairing beats rejecting needs a
-    number.
+    The integrity and cap fields are not truncation: they record what left the
+    **exported** STIX bundle, because the claim that repairing beats rejecting
+    needs a number, and because everything a bundle loses should leave under a
+    name — the pass's own repairs, the references it trims out of a report or a
+    note, and the total indicator cap's own removals. Those three reconcile
+    with the bundle a reader holds. The ``judge_integrity_*`` fields are the
+    same pass on the judge's own bundle, once per verdict attempt including a
+    discarded retry, and are deliberately not part of that total.
     """
 
     tool_output_calls: int
@@ -156,6 +161,40 @@ class TruncationMetrics:
     integrity_invocations: int
     integrity_objects_removed: int
     integrity_dropped: dict[str, int] = field(default_factory=dict)
+    # A JSON answer shortened by dropping list elements rather than characters.
+    # Defaulted because a summary read back from storage predates the outcome.
+    tool_output_shortened: int = 0
+    tool_output_shortening_timeouts: int = 0
+    # References the pass took out of a report's or a note's ``object_refs``.
+    # No object left the bundle for these, which is why they are their own
+    # number rather than a reason under ``integrity_dropped``.
+    integrity_refs_trimmed: int = 0
+    # Indicators the total indicator cap removed, and how often the cap ran.
+    # Defaulted for the same reason the two above are: a summary read back from
+    # storage predates them.
+    indicator_cap_invocations: int = 0
+    indicator_cap_removed: int = 0
+    # The judge path's own integrity passes. Apart from the figures above, and
+    # never summed into them: that pass runs once per verdict *attempt*,
+    # discarded retries included, over a bundle the export may not carry, so a
+    # total holding both reconciles with nothing a reader has.
+    judge_integrity_invocations: int = 0
+    judge_integrity_objects_removed: int = 0
+    judge_integrity_dropped: dict[str, int] = field(default_factory=dict)
+    # What the run's grounding corpus could not hold. Not truncation of a
+    # model's input: it is how much of the run's own record the grounding
+    # checks could not search, which is why an absence this run stated may be
+    # a note rather than a finding.
+    evidence_corpus_missing_answers: int = 0
+    evidence_corpus_missing_tools: list[str] = field(default_factory=list)
+    evidence_corpus_partial_reason: str = ""
+    # And what it did hold, against its ceiling. ``None`` rather than zero: a
+    # summary stored before these existed, or a run whose corpus was gone when
+    # the record was written, knows nothing about what was held, and zero would
+    # be a claim that nothing was.
+    evidence_corpus_answers: int | None = None
+    evidence_corpus_bytes_held: int | None = None
+    evidence_corpus_bytes_ceiling: int | None = None
 
     @property
     def any_bound_hit(self) -> bool:
@@ -163,6 +202,108 @@ class TruncationMetrics:
         return bool(
             self.tool_output_over_limit or self.react_step_cap_hits or self.judge_token_cap_hits
         )
+
+
+def _recorded_calls(latency: Any) -> int:
+    """How many calls the per-agent latency table counts, across every agent."""
+    total = 0
+    for row in (latency or {}).values():
+        if isinstance(row, dict):
+            try:
+                total += max(0, int(row.get("calls") or 0))
+            except (TypeError, ValueError):
+                continue
+    return total
+
+
+def _optional_count(value: Any) -> int | None:
+    """A recorded count, or ``None`` when nothing was recorded.
+
+    ``None`` and ``0`` are two different answers here: one says this run made
+    no record, the other says the record is zero.
+    """
+    if value is None:
+        return None
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+# Past this share of the ceiling the figures are printed unasked: a corpus
+# holding more than half of what it may hold is one whose ceiling is a number
+# the operator should know before the run that reaches it.
+CORPUS_LOUD_SHARE = 0.5
+
+
+def corpus_held_sentence(truncation: Any) -> str:
+    """What the run's grounding corpus held, as one sentence, or ``""``.
+
+    Printed only where it tells a reader something: a corpus that went partial
+    (the loss is stated beside it) or one past half its ceiling. Otherwise the
+    figures stay on the record and nothing is said, because a run with room to
+    spare has nothing to act on.
+    """
+    answers = getattr(truncation, "evidence_corpus_answers", None)
+    held = getattr(truncation, "evidence_corpus_bytes_held", None)
+    ceiling = getattr(truncation, "evidence_corpus_bytes_ceiling", None)
+    if answers is None or held is None or ceiling is None:
+        return ""
+    partial = bool(str(getattr(truncation, "evidence_corpus_partial_reason", "") or "").strip())
+    if not partial and not (ceiling > 0 and held > ceiling * CORPUS_LOUD_SHARE):
+        return ""
+    return (
+        f"The grounding corpus held {count_label(int(answers), 'answer')}, "
+        f"{int(held)} of {int(ceiling)} bytes."
+    )
+
+
+def count_label(count: int, singular: str, plural: str = "") -> str:
+    """ "1 object", "2 objects" — a count and its noun, agreeing.
+
+    The console has the same helper, and the two sentences below are pinned
+    against one shared fixture so the wordings cannot drift apart.
+    """
+    return f"{count} {singular if count == 1 else (plural or singular + 's')}"
+
+
+def bundle_loss_sentence(truncation: Any) -> str:
+    """What the exported STIX bundle lost, as one sentence, or ``""``.
+
+    Built from the reasons, never from the total. ``integrity_objects_removed``
+    counts both integrity passes, and the second one runs after the indicator
+    cap and removes nothing but relationships the cap orphaned — so a line that
+    printed the total called six orphaned relationships "repaired away", and
+    the console, which had already learned to subtract them, disagreed with the
+    report about the same run. One reading, two surfaces.
+    """
+    dropped = getattr(truncation, "integrity_dropped", None) or {}
+
+    def _count(value: Any) -> int:
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    orphaned = _count(dropped.get("cap_orphan"))
+    repaired = max(0, _count(getattr(truncation, "integrity_objects_removed", 0)) - orphaned)
+    capped = _count(getattr(truncation, "indicator_cap_removed", 0))
+    refs = _count(getattr(truncation, "integrity_refs_trimmed", 0))
+
+    parts: list[str] = []
+    if repaired:
+        parts.append(f"{count_label(repaired, 'object')} repaired away as malformed or duplicated")
+    if capped:
+        parts.append(
+            f"{count_label(capped, 'indicator')} over the export's total cap, lowest priority first"
+        )
+    if orphaned:
+        parts.append(f"{count_label(orphaned, 'relationship')} left pointing at a capped indicator")
+    if refs:
+        parts.append(f"{count_label(refs, 'reference')} trimmed from a report or a note")
+    if not parts:
+        return ""
+    return f"The exported STIX bundle is shorter than what the run produced: {'; '.join(parts)}."
 
 
 def stage_duration_lines(stages: Any) -> list[str]:
@@ -182,6 +323,29 @@ def stage_duration_lines(stages: Any) -> list[str]:
         return []
     spent = ", ".join(f"{key} {ms / 1000.0:.1f}s" for key, ms in rows if key)
     return [f"**Per stage**: {spent}  "] if spent else []
+
+
+def tool_latency_lines(latency: Any) -> list[str]:
+    """What each agent's tool calls cost, and which single call cost the most.
+
+    Beside the per-stage line, because the two answer one question between
+    them: a stage that took four minutes is a slow model or a slow tool, and
+    only this says which. An agent whose calls were never timed contributes
+    nothing rather than a row of zeros.
+    """
+    rows = []
+    for agent, row in sorted((latency or {}).items()):
+        if not isinstance(row, dict):
+            continue
+        slowest = row.get("slowest")
+        if not isinstance(slowest, dict):
+            continue
+        total = float(row.get("total_ms") or 0) / 1000.0
+        rows.append(
+            f"{agent} {int(row.get('calls') or 0)} calls in {total:.1f}s, "
+            f"slowest `{slowest.get('tool')}` {float(slowest.get('ms') or 0) / 1000.0:.1f}s"
+        )
+    return [f"**Tool calls**: {'; '.join(rows)}  "] if rows else []
 
 
 def _attribution_layers() -> list[str]:
@@ -275,6 +439,12 @@ class RunSummary:
     # ``time``, ``repeats``, ``budget_seconds``). ``None`` on a run that
     # recorded no loop.
     budget: dict[str, Any] | None = None
+    # What each agent's tool calls cost, from the ledger's own per-call clock:
+    # ``{calls, total_ms, slowest: {tool, ms, id}}`` per agent. A run that
+    # overran used to leave a reader deriving latency from raw timestamps, and
+    # a slow tool could not be told from a slow model. ``None`` on a run whose
+    # ledger holds no timed call.
+    tool_latency: dict[str, Any] | None = None
     # ``dedupe`` is deliberately not a field here. What the report folded is
     # counted while the report's sections are built, which happens after this
     # object exists, so the report builder writes ``dedupe`` onto the summary
@@ -306,6 +476,7 @@ class RunSummary:
             f"**STIX objects**: {self.stix_object_count}  ",
             f"**Elapsed**: {self.elapsed_seconds:.1f}s  ",
             *stage_duration_lines(self.stages),
+            *tool_latency_lines(self.tool_latency),
             "",
         ]
 
@@ -472,12 +643,50 @@ class RunSummary:
                 f" / {trunc.tool_output_calls} |",
                 f"| — summarised | {trunc.tool_output_summarised} |",
                 f"| — hard truncated | {trunc.tool_output_hard_truncated} |",
+                f"| — shortened as a document | {trunc.tool_output_shortened} |",
+                f"| — shortening gave up on its clock | {trunc.tool_output_shortening_timeouts} |",
                 f"| Characters dropped | {trunc.tool_output_chars_dropped} |",
                 f"| ReAct step cap | {trunc.react_step_cap_hits} / {trunc.react_invocations} |",
                 f"| Judge token cap | {trunc.judge_token_cap_hits} / {trunc.judge_invocations} |",
-                f"| STIX objects repaired away | {trunc.integrity_objects_removed} |",
+                f"| STIX indicators over the cap | {trunc.indicator_cap_removed} |",
+                f"| STIX references trimmed | {trunc.integrity_refs_trimmed} |",
+                f"| Judge bundles repaired | {trunc.judge_integrity_objects_removed}"
+                f" over {trunc.judge_integrity_invocations} attempt(s) |",
                 "",
             ]
+            # Said only where the two counts could be read against each other
+            # and disagree, or where something was actually cut. On a run that
+            # hit no bound and counted the same calls twice it is a paragraph
+            # explaining a difference the reader cannot see.
+            if trunc.any_bound_hit or _recorded_calls(self.tool_latency) != trunc.tool_output_calls:
+                lines += [
+                    "Tool output calls are the answers a tool server returned through the "
+                    "guardrail. The per-call latency table counts every recorded call, so it "
+                    "also holds the ones answered in process, which no guardrail sees.",
+                    "",
+                ]
+            if trunc.evidence_corpus_partial_reason:
+                lines += [
+                    "Grounding searched less than this run produced "
+                    f"({trunc.evidence_corpus_partial_reason}): "
+                    f"{trunc.evidence_corpus_missing_answers} answer(s) not kept"
+                    + (
+                        f", from {', '.join(trunc.evidence_corpus_missing_tools)}"
+                        if trunc.evidence_corpus_missing_tools
+                        else ""
+                    )
+                    + ". An absence measured against it is a note and drops nothing.",
+                    "",
+                ]
+            corpus_held = corpus_held_sentence(trunc)
+            if corpus_held:
+                lines += [corpus_held, ""]
+            # The reasons, never the total: a line printing
+            # ``integrity_objects_removed`` called the cap's orphaned
+            # relationships repairs, and said 10 where the console said 4.
+            loss = bundle_loss_sentence(trunc)
+            if loss:
+                lines += [loss, ""]
             if any(trunc.integrity_dropped.values()):
                 reasons = ", ".join(
                     f"{k}={v}" for k, v in sorted(trunc.integrity_dropped.items()) if v
@@ -533,6 +742,7 @@ class RunSummary:
             "triage": dict(self.triage) if self.triage else None,
             "nudge": dict(self.nudge) if self.nudge else None,
             "budget": dict(self.budget) if self.budget else None,
+            "tool_latency": dict(self.tool_latency) if self.tool_latency else None,
         }
 
         if self.validation:
@@ -559,6 +769,8 @@ class RunSummary:
                 "tool_output_over_limit": t.tool_output_over_limit,
                 "tool_output_summarised": t.tool_output_summarised,
                 "tool_output_hard_truncated": t.tool_output_hard_truncated,
+                "tool_output_shortened": t.tool_output_shortened,
+                "tool_output_shortening_timeouts": t.tool_output_shortening_timeouts,
                 "tool_output_chars_dropped": t.tool_output_chars_dropped,
                 "react_invocations": t.react_invocations,
                 "react_step_cap_hits": t.react_step_cap_hits,
@@ -566,9 +778,28 @@ class RunSummary:
                 "judge_token_cap_hits": t.judge_token_cap_hits,
                 "integrity_invocations": t.integrity_invocations,
                 "integrity_objects_removed": t.integrity_objects_removed,
+                "integrity_refs_trimmed": t.integrity_refs_trimmed,
                 "integrity_dropped": dict(t.integrity_dropped),
+                "indicator_cap_invocations": t.indicator_cap_invocations,
+                "indicator_cap_removed": t.indicator_cap_removed,
+                "judge_integrity_invocations": t.judge_integrity_invocations,
+                "judge_integrity_objects_removed": t.judge_integrity_objects_removed,
+                "judge_integrity_dropped": dict(t.judge_integrity_dropped),
+                "evidence_corpus_missing_answers": t.evidence_corpus_missing_answers,
+                "evidence_corpus_missing_tools": list(t.evidence_corpus_missing_tools),
+                "evidence_corpus_partial_reason": t.evidence_corpus_partial_reason,
                 "any_bound_hit": t.any_bound_hit,
             }
+            # Absent rather than zero when this run recorded nothing about
+            # what its corpus held: a stored summary written before the
+            # figures existed must not read as a corpus that held nothing.
+            for key, value in (
+                ("evidence_corpus_answers", t.evidence_corpus_answers),
+                ("evidence_corpus_bytes_held", t.evidence_corpus_bytes_held),
+                ("evidence_corpus_bytes_ceiling", t.evidence_corpus_bytes_ceiling),
+            ):
+                if value is not None:
+                    result["truncation"][key] = value
 
         return result
 
@@ -616,6 +847,7 @@ class RunSummaryBuilder:
         self._triage: dict[str, Any] | None = None
         self._nudge: dict[str, Any] | None = None
         self._budget: dict[str, Any] | None = None
+        self._tool_latency: dict[str, Any] | None = None
 
     def set_budget(self, records: dict[str, list[dict[str, Any]]] | None) -> RunSummaryBuilder:
         """What each agent spent, summed over its loops, and the caps that ended them.
@@ -645,6 +877,44 @@ class RunSummaryBuilder:
                 "caps": caps,
             }
         self._budget = out or None
+        return self
+
+    def set_tool_latency(self, entries: Any) -> RunSummaryBuilder:
+        """What each agent's tool calls cost, per agent, from the ledger.
+
+        Every ledger entry carries the clock of its own round trip, so the
+        question "was the model slow or was the tool slow" is answerable
+        without deriving anything from raw timestamps. Three numbers per
+        agent — how many calls, how long they took together, and the single
+        slowest with the tool that answered it — because the slowest call is
+        what an operator looks for first when a run overran and a list of
+        every call is the ledger, which is already there.
+
+        A call with no measured duration contributes to the count and to
+        nothing else: a zero is not a measurement.
+        """
+        rows: dict[str, dict[str, Any]] = {}
+        for entry in entries or []:
+            row = entry if isinstance(entry, dict) else getattr(entry, "__dict__", None)
+            if not isinstance(row, dict):
+                continue
+            agent = str(row.get("agent") or "").strip()
+            tool = str(row.get("tool") or "").strip()
+            if not agent or not tool:
+                continue
+            try:
+                ms = int(row.get("duration_ms") or 0)
+            except (TypeError, ValueError):
+                ms = 0
+            seen = rows.setdefault(agent, {"calls": 0, "total_ms": 0, "slowest": None})
+            seen["calls"] += 1
+            if ms <= 0:
+                continue
+            seen["total_ms"] += ms
+            slowest = seen["slowest"]
+            if slowest is None or ms > int(slowest["ms"]):
+                seen["slowest"] = {"tool": tool, "ms": ms, "id": str(row.get("id") or "")}
+        self._tool_latency = rows or None
         return self
 
     def set_nudge(self, retry_modes: dict[str, str] | None) -> RunSummaryBuilder:
@@ -712,11 +982,14 @@ class RunSummaryBuilder:
         if not measured:
             return self
         dropped = snapshot.get("integrity_dropped")
+        judge_dropped = snapshot.get("judge_integrity_dropped")
         self._truncation = TruncationMetrics(
             tool_output_calls=int(snapshot.get("tool_output_calls", 0)),
             tool_output_over_limit=int(snapshot.get("tool_output_over_limit", 0)),
             tool_output_summarised=int(snapshot.get("tool_output_summarised", 0)),
             tool_output_hard_truncated=int(snapshot.get("tool_output_hard_truncated", 0)),
+            tool_output_shortened=int(snapshot.get("tool_output_shortened", 0)),
+            tool_output_shortening_timeouts=int(snapshot.get("tool_output_shortening_timeouts", 0)),
             tool_output_chars_dropped=int(snapshot.get("tool_output_chars_dropped", 0)),
             react_invocations=int(snapshot.get("react_invocations", 0)),
             react_step_cap_hits=int(snapshot.get("react_step_cap_hits", 0)),
@@ -724,7 +997,27 @@ class RunSummaryBuilder:
             judge_token_cap_hits=int(snapshot.get("judge_token_cap_hits", 0)),
             integrity_invocations=int(snapshot.get("integrity_invocations", 0)),
             integrity_objects_removed=int(snapshot.get("integrity_objects_removed", 0)),
+            integrity_refs_trimmed=int(snapshot.get("integrity_refs_trimmed", 0)),
             integrity_dropped=dict(dropped) if isinstance(dropped, dict) else {},
+            indicator_cap_invocations=int(snapshot.get("indicator_cap_invocations", 0)),
+            indicator_cap_removed=int(snapshot.get("indicator_cap_removed", 0)),
+            judge_integrity_invocations=int(snapshot.get("judge_integrity_invocations", 0)),
+            judge_integrity_objects_removed=int(snapshot.get("judge_integrity_objects_removed", 0)),
+            judge_integrity_dropped=(
+                dict(judge_dropped) if isinstance(judge_dropped, dict) else {}
+            ),
+            evidence_corpus_missing_answers=int(snapshot.get("evidence_corpus_missing_answers", 0)),
+            evidence_corpus_missing_tools=[
+                str(tool) for tool in (snapshot.get("evidence_corpus_missing_tools") or [])
+            ],
+            evidence_corpus_partial_reason=str(
+                snapshot.get("evidence_corpus_partial_reason", "") or ""
+            ),
+            evidence_corpus_answers=_optional_count(snapshot.get("evidence_corpus_answers")),
+            evidence_corpus_bytes_held=_optional_count(snapshot.get("evidence_corpus_bytes_held")),
+            evidence_corpus_bytes_ceiling=_optional_count(
+                snapshot.get("evidence_corpus_bytes_ceiling")
+            ),
         )
         return self
 
@@ -907,6 +1200,7 @@ class RunSummaryBuilder:
             triage=self._triage,
             nudge=self._nudge,
             budget=self._budget,
+            tool_latency=self._tool_latency,
         )
 
 

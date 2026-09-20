@@ -32,6 +32,7 @@ const entry = (key: string): CatalogEntry => ({
   editor: null,
   subgroup: null,
   advanced: false,
+  required_env: null,
 });
 
 /** Enough of the catalog for the guides that name key families by prefix. */

@@ -17,7 +17,7 @@ function definition(
   role: AgentDefinitionEntry["role"],
   label: string,
 ): AgentDefinitionEntry {
-  return { role, label, prompt: null, tools: [], static_provider: null, enabled: true };
+  return { role, label, prompt: null, tools: [], static_provider: null, enabled: true, max_steps: null, timeout_seconds: null };
 }
 
 const stored: Record<string, AgentDefinitionEntry> = {
@@ -52,6 +52,7 @@ const profiles: CatalogEntry = {
   editor: "stages",
   subgroup: null,
   advanced: false,
+  required_env: null,
 };
 
 /** Only what `buildFieldRowProps` actually reads. */
@@ -91,6 +92,8 @@ describe("the definitions the stages editor is handed", () => {
           tools: [],
           static_provider: null,
           enabled: true,
+          max_steps: null,
+          timeout_seconds: null,
         },
       },
       stored,

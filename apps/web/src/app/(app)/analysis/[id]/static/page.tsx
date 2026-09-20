@@ -68,6 +68,13 @@ export default function StaticTab() {
       ),
     [staticData],
   );
+  // A row is a rule, and two rules can name one technique by two mechanisms —
+  // so the heading counts techniques and the table draws the rule that tells
+  // the two rows apart. Counting rows called two mechanisms two techniques.
+  const techniqueCount = useMemo(
+    () => new Set(techniqueHits.map((h) => h.technique_id ?? "")).size,
+    [techniqueHits],
+  );
   const capabilityProfile = useMemo(
     () =>
       Object.entries(staticData?.api_capabilities ?? {}).sort((a, b) => b[1] - a[1]),
@@ -163,7 +170,7 @@ export default function StaticTab() {
         <div className="bg-bg-surface border border-border rounded">
           <div className="px-4 py-3 border-b border-border">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              ATT&amp;CK from imports ({techniqueHits.length})
+              ATT&amp;CK from imports ({techniqueCount})
             </h2>
             <p className="text-[11px] text-text-muted mt-1">
               Derived from the import table alone — no sandbox, no model. This is the
@@ -175,6 +182,7 @@ export default function StaticTab() {
               <tr className="border-b border-border">
                 <Th>Technique</Th>
                 <Th>Name</Th>
+                <Th>Rule</Th>
                 <Th>Confidence</Th>
                 <Th>Imports</Th>
               </tr>
@@ -186,6 +194,9 @@ export default function StaticTab() {
                     {h.technique_id ?? "-"}
                   </td>
                   <td className="px-4 py-2 text-xs text-text-primary">{h.name ?? "-"}</td>
+                  {/* What distinguishes two rules for one technique. A
+                      producer with no rules of its own leaves the cell bare. */}
+                  <td className="px-4 py-2 text-xs text-text-secondary">{h.rule || "-"}</td>
                   <td className="px-4 py-2 text-xs font-mono text-text-secondary">
                     {typeof h.confidence === "number" ? h.confidence.toFixed(2) : "-"}
                   </td>

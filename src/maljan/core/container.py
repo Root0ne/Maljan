@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
+import uuid
 import weakref
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any, cast
@@ -37,6 +38,7 @@ from typing import TYPE_CHECKING, Any, cast
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from maljan.agents.registry import AgentRegistry
+from maljan.agents.run_evidence_corpus import RunEvidenceCorpus
 from maljan.core.config import PROMPT_ROLES, REPORTER_AGENT_KEY, Settings
 from maljan.core.exceptions import ConfigurationError
 from maljan.core.logger import logger
@@ -263,6 +265,13 @@ class ServiceContainer:
         # queued it knows it. Empty for the CLI and for tests, which run one
         # analysis per process and have no such id to give.
         self.job_id = str(job_id or "")
+        # What ``job_key`` answers when nothing gave it one. Composed here, so
+        # it belongs to this container and therefore to one run: the key names
+        # the directory a tool server stages in, and a value derived from the
+        # process alone would have a second run that drew the same pid — after
+        # a recycle, ordinary in a container with a small ``pid_max`` — inherit
+        # the first run's uploads, carved payloads and capture.
+        self._run_key = f"cli-{os.getpid()}-{uuid.uuid4().hex[:8]}"
         # Progress feed for the live transcript UI. ``None`` outside the API
         # worker (CLI, tests), which makes every emit a no-op — see
         # maljan.pipeline.events.
@@ -351,6 +360,15 @@ class ServiceContainer:
         # Truncation is designed into this pipeline and has never been counted.
         self._truncation_ledger = TruncationLedger()
 
+        # What this run SAW, as opposed to what its ledger keeps. The evidence
+        # byte budget blanks an entry after the model has read it, so a
+        # grounding check over the stored ledger told a judge that a C2 a tool
+        # really returned appears nowhere. In memory, per job, dropped with
+        # this container; never in the graph state and never persisted.
+        self._evidence_corpus: RunEvidenceCorpus | None = RunEvidenceCorpus(
+            int(getattr(config.reporting, "evidence_corpus_bytes", 0) or 0)
+        )
+
         # Per-job source of evidence-ledger ids. One counter for the whole job
         # so ``ev_0007`` names one tool call rather than one per agent.
         self._evidence_counter = EvidenceCounter()
@@ -369,6 +387,7 @@ class ServiceContainer:
         )
 
         self._configure_langsmith()
+        self._announce_index_retry()
 
     @property
     def is_mock(self) -> bool:
@@ -597,12 +616,17 @@ class ServiceContainer:
         server's subprocess lives for exactly one analysis and is closed by
         ``aclose`` at the end of it — the same lifetime the static and sandbox
         providers already have.
+
+        It carries this job's truncation ledger, so every toolkit it opens
+        records its guardrail decisions where the run summary reads them.
         """
         with self._lock:
             if self._server_registry_cache is None:
                 from maljan.providers.servers import ServerRegistry
 
-                self._server_registry_cache = ServerRegistry(self.config)
+                self._server_registry_cache = ServerRegistry(
+                    self.config, truncation_ledger=self._truncation_ledger
+                )
                 logger.info(
                     "Tool servers: %s.",
                     ", ".join(sorted(self.config.mcp.servers)) or "(none)",
@@ -626,6 +650,15 @@ class ServiceContainer:
     def get_truncation_ledger(self) -> TruncationLedger:
         """Return the per-run truncation ledger (pitfall P6)."""
         return self._truncation_ledger
+
+    def get_evidence_corpus(self) -> RunEvidenceCorpus | None:
+        """Return the per-job record of what the run's tools answered, or ``None``.
+
+        ``None`` once the container is closed. Every reader takes that as "no
+        corpus", which is the answer that makes an absence a note rather than a
+        reason to remove something.
+        """
+        return self._evidence_corpus
 
     def get_evidence_counter(self) -> EvidenceCounter:
         """Return the per-job counter that issues evidence-ledger ids."""
@@ -718,8 +751,17 @@ class ServiceContainer:
         One key per job: the handles' same-job short circuit compares it, so a
         container that answered differently for two of its agents would close
         and reopen every server between them.
+
+        A caller with no job id of its own — the command line, a probe, a
+        script — gets one per run. The key names the directory a tool server
+        stages in, and the constant it used to be meant two ``maljan`` runs on
+        one machine writing into one directory, each able to name the other's
+        upload and carved payloads by their paths. One per run rather than one
+        per process, because a pid comes round again: this is fixed for the
+        life of the container, different for the next one, and the run that
+        composed it removes it (``MaljanApp.aclose``).
         """
-        return self.job_id or "job"
+        return self.job_id or self._run_key
 
     def get_agent(self, name: str) -> BaseAnalyst:
         """The agent definition ``name`` names, instantiated and wired.
@@ -764,6 +806,7 @@ class ServiceContainer:
             agent.token_ledger = getattr(self, "_token_ledger", None)
             agent.truncation_ledger = getattr(self, "_truncation_ledger", None)
             agent.evidence_counter = getattr(self, "_evidence_counter", None)
+            agent.evidence_corpus = getattr(self, "_evidence_corpus", None)
             # Hand the agent a way back to this container. The static analyst
             # used to construct a *whole new* ServiceContainer on every failed
             # MCP init — per chunk, so up to ten of them per run.
@@ -790,6 +833,7 @@ class ServiceContainer:
                 cached.token_ledger = getattr(self, "_token_ledger", None)
                 cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
                 cached.evidence_counter = getattr(self, "_evidence_counter", None)
+                cached.evidence_corpus = getattr(self, "_evidence_corpus", None)
                 # Hand the judge a way back to this container, the same way
                 # ``get_agent`` does above. Without this, ``_server_registry()``
                 # always read ``None`` and the judge ran with zero threat-intel
@@ -923,6 +967,34 @@ class ServiceContainer:
             self._narrative_agent_cache = None
             self._report_composer_cache = None
             self._server_registry_cache = None
+
+        # Last, and after the servers above are closed: what this run staged,
+        # carved and fetched. Here rather than in one caller, because every
+        # caller that has no worker behind it reaches teardown through this
+        # method — the command line, a settings probe, a script — and each of
+        # them would otherwise leave a directory of live malware for the TTL.
+        # The worker removes it again in a ``finally`` of its own, and a
+        # removal of what is already gone does nothing.
+        try:
+            from maljan.tools import staging
+
+            staging.remove_job_staging(self.job_key())
+        except Exception as exc:  # noqa: BLE001 — teardown never propagates
+            logger.warning("Removing this run's staging failed (non-fatal): %s", exc)
+
+        # And what this run saw, which is the other thing it held that outlives
+        # nothing. Dropping the container already frees it; this drops it here
+        # so a caller that keeps the container object alive after closing it —
+        # a test harness, a script reading a result off it — does not keep a
+        # run's whole tool output with it. Every reader of the corpus runs
+        # before teardown: the run summary is built in the judge node and the
+        # export's second-source test in the report node, both inside the run.
+        #
+        # ``None`` rather than an empty corpus. An empty one reports itself
+        # complete, so anything grounding after teardown would be told the
+        # evidence was whole — a sentinel that fails open on the one rule this
+        # whole thread exists to protect. No corpus reads as no corpus.
+        self._evidence_corpus = None
 
     def get_narrative_agent(self) -> Any | None:
         """Return the singleton NarrativeAgent or ``None`` in mock mode.
@@ -1138,6 +1210,24 @@ class ServiceContainer:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _announce_index_retry(self) -> None:
+        """Put ``validation.index_retry_seconds`` where every consumer can read it.
+
+        The knowledge sidecar is the process where an ATT&CK index build
+        actually happens, and it reads the setting out of its own environment
+        (``env_allow`` carries the name). This is the one place that puts it
+        there, beside the tracing values: the container is what builds the
+        sidecar registry, so a sidecar started from any entry point that has a
+        container — a script, a test harness, the API — reads the deployment's
+        number rather than the module default. It used to be announced from
+        ``MaljanApp.arun``, which is one entry point of several.
+        """
+        from maljan.tools import knowledge as knowledge_tools
+
+        seconds = int(getattr(getattr(self.config, "validation", None), "index_retry_seconds", 900))
+        os.environ[knowledge_tools.INDEX_RETRY_ENV] = str(seconds)
+        knowledge_tools.set_index_retry_after(seconds)
 
     def _configure_langsmith(self) -> None:
         """Propagate LangSmith tracing config into the OS environment."""

@@ -67,12 +67,22 @@ def api_capability_hits(payload: Mapping[str, Any] | None) -> list[dict[str, Any
     The tool answers per API and repeats a rule under every API it matched;
     here the matched APIs are pooled per rule and the rule counts only when
     they clear its own ``min_apis``. Each row: ``technique_id``, ``name``,
-    ``matched_apis`` in first-seen order. Corroboration and the report's
-    projection both read this, so what one calls asserted the other shows.
+    ``rule``, ``matched_apis`` in first-seen order. Corroboration and the
+    report's projection both read this, so what one calls asserted the other
+    shows.
+
+    **A row is a rule, not a technique.** Two rules can name one technique by
+    two mechanisms — the catalogue's own name is on both, so the name does not
+    tell them apart, and each carries its own ``min_apis``. Keyed by name
+    alone they pooled: one rule's APIs counted toward the other's floor, so a
+    technique could be asserted on a combination no single rule ever cleared.
+    The rule's own label is part of the key, and is on the row so a reader can
+    tell two rows for one technique apart. Corroboration keys on the technique
+    id and is unchanged by the split.
     """
     if not isinstance(payload, Mapping):
         return []
-    rules: dict[tuple[str, str], tuple[int, list[str]]] = {}
+    rules: dict[tuple[str, str, str], tuple[int, list[str]]] = {}
     for row in payload.get("capabilities") or []:
         if not isinstance(row, Mapping):
             continue
@@ -82,15 +92,15 @@ def api_capability_hits(payload: Mapping[str, Any] | None) -> list[dict[str, Any
             ids = technique_ids_in(rule.get("technique_id"))
             if not ids:
                 continue
-            key = (ids[0], str(rule.get("name") or ""))
+            key = (ids[0], str(rule.get("name") or ""), str(rule.get("rule") or ""))
             _floor, apis = rules.setdefault(key, (_min_apis(rule), []))
             for api in rule.get("matched") or []:
                 name = str(api).strip()
                 if name and name not in apis:
                     apis.append(name)
     return [
-        {"technique_id": tid, "name": name, "matched_apis": apis}
-        for (tid, name), (floor, apis) in rules.items()
+        {"technique_id": tid, "name": name, "rule": label, "matched_apis": apis}
+        for (tid, name, label), (floor, apis) in rules.items()
         if len(apis) >= floor
     ]
 

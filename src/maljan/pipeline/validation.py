@@ -30,6 +30,7 @@ from pydantic import ValidationError
 
 # The row helpers live with the shape (``analysis.corroboration``) and are
 # re-exported here, where every reader of a run's validation looks for them.
+from maljan.agents.run_evidence_corpus import CorpusState, both_searched
 from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
 from maljan.analysis.technique_ids import TECHNIQUE_ID_EXACT_RE
@@ -43,7 +44,8 @@ from maljan.pipeline.events import (
     safe_finding_value,
 )
 from maljan.schemas.evidence import entry_ids_in
-from maljan.schemas.judgement import SEVERITY_RATINGS, VERDICT_VALUES
+from maljan.schemas.judgement import BENIGN_VERDICT, SEVERITY_RATINGS, VERDICT_VALUES
+from maljan.schemas.stix_pattern import read_comparisons
 
 # How many alternatives a suggestion list carries. Three is what fits in one
 # line of feedback; a longer list reads as a menu and the model picks from the
@@ -63,13 +65,16 @@ ALIGNMENT_MARGIN = 0.20
 MAX_SCHEMA_VIOLATIONS = 6
 
 
-# The literals a STIX pattern quotes, e.g. ``[file:name = 'x.exe']`` -> ``x.exe``.
-_PATTERN_LITERAL_RE = re.compile(r"'([^']*)'")
-
 # The sentence the retry turn opens with. A constant because two call sites
 # send it and a test reads it.
 FEEDBACK_PREAMBLE = "Your previous answer had these problems:"
 FEEDBACK_CLOSING = "Fix them and answer again in the same format."
+
+
+# What joins the agents of a route inside one serialised row. A unit separator
+# rather than a comma: an agent key is an operator's word and a comma in one
+# would split a name in half on the way back.
+ROUTE_SEPARATOR = "\x1f"
 
 
 @dataclass(frozen=True)
@@ -79,9 +84,40 @@ class Violation:
     code: str
     message: str
     path: str = ""
+    # A finding the producer is shown and asked about, that nothing acts on by
+    # removing something. It exists for one situation: the check could not
+    # search this run's whole record — the grounding corpus hit its ceiling,
+    # or there is no corpus and the stored entries it fell back to had been
+    # blanked by the evidence byte budget — so "this value is in no tool
+    # output" is not a statement the platform is entitled to make. The row
+    # says what was searched and what was not; the object stays.
+    advisory: bool = False
+    # The agents this row was handed through, outermost first, and the
+    # finding's own words. Two values rather than one string: a hand-over adds
+    # a name in front of the sentence and the whole is bounded, and a bound
+    # applied to one string has to work out where the route ends — which it
+    # cannot do, and which cost a sentence opening ``T1055: `` its identifier.
+    # Carried apart, the bound can only ever shorten the route.
+    route: tuple[str, ...] = ()
+    sentence: str = ""
+
+    def __post_init__(self) -> None:
+        # A row written by a validator has no route, and its message is its
+        # sentence. Everything downstream may then read either.
+        if not self.sentence:
+            object.__setattr__(self, "sentence", self.message)
 
     def to_dict(self) -> dict[str, str]:
-        return {"code": self.code, "message": self.message, "path": self.path}
+        return {
+            "code": self.code,
+            "message": self.message,
+            "path": self.path,
+            # Strings, because every other value in the row is one and the
+            # channel that carries it is ``dict[str, list[dict[str, str]]]``.
+            "advisory": "true" if self.advisory else "",
+            "sentence": self.sentence,
+            "route": ROUTE_SEPARATOR.join(self.route),
+        }
 
 
 @dataclass
@@ -110,9 +146,21 @@ class ValidationTally:
             self.by_code[violation.code] = self.by_code.get(violation.code, 0) + 1
 
     def record_unresolved(self, producer: str, violations: Sequence[Violation]) -> None:
-        """Keep what survived the retry, as a row naming who was told."""
+        """Keep what survived the retry, as a row naming who was told.
+
+        ``advisory`` travels with it. Rebuilt without the flag, a row the
+        platform explicitly declined to act on was stored, printed and drawn as
+        an ordinary unfixed finding, and an operator had to read inside the
+        message to learn that nothing had been dropped for it.
+        """
         self.unresolved.extend(
-            {"agent": producer, "code": v.code, "message": v.message} for v in violations
+            {
+                "agent": producer,
+                "code": v.code,
+                "message": v.message,
+                **({"advisory": "true"} if v.advisory else {}),
+            }
+            for v in violations
         )
 
     def merge(self, other: ValidationTally) -> None:
@@ -1306,12 +1354,74 @@ def sample_identity_values(sample: Any) -> set[str]:
     return {value for value in values if value}
 
 
+INDICATOR_TYPE_CONTRADICTS_VERDICT_CODE = "stix.indicator_type_contradicts_verdict"
+
+# The word this export will not let a Benign verdict publish unasked, and the
+# rest of the STIX indicator-type vocabulary the judge may reach for instead.
+_MALICIOUS_ACTIVITY = "malicious-activity"
+_MILDER_INDICATOR_TYPES = ("benign", "anomalous-activity", "unknown")
+
+
+def _is_the_samples_own_indicator(pattern: str, identity: set[str]) -> bool:
+    """Whether this indicator names the sample rather than something it touched.
+
+    The export mints one indicator for the sample's own hash and types it with
+    the verdict, so an indicator quoting an identity value is that statement
+    and not a claim about a third party.
+    """
+    return any(literal.lower() in identity for _path, literal in _comparisons(pattern))
+
+
+def indicator_type_contradicts_verdict(
+    obj: Any, *, verdict: str | None, identity: set[str], path: str
+) -> list[Violation]:
+    """A judge-written indicator that says the opposite of the judge's verdict.
+
+    The type is the judge's to give: nothing rewrites it and nothing drops the
+    object. On a Benign verdict an indicator typed ``malicious-activity``
+    publishes the sample's own vendor domain to a blocklist as malicious
+    activity, so the judge is asked about it once, with the vocabulary's milder
+    words named and its own answer published whichever way it goes.
+
+    One direction only. A Malware verdict beside an indicator typed ``benign``
+    is not the same statement: an indicator is a claim about the value it
+    names, and a malicious sample may well touch something harmless.
+    """
+    if verdict != BENIGN_VERDICT:
+        return []
+    types = [str(t).strip().lower() for t in (getattr(obj, "indicator_types", None) or [])]
+    if _MALICIOUS_ACTIVITY not in types:
+        return []
+    pattern = str(getattr(obj, "pattern", "") or "")
+    if _is_the_samples_own_indicator(pattern, identity):
+        return []
+    named = str(getattr(obj, "name", "") or "").strip() or pattern
+    return [
+        Violation(
+            code=INDICATOR_TYPE_CONTRADICTS_VERDICT_CODE,
+            message=(
+                f"the indicator {safe_finding_value(named)!r} is typed "
+                f"{_MALICIOUS_ACTIVITY!r} while the verdict you stated is {BENIGN_VERDICT}, "
+                "so this bundle publishes the value as malicious activity to whoever reads it. "
+                f"The indicator-type vocabulary also has {', '.join(_MILDER_INDICATOR_TYPES)}. "
+                "Retype it, or restate the verdict, or keep the type as it is — whichever "
+                "you answer is what this run publishes, and a type you keep is recorded "
+                "beside the bundle as raised and kept."
+            ),
+            path=path,
+        )
+    ]
+
+
 def validate_verdict_bundle(
     bundle: Any,
     evidence_corpus: set[str] | None = None,
     *,
     attck: Any = None,
     sample: Any = None,
+    shortened_tools: Iterable[str] = (),
+    searched: Iterable[str] = (),
+    corpus_state: CorpusState | None = None,
 ) -> list[Violation]:
     """What is wrong with the judge's answer, in the judge's own terms.
 
@@ -1328,29 +1438,87 @@ def validate_verdict_bundle(
     address would otherwise ground an indicator for it. A pattern is grounded
     when one of its quoted values is found, in the corpus or in the identity,
     as it always was for the corpus alone; the denylists run first either way.
+
+    ``shortened_tools`` names the tools whose answers reached the corpus with
+    rows missing. It changes no verdict: it is one sentence added to an
+    absence, so a judge reading one knows which call to narrow.
+
+    ``searched`` is what the run's own tools answered, each answer as itself
+    and already lower-cased by the corpus that kept it. It is passed beside
+    ``evidence_corpus`` rather than inside it because joining the run's whole
+    record into one token copied it twice more for nothing.
+
+    ``corpus_state`` says whether the evidence searched is this run's whole
+    record. When it is not — the in-memory corpus hit its ceiling, or there is
+    no corpus and the stored entries fell back on had been blanked by the byte
+    budget — an absence is written as an **advisory** row: the judge is told
+    once, in a sentence that says what was searched and what was not, and
+    nothing drops its object for it. Passing ``None`` means the caller knows
+    the corpus was whole, which is the default every existing caller had.
     """
     violations: list[Violation] = []
     objects = list(getattr(bundle, "objects", None) or [])
     scope = expected_technique_scope(sample)
 
-    haystack = " ".join(sorted(evidence_corpus)).lower() if evidence_corpus else ""
+    # The token corpus and the run's own answers, each as itself. The tokens
+    # are short and are joined once; the answers are searched where they are.
+    haystack = Haystack(
+        [
+            " ".join(sorted(evidence_corpus)).lower() if evidence_corpus else "",
+            *(str(part) for part in searched),
+        ]
+    )
     identity = {value.lower() for value in sample_identity_values(sample)}
+    # The verdict as the judge stated it, read the one way every reader of a
+    # verdict reads it, so an indicator is weighed against the word that will
+    # be published rather than against the object set.
+    from maljan.pipeline.outcome import read_stated_verdict
+
+    stated_verdict = read_stated_verdict(bundle).recognised
     runtime_paths = _runtime_paths(evidence_corpus)
+    partial = shortened_evidence_note(shortened_tools)
+    how_whole = corpus_state or CorpusState()
+    # Neither source. The token corpus holds the sandbox report's network
+    # entries and the run's own answers travel beside it, so a run with no
+    # sandbox block and no answers searched nothing at all — and a check that
+    # searched nothing may not conclude from it. It says so instead: the row is
+    # written, it is advisory, and the judge keeps its object. Gating the whole
+    # branch on the token corpus alone skipped the check outright on mock mode,
+    # a static-only team, a failed submission and any sample that made no
+    # network call, and an invented indicator was exported with nothing said.
+    if not haystack:
+        how_whole = both_searched(how_whole, NOTHING_SEARCHED)
+    not_searched = partial_evidence_note(how_whole)
     for index, obj in enumerate(objects):
         kind = str(getattr(obj, "type", "") or "")
-        if kind == "indicator" and evidence_corpus is not None:
+        if kind == "indicator":
             pattern = str(getattr(obj, "pattern", "") or "")
+            violations.extend(
+                indicator_type_contradicts_verdict(
+                    obj,
+                    verdict=stated_verdict,
+                    identity=identity,
+                    path=f"objects[{index}]",
+                )
+            )
             problem = _indicator_problem(pattern, haystack, runtime_paths, identity)
             if problem:
+                absent = _is_an_absence(problem)
+                caveat = f"{partial}{not_searched}" if absent else ""
                 violations.append(
                     Violation(
                         code="stix.ungrounded_indicator",
                         message=(
                             f"{safe_finding_value(problem)} Emit indicators only for values a "
                             "tool in this run actually saw, and prefer zero indicators to an "
-                            "invented one."
+                            f"invented one.{caveat}"
                         ),
                         path=f"objects[{index}]",
+                        # Only an absence goes advisory, and only when the
+                        # evidence searched was partial. A denylisted host or a
+                        # malformed digest is refused on its own account and no
+                        # amount of evidence would change it.
+                        advisory=absent and how_whole.partial,
                     )
                 )
         elif kind == "attack-pattern":
@@ -1810,6 +1978,44 @@ def _runtime_paths(evidence_corpus: set[str] | None) -> set[str]:
     return found
 
 
+# The root a path on this machine is written from: a POSIX slash, a drive with
+# either separator, a UNC share, an environment variable, a home tilde, or a
+# registry hive — which ``directory:path`` carries about as often as the
+# registry's own object type does.
+_DIRECTORY_ROOT_RE = re.compile(
+    r"^(?:/"
+    # The separator after a drive is required. ``C:Windows`` is drive-relative
+    # — it names whatever directory that drive is currently in, which is not a
+    # place on the analysed machine that anything could be checked against.
+    r"|[A-Za-z]:[\\/]"
+    # One backslash or two. Two are a UNC share; one is what a UNC share
+    # written the way a judge writes it becomes, because a STIX literal
+    # ``'\\server\share'`` is unescaped by the reader to ``\server\share``
+    # before any of this sees it. Refusing it told the judge its own valid
+    # path could not be a place.
+    r"|\\\\?"
+    r"|%[A-Za-z_][A-Za-z0-9_]*%[\\/]?"
+    r"|\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)[\\/]?"
+    r"|~[\\/]?"
+    r"|(?:HKLM|HKCU|HKCR|HKU|HKCC|HKEY_[A-Z_]+)[\\/]"
+    r")",
+    re.IGNORECASE,
+)
+
+# A step that is a placeholder rather than a name. A strings table is full of
+# them — a format string the sample was compiled with, read out of the bytes as
+# though it were a path somebody visited. A step opening with ``#`` or ``?`` is
+# the last one too: it is a URL's fragment or query, and ``/#frag`` read as a
+# directory is a URL cut at its path.
+_PLACEHOLDER_STEP_RE = re.compile(r"^(?:%[-+ #0-9.]*[a-zA-Z]|%\d+|\{[^}]*\}|<[^>]*>|\$\d+|[#?].*)$")
+
+# What a step must carry to read as a name rather than as punctuation: two
+# characters somebody could have typed as part of one.
+_NAME_RUN_RE = re.compile(r"[A-Za-z0-9]{2}")
+
+# A character no path on any of these filesystems carries.
+_CONTROL_CHARACTERS = frozenset(chr(code) for code in range(0x20)) | {chr(0x7F)}
+
 # A run of hexadecimal on its own, and the lengths a digest this project can
 # name comes in. Anything else quoted in a pattern is asked the corpus question
 # as it always was.
@@ -1822,57 +2028,248 @@ _DIGEST_LENGTHS = frozenset({32, 40, 56, 64, 96, 128})
 _TOKEN_BOUNDARY_RE = re.compile(r"[0-9a-f]", re.IGNORECASE)
 
 
-# An object path in a pattern comparison, read outside the quotes: the type,
-# then the property. Case carries no meaning in a STIX object path.
-_COMPARISON_PATH_RE = re.compile(r"([a-z0-9-]+:[a-z_.]+)", re.IGNORECASE)
-
-
 def _comparisons(pattern: str) -> list[tuple[str, str]]:
     """Every ``(object path, quoted literal)`` the pattern compares, in order.
 
-    Split on the quotes rather than on the paths, because a literal is where a
-    URL lives and a URL carries anything that looks like an object path inside
-    it. Only what is written outside the quotes says what is being compared,
-    and each literal is credited to the path most recently written before it —
-    an ``IN ('a', 'b')`` list writes the path once and quotes twice.
+    :func:`~maljan.schemas.stix_pattern.read_comparisons` is the one reader of
+    a pattern this repository has; the STIX renderer asks it the same question
+    about the same syntax, and two readers of one pattern is how one of them
+    publishes what the other vetoes. What is kept here is this caller's own
+    filter: a value that is only whitespace is not a value to ask about.
     """
-    found: list[tuple[str, str]] = []
-    path = ""
-    inside_the_path = False
-    for index, chunk in enumerate(pattern.split("'")):
-        if index % 2 == 0:
-            paths = list(_COMPARISON_PATH_RE.finditer(chunk))
-            if paths:
-                path = paths[-1].group(1).lower()
-            # A quote that opens where the object path is still being written
-            # holds a key, not a value: ``file:hashes.'MD5'`` names the
-            # algorithm and ``file:extensions['pe']`` names the extension. The
-            # value is what follows the comparison operator.
-            inside_the_path = chunk.rstrip().endswith((".", "["))
-        elif chunk.strip() and not inside_the_path:
-            found.append((path, chunk.strip()))
-    return found
+    return [
+        (comparison.path, comparison.literal.strip())
+        for comparison in read_comparisons(pattern)
+        if comparison.literal.strip()
+    ]
 
 
-def _whole_token_in(literal: str, haystack: str, own: set[str]) -> bool:
-    """Whether ``literal`` appears in the corpus as a value rather than a prefix."""
+def reads_as_a_place(value: str) -> bool:
+    """Whether this literal is written the way a directory on a machine is.
+
+    The validity half of the directory question, and only that: it removes what
+    could not be a place, and says nothing about whether this run saw one. A
+    place has a root and at least one named step under it — ``/tmp`` is a
+    directory, ``/`` and ``C:\\`` are roots and nothing under them — and every
+    step is written the way a name is: not empty, not whitespace, no control
+    character, not a format specifier a sample was compiled with, and at least
+    one of them carrying two characters running that somebody could have typed.
+    A strings table produces ``/%s/%s`` and ``/ /`` by the dozen.
+    """
+    text = str(value or "")
+    root = _DIRECTORY_ROOT_RE.match(text)
+    if root is None:
+        return False
+    steps = [step for step in re.split(r"[\\/]", text[root.end() :]) if step != ""]
+    if not steps or text[root.end() :].startswith(("/", "\\")):
+        return False
+    for step in steps:
+        if not step.strip() or _PLACEHOLDER_STEP_RE.match(step):
+            return False
+        if any(character in _CONTROL_CHARACTERS for character in step):
+            return False
+    return any(_NAME_RUN_RE.search(step) for step in steps)
+
+
+def _place_in_the_evidence(
+    literal: str, haystack: Haystack, runtime_paths: set[str], own: set[str]
+) -> bool:
+    """Whether the run recorded this place, however either side spelled it.
+
+    The grounding half. A path is written with whichever separator the writer's
+    platform uses and with a trailing one as often as without, so the literal is
+    asked under the spellings that mean the same location — the normalisation
+    the report's own path rows go through — and each is asked as a whole value
+    rather than as a substring.
+    """
+    from maljan.reporting.dedupe import canonical_path
+
     lowered = literal.lower()
-    if lowered in own:
-        return True
-    start = haystack.find(lowered)
+    spellings = {
+        lowered,
+        canonical_path(literal).lower(),
+        lowered.replace("\\", "/"),
+        lowered.replace("/", "\\"),
+    }
+    spellings |= {spelling.rstrip("/\\") for spelling in spellings if len(spelling) > 1}
+    return any(
+        spelling in own or spelling in runtime_paths or haystack.holds_value(spelling)
+        for spelling in spellings
+        if spelling
+    )
+
+
+class Haystack:
+    """The evidence a grounding check searches, as the parts it came in.
+
+    Never one joined string. A value never spans two tool answers — joining
+    them put a space between them and a space bounds a value — so asking each
+    part is exactly the search the joined string performed. Joining was not
+    free: on 400 answers of 6 000 characters the run's record was copied on the
+    way into the corpus's cache, again as an element of the token set, and a
+    third time into the string that was finally searched.
+
+    Everything here is compared lower-cased, which is the corpus's own rule and
+    is why the run's answers are folded once, at the moment they are recorded.
+    """
+
+    __slots__ = ("parts",)
+
+    def __init__(self, parts: Iterable[str]) -> None:
+        self.parts: tuple[str, ...] = tuple(part for part in parts if part)
+
+    def __contains__(self, needle: str) -> bool:
+        return any(needle in part for part in self.parts)
+
+    def __bool__(self) -> bool:
+        return bool(self.parts)
+
+    def holds_value(self, value: str) -> bool:
+        """Whether the evidence holds ``value`` as a value of its own."""
+        from maljan.agents._indicator_denylists import whole_value_in
+
+        return any(whole_value_in(value, part) for part in self.parts)
+
+    def holds_token(self, value: str) -> bool:
+        """Whether ``value`` stands between two boundaries rather than inside a run."""
+        return any(_token_in(value, part) for part in self.parts)
+
+
+def _token_in(lowered: str, part: str) -> bool:
+    """Whether ``lowered`` is a whole token of ``part``."""
+    start = part.find(lowered)
     while start != -1:
-        before = haystack[start - 1] if start else ""
-        after = haystack[start + len(lowered) : start + len(lowered) + 1]
+        before = part[start - 1] if start else ""
+        after = part[start + len(lowered) : start + len(lowered) + 1]
         if not _TOKEN_BOUNDARY_RE.match(before or " ") and not _TOKEN_BOUNDARY_RE.match(
             after or " "
         ):
             return True
-        start = haystack.find(lowered, start + 1)
+        start = part.find(lowered, start + 1)
     return False
 
 
+def _whole_token_in(literal: str, haystack: Haystack, own: set[str]) -> bool:
+    """Whether ``literal`` appears in the corpus as a value rather than a prefix."""
+    lowered = literal.lower()
+    if lowered in own:
+        return True
+    return haystack.holds_token(lowered)
+
+
+# What a check that had nothing to search says about what it searched. Not the
+# same as a corpus that lost answers — there were none to lose — but the same
+# conclusion: an absence measured over nothing is a note, never a reason to
+# remove a model's object.
+NOTHING_SEARCHED = CorpusState(complete=False, why="no evidence was searched")
+
+# The words every corpus-miss sentence in :func:`_indicator_problem` shares.
+# Kept for readers grepping for the phrase; nothing decides anything by it.
+ABSENT_FROM_THE_EVIDENCE = "appears nowhere"
+
+
+class _Problem(str):
+    """A refusal sentence, and whether the refusal is an absence.
+
+    A ``str``, so the sentence is still just the sentence everywhere it is
+    read. The flag rides on the object rather than in its text because what
+    the caveat and the advisory rule key on is *what the check concluded*, and
+    keying on the words would let a model-written indicator value carrying the
+    phrase attract a caveat it did not earn.
+    """
+
+    absent: bool = False
+
+
+def _an_absence(sentence: str) -> _Problem:
+    """A refusal whose whole content is that the evidence does not hold it."""
+    found = _Problem(sentence)
+    found.absent = True
+    return found
+
+
+def _is_an_absence(problem: str) -> bool:
+    """Whether this refusal is "the evidence does not hold it" and nothing else."""
+    return bool(getattr(problem, "absent", False))
+
+
+def shortened_evidence_note(tools: Iterable[str]) -> str:
+    """What to add to an absence when part of the evidence searched was shortened.
+
+    A shortened answer is still the answer the model read — the shortener hands
+    one string to both the model and the ledger — so "this value is in no tool
+    output" stays true and the grounding rule is unchanged. What is not true is
+    that the search was over everything the tool found: a shortened document
+    handed over fewer rows than the call produced. Naming the tools lets the
+    judge ask one of them again with a narrower argument instead of guessing
+    whether its value was in the part that did not fit.
+
+    Empty when nothing was shortened, so a clean run's feedback is unchanged.
+    """
+    named = sorted({str(tool).strip() for tool in tools if str(tool).strip()})
+    if not named:
+        return ""
+    return (
+        " The evidence searched includes shortened answers from "
+        f"{safe_finding_value(', '.join(named))}: those calls did not fit and were "
+        "handed over with rows missing. Narrow one of them and ask again before "
+        "withdrawing a value on this."
+    )
+
+
+def partial_evidence_note(state: CorpusState) -> str:
+    """What an absence may say when the evidence searched was not the whole run.
+
+    The platform does not assert an absence over evidence it knows is partial.
+    When the run's in-memory corpus hit its ceiling, or there is no corpus and
+    the stored entries fell back on had been blanked by the byte budget, the
+    row says how much was not searched and whose it was — counts and tool
+    names only, because a sentence naming a value would put a tool's output
+    back into the row the value was withheld from — and says that nothing is
+    dropped for it.
+
+    Empty when the corpus was whole, so an ordinary absence reads as it did.
+    """
+    if state.complete:
+        return ""
+    if not state.missing_tools:
+        # No tool to name — the corpus is gone, or there was never anything to
+        # search — so the reason is what the sentence carries instead. One of
+        # this module's own words either way, never a producer's.
+        return (
+            f" The evidence searched is not this run's whole record ({state.why}), so this is a "
+            "note rather than a finding and nothing is dropped for it."
+        )
+    named = safe_finding_value(", ".join(state.missing_tools))
+    answers = "answer" if state.missing_answers == 1 else "answers"
+    return (
+        f" The evidence searched is not this run's whole record: {state.missing_answers} "
+        f"{answers} from {named} were not kept. This is a note rather than a finding, and "
+        "nothing is dropped for it."
+    )
+
+
+def partial_grounding_reason(state: CorpusState) -> str:
+    """One sentence saying grounding was advisory in this run, or ``""``.
+
+    A degradation reason rather than a finding: it is a fact about the run's
+    record, not about the sample. It names the remedy — which of the three
+    reasons it is — because an operator who set the ceiling and an operator
+    whose run was resumed have different things to do about it.
+    """
+    if state.complete:
+        return ""
+    reason = state.why or "the evidence searched was not this run's whole record"
+    named = f" ({', '.join(state.missing_tools)})" if state.missing_tools else ""
+    return (
+        f"grounding searched less than this run produced — {reason}: "
+        f"{state.missing_answers} answer(s) not kept{named}. "
+        "An absence measured against it is recorded as a note and drops nothing."
+    )
+
+
 def _indicator_problem(
-    pattern: str, haystack: str, runtime_paths: set[str], identity: Iterable[str] = ()
+    pattern: str, haystack: Haystack, runtime_paths: set[str], identity: Iterable[str] = ()
 ) -> str:
     """Why this indicator is not grounded, in words the judge can act on, or "".
 
@@ -1903,7 +2300,8 @@ def _indicator_problem(
     # matched against, and a scrubbed path would answer a different question
     # from the one this check asks. The sentence they end up in is what the
     # caller wraps, because that is what is stored and shown.
-    literals = [str(v).strip() for v in _PATTERN_LITERAL_RE.findall(pattern) if str(v).strip()]
+    comparisons = _comparisons(pattern)
+    literals = [literal for _path, literal in comparisons]
     if not literals:
         return "the indicator pattern quotes no value."
     own = set(identity)
@@ -1935,11 +2333,11 @@ def _indicator_problem(
     # answered for the whole expression. What one comparison establishes is
     # that *it* raised no problem; the others are still asked.
     grounded = False
-    for path, literal in _comparisons(pattern):
+    for path, literal in comparisons:
         if path.startswith("file:hashes") or path.endswith("imphash"):
             if _HEX_TOKEN_RE.match(literal) and len(literal) in _DIGEST_LENGTHS:
                 if not _whole_token_in(literal, haystack, own):
-                    return (
+                    return _an_absence(
                         f"the indicator pattern names {safe_finding_value(literal)}, which "
                         "appears nowhere in the evidence this run collected as a value of its "
                         "own."
@@ -1964,7 +2362,7 @@ def _indicator_problem(
                     "vendor infrastructure."
                 )
             if not _found(literal):
-                return (
+                return _an_absence(
                     f"the URL {safe_finding_value(literal)!r} appears nowhere in this run's "
                     "evidence."
                 )
@@ -1982,12 +2380,31 @@ def _indicator_problem(
                     "not a file on disk."
                 )
             lowered = literal.lower()
-            if not (
-                any(lowered.endswith(ext) for ext in IOC_FILE_EXTENSIONS)
-                or any(literal.startswith(prefix) for prefix in IOC_OS_RESOURCE_PREFIXES)
+            anchored = (
+                any(literal.startswith(prefix) for prefix in IOC_OS_RESOURCE_PREFIXES)
                 or lowered in runtime_paths
                 or lowered in own
-            ):
+            )
+            if path.startswith("directory:path"):
+                # Two questions, and a directory is asked both. A directory has
+                # no extension to answer the first with, and telling the judge
+                # its own row "has no file extension … so nothing says it is a
+                # real path" was untrue of the thing it had written.
+                if not reads_as_a_place(literal):
+                    return (
+                        f"{safe_finding_value(literal)!r} is not written as a directory: a "
+                        "path on this machine has a root — a drive, a share, a POSIX slash, "
+                        "an environment variable or a registry hive — and at least one named "
+                        "step under it."
+                    )
+                if not _place_in_the_evidence(literal, haystack, runtime_paths, own):
+                    return _an_absence(
+                        f"{safe_finding_value(literal)!r} appears nowhere in the evidence "
+                        "this run collected as a value of its own."
+                    )
+                grounded = True
+                continue
+            if not (anchored or any(lowered.endswith(ext) for ext in IOC_FILE_EXTENSIONS)):
                 return (
                     f"{safe_finding_value(literal)!r} has no file extension, no filesystem "
                     "anchor and was not "
@@ -2013,7 +2430,7 @@ def _indicator_problem(
     # the company it keeps.
     if grounded:
         return ""
-    return (
+    return _an_absence(
         f"the indicator pattern names {safe_finding_value(', '.join(literals))}, which "
         "appears nowhere "
         "in the evidence this run collected."
@@ -2060,11 +2477,21 @@ def drop_ungrounded_indicators(bundle: Any, violations: Sequence[Violation]) -> 
     consumed by detection tooling that has no way to read a label. It is
     dropped here and recorded in ``run_summary.validation.unresolved``, so the
     false positive is visible as a run fact rather than as a blocking rule.
+
+    An **advisory** row drops nothing. The platform states an absence only over
+    evidence it searched whole; when it could not, the judge is told so and
+    keeps its object.
     """
     indices = {
         index
         for index in (
-            _object_index(v.path) for v in violations if v.code == "stix.ungrounded_indicator"
+            _object_index(v.path)
+            for v in violations
+            # Never on an advisory row. An advisory absence is one the platform
+            # measured against evidence it knows is partial, and dropping the
+            # judge's object over it is exactly the wrong statement made
+            # expensive: the value may well be in the part that was not kept.
+            if v.code == "stix.ungrounded_indicator" and not v.advisory
         )
         if index is not None
     }
@@ -2353,7 +2780,17 @@ def validation_metrics(
     rows: list[dict[str, str]] = []
     for agent, violation in unresolved:
         by_code[violation.code] = by_code.get(violation.code, 0) + 1
-        rows.append({"agent": agent, "code": violation.code, "message": violation.message})
+        rows.append(
+            {
+                "agent": agent,
+                "code": violation.code,
+                "message": violation.message,
+                # The second place a row is rebuilt for the record. A row the
+                # platform declined to act on, stored without the flag, reads
+                # downstream as a producer's own unfixed finding.
+                **({"advisory": "true"} if violation.advisory else {}),
+            }
+        )
     return {
         "retries": int(retries),
         "by_code": dict(sorted(by_code.items())),

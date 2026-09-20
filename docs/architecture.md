@@ -472,7 +472,22 @@ Four rules follow from the statement:
   is marked suspicious, `anomalous-activity` otherwise, and
   `anomalous-activity` for a `file:name` out of the string scan); a Benign run
   can carry them, because a benign sample still talks to hosts, and they are
-  exported as they are. A summary
+  exported as they are. A judge-written indicator keeps the type the judge
+  gave it, and on one shape the judge is asked about it first: a Benign verdict
+  beside an indicator the judge typed `malicious-activity` publishes a value as
+  malicious activity under a verdict that says the opposite — on a recorded run
+  it was the analysed vendor's own project domain. `stix.indicator_type_contradicts_verdict`
+  puts that to the judge once, through the same single retry the other verdict
+  checks share, naming the indicator, the verdict's own word and the
+  vocabulary's `benign` / `anomalous-activity` / `unknown`, and saying the type
+  may be kept. Whatever comes back is published: nothing retypes an indicator
+  and nothing drops one. A type the judge keeps stays in
+  `run_summary.validation.unresolved` and is printed with the other unresolved
+  findings, so a consumer reading the bundle beside the report sees the
+  contradiction was raised and kept. The mirror — a Malware verdict beside an
+  indicator typed `benign` — is not a contradiction and is not asked about: an
+  indicator is a claim about the value it names, and a malicious sample may
+  touch something harmless. A summary
   note then has no malware object to be about, so it refers to the indicator
   carrying the sample's own hash, which the cap keeps in a band of its own; a
   bundle holding nothing the note could truthfully refer to emits no note, and
@@ -984,21 +999,30 @@ analysis tools that read a file — `identify_file`, `hashes`, `signing_info`,
 `strings`, `iocs_from_file`, `pe_info`, `elf_info`, `macho_info`, `apk_info`,
 `carve_payloads`, `archive_list`, `document_info`, `yara_scan` and `capa`. It
 is held to **the carved tree of the file this call is pinned to, and that file
-itself** — `<staging>/carved/<the sample's sha256>/`, which is exactly the key
-`carve_payloads` writes under and which the sidecar derives from the bytes it
-was handed. Not the staging base: one staging directory serves every job on the
-host, `put_sample` writes `<staging>/<sha16>_<name>` into it and every sample's
-carved tree sits beside every other's, so a base-wide bound let a run read
+itself** — `<staging>/job-<id>/carved/<the sample's sha256>/`, which is exactly
+the key `carve_payloads` writes under and which the sidecar derives from the
+bytes it was handed. Not the staging base: a base-wide bound let a run read
 another run's payload and another run's upload. A sample is adversary-authored
 content this model reads, and it can carry another sample's digest in its own
 bytes beside one instruction to point a tool at it; samples are not only
 malware, either, since an operator submits a suspicious document that may hold
-somebody's data. Two runs of the same sample share one tree, which is the same
-bytes read twice.
+somebody's data.
+
+**Staging is per job, and that is what makes the bound the directory rather
+than the tree.** `MALJAN_STAGING_DIR` stays the operator's base; the process
+that spawns a sidecar composes one leaf inside it per job and passes it as
+`MALJAN_STAGING_JOB`, which the sidecar joins to the base itself — two
+variables, because `child_env` applies a server's own `env` map last and a
+composed path would either lose to the operator's value or overwrite it. The
+job's owner removes that directory on every way out of the run, and the TTL
+sweep prunes whatever a killed worker left. So `put_sample` uploads are not
+nameable across jobs either, and two runs of the same sample no longer share a
+tree.
 
 Both spellings a model writes are understood — the absolute path
-`carve_payloads` returned, and the tail of it relative to the staging base or
-to the tree — and whichever it is, the resolved path must land inside the tree
+`carve_payloads` returned, and the tail of it relative to this job's staging
+directory or to the tree — and whichever it is, the resolved path must land
+inside the tree
 or on the sample. Symlinks are followed on both sides first, so a link planted
 under staging and a climb out of it land where they really point and meet the
 existing remediation-bearing refusal. The value must resolve onto a **regular
@@ -1106,6 +1130,69 @@ pipeline panel rather than from a log line.
 That stamp is what makes a report checkable: the model can cite the call it read
 a fact from, a report section lists the entries it was built from, and `GET
 /api/v1/jobs/{id}/evidence` serves those entries back.
+
+**An answer wider than the prompt allows.** Before any of that, a tool result
+over `preprocessing.max_tool_output_chars` meets the output guardrail, which
+now has three outcomes rather than two. A JSON object is **shortened as a
+document**: elements come off the end of its largest lists, then characters off
+the end of its largest long strings, until it fits. No key is ever dropped, the
+answer's own `truncated` flag is set, and one reserved top-level key —
+`shortened` — maps each shortened value's path to what was kept and what was
+left out, so a count can be reconciled without reading it against one of the
+tool's own numbers that means something else. Nothing else is written into the
+tool's vocabulary. Anything that is not a JSON object — a decompilation, any
+plain text — goes to the `FunctionSummarizer` when
+`preprocessing.use_function_summarizer` is on and to the character cut
+otherwise, exactly as before.
+
+The shortening runs **before** the summariser, and for a JSON object it is the
+better of the two: the summariser answers in English prose, and prose is what
+leaves the record with no `structured` at all — which is the defect the
+shortening exists to remove. For the decompilation the summariser was written
+for, which arrives as plain text, nothing changed. Deciding what to drop is
+arithmetic over sizes measured in one walk, it runs on a thread rather than the
+event loop, and a monotonic wall backstops it; a document the shortening cannot
+help (its keys alone over the limit) is recognised by one subtraction and takes
+the character cut at once. Two things bound it: a size ceiling, because the
+wall cannot pre-empt the one parse everything depends on, and past the parse a
+monotonic wall checked at every phase. An answer this system has already
+shortened is not shortened again — a second map would count against a baseline
+the first one moved. `run_summary.truncation` counts the three outcomes apart,
+and the wall firing among them — on the job's one truncation ledger, which the
+server registry puts on every toolkit it opens, so a bound a tool server's
+answer hit is counted where the run summary reads.
+
+**What the model is told about it.** A shortened answer carries one sentence
+for the model: the key the arithmetic is under, that an identical call returns
+the identical shortened answer, and this tool's own arguments that reach what
+was left out — `limit`, `offset` and `pattern` for `strings`, nothing at all
+for a tool that offers no such argument, which the sentence then says. The
+arguments are read off the schema the tool offered
+(`agents.output_shortening.narrowing_arguments`), never guessed per tool, and
+the same list is what the repeat notices name, so one tool has one answer to
+"ask it differently" however the model arrives at the question. Nothing
+re-issues a call and nothing edits an argument: the text is the model's to act
+on.
+
+A parameter name is a tool server's own text on its way into the model's
+context, so only a plain identifier of at most forty characters is ever named,
+at most six of them, in schema order; anything else is left out rather than
+escaped or trimmed, because a name this refuses is one the model could not pass
+anyway. That bound is also what makes the sentence priceable: both guardrails —
+the MCP toolkits' and the Ghidra HTTP client's — shorten to
+`output_shortening.shorten_target(limit, narrowing)`, one function, so an
+answer and the notice appended to it are together inside the limit the operator
+set. The room the sentence may take is capped at `MAX_SENTENCE_ROOM`, the exact
+width of the widest sentence those bounds allow, so a server declaring two
+hundred long parameters cannot shrink the budget its own answer is shortened
+into. An answer no guardrail saw — an in-process tool's — is not shortened at
+all and carries no notice.
+
+The sentence a reader sees is drawn above the section's table, not as a row in
+it: the bookkeeping is this system's account of its own handling, and a
+key-value table is a table of facts about the sample. The map's every path
+resolves in the answer that carries it, and for each one what it says was kept
+is what is there.
 
 Two bounds keep the ledger from becoming the thing it records. Each output is
 trimmed on the way in, and each agent gets a byte budget
@@ -1505,7 +1592,7 @@ sample resolved, while the URL carrying the same host survived and was refused
 at the export with a row beside it. Nothing a sandbox, an analyst or the judge
 observed is dropped at the projection now: the row keeps its place in the
 network block with the source that saw it, and the export records
-`stix.unpublishable_domain` — *a name that does not resolve outside the
+`stix.unpublishable_endpoint` — *a name that does not resolve outside the
 analysed network*. A name only the string sweep produced is unchanged, held
 back by `_is_emittable_domain` at the projection and silent, because a run of
 bytes ending in `.local` is not an observation of anything. The last label's
@@ -1602,21 +1689,51 @@ does. Asking it of URLs alone exported `[domain-name:value = 'localhost']` and
 in the tree refused the same two values. A pattern is not one comparison, so
 every value in it is asked — `[a] OR [b]`, an `AND` of two object paths, an
 `IN` list — and an indicator with one unpublishable endpoint in it is declined
-whole. The object type is read whatever case it is written in. A comparison
-whose right-hand side is not an endpoint at all — `MATCHES`, `LIKE`,
-`ISSUBSET` — is declined too, with the reason that is true of it: the pipeline
-could not read the pattern's endpoint, so it could not ask whether this export
-may carry it. A syntactically routable address the judge invented passes this
-question by design; whether any evidence holds it up is
-`stix.ungrounded_indicator`'s question, and that check is asked of every
+whole, and a value reached through a reference is one of them:
+`network-traffic:dst_ref.value` and `domain-name:resolves_to_refs[*].value`
+carry an endpoint and are asked whichever of the two questions fits what is
+written there. The object type is read whatever case it is written in. A
+comparison whose right-hand side is not an endpoint at all — `MATCHES`,
+`LIKE`, `ISSUBSET` — is declined too, with the reason that is true of it: the
+pipeline could not read the pattern's endpoint, so it could not ask whether
+this export may carry it, and a comparison the reader cannot read at all is
+declined with the same sentence rather than guessed at.
+
+One reader answers what a pattern says, for the export and for the grounding
+check both: `schemas.stix_pattern.read_comparisons`, which returns the object
+path, the operator and the literal of every quoted value in it. Two readers had
+already drifted — one decided a quoted key structurally, the other from the
+property name — and neither read an escaped quote, so `[file:name =
+'it\'s.exe']` was read as the value `it\` and the judge was told its own row
+appears nowhere in the evidence. A quote that opens where the object path is
+still being written is a key (`file:hashes.'MD5'`, `file:extensions['pe']`);
+a qualifier's own literal (`START '…' STOP '…'`) belongs to the qualifier and
+is not credited to the comparison before it. A syntactically routable address
+the judge invented passes this question by design; whether any evidence holds
+it up is `stix.ungrounded_indicator`'s question, and that check is asked of every
 indicator the judge writes.
 
 The same validity questions reach the judge's other kinds. An `email-addr`
 pattern is asked whether it is a mailbox at all and whether its domain part
 could exist; a `file:name` pattern is asked whether it names a file rather than
 a directory or a root — both declined as `stix.unpublishable_artefact` when
-they are not. A `file:hashes` comparison is asked whether the literal is a
-digest of the algorithm it is written under, by length and alphabet
+they are not. A `directory:path` comparison is asked two questions of its own,
+and told which one it failed. The first is validity — could this be a place on
+a machine: it has a root (a POSIX slash, a drive with either separator, a
+share, an environment variable, a home tilde, a registry hive) and at least one
+named step under it, and every step is written the way a name is, not empty,
+not whitespace, not a format specifier a sample was compiled with, with at
+least one of them carrying two characters running. `/tmp` is a directory; `/`
+and `C:\` are roots with nothing under them, and `/%s/%s` and `/ /` are what a
+strings table produces by the dozen. The second is grounding: the literal is
+asked the corpus question every other literal is asked, as a whole value and
+under the spellings that mean the same location (`reporting.dedupe`'s own path
+normalisation), because a path is written with whichever separator its writer's
+platform uses. A directory used to be refused with the file-name sentence,
+which told the judge its own directory row *has no file extension … so nothing
+says it is a real path*, and the judge spent its one retry on an untruth. A `file:hashes` comparison is
+asked whether the literal is a digest of the algorithm it is written under, by
+length and alphabet
 (`HASH_HEX_LENGTHS`), and declined as `stix.malformed_hash` when it is not: one
 run exported sixteen of the thirty-two characters of an MD5, a value a consumer
 matching on MD5 can never match. The grounding check asks the same question
@@ -1624,6 +1741,36 @@ first and then matches a digest as a *whole token*, never as the prefix of a
 longer run of hexadecimal, because a truncated digest is not "present in the
 evidence" however the substring search answers. An algorithm the table does not
 name is left alone.
+
+**What the corpus is.** The grounding checks search what the run *saw*, not
+what its ledger kept. `reporting.evidence_budget_bytes` blanks an entry's
+output once an agent's answers pass it — after the model has read them — so a
+corpus built from stored entries once told a judge that a C2 a tool really
+returned appears nowhere, and the indicator was dropped. The container keeps
+every tool answer as the model received it (after the output shortener, before
+the budget) in memory, for the length of the job, never in the graph state and
+never persisted, bounded by `reporting.evidence_corpus_bytes`. The judge's
+grounding corpus and the export's second-source test both read it; the stored
+entries are the fallback for a run whose corpus is gone.
+
+**And what an absence may say.** Past the ceiling, with no corpus at all, or
+over stored entries of which any was blanked, the evidence searched is not the
+run's whole record — and the platform does not assert an absence over evidence
+it knows is partial. The finding is then **advisory**: the judge is told once,
+in a sentence naming how many answers were not kept and from which tools, and
+nothing drops its object for it. `drop_ungrounded_indicators` reads the flag,
+and a source guard fails any other consumer that decides a removal from an
+ungrounded row without asking.
+
+**And what it held.** Beside the loss, `run_summary.truncation` carries
+`evidence_corpus_answers`, `evidence_corpus_bytes_held` and
+`evidence_corpus_bytes_ceiling`, read off the corpus while the container still
+has one. The three are **absent** on a run that recorded none of them — a
+summary stored before they existed, a run resumed without its corpus — because
+zero would say the corpus held nothing. The report's Bounds Hit section and the
+console's "what the run spent" print them only where they tell a reader
+something: a corpus that went partial, or one past half its ceiling. Otherwise
+the record carries them and both surfaces stay quiet.
 
 Two rows that mean one path are one row. `reporting.dedupe.canonical_path`
 normalises the separators, collapses runs of them, drops a trailing one and
@@ -1635,16 +1782,18 @@ carried the same directory twice, once with the trailing slash and once
 without.
 
 Whether an endpoint that *could* exist is published stays
-`corroboration_reason`'s decision. A URL or a name the host question refuses is
-recorded as `stix.unpublishable_url` or `stix.unpublishable_domain` when a
-sandbox, an analyst or the judge is the one that recorded it — the report's own
-network block and the judge's own bundle both left unchanged. An address the
-export holds back is recorded under the domain code, which is the code for an
-endpoint that is not a host anything outside the analysed network could answer
-for; the sentence beside it names the kind. A row held back
-only for want of a second source is the rule working and is not a finding, and
-neither is a string sweep's own cut-off: a report carries up to forty of them,
-and forty unresolved findings nobody can act on bury the ones somebody can.
+`corroboration_reason`'s decision. A URL, a name or an address the host
+question refuses is recorded as `stix.unpublishable_endpoint` when a sandbox,
+an analyst or the judge is the one that recorded it — the report's own network
+block and the judge's own bundle both left unchanged. One question, one code,
+and the sentence beside it names the kind: the same decision used to be filed
+under `stix.unpublishable_url` and `stix.unpublishable_domain`, with the second
+of them covering addresses too. A run stored before that keeps the row it
+wrote, and the console reads all three as the export's own decision. A row
+held back only for want of a second source is the rule working and is not a
+finding, and neither is a string sweep's own cut-off: a report carries up to
+forty of them, and forty unresolved findings nobody can act on bury the ones
+somebody can.
 
 Every model-written value on this path — a URL echoed into a decline, the
 judge's own verdict word, the category it invented, the type of an object the
@@ -1668,4 +1817,8 @@ the judge, then string-derived and corroborated), then the other hashes the
 judge carried, then the file names. A string-derived row never outranks the
 observed row it duplicates, and when they are the same indicator the queue
 order makes the observation the one that survives the dedupe. The renderer and
-the linter read the one constant.
+the linter read the one constant. The integrity pass then runs a second time,
+to sweep the relationships the cap left pointing at nothing, and what it takes
+out there is counted in the truncation ledger under `cap_orphan` — its own
+reason, because it is the cap's loss rather than a defect of anybody's bundle,
+and because that pass used to run with no ledger at all.

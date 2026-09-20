@@ -38,6 +38,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
+from maljan.core.truncation_ledger import EXPORT_PASS, JUDGE_PASS
 from maljan.reporting.dedupe import pattern_fingerprint
 
 if TYPE_CHECKING:
@@ -79,11 +80,6 @@ _MITRE_LOOKUP: dict[str, tuple[str, str]] = {
     "T1497": ("Virtualization/Sandbox Evasion", "https://attack.mitre.org/techniques/T1497/"),
     "T1547": ("Boot or Logon Autostart Execution", "https://attack.mitre.org/techniques/T1547/"),
 }
-
-# STIX pattern values are usually wrapped in single quotes inside square
-# brackets: ``[file:hashes.SHA-256 = 'abcd...']``. This regex pulls every
-# such quoted literal out so we can compare against the evidence corpus.
-_PATTERN_LITERAL_RE = re.compile(r"'([^']+)'")
 
 
 def _technique_display_name(tid: str) -> str | None:
@@ -263,7 +259,11 @@ def postprocess_judge_bundle(
 
     # ── Final integrity pass: empty-pattern drop, dedup, dangling-ref sweep ──
     before = len(objects)
-    objects = enforce_bundle_integrity(objects, ledger=ledger)
+    # Recorded as the judge path's own: this runs once per verdict attempt,
+    # discarded retries included, over objects the export may never carry, so
+    # it cannot be part of the total a reader reconciles with the bundle they
+    # hold.
+    objects = enforce_bundle_integrity(objects, ledger=ledger, whose=JUDGE_PASS)
     bundle_dict["objects"] = objects
     if len(objects) != before:
         logger.info(
@@ -437,6 +437,8 @@ def enforce_bundle_integrity(
     objects: list[Any],
     *,
     ledger: Any | None = None,
+    dropped_as: str | None = None,
+    whose: str = EXPORT_PASS,
 ) -> list[Any]:
     """Make a STIX object list internally valid and non-redundant, in place-ish.
 
@@ -456,6 +458,14 @@ def enforce_bundle_integrity(
                  often this pass fires and what it removes, and nothing counted it
                  before. Typed loosely to keep this module free of a core import
                  it does not otherwise need.
+        whose: Which bundle this pass ran on. The export's passes are the ones
+                 the run summary reconciles with the published bundle; the
+                 judge path's run per verdict attempt and are counted apart.
+        dropped_as: One reason to file everything this run of the pass removes
+                 under, in place of the per-step reasons. The caller that sweeps
+                 up after the indicator cap uses it: nothing there is a defect of
+                 anybody's bundle, it is all the cap's own loss, and one name for
+                 it keeps that separate from what the first pass repaired.
     """
     _objects_in = len(objects)
     _dropped: dict[str, int] = {}
@@ -538,19 +548,29 @@ def enforce_bundle_integrity(
     _dropped["duplicate_relationship"] = _dup_rel
     objects = kept
 
-    # 5) trim object_refs to surviving objects
+    # 5) trim object_refs to surviving objects. What this takes out removes no
+    # object, so it is not one of the reasons — but it is a removal, and a
+    # reader comparing the exported bundle with the judge's own would find it
+    # nowhere if it were not counted.
     ids = {_oid(o) for o in objects}
+    _refs_trimmed = 0
     for o in objects:
         refs = _oget(o, "object_refs")
         if isinstance(refs, list):
-            _oset(o, "object_refs", [r for r in refs if r in ids])
+            surviving = [r for r in refs if r in ids]
+            _refs_trimmed += len(refs) - len(surviving)
+            _oset(o, "object_refs", surviving)
 
     if ledger is not None:
         try:
             ledger.record_integrity_pass(
                 objects_in=_objects_in,
                 objects_out=len(objects),
-                dropped=_dropped,
+                dropped=(
+                    {dropped_as: sum(_dropped.values())} if dropped_as is not None else _dropped
+                ),
+                refs_trimmed=_refs_trimmed,
+                whose=whose,
             )
         except Exception:  # noqa: BLE001 — telemetry must never break a bundle
             pass

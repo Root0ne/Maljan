@@ -327,11 +327,16 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
         return {}
 
     caps = static.api_capabilities or {}
-    techniques = [
-        str(h.get("technique_id"))
-        for h in (static.api_technique_hits or [])
-        if h.get("technique_id")
-    ]
+    # Distinct ids, in first-seen order. A row is a rule and two rules can
+    # name one technique by two mechanisms, so a plain list handed the
+    # narrative the same id twice and read as two findings.
+    techniques = list(
+        dict.fromkeys(
+            str(h.get("technique_id"))
+            for h in (static.api_technique_hits or [])
+            if h.get("technique_id")
+        )
+    )
 
     if section == "packing_obfuscation":
         facts: dict[str, Any] = {

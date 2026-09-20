@@ -67,15 +67,29 @@ from maljan.schemas.stix_models import (
     Report,
     get_utcnow,
 )
+from maljan.schemas.stix_pattern import read_comparisons
 
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+# What the truncation ledger files the integrity pass's second run under: a
+# relationship the indicator cap left pointing at nothing.
+CAP_ORPHAN_REASON = "cap_orphan"
 
 # What the run summary calls a judge object this export declined to carry. Each
 # says what is not in the bundle and why; nothing is rewritten, and the judge's
 # own bundle keeps the object.
 MALWARE_UNDER_BENIGN_CODE = "stix.malware_object_under_benign"
-UNPUBLISHABLE_URL_CODE = "stix.unpublishable_url"
-UNPUBLISHABLE_DOMAIN_CODE = "stix.unpublishable_domain"
+# One endpoint question, one code. A URL, a name and an address that fail the
+# same host question are one class of decline, and a reader filtering on the
+# code used to find that class under two names — with the second of them
+# covering addresses too, which is not what it is called. The kind is in the
+# sentence, where it says something.
+UNPUBLISHABLE_ENDPOINT_CODE = "stix.unpublishable_endpoint"
+# What a run stored before that carries for the same decision. Nothing is
+# migrated: a stored row is what that run recorded. The console reads these as
+# the same decision, and ``apps/web/src/lib/validationRows.ts`` holds the list
+# it reads them from.
+LEGACY_UNPUBLISHABLE_CODES = ("stix.unpublishable_url", "stix.unpublishable_domain")
 # An indicator over something that is not an endpoint: a mailbox that is not
 # one, a file name that names a directory or a root.
 UNPUBLISHABLE_ARTEFACT_CODE = "stix.unpublishable_artefact"
@@ -129,42 +143,60 @@ _NETWORK_PATTERN_PREFIXES = (
 )
 
 
-# The literals a STIX pattern quotes, which is where a URL indicator keeps its
-# URL.
-_PATTERN_LITERALS_RE = re.compile(r"'([^']*)'")
-
-# An object path in a pattern comparison: the type, then the property. Case
-# does not carry meaning in a STIX object path, and a judge writes
-# ``[URL:value = ...]`` often enough that reading it as a kind this question is
-# not about would be a hole rather than a nicety.
-_OBJECT_PATH_RE = re.compile(r"([a-z0-9-]+):([a-z_.]+)", re.IGNORECASE)
-
 # Comparison operators whose right-hand side is not an endpoint: a regular
 # expression, a wildcard shape, a subnet. The value cannot be asked the host
 # question, so the indicator is declined for that reason and not for a reason
 # that would be untrue of it.
 _UNREADABLE_OPERATORS = ("matches", "like", "issubset", "issuperset")
 
-# The object types whose value this export can ask a validity question about:
-# the four endpoints a consumer would act on, the mailbox and the file name.
-# A pattern over anything else is carried as the judge wrote it — there is no
+# The object paths whose value this export can ask a validity question about:
+# the four endpoints a consumer would act on, the mailbox and the file name. A
+# pattern over anything else is carried as the judge wrote it — there is no
 # true question to ask of it, and inventing one would decline an object for a
 # reason that is not so.
-_CHECKED_OBJECT_TYPES = ("url", "domain-name", "ipv4-addr", "ipv6-addr", "email-addr", "file")
+_DIRECT_PATHS = {
+    "url:value": "url",
+    "domain-name:value": "domain-name",
+    "ipv4-addr:value": "ipv4-addr",
+    "ipv6-addr:value": "ipv6-addr",
+    "email-addr:value": "email-addr",
+    "file:name": "file",
+}
 
-# What each of them is called in a recorded decline, and which code the decline
-# is filed under.
+# A value reached through a reference carries the referenced object's own
+# value: ``network-traffic:dst_ref.value`` is the address the traffic went to
+# and ``domain-name:resolves_to_refs[*].value`` is what the name resolved to.
+# Either could be a name or an address, so both questions are asked of it.
+#
+# These three references from these two owners, and no others. A reference is
+# not an endpoint by itself — ``email-message:from_ref.value`` is a mailbox and
+# ``network-traffic:src_payload_ref`` points at an artefact — and asking either
+# of them the host question would decline an object for a reason that is not
+# so, which is the thing the checked set exists to avoid.
+_ENDPOINT_KIND = "endpoint"
+_REFERENCE_OWNERS = ("network-traffic", "domain-name")
+_REFERENCE_STEP_RE = re.compile(r"(?:^|\.)(?:src_ref|dst_ref|resolves_to_refs)\.")
+
+# A hardware address, which is a legal target of ``src_ref`` and ``dst_ref``
+# and is not a host. There is no true host question to ask of one, so it is
+# carried as the judge wrote it rather than declined with a sentence about
+# names and addresses that could exist outside the analysed network.
+_MAC_ADDRESS_RE = re.compile(r"^[0-9a-f]{2}([:-])(?:[0-9a-f]{2}\1){4}[0-9a-f]{2}$", re.IGNORECASE)
+
+# A list step inside an object path says which element, never what the value is.
+_INDEX_STEP_RE = re.compile(r"\[[^\]]*\]")
+
+# What each kind is called in a recorded decline, and which code the decline is
+# filed under: one code for an endpoint no export may carry, one for an
+# indicator over something that is not an endpoint at all.
 _OBJECT_TYPE_WORDS = {
     "url": "URL",
     "domain-name": "domain",
     "email-addr": "e-mail address",
     "file": "file name",
+    _ENDPOINT_KIND: "endpoint",
 }
 _DECLINE_CODES = {
-    "url": UNPUBLISHABLE_URL_CODE,
-    "domain-name": UNPUBLISHABLE_DOMAIN_CODE,
-    "ipv4-addr": UNPUBLISHABLE_DOMAIN_CODE,
-    "ipv6-addr": UNPUBLISHABLE_DOMAIN_CODE,
     "email-addr": UNPUBLISHABLE_ARTEFACT_CODE,
     "file": UNPUBLISHABLE_ARTEFACT_CODE,
 }
@@ -188,8 +220,23 @@ def _network_rank(source: Any) -> int:
     return _NETWORK_SOURCE_RANK.get(name, _UNRECORDED_SOURCE_RANK)
 
 
+def _record_indicator_cap(ledger: Any | None, *, removed: int) -> None:
+    """Tell the truncation ledger what the cap spent. Never raises.
+
+    The cap is the one place a bundle loses objects that the integrity pass
+    does not account for, so without this the ledger's reasons stop short of
+    the bundle.
+    """
+    if ledger is None:
+        return
+    try:
+        ledger.record_indicator_cap(removed=removed)
+    except Exception:  # noqa: BLE001 — telemetry must never break an export
+        return
+
+
 def _within_the_indicator_cap(
-    objects: list[Any], order: dict[str, tuple[int, int, int]]
+    objects: list[Any], order: dict[str, tuple[int, int, int]], ledger: Any | None = None
 ) -> list[Any]:
     """``objects`` with the lowest-priority indicators removed, or ``objects`` itself.
 
@@ -203,10 +250,12 @@ def _within_the_indicator_cap(
     """
     indicators = [obj for obj in objects if getattr(obj, "type", "") == "indicator"]
     if len(indicators) <= MAX_TOTAL_INDICATORS:
+        _record_indicator_cap(ledger, removed=0)
         return objects
     last = (_BAND_FILE_NAME + 1, 0, len(order))
     ranked = sorted(indicators, key=lambda obj: order.get(obj.id, last))
     kept = {obj.id for obj in ranked[:MAX_TOTAL_INDICATORS]}
+    _record_indicator_cap(ledger, removed=len(indicators) - MAX_TOTAL_INDICATORS)
     logger.warning(
         "stix_renderer: total indicator cap (%d) exceeded by %d; the lowest-priority "
         "indicator(s) are not exported.",
@@ -312,38 +361,50 @@ def _observed(source: Any) -> bool:
     return str(source or "").strip().lower() in _OBSERVED_SOURCES
 
 
-def _pattern_endpoints(pattern: str) -> list[tuple[str, str, str]]:
-    """Every ``(object type, literal, operator)`` a network comparison names.
+def _checked_kind(object_type: str, prop: str) -> str:
+    """Which validity question this export can ask at this object path, or ``""``.
+
+    Structural, in one place: a key quoted inside a path is the reader's
+    business and a property is either one this export can ask about or one it
+    carries as written. It used to be decided here by ``prop != "name"``, which
+    reads the ``'MD5'`` of ``file:hashes.'MD5'`` as a file name's neighbour
+    rather than as the key it is, and left the object types of every reference
+    path out of the question entirely.
+    """
+    steps = _INDEX_STEP_RE.sub("", prop)
+    direct = _DIRECT_PATHS.get(f"{object_type}:{steps}")
+    if direct is not None:
+        return direct
+    if (
+        object_type in _REFERENCE_OWNERS
+        and steps.endswith(".value")
+        and _REFERENCE_STEP_RE.search(steps)
+    ):
+        return _ENDPOINT_KIND
+    return ""
+
+
+def _pattern_endpoints(pattern: str) -> list[tuple[str, str, str, bool]]:
+    """Every ``(kind, literal, operator, readable)`` a checked comparison names.
 
     A STIX pattern is not one comparison. ``[a] OR [b]``, an ``AND`` of two
     object paths and an ``IN`` list of several values are all one pattern with
-    several endpoints in it, and an indicator is exported or not as a whole. So
-    every quoted value is credited to the object path most recently written
-    before it, and the caller answers for all of them.
-
-    The split is on the quotes rather than on the object paths, because a
-    pattern's literals are where a URL lives and a URL can carry anything that
-    looks like an object path inside it. Only what is written *outside* the
-    quotes says what is being compared.
+    several endpoints in it, and an indicator is exported or not as a whole, so
+    the caller answers for all of them.
+    ``maljan.schemas.stix_pattern`` is what reads the syntax, here and in the
+    validator both; what is kept here is this export's own question — which
+    paths it has something true to ask about.
     """
-    found: list[tuple[str, str, str]] = []
-    kind = ""
-    prop = ""
-    operator = ""
-    for index, chunk in enumerate(pattern.split("'")):
-        if index % 2 == 0:
-            # No path in this chunk means the list of values goes on: ``IN
-            # ('a', 'b')`` writes the path once and quotes twice.
-            paths = list(_OBJECT_PATH_RE.finditer(chunk))
-            if paths:
-                kind = paths[-1].group(1).lower()
-                prop = paths[-1].group(2).lower()
-                operator = chunk[paths[-1].end() :].strip().lower()
-        elif kind in _CHECKED_OBJECT_TYPES and not (kind == "file" and prop != "name"):
-            # A ``file:hashes.'MD5'`` comparison quotes the algorithm as well
-            # as the digest, and neither is a file name. Hashes are asked their
-            # own question, by length and alphabet, outside this loop.
-            found.append((kind, chunk, operator))
+    found: list[tuple[str, str, str, bool]] = []
+    for comparison in read_comparisons(pattern):
+        kind = _checked_kind(comparison.object_type, comparison.prop)
+        if not kind:
+            # An unreadable comparison names no path, so nothing says which
+            # question to ask of it; it is declined rather than carried.
+            if not comparison.readable:
+                found.append((_ENDPOINT_KIND, comparison.literal, comparison.operator, False))
+            continue
+        found.append((kind, comparison.literal, comparison.operator, comparison.readable))
     return found
 
 
@@ -368,6 +429,17 @@ def _endpoint_is_publishable(kind: str, literal: str) -> bool:
         return email_is_publishable(literal)
     if kind == "file":
         return path_names_a_file(literal)
+    if kind == _ENDPOINT_KIND:
+        # A reference's value is whichever of the three it happens to be, so it
+        # is asked the question that fits what is written, and a hardware
+        # address is asked none of them.
+        text = str(literal).strip()
+        if _MAC_ADDRESS_RE.match(text):
+            return True
+        try:
+            ipaddress.ip_address(text.strip("[]"))
+        except ValueError:
+            return host_is_public(literal)
     # The judge asserting an address is somebody observing it, so a private one
     # it cites out of the sandbox's own evidence is lateral movement and stays.
     # Loopback, unspecified, documentation, multicast and broadcast never are.
@@ -397,11 +469,11 @@ def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
     if malformed is not None:
         algorithm, literal = malformed
         return (MALFORMED_HASH_CODE, malformed_hash_sentence(algorithm, literal))
-    for kind, literal, operator in _pattern_endpoints(pattern):
-        readable = _endpoint_is_readable(operator)
+    for kind, literal, operator, read in _pattern_endpoints(pattern):
+        readable = read and _endpoint_is_readable(operator)
         if readable and _endpoint_is_publishable(kind, literal):
             continue
-        code = _DECLINE_CODES.get(kind, UNPUBLISHABLE_DOMAIN_CODE)
+        code = _DECLINE_CODES.get(kind, UNPUBLISHABLE_ENDPOINT_CODE)
         words = _OBJECT_TYPE_WORDS.get(kind, "address")
         if not readable:
             return (code, unreadable_endpoint_sentence(literal, words, "the judge's own bundle"))
@@ -442,6 +514,7 @@ class ExtendedSTIXRenderer:
         base_bundle: Bundle | None = None,
         *,
         ledger: Any | None = None,
+        corpus: Any = None,
     ) -> Bundle:
         """Render the extended bundle.
 
@@ -629,7 +702,7 @@ class ExtendedSTIXRenderer:
                 if _observed(url.source) and not host_is_public(url_host(url.url)):
                     self.declined.append(
                         (
-                            UNPUBLISHABLE_URL_CODE,
+                            UNPUBLISHABLE_ENDPOINT_CODE,
                             impossible_host_sentence(url.url, "the report's network block"),
                         )
                     )
@@ -645,7 +718,7 @@ class ExtendedSTIXRenderer:
                 if _observed(domain.source) and not host_is_public(domain.fqdn):
                     self.declined.append(
                         (
-                            UNPUBLISHABLE_DOMAIN_CODE,
+                            UNPUBLISHABLE_ENDPOINT_CODE,
                             unpublishable_domain_sentence(domain.fqdn),
                         )
                     )
@@ -660,7 +733,7 @@ class ExtendedSTIXRenderer:
         # the network block's own answer for a name, and everything some other
         # producer in this run wrote down for every other kind.
         publishable_domains = _publishable_domains(report)
-        corroborating = _corroborating_values(report)
+        corroborating = _corroborating_values(report, corpus)
 
         # Apply the same acceptance-based filter
         # used by the judge bundle postprocess so deterministic
@@ -786,12 +859,19 @@ class ExtendedSTIXRenderer:
         from maljan.agents.judge_postprocess import enforce_bundle_integrity
 
         objects = enforce_bundle_integrity(objects, ledger=ledger)
-        capped = _within_the_indicator_cap(objects, order)
+        capped = _within_the_indicator_cap(objects, order, ledger=ledger)
         if capped is objects:
             return Bundle(objects=objects)
         # Only what the cap orphaned is left to sweep, and it is the cap's
-        # doing rather than the pass's, so this one is not counted again.
-        return Bundle(objects=enforce_bundle_integrity(capped))
+        # doing rather than a defect of anybody's bundle — so it is counted
+        # under a reason of its own. Counted it must be: the pass used to run
+        # here with no ledger at all, so this sweep's losses appeared in no
+        # total. The cap's own removals are counted beside them, under
+        # ``indicator_cap_removed``, so every object that left this bundle
+        # left under a name.
+        return Bundle(
+            objects=enforce_bundle_integrity(capped, ledger=ledger, dropped_as=CAP_ORPHAN_REASON)
+        )
 
     @staticmethod
     def _normalize_judge_timestamps(objects: list[Any]) -> None:
@@ -1237,7 +1317,7 @@ def _section_text(section: Any) -> list[str]:
     return parts
 
 
-def _corroborating_values(report: Any) -> str:
+def _corroborating_values(report: Any, corpus: Any = None) -> str:
     """Everything a second source in this run recorded, lowercased, built once.
 
     One haystack per render, searched for whole values rather than by
@@ -1275,6 +1355,9 @@ def _corroborating_values(report: Any) -> str:
 
     sections = list(getattr(report, "sections", None) or [])
     cited: set[str] = set()
+    # The cited entries a section already contributed text for, so the corpus
+    # is read only where the stored record has nothing left.
+    drawn: set[str] = set()
     for section in sections:
         origin = str(getattr(section, "source", "") or "").strip().lower()
         if origin.startswith(_ANALYST_SECTION_SOURCES):
@@ -1287,7 +1370,23 @@ def _corroborating_values(report: Any) -> str:
             continue
         if not cited.intersection(str(eid) for eid in (section.evidence_ids or [])):
             continue
+        drawn.update(str(eid) for eid in (section.evidence_ids or []))
         parts.extend(_section_text(section))
+
+    # What the run saw, for the cited entries whose stored output is gone. The
+    # evidence byte budget blanks an entry after the model has read it, so an
+    # answer an analyst cited can leave no section at all and a value a tool
+    # really returned stops corroborating anything. The narrowing is unchanged
+    # — an analyst has to have cited it, and the string sweep's own entries are
+    # still not a second source — only the place the text is read from.
+    if corpus is not None:
+        for entry_id in sorted(cited - drawn):
+            try:
+                if str(corpus.tool_of(entry_id) or "") in _STRING_SWEEP_TOOLS:
+                    continue
+                parts.append(str(corpus.text_for(entry_id) or ""))
+            except Exception:  # noqa: BLE001 — a weaker haystack, never a failed render
+                continue
     return " ".join(part for part in parts if part).lower()
 
 

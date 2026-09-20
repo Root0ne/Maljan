@@ -129,16 +129,29 @@ class APISettings(BaseSettings):
     jwt_issuer: str = "maljan-api"
     jwt_audience: str = "maljan-clients"
 
-    # Minimal viable secret
-    # rotation. New tokens carry the ``kid`` header set to ``jwt_key_id``.
-    # During rotation, operators set ``jwt_previous_secret_key`` to the
-    # old value for a grace period; ``decode_token`` accepts both. Once
-    # every token with the old ``kid`` has expired, the previous secret
-    # can be removed. TODO(audit-2026-05-19): wire a cron / admin
-    # endpoint that automates the rotation cadence.
+    # Secret rotation. New tokens carry the ``kid`` header set to
+    # ``jwt_key_id``. During rotation an operator sets
+    # ``jwt_previous_secret_key`` to the old value for a grace period and
+    # ``decode_token`` accepts both, so tokens minted before the rotation stay
+    # valid until they expire.
+    #
+    # The grace period has an end, and the end is written down rather than
+    # remembered: ``jwt_previous_secret_not_after`` is the moment after which a
+    # token signed with the old secret is refused, and a previous secret
+    # configured without one is a bootstrap refusal. An old signing secret that
+    # nobody remembers to clear is a key that stays accepted for the life of
+    # the deployment, which is the whole risk rotating was meant to remove.
+    # ``/system/status`` and the startup log say that a grace secret is
+    # configured and when it lapses; the runbook is in docs/deployment.md.
     jwt_key_id: str = "v1"
     jwt_previous_secret_key: SecretStr = SecretStr("")
     jwt_previous_key_id: str = "v0"
+    # Typed as text and parsed where it is read, not by pydantic: this module
+    # never raises on construction (see ``app.bootstrap``), and a mistyped
+    # moment must reach an operator as the one bootstrap report naming every
+    # problem rather than as a traceback from whichever import built the
+    # settings singleton first.
+    jwt_previous_secret_not_after: str = ""
 
     # Secure flag on the HttpOnly refresh cookie. Left unset by default so it
     # can default to the inverse of ``debug`` (true outside debug, so the

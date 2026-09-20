@@ -54,6 +54,9 @@ class _Provider:
 
     def open(self, job: Any) -> None:
         self.opened = True
+        # Kept so a test can ask what the resolver handed the provider: the
+        # job's own ledger and output limit travel in this context.
+        self.job = job
 
     def get_tools(self) -> list[Any]:
         return [_tool("r2_open"), _tool("r2_analyze")]
@@ -98,12 +101,23 @@ class _Container:
         self._provider = over.get("provider", _Provider())
         self._registry = over.get("registry", _Registry({}, {}))
         self.llm = object()
+        from maljan.core.truncation_ledger import TruncationLedger
+
+        self._truncation_ledger = TruncationLedger()
 
     def get_agent_llm(self, name: str) -> Any:
         return self.llm
 
+    def job_key(self) -> str:
+        """What the real container answers, and what a provider opens under."""
+        return "job-under-test"
+
     def get_static_provider(self, provider_id: str | None = None) -> Any:
         return self._provider
+
+    def get_truncation_ledger(self) -> Any:
+        """The job's own bound-hit ledger, which every attach carries."""
+        return self._truncation_ledger
 
     def get_server_registry(self) -> Any:
         return self._registry
@@ -172,8 +186,36 @@ def test_a_provider_reference_is_the_only_way_a_generic_agent_gets_provider_tool
             "profile": "one",
         },
     )
-    resolved = resolve_agent("strings", _Container(cfg))
+    container = _Container(cfg)
+    resolved = resolve_agent("strings", container)
     assert [t.name for t in resolved.tools] == ["r2_open", "r2_analyze"]
+
+
+def test_a_generic_agents_provider_is_opened_with_the_jobs_ledger_and_limit():
+    """The provider's own tools are guardrailed too, and counted where the rest are."""
+    cfg = Settings(
+        _env_file=None,
+        agents={
+            "definitions": {
+                "strings": {
+                    "role": "generic",
+                    "prompt": "p",
+                    "static_provider": "r2",
+                    "tools": [{"kind": "provider"}],
+                }
+            },
+            "profiles": {"one": {"analysts": ["strings"]}},
+            "profile": "one",
+        },
+    )
+    container = _Container(cfg)
+
+    resolve_agent("strings", container)
+
+    job = container._provider.job
+    assert job.job_key == "job-under-test"
+    assert job.truncation_ledger is container.get_truncation_ledger()
+    assert job.max_output_chars == cfg.preprocessing.max_tool_output_chars
 
 
 def test_a_built_in_role_never_opens_its_provider_during_resolution():

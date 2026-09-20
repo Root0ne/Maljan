@@ -62,6 +62,10 @@ class MaljanApp:
         agents own their MCP toolkits — so the release has to start here. Never
         raises: this runs from a ``finally`` around a completed analysis, and
         teardown must not be able to turn a finished run into a failed one.
+
+        The container takes this run's staging directory away as the last thing
+        it does, so a caller with no worker behind it — the command line — has
+        a teardown that leaves nothing on disk.
         """
         try:
             await self.container.aclose()
@@ -227,16 +231,22 @@ class MaljanApp:
                 # the structured IOCs. Only CAPE-style providers declare it.
                 if caps.can_fetch_pcap and isinstance(result.report, dict):
                     try:
-                        import tempfile
+                        from maljan.tools import staging
 
-                        from maljan.tools.roots import add_sample_root
-
-                        pcap_dir = Path(tempfile.gettempdir()) / "maljan-cape-pcap"
-                        # The capture lands here, so this is where the network
-                        # sidecar is allowed to read one from.
-                        add_sample_root(pcap_dir)
+                        # This job's own capture directory, inside its staging
+                        # directory: named as a root for this job's sidecars
+                        # and for no later one, removed with everything else
+                        # the job staged, and swept by the same TTL. A capture
+                        # is a full record of the detonation — the operator's
+                        # addressing, the C2 exchange, whatever the malware
+                        # sent in the clear — and ``pcap_path`` is a qualified
+                        # argument the *model* writes, so a directory shared
+                        # between jobs was one instruction inside a sample away
+                        # from an earlier job's traffic.
+                        pcap_dir = staging.open_capture_dir(self.container.job_key())
                         pcap_path = provider.fetch_pcap(task_id, str(pcap_dir))
                         if pcap_path:
+                            staging.make_private(Path(pcap_path))
                             net = result.report.setdefault("network", {})
                             if isinstance(net, dict):
                                 net["pcap_local_path"] = pcap_path
@@ -327,6 +337,12 @@ class MaljanApp:
             from maljan.tools.roots import add_sample_root
 
             add_sample_root(Path(sample_path).parent)
+
+        # How long a failed ATT&CK index build is believed. Set here, before
+        # the pipeline opens the sidecar registry, because the knowledge
+        # sidecar is the process where that build actually happens and it
+        # reads its environment rather than the settings store. The in-process
+        # module is told directly, for the lookups this worker makes itself.
 
         # Submit to sandbox if sample_path is provided
         sandbox_report = await self._submit_to_sandbox(sample_path)

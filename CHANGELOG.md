@@ -473,8 +473,157 @@ change landed on `main`.
   waiting and the setting it is waiting on, `api.enrichment_dedicated_worker`.
   Nothing is drawn where enrichment runs beside the analyses, where its worker
   is up, or against an API that does not answer with the field.
+- **An agent carries its own step and time budget.** `max_steps` and
+  `timeout_seconds` on an agent definition, drawn on its card in the console as
+  **Steps per loop** and **Seconds per loop**; blank inherits the deployment's
+  `react_agent_max_steps` / `react_agent_timeout`. The seeded lead's 40 steps
+  and 1800 s move onto its definition, so a clone of a team arrives with the
+  budget its agents need rather than with five specialists to ask and the
+  default ten steps to ask them in. Alembic revision `20260927000000` moves a
+  stored override onto the definition it belongs to — only a value the field
+  accepts, so a `0` or a negative left in an old override map stays there and
+  is named in the migration's log rather than making every later settings read
+  raise — and the save review names a budget edit like any other field. A
+  stored budget the field would refuse is read as absent, with the reason
+  logged, so one agent's number cannot take a deployment down.
+- **A JWT rotation's grace period can be given a written end.**
+  `JWT_PREVIOUS_SECRET_NOT_AFTER` is optional; when it is set it is enforced,
+  and past that moment a token signed with the previous secret is refused.
+  `GET /api/v1/system/status` reports the rotation to an admin caller under
+  `jwt_grace_secret` (the previous `kid`, when it lapses, whether it is still
+  accepted, and whether an end was written down at all), and the API says the
+  same at every start. A grace secret with no end is accepted as before and
+  warned about at every start; one whose window has run out is warned about
+  until both settings are cleared. `docs/deployment.md` has the three-step
+  runbook. Nothing rotates on its own.
+- **Per-tool-call timing, per agent.** The run summary carries `tool_latency`
+  — for each agent how many tool calls it made, what they cost together, and
+  the single slowest with the tool that answered it, computed from the clock
+  each ledger entry already carried — and the summary's header draws a **Tool
+  calls** line beside **Per stage**. The analyst-latency log line names that
+  slowest call, so a run that overran says whether the model was slow or a
+  tool was.
+- **A technique's name, tactics, domain and platforms are a file read.**
+  `data/attck_techniques.json` ships beside the id catalogue, written from the
+  same three bundles by
+  `scripts/knowledge/prepare_attck_malware_fixtures.py`: per active technique
+  id its domain, its name, its tactic slugs and its MITRE platforms, plus the
+  tactic catalogue per domain. `tools.knowledge.attck_lookup`,
+  `attck_validate`, `attck_scope` and the capability matrix's name and tactic
+  resolution all answer from it and build nothing; only `resolve_technique` and
+  the alignment gate, which rank, still load the STIX bundles. A cold worker
+  and a cold CI runner no longer fetch fifty-eight megabytes to answer a
+  dictionary question, and `tests/unit` needs no network at all. Mobile and ICS
+  rows carry their tactics, which the enterprise-only kill-chain filter had
+  always dropped.
+  `data/attck_retired_ids.json` gains `revoked_by` per row where the bundle
+  names a successor, which is what lets a data builder retarget a retired id
+  mechanically.
+- **An ELF's symbols have a behaviour catalogue.**
+  `data/api_behaviour_map_v1.json` gains a `linux` block of nine groups over
+  182 libc, syscall, OpenSSL and libcurl names, and `data/api_attck_map_v1.json`
+  two Linux technique rules, each naming an id the vendored table declares
+  for Linux. Every tier and every rule was measured against the 1911 ELF
+  binaries with a dynamic symbol table on the machine it was written on, with
+  `scripts/knowledge/measure_api_behaviour_block.py`, which ships so the
+  measurement can be repeated: eight of the nine groups are informational
+  associations carrying `corroborated_by`, the ninth is labelled only when a
+  second name says the sample reaches into another process (`flags_with`, a new
+  key the Windows block does not use), and the worst technique rule appears on
+  0.16% of those binaries. Each Linux rule carries `ordinary_use`, one sentence
+  naming the software that is not a sample and imports the same symbols. The vocabulary is
+  deliberately narrower than the Windows one: `registry` has no counterpart,
+  and `persistence`, `keylogging`, `screen_capture`, `credential` and `evasion`
+  are absent because their honest Linux evidence is a path or an X11 call
+  rather than a symbol name. The catalogue is asked one platform at a time —
+  `tools.knowledge.api_capability` and the knowledge sidecar's tool take
+  `platform`, and the triage pack passes the routed format's — so a name in
+  both blocks (`connect`, `send`, `system`) is answered about the system the
+  sample actually runs on, and a format with no block (Mach-O, an APK) is not
+  asked at all rather than asked about Win32.
+  **Upgrading:** a caller of `api_capability`, `load_api_behaviour_db` or
+  `load_api_attck_map` that wants ELF answers must pass `platform="linux"`;
+  the default stays Windows, so nothing that exists changes. A technique rule
+  now carries `rule` beside `name`, and `name` is the ATT&CK name for the id:
+  the two `T1685` rules no longer print a name the catalogue does not use.
+- **The API capability builder regenerates its own data file.** Its curated
+  source still named two ids ATT&CK 19.2 retired, and its own check refused
+  them, so `data/api_attck_map_v1.json` had no working generator. A retired id
+  is now followed to the id the vendored set's `revoked_by` names, or dropped
+  and listed when it names none, and two rules may share an id where a release
+  folded two sub-techniques into one. `make prepare-api-db` reproduces both
+  shipped data files byte for byte.
+- **A failed ATT&CK index build is retried.** It is remembered with the moment
+  it happened and re-attempted after `validation.index_retry_seconds` (default
+  900; 0 never re-attempts, which is the previous behaviour). One unreachable
+  moment used to leave every later job in that worker without the index, with
+  nothing saying why. Concurrent lookups still start one build, not a storm.
+  The value reaches the knowledge sidecar — the process where the build
+  actually happens — as `MALJAN_INDEX_RETRY_SECONDS`, which that server is
+  allowed to read and applies once at start-up.
 
 ### Changed
+
+- **Staging is per job.** The sidecars' staging directory held every job the
+  server process ever ran: `put_sample` uploads landed flat in it under
+  sixteen hex characters and the original file name, every sample's carved tree
+  sat beside every other's, and two runs of the same sample shared one tree, so
+  the only thing keeping one run out of another's files was the shape of the
+  carved tree rather than the directory. `MALJAN_STAGING_DIR` is now the
+  **base**, and each job writes into `job-<its id>` inside it: its uploads, its
+  `carved/<sha256>/` trees, and nothing another job can name by any spelling.
+  The spawn composes that one directory name and passes it to the child as
+  `MALJAN_STAGING_JOB` — a leaf, not a path, so an operator's configured base
+  stays the base; the sidecar joins the two. A path argument resolving into
+  another job's directory is refused even where a sample root contains the
+  base. The job's owner removes the directory on success, on failure and on an
+  operator's cancel, and the `MALJAN_STAGING_TTL_HOURS` sweep now prunes a job
+  directory whole — by the newest mtime inside it, following no link — as well
+  as the files inside a directory still in use. **What an operator does:**
+  nothing. The flat uploads and the single `carved/` tree of the previous
+  release are swept by the same TTL where they lie; a host you want clean at
+  once can have that directory emptied while no job is running. A sidecar
+  started by hand or by a settings probe gets no leaf and writes in the base
+  exactly as before.
+
+- **A tool answer too big for the prompt is shortened, not cut in half.** A
+  JSON result over `preprocessing.max_tool_output_chars` was cut as text, which
+  ended the document mid-array: the model got a prefix with none of the
+  answer's own metadata (`total`, `next_offset`, `read_path`) and the ledger
+  got prose it could not parse, so `structured` was empty. Every reader of the
+  record — the evidence sections, corroboration, the triage pack — skips an
+  entry with no `structured`, so an analyst's *largest* answers, the ones that
+  found the most, contributed nothing to the report and nothing said so. Such
+  an answer is now shortened as a document: elements come off the end of its
+  largest lists until it fits, no key is ever dropped, `truncated` is set and
+  each shortened list says how many rows came back (`<key>_returned` beside a
+  `total` the tool already emits, otherwise `<key>_omitted`). **What changes
+  for a consumer:** a large result now reads as valid JSON with fewer rows and
+  a stated count rather than as a cut-off string, and `structured` is populated
+  for those entries for the first time — so evidence sections, corroboration
+  and the triage pack begin to see calls they have never seen, and a report
+  over the same sample can carry more than it did. A large **string** value is
+  shortened the same way, which is the decompilation shape. Bookkeeping goes
+  under one reserved top-level key, `shortened`, mapping each shortened value's
+  path to `kept`/`omitted` (or `kept_chars`/`omitted_chars`); nothing is written
+  into the tool's own vocabulary but the `truncated` flag it already has, and a
+  tool that already uses the name keeps it. Anything that is not a JSON object
+  (decompilation as plain text, any prose) reaches the `FunctionSummarizer` and
+  then the same character cut as before, byte for byte — but a JSON object no
+  longer reaches the summariser, because its answer is prose and prose is what
+  leaves the record with nothing structured in it. The run summary's truncation
+  block counts the new outcome as `tool_output_shortened`, and a shortening that
+  ran past its wall as `tool_output_shortening_timeouts`. The report says in a
+  sentence above the section's table, rather than as a row in it, that an
+  answer was shortened and by how much.
+
+- **Deprecated: `react_agent_max_steps_overrides` and
+  `react_agent_timeout_overrides`.** A budget belongs to the agent that spends
+  it, so it is set on the agent's definition now. Both maps are still read for
+  an agent whose definition sets neither, and a definition's own value wins
+  over them; move any budget you keep in them onto the agent's card, because a
+  later release drops them. The seeded entries for `lead` are already gone —
+  the lead's budget is on its definition.
 
 - **A run's watchers are no longer drawn as members of its team.** The
   mediator and the sycophancy detector publish as `pipeline` with
@@ -767,7 +916,211 @@ change landed on `main`.
   `GET /reports/{id}/iocs` must now ask for `include=all`, which returns
   exactly what the route returned before.
 
+- **One code for one export decision about an endpoint.** A URL, a name and an
+  address the host question refuses are one class of decline, and the run
+  summary recorded them under `stix.unpublishable_url` and
+  `stix.unpublishable_domain` — with the second of the two also covering
+  addresses, which is not what it is called. All three are now
+  `stix.unpublishable_endpoint`, and the sentence beside the row names the
+  kind. Nothing is migrated: a run stored before this keeps the code it wrote,
+  and the console reads all three as the export's own decision.
+  **Upgrading:** a consumer filtering `run_summary.validation` on
+  `stix.unpublishable_url` or `stix.unpublishable_domain` must also accept
+  `stix.unpublishable_endpoint` to keep seeing new runs.
+
+- **A `directory:path` indicator now needs the run's own evidence, not only a
+  filesystem anchor.** A directory whose literal began with one of the
+  OS-resource prefixes — `C:\`, `/data/`, `%TEMP%`, a registry hive — used to
+  be admitted on that alone, with no corpus question asked. Shape is not
+  evidence: the anchor now answers only whether the literal could be a place,
+  and the literal is then asked, as every other literal is, whether this run
+  recorded it. A judge that writes a real directory the run did not happen to
+  write down is told so and spends its one retry there.
+  **Upgrading:** a run whose evidence does not name a directory it claimed will
+  carry a `stix.ungrounded_indicator` row for it where it carried none before,
+  and the indicator is dropped after the retry rather than exported.
+- **Everything the exported STIX bundle loses now leaves under a name.** The
+  total indicator cap removed indicators with a log line and nothing else, and
+  the integrity pass trimmed a report's or a note's `object_refs` without
+  recording it, so what the **export** removed could not be totalled. Both are
+  counted: `truncation.indicator_cap_removed` and
+  `truncation.integrity_refs_trimmed` on the run summary, two rows in the
+  report's Bounds Hit table, and one sentence in the console's run record
+  naming each reason with its own count. What reconciles is the export's own
+  figures: the objects the assembled bundle lost equal
+  `integrity_objects_removed` plus `indicator_cap_removed`. The judge path runs
+  the same pass once per verdict *attempt*, discarded retries included, so its
+  removals are counted apart under `judge_integrity_*` and are not part of that
+  total.
+  **Upgrading:** `run_summary.truncation` carries six new keys
+  (`indicator_cap_invocations`, `indicator_cap_removed`, `integrity_refs_trimmed`,
+  `judge_integrity_invocations`, `judge_integrity_objects_removed`,
+  `judge_integrity_dropped`); a summary stored before this release has none of
+  them and reads as zero. `integrity_objects_removed` no longer counts the judge
+  path's own passes, so on a run with a judge retry it is smaller than before.
+
+- **A finding row handed up a chain of delegations stays inside its limit.**
+  Each hand-over put the callee's name in front of the row, and nothing bounded
+  the result, so a row five levels deep was longer than the eight hundred
+  characters every validator's own row is held to. The chain is cut instead,
+  oldest step first and marked with an ellipsis; the finding's own sentence is
+  never cut. The route and the sentence are carried as two values, so the bound
+  can only ever shorten the route.
+- **A UNC share written the way a judge writes it reads as a place.** A STIX
+  literal `'\\server\share'` is unescaped by the pattern reader to
+  `\server\share`, and the directory check refused a single leading backslash,
+  so the judge was told its own valid path could not be a directory. One
+  backslash or two is a root now. In the other direction the check no longer
+  admits a drive-relative `C:Windows`, which names no place on the analysed
+  machine, nor a URL's fragment or query read as a step (`/#frag`, `/?q=1`).
+- **An absence over evidence the run knows is partial says so.** The output
+  shortener hands one string to the model and to the ledger, so a value in
+  neither is a value the model never saw and the grounding rule is unchanged.
+  What changes is the feedback: when an entry the grounding check searched came
+  back shortened, the `stix.ungrounded_indicator` row names the tools whose
+  answers were handed over with rows missing, so the judge can narrow one and
+  ask again instead of guessing.
+- **The two deprecated per-agent budget maps name the release they go in, and
+  cannot hold a budget nothing can use.** `react_agent_timeout_overrides` and
+  `react_agent_max_steps_overrides` are deleted in the release after the next
+  promotion to main, said identically in the two source comments and in
+  `docs/configuration.md`. A map entry that is not a whole number of at least
+  one — the bound a definition's own budget fields already carry — is dropped
+  when the settings are built, with the agent and the value logged. Dropped
+  rather than refused: a settings build that raises is a deployment that
+  cannot serve, and the agent falls back to the deployment's own budget, which
+  is what the reader did with such a value anyway. The bound runs before
+  pydantic's coercion, so a `2.5`, a `"lots"` and a nested dict are dropped too
+  rather than raising, while a `"40"` written through the environment is kept.
+- **Two import rules for one technique are two rows again.** `api_capability_hits`
+  keyed a row by technique id and name, and the catalogue's own name is on both
+  of the `T1685` rules, so they pooled: one rule's matched APIs counted toward
+  the other's `min_apis`, and a technique could be asserted on a combination no
+  single rule ever cleared. A row is a rule — the rule's own label is part of
+  the key and is on the row, and the report's import-technique table carries a
+  **Rule** column, as does the console's ATT&CK-from-imports table.
+  Corroboration keys on the technique id and is unchanged, and so is every
+  count of techniques: the console's heading, the narrative's prompt and the
+  report's facts count distinct technique ids rather than rows.
+- **The ATT&CK index retry interval reaches a sidecar from any entry point.**
+  `MALJAN_INDEX_RETRY_SECONDS` was exported in `MaljanApp.arun` alone, so a
+  knowledge sidecar started from a container built anywhere else kept the
+  module default. It is announced by the container, beside the tracing values,
+  which is the one place a sidecar's environment is decided from settings.
+- **A grounding check searches what the run saw, not what the ledger kept.**
+  `reporting.evidence_budget_bytes` blanks an entry's output after the model has
+  read it, so the judge could be told that a C2 a tool really returned "appears
+  nowhere in the evidence this run collected" — and the indicator was dropped
+  from the exported bundle over it. The container now keeps every tool answer as
+  the model received it, in memory, for the length of the job, bounded by the new
+  `reporting.evidence_corpus_bytes` (64 MB); the judge's grounding corpus and the
+  export's second-source test read that.
+  **Upgrading:** nothing to do. The corpus is never persisted and never enters
+  the graph state; set `reporting.evidence_corpus_bytes` lower to cap the memory,
+  and to zero to keep none — which makes every absence advisory, below.
+- **The platform does not assert an absence over evidence it knows is partial.**
+  When the corpus hit its ceiling, when there is no corpus (a report rebuilt
+  later, a run resumed in another process), or when the stored entries fell back
+  on include one the byte budget blanked, a `stix.ungrounded_indicator` row is
+  **advisory**: it says how many answers were not searched and from which tools,
+  it is fed back once like any finding, and the judge's object is not dropped for
+  it. `Violation` carries the flag and `drop_ungrounded_indicators` honours it.
+- **A grounding corpus that kept nothing is still the corpus.** Asking it only
+  when it held something threw away the verdict of one that kept nothing —
+  which is exactly what `reporting.evidence_corpus_bytes = 0` produces — and
+  the check fell back to the stored ledger, was told the evidence was whole,
+  and dropped the judge's object, the opposite of what the setting says. The
+  corpus is consulted whenever it has anything to say, and how whole the
+  searched evidence is, is the conjunction of the sources searched: a fallback
+  to stored entries inherits the state of the corpus it fell back from and
+  never launders it into "complete".
+- **A run whose grounding went advisory says so where an operator looks.**
+  `run_summary.truncation` carries `evidence_corpus_missing_answers`,
+  `evidence_corpus_missing_tools` and `evidence_corpus_partial_reason`; a
+  degradation reason names which of the three reasons it was; the report prints
+  it under Bounds Hit and the console draws it in the run record beside the
+  degraded banner. `advisory` survives `record_unresolved`, so a row the
+  platform declined to act on is no longer stored and drawn as a producer's
+  unfixed finding.
+- **The report and the console describe a bundle's losses in one wording.** The
+  report's Bounds Hit line printed `integrity_objects_removed` as "objects
+  repaired away" with the indicator cap's orphaned relationships inside it, and
+  said 10 where the console said 4 about the same run. Both build the sentence
+  the same way now, pinned on both sides against one fixture of the eight
+  measured bundle shapes.
+- **The grounding corpus costs what its ceiling says.** The run's record was
+  copied three more times on the way to a check — a joined cache, a token-set
+  element, and the string the check searched — so one check over 400 answers of
+  6,000 characters allocated 6.01 MB on top of a 2.4 MB corpus. The text is held
+  once, lower-cased at the moment it is recorded, and a check searches each
+  answer where it lies: the same check now allocates **0.01 MB**.
+  **Upgrading:** `reporting.evidence_corpus_bytes` defaults to **16 MB** rather
+  than 64, which is about 2,700 tool answers at the output cap against the few
+  hundred a whole team makes — the ceiling now bounds the process cost rather
+  than a quarter of it.
+- **The grounding check runs on whichever record the run has.** It was gated on
+  the sandbox token corpus alone, and the run's own tool answers had moved
+  beside that corpus rather than into it — so on every run with no sandbox
+  network block (mock mode, a static-only team, a failed submission, a sample
+  that made no network call) the `stix.ungrounded_indicator` check did not run
+  at all and an invented indicator was exported with nothing said about it. It
+  runs on either source now. With **neither** — no sandbox block and no tool
+  answers — nothing was searched, and a check that searched nothing may not
+  conclude from it: the row is written, it is advisory, and the judge keeps its
+  object, which is the same answer a partial corpus gets.
+  **Upgrading:** a run with no evidence at all now spends one correction turn
+  on an indicator it used to export unquestioned, and carries an advisory row
+  for it in `run_summary.validation.unresolved`. Nothing is dropped for it.
 ### Fixed
+
+- **A sandbox capture belongs to the job it was fetched for.** The capture was
+  written into one directory under the system temp directory, shared by every
+  job and every worker on the host, world-readable, named as a readable
+  directory for every sidecar started after it, and removed by nothing — while
+  `pcap_path` is a qualified argument the *model* writes. A sample carrying one
+  instruction could therefore have a later job read an earlier job's whole
+  detonation: the operator's addressing, the C2 exchange, whatever the malware
+  sent in the clear. Every provider that fetches one (CAPE, the REST DSL,
+  Triage) now writes into a `captures/` child of the job's own staging
+  directory, 0600 inside a 0700 tree; the directory is named as a readable root
+  for that job's sidecars alone and the root is dropped when the job ends; both
+  file-reading sidecars refuse another job's capture by every spelling; and the
+  whole thing goes with the job's staging directory. **What an operator does:**
+  nothing. What an earlier release left in `maljan-cape-pcap` under the system
+  temp directory is swept on the staging TTL, and nothing writes there any more.
+  A capture is created 0600 with `O_NOFOLLOW` rather than written and then
+  chmodded, and a fetch that fails or returns too few bytes to be a capture
+  leaves none behind.
+
+- **A run with no job id of its own removes what it staged.** The command line,
+  a settings probe and any script that builds a container used to compose a
+  staging directory and leave it for the TTL — and the name was derived from
+  the process, so a second run that drew a recycled pid inside that window
+  inherited the first one's uploads, carved payloads and capture. The name is
+  now per run, the container takes its directory away as the last thing it
+  closes, and `maljan analyze` releases the run in a `finally` that covers a
+  completed analysis, a failed one and an interrupted one alike.
+
+- **A retirement of the shared agent loop no longer costs a grace period per
+  abandoned tool server.** When that loop is retired, every handle bound to it
+  is abandoned and its child reaped — and the reap ran serially: SIGTERM, a
+  two-second wait, SIGKILL and a log line for each handle in turn, on a daemon
+  watchdog thread. One recorded retirement walked sixty-one of them. The set is
+  now signalled together, the grace is waited out once, the survivors are
+  killed, and the whole set is one log line naming the servers and the counts.
+  A test's tool servers are also closed with the test now, so a session no
+  longer hands a retirement every earlier test's handles.
+
+- **A process that has finished its work is not ended by its own watchdog.** The
+  cancel watchdog is a daemon thread with a ten-second fuse: when a run ends
+  inside that fuse it woke afterwards, reaped the sidecars of the loop it was
+  retiring — two seconds of grace per handle — and logged. Writing to a stream
+  the process had already closed is an error `logging` prints and swallows, and
+  holding the stderr buffer lock while the interpreter finalises is a fatal
+  error and a non-zero exit on a run where everything had passed. Once
+  `sys.is_finalizing()` is true the watchdog retires nothing, reaps nothing and
+  says nothing, and nothing it does can leave its thread; the children it would
+  have killed are the operating system's to collect a moment later.
 
 - **Enrichment stopped taking the slot an analysis was waiting for.** The
   post-verdict reputation lookups were queued beside the analyses, where the
@@ -2446,6 +2799,172 @@ change landed on `main`.
   request from the stored report, so there is no second copy to go stale; a
   report stored before this keeps the figures it was stored with, and its
   run-summary column — what the console draws — was always the final one.
+- **A late event continues its job's numbering whoever publishes it.** The
+  per-job sequence counter lives 24 hours and the rows it numbers do not, so a
+  task publishing for an older job — enrichment was the only one, and it
+  carried its own seeding call — started again at 1, collided with that job's
+  first stored event and lost the row to a feed that never fails a run. The
+  seeding now happens in the publisher, once per job, before the first number
+  it hands out for a job whose feed is being persisted; no call site has to
+  remember it.
+- **An endpoint label keeps its IPv6 brackets.** `http://[::1]:8080/v1` was
+  named `http://::1:8080` in the submit gate's refusal and on the console — an
+  address that cannot be typed back in and whose port cannot be told from its
+  last group, so an operator could not find the failing pair. The label is now
+  re-bracketed; it still carries no userinfo, path or query.
+- **The model probe's five minutes covers the catalogue listing.** The budget
+  was taken after the provider's model list came back, so the real wall was
+  five minutes plus the listing per provider and the sentence naming untried
+  pairs understated it. The deadline is now taken as the probe begins.
+- **The Ollama probe's failure detail reads as two sentences.** It joined
+  "answered nothing" to the remedy with no separator.
+- **A carved-file answer names the file before anything a cut would take.** The
+  analysis sidecar puts `read_path` first in every answer to a `carved_path`
+  call. It was appended, so an answer wider than the caller's output guardrail
+  lost it: one measured run's `strings` over a carved PE came back with 150
+  rows, was cut at six thousand characters before anything recorded it, and
+  stored no `read_path` while its shorter siblings each carried one.
+- **The console reads the required environment names from the API.** The names
+  a built-in sidecar is always started with were written down a second time in
+  TypeScript with nothing pinning the two lists together, so a change on the
+  Python side would have left the editor drawing the wrong names as fixed and
+  silently restoring ones it had offered as removable. The server-map catalog
+  entry now carries `required_env`, resolved from `REQUIRED_ENV_ALLOW` the way
+  `choices` is resolved, and the console's copy is gone.
+
+- **One reader of a STIX pattern, and it reads an escaped quote.** The
+  validator and the STIX renderer each split a pattern on its quotes, and
+  neither undid an escape: `[file:name = 'it\'s.exe']` was read as the value
+  `it\`, the judge was told its own row appears nowhere in the evidence, and
+  it spent its one retry on that. They had also drifted about what a quoted key
+  is — one decided it structurally, the other from the property name. Both now
+  ask `schemas.stix_pattern.read_comparisons`, which gives the object path, the
+  operator and the literal of every quoted value, keeps `file:hashes.'MD5'` and
+  `file:extensions['pe']` as keys, leaves a `START '…' STOP '…'` qualifier's
+  timestamps out of the comparison before it, and reports what it cannot read
+  as unreadable so it is declined rather than guessed at. The digest check
+  (`malformed_hash_in`) reads through it too, and the dead fourth reader in
+  `judge_postprocess` is gone, so the pattern really is read in one place. That
+  check also reads `IN (…)`: `[file:hashes.'MD5' IN ('deadbeef', …)]` asserts
+  every member is an MD5, and the length rule used to ask the `=` form alone.
+
+- **An endpoint written through a reference is asked the host question.** A
+  judge-written `[network-traffic:dst_ref.value = '127.0.0.1']` reached no
+  check at all, so loopback, private and documentation addresses in that
+  pattern shape were exported with nothing in the run summary saying so.
+  `network-traffic:src_ref.value`, `dst_ref.value` and the
+  `resolves_to_refs[*].value` shapes are now asked the same question as the
+  four direct kinds, and asked whichever of host or address fits the value.
+
+- **A directory is asked whether it is a place, and then whether this run saw
+  one.** The grounding check put `directory:path` in the `file:name` branch, so
+  the judge read *"has no file extension, no filesystem anchor … so nothing
+  says it is a real path"* about a directory it had written, retried on it and
+  lost the row. A directory is now asked two questions and told which one it
+  failed. Validity: it has a root — a POSIX slash, a drive with either
+  separator, a share, an environment variable, a home tilde, a registry hive —
+  and at least one named step under it, every step written the way a name is
+  rather than as whitespace or as a format specifier the sample was compiled
+  with. `/tmp` passes where it used to be refused; `/`, `C:\`, `/%s/%s` and
+  `/ /` do not. Grounding: the literal is then asked the corpus question every
+  other literal is asked, as a whole value and under the spellings that mean
+  the same location, so a shape alone no longer stands in for evidence.
+
+- **A value is found at its own boundaries in the evidence.**
+  `whole_value_in` read `/`, `\` and `:` as part of a label, so a host written
+  inside a URL, a host written before its port, a mailbox after `mailto:` and
+  an address at the end of a sentence were all reported as appearing nowhere
+  and the row was withheld from the bundle with a sentence saying nothing
+  corroborates it. Those three characters join the parts of a compound value
+  rather than extend a part, so each of them now bounds a part, and a `.` that
+  nothing continues is the sentence's full stop. A `.` that something
+  continues is still the value's, so `168.1.1` is still not found inside
+  `192.168.1.1` and `evil.com` is still not found inside `notevil.com`,
+  `sub.evil.com` or `evil.com.br`.
+
+- **What the indicator cap orphans is counted.** The integrity pass runs a
+  second time after the cap to sweep the relationships it left pointing at
+  nothing, and that run was given no truncation ledger, so the aggregate
+  under-reported what had left the bundle and a reader could not reconcile the
+  object count. It reports now, under `cap_orphan` — its own reason, because it
+  is the cap's loss rather than a defect of anybody's bundle.
+
+- **The finding-row guard looks at every place a row is built.** It read the
+  `message=` keyword in `validation.py` alone, so seven `Violation`
+  constructions in four other modules were never inspected, a row written as
+  `Violation(code, message)` was invisible, and a local spelled like a message
+  builder was trusted for its name. It now walks every module in the tree that
+  builds one, matches positional arguments, resolves the constructor under an
+  import alias (the resolution shared with the sibling guard that already did
+  it), revokes a module-level name the moment a function binds that spelling
+  itself, trusts a local only for the value it was given, and fails if a sixth
+  module starts building rows.
+
+- **A run that shortens an answer says so.** Every attach but the static
+  provider's opened its toolkit with no truncation ledger and no tool-output
+  limit, so the guardrail on a tool server's answer counted on nothing and cut
+  at the signature's own 8000 characters rather than at
+  `core.preprocessing.max_tool_output_chars`. A run whose analysts met six
+  shortened answers reported `tool_output_shortened = 0` and
+  `any_bound_hit = false`, and the Bounds Hit table, the console's "what the
+  run spent" and the `truncation_rate` aggregate were all built from those
+  zeros. The server registry now carries the job's ledger and the job's limit
+  onto every toolkit it opens, and an agent's own static provider is attached
+  the same way. The Bounds Hit section says in words what its call count
+  counts, because the per-call latency table also holds calls answered in
+  process, which no guardrail sees.
+  **Upgrading:** a tool server's answer is now cut at
+  `core.preprocessing.max_tool_output_chars` (6000 by default) rather than at
+  8000, so an operator who relied on the wider cut should raise the setting.
+
+- **The shortening notice names the way to narrow.** The sentence a model reads
+  on a shortened answer said what was missing and offered every optional
+  argument the call had not set, so a model that met the same 116-of-150 answer
+  three times re-issued the identical call each time. It now says that an
+  identical call returns the identical shortened answer and names the
+  arguments of *that* tool that narrow or page it, read off the schema the tool
+  offered; a tool with no such argument is said to have none, and nothing more
+  is offered. The repeat notices name the same list, so one tool no longer has
+  two answers to "ask it differently". A parameter name is a tool server's own
+  text, so only a plain identifier of at most forty characters is named, at
+  most six of them, and anything else is left out; both guardrails — the MCP
+  toolkits' and the Ghidra HTTP client's — reserve the room the sentence needs
+  through one shared `shorten_target`, capped so no schema can shrink the
+  budget its own answer is shortened into, so an answer and its notice together
+  stay inside the limit the answer was cut to. No code re-issues a call or
+  edits an argument.
+
+- **The grounding corpus records what it held, not only what it missed.**
+  `run_summary.truncation` gains `evidence_corpus_answers`,
+  `evidence_corpus_bytes_held` and `evidence_corpus_bytes_ceiling`, read off
+  the corpus while the container still has one, so a reader can see how close
+  a run came to `core.reporting.evidence_corpus_bytes` rather than only that it
+  did not reach it. The report's Bounds Hit section and the console's "what the
+  run spent" print one sentence for them where it says something — a corpus
+  that went partial, or one past half its ceiling — and stay quiet otherwise.
+  **Upgrading:** the three keys are **absent**, not zero, on a summary stored
+  before they existed or on a run resumed without its corpus; a consumer must
+  read a missing key as "not recorded" rather than as a corpus that held
+  nothing.
+
+- **A Benign verdict is asked about an indicator typed `malicious-activity`.**
+  On a run that concluded Benign for a signed vendor utility the judge typed
+  the vendor's own project domain `malicious-activity`, and the export — which
+  keeps a judge-written type by design — published it, so the domain reached a
+  consumer as malicious activity under a verdict saying the opposite. The new
+  validator `stix.indicator_type_contradicts_verdict` puts that to the judge
+  once, through the single retry the other verdict checks already share,
+  naming the indicator, the verdict's own word and the vocabulary's `benign`,
+  `anomalous-activity` and `unknown`, and saying the type may be kept. Whatever
+  the judge answers is published: nothing retypes an indicator and nothing
+  drops one. A type that is kept stays in `run_summary.validation.unresolved`
+  and is printed with the other unresolved findings. The mirror case — a
+  Malware verdict beside an indicator typed `benign` — is not a contradiction
+  and is not asked about.
+  **Upgrading:** a Benign run carrying such an indicator now spends its one
+  verdict correction turn on it and may carry a new code in
+  `run_summary.validation.unresolved`; a consumer that partitions on validation
+  codes should know the name.
 
 ### Removed
 
@@ -2556,6 +3075,12 @@ change landed on `main`.
   phase labels. The reasoning stays, the bookkeeping goes
   ([#38](https://github.com/Root0ne/Maljan/pull/38)).
 
+- **`data/attck_platforms.json`.** `data/attck_techniques.json` replaces it and
+  carries everything it did — per technique id, its domain and its MITRE
+  platforms — beside the name and the tactic slugs it did not, plus the tactic
+  catalogue per domain. Nothing in the tree reads the old path; a deployment or
+  a script of your own that reads it by name must be pointed at the new file,
+  whose rows are keyed the same way and carry the same two keys.
 ### Upgrading
 
 An existing `.env` deployment is not migrated automatically. Move the bootstrap
@@ -2565,6 +3090,17 @@ Configuration — or import a JSON export from another instance. Keep
 `SETTINGS_ENCRYPTION_KEY` stable: there is no re-encryption step, and a changed
 key makes every stored secret unreadable. See
 [docs/configuration.md](docs/configuration.md).
+
+`data/attck_platforms.json` is gone and `data/attck_techniques.json` stands in
+its place, with the same `{technique_id: {domain, platforms}}` rows plus `name`,
+`tactics` and a `_tactics` catalogue per domain. Regenerate it, the id
+catalogue and the retired set together with
+`uv run python scripts/knowledge/prepare_attck_malware_fixtures.py`. Nothing in
+this repository reads the old filename; only a deployment or a script of your
+own can be affected, and pointing it at the new file is the whole change.
+Mobile and ICS technique rows now carry their tactics, which they never did:
+a capability cell for one of those techniques shows its real matrix column
+instead of an empty one.
 
 A JSON export taken before the tool-selection modes were removed may carry
 `core.static.ghidra.tool_selection`, `core.static.r2.tool_selection` or the

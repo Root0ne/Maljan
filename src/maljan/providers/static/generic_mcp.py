@@ -181,8 +181,13 @@ class GenericMCPStaticProvider(StaticProvider):
                 return
             self._handle.close()
         self._job = job
+        # The job, not the sample. This string becomes the name of the
+        # directory the server may stage in, and two jobs on one sample are
+        # exactly the case a per-job directory exists for; the sample's digest
+        # is the fallback for a caller that has no job to give, and it is then
+        # the caller's to clean up.
         self._handle.open(
-            job.sha256 or "static",
+            job.job_key or job.sha256 or "static",
             output_guardrail=job.output_guardrail,
             max_output_chars=job.max_output_chars,
             truncation_ledger=job.truncation_ledger,

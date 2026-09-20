@@ -152,6 +152,9 @@ def default_profile_summary() -> dict[str, Any]:
             "integrity_invocations": 1,
             "integrity_objects_removed": 0,
             "integrity_dropped": {"indicator": 0},
+            "evidence_corpus_answers": 12,
+            "evidence_corpus_bytes_held": 4096,
+            "evidence_corpus_bytes_ceiling": 16777216,
         }
     )
     return builder.build().to_dict()

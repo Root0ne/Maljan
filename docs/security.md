@@ -30,8 +30,16 @@ falling through to the bearer path.
 `JWT_ALGORITHM`, carry the `JWT_ISSUER`/`JWT_AUDIENCE` claims, and are stamped
 with the `kid` in `JWT_KEY_ID`. To rotate, move the old secret to
 `JWT_PREVIOUS_SECRET_KEY` with its `JWT_PREVIOUS_KEY_ID` and set the new one;
-both are accepted until every token carrying the old `kid` has expired, after
-which the previous pair can be removed.
+both are accepted while the grace period lasts, so a token minted before the
+rotation keeps working until it expires. Write the end of that period down in
+`JWT_PREVIOUS_SECRET_NOT_AFTER`: past that moment a token signed with the
+previous secret is refused, which is what stops a retired secret being honoured
+for the life of the deployment because nobody remembered to clear it. The
+setting is optional and a grace secret without one is accepted with no end, so
+an upgrade changes nothing for a rotation already under way; the startup check
+says so at every start until the moment is set or the previous pair is removed.
+`GET /api/v1/system/status` reports the rotation to an admin caller under
+`jwt_grace_secret`. The runbook is in [deployment.md](deployment.md).
 
 **The development bypass.** `AUTH_DISABLED` skips every token check and
 attributes each request to a seeded admin user. It is refused at startup

@@ -13,6 +13,7 @@ import contextlib
 import itertools
 import json
 import re
+import sys
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -455,20 +456,80 @@ def hard_cap(timeout: float, ceiling: BudgetCeiling | None = None) -> float:
     return max(1.0, wall)
 
 
+def a_budget(value: Any) -> int | None:
+    """``value`` as a budget, or ``None`` when it is not one.
+
+    A whole number of at least one. ``True`` is an ``int`` to Python and is a
+    budget to nobody, so it is refused by name. Everything a budget is read
+    from goes through this: the definition's own fields, which the settings
+    model already holds to the same rule, and the two deprecated override
+    maps, which are plain ``dict[str, int]`` and hold anything an admin typed.
+    A loop given a zero or a negative recursion limit does not run at all, so
+    the fallback is the deployment's number rather than the stored one.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return None
+    return value
+
+
+def _definition_budget(cfg: Any, agent_name: str) -> tuple[int | None, int | None]:
+    """``(timeout_seconds, max_steps)`` this agent's definition sets, if any.
+
+    Read defensively: a settings stand-in may carry no definition map at all,
+    and a budget is not worth an exception on the path that starts every loop.
+    """
+    definitions = getattr(getattr(cfg, "agents", None), "definitions", None)
+    if not isinstance(definitions, dict):
+        return None, None
+    definition = definitions.get(agent_name)
+    return (
+        a_budget(getattr(definition, "timeout_seconds", None)),
+        a_budget(getattr(definition, "max_steps", None)),
+    )
+
+
+def slowest_call(entries: Any) -> str:
+    """`, slowest <tool> 12.3s`, or `""` when nothing in the loop was timed.
+
+    The loop's own elapsed time says a run was slow; it does not say whether
+    the model or a tool was. The ledger's per-call clock does, and the slowest
+    call is the one an operator looks for first. A clause rather than a line of
+    its own, so the three existing lines keep their shape.
+    """
+    slowest = None
+    for entry in entries or []:
+        try:
+            ms = int(getattr(entry, "duration_ms", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if ms > 0 and (slowest is None or ms > slowest[0]):
+            slowest = (ms, str(getattr(entry, "tool", "") or ""))
+    if slowest is None or not slowest[1]:
+        return ""
+    return f", slowest {slowest[1]} {slowest[0] / 1000.0:.1f}s"
+
+
 def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[int, int]:
     """``(timeout, max_steps)`` for one loop of ``agent_name``.
 
-    The per-agent overrides for a loop of its own. A ceiling replaces both:
-    an agent answering an ask spends the delegation's budget, not its stage's
-    and not a leftover of its caller's. A module function rather than only a
-    method, so a duck-typed analyst that borrows one method reads the same
-    numbers.
+    The agent's own definition first, then the deprecated per-agent override
+    maps — each held to what a budget can be — then the deployment's defaults.
+    A budget is a property of the agent
+    — an operator cloning a team gets the definition, and used to get none of
+    its budget — so the definition wins over a map keyed by agent name
+    somewhere else in the settings. A ceiling replaces both: an agent
+    answering an ask spends the delegation's budget, not its stage's and not a
+    leftover of its caller's. A module function rather than only a method, so
+    a duck-typed analyst that borrows one method reads the same numbers.
     """
     cfg = get_settings()
+    own_timeout, own_steps = _definition_budget(cfg, agent_name)
     overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
-    timeout = int(overrides.get(agent_name, cfg.react_agent_timeout))
     step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
-    max_steps = int(step_overrides.get(agent_name, cfg.react_agent_max_steps))
+    timeout = own_timeout or a_budget(overrides.get(agent_name)) or int(cfg.react_agent_timeout)
+    max_steps = (
+        own_steps or a_budget(step_overrides.get(agent_name)) or int(cfg.react_agent_max_steps)
+    )
     if ceiling is not None:
         max_steps = max(2, int(ceiling.steps))
         timeout = max(1, int(ceiling.seconds))
@@ -1314,6 +1375,22 @@ def _get_agent_loop() -> asyncio.AbstractEventLoop:
         return loop
 
 
+# Once the interpreter has begun finalising, a daemon thread has nothing
+# useful left to do and several harmful things it can still attempt. Logging is
+# the sharpest: the streams a handler writes to are closed by then, which
+# ``logging`` reports as an error and swallows, and holding the stderr buffer
+# lock while the runtime tears itself down is a ``Fatal Python error`` and a
+# non-zero exit on a process that had already finished its work. The children
+# this thread would reap are the operating system's to collect a moment later
+# in any case, so standing down costs nothing.
+def _the_interpreter_is_going() -> bool:
+    """True once this process has begun shutting down. Never raises."""
+    try:
+        return bool(sys.is_finalizing())
+    except Exception:  # noqa: BLE001 — a shutdown check may not fail a shutdown
+        return True
+
+
 def _retire_wedged_loop(loop: asyncio.AbstractEventLoop, what: str) -> None:
     """Stop ``loop``, verify it stopped, and let the next caller start a fresh one.
 
@@ -1341,6 +1418,8 @@ def _retire_wedged_loop(loop: asyncio.AbstractEventLoop, what: str) -> None:
     or async client created on this loop would only park on a future nobody
     will ever complete, which is what the invalidation exists to prevent.
     """
+    if _the_interpreter_is_going():
+        return
     global _AGENT_LOOP
     with _AGENT_LOOP_LOCK:
         if _AGENT_LOOP is loop:
@@ -1361,6 +1440,8 @@ def _retire_wedged_loop(loop: asyncio.AbstractEventLoop, what: str) -> None:
         if loop.is_closed() or not loop.is_running():
             return
         time.sleep(0.1)
+    if _the_interpreter_is_going():
+        return
     logger.error(
         "the retired agent loop did not stop within %.0fs either: thread %r is abandoned "
         "and keeps running whatever blocked it until this process exits. Everything that "
@@ -1436,7 +1517,11 @@ def _cancel_and_watch(
         while time.monotonic() < deadline:
             if running and running[0].done():
                 return
+            if _the_interpreter_is_going():
+                return
             time.sleep(0.05)
+        if _the_interpreter_is_going():
+            return
         if running:
             if not running[0].done():
                 _retire_wedged_loop(loop, what)
@@ -1444,7 +1529,23 @@ def _cancel_and_watch(
         if not servicing.is_set():
             _retire_wedged_loop(loop, f"{what} (never started: the loop is not running work)")
 
-    threading.Thread(target=_watch, name="maljan-agent-loop-watchdog", daemon=True).start()
+    def _watch_quietly() -> None:
+        """``_watch``, with nothing able to leave the thread.
+
+        A daemon thread has nobody to report to. An exception out of one is a
+        traceback printed at shutdown, on streams that may be gone, which is
+        the failure this whole guard exists to stop — and a watchdog that
+        cannot finish its own job has nothing to say that is worth ending a
+        finished process over.
+        """
+        try:
+            _watch()
+        except BaseException:  # noqa: BLE001 — a watchdog never becomes the failure
+            if not _the_interpreter_is_going():
+                with contextlib.suppress(Exception):
+                    logger.debug("the cancel watchdog stopped early.", exc_info=True)
+
+    threading.Thread(target=_watch_quietly, name="maljan-agent-loop-watchdog", daemon=True).start()
 
 
 def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
@@ -1918,6 +2019,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # and truncation ledgers. None outside a job: the recorder then counts
         # within its own loop.
         self.evidence_counter: EvidenceCounter | None = None
+        # The run's record of what its tools answered, handed down by the
+        # container. ``None`` for an agent built outside a job.
+        self.evidence_corpus: Any = None
         # What the optional ``maljan-findings`` block carried, accumulated as
         # the loop answers and drained onto the ISR the analyst returns. A
         # buffer rather than a return value because the block arrives with the
@@ -2460,6 +2564,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             # "analysis" every entry carried when there was only one.
             stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
             sink=self._event_sink(),
+            # What the run saw, before the byte budget trims what it keeps.
+            corpus=getattr(self, "evidence_corpus", None),
         )
         # The repeat guard is per loop, like the recorder: a second chunk is a
         # new conversation and the model has not seen the first one's answers.
@@ -2693,40 +2799,43 @@ class BaseAnalyst(BudgetMeter, ABC):
             if getattr(_m, "type", "") == "ai":
                 record_response_usage(self.token_ledger, _m)
         elapsed = _time.monotonic() - _t0
-        # PERF-STATIC-ANALYST-LATENCY-01 minimal viable: emit a WARNING
-        # when the analyst either hit the configured timeout's 90%
-        # ceiling OR exceeded a hard per-run Ghidra budget. Operators get
-        # a single grep target instead of having to derive latency from
-        # raw timestamps. TODO(audit-2026-05-19): per-step timing in a
-        # deeper refactor — add a LangGraph callback that times each
-        # tool round-trip individually.
+        # A loop that overran is a slow model or a slow tool, and the loop's
+        # own elapsed time cannot tell them apart. Every ledger entry carries
+        # the clock of its own round trip, so the line names the single
+        # slowest call and the tool that answered it; the run summary carries
+        # the same three numbers per agent (``tool_latency``), and the ledger
+        # itself has every call.
+        slowest = slowest_call(recorder.entries)
         cfg_obj = get_settings()
         _budget = getattr(cfg_obj, "react_agent_tool_call_budget", 20)
         if tool_call_count > _budget:
             self.logger.warning(
-                "%s ReAct loop spent %d tool calls (budget=%d, elapsed=%.1fs).",
+                "%s ReAct loop spent %d tool calls (budget=%d, elapsed=%.1fs)%s.",
                 self.name,
                 tool_call_count,
                 _budget,
                 elapsed,
+                slowest,
             )
         elif elapsed > 0.9 * float(timeout):
             self.logger.warning(
                 "%s ReAct loop close to timeout: elapsed=%.1fs, "
-                "timeout=%ds, tool_calls=%d, messages=%d.",
+                "timeout=%ds, tool_calls=%d, messages=%d%s.",
                 self.name,
                 elapsed,
                 timeout,
                 tool_call_count,
                 len(msgs),
+                slowest,
             )
         else:
             self.logger.info(
-                "%s ReAct loop: elapsed=%.1fs, tool_calls=%d, messages=%d.",
+                "%s ReAct loop: elapsed=%.1fs, tool_calls=%d, messages=%d%s.",
                 self.name,
                 elapsed,
                 tool_call_count,
                 len(msgs),
+                slowest,
             )
 
         final_message = msgs[-1]

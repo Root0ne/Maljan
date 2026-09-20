@@ -22,8 +22,8 @@ evidence the module could not find — is gone: the analyst's number is the
 analyst's, and an unsupported claim is now something the analyst is told about
 in its own loop, not something a matrix builder quietly discounts.
 
-``ATTCKIndex`` gives technique name and tactic phases for any ATT&CK ID, via the
-lazy singleton ``ATTCKValidator.get_instance()`` so the bundle is not re-read.
+The vendored technique table gives the name and the tactic phases for any
+ATT&CK id — a file read, not an index build.
 
 The output is two complementary structures:
   - ``CapabilityCell[]`` — one row per (tactic, technique) pair for the
@@ -32,9 +32,10 @@ The output is two complementary structures:
     confidence, contributing layers; this is what the narrative agent reads.
 
 The mapping ``technique_phase_slug -> (tactic_id, tactic_name)`` is resolved
-from the LIVE ATT&CK bundle's tactic catalogue (so new releases map with no code
-change). The inlined ``_TACTIC_TABLE`` below is kept only as an offline fallback
-for when the catalogue is unavailable (first run with no network, tests, etc.).
+from the vendored tactic catalogue, which the ATT&CK update script writes from
+the same bundles (so new releases map with no code change). The inlined
+``_TACTIC_TABLE`` below is kept only as a fallback for when that file cannot be
+read.
 """
 
 from __future__ import annotations
@@ -97,13 +98,12 @@ def build_capability_matrix(
     if not techniques:
         return [], []
 
-    index = _load_attck_index()
     out_of_scope = _out_of_scope(list(techniques), sample)
 
     cells: list[CapabilityCell] = []
     mappings: list[TTPMapping] = []
     for tid, info in techniques.items():
-        name, tactic_slug = _resolve_technique_meta(index, tid)
+        (name, tactic_slug), tactic_domain = _resolve_technique_meta(tid)
         evidence = info["evidence"]
         # The highest number any source put on this technique. Taken once, here,
         # rather than accumulated into the row as it was collected.
@@ -119,7 +119,7 @@ def build_capability_matrix(
         if confidence <= 0.0 and not evidence and not layers:
             continue
 
-        tactic_id, tactic_name = _resolve_tactic(index, tactic_slug)
+        tactic_id, tactic_name = _resolve_tactic(tactic_slug, tactic_domain)
         domain, platforms = _catalogue_scope(tid)
         # The cell keeps an id the catalogue rejected or the sample cannot
         # host, with the reason written beside it: it is the producer's answer
@@ -471,60 +471,49 @@ def _judge_relationship_rows(
     return rows
 
 
-def _load_attck_index() -> Any | None:
-    """Return a singleton ATTCKIndex or None if loading fails."""
+def _resolve_technique_meta(tid: str) -> tuple[tuple[str, str], str]:
+    """``((technique_name, tactic_slug), domain)`` for an id, from the vendored table.
+
+    A name and a tactic are dictionary facts about an id, and the vendored
+    table carries both; reading them from the ATT&CK index meant building the
+    whole catalogue — a fifty-megabyte parse, and on a cold box a download —
+    to render a heatmap row. Falls back to ``(tid, "")`` for an id the table
+    does not have, as the index did.
+    """
     try:
-        from maljan.memory.attck_validator import ATTCKValidator
-
-        validator = ATTCKValidator.get_instance()
-        return getattr(validator, "_index", None)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("capability_matrix: ATTCKValidator unavailable (%s)", exc)
-        return None
-
-
-def _resolve_technique_meta(index: Any | None, tid: str) -> tuple[str, str]:
-    """Return (technique_name, tactic_slug). Falls back to (tid, '')."""
-    if index is None:
-        return tid, ""
-    try:
-        tech = index.get_by_id(tid)
-    except Exception:  # noqa: BLE001
-        return tid, ""
-    if tech is None:
-        # Try the parent technique when the input is a sub-technique
-        if "." in tid:
-            parent = tid.split(".")[0]
-            try:
-                tech = index.get_by_id(parent)
-            except Exception:  # noqa: BLE001
-                tech = None
-    if tech is None:
-        return tid, ""
-    name = getattr(tech, "name", None) or tid
-    tactic_phases = getattr(tech, "tactic_phases", None) or []
-    primary_phase = tactic_phases[0] if tactic_phases else ""
-    return str(name), str(primary_phase)
+        from maljan.memory.attck_loader import technique_entry
+    except Exception as exc:  # noqa: BLE001 — a catalogue lookup degrades, never raises
+        logger.debug("capability_matrix: the technique table is unavailable (%s)", exc)
+        return (tid, ""), ""
+    entry = technique_entry(tid)
+    if entry is None and "." in tid:
+        # A sub-technique the table does not carry is described by its parent.
+        entry = technique_entry(tid.split(".")[0])
+    if entry is None:
+        return (tid, ""), ""
+    return (entry.name or tid, entry.tactics[0] if entry.tactics else ""), entry.domain
 
 
-def _resolve_tactic(index: Any | None, tactic_slug: str) -> tuple[str, str]:
+def _resolve_tactic(tactic_slug: str, domain: str = "") -> tuple[str, str]:
     """Resolve a kill-chain slug to ``(tactic_id, tactic_name)``.
 
-    Prefers the live ATT&CK bundle's tactic catalogue (via the index) for
-    resolution, then pins the *display name* to the canonical Enterprise label
-    for known TA-ids. A v19+ bundle returns the renamed label "Stealth" for
-    TA0005, which leaked into the markdown export /
-    ``ttp_mappings`` and contradicted the frontend's "Defense Evasion". Pinning
-    keeps every surface consistent. Falls back to the inlined ``_TACTIC_BY_SLUG``
-    table when the catalogue is unavailable (offline first run, fixtures, tests).
+    The vendored table's tactic catalogue answers, then the *display name* is
+    pinned to the canonical Enterprise label for known TA-ids. A v19+ release
+    renamed TA0005 "Defense Evasion" to "Stealth", which leaked into the
+    markdown export / ``ttp_mappings`` and contradicted the frontend's
+    "Defense Evasion"; pinning keeps every surface consistent. Falls back to
+    the inlined ``_TACTIC_BY_SLUG`` table when the vendored catalogue cannot be
+    read.
     """
     if not tactic_slug:
         return "", ""
-    getter = getattr(index, "get_tactic_by_slug", None)
-    if callable(getter):
-        tactic = getter(tactic_slug)
-        if tactic is not None:
-            tid = str(getattr(tactic, "tactic_id", ""))
-            name = str(getattr(tactic, "name", ""))
-            return tid, _TACTIC_NAME_BY_ID.get(tid, name)
+    try:
+        from maljan.memory.attck_loader import tactic_entry
+
+        tactic = tactic_entry(domain, tactic_slug)
+    except Exception as exc:  # noqa: BLE001 — a catalogue lookup degrades, never raises
+        logger.debug("capability_matrix: no tactic catalogue for %s (%s)", tactic_slug, exc)
+        tactic = None
+    if tactic is not None and tactic.tactic_id:
+        return tactic.tactic_id, _TACTIC_NAME_BY_ID.get(tactic.tactic_id, tactic.name)
     return _TACTIC_BY_SLUG.get(tactic_slug, ("", tactic_slug))

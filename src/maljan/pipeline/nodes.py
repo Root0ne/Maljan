@@ -26,6 +26,13 @@ from maljan.agents.judge_agent import (
     VERDICT_TIMEOUT_CODE,
     VERDICT_TIMEOUT_REASON,
 )
+from maljan.agents.run_evidence_corpus import (
+    NO_CORPUS,
+    CorpusState,
+    both_searched,
+    parts_of,
+    state_of,
+)
 from maljan.analysis.corroboration import corroboration_row
 from maljan.analysis.run_summary import RunSummaryBuilder
 from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, PROMPT_ROLES, ReportingConfig
@@ -81,6 +88,7 @@ from maljan.pipeline.validation import (
     corroboration,
     corroboration_sources,
     not_run_sentence,
+    partial_grounding_reason,
     technique_check_note,
     ungrounded_technique_note,
     validation_metrics,
@@ -287,6 +295,70 @@ def _sandbox_fed(role: str) -> bool:
     return role not in SAMPLE_FED_ROLES
 
 
+def _tools_that_were_shortened(ledger: Any) -> set[str]:
+    """The tools whose answers reached the evidence corpus with rows missing.
+
+    Read off the stored document rather than off a counter: the shortener puts
+    its own map into the answer under a reserved key, and that is the one thing
+    that says *this* answer is partial. A ledger entry with no parsed document
+    cannot have been shortened — shortening is what keeps an answer parseable.
+    """
+    from maljan.agents.output_shortening import our_key_in
+
+    found: set[str] = set()
+    for entry in ledger or ():
+        structured = getattr(entry, "structured", None)
+        if not isinstance(structured, dict):
+            continue
+        try:
+            if our_key_in(structured):
+                found.add(str(getattr(entry, "tool", "") or "").strip())
+        except Exception:  # noqa: BLE001 — a feedback sentence is never worth a run
+            continue
+    found.discard("")
+    return found
+
+
+def _what_the_run_saw(container: Any, ledger: Any) -> tuple[list[str], CorpusState]:
+    """The tool answers a grounding check may search, and how whole they are.
+
+    The run's own in-memory corpus first: it holds every answer as the model
+    received it, which is the only record that can answer "did a tool in this
+    run produce this value". It is consulted whenever it exists and has
+    anything to say — either it kept something, or it says it kept less than
+    the run produced. Asking it only when it held something threw away the
+    verdict of a corpus that kept *nothing*, which is precisely what an
+    operator gets by setting the ceiling to zero, and the check then fell back
+    to the stored ledger and was told the evidence was whole.
+
+    The stored entries are the fallback — a report rebuilt later, a run resumed
+    in another process — and a fallback is never whole on its own: any of those
+    entries may have been blanked by the byte budget after the model read it,
+    and there is no record of what a corpus that is gone would have held. So
+    what the check is told is the **conjunction** of the sources it searched:
+    the fallback's own count of blanked entries, and the state of the corpus it
+    fell back from, which for a corpus that does not exist is partial by
+    construction.
+    """
+    corpus = None
+    try:
+        corpus = container.get_evidence_corpus()
+    except Exception:  # noqa: BLE001 — a container without one is the fallback
+        corpus = None
+    corpus_state = state_of(corpus) if corpus is not None else NO_CORPUS
+    if corpus is not None and (len(corpus) or corpus_state.partial):
+        return list(parts_of(corpus)), corpus_state
+
+    entries = list(ledger or [])
+    blanked = [e for e in entries if getattr(e, "truncated", False) and not e.output]
+    stored = CorpusState(
+        complete=not blanked,
+        missing_answers=len(blanked),
+        missing_tools=tuple(sorted({str(getattr(e, "tool", "") or "") for e in blanked} - {""})),
+    )
+    return [e.output for e in entries if e.output], both_searched(corpus_state, stored)
+
+
 def _violations_from_rows(rows: Any) -> list[Violation]:
     """Rebuild the violations an analyst node put on the state channel."""
     out: list[Violation] = []
@@ -297,6 +369,10 @@ def _violations_from_rows(rows: Any) -> list[Violation]:
                     code=str(row.get("code")),
                     message=str(row.get("message") or ""),
                     path=str(row.get("path") or ""),
+                    # A row that crossed the state channel keeps whether
+                    # anything may act on it; rebuilt without the flag, an
+                    # advisory absence would come back as a reason to drop.
+                    advisory=bool(row.get("advisory")),
                 )
             )
     return out
@@ -1034,6 +1110,9 @@ def make_triage_node(
             # draws them in the same conversation, so they are fed out as the
             # pack writes them rather than only after the run.
             sink=container.event_sink,
+            # The pack's answers are what the run saw too, and a judge
+            # grounding an indicator in one must find it.
+            corpus=container.get_evidence_corpus(),
         )
         cfg = container.config
         capa_cfg = cfg.static.capa
@@ -2920,21 +2999,62 @@ def make_judge_node(
             # The corpus an indicator's pattern value has to appear in. It is
             # no longer a filter: the judge is told which values are not in it
             # and gets a turn to withdraw them.
+            #
+            # What goes into it is what the run SAW. The stored ledger is not
+            # that: ``apply_budget`` blanks an entry's output once an agent
+            # passes its byte budget, *after* the model has read the answer, so
+            # a corpus built from stored entries told the judge that a C2 a
+            # tool really returned appears nowhere. The container keeps the
+            # answers as the model received them, in memory, for the length of
+            # the job; the stored entries are the fallback for a run whose
+            # corpus is gone, and a fallback that had to read a blanked entry
+            # says so.
             evidence_corpus: set[str] = set()
+            corpus_state = NO_CORPUS
             try:
                 from maljan.agents.judge_postprocess import build_evidence_corpus
 
                 # Best-effort — interesting strings come from a partial
                 # MalwareReport build later in the pipeline, so we pull
-                # from the raw sandbox report and the ledger's own outputs.
+                # from the raw sandbox report and what the run's tools said.
                 sandbox_report = state.get("sandbox_report") or {}
+                seen, corpus_state = _what_the_run_saw(container, _ledger)
+                # The run's own answers travel beside the token corpus rather
+                # than inside it: added as set elements they were copied once
+                # more, and joined into one string to be searched a third time.
                 evidence_corpus = build_evidence_corpus(
                     interesting_strings=None,
                     sandbox_report=sandbox_report if isinstance(sandbox_report, dict) else None,
-                    extra=[entry.output for entry in _ledger if entry.output],
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Evidence corpus build skipped: %s", exc)
+
+            # A shortened answer is the one the model read — the shortener
+            # hands one string to the model and to the ledger — so nothing
+            # about the grounding rule changes. What changes is what an
+            # absence is allowed to sound like: the tools whose answers went
+            # in with rows missing are named, so the judge can ask one of them
+            # again with a narrower argument.
+            shortened_tools = sorted(_tools_that_were_shortened(_ledger))
+
+            # How whole the evidence the grounding checks searched was, on the
+            # run's own record. A phrase inside one feedback message was the
+            # only place it appeared, so a run whose grounding went advisory
+            # looked exactly like one whose grounding was whole.
+            try:
+                from maljan.agents.run_evidence_corpus import held_by
+
+                container.get_truncation_ledger().record_evidence_corpus(
+                    missing_answers=corpus_state.missing_answers,
+                    missing_tools=corpus_state.missing_tools,
+                    reason="" if corpus_state.complete else corpus_state.why,
+                    # Read while the container still has a corpus: after it
+                    # closes there is none to ask, and what it held would be
+                    # recorded as nothing.
+                    held=held_by(container.get_evidence_corpus()),
+                )
+            except Exception as exc:  # noqa: BLE001 — telemetry never breaks a verdict
+                logger.debug("Evidence corpus state not recorded: %s", exc)
 
             # Failure signals, computed before the verdict rather than after
             # it: the judge is told why the run is thin so it can weigh its own
@@ -3088,6 +3208,17 @@ def make_judge_node(
             _ungrounded_note = ungrounded_technique_note(state.get("validation_findings"))
             if _ungrounded_note:
                 _degradation_reasons.append(_ungrounded_note)
+            # A run whose grounding could not search its own whole record says
+            # so as a run fact. Every absence it stated is a note, and an
+            # operator reading the verdict should know that before reading the
+            # indicators.
+            # Only when there was something to ground against: a run whose
+            # ledger is empty grounded nothing, and saying its corpus was
+            # partial would be a reason about a check that never ran.
+            if _ledger or corpus_state.missing_answers:
+                _corpus_note = partial_grounding_reason(corpus_state)
+                if _corpus_note:
+                    _degradation_reasons.append(_corpus_note)
             # A check that could not run is a fact about the run, not a
             # finding about the sample: it is said here and listed under
             # ``validation.not_run``.
@@ -3141,6 +3272,15 @@ def make_judge_node(
                 degradation_note=degradation_note,
                 memory_store=memory_store,
                 evidence_corpus=evidence_corpus or None,
+                # Which of those answers reached the corpus with rows missing.
+                # The judge is not told a different rule, it is told which call
+                # to narrow before it withdraws a value.
+                shortened_tools=shortened_tools,
+                # What the run's tools answered, as the answers they are, and
+                # whether that is this run's whole record. When it is not, an
+                # absence is a note and nothing is dropped for it.
+                searched=seen,
+                corpus_state=corpus_state,
                 current_sample_id=state.get("file_hash"),
                 sample=_sample_identity(state),
                 # What the run recorded, so a verdict that says the sample is
@@ -3270,6 +3410,7 @@ def make_judge_node(
                     .set_triage(_triage_facts)
                     .set_nudge(state.get("nudge_retry_modes") or {})
                     .set_budget(state.get("budget_records") or {})
+                    .set_tool_latency(state.get("evidence_ledger") or [])
                     .build()
                 )
                 run_summary_dict = summary.to_dict()
@@ -3944,7 +4085,13 @@ def make_report_node(
             try:
                 _renderer = ExtendedSTIXRenderer()
                 extended_bundle = _renderer.render(
-                    report, base, ledger=container.get_truncation_ledger()
+                    report,
+                    base,
+                    ledger=container.get_truncation_ledger(),
+                    # What the run saw, for the cited entries the byte budget
+                    # blanked: the second-source test reads the same record
+                    # the judge's grounding check does.
+                    corpus=container.get_evidence_corpus(),
                 )
                 extended_dump = extended_bundle.model_dump(mode="json")
                 # What the judge said about a technique the checks rejected

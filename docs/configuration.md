@@ -37,8 +37,9 @@ same contract in short form.
 | `JWT_ISSUER` | no | `maljan-api` | |
 | `JWT_AUDIENCE` | no | `maljan-clients` | |
 | `JWT_KEY_ID` | no | `v1` | `kid` stamped on new tokens. |
-| `JWT_PREVIOUS_SECRET_KEY` | no | — | Accepted alongside the current secret during a rotation window. |
+| `JWT_PREVIOUS_SECRET_KEY` | no | — | Accepted alongside the current secret during a rotation window; set `JWT_PREVIOUS_SECRET_NOT_AFTER` beside it to give that window an end. |
 | `JWT_PREVIOUS_KEY_ID` | no | `v0` | |
+| `JWT_PREVIOUS_SECRET_NOT_AFTER` | no | — | ISO-8601 moment (UTC when it carries no offset) after which a token signed with the previous secret is refused. Unset means the window has no end, which the startup check warns about at every start; a value that does not read as a moment is refused at startup. |
 | `APP_NAME` | no | `Maljan` | |
 | `APP_VERSION` | no | `0.1.0` | |
 | `DEBUG` | no | `false` | Also enables `/docs`, `/redoc` and `/openapi.json`. |
@@ -270,7 +271,9 @@ and asks to be run again once the model is warm.
 **What it costs.** The `llm` probe asks its pairs one after another — a single
 local server told to load several models at once is the failure this project
 has already diagnosed — with ninety seconds for each call and five minutes for
-the whole probe. A pair there was no room left to ask is named in the answer as
+the whole probe, counted from the moment the probe starts, so the catalogue
+listing in front of the calls comes out of the same five minutes rather than
+being added to them. A pair there was no room left to ask is named in the answer as
 not tried and files no row, exactly as a timeout does; pressing **Test** again
 asks it. In a failing pair's sentence an endpoint is printed as its scheme and
 host, so a base URL that carries credentials does not reach the screen or the
@@ -340,22 +343,87 @@ Each sandbox is asked for the options its format needs:
 
 The technique universe spans all three ATT&CK domains. `data/attck_valid_ids.json`
 carries one sorted id list per domain (`enterprise`, `mobile`, `ics`), and
-`data/attck_platforms.json` carries, per technique id, its domain and MITRE
-platforms. The two files come from the same bundles and the same script, so
-they never disagree about which domain an id belongs to. Between them they
-answer the validity and the domain-and-platform halves of the technique check
-with no network and no bundle load (`tools.knowledge.attck_scope`).
+`data/attck_techniques.json` carries, per technique id, its domain, its name,
+its tactic slugs and its MITRE platforms, plus the tactic catalogue (slug to
+TA-id and display name) per domain. The two files come from the same bundles
+and the same script, so they never disagree about which domain an id belongs
+to. Mobile and ICS techniques carry their own matrices' tactics: each bundle
+files its kill-chain phases under its own name, and the extractor reads all
+three. Between them they answer every dictionary question the pipeline asks about
+a technique — validity, name, tactics, domain, platforms — with no network and
+no bundle load: `tools.knowledge.attck_lookup`, `attck_scope`, `attck_validate`
+and the capability matrix all read them and build nothing.
 `data/attck_retired_ids.json`, written by the same script from the catalogue it
-overwrites, names the ids a previous release had and the release that retired
-them, so an older report's `T1562.001` is reported as retired rather than as an
-invented id;
+overwrites, names the ids a previous release had, the release that retired them
+and, where the bundle states one, the id that revoked them — so an older
+report's `T1562.001` is reported as retired rather than as an invented id, and
+the data builders can retarget it mechanically.
 `src/maljan/memory/attck_loader.py` downloads and caches each domain's STIX
-bundle under `~/.cache/maljan/attck/` (or `MALJAN_ATTCK_CACHE`) for the names,
-the tactics and the index, and consults it for platforms only when a real id is
-missing from the vendored map. Enterprise is required; Mobile and ICS are
-additive, and a box that can reach neither keeps working with a narrower
-catalog. Regenerate both files with
-`uv run python scripts/knowledge/prepare_attck_malware_fixtures.py`.
+bundle under `~/.cache/maljan/attck/` (or `MALJAN_ATTCK_CACHE`) for the ranked
+index alone — `tools.knowledge.resolve_technique` and the alignment gate — and
+consults it for platforms only when a real id is missing from the vendored
+table. Enterprise is required; Mobile and ICS are additive, and a box that can
+reach neither keeps working with a narrower catalog. Regenerate all three files
+with `uv run python scripts/knowledge/prepare_attck_malware_fixtures.py`.
+
+A failed index build is remembered for `validation.index_retry_seconds`
+(default 900) and then attempted again, so one unreachable moment does not cost
+a worker its index for the life of the process; 0 never re-attempts. The value
+travels to the knowledge tool server — the process where the build happens — as
+`MALJAN_INDEX_RETRY_SECONDS`, which is on that server's `env_allow` and cannot
+be taken off it.
+
+### The API catalogue
+
+`data/api_behaviour_map_v1.json` and `data/api_attck_map_v1.json` are written
+by `scripts/knowledge/build_api_capability_db.py` (`make prepare-api-db`) from
+the curated tables in its source; no hand edits. Both carry one block per
+platform — `windows` for a PE's imports, `linux` for an ELF's dynamic symbols —
+and a caller asks one at a time, because the two vocabularies share names
+(`connect`, `send`, `system`). `tools.knowledge.api_capability` takes
+`platform` and the triage pack passes the routed format's, so an ELF's symbols
+are never given Win32 categories. A routed format with no block — a Mach-O, an
+APK — is not asked at all: the catalogue answering about the wrong system is
+worse than it saying nothing, and the import table is in the format entry
+either way.
+
+The Linux block is narrower on purpose: there is no registry, and persistence,
+keylogging, screen capture and credential access have no unambiguous libc
+vocabulary to author from. Its tiers were measured rather than judged. A group
+whose bare presence would label more than one in a hundred of an ordinary
+Linux system's own binaries is an informational association carrying
+`corroborated_by` — the names that would give it weight — instead of a tier the
+catalogue calls suspicious; only `process_injection` is tiered, and it carries
+`flags_with`, so the label waits until a second name says the sample reaches
+into another process. A technique rule is kept only where the symbols are the
+technique's own mechanism, which left three; the rules that rested on
+privilege dropping, on ordinary sockets or on asking who the process runs as
+were removed because they fired on ordinary software.
+
+A technique id in either block is retargeted, or dropped and listed, against
+the vendored catalogue's `revoked_by` when a release retires it. A rule carries
+`name` — the catalogue's name for the id — a `rule` label saying which of two
+rules on one technique matched, and, in the Linux block, `ordinary_use`: one
+sentence naming the software that is not a sample and imports the same symbols,
+because a mechanism with ordinary users that does not say so reads as an
+accusation.
+
+Rerun the measurement after an ATT&CK refresh, after adding a group or a rule,
+or on a distribution whose software is not the one the block was written
+against:
+
+```
+uv run python scripts/knowledge/measure_api_behaviour_block.py \
+    --fail-over 1 /usr/bin /usr/sbin /usr/lib/systemd
+```
+
+It reads the dynamic symbol imports of the ELF files under those directories,
+prints per group and per rule how many binaries each appears on and labels, and
+names the ones carrying a label or a technique row so a reader can judge
+whether that population is the one the technique describes. `--fail-over` exits
+non-zero when anything is above that share. It needs `pyelftools`, reaches no
+network, and no test runs it: a test that read a host's binaries would answer
+differently on every machine.
 
 ### Rule corpora
 
@@ -693,10 +761,20 @@ that reaches its step cap writes up what it gathered, the way an analyst at
 its own cap does.
 
 That makes the caller's stage timeout the thing that decides how many asks fit
-in one loop: the seeded `lead` has `react_agent_timeout_overrides` of 1800 s
-and `react_agent_max_steps_overrides` of 40, which is room for six asks and
+in one loop: the seeded `lead` carries `timeout_seconds: 1800` and
+`max_steps: 40` on its own definition, which is room for six asks and
 the turns to weigh them — 1800 s over the default 300 s per ask, and two steps
-per ask. The `ask_<key>` tool's description gives the model the same number,
+per ask. A budget is part of the definition, so a clone of a team carries the
+budget its agents need; the console draws the two as **Steps per loop** and
+**Seconds per loop** on the agent's card, and a blank box inherits the
+deployment's `react_agent_max_steps` / `react_agent_timeout`. The two
+`react_agent_*_overrides` maps are deprecated and are deleted in the release
+after the next promotion to main: until then they are still read for an
+agent whose definition sets neither, so a deployment that configured a budget
+there keeps it, and a definition's own value wins over them. A map entry that
+is not a whole number of at least one is dropped with a warning when the
+settings are built, the same bound the definition's own fields carry.
+The `ask_<key>` tool's description gives the model the same number,
 computed by `delegation._asks_that_fit` from the caller's own timeout rather
 than written down twice. See *Delegation* in [architecture.md](architecture.md) for
 what the ledger and the transcript record.
@@ -933,15 +1011,49 @@ transport on another host. Two environment variables configure that, and with
 
 | variable | default | meaning |
 | :-- | :-- | :-- |
-| `MALJAN_STAGING_DIR` | a `maljan-analysis-mcp` directory under the system temp dir | where uploads land |
+| `MALJAN_STAGING_DIR` | a `maljan-analysis-mcp` directory under the system temp dir | the base uploads land under |
 | `MALJAN_STAGING_TTL_HOURS` | `24` | how long a staged sample, and a payload carved out of one, is kept; `0` disables pruning |
 
-The directory is created with mode 0o700 and refused if what is already at that
-path is a symlink or belongs to another user — the default name is predictable
-and the system temp directory is shared. Each file is created with
-`O_CREAT|O_EXCL|O_NOFOLLOW` at 0o600 rather than written and then chmodded, and
-every `put_sample*` call prunes entries past the TTL, so a long-lived server
-does not accumulate samples without bound.
+`MALJAN_STAGING_DIR` is the **base**, and each job writes into one directory of
+its own inside it — `job-<the job's id>`, holding that job's uploads and its
+`carved/<sha256>/` trees. The name is composed by the process that starts the
+sidecar and handed over as a third variable, `MALJAN_STAGING_JOB`; it is a
+single directory name, never a path, so an operator's `MALJAN_STAGING_DIR` is
+the base whatever else is configured. That variable is not read from the
+environment and is not something to set: a sidecar started without one writes
+into the base itself, which is what a settings probe and a server run by hand
+do.
+
+Both the base and the job directory are created with mode 0o700 and refused if
+what is already at that path is a symlink or belongs to another user — the
+default name is predictable and the system temp directory is shared. Each file
+is created with `O_CREAT|O_EXCL|O_NOFOLLOW` at 0o600 rather than written and
+then chmodded, and every `put_sample*` call prunes past the TTL: the files of a
+job directory still in use, the whole directory of one whose newest file is
+past the cutoff, and the flat files an older release left in the base. So a
+long-lived server accumulates neither samples nor job directories, and an
+upgrade has nothing to migrate.
+
+A job directory is pruned whole only once the newest file anywhere inside it is
+past the cutoff, and a running job keeps its own directory current while it
+refreshes its owner heartbeat — so a run longer than the TTL does not lose its
+carved payloads to a second worker's sidecar sweeping the same base. Set the
+TTL below the longest run this deployment can have and that marker is the only
+thing standing between a live job and its own directory; there is no reason to.
+
+The sandbox capture a job fetches lands in a `captures/` child of the same
+directory and obeys every rule above: 0700, files 0600 from their first byte,
+removed with the job, swept by the same TTL, and unreachable from another job.
+The directory an earlier release used, `maljan-cape-pcap` under the system temp
+directory, is swept as well and is no longer written.
+
+One configuration would widen this if nothing else stopped it: a
+`MALJAN_SAMPLE_ROOTS` entry containing the staging base — the deployment's
+whole samples directory, say, with the base inside it — which names every
+job's directory as one a sidecar may read. `confined_to_this_job` refuses it
+anyway: a path argument resolving under the base but outside this job's own
+directory is refused whatever the roots say, so the job directory is the
+boundary and the roots cannot loosen it.
 
 ### Which directories a sidecar may read
 
@@ -951,17 +1063,20 @@ file-reading sidecars — `analysis` and `network` — therefore resolve every
 `path`, `pcap_path` and `ruleset` argument (symlinks followed) and refuse
 anything that lands outside the directories they were given:
 
-* the staging directory `MALJAN_STAGING_DIR` names, where their own uploads
-  land, and
+* this job's staging directory, where their own uploads land, and
 * every directory in `MALJAN_SAMPLE_ROOTS`.
+
+This job's, not the base: a path that resolves into another job's staging
+directory is refused even when a sample root happens to contain the base, so
+the job directory is the boundary whatever the roots are configured as.
 
 `carved_path` on the `analysis` sidecar is narrower than both, because it is
 the one file argument a *model* chooses rather than the platform: it is held to
-`<staging>/carved/<sha256 of the file the call is pinned to>/` and to that file
-itself, so a run reaches the payloads it carved and nothing another run
-carved or uploaded. One staging directory serves every job a server process
-handles, which is why the base is not the bound. The resolved value must be a
-regular file; a directory, a FIFO, a device or a socket is refused.
+`<staging>/job-<id>/carved/<sha256 of the file the call is pinned to>/` and to
+that file itself, so a run reaches the payloads it carved and nothing another
+run carved or uploaded — two jobs on the same sample carve into two directories
+and neither can name the other's. The resolved value must be a regular file; a
+directory, a FIFO, a device or a socket is refused.
 
 | variable | default | meaning | seen by |
 | :-- | :-- | :-- | :-- |

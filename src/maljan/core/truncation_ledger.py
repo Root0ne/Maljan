@@ -37,7 +37,33 @@ INTEGRITY_REASONS = (
     "duplicate_indicator",
     "dangling_relationship",
     "duplicate_relationship",
+    # The pass runs a second time after the indicator cap, and everything it
+    # takes out there is something the cap orphaned — a relationship whose
+    # endpoint is no longer in the bundle. Its own reason, because it is the
+    # cap's loss rather than a defect of anybody's bundle, and because that
+    # second pass used to run without a ledger at all, so what it removed was
+    # counted nowhere.
+    "cap_orphan",
 )
+
+# What the indicator cap itself removed, and what step 5 of the integrity pass
+# takes out of a report's or a note's ``object_refs`` without removing an
+# object. Neither is a repair and neither belongs in ``INTEGRITY_REASONS`` —
+# the reasons there total to what the pass removed, and folding two other
+# kinds of loss in would break that total. They are counted here so that
+# everything that leaves a bundle leaves under a name.
+INDICATOR_CAP_REASON = "indicator_cap"
+REFS_TRIMMED_REASON = "refs_trimmed"
+
+# Whose removals a run of the integrity pass is. The pass runs on two bundles
+# and the two do not add up to one number: the export's passes act on the
+# bundle that is published, while the judge path's run once per verdict
+# *attempt* — including an attempt whose bundle was discarded and retried, and
+# on objects the export may never carry. Summed together, the total could not
+# be reconciled with anything a reader holds. The export's figures are the ones
+# the run summary reconciles; the judge path's are kept under their own name.
+EXPORT_PASS = "export"
+JUDGE_PASS = "judge"
 
 
 def truncation_rate(over_limit: int, calls: int) -> float:
@@ -69,6 +95,8 @@ def record_guardrail_outcome(
     over_limit: bool,
     summarised: bool = False,
     hard_truncated: bool = False,
+    shortened: bool = False,
+    shortening_timed_out: bool = False,
 ) -> None:
     """Record one tool-output guardrail decision on ``ledger``.
 
@@ -88,6 +116,8 @@ def record_guardrail_outcome(
             over_limit=over_limit,
             summarised=summarised,
             hard_truncated=hard_truncated,
+            shortened=shortened,
+            shortening_timed_out=shortening_timed_out,
         )
     except Exception:  # noqa: BLE001 — telemetry must never break a tool call
         return
@@ -173,6 +203,15 @@ class TruncationLedger:
         self.tool_output_over_limit = 0
         self.tool_output_summarised = 0
         self.tool_output_hard_truncated = 0
+        # A JSON answer shortened by dropping list elements rather than
+        # characters: still a document, still parsed into the ledger's
+        # ``structured``, and saying how many rows it handed over.
+        self.tool_output_shortened = 0
+        # A shortening that ran past its wall and gave way to the character
+        # cut. Counted apart because it is a cost signal, not a shape one: a
+        # run with any of these was spending an analyst's budget on
+        # serialisation.
+        self.tool_output_shortening_timeouts = 0
         self.tool_output_chars_in = 0
         self.tool_output_chars_kept = 0
 
@@ -193,6 +232,36 @@ class TruncationLedger:
         self.integrity_objects_in = 0
         self.integrity_objects_out = 0
         self.integrity_dropped: dict[str, int] = dict.fromkeys(INTEGRITY_REASONS, 0)
+        # References a report or a note lost in step 5 of the pass. The object
+        # count does not move, so this is not an ``integrity_dropped`` reason;
+        # it is nonetheless a removal a reader comparing the bundle with the
+        # judge's own would otherwise find unaccounted.
+        self.integrity_refs_trimmed = 0
+
+        # The judge path's own passes, counted apart for the reason above.
+        self.judge_integrity_invocations = 0
+        self.judge_integrity_objects_in = 0
+        self.judge_integrity_objects_out = 0
+        self.judge_integrity_dropped: dict[str, int] = dict.fromkeys(INTEGRITY_REASONS, 0)
+
+        # The total indicator cap (reporting/renderers/stix_renderer).
+        self.indicator_cap_invocations = 0
+        self.indicator_cap_removed = 0
+
+        # What the run's grounding corpus could not hold, as the judge node
+        # found it. Not a bound on a model's input — it is how much of this
+        # run's own record a grounding check could not search, which is what
+        # makes an absence a note rather than a finding.
+        self.evidence_corpus_missing_answers = 0
+        self.evidence_corpus_missing_tools: tuple[str, ...] = ()
+        self.evidence_corpus_partial_reason = ""
+        # And what it did hold, against the ceiling it held it under. ``None``
+        # until the node that reads the corpus records it: a run whose corpus
+        # was gone by then knows nothing about what it held, which is not the
+        # same statement as holding nothing.
+        self.evidence_corpus_answers: int | None = None
+        self.evidence_corpus_bytes_held: int | None = None
+        self.evidence_corpus_bytes_ceiling: int | None = None
 
     # -- tool output --------------------------------------------------------
 
@@ -204,6 +273,8 @@ class TruncationLedger:
         over_limit: bool,
         summarised: bool = False,
         hard_truncated: bool = False,
+        shortened: bool = False,
+        shortening_timed_out: bool = False,
     ) -> None:
         """Record one guardrail decision.
 
@@ -220,6 +291,10 @@ class TruncationLedger:
                 self.tool_output_summarised += 1
             if hard_truncated:
                 self.tool_output_hard_truncated += 1
+            if shortened:
+                self.tool_output_shortened += 1
+            if shortening_timed_out:
+                self.tool_output_shortening_timeouts += 1
 
     # -- loop / generation ceilings ----------------------------------------
 
@@ -255,19 +330,82 @@ class TruncationLedger:
         objects_in: int,
         objects_out: int,
         dropped: dict[str, int] | None = None,
+        refs_trimmed: int = 0,
+        whose: str = EXPORT_PASS,
     ) -> None:
         """Record one ``enforce_bundle_integrity`` invocation.
 
         Unknown reason keys are ignored rather than accumulated, so a typo at a
         call site cannot silently invent a category in the C7 report.
+
+        ``refs_trimmed`` is counted apart from ``dropped``: the references step
+        5 takes out of a report or a note remove no object, so adding them to a
+        reason would stop the reasons totalling to what the pass removed.
+
+        ``whose`` says which bundle this pass ran on. Only :data:`EXPORT_PASS`
+        counts toward the figures the run summary reconciles with the published
+        bundle; :data:`JUDGE_PASS` runs once per verdict attempt, discarded
+        retries included, and is kept under its own name.
         """
         with self._lock:
+            if whose == JUDGE_PASS:
+                self.judge_integrity_invocations += 1
+                self.judge_integrity_objects_in += max(0, int(objects_in))
+                self.judge_integrity_objects_out += max(0, int(objects_out))
+                for reason, count in (dropped or {}).items():
+                    if reason in self.judge_integrity_dropped:
+                        self.judge_integrity_dropped[reason] += max(0, int(count))
+                return
             self.integrity_invocations += 1
             self.integrity_objects_in += max(0, int(objects_in))
             self.integrity_objects_out += max(0, int(objects_out))
+            self.integrity_refs_trimmed += max(0, int(refs_trimmed))
             for reason, count in (dropped or {}).items():
                 if reason in self.integrity_dropped:
                     self.integrity_dropped[reason] += max(0, int(count))
+
+    # -- the grounding corpus -----------------------------------------------
+
+    def record_evidence_corpus(
+        self,
+        *,
+        missing_answers: int,
+        missing_tools: tuple[str, ...],
+        reason: str,
+        held: object | None = None,
+    ) -> None:
+        """Record how whole the evidence a grounding check searched was.
+
+        Recorded once, from the node that builds the corpus the judge is
+        grounded against. Nothing here is a count of calls: a run whose corpus
+        held everything records zeroes, which is the answer an operator needs
+        as much as a number is.
+
+        ``held`` is the corpus's own account of what it is holding, read while
+        the container still has one. Left out — a run resumed without its
+        corpus — the three figures stay absent rather than reading as zero.
+        """
+        with self._lock:
+            self.evidence_corpus_missing_answers = max(0, int(missing_answers))
+            self.evidence_corpus_missing_tools = tuple(missing_tools)
+            self.evidence_corpus_partial_reason = str(reason or "")
+            if held is None:
+                return
+            self.evidence_corpus_answers = max(0, int(getattr(held, "answers", 0)))
+            self.evidence_corpus_bytes_held = max(0, int(getattr(held, "bytes_held", 0)))
+            self.evidence_corpus_bytes_ceiling = max(0, int(getattr(held, "ceiling", 0)))
+
+    # -- indicator cap ------------------------------------------------------
+
+    def record_indicator_cap(self, *, removed: int) -> None:
+        """Record one run of the total indicator cap.
+
+        Recorded even when the cap did not bind, so the count of removals has
+        the denominator every other bound on this ledger has.
+        """
+        with self._lock:
+            self.indicator_cap_invocations += 1
+            self.indicator_cap_removed += max(0, int(removed))
 
     # -- reporting ----------------------------------------------------------
 
@@ -279,6 +417,8 @@ class TruncationLedger:
                 "tool_output_over_limit": self.tool_output_over_limit,
                 "tool_output_summarised": self.tool_output_summarised,
                 "tool_output_hard_truncated": self.tool_output_hard_truncated,
+                "tool_output_shortened": self.tool_output_shortened,
+                "tool_output_shortening_timeouts": self.tool_output_shortening_timeouts,
                 "tool_output_chars_in": self.tool_output_chars_in,
                 "tool_output_chars_kept": self.tool_output_chars_kept,
                 "tool_output_chars_dropped": chars_dropped(
@@ -306,7 +446,21 @@ class TruncationLedger:
                 "integrity_objects_removed": max(
                     0, self.integrity_objects_in - self.integrity_objects_out
                 ),
+                "integrity_refs_trimmed": self.integrity_refs_trimmed,
                 "integrity_dropped": dict(self.integrity_dropped),
+                "indicator_cap_invocations": self.indicator_cap_invocations,
+                "indicator_cap_removed": self.indicator_cap_removed,
+                "judge_integrity_invocations": self.judge_integrity_invocations,
+                "judge_integrity_objects_removed": max(
+                    0, self.judge_integrity_objects_in - self.judge_integrity_objects_out
+                ),
+                "judge_integrity_dropped": dict(self.judge_integrity_dropped),
+                "evidence_corpus_missing_answers": self.evidence_corpus_missing_answers,
+                "evidence_corpus_missing_tools": list(self.evidence_corpus_missing_tools),
+                "evidence_corpus_partial_reason": self.evidence_corpus_partial_reason,
+                "evidence_corpus_answers": self.evidence_corpus_answers,
+                "evidence_corpus_bytes_held": self.evidence_corpus_bytes_held,
+                "evidence_corpus_bytes_ceiling": self.evidence_corpus_bytes_ceiling,
             }
 
     @property

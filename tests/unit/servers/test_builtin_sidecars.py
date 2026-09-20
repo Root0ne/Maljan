@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -154,7 +155,8 @@ def test_only_the_analysis_sidecar_is_allowed_to_see_the_staging_directory() -> 
     ``MALJAN_SAMPLE_ROOTS`` is the exception both file-reading sidecars need:
     it is the list of directories they may read a path argument in, and a
     server that cannot see it reads only what it staged itself. The knowledge
-    sidecar takes no path at all, so it still sees nothing.
+    sidecar takes no path at all, so it sees neither, and the one variable it
+    does see says nothing about the filesystem.
     """
     from maljan.core.config import Settings
 
@@ -165,4 +167,119 @@ def test_only_the_analysis_sidecar_is_allowed_to_see_the_staging_directory() -> 
         "MALJAN_SAMPLE_ROOTS",
     ]
     assert servers["network"].env_allow == ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"]
-    assert servers["knowledge"].env_allow == []
+    assert servers["knowledge"].env_allow == ["MALJAN_INDEX_RETRY_SECONDS"]
+
+
+@pytest.mark.skipif(
+    _INTERPRETER_MISSING, reason="no python interpreter available to launch the sidecar"
+)
+def test_the_index_retry_interval_reaches_the_knowledge_sidecar() -> None:
+    """The sidecar is the process where the ATT&CK index is actually built, so
+    an operator who sets the interval to zero has to reach it here. Proved
+    through a real stdio handshake against a child started the way the
+    registry starts it, reading the value back out of the running process."""
+    import json
+    import subprocess
+
+    from maljan.agents.subprocess_env import child_env
+    from maljan.core.config import REQUIRED_ENV_ALLOW, Settings
+    from maljan.tools.knowledge import INDEX_RETRY_ENV
+
+    assert INDEX_RETRY_ENV in REQUIRED_ENV_ALLOW["knowledge"]
+    assert INDEX_RETRY_ENV in Settings(_env_file=None).mcp.servers["knowledge"].env_allow
+
+    env = child_env(allow=(INDEX_RETRY_ENV,), source={**os.environ, INDEX_RETRY_ENV: "0"})
+    assert env[INDEX_RETRY_ENV] == "0"
+    probe = (
+        "import json,runpy,sys;"
+        "sys.argv=['server.py'];"
+        "m=runpy.run_path('server.py');"
+        "print(json.dumps({'retry': m['knowledge_tools']._RETRY_AFTER_SECONDS}))"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=str(ROOT / "services" / "knowledge-mcp"),
+        env={**env, "PYTHONPATH": str(ROOT / "src")},
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert done.returncode == 0, done.stderr[-2000:]
+    assert json.loads(done.stdout.strip().splitlines()[-1]) == {"retry": 0.0}
+
+
+@pytest.mark.skipif(
+    _INTERPRETER_MISSING, reason="no python interpreter available to launch the sidecar"
+)
+def test_a_sidecar_that_is_told_nothing_keeps_the_module_default() -> None:
+    import json
+    import subprocess
+
+    from maljan.agents.subprocess_env import child_env
+
+    env = child_env(source={k: v for k, v in os.environ.items()})
+    probe = (
+        "import json,runpy,sys;"
+        "sys.argv=['server.py'];"
+        "m=runpy.run_path('server.py');"
+        "print(json.dumps({'retry': m['knowledge_tools']._RETRY_AFTER_SECONDS}))"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=str(ROOT / "services" / "knowledge-mcp"),
+        env={**env, "PYTHONPATH": str(ROOT / "src")},
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert done.returncode == 0, done.stderr[-2000:]
+    assert json.loads(done.stdout.strip().splitlines()[-1]) == {"retry": 900.0}
+
+
+def test_the_container_is_the_one_place_that_announces_the_retry_interval() -> None:
+    """A sidecar started from any entry point reads the deployment's number.
+
+    It used to be announced from ``MaljanApp.arun``, which is one entry point
+    of several: a container built by a script, a test harness or the API
+    started its knowledge sidecar with the module default instead of the
+    configured interval. The container builds the sidecar registry, so it is
+    where the value is put into the environment ``child_env`` filters.
+    """
+    import ast
+    import os
+    import pathlib
+
+    from maljan.core.config import Settings
+    from maljan.core.container import ServiceContainer
+    from maljan.tools.knowledge import INDEX_RETRY_ENV
+
+    config = Settings(_env_file=None)
+    config.validation.index_retry_seconds = 1234
+    before = os.environ.get(INDEX_RETRY_ENV)
+    try:
+        ServiceContainer(config=config, mock=True)
+        assert os.environ[INDEX_RETRY_ENV] == "1234"
+    finally:
+        if before is None:
+            os.environ.pop(INDEX_RETRY_ENV, None)
+        else:
+            os.environ[INDEX_RETRY_ENV] = before
+
+    # And in one place only: nothing else in the tree writes the name.
+    writers: list[str] = []
+    root = pathlib.Path(__file__).resolve().parents[3] / "src" / "maljan"
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            for target in node.targets:
+                if (
+                    isinstance(target, ast.Subscript)
+                    and isinstance(target.value, ast.Attribute)
+                    and target.value.attr == "environ"
+                    and "INDEX_RETRY_ENV" in ast.unparse(target.slice)
+                ):
+                    writers.append(str(path.relative_to(root)))
+
+    assert writers == ["core/container.py"], writers

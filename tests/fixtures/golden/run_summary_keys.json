@@ -98,6 +98,7 @@
     "output_tokens": null,
     "total_tokens": null
   },
+  "tool_latency": null,
   "triage": {
     "duration_ms": null,
     "entries": null,
@@ -105,9 +106,21 @@
   },
   "truncation": {
     "any_bound_hit": null,
+    "evidence_corpus_answers": null,
+    "evidence_corpus_bytes_ceiling": null,
+    "evidence_corpus_bytes_held": null,
+    "evidence_corpus_missing_answers": null,
+    "evidence_corpus_missing_tools": [],
+    "evidence_corpus_partial_reason": null,
+    "indicator_cap_invocations": null,
+    "indicator_cap_removed": null,
     "integrity_dropped": "<data-keyed map>",
     "integrity_invocations": null,
     "integrity_objects_removed": null,
+    "integrity_refs_trimmed": null,
+    "judge_integrity_dropped": {},
+    "judge_integrity_invocations": null,
+    "judge_integrity_objects_removed": null,
     "judge_invocations": null,
     "judge_token_cap_hits": null,
     "react_invocations": null,
@@ -116,6 +129,8 @@
     "tool_output_chars_dropped": null,
     "tool_output_hard_truncated": null,
     "tool_output_over_limit": null,
+    "tool_output_shortened": null,
+    "tool_output_shortening_timeouts": null,
     "tool_output_summarised": null
   },
   "validation": {

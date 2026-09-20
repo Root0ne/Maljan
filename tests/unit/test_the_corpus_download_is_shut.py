@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from maljan.memory import attck_index, attck_loader, embeddings, semantic_attck_index
+from maljan.memory.attck_loader import load_all_domains as _BOUND_AT_IMPORT
 
 
 class TestTheDoorsAreHeld:
@@ -35,6 +36,28 @@ class TestTheDoorsAreHeld:
         """``attck_index`` imported the loader's name, so it holds a second reference."""
         with pytest.raises(pytest.fail.Exception):
             attck_index.load_all_domains()
+
+    def test_a_name_bound_at_import_in_a_test_file_refuses_as_well(self) -> None:
+        """The shape that walks past a patch on the module attribute.
+
+        A file whose first line is ``from maljan.memory.attck_loader import
+        load_all_domains`` holds the original function, and patching the name
+        on the module leaves that reference alone. What the original calls is
+        patched too, so the door holds whichever way in a caller found: the
+        build refuses before a domain is loaded, and a fetch refuses before a
+        socket is opened.
+        """
+        assert _BOUND_AT_IMPORT is not attck_loader.load_all_domains
+        with pytest.raises(pytest.fail.Exception) as refused:
+            _BOUND_AT_IMPORT()
+
+        assert "built the ATT&CK index" in str(refused.value)
+
+    def test_the_download_itself_refuses(self) -> None:
+        with pytest.raises(pytest.fail.Exception) as refused:
+            attck_loader._fetch_bundle("https://example.org/enterprise-attack.json")
+
+        assert "fetched the ATT&CK corpus" in str(refused.value)
 
     def test_the_embedding_model_is_not_reachable(self) -> None:
         """No model is the module's own signal to project bags of words.

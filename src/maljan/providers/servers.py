@@ -20,6 +20,7 @@ added is never the evidence the run was measured on.
 from __future__ import annotations
 
 import asyncio
+import sys
 import threading
 import weakref
 from collections.abc import Callable
@@ -178,24 +179,58 @@ def _abandon_handles_on(loop: asyncio.AbstractEventLoop) -> None:
     user of the server re-attaches on the fresh loop instead of parking on a
     future the retired loop will never complete.
 
-    Runs on the watchdog thread. The reap is the only slow part and is bounded
-    by ``CHILD_TERM_GRACE``.
+    Runs on the watchdog thread, and the grace period is paid **once** for the
+    whole set rather than once per handle. A retirement that met sixty-one
+    abandoned handles used to spend ``CHILD_TERM_GRACE`` on each of them in
+    turn — two minutes of a daemon thread, which is how one of them came to be
+    writing a log line after the interpreter had closed the stream under it.
+    Every child is signalled first, the grace is waited out once, and the
+    survivors are killed; the whole set is one log line rather than one per
+    handle. A process already shutting down is left to the operating system.
     """
-    for handle in list(_LIVE_HANDLES):
-        if handle._owner_loop is not loop:
-            continue
-        logger.error(
-            "mcp server %r was attached to the agent loop that has just been retired; "
-            "abandoning its toolkit and reaping its child.",
-            handle.name,
-        )
+    import time
+
+    if sys.is_finalizing():
+        return
+    abandoned = [handle for handle in list(_LIVE_HANDLES) if handle._owner_loop is loop]
+    if not abandoned:
+        return
+    signalled: list[tuple[ServerHandle, list[int]]] = []
+    for handle in abandoned:
         handle._toolkit = None
         handle._all_tools = []
         handle._opened_async = False
         try:
-            handle._reap_children()
+            pids = handle._terminate_children()
         except Exception as exc:  # noqa: BLE001 — teardown never propagates
             logger.warning("mcp server %r child reap failed (non-fatal): %s", handle.name, exc)
+            pids = []
+        if pids:
+            signalled.append((handle, pids))
+    logger.error(
+        "%d mcp server(s) were attached to the agent loop that has just been retired; "
+        "abandoning their toolkits and reaping %d child process(es). servers=%s",
+        len(abandoned),
+        sum(len(pids) for _handle, pids in signalled),
+        ", ".join(sorted({handle.name for handle in abandoned})),
+    )
+    if signalled and not sys.is_finalizing():
+        time.sleep(CHILD_TERM_GRACE)
+        killed: list[tuple[str, int]] = []
+        for handle, pids in signalled:
+            try:
+                killed.extend((handle.name, pid) for pid in handle._kill_survivors(pids, say=False))
+            except Exception as exc:  # noqa: BLE001 — teardown never propagates
+                logger.warning("mcp server %r child kill failed (non-fatal): %s", handle.name, exc)
+        if killed:
+            logger.warning(
+                "%d child process(es) of %d abandoned mcp server(s) ignored SIGTERM and were "
+                "killed: %s",
+                len(killed),
+                len({name for name, _pid in killed}),
+                ", ".join(f"{name}={pid}" for name, pid in killed),
+            )
+    for handle in abandoned:
         handle._forget_attachment()
 
 
@@ -285,6 +320,48 @@ class ServerHandle:
             )
         return str(resolved)
 
+    def _stages_per_job(self) -> bool:
+        """Whether this server writes or reads a staging directory at all.
+
+        A built-in that is required to see ``MALJAN_STAGING_DIR`` does, and so
+        does a server an operator configured with that name — the same sidecar
+        under a key of their own. Every other server is told nothing: a job id
+        is not a fact a third-party tool server needs.
+        """
+        from maljan.core.config import REQUIRED_ENV_ALLOW
+        from maljan.tools.staging import STAGING_DIR_ENV
+
+        if STAGING_DIR_ENV in REQUIRED_ENV_ALLOW.get(self.name, ()):
+            return True
+        return STAGING_DIR_ENV in self.config.env_allow or STAGING_DIR_ENV in self.config.env
+
+    def _name_the_job_staging(self, env: dict[str, str]) -> None:
+        """Give the child the one directory name this job may stage under.
+
+        Written after ``child_env`` rather than into it, and as a leaf rather
+        than as a path: the operator's ``MALJAN_STAGING_DIR`` is applied last by
+        ``child_env`` and stays the base, and the sidecar joins the two itself.
+        The name is recorded so this job's teardown can remove exactly what it
+        pointed its sidecars at.
+
+        Cleared first, and unconditionally. ``child_env`` applies a server's own
+        ``env`` map on top of everything, so a stored mapping naming this
+        variable would otherwise reach the child verbatim — pointing a server at
+        a directory belonging to whichever job the operator had written down,
+        for every job it is attached to, and having this job's teardown remove
+        it under that other job's name. The leaf is the spawn's to compose or
+        nobody's; settings validation refuses the name as well, and this is the
+        fence for a mapping that reached a handle by some other path.
+        """
+        from maljan.tools import staging
+
+        env.pop(staging.STAGING_JOB_ENV, None)
+        if not self._job_id or not self._stages_per_job():
+            return
+        leaf = staging.job_directory_name(self._job_id)
+        env[staging.STAGING_JOB_ENV] = leaf
+        staging.note_job_directory(self._job_id, staging.staging_base(env) / leaf)
+
     def _build_toolkit(
         self,
         output_guardrail: Callable[[str], str] | None,
@@ -309,6 +386,7 @@ class ServerHandle:
             from maljan.core.paths import resolve_mcp_args
 
             env = child_env(self.config.env, allow=tuple(self.config.env_allow))
+            self._name_the_job_staging(env)
             if self.name not in BUILTIN_SERVER_KEYS:
                 # Byte-for-byte with the pre-branch built-ins (spec S3.2): the
                 # in-repo network/threatintel sidecars were launched with a
@@ -685,19 +763,51 @@ class ServerHandle:
             ", ".join(str(pid) for pid in pids),
         )
 
-    def _kill_survivors(self, pids: list[int]) -> None:
-        """SIGKILL whichever of ``pids`` sat through the SIGTERM."""
+    def _terminate_children(self) -> list[int]:
+        """SIGTERM this handle's children and hand back the pids that got it.
+
+        The first half of a reap, on its own so a caller with many handles to
+        release can signal all of them before waiting out a single grace period
+        rather than paying one per handle.
+
+        No finalisation check of its own: both callers that can reach it from
+        the watchdog thread stand down before this, and a reap that began in
+        time is entitled to finish its SIGTERM — it is the *kill*, after the
+        grace, that a finalising interpreter must not reach.
+        """
         import signal
 
+        pids = self._live_children()
+        if pids:
+            self._signal_children(pids, signal.SIGTERM)
+        return pids
+
+    def _kill_survivors(self, pids: list[int], *, say: bool = True) -> list[int]:
+        """SIGKILL whichever of ``pids`` sat through the SIGTERM.
+
+        Returns the pids it killed. ``say=False`` for a caller releasing many
+        handles at once, which says it once for all of them instead.
+
+        Not once the interpreter is finalising: this is reached from a daemon
+        thread after a grace period long enough for a process to have decided
+        to exit inside it, and the line it logs would be written to a stream
+        that is already closed.
+        """
+        import signal
+
+        if sys.is_finalizing():
+            return []
         survivors = [pid for pid in pids if pid in _own_child_pids()]
         if not survivors:
-            return
+            return []
         self._signal_children(survivors, signal.SIGKILL)
-        logger.warning(
-            "mcp server '%s' child(ren) %s ignored SIGTERM; killed.",
-            self.name,
-            ", ".join(str(pid) for pid in survivors),
-        )
+        if say:
+            logger.warning(
+                "mcp server '%s' child(ren) %s ignored SIGTERM; killed.",
+                self.name,
+                ", ".join(str(pid) for pid in survivors),
+            )
+        return survivors
 
     async def _areap_children(self) -> None:
         """Terminate, then kill, the child this handle spawned. Never raises.
@@ -707,24 +817,27 @@ class ServerHandle:
         when a cleanup is abandoned. Without this the child outlives the job
         and, with ``max_jobs = 1``, accumulates one sidecar per analysis.
         """
-        import signal
-
-        pids = self._live_children()
+        pids = self._terminate_children()
         if not pids:
             return
-        self._signal_children(pids, signal.SIGTERM)
         await asyncio.sleep(CHILD_TERM_GRACE)
         self._kill_survivors(pids)
 
     def _reap_children(self) -> None:
-        """``_areap_children`` for the synchronous close path."""
-        import signal
+        """``_areap_children`` for the synchronous close path.
+
+        Reached from the retirement hook on a daemon thread, so it stands down
+        once the interpreter is going: the child is the operating system's to
+        collect by then, and what this would otherwise do is sleep through the
+        grace and log into a closed stream.
+        """
         import time
 
-        pids = self._live_children()
+        if sys.is_finalizing():
+            return
+        pids = self._terminate_children()
         if not pids:
             return
-        self._signal_children(pids, signal.SIGTERM)
         time.sleep(CHILD_TERM_GRACE)
         self._kill_survivors(pids)
 
@@ -954,10 +1067,17 @@ class ServerHandle:
 class ServerRegistry:
     """The tool servers one job may attach, built from ``cfg.mcp.servers``."""
 
-    def __init__(self, cfg: Settings) -> None:
+    def __init__(self, cfg: Settings, *, truncation_ledger: Any | None = None) -> None:
         self._handles = {
             name: ServerHandle(name, config) for name, config in cfg.mcp.servers.items()
         }
+        # The job's own bound-hit ledger and the job's own tool-output limit,
+        # put on every toolkit this registry opens. Both used to be left to the
+        # caller: every attach but the static provider's passed neither, so the
+        # guardrail on a tool server's answer counted on nothing and cut at the
+        # signature's own 8000 rather than at the number the operator set.
+        self._truncation_ledger = truncation_ledger
+        self._max_output_chars = int(getattr(cfg.preprocessing, "max_tool_output_chars", 0) or 0)
         # A handle is bound to the loop that opened it, so a caller on another
         # running loop cannot be handed it — see ``_handle_for``. These are
         # the extra handles that answer for those callers, keyed by server and
@@ -972,6 +1092,27 @@ class ServerRegistry:
         # ``degradation_reasons`` so the run summary says which server was
         # missing, rather than the report simply being thinner than the last.
         self.degradation_reasons: list[str] = []
+
+    def _attach(self, context: dict[str, Any]) -> dict[str, Any]:
+        """The attach context, with this job's ledger and limit in it.
+
+        One ledger per job: the registry's is the job's, so a toolkit it opens
+        records where the run summary reads, whatever the caller thought to
+        pass. A caller naming a different ledger is told, because a second
+        ledger is a count that reaches no reader.
+        """
+        out = dict(context)
+        if self._truncation_ledger is not None:
+            named = out.get("truncation_ledger")
+            if named is not None and named is not self._truncation_ledger:
+                logger.warning(
+                    "a tool server was asked to record on a ledger other than the job's; "
+                    "the job's ledger is used."
+                )
+            out["truncation_ledger"] = self._truncation_ledger
+        if self._max_output_chars > 0:
+            out.setdefault("max_output_chars", self._max_output_chars)
+        return out
 
     def _handle_for(self, handle: ServerHandle, loop: asyncio.AbstractEventLoop) -> ServerHandle:
         """The handle ``loop`` may use for this server, its own if need be.
@@ -1133,6 +1274,7 @@ class ServerRegistry:
         tools: list[BaseTool] = []
         reasons: list[str] = []
         seen = {} if seen is None else seen
+        context = self._attach(context)
         from maljan.agents.base_agent import _get_agent_loop
 
         # ``open`` hands ``initialize`` to the shared agent loop, so that is
@@ -1183,6 +1325,7 @@ class ServerRegistry:
         tools: list[BaseTool] = []
         reasons: list[str] = []
         seen = {} if seen is None else seen
+        context = self._attach(context)
         loop = asyncio.get_running_loop()
         for bound in self.for_agent(role, exclude=exclude):
             handle = self._handle_for(bound, loop)
@@ -1244,6 +1387,7 @@ class ServerRegistry:
         """
         from maljan.agents.base_agent import _get_agent_loop
 
+        context = self._attach(context)
         try:
             handle = self._handle_for(self.get(str(ref.server)), _get_agent_loop())
         except ProviderConfigurationError:
@@ -1276,6 +1420,7 @@ class ServerRegistry:
         self, ref: Any, job_id: str, *, seen: dict[str, str] | None = None, **context: Any
     ) -> tuple[list[BaseTool], list[str]]:
         """``tools_for_ref``, awaited on the caller's own loop."""
+        context = self._attach(context)
         loop = asyncio.get_running_loop()
         try:
             handle = self._handle_for(self.get(str(ref.server)), loop)

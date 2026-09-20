@@ -1,7 +1,8 @@
 {
   "arguments": {
     "api_capability": [
-      "api_names"
+      "api_names",
+      "platform"
     ],
     "attck_lookup": [
       "technique_id"
