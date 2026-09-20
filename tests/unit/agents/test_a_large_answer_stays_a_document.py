@@ -697,6 +697,7 @@ class TestTheGuardrailUsesIt:
 
         toolkit = MCPLangChainToolkit.__new__(MCPLangChainToolkit)
         toolkit._max_output_chars = limit
+        toolkit._context_budget = None
         toolkit._output_guardrail = None
         toolkit._truncation_ledger = ledger
         return toolkit
@@ -751,6 +752,7 @@ class TestTheGuardrailUsesIt:
         ledger = self._Ledger()
         client = GhidraHTTPClient.__new__(GhidraHTTPClient)
         client._max_output_chars = 4000
+        client._context_budget = None
         client._output_guardrail = None
         client._truncation_ledger = ledger
 
@@ -791,6 +793,7 @@ class TestWhatTheRecordThenHolds:
 
         toolkit = MCPLangChainToolkit.__new__(MCPLangChainToolkit)
         toolkit._max_output_chars = self.LIMIT
+        toolkit._context_budget = None
         toolkit._output_guardrail = None
         toolkit._truncation_ledger = None
 
@@ -1004,7 +1007,7 @@ class TestAServersParameterNameIsUntrustedText:
             # One limit, read once per call, and one function that reads it:
             # the operator's cap when there is one, and otherwise what the
             # served window has left for this answer.
-            assert 'output_limit(self._max_output_chars, getattr(self, "_context_budget"' in source
+            assert "output_limit(self._max_output_chars, self._context_budget)" in source
             assert "shorten_target(limit, narrowing)" in source, module.__name__
 
         from maljan.agents.evidence_recorder import shortened_notice
@@ -1012,6 +1015,7 @@ class TestAServersParameterNameIsUntrustedText:
 
         client = GhidraHTTPClient.__new__(GhidraHTTPClient)
         client._max_output_chars = 4000
+        client._context_budget = None
         client._output_guardrail = None
         client._truncation_ledger = None
 

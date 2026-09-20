@@ -368,7 +368,7 @@ class MCPLangChainToolkit:
         from maljan.llm.context_window import no_room_sentence, output_limit
 
         chars_in = len(output)
-        limit = output_limit(self._max_output_chars, getattr(self, "_context_budget", None))
+        limit = output_limit(self._max_output_chars, self._context_budget)
 
         if limit <= 0:
             said = no_room_sentence(chars_in)

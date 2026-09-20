@@ -150,9 +150,15 @@ class TestFailures:
 
 
 class TestTheFullResultSurvivesTheTextCut:
-    """The text a model reads is cut at MAX_OUTPUT_CHARS; the record keeps the
-    result. On the live proof a pe_info result over the cap lost its
-    structured payload, and with it every reader of the record."""
+    """The record keeps what the model was handed, text and parsed result both.
+
+    It used to keep only the first six thousand characters of the text. That
+    was defensible while the guardrail handed the model the same six thousand;
+    once the guardrail's cap came from the served context window the two
+    diverged, and the durable record — the evidence API, the report sections —
+    held a prefix of what the citation pointed at, with a trailing ellipsis and
+    no flag.
+    """
 
     def _pe_info(self) -> dict:
         return {
@@ -192,11 +198,30 @@ class TestTheFullResultSurvivesTheTextCut:
             output=text,
         )
 
-    def test_a_long_pe_info_result_keeps_its_imports(self) -> None:
-        entry = self._entry(self._pe_info(), "pe_info")
+    def test_a_long_pe_info_result_is_stored_whole(self) -> None:
+        payload = self._pe_info()
+        entry = self._entry(payload, "pe_info")
+        assert entry.output == json.dumps(payload)
+        assert entry.truncated is False
+        assert entry.structured == payload
+
+    def test_a_caller_with_a_ceiling_of_its_own_gets_a_flagged_prefix(self) -> None:
+        """No silent trailing ellipsis: a stored prefix says it is one."""
+        from maljan.schemas.evidence import build_entry, format_entry_id
+
+        text = json.dumps(self._pe_info())
+        entry = build_entry(
+            entry_id=format_entry_id(1),
+            seq=1,
+            agent="pipeline",
+            tool="pe_info",
+            args={},
+            server="pipeline",
+            output=text,
+            max_chars=MAX_OUTPUT_CHARS,
+        )
         assert len(entry.output) <= MAX_OUTPUT_CHARS
-        assert entry.output.endswith("…")
-        assert entry.structured == self._pe_info()
+        assert entry.truncated is True
 
     def test_the_technique_ids_of_a_long_capa_result_are_readable(self) -> None:
         from maljan.pipeline.evidence_summary import _technique_ids

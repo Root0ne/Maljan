@@ -112,6 +112,65 @@ class TestBothToolPathsCutAtTheDerivedNumber:
         assert ledger.rows[-1]["limit"] == expected
 
 
+class TestAConversationWithNoRoomLeft:
+    """The one outcome that is not an answer, on both tool paths."""
+
+    @staticmethod
+    def _full_budget() -> Any:
+        budget = cw.ContextBudget(cw.WindowFact(32768, cw.PROBED, "props"), reply_tokens=8192)
+        budget.note_conversation("static", (32768 - 8192) * cw.CHARS_PER_TOKEN)
+        return budget
+
+    def test_the_model_is_told_rather_than_handed_a_fragment(self) -> None:
+        from maljan.agents.mcp_client import MCPLangChainToolkit
+
+        budget = self._full_budget()
+        toolkit = MCPLangChainToolkit(max_output_chars=0, context_budget=budget)
+        answer = _answer(400)
+
+        said = toolkit._apply_output_guardrail(answer)
+
+        assert said == cw.no_room_sentence(len(answer))
+        assert "no room left" in said
+        assert not said.startswith("{"), "no fragment of the answer was handed over"
+
+    def test_the_ghidra_path_says_the_same_thing(self) -> None:
+        from maljan.agents.ghidra_http_client import GhidraHTTPClient
+
+        client = GhidraHTTPClient.__new__(GhidraHTTPClient)
+        client._max_output_chars = 0
+        client._output_guardrail = None
+        client._truncation_ledger = None
+        client._context_budget = self._full_budget()
+        answer = _answer(400)
+
+        assert client._apply_output_guardrail(answer) == cw.no_room_sentence(len(answer))
+
+    def test_the_run_counts_it_and_the_report_shows_it(self) -> None:
+        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from maljan.core.truncation_ledger import TruncationLedger
+
+        ledger = TruncationLedger()
+        toolkit = MCPLangChainToolkit(max_output_chars=0, context_budget=self._full_budget())
+        toolkit._truncation_ledger = ledger
+
+        toolkit._apply_output_guardrail(_answer(400))
+
+        snapshot = ledger.snapshot()
+        assert snapshot["tool_output_no_room"] == 1
+        summary = RunSummaryBuilder(time.monotonic()).set_truncation(snapshot).build()
+        assert summary.truncation is not None
+        assert summary.truncation.any_bound_hit is True
+        assert "no room left for the answer | 1" in summary.to_markdown()
+
+    def test_an_operator_cap_never_produces_it(self) -> None:
+        """A number the operator set is theirs, and it is never zero."""
+        from maljan.agents.mcp_client import MCPLangChainToolkit
+
+        toolkit = MCPLangChainToolkit(max_output_chars=6000, context_budget=self._full_budget())
+        assert toolkit._apply_output_guardrail(_answer(400)) != cw.no_room_sentence(0)
+
+
 class TestALoopReportsWhatItHolds:
     """The run-state refresher is where the conversation is measured."""
 
@@ -252,6 +311,26 @@ class TestTheRunSaysWhatWasInForce:
         assert "llama.cpp /props reported it" in said
         assert "between 2,000 and 9,216 characters" in said
         assert "3 characters per token" in said
+
+    def test_an_unknown_window_says_so_and_derives_nothing(self) -> None:
+        from maljan.core.truncation_ledger import TruncationLedger
+
+        budget = cw.ContextBudget(cw.unknown_window())
+        ledger = TruncationLedger()
+        ledger.record_tool_output(
+            chars_in=10,
+            chars_kept=10,
+            over_limit=False,
+            limit=cw.UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS,
+        )
+        ledger.note_context_window(budget.snapshot())
+
+        said = cap_in_force_sentence(self._summary(ledger.snapshot()).truncation)
+
+        assert "unknown" in said
+        assert "6,000 characters" in said
+        assert "context_size" in said
+        assert "characters per token" not in said, "nothing is derived from nothing"
 
     def test_a_run_with_an_operator_cap_says_that_instead(self) -> None:
         from maljan.core.truncation_ledger import TruncationLedger

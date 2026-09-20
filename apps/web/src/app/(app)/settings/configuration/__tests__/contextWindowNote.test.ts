@@ -19,6 +19,7 @@ function window(over: Partial<ContextWindow> = {}): ContextWindow {
     cap: 9216,
     derived: true,
     setting: 0,
+    remedy: "",
     ...over,
   };
 }
@@ -33,15 +34,32 @@ describe("contextWindowNote", () => {
     expect(said).toContain("8,192 tokens held back");
   });
 
-  it("says a fallback is a fallback", () => {
-    const said = contextWindowNote(window({ source: "fallback", tokens: 8192, cap: 2304 }));
-    expect(said).toContain("conservative fallback");
-    expect(said).toContain("8,192 tokens");
+  it("names the word the run summary and the API use", () => {
+    for (const source of ["declared", "probed", "table"] as const) {
+      expect(contextWindowNote(window({ source }))).toContain(`(${source} —`);
+    }
+  });
+
+  it("says an unknown window is unknown and derives nothing from it", () => {
+    const said = contextWindowNote(
+      window({
+        source: "fallback",
+        tokens: 8192,
+        cap: 6000,
+        remedy: "set core.llm.openai.context_size",
+      }),
+    );
+    expect(said).toContain("unknown");
+    expect(said).toContain("fallback");
+    expect(said).toContain("6,000 characters");
+    expect(said).toContain("set core.llm.openai.context_size");
+    expect(said).not.toContain("characters per token");
+    expect(said).not.toContain("8,192");
   });
 
   it("tells a vendored figure from a probed one", () => {
     expect(contextWindowNote(window({ source: "table" }))).toContain("vendored table");
-    expect(contextWindowNote(window({ source: "declared" }))).toContain("own setting");
+    expect(contextWindowNote(window({ source: "declared" }))).toContain("settings");
   });
 
   it("says the window decides nothing when the operator set the cap", () => {

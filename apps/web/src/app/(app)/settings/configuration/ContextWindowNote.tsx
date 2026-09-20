@@ -21,14 +21,16 @@ export const TOOL_OUTPUT_KEY = "core.preprocessing.max_tool_output_chars";
  * server was down would be reporting the wrong problem in the wrong place.
  */
 export default function ContextWindowNote() {
-  const [window, setWindow] = useState<ContextWindow | null>(null);
+  /* Not named `window`: this is a client component, and shadowing the global
+     inside one is a trap for the next reader of the effect below. */
+  const [detected, setDetected] = useState<ContextWindow | null>(null);
 
   useEffect(() => {
     let live = true;
     api
       .getContextWindow()
       .then((w) => {
-        if (live) setWindow(w);
+        if (live) setDetected(w);
       })
       .catch(() => undefined);
     return () => {
@@ -36,10 +38,10 @@ export default function ContextWindowNote() {
     };
   }, []);
 
-  if (!window) return null;
+  if (!detected) return null;
   return (
     <p className="text-xs text-text-secondary mt-1" data-testid="context-window-note">
-      {contextWindowNote(window)}
+      {contextWindowNote(detected)}
     </p>
   );
 }

@@ -284,6 +284,133 @@ class TestLearningTheWindow:
         assert cw.model_family("Qwen3.5:9B") == "qwen3.5"
 
 
+class TestANumberAnEndpointReportsIsUntrusted:
+    """One integer must not be able to switch the output guardrail off."""
+
+    def test_an_absurd_window_is_refused_rather_than_believed(self) -> None:
+        for reported in (10**18, 10**15, 999_999_999_999, cw.MAX_BELIEVABLE_WINDOW_TOKENS + 1):
+            assert cw.believable(reported) == 0, reported
+
+    def test_the_boundary_itself_is_believed(self) -> None:
+        assert cw.believable(cw.MAX_BELIEVABLE_WINDOW_TOKENS) == cw.MAX_BELIEVABLE_WINDOW_TOKENS
+        assert cw.believable(cw.MAX_BELIEVABLE_WINDOW_TOKENS - 1) > 0
+
+    def test_every_window_the_vendored_table_ships_is_believed(self) -> None:
+        import json
+
+        from maljan.core.paths import resolve_data
+
+        raw = json.loads(resolve_data(cw.TABLE_PATH).read_text(encoding="utf-8"))
+        for key, value in raw["windows"].items():
+            assert cw.believable(value) == value, key
+
+    def test_a_shape_that_is_not_a_window_is_not_one(self) -> None:
+        for reported in ("32768", -5, 32768.0, True, False, None, [32768]):
+            assert cw.believable(reported) == 0, reported
+
+    def test_a_refused_figure_travels_as_a_reason_rather_than_a_silence(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path != "/props":
+                return httpx.Response(404, json={})
+            return httpx.Response(200, json={"default_generation_settings": {"n_ctx": 10**18}})
+
+        real = httpx.Client
+
+        def stub(**_kwargs: Any) -> httpx.Client:
+            return real(transport=httpx.MockTransport(handler))
+
+        cw.forget_learned_windows()
+        try:
+            httpx.Client = stub  # type: ignore[assignment,misc]
+            fact = cw.probe_window("openai", endpoint="http://127.0.0.1:8080/v1", model="q")
+        finally:
+            httpx.Client = real  # type: ignore[misc]
+            cw.forget_learned_windows()
+
+        assert fact is not None
+        assert fact.source == cw.FALLBACK
+        assert "refused" in fact.detail
+
+    def test_the_guardrail_is_not_switched_off_by_one(self) -> None:
+        """The whole point: an unbelievable window cannot make every answer fit."""
+        budget = cw.ContextBudget(cw.unknown_window("a proxy reported bytes"))
+        assert budget.chars_for_one_answer() == cw.UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
+
+
+class TestOneQuestionPerEndpointAndModel:
+    def setup_method(self) -> None:
+        cw.forget_learned_windows()
+
+    def teardown_method(self) -> None:
+        cw.forget_learned_windows()
+
+    def test_a_team_on_one_endpoint_asks_once(self) -> None:
+        """Four agents used to mean four full plans against a dead endpoint."""
+        from maljan.core.config import Settings
+
+        settings = Settings(_env_file=None, llm={"openai": {"base_url": "http://127.0.0.1:1/v1"}})
+        asked = _sent_by(
+            lambda: cw.window_for_settings(settings, ["static", "dynamic", "network", "judge"])
+        )
+        assert len({str(request.url) for request in asked}) == len(asked)
+        assert len(asked) <= len(cw.PROBE_PATHS)
+
+    def test_a_failure_is_remembered_so_the_next_job_does_not_repeat_it(self) -> None:
+        from maljan.core.config import Settings
+
+        settings = Settings(_env_file=None, llm={"openai": {"base_url": "http://127.0.0.1:1/v1"}})
+        first = _sent_by(lambda: cw.window_for_settings(settings, ["static"]))
+        again = _sent_by(lambda: cw.window_for_settings(settings, ["static"]))
+        assert first, "the first job asked"
+        assert again == [], "the second job asked again"
+
+    def test_a_remembered_answer_is_asked_again_once_it_is_old(self) -> None:
+        from maljan.core.config import Settings
+
+        settings = Settings(_env_file=None, llm={"openai": {"base_url": "http://127.0.0.1:1/v1"}})
+        _sent_by(lambda: cw.window_for_settings(settings, ["static"]))
+        for key in list(cw._learned):  # noqa: SLF001 - the age is the thing under test
+            cw._learned[key] = (0.0, cw._learned[key][1])  # noqa: SLF001
+        assert _sent_by(lambda: cw.window_for_settings(settings, ["static"])), "never asked again"
+
+
+class TestTheOllamaWindowIsBothNumbers:
+    def setup_method(self) -> None:
+        cw.forget_learned_windows()
+
+    def teardown_method(self) -> None:
+        cw.forget_learned_windows()
+
+    def test_the_settings_value_does_not_short_circuit_the_probe(self) -> None:
+        """The served window is the smaller of what is sent and what is held."""
+        from maljan.core.config import Settings
+
+        settings = Settings(_env_file=None, llm={"provider": "ollama"})
+        asked = _sent_by(lambda: cw.window_for_settings(settings, ["static"]))
+        assert [request.url.path for request in asked] == ["/api/show"]
+
+    def test_a_model_that_holds_less_than_is_asked_for_wins(self) -> None:
+        smaller = cw.WindowFact(8192, cw.PROBED, "the Ollama model description reported 8,192")
+        fact = cw._combined(32768, True, smaller)  # noqa: SLF001 - the rule under test
+        assert fact.tokens == 8192
+
+    def test_an_untouched_default_does_not_claim_an_operator_set_it(self) -> None:
+        from maljan.core.config import Settings
+
+        shipped = Settings(_env_file=None, llm={"provider": "ollama"})
+        chosen = Settings(_env_file=None, llm={"provider": "ollama", "ollama": {"num_ctx": 4096}})
+        assert cw.declared_window(shipped, "ollama")[1] is True
+        assert cw.declared_window(chosen, "ollama")[1] is False
+        assert "by default" in cw._declared_fact(32768, True).detail  # noqa: SLF001
+        assert "settings name" in cw._declared_fact(4096, False).detail  # noqa: SLF001
+
+    def test_the_table_does_not_override_a_deployments_own_statement(self) -> None:
+        """A published figure for a family is not evidence against an operator."""
+        table = cw.table_window("gpt-4o")
+        assert table is not None and table.tokens == 128000
+        assert cw._combined(200000, False, table).tokens == 200000  # noqa: SLF001
+
+
 class TestTheArithmetic:
     """One function, and the two properties the design rests on."""
 

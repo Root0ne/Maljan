@@ -129,7 +129,9 @@ class ContextWindowResponse(BaseModel):
     ``detail`` says the same thing in a sentence. ``cap`` is what one tool
     answer may take on an empty conversation, which is the most it can be;
     ``derived`` is false when the operator set the cap themselves, and ``cap``
-    is then their number and the window decides nothing.
+    is then their number and the window decides nothing. Where the window is
+    ``fallback`` nothing is derived from it either — ``cap`` is the documented
+    constant and ``remedy`` names the setting that would change that.
     """
 
     tokens: int
@@ -141,6 +143,7 @@ class ContextWindowResponse(BaseModel):
     cap: int
     derived: bool
     setting: int
+    remedy: str = ""
 
 
 class VirustotalRegisterResponse(BaseModel):

@@ -131,6 +131,7 @@
     "tool_output_hard_truncated": null,
     "tool_output_limit_largest": null,
     "tool_output_limit_smallest": null,
+    "tool_output_no_room": null,
     "tool_output_over_limit": null,
     "tool_output_shortened": null,
     "tool_output_shortening_timeouts": null,

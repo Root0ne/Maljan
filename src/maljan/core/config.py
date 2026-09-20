@@ -2648,6 +2648,18 @@ class ReportingConfig(BaseModel):
     # of six stages would otherwise put the whole run into every prompt after
     # the second one, and the last stage would spend its context on a summary
     # of a summary instead of on the sample.
+    #
+    # The third copy of the six thousand the tool-output cap used to be, and it
+    # is the one that stays. The two it is not: the guardrail's number bounded
+    # a prompt and is now derived from the served window; the evidence ledger's
+    # bounded a *record* silently and is gone, because a stored prefix that
+    # does not say it is one cannot be cited. This bounds a prompt, like the
+    # first, and it announces itself — the block a stage reads ends in
+    # "[upstream findings truncated]" — and nothing is lost, because the whole
+    # findings stay in the run state, the transcript and the report. What it
+    # shares with the first is being a constant where the served window is
+    # knowable, and deriving it belongs with that cap rather than bolted on
+    # here.
     upstream_findings_max_chars: Annotated[int, Field(ge=0)] = 6000
     auto_generate_detection_rules: bool = True
 

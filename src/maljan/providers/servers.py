@@ -1134,6 +1134,14 @@ class ServerRegistry:
                     "the job's ledger is used."
                 )
             out["truncation_ledger"] = self._truncation_ledger
+        named_limit = out.get("max_output_chars")
+        if named_limit is not None and int(named_limit) != self._max_output_chars:
+            logger.warning(
+                "a tool server was asked to cut its answers at %s rather than the job's %s; "
+                "the job's limit is used.",
+                named_limit,
+                self._max_output_chars,
+            )
         out["max_output_chars"] = self._max_output_chars
         if self._context_budget is not None:
             out["context_budget"] = self._context_budget

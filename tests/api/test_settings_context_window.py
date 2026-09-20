@@ -49,13 +49,15 @@ def _with_overrides(overrides: dict[str, Any]) -> Any:
     )
 
 
-def test_a_declared_window_is_reported_without_asking_anything(client) -> None:
+def test_a_declared_window_is_still_checked_against_the_server(client) -> None:
+    """A settings value does not short-circuit the endpoint that knows better."""
     with (
         _with_overrides({"core.llm.openai.context_size": 32768}),
-        patch.object(cw, "aprobe_window", AsyncMock(side_effect=AssertionError("asked"))),
+        patch.object(cw, "aprobe_window", AsyncMock(return_value=None)) as asked,
     ):
         r = client.get("/api/v1/settings/context-window")
 
+    assert asked.await_count == 1
     assert r.status_code == 200
     body = r.json()
     assert body["tokens"] == 32768
@@ -63,6 +65,31 @@ def test_a_declared_window_is_reported_without_asking_anything(client) -> None:
     assert body["derived"] is True
     assert body["cap"] == 9216
     assert body["chars_per_token"] == cw.CHARS_PER_TOKEN
+
+
+def test_a_server_serving_less_than_the_setting_claims_wins(client) -> None:
+    """A stale context_size must not be allowed to overflow the real window."""
+    smaller = cw.WindowFact(16384, cw.PROBED, "llama.cpp /props reported 16,384 tokens")
+    with (
+        _with_overrides({"core.llm.openai.context_size": 131072}),
+        patch.object(cw, "aprobe_window", AsyncMock(return_value=smaller)),
+    ):
+        body = client.get("/api/v1/settings/context-window").json()
+
+    assert body["tokens"] == 16384
+    assert body["source"] == cw.PROBED
+
+
+def test_an_unknown_window_derives_nothing_and_names_the_remedy(client) -> None:
+    with (
+        _with_overrides({"core.llm.openai.expert_model": "a-private-build"}),
+        patch.object(cw, "aprobe_window", AsyncMock(return_value=None)),
+    ):
+        body = client.get("/api/v1/settings/context-window").json()
+
+    assert body["source"] == cw.FALLBACK
+    assert body["cap"] == cw.UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
+    assert "context_size" in body["remedy"]
 
 
 def test_a_server_that_reports_its_window_is_reported_as_probed(client) -> None:
@@ -94,6 +121,7 @@ def test_an_endpoint_that_says_nothing_is_an_answer_and_not_an_error(client) -> 
 
 
 def test_an_operator_cap_says_the_window_decides_nothing(client) -> None:
+    """And asks nothing: the window cannot change a cap the operator set."""
     with (
         _with_overrides({"core.preprocessing.max_tool_output_chars": 6000}),
         patch.object(cw, "aprobe_window", AsyncMock(side_effect=AssertionError("asked"))),

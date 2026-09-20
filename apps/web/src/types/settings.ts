@@ -311,6 +311,9 @@ export interface ContextWindow {
   cap: number;
   derived: boolean;
   setting: number;
+  /** What an operator does about an unknown window. Empty when the window is
+   *  known and there is nothing to do. */
+  remedy: string;
 }
 
 export interface ProbeResult {

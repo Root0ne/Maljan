@@ -673,13 +673,16 @@ async def context_window_facts(settings: Any) -> dict[str, Any]:
 
     ``cap`` is what one tool answer would be allowed on an empty conversation,
     which is the largest it can be; a conversation with something in it gets
-    less, and the run summary reports the range that actually applied.
+    less, and the run summary reports the range that actually applied. Where
+    the window is unknown nothing is derived from it and ``cap`` is the
+    documented constant, with ``remedy`` naming what would change that.
     ``setting`` is what ``core.preprocessing.max_tool_output_chars`` holds, so
     the console can say whether the window decides at all.
     """
     from maljan.agents.composition import analyst_keys
     from maljan.llm.context_window import (
         ANSWER_SHARE,
+        UNKNOWN_WINDOW_REMEDY,
         ContextBudget,
         awindow_for_settings,
         generation_reserve,
@@ -702,9 +705,10 @@ async def context_window_facts(settings: Any) -> dict[str, Any]:
         "chars_per_token": budget.chars_per_token,
         "reply_tokens": budget.reply_tokens,
         "answer_share": ANSWER_SHARE,
-        "cap": configured if configured > 0 else budget.chars_for_one_answer(),
+        "cap": configured if configured > 0 else budget.cap_without_recording(),
         "derived": configured <= 0,
         "setting": configured,
+        "remedy": "" if budget.derives or configured > 0 else UNKNOWN_WINDOW_REMEDY,
     }
 
 
@@ -1608,13 +1612,8 @@ async def run_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -
             resolved[short] = _unwrap(API_DEFAULTS[path])
         else:
             resolved[short] = _unwrap(getattr(api_settings, path))
-    result = await in_probe_loop(lambda: probe(resolved))
-    if name == "llm":
-        # Asked here rather than inside the probe: the window is a fact about
-        # the endpoints these values name, not about whether a model answered,
-        # and an operator pressing Test on the model card is exactly the moment
-        # to tell them how much of a tool answer that model can be handed.
-        details = dict(result.details or {})
-        details["context_window"] = await context_window_facts(core)
-        result.details = details
-    return result
+    # Deliberately no context-window block on the probe result. The window is
+    # a fact about the endpoint rather than about whether a model answered, the
+    # settings page reads it from its own route, and computing it here spent up
+    # to three metadata requests per Test press on something no surface drew.
+    return await in_probe_loop(lambda: probe(resolved))
