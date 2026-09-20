@@ -395,14 +395,21 @@ def api_capability(
     are lookups in a vendored table, so an API absent from the table comes back
     with empty lists rather than a guess.
 
-    ``measured`` is what the association was measured at: the share of a named
-    corpus of benign software the rule or the category fires on, and how many
-    held-out malware profiles support it. ``corpora`` names what those shares
-    are of, once per answer rather than once per row, and ``behaviour_rates``
-    carries the same for each category the answer mentions. An association with
-    no measurement has no ``measured`` key rather than a zero. The rate is the
-    fact; the reader weighs it. What it is not: none of the corpora carry
-    technique-level ground truth, so the numbers say a combination separates
+    ``measured`` is what the association was measured at.
+    ``seen_on_benign_percent`` is the share of a named corpus of benign software
+    the rule fired on, ``seen_on_benign_files`` the count behind that share, and
+    ``held_out_malware_profiles`` how many profiles the combination was not
+    chosen on that it fires on — ``0`` where it fires on none, stated rather
+    than left out. ``corpora`` names what those shares are of, once per answer
+    rather than once per row, and ``behaviour_rates`` carries the same for each
+    category the answer mentions. An association with no measurement has no
+    ``measured`` key rather than a zero.
+
+    Read those numbers in the one direction they were measured in: they say how
+    often this *rule* fires on software that is not a sample. None of them is a
+    probability that *this* sample is benign, and nothing here is evidence about
+    this sample at all. None of the corpora carry technique-level ground truth
+    either, so what a malware number says is that a combination separates
     binaries already known to be bad from binaries already known to be good,
     never that this sample performs the technique.
 

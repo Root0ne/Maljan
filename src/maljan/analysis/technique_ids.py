@@ -130,18 +130,24 @@ def api_capability_hits(payload: Mapping[str, Any] | None) -> list[dict[str, Any
 def _benign_rate(rule: Mapping[str, Any], corpus: str) -> str:
     """One sentence for how common a rule is in software that is not a sample.
 
-    A share and the count behind it, because a share rounded to one decimal
-    place reads as zero for a rule that fires on one file in three thousand,
-    and a rule with no measurement gets no sentence rather than a zero.
+    The sentence is written so it cannot be read as anything else. It says what
+    the rule did — *fires on* — before it says a number, it names the corpus the
+    number is a share of, and it carries the count behind the share, because a
+    share rounded to one decimal place reads as zero for a rule that fires on
+    one file in three thousand. It is emphatically not a probability that this
+    sample is benign, and the value is persisted and read on its own, so the
+    words that rule that reading out have to be inside the string rather than in
+    the column it happens to be drawn in. A rule with no measurement gets no
+    sentence rather than a zero.
     """
     measured = rule.get("measured")
     if not isinstance(measured, Mapping):
         return ""
-    percent, files = measured.get("benign_percent"), measured.get("benign_files")
+    percent, files = measured.get("seen_on_benign_percent"), measured.get("seen_on_benign_files")
     if not isinstance(percent, int | float) or not isinstance(files, int):
         return ""
-    of = f" of {corpus}" if corpus else ""
-    return f"{percent:.1f}% of benign software ({files}{of})"
+    of = f" of {corpus}" if corpus else " measured"
+    return f"fires on {percent:.1f}% of benign software ({files}{of})"
 
 
 def _min_apis(rule: Mapping[str, Any]) -> int:

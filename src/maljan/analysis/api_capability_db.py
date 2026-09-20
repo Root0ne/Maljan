@@ -95,16 +95,20 @@ class MeasuredRate:
 
     The catalogue's associations are not judged, they are measured, and the
     measurement travels with the association rather than staying in whatever
-    document recorded it: an import-derived row that says "T1497.003, time
-    based evasion" and nothing else invites a reader to treat it as a finding,
-    and the same row saying it fires on 9.6% of ordinary Windows software does
+    document recorded it: an import-derived row that says "T1113, screen
+    capture" and nothing else invites a reader to treat it as a finding, and the
+    same row saying the rule fires on 0.3% of ordinary Windows software does
     not. The model is told the rate and decides; the platform states a fact and
     stops there.
 
-    ``benign_files`` is carried beside ``benign_percent`` because a share
-    rounded to one decimal place reads as zero for a rule that fires on one
-    file in three thousand, and an association that was never measured is
-    ``None`` rather than a zero, which is a different statement.
+    Every field names its own direction, because the value travels and is read
+    apart from this class. ``seen_on_benign_percent`` is the share of the named
+    benign corpus the association fired on — never a probability that some
+    sample is benign, which is the misreading the name exists to prevent.
+    ``seen_on_benign_files`` is carried beside it because a share rounded to one
+    decimal place reads as zero for a rule that fires on one file in three
+    thousand, and an association that was never measured is ``None`` rather than
+    a zero, which is a different statement.
 
     ``held_out_malware_profiles`` is how many distinct import profiles the
     combination was *not* chosen on that it fires on. It is support, not
@@ -113,23 +117,23 @@ class MeasuredRate:
     from binaries already known to be good.
     """
 
-    benign_percent: float
-    benign_files: int
+    seen_on_benign_percent: float
+    seen_on_benign_files: int
     benign_corpus: str = ""
-    labelled_percent: float | None = None
-    labelled_files: int | None = None
+    labels_benign_percent: float | None = None
+    labels_benign_files: int | None = None
     held_out_malware_profiles: int | None = None
     held_out_malware_corpus: str = ""
 
     def rates(self) -> dict[str, Any]:
         """The numbers alone, for a row that repeats under every matched name."""
         out: dict[str, Any] = {
-            "benign_percent": self.benign_percent,
-            "benign_files": self.benign_files,
+            "seen_on_benign_percent": self.seen_on_benign_percent,
+            "seen_on_benign_files": self.seen_on_benign_files,
         }
-        if self.labelled_percent is not None:
-            out["labelled_percent"] = self.labelled_percent
-            out["labelled_files"] = self.labelled_files
+        if self.labels_benign_percent is not None:
+            out["labels_benign_percent"] = self.labels_benign_percent
+            out["labels_benign_files"] = self.labels_benign_files
         if self.held_out_malware_profiles is not None:
             out["held_out_malware_profiles"] = self.held_out_malware_profiles
         return out
@@ -153,20 +157,22 @@ def _measured(raw: Any) -> MeasuredRate | None:
     """
     if not isinstance(raw, dict):
         return None
-    percent, files = raw.get("benign_percent"), raw.get("benign_files")
+    percent, files = raw.get("seen_on_benign_percent"), raw.get("seen_on_benign_files")
     if not isinstance(percent, int | float) or not isinstance(files, int):
         return None
-    labelled_percent = raw.get("labelled_percent")
-    labelled_files = raw.get("labelled_files")
+    labels_benign_percent = raw.get("labels_benign_percent")
+    labels_benign_files = raw.get("labels_benign_files")
     held = raw.get("held_out_malware_profiles")
     return MeasuredRate(
-        benign_percent=float(percent),
-        benign_files=int(files),
+        seen_on_benign_percent=float(percent),
+        seen_on_benign_files=int(files),
         benign_corpus=str(raw.get("benign_corpus") or ""),
-        labelled_percent=(
-            float(labelled_percent) if isinstance(labelled_percent, int | float) else None
+        labels_benign_percent=(
+            float(labels_benign_percent) if isinstance(labels_benign_percent, int | float) else None
         ),
-        labelled_files=(int(labelled_files) if isinstance(labelled_files, int) else None),
+        labels_benign_files=(
+            int(labels_benign_files) if isinstance(labels_benign_files, int) else None
+        ),
         held_out_malware_profiles=(int(held) if isinstance(held, int) else None),
         held_out_malware_corpus=str(raw.get("held_out_malware_corpus") or ""),
     )

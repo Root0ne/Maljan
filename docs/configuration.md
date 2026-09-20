@@ -402,18 +402,37 @@ hook, raw-input device or whole-keyboard read that is the capture rather than
 the key-state poll a game does every frame. A technique rule is kept only where
 its combination is the act the technique describes.
 
+**Two bars, and a rule clears both or it is not in the catalogue.** The first
+asks whether a rule carries information: one whose size-matched lift over a
+known-bad corpus is at or below 1.5 fires no more often on malware than on
+ordinary software, and it goes. The second asks whether a rule that does carry
+information is worth a reader's attention: above 4% of ordinary Windows
+software, a rule ships only when its lift reaches 3 and it fires on at least one
+profile the combination was not chosen on. A reference association earns its
+place by changing what a reader would believe, and one that appears in a
+fifteenth of all benign software while barely favouring malware does not — the
+imports are in the triage pack either way, so removing the association removes
+noise and no evidence with it.
+
 **Every association carries the rate it was measured at**, under `measured`:
-the share of a named benign corpus it fires on, the count of files behind that
-share, and — on Windows — how many held-out malware profiles support it. The
-rate reaches the model in the `api_capability` answer, the report's
-import-technique table and the console's cell, and a reader weighs it. There is
-no technique-level ground truth for either malware corpus, so what the numbers
-say is that a combination separates binaries already known to be bad from
-binaries already known to be good, never that a sample performs the technique;
-roughly three malware samples in ten import nothing an import rule can see at
-all, because they are packed, .NET, or resolve everything at runtime. An
-association that has not been measured carries no `measured` block, and the
-surfaces say so rather than printing a zero.
+`seen_on_benign_percent` is the share of a named benign corpus the association
+fired on, `seen_on_benign_files` the count behind that share, and — on Windows —
+`held_out_malware_profiles` how many profiles the combination was not chosen on
+that it fires on, stated as `0` where it fires on none, because an absent count
+and a count of zero read the same and mean opposite things. The rate reaches the
+model in the `api_capability` answer, the report's import-technique table and
+the console's cell, and a reader weighs it.
+
+Read those numbers in the one direction they were measured in: they say how
+often a *rule* fires on software that is not a sample, and none of them is a
+probability that a given sample is benign. There is no technique-level ground
+truth for either malware corpus, so what a malware number says is that a
+combination separates binaries already known to be bad from binaries already
+known to be good, never that a sample performs the technique; roughly three
+malware samples in ten import nothing an import rule can see at all, because
+they are packed, .NET, or resolve everything at runtime. An association that has
+not been measured carries no `measured` block, and the surfaces say so rather
+than printing a zero.
 
 A technique id in either block is retargeted, or dropped and listed, against
 the vendored catalogue's `revoked_by` when a release retires it. Every rule

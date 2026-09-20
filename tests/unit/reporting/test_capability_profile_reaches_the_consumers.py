@@ -72,7 +72,9 @@ class TestTheMarkdownReport:
         finding. The last cell is the measurement, with the corpus named."""
         report, _entry_id = _report()
         md = MarkdownRenderer().render(report)
-        assert "0.5% of benign software (13 of 2730 freely distributed Windows binaries" in md
+        assert (
+            "fires on 0.5% of benign software (13 of 2730 freely distributed Windows binaries"
+        ) in md
 
 
 class TestTheNarrativePrompt:

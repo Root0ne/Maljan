@@ -36,6 +36,26 @@ class TestApiCapability:
         assert by_api["WriteProcessMemory"]["category"] == "process_injection"
         assert by_api["CreateRemoteThread"]["behaviours"] == ["process_injection"]
 
+    def test_every_rate_in_the_answer_says_which_way_it_was_measured(self) -> None:
+        """A number called ``benign_percent`` beside a technique invites one
+        reading the measurement does not support — that the sample is that
+        likely to be benign. Every key says what was counted and what it was
+        counted over, and the corpus is named in the answer.
+        """
+        result = knowledge.api_capability(["GetDIBits", "PrintWindow"])
+        (cited,) = result["capabilities"][0]["techniques"]
+        assert set(cited["measured"]) == {
+            "seen_on_benign_percent",
+            "seen_on_benign_files",
+            "held_out_malware_profiles",
+        }
+        assert "Windows binaries" in result["corpora"]["benign"]
+        assert "profiles" in result["corpora"]["held_out_malware"]
+        # Nothing anywhere in the answer is a bare share of "benign".
+        blob = json.dumps(result)
+        assert '"benign_percent"' not in blob
+        assert '"labelled_percent"' not in blob
+
     def test_the_category_a_reader_would_assume_is_a_label_carries_its_rate_instead(self) -> None:
         """``process_injection`` is met by ``VirtualProtect``, which every
         just-in-time compiler and every trampoline imports. Measured, the
@@ -45,8 +65,8 @@ class TestApiCapability:
         (row,) = result["capabilities"]
         assert row["catalog_flags"] == []
         rate = result["behaviour_rates"]["process_injection"]
-        assert rate["benign_percent"] > 50
-        assert rate["benign_files"] > 0
+        assert rate["seen_on_benign_percent"] > 50
+        assert rate["seen_on_benign_files"] > 0
         assert "Windows binaries" in result["corpora"]["benign"]
 
     def test_an_api_the_catalog_does_not_know_comes_back_empty_not_guessed_at(self) -> None:
@@ -110,7 +130,7 @@ class TestApiCapability:
         assert cited["min_apis"] == 1
         assert cited["rule"] == "sending an ICMP echo request"
         assert "ping" in cited["ordinary_use"]
-        assert cited["measured"]["benign_files"] == 2
+        assert cited["measured"]["seen_on_benign_files"] == 2
         assert row["catalog_flags"] == []
 
 

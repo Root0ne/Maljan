@@ -323,11 +323,13 @@ class MarkdownRenderer:
                 "capa's, or the knowledge table's — no sandbox, no model. The pack's "
                 "rows cite their ledger entry. A row is an association, not a "
                 "finding: the last column is how much ordinary software the same "
-                "rule fires on, measured, and a blank there means the rule has not "
-                "been measured rather than that it never fires._"
+                "rule fires on, measured over the corpus it names, and it says "
+                "nothing about how likely this sample is to be benign. "
+                "`not measured` there means the rule has no measurement, not that "
+                "it never fires._"
             )
             lines.append("")
-            lines.append("| Technique | Name | Rule | Source | Imports | In benign software |")
+            lines.append("| Technique | Name | Rule | Source | Imports | Measured |")
             lines.append("|---|---|---|---|---|---|")
             # By source, then technique: a stated order, so a capa-heavy binary
             # cannot push the pack's rows off the end of the audit trail.

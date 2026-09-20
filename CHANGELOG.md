@@ -1085,57 +1085,76 @@ change landed on `main`.
   whole-keyboard read that is the capture rather than the key-state poll a game
   does every frame. The block now labels **2.01% of ordinary software and
   21.14% of malware**.
-  **Fifteen of the forty-seven technique rules are gone**, each because its own
-  shipped measurement found nothing in it: within the size-matched band its
+  **Eighteen of the forty-seven technique rules are gone**, against two bars.
+  Fifteen carried no information at all: within the size-matched band their
   names fired no more often on malware than on ordinary software (T1003, T1016,
   T1027, T1049, T1053.005, T1071.004, T1087, T1106, T1140, T1222, T1546.003,
   T1555, T1620 on Windows, and the two rules on the scanning and tracing
-  provider calls that ATT&CK 19.2 folded into T1685). **Fourteen keep a
-  narrower combination**, and a name was removed from one only where the act it
-  names is not the act the technique describes — `TerminateProcess` ends a
-  process and not a service, `MoveFileEx` renames a file and does not delete
-  it, `IsProcessorFeaturePresent` is the C runtime asking about the processor
-  at startup. Eight further combinations were written, measured and **not**
-  applied, because the only argument for them was that they happened to
-  separate these two corpora best. T1095 keeps one name: the ten Berkeley and
-  Winsock names label one benign binary in twenty and more than a third of
-  everything that touches a network, and a raw socket and a TCP socket are the
-  same import, so what is left is `IcmpSendEcho`, which is ICMP by
-  construction. Over the same corpora the rule set now fires on **19.38% of
-  ordinary software and 59.35% of malware**, against 25.71% and 63.41% before.
+  provider calls that ATT&CK 19.2 folded into T1685). Three carried information
+  and were still not worth a reader's attention: above 4% of ordinary Windows
+  software a rule ships only where its size-matched lift reaches 3 and it fires
+  on a profile it was not chosen on, and **T1497.003** (9.56%, lift 2.30),
+  **T1622** (7.51%, 2.28) and **T1083** (6.41%, 2.98) clear none of that. A
+  reference association earns its place by changing what a reader would believe,
+  and one that appears in a fifteenth of all benign software while barely
+  favouring malware does not; the imports themselves are in the triage pack
+  either way, so removing the association removes noise and no evidence.
+  **Fourteen of the twenty-nine that remain keep a narrower combination**, and a
+  name was removed from one only where the act it names is not the act the
+  technique describes — `TerminateProcess` ends a process and not a service,
+  `MoveFileEx` renames a file and does not delete it, `IsProcessorFeaturePresent`
+  is the C runtime asking about the processor at startup. Eight further
+  combinations were written, measured and **not** applied, because the only
+  argument for them was that they happened to separate these two corpora best.
+  T1095 keeps one name: the ten Berkeley and Winsock names label one benign
+  binary in twenty and more than a third of everything that touches a network,
+  and a raw socket and a TCP socket are the same import, so what is left is
+  `IcmpSendEcho`, which is ICMP by construction. Over the same corpora the rule
+  set now fires on **14.40% of ordinary software and 45.53% of malware**,
+  against 25.71% and 63.41% before.
   **Every surviving association carries the rate it was measured at**, under
-  `measured`: the share of the named corpus it fires on, the count of files
-  behind that share, and how many held-out malware profiles support it. The
-  Linux block carries the same field from its own measurement. The rate reaches
-  the model in the `api_capability` answer, the report's import-technique table
-  and the console's cell, so a reader weighs an association instead of reading
-  it as a finding. Every Windows rule also gains the `rule` label and the
-  `ordinary_use` sentence the two Linux rules already had, and the builder
-  refuses a rule missing either.
-  What the numbers are not: neither malware corpus carries technique-level
-  ground truth, so what was measured is that a combination separates binaries
-  already known to be bad from binaries already known to be good, never that a
-  sample performs the technique. 29.2% of the malware corpus imports nothing an
-  import rule can see, and the combinations are tuned to this pair of corpora.
+  `measured`: `seen_on_benign_percent` is the share of the named corpus the
+  association fired on, `seen_on_benign_files` the count behind that share, and
+  `held_out_malware_profiles` how many profiles the combination was not chosen
+  on that it fires on — `0` where it fires on none, said rather than left out,
+  because an absent count and a count of zero read the same and mean opposite
+  things. The Linux block carries the same field from its own measurement. The
+  rate reaches the model in the `api_capability` answer, the report's
+  import-technique table and the console's cell, so a reader weighs an
+  association instead of reading it as a finding. Every Windows rule also gains
+  the `rule` label and the `ordinary_use` sentence the two Linux rules already
+  had, and the builder refuses a rule missing either, or missing its held-out
+  count.
+  Read the rates in the one direction they were measured in: they say how often
+  a rule fires on software that is not a sample, and none of them is a
+  probability that a given sample is benign — which is why every key names what
+  was counted. Neither malware corpus carries technique-level ground truth, so
+  what was measured is that a combination separates binaries already known to be
+  bad from binaries already known to be good, never that a sample performs the
+  technique. 29.2% of the malware corpus imports nothing an import rule can see,
+  and the combinations are tuned to this pair of corpora.
   `scripts/knowledge/measure_api_behaviour_block.py` gains `--platform windows`
   so the whole measurement is one command: it reads PE import tables with
   `pefile` exactly as `extractors/pe_extractor.py` does, records an ordinal-only
   import as `Ordinal_<n>`, deduplicates by content, takes a directory or an
   inventory file, and `--write-inventory` saves what it read so the same corpus
   can be measured again after the files are gone.
-  **Upgrading:** fifteen technique ids disappear from the Windows import layer
+  **Upgrading:** eighteen technique ids disappear from the Windows import layer
   and fourteen more fire on fewer samples, so a saved report and a live run will
   show fewer rows in the import-derived ATT&CK table and fewer catalogue
   associations in the corroboration table; a dashboard counting those rows will
-  read lower for the same sample. `catalog_flags: ["suspicious"]` now appears on
-  a Windows import only where the `keylogging` gate is met, so an
-  `api_capability` consumer that treated the flag as its trigger sees it on
-  roughly one binary in fifty rather than on nearly every one. The
-  `api_capability` answer gains `measured` on a technique row,
+  read lower for the same sample. The three the second bar removed —
+  T1497.003, T1622 and T1083 — are the ones most likely to be missed, because
+  they fired on more samples than anything else in the block; they fired on
+  ordinary software at nearly the same rate, which is why they are gone.
+  `catalog_flags: ["suspicious"]` now appears on a Windows import only where the
+  `keylogging` gate is met, so an `api_capability` consumer that treated the flag
+  as its trigger sees it on roughly one binary in fifty rather than on nearly
+  every one. The `api_capability` answer gains `measured` on a technique row,
   `behaviour_rates` per category and `corpora` at the top; `api_technique_hits`
   rows gain `benign_rate`, a sentence, absent on a producer with no measurement
-  — absent means not measured, never "never fires". Nothing was renamed and no
-  category was removed, so a consumer reading `category` alone is unaffected.
+  — absent means not measured, never "never fires". No behaviour category was
+  renamed or removed, so a consumer reading `category` alone is unaffected.
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was

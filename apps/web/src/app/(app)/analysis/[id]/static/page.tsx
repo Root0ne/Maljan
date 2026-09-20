@@ -176,7 +176,8 @@ export default function StaticTab() {
               Derived from the import table alone — no sandbox, no model. This is the
               audit trail behind the capability matrix. A row is an association, not a
               finding: the last column is how much ordinary software the same rule
-              fires on, measured.
+              fires on, measured over the corpus it names, and it says nothing about
+              how likely this sample is to be benign.
             </p>
           </div>
           <table className="w-full">
@@ -187,7 +188,7 @@ export default function StaticTab() {
                 <Th>Rule</Th>
                 <Th>Confidence</Th>
                 <Th>Imports</Th>
-                <Th>In benign software</Th>
+                <Th>Measured</Th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border-light">

@@ -290,7 +290,7 @@ class TestAnAssociationCarriesWhatItWasMeasuredAt:
         for rule in table.techniques:
             assert rule.measured is not None, rule.technique_id
             assert rule.measured.benign_corpus, rule.technique_id
-            assert rule.measured.benign_files >= 0, rule.technique_id
+            assert rule.measured.seen_on_benign_files >= 0, rule.technique_id
 
     def test_every_category_says_the_same(self) -> None:
         for platform in ("windows", "linux"):
@@ -315,9 +315,9 @@ class TestAnAssociationCarriesWhatItWasMeasuredAt:
         from maljan.analysis.api_capability_db import _measured
 
         assert _measured(None) is None
-        assert _measured({"benign_percent": 0.4}) is None
-        assert _measured({"benign_files": 4}) is None
-        assert _measured({"benign_percent": 0.0, "benign_files": 0}) is not None
+        assert _measured({"seen_on_benign_percent": 0.4}) is None
+        assert _measured({"seen_on_benign_files": 4}) is None
+        assert _measured({"seen_on_benign_percent": 0.0, "seen_on_benign_files": 0}) is not None
 
 
 class TestALabelWaitsForTheCombinationThatEarnsIt:
