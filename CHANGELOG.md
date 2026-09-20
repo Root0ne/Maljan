@@ -1109,7 +1109,9 @@ change landed on `main`.
   Both notices come out of the tool budget — the window less the room kept back
   for the model's reply — and are withheld when they would not fit, so the
   reserve the forced synthesis writes its answer in is never spent on saying
-  that the room ran out. A positive value is an explicit operator cap and
+  that the room ran out. The `[OUTPUT TRUNCATED]` marker is kept back out of
+  the cap rather than appended after it, so what reaches the model from a
+  character cut is the limit, marker included. A positive value is an explicit operator cap and
   behaves exactly as this setting always did. The window itself is learned free
   of charge and without asking the operator anything:
   llama.cpp's `/props`, Ollama's `/api/show`, an OpenAI-compatible

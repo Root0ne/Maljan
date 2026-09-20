@@ -2449,7 +2449,22 @@ class BaseAnalyst(BudgetMeter, ABC):
             budget.append(f"{max(0, int(seconds_left))} s")
         if budget:
             body = f"{body}\nbudget remaining: {', '.join(budget)}"
-        return f"{body}\n{NO_ROOM_RUN_STATE}" if self._out_of_room() else body
+        return f"{body}\n{NO_ROOM_RUN_STATE}" if self._says_no_room() else body
+
+    def _says_no_room(self) -> bool:
+        """Whether this loop's run-state block carries the no-room line.
+
+        Asked of the budget rather than derived from ``_out_of_room``: the line
+        is charged when the room runs out, and only when there was room to
+        charge it, so the block adds nothing that was not paid for.
+        """
+        from maljan.llm.context_window import ContextBudget
+
+        budget = self._context_budget()
+        try:
+            return isinstance(budget, ContextBudget) and budget.says_no_room(self.name)
+        except Exception:  # noqa: BLE001 — a budget is never worth a lost loop
+            return False
 
     def _out_of_room(self) -> bool:
         """Whether this agent's tool phase has ended for want of room.

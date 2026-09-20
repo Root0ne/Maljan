@@ -24,6 +24,22 @@ from pydantic import create_model
 
 from maljan.core.logger import logger
 
+# What a character cut leaves behind, and the room kept back for it.
+#
+# The marker goes *inside* the limit rather than after it, which is the same
+# rule ``output_shortening.shorten_target`` follows for the notice a shortened
+# answer carries: the limit is how much may reach the model, and the marker
+# reaches the model. Appended after the cut instead, it left twenty characters
+# a call unaccounted — self-correcting between model turns, because the next
+# measurement sees the true size, and not self-correcting inside one, where
+# every answer of a wide fan-out leaked its own.
+TRUNCATION_MARKER = "\n\n[OUTPUT TRUNCATED]"
+
+
+def truncation_target(limit: int) -> int:
+    """How much of an answer a character cut keeps, so the marker fits the limit."""
+    return max(0, int(limit) - len(TRUNCATION_MARKER))
+
 
 class MCPLangChainToolkit:
     """Toolkit that connects to an MCP server and exposes its tools to LangChain."""
@@ -387,6 +403,7 @@ class MCPLangChainToolkit:
 
         attempt = shorten_json_document(output, shorten_target(limit, narrowing))
         if attempt.shortened:
+            self._charge_overage(len(attempt.text), limit)
             self._record_guardrail(
                 chars_in, len(attempt.text), over_limit=True, shortened=True, limit=limit
             )
@@ -398,13 +415,15 @@ class MCPLangChainToolkit:
             except Exception as exc:
                 logger.warning("Output guardrail failed: %s — falling back to truncation.", exc)
             else:
+                self._charge_overage(len(summarised), limit)
                 self._record_guardrail(
                     chars_in, len(summarised), over_limit=True, summarised=True, limit=limit
                 )
                 return summarised
 
         # Fallback: simple truncation with a marker
-        result = output[:limit] + "\n\n[OUTPUT TRUNCATED]"
+        result = output[: truncation_target(limit)] + TRUNCATION_MARKER
+        self._charge_overage(len(result), limit)
         self._record_guardrail(
             chars_in,
             len(result),
@@ -414,6 +433,28 @@ class MCPLangChainToolkit:
             limit=limit,
         )
         return result
+
+    def _charge_overage(self, kept: int, limit: int) -> str:
+        """Charge what a result is longer than the cap it was measured against.
+
+        The budget reserved ``limit`` when it granted the cap, and two branches
+        can hand back more than that: the character cut appends its marker
+        after cutting, and a summariser may legitimately expand a short input.
+        Twenty characters a call sounds like nothing and is not — within one
+        model turn, where no measurement intervenes, every granted answer leaks
+        its marker, and the run's own account of what the conversation holds
+        drifts from what is in it. The ledger already records the real length;
+        this makes the budget agree with it.
+
+        Returns nothing useful; it is called for the charge.
+        """
+        from maljan.llm.context_window import ContextBudget
+
+        budget = getattr(self, "_context_budget", None)
+        over = max(0, int(kept) - int(limit))
+        if over and isinstance(budget, ContextBudget):
+            budget.charge(over)
+        return ""
 
     def _no_room(self, chars_in: int) -> str:
         """The sentence a conversation with no room left gets, said once.

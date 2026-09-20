@@ -321,12 +321,17 @@ def derive_tool_output_chars(
     charged through :meth:`ContextBudget.charge` and withheld entirely when
     they would not fit, and what they are measured against is the same tool
     budget a cap comes out of — the window less the reply reserve
-    (:meth:`ContextBudget.room_for`). So the whole of what this platform hands
-    a model, answers and refusals together, stays inside the tool budget, and
-    the reserve the forced synthesis writes its answer in is never spent on
-    saying that the room ran out. Measured over every window the vendored
-    table ships, at 20, 40 and 60 rounds, empty and preloaded: nothing reaches
-    the tool budget, let alone the window.
+    (:meth:`ContextBudget.room_for`). A marker or a notice a branch adds to an
+    answer comes out of that answer's own cap rather than after it, and
+    anything a branch does hand back beyond its cap is charged. So the whole of
+    what this platform hands a model, answers and refusals together, stays
+    inside the tool budget, and the reserve the forced synthesis writes its
+    answer in is never spent on saying that the room ran out.
+
+    Measured by driving this module's own guardrail over every window the
+    vendored table ships, at 20, 40 and 60 rounds, empty and preloaded, and at
+    fan-outs of 32 and 128: the tool budget is never exceeded — the worst case
+    is zero characters over — and the whole reply reserve survives.
 
     What is outside the claim is the model's own output — its tool requests and
     its prose. The platform does not hand those over and cannot cap them, and
@@ -1250,6 +1255,11 @@ class ContextBudget:
         self._handed: dict[str, int] = {}
         # The agents that have been told the room is gone. Told once each.
         self._no_room: set[str] = set()
+        # And the agents whose run-state block carries the standing line about
+        # it, which is only the ones there was room to say it to.
+        self._run_state_said: set[str] = set()
+        # Whether the invariant below has already been reported broken.
+        self._warned_unnamed = False
         self._smallest = 0
         self._largest = 0
 
@@ -1272,6 +1282,7 @@ class ContextBudget:
             self._held.pop(key, None)
             self._handed.pop(key, None)
             self._no_room.discard(key)
+            self._run_state_said.discard(key)
 
     def held_chars(self, agent: str = "") -> int:
         """What an answer for ``agent`` is measured against, in characters.
@@ -1290,21 +1301,47 @@ class ContextBudget:
         """Charge text that entered the conversation without being a capped answer.
 
         The refusal a tool call gets when the room has run out is text like any
-        other: it reaches the model, it costs the window, and leaving it
-        uncharged is how a loop that had stopped being given answers kept
-        growing with nothing accounting for it.
+        other, and so is the twenty characters a character cut appends after
+        cutting: they reach the model, they cost the window, and leaving them
+        uncharged is how the run's account of what a conversation holds drifts
+        from what is in it.
         """
+        key = self._whose(agent)
         with self._lock:
-            key = self._whose(agent)
             self._handed[key] = self._handed.get(key, 0) + max(0, int(chars))
 
     def note_no_room(self, agent: str = "") -> None:
-        """Record that this agent has been told the room is gone."""
+        """Record that this agent has been told the room is gone.
+
+        The run-state block will carry :data:`NO_ROOM_RUN_STATE` from here on,
+        so that line is charged now — once, because the block is rewritten
+        on every model turn rather than appended to, so only one copy is ever
+        in the conversation. Charged only if it fits, on the same rule as the
+        two notices, and :meth:`says_no_room` is what the block asks before
+        adding it, so nothing is added that was not paid for.
+        """
+        key = self._whose(agent)
         with self._lock:
-            self._no_room.add(self._whose(agent))
+            self._no_room.add(key)
+        if self.room_for(len(NO_ROOM_RUN_STATE), key):
+            self.charge(len(NO_ROOM_RUN_STATE), key)
+            with self._lock:
+                self._run_state_said.add(key)
+
+    def says_no_room(self, agent: str = "") -> bool:
+        """Whether the run-state block may carry the no-room line for this agent.
+
+        A latch, not a per-turn question. The charge is made once, when the
+        room runs out and only if there was room to make it; from the next
+        model turn the line is inside the measured conversation like any other
+        text. Clearing it on a measurement would drop the line the model is
+        meant to keep reading, and charge it again the moment it came back.
+        """
+        with self._lock:
+            return (str(agent) or current_agent()) in self._run_state_said
 
     def _whose(self, agent: str) -> str:
-        """The agent a charge or a mark belongs to. Called with the lock held.
+        """The agent a charge or a mark belongs to. Takes the lock itself.
 
         The invariant: a guardrail is reached from inside the tool wrapper,
         which names the agent for the length of the call
@@ -1317,17 +1354,24 @@ class ContextBudget:
         agent, its tool phase never ends and the long sentence is repeated on
         every call. So an unnamed call is not quietly filed under the empty
         string. It is attributed to the conversation the cap was computed
-        against — the fullest one — and it says so, loudly enough to find.
+        against — the fullest one — and it says so, once: a broken path is a
+        hot one, and a warning per call would flood a log to report a thing
+        that is true of the whole run. The log is written outside the lock for
+        the same reason — a handler is not something a budget read should wait
+        on.
         """
         named = str(agent) or current_agent()
         if named:
             return named
-        fullest = max(self._held, key=lambda key: self._held[key], default="")
-        logger.warning(
-            "a tool answer was sized outside the wrapper that names its agent; "
-            "the charge is attributed to the fullest conversation (%r).",
-            fullest,
-        )
+        with self._lock:
+            fullest = max(self._held, key=lambda key: self._held[key], default="")
+            first, self._warned_unnamed = not self._warned_unnamed, True
+        if first:
+            logger.warning(
+                "a tool answer was sized outside the wrapper that names its agent; "
+                "the charge is attributed to the fullest conversation (%r).",
+                fullest,
+            )
         return fullest
 
     def tool_budget_chars(self) -> int:

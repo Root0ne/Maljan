@@ -713,13 +713,21 @@ class TestTheGuardrailUsesIt:
         assert ledger.rows[-1]["shortened"] is True
         assert ledger.rows[-1]["hard_truncated"] is False
 
-    def test_a_large_non_json_answer_is_cut_exactly_as_it_always_was(self) -> None:
+    def test_a_large_non_json_answer_still_takes_the_character_cut(self) -> None:
+        """Unchanged but for the marker, which now comes out of the limit.
+
+        Appended after the cut it was twenty characters the budget never saw,
+        and inside one model turn every answer leaked its own.
+        """
+        from maljan.agents.mcp_client import TRUNCATION_MARKER, truncation_target
+
         ledger = self._Ledger()
         text = "a decompiled function, in C. " * 500
 
         kept = self._client(ledger)._apply_output_guardrail(text)
 
-        assert kept == text[:4000] + "\n\n[OUTPUT TRUNCATED]"
+        assert kept == text[: truncation_target(4000)] + TRUNCATION_MARKER
+        assert len(kept) == 4000
         assert ledger.rows[-1]["hard_truncated"] is True
         assert ledger.rows[-1]["shortened"] is False
 

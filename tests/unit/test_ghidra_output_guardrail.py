@@ -41,16 +41,20 @@ class TestOutputGuardrailTruncation:
     """Outputs over the limit should be truncated when no guardrail callback is set."""
 
     def test_large_output_truncated(self, server_params: MagicMock) -> None:
+        from maljan.agents.mcp_client import TRUNCATION_MARKER
+
         toolkit = MCPLangChainToolkit(server_params, max_output_chars=100)
         text = "B" * 500
         result = toolkit._apply_output_guardrail(text)
 
-        # Should be truncated to max_output_chars + marker
         assert len(result) < len(text)
         assert result.endswith("[OUTPUT TRUNCATED]")
-        # The payload portion should be exactly 100 chars
-        payload = result.split("\n\n[OUTPUT TRUNCATED]")[0]
-        assert len(payload) == 100
+        # The marker is kept back out of the limit rather than appended after
+        # it, the way the shortener already reserves room for its own notice:
+        # what reaches the model is the limit, marker included.
+        assert len(result) == 100
+        payload = result.split(TRUNCATION_MARKER)[0]
+        assert len(payload) == 100 - len(TRUNCATION_MARKER)
 
     def test_truncation_marker_present(self, server_params: MagicMock) -> None:
         toolkit = MCPLangChainToolkit(server_params, max_output_chars=50)

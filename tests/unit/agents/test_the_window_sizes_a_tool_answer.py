@@ -177,6 +177,7 @@ class TestAConversationWithNoRoomLeft:
         assert "no room left for the answer | 1" in summary.to_markdown()
 
     def test_the_sentence_is_charged_like_any_answer(self) -> None:
+        """And so is the standing run-state line the block carries from now on."""
         from maljan.agents.mcp_client import MCPLangChainToolkit
 
         budget = self._full_budget()
@@ -187,7 +188,9 @@ class TestAConversationWithNoRoomLeft:
         with cw.answering_for("static"):
             said = toolkit._apply_output_guardrail(answer)
 
-        assert budget.held_chars("static") == before + len(said)
+        charged = budget.held_chars("static") - before
+        assert charged == len(said) + len(cw.NO_ROOM_RUN_STATE)
+        assert budget.says_no_room("static") is True
         assert budget.out_of_room("static") is True
 
     def test_the_tool_phase_ends_rather_than_repeating_the_sentence(self) -> None:

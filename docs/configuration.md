@@ -509,14 +509,17 @@ once or forty times. The loop then ends the way a repeating loop already does:
 what was gathered into the answer instead of a "need more steps" non-answer.
 
 Both notices come out of the **tool budget** — the window less the room kept
-back for the model's reply — and are withheld when they would not fit. That is
-what leaves the reply reserve whole: the forced synthesis above is this
-design's answer to a full conversation, and spending its room on saying that
-the room ran out would take it from the one thing left to do. Measured over
-every window the vendored table ships, at twenty, forty and sixty rounds and
-with a chunk preloaded: nothing reaches the tool budget, and the whole reserve
-survives — 8,192 tokens on a 131,072-token window, 2,048 on 8,192, 1,024 on
-4,096.
+back for the model's reply — and are withheld when they would not fit. So does
+the marker a character cut leaves behind, which is kept back out of the cap
+rather than appended after it, the way the shortener already reserves room for
+its own notice. That is what leaves the reply reserve whole: the forced
+synthesis above is this design's answer to a full conversation, and spending
+its room on saying that the room ran out would take it from the one thing left
+to do. Measured by driving the guardrail itself over every window the vendored
+table ships, at twenty, forty and sixty rounds, with a chunk preloaded and at
+fan-outs of thirty-two and a hundred and twenty-eight: the tool budget is never
+exceeded, and the whole reserve survives — 8,192 tokens on a 131,072-token
+window, 2,048 on 8,192, 1,024 on 4,096.
 
 What is outside that guarantee is the model's own output: its tool requests and
 its prose are not the platform's to cap, and on a very small window they reach

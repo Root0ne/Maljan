@@ -131,7 +131,7 @@ def _loop(window: int, rounds: int, preload: int = 0) -> int:
     sentence = len(cw.no_room_sentence(120_000))
     ended = len(cw.TOOL_PHASE_ENDED_NOTICE)
     budget = cw.ContextBudget(cw.WindowFact(window, cw.PROBED, "props"), reply_tokens=8192)
-    held = preload * cw.CHARS_PER_TOKEN + _RUN_STATE_BLOCK + len(cw.NO_ROOM_RUN_STATE)
+    held = preload * cw.CHARS_PER_TOKEN + _RUN_STATE_BLOCK
     with cw.answering_for("static"):
         budget.note_conversation("static", held)
         for _ in range(rounds):
@@ -142,7 +142,12 @@ def _loop(window: int, rounds: int, preload: int = 0) -> int:
                 continue
             cap = budget.chars_for_one_answer()
             if cap == 0:
+                # ``note_no_room`` charges the standing run-state line itself,
+                # once and only when it fits, so the caller adds it to its own
+                # tally rather than charging it a second time.
                 budget.note_no_room()
+                if budget.says_no_room("static"):
+                    held += len(cw.NO_ROOM_RUN_STATE)
                 if budget.room_for(sentence, "static"):
                     budget.charge(sentence)
                     held += sentence
@@ -206,6 +211,66 @@ class TestTheReplyReserveIsNeverSpentOnSayingTheRoomRanOut:
         budget = cw.ContextBudget(cw.WindowFact(8192, cw.PROBED, "props"), reply_tokens=8192)
         assert budget.tool_budget_chars() == (8192 - budget.reply_tokens) * cw.CHARS_PER_TOKEN
         assert budget.tool_budget_chars() < 8192 * cw.CHARS_PER_TOKEN
+
+    def test_nothing_the_real_guardrail_returns_outruns_the_tool_budget(self) -> None:
+        """The whole claim, through the guardrail itself rather than a stand-in.
+
+        Plain text, so the shortener declines and the character cut runs — the
+        branch whose marker used to be appended after the cut and charged to
+        nobody. Twenty characters a call, self-correcting between model turns
+        and not inside one, where a wide fan-out leaked every answer's own.
+        """
+        import logging
+
+        from maljan.agents.mcp_client import MCPLangChainToolkit
+
+        logging.disable(logging.WARNING)
+        try:
+            text = "a decompiled function, in C. " * 200_000
+            for window in (4096, 8192, 32768, 131072):
+                budget = cw.ContextBudget(
+                    cw.WindowFact(window, cw.PROBED, "props"), reply_tokens=8192
+                )
+                toolkit = MCPLangChainToolkit(max_output_chars=0, context_budget=budget)
+                held = 0
+                with cw.answering_for("static"):
+                    budget.note_conversation("static", 0)
+                    for _ in range(60):
+                        if budget.out_of_room("static"):
+                            continue
+                        held += len(toolkit._apply_output_guardrail(text))
+                assert held <= budget.tool_budget_chars(), (window, held)
+                assert budget.held_chars("static") <= budget.tool_budget_chars(), window
+        finally:
+            logging.disable(logging.NOTSET)
+
+    def test_a_wide_fan_out_through_the_real_guardrail_stays_inside_too(self) -> None:
+        """The one place the marker used to compound rather than stay constant."""
+        import logging
+
+        from maljan.agents.mcp_client import MCPLangChainToolkit
+
+        logging.disable(logging.WARNING)
+        try:
+            text = "a decompiled function, in C. " * 200_000
+            for window, fan_out in ((32768, 32), (32768, 128), (4096, 128)):
+                budget = cw.ContextBudget(
+                    cw.WindowFact(window, cw.PROBED, "props"), reply_tokens=8192
+                )
+                toolkit = MCPLangChainToolkit(max_output_chars=0, context_budget=budget)
+                with cw.answering_for("static"):
+                    budget.note_conversation("static", 0)
+                    spent = sum(len(toolkit._apply_output_guardrail(text)) for _ in range(fan_out))
+                assert spent <= budget.tool_budget_chars(), (window, fan_out, spent)
+        finally:
+            logging.disable(logging.NOTSET)
+
+    def test_the_marker_comes_out_of_the_limit_rather_than_after_it(self) -> None:
+        from maljan.agents import ghidra_http_client, mcp_client
+
+        for module in (mcp_client, ghidra_http_client):
+            assert module.truncation_target(4000) == 4000 - len(module.TRUNCATION_MARKER)
+            assert module.truncation_target(5) == 0, "a limit under the marker keeps nothing"
 
     def test_an_unknown_window_never_withholds_a_refusal(self) -> None:
         """Nothing was measured, so nothing may be refused on its strength."""
