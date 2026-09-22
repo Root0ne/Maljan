@@ -81,6 +81,11 @@ on loopback port 8080.
 The evaluation harness behind the published measurements is no longer part of
 this tree; see [paper.md](paper.md).
 
+## Documentation site
+
+The pages under `docs/` are also built into a MkDocs Material site; preview it
+locally with `uv run --group docs mkdocs serve`.
+
 ## Continuous integration
 
 [`.github/workflows/ci.yml`](https://github.com/Root0ne/Maljan/blob/dev/.github/workflows/ci.yml)

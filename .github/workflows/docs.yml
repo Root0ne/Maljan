@@ -1,0 +1,59 @@
+name: Docs
+
+on:
+  pull_request:
+    branches: ["main", "dev"]
+    paths: ["docs/**", "mkdocs.yml"]
+  push:
+    branches: ["main"]
+    paths: ["docs/**", "mkdocs.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+
+      # The docs group carries mkdocs-material and nothing else — none of the
+      # runtime or test dependencies this workspace also locks.
+      - name: Install docs dependencies
+        run: uv sync --frozen --only-group docs --no-install-project
+
+      - name: Build the site
+        run: uv run --no-sync mkdocs build --strict
+
+      - name: Upload the site
+        if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
