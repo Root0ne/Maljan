@@ -697,6 +697,7 @@ class TestTheGuardrailUsesIt:
 
         toolkit = MCPLangChainToolkit.__new__(MCPLangChainToolkit)
         toolkit._max_output_chars = limit
+        toolkit._context_budget = None
         toolkit._output_guardrail = None
         toolkit._truncation_ledger = ledger
         return toolkit
@@ -712,13 +713,21 @@ class TestTheGuardrailUsesIt:
         assert ledger.rows[-1]["shortened"] is True
         assert ledger.rows[-1]["hard_truncated"] is False
 
-    def test_a_large_non_json_answer_is_cut_exactly_as_it_always_was(self) -> None:
+    def test_a_large_non_json_answer_still_takes_the_character_cut(self) -> None:
+        """Unchanged but for the marker, which now comes out of the limit.
+
+        Appended after the cut it was twenty characters the budget never saw,
+        and inside one model turn every answer leaked its own.
+        """
+        from maljan.agents.mcp_client import TRUNCATION_MARKER, truncation_target
+
         ledger = self._Ledger()
         text = "a decompiled function, in C. " * 500
 
         kept = self._client(ledger)._apply_output_guardrail(text)
 
-        assert kept == text[:4000] + "\n\n[OUTPUT TRUNCATED]"
+        assert kept == text[: truncation_target(4000)] + TRUNCATION_MARKER
+        assert len(kept) == 4000
         assert ledger.rows[-1]["hard_truncated"] is True
         assert ledger.rows[-1]["shortened"] is False
 
@@ -751,6 +760,7 @@ class TestTheGuardrailUsesIt:
         ledger = self._Ledger()
         client = GhidraHTTPClient.__new__(GhidraHTTPClient)
         client._max_output_chars = 4000
+        client._context_budget = None
         client._output_guardrail = None
         client._truncation_ledger = ledger
 
@@ -791,6 +801,7 @@ class TestWhatTheRecordThenHolds:
 
         toolkit = MCPLangChainToolkit.__new__(MCPLangChainToolkit)
         toolkit._max_output_chars = self.LIMIT
+        toolkit._context_budget = None
         toolkit._output_guardrail = None
         toolkit._truncation_ledger = None
 
@@ -1001,13 +1012,18 @@ class TestAServersParameterNameIsUntrustedText:
         narrowing = ("limit", "offset", "pattern")
         for module in (mcp_client, ghidra_http_client):
             source = inspect.getsource(module)
-            assert "shorten_target(self._max_output_chars, narrowing)" in source, module.__name__
+            # One limit, read once per call, and one function that reads it:
+            # the operator's cap when there is one, and otherwise what the
+            # served window has left for this answer.
+            assert "output_limit(self._max_output_chars, self._context_budget)" in source
+            assert "shorten_target(limit, narrowing)" in source, module.__name__
 
         from maljan.agents.evidence_recorder import shortened_notice
         from maljan.agents.ghidra_http_client import GhidraHTTPClient
 
         client = GhidraHTTPClient.__new__(GhidraHTTPClient)
         client._max_output_chars = 4000
+        client._context_budget = None
         client._output_guardrail = None
         client._truncation_ledger = None
 

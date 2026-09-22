@@ -25,6 +25,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
+from maljan.llm.context_window import answering_for
 from maljan.pipeline.events import (
     EventSink,
     emit_tool_call_finished,
@@ -580,9 +581,10 @@ def record_tools(
     recorder: EvidenceRecorder,
     repeats: RepeatGuard | None = None,
     repairs: ArgumentRepairs | None = None,
+    context_budget: Any | None = None,
 ) -> list[BaseTool]:
     """Every tool, each writing its call to ``recorder`` and stamping the id."""
-    return [_record_tool(tool, recorder, repeats, repairs) for tool in tools]
+    return [_record_tool(tool, recorder, repeats, repairs, context_budget) for tool in tools]
 
 
 def _record_tool(
@@ -590,6 +592,7 @@ def _record_tool(
     recorder: EvidenceRecorder,
     repeats: RepeatGuard | None = None,
     repairs: ArgumentRepairs | None = None,
+    context_budget: Any | None = None,
 ) -> Any:
     """One tool, rebuilt so its result is recorded and stamped.
 
@@ -621,6 +624,35 @@ def _record_tool(
     # is being given two accounts of the same tool. The guardrail that shortens
     # an answer reserves room for the sentence naming exactly these.
     narrowing = narrowing_arguments(accepted)
+
+    def _the_room_is_gone() -> str | None:
+        """The line a call gets once this agent's conversation has no room left.
+
+        The first answer that would not fit was met by the guardrail, which
+        told the model so in a sentence and ended this agent's tool phase. From
+        here the tool is **not run**: running it would spend a server's time on
+        an answer with nowhere to go, and repeating the sentence would pay a
+        few hundred characters a round to say a thing already said. What a
+        model that asks anyway gets is one short charged line, and the
+        run-state block carries the same fact every turn at no cumulative cost.
+
+        Nothing is written to the ledger: no tool ran, and an entry here would
+        be a citable id for evidence that does not exist — the same rule the
+        repeat guard follows.
+        """
+        from maljan.llm.context_window import TOOL_PHASE_ENDED_NOTICE, ContextBudget
+
+        if not isinstance(context_budget, ContextBudget):
+            return None
+        if not context_budget.out_of_room(recorder.agent):
+            return None
+        if not context_budget.room_for(len(TOOL_PHASE_ENDED_NOTICE), recorder.agent):
+            # Not even a line fits. Handing one over anyway is how a loop that
+            # had already stopped being given answers walked past the window a
+            # word at a time.
+            return ""
+        context_budget.charge(len(TOOL_PHASE_ENDED_NOTICE), recorder.agent)
+        return TOOL_PHASE_ENDED_NOTICE
 
     def _already_answered(kwargs: dict[str, Any]) -> str | None:
         """The note for a call that has been made twice already, if it has."""
@@ -750,10 +782,13 @@ def _record_tool(
     if func is not None:
 
         def wrapped_func(**kwargs: Any) -> str:  # noqa: F811
-            # The guard first, and nothing is announced when it refuses: no
+            # The guards first, and nothing is announced when one refuses: no
             # tool runs, no entry is written, and a start with no finish behind
             # it would leave the console holding a bubble open for a call that
             # never happened.
+            ended = _the_room_is_gone()
+            if ended is not None:
+                return ended
             answered = _already_answered(kwargs)
             if answered is not None:
                 return answered
@@ -764,13 +799,18 @@ def _record_tool(
             started, wall_clock = time.monotonic(), time.time()
             repeated = _served_again(kwargs)
             try:
-                return _stamp(kwargs, started, wall_clock, func(**kwargs), repeated)
+                with answering_for(recorder.agent):
+                    value = func(**kwargs)
+                return _stamp(kwargs, started, wall_clock, value, repeated)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
                 return _stamp_error(kwargs, started, wall_clock, exc, repeated)
 
     if coroutine is not None:
 
         async def wrapped_coroutine(**kwargs: Any) -> str:  # noqa: F811
+            ended = _the_room_is_gone()
+            if ended is not None:
+                return ended
             answered = _already_answered(kwargs)
             if answered is not None:
                 return answered
@@ -778,7 +818,14 @@ def _record_tool(
             started, wall_clock = time.monotonic(), time.time()
             repeated = _served_again(kwargs)
             try:
-                return _stamp(kwargs, started, wall_clock, await coroutine(**kwargs), repeated)
+                # Named for the length of the call so the guardrail — two
+                # layers down, behind a toolkit every agent of the job shares —
+                # charges this answer to the conversation it is entering. The
+                # name survives the ``asyncio.to_thread`` both tool paths hand
+                # the guardrail to, because that copies the context.
+                with answering_for(recorder.agent):
+                    value = await coroutine(**kwargs)
+                return _stamp(kwargs, started, wall_clock, value, repeated)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
                 return _stamp_error(kwargs, started, wall_clock, exc, repeated)
 

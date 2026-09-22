@@ -73,12 +73,11 @@ class TestRecordedCalls:
         assert result.startswith("[ev_0001]\n")
         assert "hello" in result
 
-    def test_the_model_reads_the_whole_result_and_the_ledger_keeps_a_trimmed_copy(
-        self,
-    ) -> None:
-        # The ledger trims what it stores; what a tool result costs in a prompt
-        # is decided where it always was — llm.max_tool_output_chars and the
-        # summariser guardrail — not silently here.
+    def test_the_ledger_stores_what_the_model_was_handed(self) -> None:
+        # What a tool result costs in a prompt is decided by the output
+        # guardrail; what the record holds is the same text, so a citation is
+        # checkable past the first few thousand characters of it. The one
+        # bound on the stored size is the per-agent byte budget, which says so.
         big = "A" * 20000
 
         def dump(path: str) -> str:
@@ -90,8 +89,8 @@ class TestRecordedCalls:
         result = wrapped.invoke({"path": "/samples/evil.exe"})
 
         assert result == f"[ev_0001]\n{big}"
-        assert len(recorder.entries[0].output) < len(big)
-        assert recorder.entries[0].output.endswith("…")
+        assert recorder.entries[0].output == big
+        assert recorder.entries[0].truncated is False
 
     def test_a_raising_tool_is_recorded_as_a_failure(self) -> None:
         def pe_info(path: str) -> dict[str, str]:

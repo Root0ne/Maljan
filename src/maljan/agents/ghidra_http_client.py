@@ -24,6 +24,22 @@ from pydantic import create_model
 from maljan.agents.output_shortening import narrowing_arguments
 from maljan.core.logger import logger
 
+# What a character cut leaves behind, and the room kept back for it.
+#
+# The marker goes *inside* the limit rather than after it, which is the same
+# rule ``output_shortening.shorten_target`` follows for the notice a shortened
+# answer carries: the limit is how much may reach the model, and the marker
+# reaches the model. Appended after the cut instead, it left twenty characters
+# a call unaccounted — self-correcting between model turns, because the next
+# measurement sees the true size, and not self-correcting inside one, where
+# every answer of a wide fan-out leaked its own.
+TRUNCATION_MARKER = "\n\n[OUTPUT TRUNCATED]"
+
+
+def truncation_target(limit: int) -> int:
+    """How much of an answer a character cut keeps, so the marker fits the limit."""
+    return max(0, int(limit) - len(TRUNCATION_MARKER))
+
 
 class GhidraHTTPClient:
     """Client that discovers and calls GhidraMCP headless REST endpoints."""
@@ -33,8 +49,9 @@ class GhidraHTTPClient:
         base_url: str,
         auth_token: str = "",
         output_guardrail: Any | None = None,
-        max_output_chars: int = 8000,
+        max_output_chars: int = 0,
         truncation_ledger: Any | None = None,
+        context_budget: Any | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         # Callers pass a plain string (``SecretStr.get_secret_value()`` already
@@ -44,10 +61,16 @@ class GhidraHTTPClient:
         self._tools: list[BaseTool] = []
         self._schema: list[dict[str, Any]] = []
         self._output_guardrail = output_guardrail
+        # Zero is the ordinary case and means "ask the budget below". A
+        # positive number is the operator's own cap and wins over it.
         self._max_output_chars = max_output_chars
         # Optional TruncationLedger (pitfall P6); None disables counting. This is
         # the production Ghidra transport, so this is where the numbers come from.
         self._truncation_ledger = truncation_ledger
+        # The job's context budget, which knows the window the served model has
+        # and what the conversation currently holds. None outside a job, and the
+        # conservative window then answers.
+        self._context_budget = context_budget
         # Single long-lived AsyncClient — re-using the connection pool across
         # tool calls cuts TLS/TCP handshake overhead and avoids the previous
         # "new client per tool call" anti-pattern.
@@ -292,8 +315,67 @@ class GhidraHTTPClient:
         clean = " ".join(description.split())
         return f"[{cat}] {clean}"
 
+    def _charge_overage(self, kept: int, limit: int) -> str:
+        """Charge what a result is longer than the cap it was measured against.
+
+        The budget reserved ``limit`` when it granted the cap, and two branches
+        can hand back more than that: the character cut appends its marker
+        after cutting, and a summariser may legitimately expand a short input.
+        Twenty characters a call sounds like nothing and is not — within one
+        model turn, where no measurement intervenes, every granted answer leaks
+        its marker, and the run's own account of what the conversation holds
+        drifts from what is in it. The ledger already records the real length;
+        this makes the budget agree with it.
+
+        Returns nothing useful; it is called for the charge.
+        """
+        from maljan.llm.context_window import ContextBudget
+
+        budget = getattr(self, "_context_budget", None)
+        over = max(0, int(kept) - int(limit))
+        if over and isinstance(budget, ContextBudget):
+            budget.charge(over)
+        return ""
+
+    def _no_room(self, chars_in: int) -> str:
+        """The sentence a conversation with no room left gets, said once.
+
+        Charged to the budget, because it is text that enters the conversation
+        like any answer, and the agent is marked so its tool phase ends rather
+        than paying for this sentence on every remaining round.
+
+        Withheld when it would not fit, on the same rule as the shorter line a
+        later call gets: a conversation already at its budget took a constant
+        few hundred characters to be told it had none, which is the one claim
+        this design makes about its own text and has to hold for the long
+        sentence as well as the short one. The agent is marked either way —
+        the phase ends whether or not there was room to say so.
+        """
+        from maljan.llm.context_window import ContextBudget, no_room_sentence
+
+        said = no_room_sentence(chars_in)
+        budget = getattr(self, "_context_budget", None)
+        if not isinstance(budget, ContextBudget):
+            return said
+        budget.note_no_room()
+        if not budget.room_for(len(said)):
+            return ""
+        budget.charge(len(said))
+        return said
+
     def _apply_output_guardrail(self, output: str, narrowing: Sequence[str] = ()) -> str:
         """Limit tool output size to prevent LLM context overflow.
+
+        The limit is ``_max_output_chars`` when the operator set one, and
+        otherwise what the served model's context window has left for one
+        answer at this moment (``maljan.llm.context_window.output_limit``),
+        read once so the whole of one call's decision is taken against one
+        number.
+
+        A limit of zero is not "cut to nothing": it is the conversation having
+        no room left for a tool answer at all. The model is handed one sentence
+        saying so — a deterministic fact about this conversation — and the
+        whole answer stays on the evidence ledger under the call's own id.
 
         ``narrowing`` names this tool's own arguments that reach what a
         shortening leaves out. The recorder appends a sentence naming them to a
@@ -320,32 +402,49 @@ class GhidraHTTPClient:
         """
         from maljan.agents.output_shortening import shorten_json_document, shorten_target
         from maljan.core.truncation_ledger import record_guardrail_outcome
+        from maljan.llm.context_window import output_limit
 
         chars_in = len(output)
+        limit = output_limit(self._max_output_chars, self._context_budget)
 
-        if chars_in <= self._max_output_chars:
+        if limit <= 0:
+            said = self._no_room(chars_in)
+            record_guardrail_outcome(
+                self._truncation_ledger,
+                chars_in=chars_in,
+                chars_kept=len(said),
+                over_limit=True,
+                no_room=True,
+                limit=limit,
+            )
+            return said
+
+        if chars_in <= limit:
             record_guardrail_outcome(
                 self._truncation_ledger,
                 chars_in=chars_in,
                 chars_kept=chars_in,
                 over_limit=False,
+                limit=limit,
             )
             return output
 
         logger.warning(
             "Ghidra tool output exceeds limit (%d > %d chars). Applying guardrail.",
             chars_in,
-            self._max_output_chars,
+            limit,
         )
 
-        attempt = shorten_json_document(output, shorten_target(self._max_output_chars, narrowing))
+        attempt = shorten_json_document(output, shorten_target(limit, narrowing))
         if attempt.shortened:
+            self._charge_overage(len(attempt.text), limit)
             record_guardrail_outcome(
                 self._truncation_ledger,
                 chars_in=chars_in,
                 chars_kept=len(attempt.text),
                 over_limit=True,
                 shortened=True,
+                limit=limit,
             )
             return attempt.text
 
@@ -355,16 +454,19 @@ class GhidraHTTPClient:
             except Exception as exc:
                 logger.warning("Output guardrail failed: %s - falling back to truncation.", exc)
             else:
+                self._charge_overage(len(summarised), limit)
                 record_guardrail_outcome(
                     self._truncation_ledger,
                     chars_in=chars_in,
                     chars_kept=len(summarised),
                     over_limit=True,
                     summarised=True,
+                    limit=limit,
                 )
                 return summarised
 
-        result = output[: self._max_output_chars] + "\n\n[OUTPUT TRUNCATED]"
+        result = output[: truncation_target(limit)] + TRUNCATION_MARKER
+        self._charge_overage(len(result), limit)
         record_guardrail_outcome(
             self._truncation_ledger,
             chars_in=chars_in,
@@ -372,5 +474,6 @@ class GhidraHTTPClient:
             over_limit=True,
             hard_truncated=True,
             shortening_timed_out=attempt.timed_out,
+            limit=limit,
         )
         return result

@@ -21,6 +21,14 @@ from app.api.v1.auth import update_me  # noqa: E402
 from app.auth.password import verify_password  # noqa: E402
 from app.schemas.auth import UserUpdateRequest  # noqa: E402
 from app.services import audit as audit_module  # noqa: E402
+from tests.credential_shapes import password, stored_hash
+
+# Built rather than written down, the way every other credential-shaped value
+# in this suite is: what the assertions need is a password past the minimum, a
+# second one that differs from it, and a stored hash that is neither.
+NEW_PASSWORD = password()
+OTHER_PASSWORD = password(variant=1)
+ORIGINAL_HASH = stored_hash()
 
 
 class _FakeAuditSession:
@@ -63,7 +71,7 @@ def _fake_user() -> Any:
     user.id = uuid.uuid4()
     user.email = "test@example.com"
     user.full_name = "Old Name"
-    user.hashed_password = "argon2-original-hash"
+    user.hashed_password = ORIGINAL_HASH
     return user
 
 
@@ -86,8 +94,8 @@ def test_schema_allows_empty_update() -> None:
 
 
 def test_schema_accepts_valid_password() -> None:
-    body = UserUpdateRequest(password="longenough")
-    assert body.password == "longenough"
+    body = UserUpdateRequest(password=NEW_PASSWORD)
+    assert body.password == NEW_PASSWORD
 
 
 def test_schema_rejects_short_password() -> None:
@@ -131,14 +139,14 @@ async def test_update_me_hashes_password() -> None:
     """Password is hashed via hash_password() — never stored plaintext."""
     user = _fake_user()
     db = _fake_db()
-    body = UserUpdateRequest(password="newsecret123")
+    body = UserUpdateRequest(password=NEW_PASSWORD)
 
     await update_me(body=body, request=_fake_request(), user=user, db=db)
 
-    assert user.hashed_password != "newsecret123"
-    assert user.hashed_password != "argon2-original-hash"
+    assert user.hashed_password != NEW_PASSWORD
+    assert user.hashed_password != ORIGINAL_HASH
     # Hash should be verifiable.
-    assert verify_password("newsecret123", user.hashed_password)
+    assert verify_password(NEW_PASSWORD, user.hashed_password)
     db.flush.assert_awaited_once()
 
 
@@ -146,12 +154,12 @@ async def test_update_me_hashes_password() -> None:
 async def test_update_me_updates_both_fields() -> None:
     user = _fake_user()
     db = _fake_db()
-    body = UserUpdateRequest(full_name="Both Updated", password="anothersecret")
+    body = UserUpdateRequest(full_name="Both Updated", password=OTHER_PASSWORD)
 
     await update_me(body=body, request=_fake_request(), user=user, db=db)
 
     assert user.full_name == "Both Updated"
-    assert verify_password("anothersecret", user.hashed_password)
+    assert verify_password(OTHER_PASSWORD, user.hashed_password)
     # One audit log entry should be staged.
     db.add.assert_called()
 

@@ -289,6 +289,33 @@ export interface CapabilityManifest {
   tools: CapabilityCell[];
 }
 
+/**
+ * The context window the configured models serve, and what it buys one tool
+ * answer. Mirrors `ContextWindowResponse` in
+ * `apps/api/app/schemas/settings.py`.
+ *
+ * `source` is one of four words: `declared` (the settings name the window),
+ * `probed` (the server reported it), `table` (the vendored figure for this
+ * model family) and `fallback` (nothing answered). `cap` is what one answer
+ * may take on an empty conversation, which is the most it can be; `derived`
+ * is false when the operator set the cap themselves, and the window then
+ * decides nothing.
+ */
+export interface ContextWindow {
+  tokens: number;
+  source: "declared" | "probed" | "table" | "fallback";
+  detail: string;
+  chars_per_token: number;
+  reply_tokens: number;
+  answer_share: number;
+  cap: number;
+  derived: boolean;
+  setting: number;
+  /** What an operator does about an unknown window. Empty when the window is
+   *  known and there is nothing to do. */
+  remedy: string;
+}
+
 export interface ProbeResult {
   ok: boolean;
   latency_ms: number;

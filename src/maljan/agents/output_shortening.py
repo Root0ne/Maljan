@@ -106,6 +106,13 @@ SHORTENING_BUDGET_SECONDS = 1.0
 # clock is consulted at all. Well above every answer measured — the largest was
 # under eight megabytes — and far enough below the shapes that cost a second
 # that the two together are a real bound rather than a stated one.
+#
+# Nothing about the limit an answer is shortened *to* moves this. That limit is
+# now derived from the served model's context window and can be far larger than
+# the 6,000 characters it replaced, but this bounds what *arrives* — what the
+# tool server sent — and a tool sends what it sends whatever the model can
+# read. The parse-cost measurement above is therefore the whole argument, and
+# it is unchanged.
 MAX_SHORTENABLE_CHARS = 12_000_000
 
 # A subtree under this key is never touched. A returned error is the one answer

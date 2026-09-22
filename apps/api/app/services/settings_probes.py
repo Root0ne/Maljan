@@ -663,6 +663,55 @@ async def probe_llm(v: dict[str, Any]) -> ProbeResult:
     return await probe(v)
 
 
+async def context_window_facts(settings: Any) -> dict[str, Any]:
+    """The window these settings' models serve, and what it gives one answer.
+
+    Free of charge and asked of the operator's own endpoints: the same metadata
+    requests the worker makes (``maljan.llm.context_window``), never a
+    generation call. An endpoint that says nothing falls to the vendored table
+    and then to the stated fallback, so this always answers and never raises.
+
+    ``cap`` is what one tool answer would be allowed on an empty conversation,
+    which is the largest it can be; a conversation with something in it gets
+    less, and the run summary reports the range that actually applied. Where
+    the window is unknown nothing is derived from it and ``cap`` is the
+    documented constant, with ``remedy`` naming what would change that.
+    ``setting`` is what ``core.preprocessing.max_tool_output_chars`` holds, so
+    the console can say whether the window decides at all.
+    """
+    from maljan.agents.composition import analyst_keys
+    from maljan.llm.context_window import (
+        ANSWER_SHARE,
+        UNKNOWN_WINDOW_REMEDY,
+        ContextBudget,
+        awindow_for_settings,
+        generation_reserve,
+    )
+
+    configured = int(getattr(settings.preprocessing, "max_tool_output_chars", 0) or 0)
+    try:
+        agents = [*analyst_keys(settings), "judge"]
+        window = await awindow_for_settings(settings, agents, probe=configured <= 0)
+    except Exception as exc:  # noqa: BLE001 — a window is never worth a failed page
+        logger.warning("the context window could not be learned: %s", type(exc).__name__)
+        from maljan.llm.context_window import unknown_window
+
+        window = unknown_window(f"the probe could not be made ({type(exc).__name__})")
+    budget = ContextBudget(window, reply_tokens=generation_reserve(settings))
+    return {
+        "tokens": window.tokens,
+        "source": window.source,
+        "detail": window.detail,
+        "chars_per_token": budget.chars_per_token,
+        "reply_tokens": budget.reply_tokens,
+        "answer_share": ANSWER_SHARE,
+        "cap": configured if configured > 0 else budget.cap_without_recording(),
+        "derived": configured <= 0,
+        "setting": configured,
+        "remedy": "" if budget.derives or configured > 0 else UNKNOWN_WINDOW_REMEDY,
+    }
+
+
 def _ghidra_tool_names(schema: Any) -> list[str]:
     """The tool names ``GhidraHTTPClient`` derives from the server's schema.
 
@@ -1563,4 +1612,8 @@ async def run_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -
             resolved[short] = _unwrap(API_DEFAULTS[path])
         else:
             resolved[short] = _unwrap(getattr(api_settings, path))
+    # Deliberately no context-window block on the probe result. The window is
+    # a fact about the endpoint rather than about whether a model answered, the
+    # settings page reads it from its own route, and computing it here spent up
+    # to three metadata requests per Test press on something no surface drew.
     return await in_probe_loop(lambda: probe(resolved))

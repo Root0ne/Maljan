@@ -2879,6 +2879,21 @@ def _verdict_record(stage: Any, started: float, *, ran: bool, reason: str = "") 
     )
 
 
+def _truncation_snapshot(container: ServiceContainer) -> dict[str, Any]:
+    """The bound-hit ledger, with the window its tool-output caps came from.
+
+    Written on the ledger rather than handed to the builder separately, so the
+    caps a run applied and the window they were derived from travel as one
+    record and a summary read back from storage carries both or neither.
+    """
+    ledger = container.get_truncation_ledger()
+    try:
+        ledger.note_context_window(container.context_budget_snapshot())
+    except Exception as exc:  # noqa: BLE001 — telemetry never breaks a verdict
+        logger.debug("the context window was not recorded on the run summary: %s", exc)
+    return ledger.snapshot()
+
+
 def make_judge_node(
     container: ServiceContainer,
     *,
@@ -3406,7 +3421,7 @@ def make_judge_node(
                         )
                     )
                     .set_token_usage(container.get_token_ledger().snapshot())
-                    .set_truncation(container.get_truncation_ledger().snapshot())
+                    .set_truncation(_truncation_snapshot(container))
                     .set_triage(_triage_facts)
                     .set_nudge(state.get("nudge_retry_modes") or {})
                     .set_budget(state.get("budget_records") or {})

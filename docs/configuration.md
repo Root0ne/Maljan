@@ -511,6 +511,103 @@ asserts nothing — which is what `web_client_apis` and `file_enumeration_apis`
 are for. Importing an HTTP client is a fact; calling it a command-and-control
 channel is a claim no substring can support.
 
+### How much of a tool answer a model sees
+
+`core.preprocessing.max_tool_output_chars` is **0** by default, and 0 does not
+mean "no cap" — it means the cap is worked out at the moment of each call from
+the context window the served model was found to have. A positive value is an
+explicit operator cap and behaves as this setting always did: that many
+characters, on every answer, whatever the window.
+
+The arithmetic lives in one function (`maljan.llm.context_window`) and reads:
+the served window, less the tokens held back for the model's own reply (the
+larger of `core.llm.expert_max_tokens` and `core.llm.judge_max_tokens`, never
+more than a quarter of the window), less what the conversation already holds,
+converted at **3 characters per token**, times the **eighth** of what is left
+that one answer may take. Three characters per token is measured rather than
+assumed — a recorded conversation of about 114,000 characters was reported by
+the server at 38,868 tokens — and is deliberately denser than the four the
+token estimate uses for prose, because what this bounds is JSON and decompiled
+C.
+
+**A cap never exceeds the room that is really left.** Below **2,000
+characters** the share stops falling and the floor applies, but only while the
+room affords it; where it does not, the cap is what is left. Because each
+answer is measured against what is free *at that moment*, and because what it
+takes is charged as soon as it is handed out — a model turn may call several
+tools at once — the answers of one conversation add up to less than the room it
+started with, on every window the vendored table ships.
+
+The share decides how large the first answer is and how quickly they shrink: at
+32,768 tokens the first is 9,216 characters and about twelve clear the floor;
+at 131,072 the first is 46,080; at a million, 371,928. At the floor the answer
+meets the structural shortener exactly as any other does and carries the same
+notice naming the arguments that would narrow it.
+
+**When the room runs out, the tool phase ends.** Below about a thousand
+characters an answer cannot survive its own notice, so nothing of it is handed
+over. The model is told once, in one sentence, that the conversation has no
+room left for a tool answer; the whole answer stays on the evidence ledger
+under the call's id, and the run summary counts it as `tool_output_no_room`.
+From there that agent's tool calls are **not run** — a server's time is not
+spent on an answer with nowhere to go — and a call made anyway returns one
+short line. The run-state block carries the same fact on every model turn,
+replaced rather than appended, so it costs the same whether the loop reads it
+once or forty times. The loop then ends the way a repeating loop already does:
+`no_room` on its budget record with the reason, and the forced synthesis turns
+what was gathered into the answer instead of a "need more steps" non-answer.
+
+Both notices come out of the **tool budget** — the window less the room kept
+back for the model's reply — and are withheld when they would not fit. So does
+the marker a character cut leaves behind, which is kept back out of the cap
+rather than appended after it, the way the shortener already reserves room for
+its own notice. That is what leaves the reply reserve whole: the forced
+synthesis above is this design's answer to a full conversation, and spending
+its room on saying that the room ran out would take it from the one thing left
+to do. Measured by driving the guardrail itself over every window the vendored
+table ships, at twenty, forty and sixty rounds, with a chunk preloaded and at
+fan-outs of thirty-two and a hundred and twenty-eight: the tool budget is never
+exceeded, and the whole reserve survives — 8,192 tokens on a 131,072-token
+window, 2,048 on 8,192, 1,024 on 4,096.
+
+What is outside that guarantee is the model's own output: its tool requests and
+its prose are not the platform's to cap, and on a very small window they reach
+the window before the platform's text does.
+
+The window itself is learned free of charge and without asking the operator
+anything. In order:
+
+| Source | Where it comes from |
+|---|---|
+| `declared` | `core.llm.ollama.num_ctx`, which the provider sends with every call, or `core.llm.openai.context_size` where an operator has set it. It does **not** short-circuit the probe: where a window was also probed, the smaller of the two wins, so a model that holds less than `num_ctx` asks for — and a `context_size` left behind by a server restarted smaller — cannot overflow the real window |
+| `probed` | llama.cpp `GET /props` (`default_generation_settings.n_ctx`, then `n_ctx_per_seq`); an OpenAI-compatible `GET /v1/models` (`max_model_len` for vLLM, `context_length` for OpenRouter); Ollama `POST /api/show` (`model_info.<arch>.context_length`, with a Modelfile `num_ctx` winning); Text Generation Inference `GET /info` (`max_total_tokens`) |
+| `table` | `data/model_context_windows_v1.json`, keyed by model-id family, for the vendor APIs that publish a window without serving it |
+| `fallback` | nothing answered, and **nothing is derived from it**: one tool answer is capped at the documented 6,000 characters — exactly what this platform did before the window was learned at all — and every surface says the window is unknown |
+
+No generation call is ever made — the probe reads metadata endpoints only, a
+guard test drives both entry points through a transport that records every
+request, and a probe that fails never fails a run and never blocks a settings
+save. One question is asked per `(provider, endpoint, model)` rather than per
+agent, both outcomes are remembered for fifteen minutes, and the whole plan
+runs under one four-second wall clock.
+
+A window an endpoint reports is untrusted input and is believed only up to ten
+million tokens. Past that the figure is refused rather than clamped, with the
+reason in words, because a proxy reporting its window in bytes produces a cap
+larger than any answer there will ever be — and a cap that large makes every
+answer fit, which switches the shortener, the summariser and the character cut
+off for the whole run.
+
+A run whose agents sit on different models takes the **smallest** of their
+windows, because one cap is handed to every tool server the job opens.
+
+Where to see what applied: the Settings page prints the detected window beside
+the field, with the source word itself, and `run_summary.truncation` records
+the window, its source, the characters-per-token figure and the smallest and
+largest cap the run used. A run that landed on `fallback` is the one to act on
+— set `core.llm.openai.context_size` to the window the server was started with,
+and the cap is derived from then on.
+
 ### The evidence budget
 
 `reporting.evidence_budget_bytes` (512 KiB by default) is how many bytes of
@@ -520,6 +617,18 @@ carry no output, and the report states how many were trimmed. Raise it for a
 deep reversing loop whose decompilation is the evidence; set it to `0` to keep
 every output, which is a supportable choice on a machine with room for it and
 a way to fill a JSONB column and a context window on one that has not.
+
+Half a megabyte holds one loop's whole tool output up to a served window of
+about 183,000 tokens, which follows from the cap above: a loop's answers come
+to at most `(window − reply reserve) × 3` characters. `evidence_corpus_bytes`
+(16 MB, the run-wide grounding corpus) holds six such loops at 131,072 tokens
+and about five and a half at a million. Neither is scaled with the window on
+purpose — they bound the worker's memory and a database column rather than the
+model's context, and a machine that also runs the model cannot answer a bigger
+window by holding a proportionally bigger corpus. Past either, what happens is
+what always happened: the ledger entry keeps the call and drops the output and
+the report says how many, and the corpus reports itself incomplete so that an
+absence measured against it is advisory.
 
 ### The live conversation
 
