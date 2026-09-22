@@ -196,38 +196,36 @@ class MarkdownRenderer:
         ident = report.identity
         hashes = ident.hashes
         lines = ["## Sample Identification", ""]
-        lines.append("| Field | Value |")
-        lines.append("|---|---|")
-        lines.append(f"| File name | `{ident.file_name or 'unknown'}` |")
-        lines.append(f"| File size | {ident.file_size_bytes:,} bytes |")
-        lines.append(f"| File type | {ident.file_type} |")
+        lines.append(_row("Field", "Value"))
+        lines.append(_divider(2))
+        lines.append(_row("File name", f"`{ident.file_name or 'unknown'}`"))
+        lines.append(_row("File size", f"{ident.file_size_bytes:,} bytes"))
+        lines.append(_row("File type", ident.file_type))
         if ident.mime_type:
-            lines.append(f"| MIME | {ident.mime_type} |")
+            lines.append(_row("MIME", ident.mime_type))
         if ident.compile_timestamp:
-            lines.append(f"| Compile timestamp | {ident.compile_timestamp.isoformat()} |")
+            lines.append(_row("Compile timestamp", ident.compile_timestamp.isoformat()))
         if ident.language_or_compiler:
-            lines.append(f"| Language / compiler | {ident.language_or_compiler} |")
+            lines.append(_row("Language / compiler", ident.language_or_compiler))
         # Extracted since the model existed and printed nowhere. It is what
         # lets a reader disagree with `file_type`: a .doc whose first bytes are
         # `4d5a` is the finding, and the type string alone hides it.
         if ident.magic_bytes:
-            lines.append(f"| Magic bytes | `{ident.magic_bytes}` |")
+            lines.append(_row("Magic bytes", f"`{ident.magic_bytes}`"))
         signing = ident.signing
         cited = f" ({signing.evidence_id})" if signing.evidence_id else ""
-        lines.append(f"| Signed | {'yes' if signing.is_signed else 'no'}{cited} |")
+        lines.append(_row("Signed", f"{'yes' if signing.is_signed else 'no'}{cited}"))
         if signing.signer_subject:
-            lines.append(f"| Signer | {signing.signer_subject} |")
+            lines.append(_row("Signer", signing.signer_subject))
         if signing.signer_issuer:
-            lines.append(f"| Signer issuer | {signing.signer_issuer} |")
+            lines.append(_row("Signer issuer", signing.signer_issuer))
         if signing.signature_valid is not None:
-            lines.append(
-                f"| Signature chain | {'valid' if signing.signature_valid else 'invalid'} |"
-            )
+            lines.append(_row("Signature chain", "valid" if signing.signature_valid else "invalid"))
         lines.append("")
         lines.append("**Hashes:**")
         lines.append("")
-        lines.append("| Algorithm | Digest |")
-        lines.append("|---|---|")
+        lines.append(_row("Algorithm", "Digest"))
+        lines.append(_divider(2))
         for algo, value in (
             ("MD5", hashes.md5),
             ("SHA1", hashes.sha1),
@@ -238,7 +236,7 @@ class MarkdownRenderer:
             ("tlsh", hashes.tlsh),
         ):
             if value:
-                lines.append(f"| {algo} | `{value}` |")
+                lines.append(_row(algo, f"`{value}`"))
         return "\n".join(lines)
 
     def _section_severity(self, severity: SeverityAssessment | None) -> str:
@@ -284,14 +282,17 @@ class MarkdownRenderer:
         if static.packer_matches:
             lines.append("**Packer / protector**:")
             lines.append("")
-            lines.append("| Name | Kind | Confidence | Evidence |")
-            lines.append("|---|---|---|---|")
+            lines.append(_row("Name", "Kind", "Confidence", "Evidence"))
+            lines.append(_divider(4))
             for pm in static.packer_matches[:6]:
-                evidence = ", ".join(f"`{e}`" for e in (pm.get("evidence") or [])[:4]) or "-"
+                evidence = ", ".join(f"`{e}`" for e in (pm.get("evidence") or [])[:4])
                 lines.append(
-                    f"| {pm.get('name', '?')} | {pm.get('kind', '-')} | "
-                    f"{float(pm.get('confidence') or 0.0):.2f} ({pm.get('method', '-')}) "
-                    f"| {evidence} |"
+                    _row(
+                        pm.get("name") or "?",
+                        pm.get("kind") or "-",
+                        f"{float(pm.get('confidence') or 0.0):.2f} ({pm.get('method') or '-'})",
+                        evidence or "-",
+                    )
                 )
             lines.append("")
         elif static.packer_hint:
@@ -307,12 +308,28 @@ class MarkdownRenderer:
         if static.api_capabilities:
             ordered = sorted(static.api_capabilities.items(), key=lambda kv: -kv[1])
             cited = ", ".join(static.api_capabilities_evidence_ids)
+            rates = static.api_capability_rates
+
+            def _profile(category: str, count: int) -> str:
+                share = rates.get(category)
+                return f"{category} ×{count}" + (f" ({share:.1f}%)" if share is not None else "")
+
             lines.append(
                 "**Import capability profile**"
                 + (f" ({cited})" if cited else "")
                 + ": "
-                + ", ".join(f"{cat} ×{count}" for cat, count in ordered)
+                + ", ".join(_profile(cat, count) for cat, count in ordered)
             )
+            if static.api_capability_corpus:
+                # Said once rather than under every category. A count of
+                # imports in a group is not a fact about the sample until a
+                # reader knows how much ordinary software is in the same group.
+                lines.append("")
+                lines.append(
+                    "_The bracketed share is how much of "
+                    f"{static.api_capability_corpus} the category appears on; it says "
+                    "nothing about how likely this sample is to be benign._"
+                )
             lines.append("")
 
         if static.api_technique_hits:
@@ -321,11 +338,16 @@ class MarkdownRenderer:
             lines.append(
                 "_Deterministic: each row is a rule that fired over the import table — "
                 "capa's, or the knowledge table's — no sandbox, no model. The pack's "
-                "rows cite their ledger entry._"
+                "rows cite their ledger entry. A row is an association, not a "
+                "finding: the last column is how much ordinary software the same "
+                "rule fires on, measured over the corpus it names, and it says "
+                "nothing about how likely this sample is to be benign. "
+                "`not measured` there means the rule has no measurement, not that "
+                "it never fires._"
             )
             lines.append("")
-            lines.append("| Technique | Name | Rule | Source | Imports |")
-            lines.append("|---|---|---|---|---|")
+            lines.append(_row("Technique", "Name", "Rule", "Source", "Imports", "Measured"))
+            lines.append(_divider(6))
             # By source, then technique: a stated order, so a capa-heavy binary
             # cannot push the pack's rows off the end of the audit trail.
             ordered_hits = sorted(
@@ -337,6 +359,12 @@ class MarkdownRenderer:
                 ),
             )
             for hit in ordered_hits[:25]:
+                # Every cell here is escaped, and the one that most needs it is
+                # the import names: they are the sample's own bytes, decoded
+                # with replacement and otherwise arbitrary, so a crafted PE
+                # whose import table carries a pipe adds a column to a table a
+                # human reads to make a call, and one carrying a newline cuts
+                # the row in half and orphans every row after it.
                 apis = ", ".join(f"`{a}`" for a in (hit.get("matched_apis") or [])[:6])
                 source = str(hit.get("source") or "-")
                 if hit.get("evidence_id"):
@@ -345,8 +373,14 @@ class MarkdownRenderer:
                 # technique by two mechanisms and the catalogue's name is on
                 # both. A producer that has no such label leaves the cell bare.
                 lines.append(
-                    f"| {hit.get('technique_id', '?')} | {hit.get('name', '-')} "
-                    f"| {hit.get('rule') or '-'} | {source} | {apis} |"
+                    _row(
+                        hit.get("technique_id") or "?",
+                        hit.get("name") or "-",
+                        hit.get("rule") or "-",
+                        source,
+                        apis,
+                        hit.get("benign_rate") or "not measured",
+                    )
                 )
             lines.append("")
 
@@ -358,16 +392,33 @@ class MarkdownRenderer:
             # below harder to use than it needed to be: those rows carry a file
             # offset, and without this column there is nothing to match it
             # against to say which section a payload came out of.
-            lines.append("| Name | VA | Virtual size | Raw size | Raw offset | Entropy | Notes |")
-            lines.append("|---|---|---|---|---|---|---|")
+            lines.append(
+                _row(
+                    "Name",
+                    "VA",
+                    "Virtual size",
+                    "Raw size",
+                    "Raw offset",
+                    "Entropy",
+                    "Notes",
+                )
+            )
+            lines.append(_divider(7))
             for sec in static.sections:
                 flag = "[HIGH ENTROPY]" if sec.entropy > 7.0 else ""
                 if sec.is_suspicious and not flag:
                     flag = "[SUSPICIOUS]"
                 raw_offset = f"0x{sec.raw_offset:x}" if isinstance(sec.raw_offset, int) else "-"
                 lines.append(
-                    f"| `{sec.name}` | {sec.virtual_address} | {sec.virtual_size} | "
-                    f"{sec.raw_size} | {raw_offset} | {sec.entropy:.2f} | {flag} |"
+                    _row(
+                        f"`{sec.name}`",
+                        sec.virtual_address,
+                        sec.virtual_size,
+                        sec.raw_size,
+                        raw_offset,
+                        f"{sec.entropy:.2f}",
+                        flag,
+                    )
                 )
             lines.append("")
 
@@ -381,10 +432,10 @@ class MarkdownRenderer:
         if static.interesting_strings:
             lines.append("### Indicator Strings")
             lines.append("")
-            lines.append("| Kind | Value |")
-            lines.append("|---|---|")
+            lines.append(_row("Kind", "Value"))
+            lines.append(_divider(2))
             for ioc in static.interesting_strings[:50]:
-                lines.append(f"| {ioc.kind} | `{_truncate(ioc.value, 100)}` |")
+                lines.append(_row(ioc.kind, f"`{_truncate(ioc.value, 100)}`"))
             lines.append("")
 
         if static.embedded_resources:
@@ -401,13 +452,17 @@ class MarkdownRenderer:
             if carved:
                 lines.append("**Carved payloads** — nested executables found inside the sample:")
                 lines.append("")
-                lines.append("| Type | Location | Size | Entropy | SHA-256 |")
-                lines.append("|---|---|---|---|---|")
+                lines.append(_row("Type", "Location", "Size", "Entropy", "SHA-256"))
+                lines.append(_divider(5))
                 for res in carved[:10]:
                     lines.append(
-                        f"| {res.get('type', '?')} | `{res.get('id', '?')}` "
-                        f"({res.get('source', '-')}) | {res.get('size', 0)} bytes "
-                        f"| {res.get('entropy', 0.0)} | `{str(res.get('sha256', ''))[:32]}…` |"
+                        _row(
+                            res.get("type") or "?",
+                            f"`{res.get('id') or '?'}` ({res.get('source') or '-'})",
+                            f"{res.get('size', 0)} bytes",
+                            res.get("entropy", 0.0),
+                            f"`{str(res.get('sha256', ''))[:32]}…`",
+                        )
                     )
                 lines.append("")
 
@@ -443,8 +498,8 @@ class MarkdownRenderer:
         if dyn.registry_mods:
             lines.append("### Registry Modifications")
             lines.append("")
-            lines.append("| Hive | Key | Value | Operation |")
-            lines.append("|---|---|---|---|")
+            lines.append(_row("Hive", "Key", "Value", "Operation"))
+            lines.append(_divider(4))
             for reg in dyn.registry_mods[:40]:
                 lines.append(_registry_row(reg))
             lines.append("")
@@ -452,36 +507,42 @@ class MarkdownRenderer:
         if dyn.file_operations:
             lines.append("### File Operations")
             lines.append("")
-            lines.append("| Path | Op | API |")
-            lines.append("|---|---|---|")
+            lines.append(_row("Path", "Op", "API"))
+            lines.append(_divider(3))
             for op in dyn.file_operations[:40]:
                 if not isinstance(op, dict):
                     continue
                 lines.append(
-                    f"| `{_truncate(str(op.get('path', '')), 80)}` | "
-                    f"{op.get('operation', '-')} | {op.get('api', '-')} |"
+                    _row(
+                        f"`{_truncate(str(op.get('path', '')), 80)}`",
+                        op.get("operation", "-"),
+                        op.get("api", "-"),
+                    )
                 )
             lines.append("")
 
         if dyn.notable_apis:
             lines.append("### Notable APIs")
             lines.append("")
-            lines.append("| API | Process | Count |")
-            lines.append("|---|---|---|")
+            lines.append(_row("API", "Process", "Count"))
+            lines.append(_divider(3))
             for api in dyn.notable_apis[:20]:
                 if not isinstance(api, dict):
                     continue
                 lines.append(
-                    f"| `{api.get('api', '-')}` | `{api.get('process') or '-'}` | "
-                    f"{api.get('count', 0)} |"
+                    _row(
+                        f"`{api.get('api', '-')}`",
+                        f"`{api.get('process') or '-'}`",
+                        api.get("count", 0),
+                    )
                 )
             lines.append("")
 
         if dyn.sandbox_signatures:
             lines.append("### Sandbox Signatures")
             lines.append("")
-            lines.append("| Name | Severity | ATT&CK | Marks |")
-            lines.append("|---|---|---|---|")
+            lines.append(_row("Name", "Severity", "ATT&CK", "Marks"))
+            lines.append(_divider(4))
             for sig in dyn.sandbox_signatures[:30]:
                 lines.append(_signature_row(sig))
             lines.append("")
@@ -497,8 +558,17 @@ class MarkdownRenderer:
         if net.domains:
             lines.append("### Domains")
             lines.append("")
-            lines.append("| FQDN | Source | Suspicious | Reason | Resolved IPs | Queried by |")
-            lines.append("|---|---|---|---|---|---|")
+            lines.append(
+                _row(
+                    "FQDN",
+                    "Source",
+                    "Suspicious",
+                    "Reason",
+                    "Resolved IPs",
+                    "Queried by",
+                )
+            )
+            lines.append(_divider(6))
             for d in net.domains[:40]:
                 lines.append(_domain_row(d))
             lines.append("")
@@ -506,8 +576,8 @@ class MarkdownRenderer:
         if net.ips:
             lines.append("### IPs")
             lines.append("")
-            lines.append("| Address | Port | Transport | ASN | Geo |")
-            lines.append("|---|---|---|---|---|")
+            lines.append(_row("Address", "Port", "Transport", "ASN", "Geo"))
+            lines.append(_divider(5))
             for ip in net.ips[:40]:
                 lines.append(_ip_row(ip))
             lines.append("")
@@ -515,8 +585,8 @@ class MarkdownRenderer:
         if net.urls:
             lines.append("### URLs")
             lines.append("")
-            lines.append("| Method | URL | Status | User-Agent |")
-            lines.append("|---|---|---|---|")
+            lines.append(_row("Method", "URL", "Status", "User-Agent"))
+            lines.append(_divider(4))
             for url in net.urls[:40]:
                 lines.append(_url_row(url))
             lines.append("")
@@ -548,12 +618,16 @@ class MarkdownRenderer:
         lines = ["## Persistence Mechanisms", ""]
         if not mechanisms:
             return ""
-        lines.append("| Kind | Target | Payload | ATT&CK |")
-        lines.append("|---|---|---|---|")
+        lines.append(_row("Kind", "Target", "Payload", "ATT&CK"))
+        lines.append(_divider(4))
         for mech in mechanisms[:40]:
             lines.append(
-                f"| {mech.kind} | `{_truncate(mech.target, 80)}` | "
-                f"`{_truncate(mech.payload, 80)}` | {mech.technique_id or '-'} |"
+                _row(
+                    mech.kind,
+                    f"`{_truncate(mech.target, 80)}`",
+                    f"`{_truncate(mech.payload, 80)}`",
+                    mech.technique_id or "-",
+                )
             )
         return "\n".join(lines)
 
@@ -576,8 +650,8 @@ class MarkdownRenderer:
             )
 
         if cells:
-            lines.append("| Tactic | Technique | Confidence | Layers |")
-            lines.append("|---|---|---|---|")
+            lines.append(_row("Tactic", "Technique", "Confidence", "Layers"))
+            lines.append(_divider(4))
             for cell in cells:
                 tactic = f"{cell.tactic_name} ({cell.tactic})" if cell.tactic else cell.tactic_name
                 layers = ", ".join(cell.contributing_layers) or "-"
@@ -585,8 +659,12 @@ class MarkdownRenderer:
                 # is printed as it was written, with the reason beside it.
                 marker = "" if cell.technique_id_valid else f" _({UNVERIFIED_TECHNIQUE_MARKER})_"
                 lines.append(
-                    f"| {tactic} | {cell.technique_id} {cell.technique_name}{marker} | "
-                    f"{cell.confidence:.2f} | {layers} |"
+                    _row(
+                        tactic,
+                        f"{cell.technique_id} {cell.technique_name}{marker}",
+                        f"{cell.confidence:.2f}",
+                        layers,
+                    )
                 )
             lines.append("")
 
@@ -646,41 +724,46 @@ class MarkdownRenderer:
             lines.append("")
             lines.append("**Function-hash matches (shared code with prior samples):**")
             lines.append("")
-            lines.append("| Family | Confidence | Shared functions | Example functions |")
-            lines.append("|---|---|---|---|")
+            lines.append(_row("Family", "Confidence", "Shared functions", "Example functions"))
+            lines.append(_divider(4))
             for match in attr.function_hash_matches[:10]:
                 examples = (
                     ", ".join(f"`{f}`" for f in (match.get("example_functions") or [])[:3]) or "-"
                 )
                 lines.append(
-                    f"| {match.get('family', '?')} "
-                    f"| {float(match.get('confidence') or 0.0):.2f} "
-                    f"| {match.get('shared_functions', '-')} | {examples} |"
+                    _row(
+                        match.get("family") or "?",
+                        f"{float(match.get('confidence') or 0.0):.2f}",
+                        match.get("shared_functions") or "-",
+                        examples,
+                    )
                 )
         if attr.family_rag_candidates:
             lines.append("")
             lines.append("**Family-feature RAG candidates (static-feature similarity):**")
             lines.append("")
-            lines.append("| Family | Similarity | Category | Samples in catalog |")
-            lines.append("|---|---|---|---|")
+            lines.append(_row("Family", "Similarity", "Category", "Samples in catalog"))
+            lines.append(_divider(4))
             for cand in attr.family_rag_candidates[:10]:
                 lines.append(
-                    f"| {cand.get('family', '?')} "
-                    f"| {float(cand.get('similarity') or 0.0):.3f} "
-                    f"| {cand.get('malware_category', '-')} "
-                    f"| {cand.get('sample_count', '-')} |"
+                    _row(
+                        cand.get("family") or "?",
+                        f"{float(cand.get('similarity') or 0.0):.3f}",
+                        cand.get("malware_category") or "-",
+                        cand.get("sample_count") or "-",
+                    )
                 )
         if attr.similar_samples:
             lines.append("")
             lines.append("**Similar samples (LTM nearest neighbours):**")
             lines.append("")
-            lines.append("| SHA256 | Distance | Source |")
-            lines.append("|---|---|---|")
+            lines.append(_row("SHA256", "Distance", "Source"))
+            lines.append(_divider(3))
             for sample in attr.similar_samples[:10]:
                 sha = str(sample.get("sha256", "?"))
                 dist = sample.get("distance")
                 dist_str = f"{dist:.3f}" if isinstance(dist, int | float) else "-"
-                lines.append(f"| `{sha}` | {dist_str} | {sample.get('source', '-')} |")
+                lines.append(_row(f"`{sha}`", dist_str, sample.get("source") or "-"))
         return "\n".join(lines)
 
     def _section_detection_signatures(self, rules: list[DetectionRule]) -> str:
@@ -777,10 +860,10 @@ class MarkdownRenderer:
         if ta.cli_flags:
             lines.append("### Command-line Flags")
             lines.append("")
-            lines.append("| Flag | Meaning |")
-            lines.append("|---|---|")
+            lines.append(_row("Flag", "Meaning"))
+            lines.append(_divider(2))
             for flag in ta.cli_flags[:20]:
-                lines.append(f"| `{flag.flag}` | {flag.description or '-'} |")
+                lines.append(_row(f"`{flag.flag}`", flag.description or "-"))
             lines.append("")
 
         spk = ta.service_process_kill
@@ -827,10 +910,10 @@ class MarkdownRenderer:
             if present:
                 lines.append("### Encryption Scheme")
                 lines.append("")
-                lines.append("| Property | Value |")
-                lines.append("|---|---|")
+                lines.append(_row("Property", "Value"))
+                lines.append(_divider(2))
                 for label, value in present:
-                    lines.append(f"| {label} | {value} |")
+                    lines.append(_row(label, value))
                 lines.append("")
 
         note = ta.ransom_note
@@ -865,12 +948,17 @@ class MarkdownRenderer:
         if not report.c2_channels:
             return ""
         lines = ["## C2 Channels", ""]
-        lines.append("| Channel | Protocol | Encryption | Packet layout | Beacon format |")
-        lines.append("|---|---|---|---|---|")
+        lines.append(_row("Channel", "Protocol", "Encryption", "Packet layout", "Beacon format"))
+        lines.append(_divider(5))
         for ch in report.c2_channels[:10]:
             lines.append(
-                f"| {ch.name} | {ch.protocol or '-'} | {ch.encryption or '-'} "
-                f"| {ch.packet_layout or '-'} | {ch.beacon_format or '-'} |"
+                _row(
+                    ch.name,
+                    ch.protocol or "-",
+                    ch.encryption or "-",
+                    ch.packet_layout or "-",
+                    ch.beacon_format or "-",
+                )
             )
         return "\n".join(lines)
 
@@ -1002,8 +1090,8 @@ class MarkdownRenderer:
                 "it is not a rule match and counts for nothing._"
             )
             lines.append("")
-            lines.append("| Technique | Asserted by | Claimed by | Catalogue |")
-            lines.append("|---|---|---|---|")
+            lines.append(_row("Technique", "Asserted by", "Claimed by", "Catalogue"))
+            lines.append(_divider(4))
             for tid, row in sorted(corroboration.items()):
                 if isinstance(row, dict):
                     asserted_by = ", ".join(row.get("asserted_by") or []) or "—"
@@ -1013,7 +1101,7 @@ class MarkdownRenderer:
                     asserted_by, claimed_by = "—", ", ".join(str(s) for s in row) or "—"
                     associated = "—"
                 label = technique_label(str(tid), row if isinstance(row, dict) else None)
-                lines.append(f"| {label} | {asserted_by} | {claimed_by} | {associated} |")
+                lines.append(_row(label, asserted_by, claimed_by, associated))
             lines.append("")
         return "\n".join(lines)
 
@@ -1051,14 +1139,11 @@ def _evidence_rows(section: Any) -> list[str]:
     """The tabular or bulleted half of a section, or nothing."""
     if section.kind in {"table", "kv"} and section.rows:
         columns = section.columns or [f"Column {i + 1}" for i in range(len(section.rows[0]))]
-        out = [
-            "| " + " | ".join(columns) + " |",
-            "|" + "---|" * len(columns),
-        ]
+        out = [_row(*columns), _divider(len(columns))]
         for row in section.rows:
             cells = [_truncate(str(cell), 160) for cell in row]
             cells += [""] * (len(columns) - len(cells))
-            out.append("| " + " | ".join(cells[: len(columns)]) + " |")
+            out.append(_row(*cells[: len(columns)]))
         return out
     if section.kind == "list" and section.items:
         return [f"- {_truncate(item, 200)}" for item in section.items]
@@ -1107,6 +1192,50 @@ def _unmapped_behaviour_lines(report: MalwareReport) -> list[str]:
     return lines
 
 
+def _row(*cells: Any) -> str:
+    """One table row, assembled from its cells so the cells cannot assemble it.
+
+    Escaping per call site was the first attempt and it does not hold: it is a
+    rule nothing enforces, and the evidence is that a careful sweep with a test
+    behind it still left the PE Sections table — whose first cell is eight raw
+    bytes out of the section header — building its own row. A row a caller
+    cannot write by hand cannot be written wrong, so every table in this
+    renderer goes through here, header rows included, and
+    ``test_a_table_row_is_never_assembled_by_hand`` fails the build if a new one
+    does not.
+
+    A cell arrives composed: backticks, a parenthetical, a format spec are the
+    caller's business. What is not the caller's business is the separator, so
+    the escaping happens here, once, on whatever the cell turned out to be.
+    """
+    return "| " + " | ".join(_cell(cell) for cell in cells) + " |"
+
+
+def _divider(columns: int) -> str:
+    """The rule under a table's header, for as many columns as it has."""
+    return "|" + "---|" * columns
+
+
+def _cell(value: Any) -> str:
+    """One table cell's text, with what would break the table taken out of it.
+
+    Every string in this report that a sample, a sandbox, a tool payload or a
+    model wrote is free text, and a Markdown table is one of the few places
+    where free text is structural: a single ``|`` adds a column and shifts
+    every cell after it, and a newline ends the row and orphans every row
+    below. The worst case is not theoretical — an import name is the sample's
+    own bytes and a URL, a registry key and a dropped file's path all come
+    from the sample too — and the table it would wreck is one a human reads to
+    make a call. Cheaper to escape at the cell than to trust each producer.
+
+    Not a security control. ``markdown-it`` runs with ``html=False`` and React
+    escapes text, so nothing here is about injection; this is table integrity.
+    """
+    if value is None:
+        return ""
+    return str(value).replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+
 def _truncate(value: str, length: int) -> str:
     if value is None:
         return ""
@@ -1132,16 +1261,18 @@ def _process_tree_lines(node: ProcessNode, depth: int) -> list[str]:
 
 def _registry_row(reg: RegistryMod) -> str:
     value_name = reg.value_name or "-"
-    return (
-        f"| {reg.hive} | `{_truncate(reg.key, 80)}` | `{_truncate(value_name, 40)}` | "
-        f"{reg.operation} |"
+    return _row(
+        reg.hive,
+        f"`{_truncate(reg.key, 80)}`",
+        f"`{_truncate(value_name, 40)}`",
+        reg.operation,
     )
 
 
 def _signature_row(sig: SandboxSignature) -> str:
     ttps = ", ".join(sig.technique_ids) if sig.technique_ids else "-"
     desc = _truncate(sig.description or sig.name, 60)
-    return f"| {sig.name} ({desc}) | {sig.severity} | {ttps} | {len(sig.marks)} |"
+    return _row(f"{sig.name} ({desc})", sig.severity, ttps, len(sig.marks))
 
 
 def _domain_row(d: NetworkDomain) -> str:
@@ -1171,20 +1302,25 @@ def _domain_row(d: NetworkDomain) -> str:
     # identically. Such a name is also kept out of the exported bundle, so a
     # reader comparing the table with the bundle needs the column to see why.
     source = d.source or "-"
-    return f"| `{d.fqdn}` | {source} | {flag} | {reason} | {ips} | {pids} |"
+    return _row(f"`{d.fqdn}`", source, flag, reason, ips, pids)
 
 
 def _ip_row(ip: NetworkIP) -> str:
-    return (
-        f"| `{ip.address}` | {ip.port or '-'} | {ip.transport or '-'} | "
-        f"{ip.asn or '-'} | {ip.geo or '-'} |"
+    return _row(
+        f"`{ip.address}`",
+        ip.port or "-",
+        ip.transport or "-",
+        ip.asn or "-",
+        ip.geo or "-",
     )
 
 
 def _url_row(u: NetworkURL) -> str:
-    return (
-        f"| {u.method} | `{_truncate(u.url, 120)}` | {u.status or '-'} | "
-        f"{_truncate(u.user_agent or '-', 60)} |"
+    return _row(
+        u.method,
+        f"`{_truncate(u.url, 120)}`",
+        u.status or "-",
+        _truncate(u.user_agent or "-", 60),
     )
 
 

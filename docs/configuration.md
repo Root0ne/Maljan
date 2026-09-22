@@ -389,41 +389,90 @@ either way.
 
 The Linux block is narrower on purpose: there is no registry, and persistence,
 keylogging, screen capture and credential access have no unambiguous libc
-vocabulary to author from. Its tiers were measured rather than judged. A group
-whose bare presence would label more than one in a hundred of an ordinary
-Linux system's own binaries is an informational association carrying
-`corroborated_by` — the names that would give it weight — instead of a tier the
-catalogue calls suspicious; only `process_injection` is tiered, and it carries
-`flags_with`, so the label waits until a second name says the sample reaches
-into another process. A technique rule is kept only where the symbols are the
-technique's own mechanism, which left three; the rules that rested on
-privilege dropping, on ordinary sockets or on asking who the process runs as
-were removed because they fired on ordinary software.
+vocabulary to author from.
+
+**Both blocks are measured rather than judged, and both read alike.** A group
+whose bare presence would label ordinary software is an informational
+association carrying `corroborated_by` — the names that would give it weight —
+instead of a tier the catalogue calls suspicious. One group per platform keeps
+a label and each carries `flags_with`, so the label waits for the combination
+that makes the group mean something: `process_injection` on Linux waits for a
+name that reaches into another process, `keylogging` on Windows for the input
+hook, raw-input device or whole-keyboard read that is the capture rather than
+the key-state poll a game does every frame. A technique rule is kept only where
+its combination is the act the technique describes.
+
+**One bar, and one trigger for a second look.** The bar asks whether a rule
+carries information: one whose size-matched lift over a known-bad corpus is at
+or below 1.5 fires no more often on malware than on ordinary software, and it
+goes. The trigger is a rule above 4% of ordinary Windows software whose lift is
+under 3 — not a threshold that deletes it, because the measured rate is carried
+precisely so a common association can ship honestly and let the reader weigh it,
+but a sign that the rule should be argued on its own terms. Three were, and each
+went for a different reason: one was the sole row on no malware profile at all
+and so told a reader nothing another row did not; one was weak on its own
+numbers; one failed the test that decides whether a name belongs in a rule,
+applied to the whole rule, because the act its names describe is not the act the
+technique describes. A rule is deleted when one of those arguments carries, and
+not for its rate.
+
+**Every association carries the rate it was measured at**, under `measured`:
+`seen_on_benign_percent` is the share of a named benign corpus the association
+fired on, `seen_on_benign_files` the count behind that share, and — on Windows —
+`held_out_malware_profiles` how many profiles the combination was not chosen on
+that it fires on, stated as `0` where it fires on none, because an absent count
+and a count of zero read the same and mean opposite things. The rate reaches the
+model in the `api_capability` answer, the report's import-technique table and
+the console's cell, and a reader weighs it.
+
+Read those numbers in the one direction they were measured in: they say how
+often a *rule* fires on software that is not a sample, and none of them is a
+probability that a given sample is benign. There is no technique-level ground
+truth for either malware corpus, so what a malware number says is that a
+combination separates binaries already known to be bad from binaries already
+known to be good, never that a sample performs the technique; roughly three
+malware samples in ten import nothing an import rule can see at all, because
+they are packed, .NET, or resolve everything at runtime. An association that has
+not been measured carries no `measured` block, and the surfaces say so rather
+than printing a zero.
 
 A technique id in either block is retargeted, or dropped and listed, against
-the vendored catalogue's `revoked_by` when a release retires it. A rule carries
-`name` — the catalogue's name for the id — a `rule` label saying which of two
-rules on one technique matched, and, in the Linux block, `ordinary_use`: one
-sentence naming the software that is not a sample and imports the same symbols,
-because a mechanism with ordinary users that does not say so reads as an
-accusation.
+the vendored catalogue's `revoked_by` when a release retires it. Every rule
+carries `name` — the catalogue's name for the id — a `rule` label saying which
+of two rules on one technique matched and what combination it keys on, and
+`ordinary_use`: one sentence naming the software that is not a sample and
+imports the same names, because a mechanism with ordinary users that does not
+say so reads as an accusation. Almost every rule needs two or more names; one
+keys on a single name that is the act itself, which the row states by setting
+`min_apis` to one.
 
 Rerun the measurement after an ATT&CK refresh, after adding a group or a rule,
-or on a distribution whose software is not the one the block was written
-against:
+or against software that is not what the block was written against:
 
 ```
 uv run python scripts/knowledge/measure_api_behaviour_block.py \
     --fail-over 1 /usr/bin /usr/sbin /usr/lib/systemd
+uv run python scripts/knowledge/measure_api_behaviour_block.py --platform windows \
+    --fail-over 1 --write-inventory corpus.jsonl.gz /srv/windows-corpus
+uv run python scripts/knowledge/measure_api_behaviour_block.py --platform windows \
+    corpus.jsonl.gz
 ```
 
-It reads the dynamic symbol imports of the ELF files under those directories,
-prints per group and per rule how many binaries each appears on and labels, and
-names the ones carrying a label or a technique row so a reader can judge
-whether that population is the one the technique describes. `--fail-over` exits
-non-zero when anything is above that share. It needs `pyelftools`, reaches no
-network, and no test runs it: a test that read a host's binaries would answer
-differently on every machine.
+A Linux run reads the dynamic symbol imports of the ELF files under those
+directories; a Windows run reads PE import tables with `pefile`, the way
+`extractors/pe_extractor.py` does, recording an ordinal-only import as
+`Ordinal_<n>` so a binary that resolves everything by ordinal stays in the
+denominator. Either way the corpus is deduplicated by content, so a suite that
+ships the same runtime DLL in twenty packages counts once. It prints per group
+and per rule how many binaries each appears on and labels, and names the ones
+carrying a label or a technique row so a reader can judge whether that
+population is the one the technique describes. `--fail-over` exits non-zero
+when anything is above that share. `--write-inventory` saves what was read as
+gzipped JSON lines, so the same corpus can be measured again after the files
+are gone, and a Windows run takes such a file in place of a directory. It needs
+`pyelftools` or `pefile`, reaches no network, and no test runs it over real
+binaries: a test that read a host's software would answer differently on every
+machine.
 
 ### Rule corpora
 

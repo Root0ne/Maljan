@@ -221,6 +221,17 @@ class StaticAnalysis(BaseModel):
     # from, so the profile line in the report points at rows a reader can open.
     api_capabilities: dict[str, int] = Field(default_factory=dict)
     api_capabilities_evidence_ids: list[str] = Field(default_factory=list)
+    # {behaviour_category: share of a named benign corpus the category appears
+    # on}, recorded from the same answer. A count of imports in a category is
+    # not a fact about the sample until a reader knows that ``execution`` is on
+    # 93.5% of ordinary Windows software and ``keylogging`` on 4.0%; a profile
+    # line without it is the last place this layer prints a number with nothing
+    # to weigh it against. ``api_capability_corpus`` names what the shares are
+    # of, once, because the same sentence under eight categories is eight
+    # copies of one fact. Empty on a report stored before the field existed,
+    # and the surfaces then print the counts alone as they always did.
+    api_capability_rates: dict[str, float] = Field(default_factory=dict)
+    api_capability_corpus: str = ""
     # The audit trail behind a rule-derived technique: one row per rule that
     # fired over the import table — capa's, or the knowledge table's technique
     # rules — with the imports or namespaces that evidenced it and, for the

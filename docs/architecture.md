@@ -257,9 +257,10 @@ the format tool the routed type selects (`pe_info`, `elf_info`, `macho_info`,
 entropies, the packer signature hits and the import rows); a `strings` head
 capped by `triage.strings_head` and `iocs_from_file`; `yara_scan`, `capa`
 under the static provider's budget and, when a sandbox report exists,
-`sigma_match_sandbox`; `api_capability` over the import set (the behaviour map
-is Windows-only, so an ELF or Mach-O import table yields no profile and no
-rule hit) and `lolbin_lookup` over the sandbox's command lines; the sandbox
+`sigma_match_sandbox`; `api_capability` over the import set (asked about the
+routed format's own platform, and a format the catalogue has no block for —
+a Mach-O, an APK — is not asked, so it yields no profile and no rule hit)
+and `lolbin_lookup` over the sandbox's command lines; the sandbox
 projections at summary level (processes, network, signatures, dropped
 files, channels) and `pcap_summary` when a capture was fetched; one reputation
 lookup on the sha256 (`get_file_report` on `virustotal` when it is enabled,
@@ -607,12 +608,14 @@ decides.
    field, a Sigma rule's technique tags, a YARA TTP rule's
    `meta.technique_id`, `lolbin_lookup` — and `claimed_by`, the agents.
    `api_capability` is not among the sources: the API catalogue associates a
-   technique with an import set (BitBlt and CreateCompatibleDC read as screen
-   capture on any GUI program), so its associations travel under
-   `associated_by`, shown in a Catalogue column for reference and counted for
-   nothing. The catalogue's own `screen_capture` and `message_loop` groups are
-   `informational` for the same reason and name, in `corroborated_by`, the
-   APIs whose presence beside them would mean something. An asserted id the
+   technique with an import set, and an import set is what a program can do
+   rather than what it did, so its associations travel under `associated_by`,
+   shown in a Catalogue column for reference and counted for nothing. Each
+   association carries the share of a named benign corpus the same rule fires
+   on, so the column can be read for what it is. All but one group per platform
+   is `informational` for the same reason, naming in `corroborated_by` the APIs
+   whose presence beside them would mean something; the one that keeps a label
+   carries `flags_with` and waits for it. An asserted id the
    catalogue has retired
    (upstream Sigma rules and the case corpus still name a few) is marked
    `retired in ATT&CK 19.2` in the table. Two flat lists in

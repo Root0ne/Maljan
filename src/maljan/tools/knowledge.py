@@ -384,25 +384,33 @@ def api_capability(
     imports them. What comes back is an association a reader may weigh; it
     is never counted as a rule match or a source.
 
-    ``behaviours`` is the catalog's own category for the API; ``techniques``
-    are the technique rules the *whole* import set clears whose evidence
-    includes this API, each with the APIs it matched and its ``min_apis``.
-    Every rule in the vendored map needs two or more APIs, so the set is
-    matched once and the rows point back into it: asked one name at a time,
-    no rule could ever fire. Both are lookups in a vendored table, so an API
-    absent from the table comes back with empty lists rather than a guess.
+    The whole import set is matched once and every row points back into it, so
+    a rule fires on the set and not on the name the row happens to hang under.
+    Almost every rule needs two or more names; the exception is a rule whose
+    single name *is* the act it describes, which says so by setting
+    ``min_apis`` to one. An API the table has never heard of comes back with
+    empty lists rather than a guess.
+
+    Read every measured number in the one direction it was measured in: it says
+    how often this *rule* fires on software that is not a sample. None of them
+    is a probability that *this* sample is benign, and nothing here is evidence
+    about this sample at all. None of the corpora carry technique-level ground
+    truth either, so what a malware number says is that a combination separates
+    binaries already known to be bad from binaries already known to be good,
+    never that this sample performs the technique. An association nobody
+    measured carries no ``measured`` key rather than a zero — an absent key is
+    "not measured" and never "never fires".
 
     ``catalog_flags`` carries the catalog's own labels — ``suspicious`` for an
-    API it tiers high or medium — named for where they come from rather than
-    presented as this tool's finding. A bare ``suspicious: true`` would be a
-    verdict, and the tools state facts.
+    API in a category the catalogue tiers high or medium, and then only where
+    the category's ``flags_with`` combination is in the same import set —
+    named for where they come from rather than presented as this tool's
+    finding. A bare ``suspicious: true`` would be a verdict, and the tools
+    state facts.
 
     ``corroborated_by`` appears on a row whose category means nothing on its
     own — drawing to a device context, pumping a message queue — and lists the
-    APIs whose presence beside it would give it weight. The catalogue used to
-    file the GDI blit calls under keylogging and tier them high, so a signed
-    SSH client read as a keylogger; the category now says what it is and what
-    it is not.
+    APIs whose presence beside it would give it weight.
     """
     from maljan.analysis.api_capability_db import (
         canonical_name,
@@ -416,6 +424,11 @@ def api_capability(
     techniques = load_api_attck_map(str(resolve_data(attck_map)), wanted)
     cleared = techniques.match(set(names)) if techniques is not None and names else []
     rows: list[dict[str, Any]] = []
+    # What every rate in this answer is a share of. Collected once: the same
+    # corpus sentence repeated under three hundred imports is three hundred
+    # copies of one fact, and the answer travels to a model with a budget.
+    corpora: dict[str, str] = {}
+    behaviour_rates: dict[str, dict[str, Any]] = {}
     for name in names:
         # The label is decided against the whole set, not against the one
         # name: a category the catalogue gates says nothing until what would
@@ -438,6 +451,9 @@ def api_capability(
                 row_cited["rule"] = rule.rule
             if rule.ordinary_use:
                 row_cited["ordinary_use"] = rule.ordinary_use
+            if rule.measured is not None:
+                row_cited["measured"] = rule.measured.rates()
+                corpora.update(rule.measured.corpora())
             cited.append(row_cited)
         row: dict[str, Any] = {
             "api": name,
@@ -452,8 +468,16 @@ def api_capability(
         gate = behaviours.flags_with(category) if behaviours else ()
         if gate and not suspicious:
             row["flagged_with"] = list(gate)
+        rate = behaviours.measured_for(category) if behaviours else None
+        if category and rate is not None:
+            behaviour_rates[category] = rate.rates()
+            corpora.update(rate.corpora())
         rows.append(row)
     out: dict[str, Any] = {"capabilities": rows, "platform": wanted}
+    if behaviour_rates:
+        out["behaviour_rates"] = behaviour_rates
+    if corpora:
+        out["corpora"] = corpora
     if behaviours is None:
         out["reason"] = f"the API behaviour catalog at {behaviour_map} has no {wanted} categories"
     return out

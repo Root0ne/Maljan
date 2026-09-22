@@ -60,6 +60,28 @@ TOOL_NEEDS: list[ToolNeeds] = [
 CAPABILITIES = manifest("knowledge", TOOL_NEEDS)
 
 
+def _described_by(source: Any) -> Any:
+    """Give a wrapper the docstring of the function it delegates to.
+
+    A tool's description is what the model is handed, and in the default
+    topology this server is what answers — so a caveat written on the
+    in-process function reaches nobody unless it is copied here. Copying it by
+    hand is how the two drift: the in-process ``api_capability`` explains what
+    each measured number counts, in which direction it was measured and that no
+    corpus behind it carries technique-level ground truth, and a second
+    paraphrase of that would be one edit away from saying something else.
+
+    Applied under ``@mcp.tool()``, which reads ``__doc__`` when it registers,
+    so the order of the two decorators is load-bearing.
+    """
+
+    def apply(wrapper: Any) -> Any:
+        wrapper.__doc__ = source.__doc__
+        return wrapper
+
+    return apply
+
+
 def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
     """Run one lookup, turning any exception into a returned error with a remedy."""
     try:
@@ -104,14 +126,8 @@ def attck_validate(ids: list[str]) -> dict[str, Any]:
 
 
 @mcp.tool()
+@_described_by(knowledge_tools.api_capability)
 def api_capability(api_names: list[str], platform: str = "windows") -> dict[str, Any]:
-    """Look up what named APIs do and which techniques the catalogue associates them with.
-
-    A reference association, not an observation of the technique. ``platform``
-    is the vocabulary to ask: "windows" for a PE's imports, "linux" for an
-    ELF's dynamic symbols. The two share names, so the wrong one answers about
-    the wrong system.
-    """
     return _guard(
         "api_capability",
         knowledge_tools.api_capability,

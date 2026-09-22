@@ -393,7 +393,9 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
 
 # Technique IDs the import-derived ATT&CK table can emit for these two
 # subjects. Kept explicit rather than prefix-matched: T1497 is sandbox evasion
-# and T1496 is resource hijacking, and a prefix rule would confuse them.
+# and T1496 is resource hijacking, and a prefix rule would confuse them. A
+# superset on purpose: capa emits its own ids into the same table, and a report
+# stored before a rule was retired still has to bucket its rows.
 _DISCOVERY_TECHNIQUES = frozenset(
     {
         "T1057",

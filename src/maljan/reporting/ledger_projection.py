@@ -345,6 +345,13 @@ def static_from_ledger(
             category = str(row.get("category") or "").strip()
             if category:
                 static.api_capabilities[category] = static.api_capabilities.get(category, 0) + 1
+        for category, rate in (data.get("behaviour_rates") or {}).items():
+            share = (rate or {}).get("seen_on_benign_percent") if isinstance(rate, dict) else None
+            if isinstance(share, int | float) and not isinstance(share, bool):
+                static.api_capability_rates[str(category)] = float(share)
+        corpus = (data.get("corpora") or {}).get("benign")
+        if isinstance(corpus, str) and corpus and not static.api_capability_corpus:
+            static.api_capability_corpus = corpus
         for hit in api_capability_hits(data):
             static.api_technique_hits.append(
                 {**hit, "source": "api_capability", "evidence_id": entry.id}

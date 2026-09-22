@@ -4,7 +4,20 @@
   "platforms": {
     "windows": {
       "process_injection": {
-        "tier": "high",
+        "tier": "informational",
+        "corroborated_by": [
+          "CreateRemoteThread",
+          "CreateRemoteThreadEx",
+          "NtCreateThreadEx",
+          "NtQueueApcThread",
+          "QueueUserAPC",
+          "RtlCreateUserThread"
+        ],
+        "measured": {
+          "seen_on_benign_percent": 65.6,
+          "seen_on_benign_files": 1790,
+          "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
+        },
         "apis": [
           "CreateFileMapping",
           "CreateFileMappingA",
@@ -54,7 +67,18 @@
         ]
       },
       "anti_debug": {
-        "tier": "high",
+        "tier": "informational",
+        "corroborated_by": [
+          "CheckRemoteDebuggerPresent",
+          "DebugActiveProcess",
+          "NtQueryInformationProcess",
+          "NtSetInformationThread"
+        ],
+        "measured": {
+          "seen_on_benign_percent": 36.6,
+          "seen_on_benign_files": 1000,
+          "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
+        },
         "apis": [
           "CheckRemoteDebuggerPresent",
           "DebugActiveProcess",
@@ -84,7 +108,19 @@
         ]
       },
       "network": {
-        "tier": "medium",
+        "tier": "informational",
+        "corroborated_by": [
+          "CryptEncrypt",
+          "GetClipboardData",
+          "URLDownloadToFileA",
+          "URLDownloadToFileW",
+          "WinExec"
+        ],
+        "measured": {
+          "seen_on_benign_percent": 14.4,
+          "seen_on_benign_files": 392,
+          "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
+        },
         "apis": [
           "CoInternetSetFeatureEnabled",
           "DnsFree",
@@ -184,7 +220,19 @@
         ]
       },
       "crypto": {
-        "tier": "medium",
+        "tier": "informational",
+        "corroborated_by": [
+          "DeleteFileA",
+          "FindFirstFileA",
+          "MoveFileExA",
+          "connect",
+          "socket"
+        ],
+        "measured": {
+          "seen_on_benign_percent": 19.0,
+          "seen_on_benign_files": 520,
+          "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
+        },
         "apis": [
           "BCryptCloseAlgorithmProvider",
           "BCryptCreateHash",
@@ -271,6 +319,11 @@
       },
       "filesystem": {
         "tier": "informational",
+        "measured": {
+          "seen_on_benign_percent": 35.6,
+          "seen_on_benign_files": 972,
+          "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
+        },
         "apis": [
           "CloseHandle",
           "CopyFileA",
@@ -364,6 +417,11 @@
       },
       "registry": {
         "tier": "informational",
+        "measured": {
+          "seen_on_benign_percent": 13.2,
+          "seen_on_benign_files": 359,
+          "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
+        },
         "apis": [
           "NtDeleteKey",
           "NtEnumerateKey",
@@ -418,7 +476,18 @@
         ]
       },
       "privilege": {
-        "tier": "high",
+        "tier": "informational",
+        "corroborated_by": [
+          "CreateRemoteThread",
+          "DuplicateTokenEx",
+          "ImpersonateLoggedOnUser",
+          "WriteProcessMemory"
+        ],
+        "measured": {
+          "seen_on_benign_percent": 9.8,
+          "seen_on_benign_files": 267,
+          "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
+        },
         "apis": [
           "AddAccessAllowedAce",
           "AddAccessAllowedAceEx",
@@ -473,7 +542,19 @@
         ]
       },
       "execution": {
-        "tier": "medium",
+        "tier": "informational",
+        "corroborated_by": [
+          "CreateRemoteThread",
+          "NtCreateThreadEx",
+          "URLDownloadToFileA",
+          "URLDownloadToFileW",
+          "WriteProcessMemory"
+        ],
+        "measured": {
+          "seen_on_benign_percent": 93.5,
+          "seen_on_benign_files": 2552,
+          "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
+        },
         "apis": [
           "AddDllDirectory",
           "AssignProcessToJobObject",
@@ -533,6 +614,11 @@
       },
       "discovery": {
         "tier": "informational",
+        "measured": {
+          "seen_on_benign_percent": 56.4,
+          "seen_on_benign_files": 1541,
+          "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
+        },
         "apis": [
           "ConvertSidToStringSidA",
           "ConvertSidToStringSidW",
@@ -652,7 +738,19 @@
         ]
       },
       "persistence": {
-        "tier": "high",
+        "tier": "informational",
+        "corroborated_by": [
+          "CreateServiceA",
+          "CreateServiceW",
+          "RegSetValueExA",
+          "RegSetValueExW",
+          "SHSetValueA"
+        ],
+        "measured": {
+          "seen_on_benign_percent": 16.8,
+          "seen_on_benign_files": 460,
+          "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
+        },
         "apis": [
           "ChangeServiceConfig2A",
           "ChangeServiceConfigA",
@@ -702,6 +800,25 @@
       },
       "keylogging": {
         "tier": "high",
+        "flags_with": [
+          "AttachThreadInput",
+          "GetAsyncKeyState",
+          "GetKeyboardState",
+          "GetRawInputData",
+          "RegisterRawInputDevices",
+          "SetWinEventHook",
+          "SetWindowsHookExA",
+          "SetWindowsHookExW"
+        ],
+        "measured": {
+          "seen_on_benign_percent": 4.0,
+          "seen_on_benign_files": 110,
+          "labels_benign_percent": 2.0,
+          "labels_benign_files": 55,
+          "held_out_malware_profiles": 7,
+          "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+          "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+        },
         "apis": [
           "AddClipboardFormatListener",
           "AttachThreadInput",
@@ -748,6 +865,11 @@
           "SetWindowsHookExA",
           "SetWindowsHookExW"
         ],
+        "measured": {
+          "seen_on_benign_percent": 5.2,
+          "seen_on_benign_files": 143,
+          "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
+        },
         "apis": [
           "BitBlt",
           "CreateCompatibleBitmap",
@@ -774,6 +896,11 @@
           "SetWindowsHookExA",
           "SetWindowsHookExW"
         ],
+        "measured": {
+          "seen_on_benign_percent": 5.7,
+          "seen_on_benign_files": 155,
+          "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
+        },
         "apis": [
           "DispatchMessageA",
           "GetMessageA",
@@ -783,7 +910,19 @@
         ]
       },
       "evasion": {
-        "tier": "high",
+        "tier": "informational",
+        "corroborated_by": [
+          "AmsiScanBuffer",
+          "EtwEventWrite",
+          "NtSetInformationProcess",
+          "RtlSetProcessIsCritical",
+          "Wow64DisableWow64FsRedirection"
+        ],
+        "measured": {
+          "seen_on_benign_percent": 79.6,
+          "seen_on_benign_files": 2174,
+          "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
+        },
         "apis": [
           "AddVectoredExceptionHandler",
           "AmsiInitialize",
@@ -851,7 +990,19 @@
         ]
       },
       "credential": {
-        "tier": "high",
+        "tier": "informational",
+        "corroborated_by": [
+          "CryptUnprotectData",
+          "GetClipboardData",
+          "SetWindowsHookExA",
+          "SetWindowsHookExW",
+          "WinHttpSendRequest"
+        ],
+        "measured": {
+          "seen_on_benign_percent": 1.2,
+          "seen_on_benign_files": 33,
+          "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors"
+        },
         "apis": [
           "CredDeleteA",
           "CredEnumerateA",
@@ -889,6 +1040,13 @@
           "process_vm_writev",
           "ptrace"
         ],
+        "measured": {
+          "seen_on_benign_percent": 0.9,
+          "seen_on_benign_files": 17,
+          "labels_benign_percent": 0.3,
+          "labels_benign_files": 5,
+          "benign_corpus": "1837 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
+        },
         "apis": [
           "fexecve",
           "memfd_create",
@@ -903,6 +1061,11 @@
           "process_vm_readv",
           "process_vm_writev"
         ],
+        "measured": {
+          "seen_on_benign_percent": 1.2,
+          "seen_on_benign_files": 22,
+          "benign_corpus": "1837 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
+        },
         "apis": [
           "personality",
           "ptrace"
@@ -917,6 +1080,11 @@
           "popen",
           "system"
         ],
+        "measured": {
+          "seen_on_benign_percent": 15.5,
+          "seen_on_benign_files": 285,
+          "benign_corpus": "1837 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
+        },
         "apis": [
           "accept",
           "accept4",
@@ -961,6 +1129,11 @@
           "socket",
           "unlink"
         ],
+        "measured": {
+          "seen_on_benign_percent": 2.4,
+          "seen_on_benign_files": 44,
+          "benign_corpus": "1837 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
+        },
         "apis": [
           "AES_cbc_encrypt",
           "AES_set_encrypt_key",
@@ -1001,6 +1174,11 @@
       },
       "filesystem": {
         "tier": "informational",
+        "measured": {
+          "seen_on_benign_percent": 79.3,
+          "seen_on_benign_files": 1456,
+          "benign_corpus": "1837 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
+        },
         "apis": [
           "access",
           "chdir",
@@ -1053,6 +1231,11 @@
       },
       "discovery": {
         "tier": "informational",
+        "measured": {
+          "seen_on_benign_percent": 47.7,
+          "seen_on_benign_files": 876,
+          "benign_corpus": "1837 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
+        },
         "apis": [
           "get_nprocs",
           "getegid",
@@ -1087,6 +1270,11 @@
           "process_vm_writev",
           "ptrace"
         ],
+        "measured": {
+          "seen_on_benign_percent": 7.8,
+          "seen_on_benign_files": 144,
+          "benign_corpus": "1837 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
+        },
         "apis": [
           "cap_set_flag",
           "cap_set_proc",
@@ -1114,6 +1302,11 @@
           "ptrace",
           "socket"
         ],
+        "measured": {
+          "seen_on_benign_percent": 22.6,
+          "seen_on_benign_files": 416,
+          "benign_corpus": "1837 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
+        },
         "apis": [
           "dlopen",
           "dlsym",
@@ -1138,6 +1331,11 @@
           "setsid",
           "system"
         ],
+        "measured": {
+          "seen_on_benign_percent": 18.5,
+          "seen_on_benign_files": 339,
+          "benign_corpus": "1837 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
+        },
         "apis": [
           "clone",
           "daemon",

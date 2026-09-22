@@ -32,6 +32,8 @@ def _rule(tid: str, name: str = "A rule") -> dict[str, Any]:
     return {
         "technique_id": tid,
         "name": name,
+        "rule": "a combination the builder will accept",
+        "ordinary_use": "software that is not a sample imports the same pair",
         "min_apis": 2,
         "confidence_base": 0.4,
         "confidence_max": 0.6,
@@ -47,9 +49,19 @@ class TestTheSourceIsSoundAgainstTheShippedCatalogue:
         assert script._validate(techniques) == []
 
     def test_the_retired_ids_are_followed_to_the_id_that_replaced_them(self) -> None:
+        """The mechanism, on a rule the source still carries or one it does not.
+
+        The two rules that exercised this in the shipped tables were the pair
+        ATT&CK folded into T1685, and both are gone: measured, neither fired on
+        a malware profile. The retarget is what keeps a curated id working
+        across a release, so it is checked directly rather than through
+        whatever rule happens to be retired today.
+        """
         script = _script()
         _techniques, moved, _dropped = script._retargeted(script.ATTCK_TECHNIQUES)
-        assert moved == [("T1562.001", "T1685"), ("T1562.006", "T1685")]
+        assert moved == []
+        _kept, moved, _dropped = script._retargeted([_rule("T1562.001")])
+        assert moved == [("T1562.001", "T1685")]
 
     def test_every_id_the_builder_emits_is_in_the_vendored_catalogue(self) -> None:
         script = _script()
@@ -114,7 +126,9 @@ class TestTheDuplicateCheck:
     def test_the_same_rule_twice_is_still_a_problem(self) -> None:
         script = _script()
         problems = script._validate([_rule("T1685", "One"), _rule("T1685", "One")])
-        assert problems == ["duplicate windows technique T1685 'One'"]
+        assert problems == [
+            "duplicate windows technique T1685 'One' 'a combination the builder will accept'"
+        ]
 
     def test_an_id_outside_the_catalogue_is_a_problem(self) -> None:
         script = _script()
@@ -218,27 +232,151 @@ class TestTheLinuxBlock:
             for group, names in named.items():
                 assert set(names) <= known, group
 
-    def test_the_windows_block_carries_no_gate(self) -> None:
-        """The label there is the tier alone, as it has always been."""
-        assert _script().FLAG_GATES_BY_PLATFORM["windows"] == {}
+    def test_the_windows_block_reads_the_same_way(self) -> None:
+        """One labelled category, behind a named combination, on both platforms.
+
+        The Windows block used to label on the tier alone, and nine categories
+        carried one: measured, that label appeared on 97.73% of ordinary
+        Windows software against 93.50% of malware, which is a label a reader
+        learns to ignore. The rule is now the Linux one — a label needs the
+        combination that makes the group mean something.
+        """
+        script = _script()
+        labelled = {
+            group
+            for group, (tier, _apis) in script.WINDOWS_CATEGORIES.items()
+            if tier in {script.HIGH, script.MEDIUM}
+        }
+        assert labelled == {"keylogging"}
+        assert set(script.FLAG_GATES_BY_PLATFORM["windows"]) == labelled
 
     def test_every_rule_says_what_it_is_the_mechanism_of_and_who_else_uses_it(self) -> None:
         """A mechanism with ordinary users that does not name them reads as an
-        accusation, and the builder refuses a rule that leaves either out."""
+        accusation, and the builder refuses a rule that leaves either out.
+
+        This held for the two Linux rules and for none of the forty-seven
+        Windows ones. It holds for every rule on either platform now.
+        """
         script = _script()
-        checked = 0
         for rule in script.ATTCK_TECHNIQUES:
-            if "linux" not in (rule.get("platforms") or []):
-                continue
-            assert rule["rule"].strip()
-            assert rule["ordinary_use"].strip()
-            checked += 1
-        assert checked >= 2
-        bare = {**_rule("T1055.008"), "platforms": ["linux"], "apis": ["ptrace"], "min_apis": 1}
+            assert rule["rule"].strip(), rule["technique_id"]
+            assert rule["ordinary_use"].strip(), rule["technique_id"]
+        bare = {
+            **_rule("T1055.008"),
+            "rule": "",
+            "ordinary_use": "",
+            "platforms": ["linux"],
+            "apis": ["ptrace", "process_vm_readv"],
+            "min_apis": 2,
+        }
         assert script._validate([bare]) == [
             "T1055.008 has no rule label",
             "T1055.008 names no ordinary user of the same symbols",
         ]
+
+    def test_the_measurement_is_part_of_the_source_and_the_builder_checks_it(self) -> None:
+        """A rate with no count behind it is a rate that reads as zero for a
+        rule firing on one file in three thousand, so the builder refuses it.
+        No block at all is allowed and means the association was not measured.
+        """
+        script = _script()
+        assert script._measurement_problems("T1", None) == []
+        assert script._measurement_problems("T1", {"seen_on_benign_percent": 0.4}) == [
+            "T1 has no measured benign count"
+        ]
+        assert script._measurement_problems("T1", {"seen_on_benign_files": 4}) == [
+            "T1 has no measured benign share"
+        ]
+        assert (
+            script._measurement_problems(
+                "T1", {"seen_on_benign_percent": 0.0, "seen_on_benign_files": 0}
+            )
+            == []
+        )
+
+    def test_a_label_needs_a_gate_and_enough_held_out_support_behind_it(self) -> None:
+        """Three held-out profiles is the floor for a label. Below it the row
+        still ships, informational, carrying the count so a reader can see how
+        thin it is — and a platform with no malware corpus at all is not held
+        to a recall bar it has no way to meet.
+        """
+        script = _script()
+        problems = script._validate([])
+        assert problems == []
+        thin = dict(script.MEASURED_CATEGORIES["windows"])
+        thin["keylogging"] = {**thin["keylogging"], "held_out_malware_profiles": 2}
+        original = script.MEASURED_CATEGORIES["windows"]
+        script.MEASURED_CATEGORIES["windows"] = thin
+        try:
+            assert script._validate([]) == [
+                "windows keylogging is tiered high on 2 held-out profiles"
+            ]
+        finally:
+            script.MEASURED_CATEGORIES["windows"] = original
+
+    def test_an_association_too_common_to_change_a_reader_s_mind_is_not_shown_at_all(self) -> None:
+        """Carrying information and being worth a reader's attention are two
+        bars, and the second one deleted three rules the first one kept.
+
+        A rule above 4% of ordinary Windows software ships only where its
+        size-matched lift reaches 3 and it fires on a profile it was not chosen
+        on. Time Based Evasion at 9.56% and lift 2.30, Debugger Evasion at
+        7.51% and 2.28, and File and Directory Discovery at 6.41% and 2.98 all
+        clear the noise bar and none of them changes what a reader would
+        believe; the imports themselves stay in the triage pack either way.
+        """
+        script = _script()
+        windows = {
+            t["technique_id"]
+            for t in script.ATTCK_TECHNIQUES
+            if "linux" not in (t.get("platforms") or [])
+        }
+        assert not windows & {"T1497.003", "T1622", "T1083"}
+        # Whatever is above the bar cleared it on support at least, which is
+        # the half of the rule the shipped data can still be checked against.
+        for tech in script.ATTCK_TECHNIQUES:
+            measured = tech.get("measured") or {}
+            if measured.get("seen_on_benign_percent", 0) > 4.0:
+                assert measured.get("held_out_malware_profiles", 0) >= 1, tech["technique_id"]
+
+    def test_a_rule_that_fires_on_no_held_out_malware_says_zero_rather_than_nothing(self) -> None:
+        """An absent count and a count of zero read the same and mean opposite
+        things. Four rules fire on no held-out profile at all and each says so.
+        """
+        script = _script()
+        for tech in script.ATTCK_TECHNIQUES:
+            if "linux" in (tech.get("platforms") or []):
+                continue
+            assert isinstance(tech["measured"]["held_out_malware_profiles"], int), tech[
+                "technique_id"
+            ]
+        silent = {
+            **_rule("T1055"),
+            "measured": {"seen_on_benign_percent": 9.0, "seen_on_benign_files": 1},
+        }
+        assert script._validate([silent]) == [
+            "T1055 does not say how many held-out profiles support it"
+        ]
+
+    def test_only_a_named_rule_may_fire_from_a_single_name(self) -> None:
+        """What made asking the tool about one import safe was an invariant, and
+        for a while after T1095 it was prose in two docstrings with nothing
+        behind it. A rule written with a floor of one over sixteen WinINet names
+        would fire on any one of them, silently.
+        """
+        script = _script()
+        assert script._SINGLE_NAME_RULES == {"T1095"}
+        wide = {**_rule("T1055"), "min_apis": 1}
+        assert "T1055 asks for one name and is not one of the rules allowed to" in script._validate(
+            [wide]
+        )
+        allowed_but_wide = {**_rule("T1095"), "min_apis": 1, "apis": ["socket", "connect"]}
+        assert "T1095 may key on a single name and names 2" in script._validate([allowed_but_wide])
+        # A floor below one is a build failure even on an allowed id: the
+        # loader would drop such a rule, and a catalogue silently missing T1095
+        # is a worse outcome than a build that refuses to write it.
+        none_at_all = {**_rule("T1095"), "min_apis": 0, "apis": ["IcmpSendEcho"]}
+        assert "T1095 asks for 0 names" in script._validate([none_at_all])
 
     def test_a_rule_whose_mechanism_cannot_be_told_from_its_opposite_is_absent(self) -> None:
         """Debugger Evasion is a process tracing itself. An import list shows

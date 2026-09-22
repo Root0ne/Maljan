@@ -5,6 +5,15 @@
     {
       "technique_id": "T1057",
       "name": "Process Discovery",
+      "rule": "walking the process list and naming the executables behind it",
+      "ordinary_use": "a task manager, an installer looking for a copy of itself already running, and every updater walk the same snapshot",
+      "measured": {
+        "seen_on_benign_percent": 1.5,
+        "seen_on_benign_files": 42,
+        "held_out_malware_profiles": 6,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.42,
       "confidence_max": 0.62,
@@ -26,6 +35,15 @@
     {
       "technique_id": "T1082",
       "name": "System Information Discovery",
+      "rule": "reading the host's version, hardware and volume identity",
+      "ordinary_use": "a crash reporter, an installer and a licence check collect the same facts about the machine they are on",
+      "measured": {
+        "seen_on_benign_percent": 4.1,
+        "seen_on_benign_files": 111,
+        "held_out_malware_profiles": 9,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 3,
       "confidence_base": 0.4,
       "confidence_max": 0.58,
@@ -51,6 +69,15 @@
     {
       "technique_id": "T1033",
       "name": "System Owner/User Discovery",
+      "rule": "asking which account the program is running as",
+      "ordinary_use": "an installer, a licence check and any program writing into a user profile ask the same question",
+      "measured": {
+        "seen_on_benign_percent": 1.6,
+        "seen_on_benign_files": 45,
+        "held_out_malware_profiles": 3,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.42,
       "confidence_max": 0.6,
@@ -68,26 +95,17 @@
       ]
     },
     {
-      "technique_id": "T1087",
-      "name": "Account Discovery",
-      "min_apis": 2,
-      "confidence_base": 0.44,
-      "confidence_max": 0.62,
-      "apis": [
-        "CheckTokenMembership",
-        "DsGetDcNameA",
-        "LookupAccountNameA",
-        "NetLocalGroupGetMembers",
-        "NetUserEnum",
-        "NetUserGetInfo"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
       "technique_id": "T1012",
       "name": "Query Registry",
+      "rule": "reading values out of the registry",
+      "ordinary_use": "every program that remembers a setting reads it back with these calls, and an import table does not carry which key was read",
+      "measured": {
+        "seen_on_benign_percent": 4.4,
+        "seen_on_benign_files": 119,
+        "held_out_malware_profiles": 12,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.38,
       "confidence_max": 0.55,
@@ -107,29 +125,17 @@
       ]
     },
     {
-      "technique_id": "T1083",
-      "name": "File and Directory Discovery",
-      "min_apis": 3,
-      "confidence_base": 0.38,
-      "confidence_max": 0.55,
-      "apis": [
-        "FindFirstFileA",
-        "FindFirstFileW",
-        "FindNextFileA",
-        "FindNextFileW",
-        "GetDriveTypeA",
-        "GetFileAttributesA",
-        "GetLogicalDriveStringsA",
-        "PathFileExistsA",
-        "SHGetFolderPathA"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
       "technique_id": "T1010",
       "name": "Application Window Discovery",
+      "rule": "enumerating the windows on the desktop and reading their titles and classes",
+      "ordinary_use": "an accessibility tool, a window manager and a program looking for its own running copy walk the same list",
+      "measured": {
+        "seen_on_benign_percent": 2.6,
+        "seen_on_benign_files": 70,
+        "held_out_malware_profiles": 7,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.44,
       "confidence_max": 0.6,
@@ -148,46 +154,17 @@
       ]
     },
     {
-      "technique_id": "T1016",
-      "name": "System Network Configuration Discovery",
-      "min_apis": 2,
-      "confidence_base": 0.42,
-      "confidence_max": 0.58,
-      "apis": [
-        "GetAdaptersAddresses",
-        "GetAdaptersInfo",
-        "GetIfTable",
-        "GetNetworkParams",
-        "NetWkstaGetInfo",
-        "SendARP",
-        "gethostname"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
-      "technique_id": "T1049",
-      "name": "System Network Connections Discovery",
-      "min_apis": 2,
-      "confidence_base": 0.44,
-      "confidence_max": 0.6,
-      "apis": [
-        "GetExtendedTcpTable",
-        "GetTcpTable",
-        "GetUdpTable",
-        "NetServerEnum",
-        "NetShareEnum",
-        "WNetEnumResourceA",
-        "WNetOpenEnumA"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
       "technique_id": "T1007",
       "name": "System Service Discovery",
+      "rule": "opening the service manager and listing the services on the host",
+      "ordinary_use": "an installer, a monitoring agent and every service-control panel enumerate services the same way",
+      "measured": {
+        "seen_on_benign_percent": 0.8,
+        "seen_on_benign_files": 23,
+        "held_out_malware_profiles": 1,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.44,
       "confidence_max": 0.6,
@@ -205,6 +182,15 @@
     {
       "technique_id": "T1614",
       "name": "System Location Discovery",
+      "rule": "reading the locale, the keyboard layout and the time zone",
+      "ordinary_use": "every program that formats a date or a number reads the same settings",
+      "measured": {
+        "seen_on_benign_percent": 6.8,
+        "seen_on_benign_files": 185,
+        "held_out_malware_profiles": 8,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.44,
       "confidence_max": 0.58,
@@ -225,19 +211,23 @@
     {
       "technique_id": "T1543.003",
       "name": "Create or Modify System Process: Windows Service",
+      "rule": "creating a service, or rewriting an existing service's configuration",
+      "ordinary_use": "an installer and a management agent create and reconfigure their own services the same way",
+      "measured": {
+        "seen_on_benign_percent": 0.3,
+        "seen_on_benign_files": 7,
+        "held_out_malware_profiles": 0,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.48,
       "confidence_max": 0.65,
       "apis": [
         "ChangeServiceConfig2A",
         "ChangeServiceConfigA",
-        "ControlService",
         "CreateServiceA",
-        "CreateServiceW",
-        "DeleteService",
-        "OpenSCManagerA",
-        "OpenSCManagerW",
-        "StartServiceA"
+        "CreateServiceW"
       ],
       "platforms": [
         "windows"
@@ -246,6 +236,15 @@
     {
       "technique_id": "T1547.001",
       "name": "Boot or Logon Autostart Execution: Registry Run Keys",
+      "rule": "creating a registry key and writing a value into it",
+      "ordinary_use": "every program that saves a setting writes a value, and the key that would make this persistence is a path an import table does not carry",
+      "measured": {
+        "seen_on_benign_percent": 4.0,
+        "seen_on_benign_files": 108,
+        "held_out_malware_profiles": 12,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.42,
       "confidence_max": 0.6,
@@ -262,59 +261,28 @@
       ]
     },
     {
-      "technique_id": "T1053.005",
-      "name": "Scheduled Task/Job: Scheduled Task",
-      "min_apis": 2,
-      "confidence_base": 0.48,
-      "confidence_max": 0.65,
-      "apis": [
-        "IRegisteredTask",
-        "ITaskFolder",
-        "ITaskScheduler",
-        "ITaskService",
-        "NetScheduleJobAdd",
-        "NetScheduleJobEnum"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
-      "technique_id": "T1546.003",
-      "name": "Event Triggered Execution: WMI Event Subscription",
-      "min_apis": 2,
-      "confidence_base": 0.48,
-      "confidence_max": 0.65,
-      "apis": [
-        "CoSetProxyBlanket",
-        "IWbemClassObject",
-        "IWbemLocator",
-        "IWbemServices"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
       "technique_id": "T1134",
       "name": "Access Token Manipulation",
+      "rule": "duplicating an access token and running or impersonating with it",
+      "ordinary_use": "a service running work as the logged-on user, a named-pipe server and a task launcher duplicate tokens the same way",
+      "measured": {
+        "seen_on_benign_percent": 0.4,
+        "seen_on_benign_files": 11,
+        "held_out_malware_profiles": 4,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.48,
       "confidence_max": 0.65,
       "apis": [
-        "AdjustTokenPrivileges",
         "CreateProcessAsUserA",
         "CreateProcessWithTokenW",
         "DuplicateToken",
         "DuplicateTokenEx",
         "ImpersonateLoggedOnUser",
         "ImpersonateNamedPipeClient",
-        "NtAdjustPrivilegesToken",
-        "OpenProcessToken",
-        "OpenThreadToken",
-        "RtlAdjustPrivilege",
-        "SetThreadToken",
-        "SetTokenInformation"
+        "SetThreadToken"
       ],
       "platforms": [
         "windows"
@@ -323,16 +291,21 @@
     {
       "technique_id": "T1548.002",
       "name": "Abuse Elevation Control Mechanism: Bypass UAC",
+      "rule": "binding to an already elevated COM object through its moniker",
+      "ordinary_use": "a setup program and a management console bind to an elevated COM object to do one privileged step",
+      "measured": {
+        "seen_on_benign_percent": 0.0,
+        "seen_on_benign_files": 0,
+        "held_out_malware_profiles": 2,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.45,
       "confidence_max": 0.62,
       "apis": [
         "CLSIDFromProgID",
-        "CheckTokenMembership",
-        "CoGetObject",
-        "GetTokenInformation",
-        "ShellExecuteExA",
-        "ShellExecuteExW"
+        "CoGetObject"
       ],
       "platforms": [
         "windows"
@@ -341,6 +314,15 @@
     {
       "technique_id": "T1055",
       "name": "Process Injection",
+      "rule": "allocating or writing memory in another process and starting a thread in it",
+      "ordinary_use": "a debugger, a profiler, an anti-cheat and an accessibility shim reach into another process with the same calls",
+      "measured": {
+        "seen_on_benign_percent": 0.5,
+        "seen_on_benign_files": 13,
+        "held_out_malware_profiles": 5,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.48,
       "confidence_max": 0.65,
@@ -351,10 +333,8 @@
         "NtCreateThreadEx",
         "NtQueueApcThread",
         "NtWriteVirtualMemory",
-        "OpenProcess",
         "QueueUserAPC",
         "RtlCreateUserThread",
-        "SetWindowsHookEx",
         "VirtualAllocEx",
         "WriteProcessMemory"
       ],
@@ -365,14 +345,21 @@
     {
       "technique_id": "T1055.012",
       "name": "Process Injection: Process Hollowing",
+      "rule": "unmapping a new process's image, or writing over it and pointing its thread at the replacement",
+      "ordinary_use": "a launcher that patches a child before it runs and an emulator that loads its own image use the same calls",
+      "measured": {
+        "seen_on_benign_percent": 0.4,
+        "seen_on_benign_files": 10,
+        "held_out_malware_profiles": 3,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.5,
       "confidence_max": 0.65,
       "apis": [
         "CreateProcessInternalW",
-        "GetThreadContext",
         "NtUnmapViewOfSection",
-        "ResumeThread",
         "SetThreadContext",
         "WriteProcessMemory",
         "ZwUnmapViewOfSection"
@@ -382,46 +369,17 @@
       ]
     },
     {
-      "technique_id": "T1620",
-      "name": "Reflective Code Loading",
-      "min_apis": 2,
-      "confidence_base": 0.45,
-      "confidence_max": 0.62,
-      "apis": [
-        "CreateFileMappingA",
-        "LdrGetProcedureAddress",
-        "LdrLoadDll",
-        "MapViewOfFile",
-        "NtCreateSection",
-        "NtMapViewOfSection",
-        "ZwCreateSection"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
-      "technique_id": "T1622",
-      "name": "Debugger Evasion",
-      "min_apis": 2,
-      "confidence_base": 0.48,
-      "confidence_max": 0.65,
-      "apis": [
-        "CheckRemoteDebuggerPresent",
-        "DebugActiveProcess",
-        "IsDebuggerPresent",
-        "NtClose",
-        "NtQueryInformationProcess",
-        "NtSetInformationThread",
-        "OutputDebugStringA"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
       "technique_id": "T1497",
       "name": "Virtualization/Sandbox Evasion",
+      "rule": "reading the firmware tables, enumerating device instances, or checking whether a person is at the machine",
+      "ordinary_use": "a hardware inventory tool, a driver installer, a screensaver and a presentation program ask the same questions",
+      "measured": {
+        "seen_on_benign_percent": 0.5,
+        "seen_on_benign_files": 13,
+        "held_out_malware_profiles": 1,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.42,
       "confidence_max": 0.6,
@@ -430,7 +388,6 @@
         "GetCursorPos",
         "GetLastInputInfo",
         "GetSystemFirmwareTable",
-        "IsProcessorFeaturePresent",
         "SetupDiEnumDeviceInfo",
         "SetupDiGetClassDevsA"
       ],
@@ -439,28 +396,17 @@
       ]
     },
     {
-      "technique_id": "T1497.003",
-      "name": "Virtualization/Sandbox Evasion: Time Based Evasion",
-      "min_apis": 3,
-      "confidence_base": 0.4,
-      "confidence_max": 0.58,
-      "apis": [
-        "GetSystemTimeAsFileTime",
-        "GetTickCount",
-        "GetTickCount64",
-        "NtQueryPerformanceCounter",
-        "NtYieldExecution",
-        "QueryPerformanceCounter",
-        "QueryPerformanceFrequency",
-        "timeGetTime"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
       "technique_id": "T1112",
       "name": "Modify Registry",
+      "rule": "writing or deleting registry keys and values",
+      "ordinary_use": "every program that saves a setting writes the registry, and an import table does not carry which key was written",
+      "measured": {
+        "seen_on_benign_percent": 4.9,
+        "seen_on_benign_files": 135,
+        "held_out_malware_profiles": 13,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.4,
       "confidence_max": 0.58,
@@ -481,68 +427,17 @@
       ]
     },
     {
-      "technique_id": "T1222",
-      "name": "File and Directory Permissions Modification",
-      "min_apis": 2,
-      "confidence_base": 0.42,
-      "confidence_max": 0.6,
-      "apis": [
-        "AddAccessAllowedAce",
-        "AddAccessDeniedAce",
-        "DeleteAce",
-        "SetEntriesInAclA",
-        "SetEntriesInAclW",
-        "SetFileSecurityA",
-        "SetFileSecurityW",
-        "SetNamedSecurityInfoA",
-        "SetNamedSecurityInfoW",
-        "SetSecurityDescriptorDacl",
-        "SetSecurityInfo"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
-      "technique_id": "T1685",
-      "name": "Disable or Modify Tools",
-      "rule": "scanning and tracing provider calls",
-      "min_apis": 2,
-      "confidence_base": 0.5,
-      "confidence_max": 0.65,
-      "apis": [
-        "AmsiInitialize",
-        "AmsiOpenSession",
-        "AmsiScanBuffer",
-        "EtwEventRegister",
-        "EtwEventUnregister",
-        "EtwEventWrite",
-        "EventWrite"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
-      "technique_id": "T1685",
-      "name": "Disable or Modify Tools",
-      "rule": "tracing provider calls and the event log",
-      "min_apis": 2,
-      "confidence_base": 0.46,
-      "confidence_max": 0.62,
-      "apis": [
-        "EtwEventRegister",
-        "EtwEventUnregister",
-        "EventWrite",
-        "ReportEventA"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
       "technique_id": "T1070.004",
       "name": "Indicator Removal: File Deletion",
+      "rule": "deleting a file through more than one of the deletion calls",
+      "ordinary_use": "an uninstaller, a cache cleaner and a build tool delete their own files the same way",
+      "measured": {
+        "seen_on_benign_percent": 0.5,
+        "seen_on_benign_files": 13,
+        "held_out_malware_profiles": 9,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.38,
       "confidence_max": 0.55,
@@ -550,7 +445,6 @@
         "DeleteFileA",
         "DeleteFileTransactedA",
         "DeleteFileW",
-        "MoveFileExA",
         "NtDeleteFile",
         "SHFileOperationA"
       ],
@@ -561,6 +455,15 @@
     {
       "technique_id": "T1070.006",
       "name": "Indicator Removal: Timestomp",
+      "rule": "reading a file's timestamps and writing them onto another",
+      "ordinary_use": "an archiver, a copy tool and a build system restore the original timestamps with exactly this pair",
+      "measured": {
+        "seen_on_benign_percent": 0.5,
+        "seen_on_benign_files": 14,
+        "held_out_malware_profiles": 3,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.5,
       "confidence_max": 0.65,
@@ -574,48 +477,22 @@
       ]
     },
     {
-      "technique_id": "T1027",
-      "name": "Obfuscated Files or Information",
-      "min_apis": 2,
-      "confidence_base": 0.4,
-      "confidence_max": 0.58,
-      "apis": [
-        "CryptBinaryToStringA",
-        "CryptStringToBinaryA",
-        "RtlCompressBuffer",
-        "RtlDecompressBuffer"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
-      "technique_id": "T1140",
-      "name": "Deobfuscate/Decode Files or Information",
-      "min_apis": 2,
-      "confidence_base": 0.4,
-      "confidence_max": 0.58,
-      "apis": [
-        "BCryptDecrypt",
-        "CryptDecrypt",
-        "CryptStringToBinaryA",
-        "CryptUnprotectData",
-        "RtlDecompressBuffer",
-        "SystemFunction036"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
       "technique_id": "T1564.003",
       "name": "Hide Artifacts: Hidden Window",
+      "rule": "creating a second desktop, or moving a thread onto one",
+      "ordinary_use": "a login screen, a screensaver host and an automation harness run their work on a desktop of their own",
+      "measured": {
+        "seen_on_benign_percent": 0.1,
+        "seen_on_benign_files": 4,
+        "held_out_malware_profiles": 0,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.44,
       "confidence_max": 0.6,
       "apis": [
         "CreateDesktopA",
-        "IsWindowVisible",
         "OpenDesktopA",
         "SetThreadDesktop",
         "SwitchDesktop"
@@ -627,17 +504,23 @@
     {
       "technique_id": "T1056.001",
       "name": "Input Capture: Keylogging",
+      "rule": "an input hook, a raw-input device or a read of the whole keyboard's state",
+      "ordinary_use": "a hotkey manager, an on-screen keyboard, a game and a remote-desktop client install the same hooks",
+      "measured": {
+        "seen_on_benign_percent": 1.2,
+        "seen_on_benign_files": 34,
+        "held_out_malware_profiles": 5,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.5,
       "confidence_max": 0.65,
       "apis": [
         "AttachThreadInput",
         "GetAsyncKeyState",
-        "GetKeyNameTextA",
-        "GetKeyState",
         "GetKeyboardState",
         "GetRawInputData",
-        "MapVirtualKeyA",
         "RegisterRawInputDevices",
         "SetWinEventHook",
         "SetWindowsHookExA",
@@ -649,60 +532,23 @@
       ]
     },
     {
-      "technique_id": "T1555",
-      "name": "Credentials from Password Stores",
-      "min_apis": 2,
-      "confidence_base": 0.48,
-      "confidence_max": 0.65,
-      "apis": [
-        "CertOpenSystemStoreA",
-        "CredEnumerateA",
-        "CredEnumerateW",
-        "CredFree",
-        "CredReadA",
-        "CredReadW",
-        "CryptUnprotectData",
-        "PFXImportCertStore",
-        "SystemFunction036",
-        "sqlite3_open",
-        "sqlite3_prepare_v2"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
-      "technique_id": "T1003",
-      "name": "OS Credential Dumping",
-      "min_apis": 2,
-      "confidence_base": 0.5,
-      "confidence_max": 0.65,
-      "apis": [
-        "LsaCallAuthenticationPackage",
-        "LsaEnumerateLogonSessions",
-        "LsaGetLogonSessionData",
-        "LsaOpenPolicy",
-        "LsaRetrievePrivateData",
-        "MsvpPasswordValidate",
-        "SamConnect",
-        "SamEnumerateDomainsInSamServer"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
       "technique_id": "T1040",
       "name": "Network Sniffing",
+      "rule": "a socket created through WSASocket and reconfigured through WSAIoctl",
+      "ordinary_use": "a packet-capture library, a network monitor and a VPN client create and reconfigure sockets this way",
+      "measured": {
+        "seen_on_benign_percent": 1.0,
+        "seen_on_benign_files": 26,
+        "held_out_malware_profiles": 0,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.48,
       "confidence_max": 0.65,
       "apis": [
         "WSAIoctl",
-        "WSASocketA",
-        "bind",
-        "ioctlsocket",
-        "recvfrom"
+        "WSASocketA"
       ],
       "platforms": [
         "windows"
@@ -711,18 +557,22 @@
     {
       "technique_id": "T1113",
       "name": "Screen Capture",
+      "rule": "pulling the pixels back out of a window or screen device context",
+      "ordinary_use": "a screenshot tool, a remote-desktop server and a screen recorder read a device context the same way",
+      "measured": {
+        "seen_on_benign_percent": 0.3,
+        "seen_on_benign_files": 8,
+        "held_out_malware_profiles": 6,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.5,
       "confidence_max": 0.65,
       "apis": [
-        "BitBlt",
-        "CreateCompatibleBitmap",
-        "CreateCompatibleDC",
-        "GetDC",
         "GetDIBits",
         "GetWindowDC",
-        "PrintWindow",
-        "StretchBlt"
+        "PrintWindow"
       ],
       "platforms": [
         "windows"
@@ -731,16 +581,22 @@
     {
       "technique_id": "T1115",
       "name": "Clipboard Data",
+      "rule": "reading what is on the clipboard, or asking to be told each time it changes",
+      "ordinary_use": "a clipboard manager, a password manager and an editor's paste path read the clipboard the same way",
+      "measured": {
+        "seen_on_benign_percent": 0.6,
+        "seen_on_benign_files": 17,
+        "held_out_malware_profiles": 4,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.5,
       "confidence_max": 0.65,
       "apis": [
         "AddClipboardFormatListener",
-        "CloseClipboard",
         "GetClipboardData",
-        "IsClipboardFormatAvailable",
-        "OpenClipboard",
-        "SetClipboardData"
+        "IsClipboardFormatAvailable"
       ],
       "platforms": [
         "windows"
@@ -749,6 +605,15 @@
     {
       "technique_id": "T1123",
       "name": "Audio Capture",
+      "rule": "opening a wave input device and starting it",
+      "ordinary_use": "a voice-chat client, a dictation tool and a recorder open the microphone the same way",
+      "measured": {
+        "seen_on_benign_percent": 0.2,
+        "seen_on_benign_files": 5,
+        "held_out_malware_profiles": 1,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.5,
       "confidence_max": 0.65,
@@ -764,6 +629,15 @@
     {
       "technique_id": "T1071.001",
       "name": "Application Layer Protocol: Web Protocols",
+      "rule": "speaking HTTP through the WinINet or WinHTTP stack",
+      "ordinary_use": "an updater, a licence check, a telemetry client and every downloader use the same stack",
+      "measured": {
+        "seen_on_benign_percent": 0.7,
+        "seen_on_benign_files": 19,
+        "held_out_malware_profiles": 7,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.44,
       "confidence_max": 0.62,
@@ -790,40 +664,22 @@
       ]
     },
     {
-      "technique_id": "T1071.004",
-      "name": "Application Layer Protocol: DNS",
-      "min_apis": 2,
-      "confidence_base": 0.46,
-      "confidence_max": 0.62,
-      "apis": [
-        "DnsFree",
-        "DnsQueryEx",
-        "DnsQuery_A",
-        "DnsQuery_W",
-        "getaddrinfo"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
       "technique_id": "T1095",
       "name": "Non-Application Layer Protocol",
-      "min_apis": 3,
+      "rule": "sending an ICMP echo request",
+      "ordinary_use": "ping, a network diagnostic tool and a reachability check send the same echo request",
+      "measured": {
+        "seen_on_benign_percent": 0.1,
+        "seen_on_benign_files": 2,
+        "held_out_malware_profiles": 2,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
+      "min_apis": 1,
       "confidence_base": 0.4,
       "confidence_max": 0.58,
       "apis": [
-        "IcmpSendEcho",
-        "WSAConnect",
-        "WSARecv",
-        "WSASend",
-        "WSASocketA",
-        "connect",
-        "recv",
-        "recvfrom",
-        "send",
-        "sendto",
-        "socket"
+        "IcmpSendEcho"
       ],
       "platforms": [
         "windows"
@@ -832,6 +688,15 @@
     {
       "technique_id": "T1105",
       "name": "Ingress Tool Transfer",
+      "rule": "fetching a file over HTTP or FTP straight to disk",
+      "ordinary_use": "an updater and an installer download their payload with the same calls",
+      "measured": {
+        "seen_on_benign_percent": 0.0,
+        "seen_on_benign_files": 0,
+        "held_out_malware_profiles": 0,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.46,
       "confidence_max": 0.62,
@@ -850,6 +715,15 @@
     {
       "technique_id": "T1486",
       "name": "Data Encrypted for Impact",
+      "rule": "deriving or generating a symmetric key and encrypting with it",
+      "ordinary_use": "a backup tool, a password manager and any program storing a secret at rest encrypt the same way",
+      "measured": {
+        "seen_on_benign_percent": 0.4,
+        "seen_on_benign_files": 12,
+        "held_out_malware_profiles": 1,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.48,
       "confidence_max": 0.65,
@@ -870,6 +744,15 @@
     {
       "technique_id": "T1490",
       "name": "Inhibit System Recovery",
+      "rule": "deleting a file and stopping or removing a service",
+      "ordinary_use": "an uninstaller removes its service and deletes its files with the same pair, and the recovery data this technique destroys is reached through a command line rather than an import",
+      "measured": {
+        "seen_on_benign_percent": 1.8,
+        "seen_on_benign_files": 50,
+        "held_out_malware_profiles": 9,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.5,
       "confidence_max": 0.65,
@@ -886,36 +769,22 @@
     {
       "technique_id": "T1489",
       "name": "Service Stop",
+      "rule": "opening a service and stopping or removing it",
+      "ordinary_use": "an installer, an uninstaller and every service-control panel stop services the same way",
+      "measured": {
+        "seen_on_benign_percent": 1.7,
+        "seen_on_benign_files": 46,
+        "held_out_malware_profiles": 1,
+        "benign_corpus": "2730 freely distributed Windows binaries from 25 independent vendors",
+        "held_out_malware_corpus": "46 distinct import profiles the combinations were not chosen on"
+      },
       "min_apis": 2,
       "confidence_base": 0.46,
       "confidence_max": 0.62,
       "apis": [
         "ControlService",
         "DeleteService",
-        "OpenServiceA",
-        "TerminateProcess"
-      ],
-      "platforms": [
-        "windows"
-      ]
-    },
-    {
-      "technique_id": "T1106",
-      "name": "Native API",
-      "min_apis": 3,
-      "confidence_base": 0.38,
-      "confidence_max": 0.55,
-      "apis": [
-        "LdrLoadDll",
-        "NtAllocateVirtualMemory",
-        "NtCreateFile",
-        "NtCreateUserProcess",
-        "NtOpenKey",
-        "NtProtectVirtualMemory",
-        "NtQuerySystemInformation",
-        "NtSetValueKey",
-        "NtWriteFile",
-        "RtlCreateProcessParameters"
+        "OpenServiceA"
       ],
       "platforms": [
         "windows"
@@ -926,6 +795,11 @@
       "name": "Ptrace System Calls",
       "rule": "attaching to another process and reading or writing its memory",
       "ordinary_use": "a debugger, a tracer and a crash reporter reach into another process with exactly this pair",
+      "measured": {
+        "seen_on_benign_percent": 0.2,
+        "seen_on_benign_files": 3,
+        "benign_corpus": "1837 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
+      },
       "platforms": [
         "linux"
       ],
@@ -943,6 +817,11 @@
       "name": "Reflective Code Loading",
       "rule": "executing an anonymous file that was never written to disk",
       "ordinary_use": "a language runtime, a just-in-time compiler and a sandbox launcher execute anonymous memory the same way",
+      "measured": {
+        "seen_on_benign_percent": 0.1,
+        "seen_on_benign_files": 1,
+        "benign_corpus": "1837 ELF binaries with a dynamic symbol table under /usr/bin and /usr/sbin"
+      },
       "platforms": [
         "linux"
       ],
