@@ -7,11 +7,12 @@ The web console in `apps/web`. It talks to the API in `apps/api` over
 
 ```
 /login, /register       Sign in, or ask for an account
-/dashboard              Counts, verdict mix, the five latest runs, runtime banners
+/dashboard              Counts, verdict mix, the five latest runs and their verdicts,
+                        the tools recent runs used, runtime banners
 /samples                Upload a sample, browse samples, submit an analysis
 /jobs                   Every analysis, filtered by status; cancel a running one
 /analysis/{jobId}
-  ├── SUMMARY           Severity, findings counts, executive summary, exports
+  ├── SUMMARY           Severity, findings counts, time per stage, executive summary, exports
   ├── CONVERSATION      The run as a group conversation, live and replayed
   ├── IDENTITY          Hashes, file metadata, signatures, reputation
   ├── STATIC            Binary structure, imports, strings, packers
@@ -37,12 +38,41 @@ that list with its status filter applied. The verdict of a finished run is a
 column on its row; the search palette offers samples and analyses, each row a
 link into the run rather than a second rendering of the list.
 
+Each row of that list copies its sample's SHA-256 and its job id in one press
+each, the two values an operator pastes somewhere else. The buttons sit outside
+the row's link, their names say which row's value they copy, and the
+confirmation is read out from a live region rather than left to the button's
+word changing under focus. One control does this everywhere a value is copied
+from a row (`apps/web/src/components/ui/CopyButton.tsx`), the IDENTITY hashes
+and the DETECTION rule cards included.
+
+**The dashboard.** Each of the five latest runs carries its verdict as a chip,
+in the verdict colours every surface shares (`apps/web/src/lib/verdict.ts`)
+and in words; a run with no verdict yet — still running, failed, or a report
+the page could not read — shows its status instead of an empty chip. Under
+them, "Tools used" lists the tools the caller's last 20 completed runs called,
+most calls first, as flat bars with the count printed. It is read from each
+run's own `run_summary.evidence.by_tool` by `GET /api/v1/dashboard/tools`, so
+it counts what the ledger recorded rather than what the feed happened to
+carry. A long tool name is cut on screen and whole on hover and to a screen
+reader, and the section is absent while no run has called anything.
+
 The analysis header carries the verdict, the sample, the job status and the
 run's stages, and the stage strip is there and nowhere else, so the shape of
 the run reads the same from every tab. The sample is the heading and is not
 restated under it; the confidence is printed here, once, as a two-decimal
 number, and a run whose judge never answered reads "not assessed" rather than
 being scored zero.
+
+**Time per stage.** SUMMARY lists each stage that took time with its duration
+and a flat bar measured against the run's total elapsed, which is printed
+beside them with the time the stages account for; the gap is queueing,
+ingestion and the writing of the report. The rows are the ones the stage strip
+draws, from the same run store and the same formatter
+(`stageTiming` in `apps/web/src/components/analysis/stageTimeline.ts`), so the
+Summary and the strip cannot print different durations for one stage. A stage
+that declined has no row, and a run stored before stages were timed has no
+card.
 
 **When the verdict and the severity disagree.** A judge can call a sample
 Malicious and rate it Informational in the same run, and the console used to
@@ -209,6 +239,20 @@ written before `signing_info` answered for one format carries three such rows,
 of which all but one are the tool's untouched defaults; the tab keeps the one
 for the format the run routed on and drops the rest.
 
+## Severity
+
+One ladder owns severity: Critical, High, Medium, Low, Informational, the
+judge's five words, with one colour each (`apps/web/src/lib/severity.ts`).
+The Summary's rating, the DETECTION rule rows and their legend, the DYNAMIC
+signature badges and the header's verdict-against-severity rule all read it,
+and anything sorted by severity is sorted by the ladder's rank, never by the
+label's alphabetical order — which would put High before Informational before
+Low before Medium. A word that is not a rung sorts last and is drawn in
+Informational's colour with its own word beside it. The colour is never the
+only carrier: the rung's word is always printed. `severity.test.ts` fails on a
+rung given a colour, compared by its spelling, or sorted by its label anywhere
+else in the tree.
+
 ## Settings
 
 Anyone signed in has Profile and API keys. An administrator also has the setup
@@ -222,6 +266,17 @@ needs — a model, a static analyser, a sandbox and a team — and opens the oth
 three once there is a model to test them against. Every setting is editable in
 exactly one group of the console; a guide is the staged, step-by-step way into
 the same keys, and each group header links to the guide that covers it.
+
+**A server's tools.** Once a tool server has been tested, its Tools section is
+a table: a search that narrows the rows by name, "Select all" and "Select
+none" (which act on the rows a search left on screen, and say so), a live
+"enabled N of M" count, and — when the server offers a capability manifest —
+each tool's standing on its host, with the manifest's reason, what the tool
+still answers without the missing part and the remedy on the row of every tool
+it marks unavailable. It edits the per-server tick list and nothing else. A
+built-in's "every tool" becomes the explicit list on the first edit, as a
+single tick always did, and a name on the list the manifest no longer offers
+is kept.
 
 ## Width, contrast and the keyboard
 
@@ -261,7 +316,10 @@ that says what it does in the console's own language.
 ## Style
 
 No gradients, and no colour or background that eases from one value to
-another: a hover state is a state, so it arrives when the pointer does. The
+another: a hover state is a state, so it arrives when the pointer does. That
+holds for the charts and bars too: a bar is one flat fill, and an SVG
+gradient, an arbitrary `transition-[…]` over a colour and an inline or
+stylesheet `transition` over one are caught like the class names are. The
 transitions that stay are the ones that move something — a rail widening, a
 chevron turning. Icons are `lucide-react`, drawn in `currentColor` with
 nothing filled behind them: 16 or 18 px everywhere except the conversation

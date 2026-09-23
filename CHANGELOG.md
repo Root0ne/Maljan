@@ -572,6 +572,25 @@ change landed on `main`.
   to the stated fallback rather than to an error. The Settings page prints it
   beside `core.preprocessing.max_tool_output_chars`, with the source word
   itself, and says which setting would fix an unknown window.
+- **The dashboard answers at a glance.** Each of the latest runs carries its
+  verdict as a chip, in the shared verdict colours and in words; a run with no
+  verdict yet shows its status. A "Tools used" list draws the tools the
+  caller's last 20 completed runs called as flat bars with the counts printed,
+  from the new authenticated `GET /api/v1/dashboard/tools?limit=` (default 20,
+  at most 100), which sums each run's `run_summary.evidence.by_tool` and says
+  how many runs it read.
+- **Copy a row's SHA-256 and job id.** Every row of the analyses list copies
+  its sample's SHA-256 and its job id in one press each, with the confirmation
+  announced to a screen reader. The IDENTITY hash rows and the DETECTION rule
+  cards use the same control and now announce it too.
+- **Time per stage on the Summary.** Each stage that took time is listed with
+  its duration and a bar against the run's total elapsed, from the same rows
+  and formatter as the header's stage strip.
+- **A per-tool table for a tool server.** Settings → tool servers draws a
+  tested server's tools as a table with a search, "Select all" / "Select none"
+  over the rows shown, a live "enabled N of M" and, where the capability
+  manifest marks a tool unavailable, its reason and remedy on its own row. It
+  edits the existing per-server tick list; there is no new setting.
 
 ### Changed
 
@@ -1302,6 +1321,20 @@ change landed on `main`.
   reads `1837` where it read `1842` and five category shares move by one
   rounding place; no Linux rule's rate moves at all. No behaviour category was
   renamed or removed, so a consumer reading `category` alone is unaffected.
+- **One severity ladder in the console.** Severity order and colour live in
+  `apps/web/src/lib/severity.ts`, and the Summary, DETECTION, DYNAMIC and the
+  header's verdict-against-severity rule read it. On DETECTION a Medium rule
+  match is now purple and a Low one blue, as on the Summary, the Sigma rows are
+  ordered by the ladder's rank, and the legend lists only the rungs that have a
+  match. A guard fails the unit suite on a severity coloured, compared by its
+  spelling or sorted by its label anywhere else.
+- **A tested tool server's unavailable tools are said on their own rows.** The
+  separate list above the Tools section is drawn only where the tool table is
+  not, and a tick list the table writes keeps the manifest's order rather than
+  the order the boxes were ticked in.
+- **The console's style guard covers charts.** `styleRules.test.ts` also fails
+  on an SVG gradient and on a colour transition written as an arbitrary
+  `transition-[…]` class, an inline style or a stylesheet declaration.
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was
