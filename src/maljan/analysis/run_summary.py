@@ -147,9 +147,17 @@ def tokens_sentence(tokens: dict[str, Any] | None) -> str | None:
     calls = int(tokens.get("llm_calls") or 0)
     if calls <= 0:
         return None
+    noun = "call" if calls == 1 else "calls"
+    # A summary stored before this release folded a character estimate into
+    # its sums for every call whose provider reported nothing, and said so
+    # only in ``estimated_calls``. Those sums are not counts, so none is shown.
+    if int(tokens.get("estimated_calls") or 0) > 0:
+        return (
+            f"Tokens: this run was recorded with estimates mixed into its {calls} model "
+            f"{noun}, so no count is shown."
+        )
     unreported = int(tokens.get("unreported_calls") or 0)
     reported = calls - unreported
-    noun = "call" if calls == 1 else "calls"
     if reported <= 0:
         return f"Tokens: not reported by the provider for any of {calls} model {noun}."
     text = (
@@ -161,8 +169,28 @@ def tokens_sentence(tokens: dict[str, Any] | None) -> str | None:
     cost = tokens.get("cost")
     cost_calls = int(tokens.get("cost_calls") or 0)
     if isinstance(cost, int | float) and cost_calls:
-        text += f"; cost {float(cost):.4f} as the provider reported it for {cost_calls}"
+        # The only usage block that carries ``cost`` is an OpenAI-compatible
+        # router's, which reports it in US dollars.
+        text += (
+            f"; a cost of {float(cost):.4f} USD as the provider reported it for "
+            f"{cost_calls} {'call' if cost_calls == 1 else 'calls'}"
+        )
     return text + "."
+
+
+def spend_blocks(snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    """``tokens`` and ``models`` as the run summary stores them, from a ledger snapshot.
+
+    For a node that closes the summary after the judge built it: the report
+    stage's own model calls — the narrative round and every composer section —
+    happen after the judge's snapshot, and a run total without them is short.
+    Empty when the snapshot holds no call.
+    """
+    if not isinstance(snapshot, dict) or not snapshot.get("llm_calls"):
+        return {}
+    summary = RunSummaryBuilder(start_time=time.time()).set_token_usage(snapshot).build()
+    stored = summary.to_dict()
+    return {"tokens": stored["tokens"], "models": stored["models"]}
 
 
 def server_rest_sentence(row: dict[str, Any]) -> str:
@@ -759,9 +787,14 @@ class RunSummary:
                 for agent, spent in sorted(tok.per_agent.items()):
                     turns: dict[str, Any] = dict(spent.get("models") or {})
                     answered = ", ".join(f"{name} ×{count}" for name, count in turns.items())
+                    # Nothing reported is said, not printed as a zero count.
+                    silent = int(spent.get("unreported_calls", 0) or 0) >= int(
+                        spent.get("llm_calls", 0) or 0
+                    )
+                    inp = "not reported" if silent else spent.get("input_tokens", 0)
+                    out = "not reported" if silent else spent.get("output_tokens", 0)
                     lines.append(
-                        f"| {agent} | {spent.get('llm_calls', 0)} | "
-                        f"{spent.get('input_tokens', 0)} | {spent.get('output_tokens', 0)} | "
+                        f"| {agent} | {spent.get('llm_calls', 0)} | {inp} | {out} | "
                         f"{spent.get('unreported_calls', 0)} | {answered or '—'} |"
                     )
                 lines.append("")

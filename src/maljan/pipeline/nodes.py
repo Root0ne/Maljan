@@ -4248,6 +4248,21 @@ def make_report_node(
             if _closed_summary:
                 _closed_summary["elapsed_seconds"] = _elapsed
                 report.run_summary = _closed_summary
+        # What the run spent, closed here for the same reason: the narrative
+        # round and the composer sections are model calls the judge's snapshot
+        # was taken before, so the ledger is read again after the last model
+        # call of the run.
+        if state.get("run_summary"):
+            from maljan.analysis.run_summary import spend_blocks
+
+            _ledger_of = getattr(container, "get_token_ledger", None)
+            _spent = spend_blocks(_ledger_of().snapshot()) if callable(_ledger_of) else {}
+            if _spent:
+                _state_summary.update(_spent)
+                _with_spend = dict(report.run_summary or {})
+                if _with_spend:
+                    _with_spend.update(_spent)
+                    report.run_summary = _with_spend
         # The markdown is rendered once every field it reads is final: the
         # validation block, the corroboration's published marks, the stage
         # rollup and the elapsed time are all written above this line, and so

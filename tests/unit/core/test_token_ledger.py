@@ -137,11 +137,36 @@ class TestTheSentence:
         text = tokens_sentence({"llm_calls": 2, "unreported_calls": 2})
         assert text == "Tokens: not reported by the provider for any of 2 model calls."
 
-    def test_a_reported_cost_is_named_with_its_calls(self) -> None:
+    def test_a_reported_cost_is_named_with_its_unit_and_its_calls(self) -> None:
         text = tokens_sentence(
             {"llm_calls": 1, "input_tokens": 1, "output_tokens": 1, "cost": 0.5, "cost_calls": 1}
         )
-        assert text is not None and "cost 0.5000 as the provider reported it for 1" in text
+        assert text is not None
+        assert "a cost of 0.5000 USD as the provider reported it for 1 call." in text
+
+    def test_a_summary_stored_with_estimates_prints_no_count(self) -> None:
+        """The shape a run stored before this release carries, as it is read back."""
+        stored = {
+            "input_tokens": 120000,
+            "output_tokens": 9000,
+            "total_tokens": 129000,
+            "llm_calls": 40,
+            "estimated_calls": 40,
+        }
+        text = tokens_sentence(stored)
+        assert text == (
+            "Tokens: this run was recorded with estimates mixed into its 40 model calls, "
+            "so no count is shown."
+        )
+        assert "120,000" not in text
+
+    def test_the_served_markdown_of_an_old_run_prints_no_estimate(self) -> None:
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+        text = MarkdownRenderer()._section_run_summary(
+            {"tokens": {"llm_calls": 40, "estimated_calls": 3, "input_tokens": 120000}}
+        )
+        assert "120,000" not in text and "no count is shown" in text
 
     def test_no_calls_no_sentence(self) -> None:
         assert tokens_sentence({"llm_calls": 0}) is None
@@ -171,6 +196,22 @@ class TestRunSummaryIntegration:
         ]
         markdown = summary.to_markdown()
         assert "## Token Usage" in markdown and "## Model Fallbacks" in markdown
+
+    def test_an_agent_whose_calls_reported_nothing_shows_no_zero_count(self) -> None:
+        led = TokenLedger()
+        led.add(_usage(10, 2), agent="static", model="m")
+        led.add(None, agent="reporter")
+        summary = (
+            RunSummaryBuilder(start_time=0.0)
+            .set_sample("abc", None)
+            .set_verdict("Benign", 0)
+            .set_token_usage(led.snapshot())
+            .build()
+        )
+        row = next(
+            line for line in summary.to_markdown().splitlines() if line.startswith("| reporter")
+        )
+        assert row == "| reporter | 1 | not reported | not reported | 1 | — |"
 
     def test_no_usage_leaves_tokens_none(self) -> None:
         summary = (

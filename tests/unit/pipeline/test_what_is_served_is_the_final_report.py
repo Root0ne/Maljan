@@ -233,3 +233,27 @@ class TestWhatIsServedFromIt:
         result, _column = await _run(container)
 
         assert result["malware_report_markdown"] == self._served(result)
+
+
+@pytest.mark.asyncio
+class TestTheRunTotalIncludesTheReportStage:
+    async def test_a_reporter_call_made_after_the_verdict_is_in_the_total(
+        self, container: Any
+    ) -> None:
+        from maljan.core.token_ledger import TokenLedger
+
+        ledger = TokenLedger()
+        ledger.add({"input_tokens": 100, "output_tokens": 10}, agent="judge", model="m")
+        container.get_token_ledger.return_value = ledger
+        # The narrative round, after the judge's snapshot was taken.
+        ledger.add({"input_tokens": 50, "output_tokens": 5}, agent="reporter")
+
+        result, column = await _run(container)
+        stored = (result["malware_report"] or {}).get("run_summary") or {}
+
+        assert column["tokens"]["llm_calls"] == 2
+        assert column["tokens"]["per_agent"]["reporter"]["input_tokens"] == 50
+        assert stored["tokens"] == column["tokens"]
+        assert "Tokens: 150 in and 15 out over 2 model calls." in MarkdownRenderer().render(
+            MalwareReport.model_validate(result["malware_report"])
+        )
