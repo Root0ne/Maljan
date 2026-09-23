@@ -568,9 +568,12 @@ loop does, whatever the model asks next: `no_room` on its budget record with
 the reason, on the `stage_ended_at_cap` event and under the agent's `caps` in
 `run_summary.budget`, and the forced synthesis turns what was gathered into the
 answer. The graph's own step-limit sentence ("need more steps") is never shown
-or handed on as an agent's words; where a loop a cap ended leaves no answer and
-the salvage writes none, the platform says so in its own sentence, and no claim
-is read from it.
+or handed on as an agent's words, and the platform writes none of its own in
+their place: where a loop a cap ended leaves no answer and the salvage writes
+none, the agent's answer is empty and its status `no_claims`, and why is on the
+budget record and the `stage_ended_at_cap` event. The node does not run such an
+analyst a second time over the same material, which would meet the same full
+window.
 
 Both notices come out of the **tool budget** — the window less the room kept
 back for the model's reply — and are withheld when they would not fit. So does
@@ -591,9 +594,15 @@ the window before the platform's text does.
 
 What a conversation is measured at is what its next request will weigh, not the
 messages alone. The definitions of the loop's tools go with every request, and
-they are counted: a static analyst holding 35 tools carries more than 19,000
-characters of them, over a quarter of a 32,768-token window's tool budget, and a count
-that left them out said there was room until the server refused. Where the
+they are counted: a static analyst holding the default toolset — 35 tools
+from the analysis, knowledge and VirusTotal servers — carries about 20,500
+characters of them, 28% of a 32,768-token window's 73,728-character tool
+budget, and a count that left them out said there was room until the server
+refused. With the framing, about 46,000 characters (63%) are left for answers
+and the model's own turns. On a small window, or with a large toolset, untick
+the tools an agent does not need in each server's tick list in the Tools step:
+that list is the only thing that narrows what a server sends an agent, and
+every unticked tool is its definition's characters back on every request. Where the
 server reported how many tokens the last request really took, that figure,
 converted at the same three characters per token, plus what the conversation
 gained since, is a floor under the measure, so content that tokenises worse
@@ -601,11 +610,27 @@ than three characters a token — pages of `strings` noise do — or the templat
 the server wraps each message in cannot hide room that is gone.
 
 And where a server says the window is full anyway — llama.cpp's "context shift
-is disabled", "the request exceeds the available context size", or a hosted
-provider's "maximum context length" — that agent's tool phase ends with
-`no_room` ("the model server reported its context window full" on the record
-and the stage event), and the forced synthesis writes the answer from what was
-gathered, rather than the agent failing and its work being lost.
+is disabled" or "the request exceeds the available context size", an
+OpenAI-compatible "maximum context length", Anthropic's "prompt is too long" —
+after the analyst's loop has gathered at least one tool answer, that agent's
+tool phase ends with `no_room` ("the model server reported its context window
+full" on the record and the stage event), and the forced synthesis writes the
+answer from what was gathered, rather than the agent failing and its work being
+lost. Only an error the provider's SDK raised for the server's answer counts.
+The same sentence on the first request, before anything was gathered, means
+the framing alone does not fit; a reply cap larger than the window names
+`max_tokens`; and an error that is not a server's answer is the platform's own.
+Each of those still fails the agent, because there is nothing to salvage and
+the failure is the true statement.
+
+The judge's tool loop takes no part in this. It is awaited whole rather than
+streamed, so a failure leaves nothing gathered to salvage, and it runs only to
+mediate a dispute or to ask who a sample is, on a conversation built from the
+analysts' reports rather than grown call by call. Its tool answers still go
+through the same guardrail, capped against the fullest conversation the budget
+knows of, because the judge's own is not recorded; its tool definitions are not
+counted; and a server that says the window is full fails the judge's loop as
+any other server error does.
 
 The window itself is learned free of charge and without asking the operator
 anything. In order:

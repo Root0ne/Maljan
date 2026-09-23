@@ -3220,9 +3220,13 @@ change landed on `main`.
   conversation feed, no longer sent back to a model as the agent's own turn in
   the salvage or the nudge, and no longer returned as the judge's mediation
   reasoning. Where a loop a cap ended produced no answer and the salvage wrote
-  none either, the platform says so in its own sentence ("The platform ended
-  this agent's tool loop: …"), from which no claim is read, instead of handing
-  on the graph's sentence or a tool's notice as the agent's answer.
+  none either, the agent's answer is now empty and its status `no_claims`,
+  instead of the graph's sentence or a tool's notice handed on as the agent's
+  answer; why the loop ended is on the budget record and the
+  `stage_ended_at_cap` event. A judge loop that ends the same way returns no
+  reasoning, and mediation reads that as no agreement without asking a model to
+  extract a verdict from nothing. The analysis node no longer runs an analyst
+  that ended `no_room` a second time over the same material.
 
 - **A JSON answer over the cap only because of its indentation is handed over
   whole.** The document shortener measured an indented answer at its compact
@@ -3251,18 +3255,24 @@ change landed on `main`.
   with 8,192 kept for the reply — when llama answered HTTP 500 "context shift is
   disabled"; the run said `tool_output_no_room 0` and the analyst's work was
   lost. The count left out the definitions of the loop's tools, which go with
-  every request: 35 tools, more than 19,000 characters. They are now counted with
-  the conversation, and where the server reported the token count of the last
-  request, that count plus what the conversation gained since is a floor under
-  the measure, so content that tokenises worse than three characters a token
-  cannot hide the room that is gone. A server error that says the window is full
-  ("context shift is disabled" joins the overflow wordings already recognised)
-  now ends that agent's tool phase with `no_room` and the detail "the model
-  server reported its context window full", and the forced synthesis writes the
-  answer from what was gathered; any other server error still fails the agent.
+  every request: 35 tools, about 20,500 characters, 28% of the tool budget.
+  They are now counted with the conversation, and where the server reported the
+  token count of the last request, that count plus what the conversation gained
+  since is a floor under the measure, so content that tokenises worse than three
+  characters a token cannot hide the room that is gone. A provider's own answer
+  that the window is full ("context shift is disabled", "exceeds the available
+  context size", "maximum context length", "prompt is too long"), met after the
+  loop has gathered at least one tool answer, now ends that agent's tool phase
+  with `no_room` and the detail "the model server reported its context window
+  full", and the forced synthesis writes the answer from what was gathered. The
+  same sentence on the first request, a reply cap larger than the window, an
+  error that is not a provider's, and any other server error still fail the
+  agent. The judge's tool loop is not covered, and the configuration guide says
+  why. "context shift" also joins the wordings that retire a learned window.
   **Upgrading:** a derived cap reaches zero sooner for an agent with many tools,
   so a run on a small window ends tool phases earlier than before and says
-  `no_room` where it used to overflow.
+  `no_room` where it used to overflow; unticking the tools an agent does not
+  need in the Tools step gives the room back.
 
 ### Removed
 

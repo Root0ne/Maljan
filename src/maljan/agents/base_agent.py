@@ -39,7 +39,7 @@ from maljan.llm.context_window import (
     CHARS_PER_TOKEN,
     NO_ROOM_RUN_STATE,
     tool_definition_chars,
-    window_reported_full,
+    window_full_error,
 )
 from maljan.pipeline.validation import (
     ALIGNMENT_MARGIN,
@@ -70,21 +70,6 @@ _RECURSION_STOP_RE = re.compile(r"need more steps to process", re.IGNORECASE)
 # before langgraph could say so. Worded so ``_RECURSION_STOP_RE`` reads it, and
 # so the salvage path that follows treats it the way it treats langgraph's.
 RECURSION_STOP_TEXT = "Sorry, need more steps to process this request."
-
-# What a loop that a cap ended says when nothing could be salvaged from it. The
-# graph's sentence above is written into the conversation as an assistant turn,
-# so handed on it reads as the agent's own words; a tool's notice at the end of
-# a loop broken for want of room is not the agent's either. This is the
-# platform saying what happened, and a claim is never read out of it.
-LOOP_ENDED_PREFIX = "The platform ended this agent's tool loop"
-
-
-def loop_ended_without_an_answer(reason: str) -> str:
-    """The platform's sentence for a loop a cap ended with no answer written."""
-    return (
-        f"{LOOP_ENDED_PREFIX}: {reason}. The agent wrote no answer, and none was "
-        "written from what it gathered."
-    )
 
 
 def is_the_graph_s_step_stop(message: Any) -> bool:
@@ -2789,6 +2774,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
         # Sent with every request of this loop, so counted with its conversation.
         self._tool_definition_chars = tool_definition_chars(recorded)
+        self.ended_out_of_room = False
         agent_executor = create_react_agent(
             _model_that_closes_off_truncated_calls(self.llm, recorded, _close_off_truncated_calls),
             recorded,
@@ -2902,8 +2888,13 @@ class BaseAnalyst(BudgetMeter, ABC):
                         # conversation out of room, whatever the budget
                         # believed: the tool phase ends the way it does when
                         # the budget sees it first, and what was gathered is
-                        # salvaged rather than lost with the analyst.
-                        if not window_reported_full(exc):
+                        # salvaged rather than lost with the analyst. Only
+                        # then. A failure that is not a provider's full-window
+                        # answer, or one met before any tool ran — the framing
+                        # alone does not fit, which is a configuration fault —
+                        # has nothing to salvage and fails the agent as it
+                        # always did.
+                        if not (window_full_error(exc) and recorder.entries):
                             raise
                         nonlocal window_full
                         window_full = True
@@ -3123,11 +3114,12 @@ class BaseAnalyst(BudgetMeter, ABC):
                 answered = True
         # A loop a cap ended ends on the graph's sentence or on a tool's
         # notice, and neither is what the agent said. Where the salvage wrote
-        # nothing, the platform says what happened instead.
+        # nothing the agent has no answer, and says nothing: why the loop
+        # ended is on the budget record and the ``stage_ended_at_cap`` event,
+        # in the platform's own voice, not in the agent's.
         if cap is not None and not answered:
-            content = loop_ended_without_an_answer(
-                why or f"the loop reached its {max_steps}-step limit"
-            )
+            content = ""
+        self.ended_out_of_room = cap == "no_room"
 
         # A final message that is neither a structured report nor a findings
         # block is not an answer. The loop's own stop condition cannot see that
@@ -4346,8 +4338,6 @@ class BaseAnalyst(BudgetMeter, ABC):
         # the fallback, so probe both the raw first line and the same line with
         # a leading ``CLAIM:``/``EVIDENCE:`` label stripped.
         stripped = text.strip()
-        if stripped.startswith(LOOP_ENDED_PREFIX):
-            return True
         first = stripped.splitlines()[0] if stripped else ""
         unlabelled = re.sub(r"^\s*(?:claim|evidence)\s*:\s*", "", first, flags=re.IGNORECASE)
         if self._META_CLAIM_RE.match(first) or self._META_CLAIM_RE.match(unlabelled):
@@ -4474,6 +4464,10 @@ class BaseAnalyst(BudgetMeter, ABC):
     loop_budget: LoopBudget | None = None
     # What the definitions of the running loop's tools weigh in a request.
     _tool_definition_chars: int = 0
+    # Whether this agent's last loop ended for want of room. A caller that
+    # would run the agent again on the same material asks this first: a
+    # second loop meets the same full window.
+    ended_out_of_room: bool = False
     _budget_ceiling: BudgetCeiling | None = None
     steps_spent: int = 0
     current_round: int = 0

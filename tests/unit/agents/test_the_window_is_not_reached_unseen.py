@@ -16,9 +16,13 @@ server reports what a request really weighed, that figure bounds the count from
 below, so a characters-per-token figure that flatters the content cannot hide
 the rest.
 
-When a server says the window is full anyway, that is the conversation out of
-room, not a crash: the tool phase ends with ``no_room`` and the salvage writes
-the answer from what was gathered.
+When a server says the window is full anyway, after the loop has gathered
+something, that is the conversation out of room, not a crash: the tool phase
+ends with ``no_room`` and the salvage writes the answer from what was gathered.
+Only a provider's own full-window answer counts. The framing not fitting on the
+first request, a reply cap larger than the window, and a failure that is not a
+server's answer at all still fail the agent: there is nothing to salvage, and
+the loud failure is the true statement.
 """
 
 from __future__ import annotations
@@ -50,7 +54,7 @@ REPLY = 8_192
 # What the budget held at the last tick before llama refused, step 36 of 40.
 HELD_AT_STEP_36 = 61_762
 # The sentence llama answered with.
-CONTEXT_SHIFT = "Error code: 500 - {'error': {'code': 500, 'message': 'context shift is disabled'}}"
+CONTEXT_SHIFT = "context shift is disabled"
 
 TASK = "look at it"
 CLAIM = (
@@ -211,10 +215,22 @@ class TestAServerThatSaysTheWindowIsFull:
         ],
     )
     def test_the_wordings_are_recognised(self, said: str) -> None:
-        assert cw.window_reported_full(said) is True
+        assert cw.window_full_error(_server_error(said)) is True
 
-    def test_an_unrelated_failure_is_not(self) -> None:
-        assert cw.window_reported_full("Error code: 500 - {'error': 'model crashed'}") is False
+    def test_an_unrelated_server_failure_is_not(self) -> None:
+        assert cw.window_full_error(_server_error("model crashed")) is False
+
+    def test_a_reply_cap_larger_than_the_window_is_a_configuration_fault_not_a_full_window(
+        self,
+    ) -> None:
+        said = (
+            "'max_tokens' is too large: 40000. This model's maximum context length is "
+            "32768 tokens and your request has 120 input tokens"
+        )
+        assert cw.window_full_error(_server_error(said, status=400)) is False
+
+    def test_an_error_that_is_not_a_server_s_answer_is_not(self) -> None:
+        assert cw.window_full_error(ValueError("could not read n_ctx from the props")) is False
 
     def test_the_tool_phase_ends_with_no_room_and_the_salvage_is_written(self) -> None:
         model = _RefusesAtTheFourthTurn(calls=[])
@@ -230,14 +246,43 @@ class TestAServerThatSaysTheWindowIsFull:
         assert sum(isinstance(m, ToolMessage) for m in salvage[0]) == 3, "over what was gathered"
         assert "the sample reads its own strings" in answer
 
-    def test_any_other_failure_still_fails_the_analyst(self) -> None:
+    @pytest.mark.parametrize(
+        ("refuse_at", "error"),
+        [
+            # Any other server failure, after tools ran.
+            (3, lambda: _server_error("model crashed")),
+            # The framing alone does not fit: nothing gathered, nothing to salvage.
+            (0, lambda: _server_error("the request exceeds the available context size")),
+            # A reply cap larger than the window, on the first request.
+            (
+                0,
+                lambda: _server_error(
+                    "'max_tokens' is too large: 40000. This model's maximum context "
+                    "length is 32768 tokens",
+                    status=400,
+                ),
+            ),
+            # Not a server's answer at all, though it names the window.
+            (3, lambda: ValueError("could not read n_ctx from the props")),
+        ],
+        ids=["other-server-error", "first-request", "reply-cap", "not-a-provider-error"],
+    )
+    def test_everything_else_still_fails_the_analyst(self, refuse_at: int, error: Any) -> None:
         from maljan.core.exceptions import AnalystError
 
-        model = _RefusesAtTheFourthTurn(
-            calls=[], said="Error code: 500 - {'error': 'model crashed'}"
-        )
+        model = _RefusesAtTheFourthTurn(calls=[], refuse_at=refuse_at, error=error)
         with pytest.raises(AnalystError):
             _run(model)
+
+
+def _server_error(said: str, status: int = 500) -> Exception:
+    """The error the OpenAI SDK raises for a server's answer with ``status``."""
+    request = httpx.Request("POST", "http://127.0.0.1:8080/v1/chat/completions")
+    response = httpx.Response(status, request=request)
+    message = f"Error code: {status} - {{'error': {{'code': {status}, 'message': '{said}'}}}}"
+    if status == 400:
+        return openai.BadRequestError(message, response=response, body=None)
+    return openai.InternalServerError(message, response=response, body=None)
 
 
 def _told_to_stop(sent: list[BaseMessage]) -> bool:
@@ -245,9 +290,10 @@ def _told_to_stop(sent: list[BaseMessage]) -> bool:
 
 
 class _RefusesAtTheFourthTurn(BaseChatModel):
-    """Asks for a tool on each loop turn; the server refuses the fourth."""
+    """Asks for a tool on each loop turn; the server refuses turn ``refuse_at``."""
 
-    said: str = CONTEXT_SHIFT
+    refuse_at: int = 3
+    error: Any = None
     calls: list[list[BaseMessage]] = []
 
     def _generate(
@@ -258,10 +304,11 @@ class _RefusesAtTheFourthTurn(BaseChatModel):
         if _told_to_stop(sent):
             return ChatResult(generations=[ChatGeneration(message=AIMessage(content=CLAIM))])
         turn = sum(1 for message in sent if isinstance(message, AIMessage))
-        if turn == 3:
-            request = httpx.Request("POST", "http://127.0.0.1:8080/v1/chat/completions")
-            raise openai.InternalServerError(
-                self.said, response=httpx.Response(500, request=request), body=None
+        if turn == self.refuse_at:
+            raise (
+                self.error()
+                if self.error is not None
+                else _server_error("context shift is disabled")
             )
         asked = AIMessage(
             content="Let me look for specific patterns.",

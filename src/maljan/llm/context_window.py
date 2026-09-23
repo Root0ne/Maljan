@@ -129,7 +129,7 @@ __all__ = [
     "reply_reserve_tokens",
     "table_window",
     "tool_definition_chars",
-    "window_reported_full",
+    "window_full_error",
     "unknown_window",
     "window_for_settings",
     "window_from_llama_props",
@@ -1029,7 +1029,10 @@ def _remembered(key: tuple[str, str, str], fact: WindowFact | None) -> WindowFac
 # What a server says when a request did not fit the window it is serving. Every
 # OpenAI-compatible server and every vendor API words it differently; what they
 # share is naming the length. Matched loosely on purpose — a false positive
-# costs one re-probe and a false negative costs a stale window.
+# costs one re-probe and a false negative costs a stale window. That reasoning
+# holds for retiring a cached window and for nothing else: a tool loop deciding
+# whether a failure is a full window asks :func:`window_full_error`, which is
+# strict, because there a false positive would swallow an agent's failure.
 _OVERFLOW_SIGNATURES = (
     "context length",
     "context window",
@@ -1047,16 +1050,40 @@ _OVERFLOW_SIGNATURES = (
 _OVERFLOW_RE = re.compile("|".join(re.escape(word) for word in _OVERFLOW_SIGNATURES))
 
 
-def window_reported_full(message: object) -> bool:
-    """Whether a server's error says a request did not fit the window it serves.
+# The provider SDKs whose errors are a server's answer. Anything else raised
+# inside a loop — a ``ValueError`` that happens to mention ``n_ctx`` — is the
+# platform's own failure and is never read as a full window.
+_PROVIDER_PACKAGES = frozenset({"openai", "anthropic", "ollama", "google"})
 
-    The same wordings :func:`note_provider_error` retires a learned window on.
-    Asked by a tool loop so a full window ends that agent's tool phase the way
-    running out of room does, rather than failing the agent and losing what it
-    had gathered. Never raises.
+# The sentences servers say when the conversation itself has filled the
+# window: llama.cpp with context shift off (prompt and reply reached it) and
+# when the prompt alone exceeds it, OpenAI-compatible servers, and Anthropic.
+_WINDOW_FULL_SIGNATURES = (
+    "context shift is disabled",
+    "exceeds the available context size",
+    "maximum context length",
+    "context_length_exceeded",
+    "prompt is too long",
+)
+
+
+def window_full_error(exc: BaseException) -> bool:
+    """Whether ``exc`` is a model server saying the conversation filled its window.
+
+    Strict where :func:`note_provider_error` is loose. Only an error a provider
+    SDK raised for a server's answer counts, and only a sentence that says the
+    request did not fit. A request whose reply cap alone is larger than the
+    window names ``max_tokens`` and is a configuration fault, not a full
+    conversation, so it is not one either. Never raises.
     """
     try:
-        return bool(_OVERFLOW_RE.search(str(message or "").lower()))
+        package = type(exc).__module__.split(".", 1)[0]
+        if package not in _PROVIDER_PACKAGES:
+            return False
+        text = str(exc).lower()
+        if "max_tokens" in text:
+            return False
+        return any(signature in text for signature in _WINDOW_FULL_SIGNATURES)
     except Exception:  # noqa: BLE001 — an error path never raises another error
         return False
 

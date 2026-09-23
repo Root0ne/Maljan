@@ -40,7 +40,6 @@ from maljan.agents.base_agent import (
     LoopBudget,
     _turn_key,
     is_the_graph_s_step_stop,
-    loop_ended_without_an_answer,
     loop_limits,
     retry_on_connection_error,
     run_on_agent_loop,
@@ -642,10 +641,11 @@ class JudgeAgent(BudgetMeter):
                 if getattr(_m, "type", "") == "ai":
                     record_response_usage(self.token_ledger, _m)
             # The graph's own sentence at its step limit is not the judge's
-            # reasoning, and what reads the reasoning next is a model.
+            # reasoning, and what reads the reasoning next is a model. The
+            # judge wrote none; the budget record says why.
             if _msgs and is_the_graph_s_step_stop(_msgs[-1]):
                 cap = "steps"
-                return loop_ended_without_an_answer(f"the loop reached its {max_steps}-step limit")
+                return ""
             return str(_msgs[-1].content)
         except TimeoutError:
             self.logger.error("JudgeAgent ReAct timed out after %ds.", timeout)
@@ -893,8 +893,14 @@ class JudgeAgent(BudgetMeter):
 
         # Structured output extraction with bounded retry; if every attempt
         # still fails, fall back to the regex-based extractor so the
-        # negotiation loop can keep running.
-        verdict = await self._extract_mediator_verdict(extract_prompt, reasoning_text)
+        # negotiation loop can keep running. A loop that wrote no reasoning has
+        # nothing for a model to extract from: it is read as no agreement,
+        # which is what the text fallback makes of an empty log.
+        verdict = (
+            await self._extract_mediator_verdict(extract_prompt, reasoning_text)
+            if reasoning_text.strip()
+            else self._fallback_mediate(reasoning_text)
+        )
 
         is_consensus = verdict.confidence >= self._consensus_threshold(consensus_threshold)
         log_msg = "Consensus reached" if is_consensus else "No consensus yet"
