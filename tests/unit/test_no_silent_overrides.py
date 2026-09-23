@@ -948,3 +948,75 @@ class TestARejectedAnswerIsNeverAskedOfAnotherModel:
             with pytest.raises(type(content_error)):
                 chain.invoke([HumanMessage(content="what does it do")])
             assert second.i == 0, f"{type(content_error).__name__} was asked of another model"
+
+
+class TestNoClaimCarriesAConfidenceNobodyStated:
+    """The flat 0.50: a confidence written onto a claim its analyst never rated.
+
+    The text fallback cut an unparsed answer into sentences and gave each one
+    0.50, and the lenient CLAIM parser wrote the same number onto a block that
+    stated none. Neither is an assignment the scan above can see — the number
+    went into a fresh object's constructor — so the behaviour is driven here,
+    and the constructors are scanned for a constant confidence.
+    """
+
+    PROSE = (
+        "**Binary Identification**:\n"
+        "- The binary is a 64-bit ELF executable, 9,800 bytes in size.\n"
+        "It downloads a payload and runs it from memory."
+    )
+
+    @staticmethod
+    def _analyst() -> Any:
+        import logging
+
+        from maljan.agents.static_analyst import StaticAnalyst
+
+        analyst = StaticAnalyst.__new__(StaticAnalyst)
+        analyst.name = "static"
+        analyst.logger = logging.getLogger("test")
+        return analyst
+
+    def test_prose_is_not_cut_into_claims(self) -> None:
+        isr = self._analyst()._text_to_isr(self.PROSE, revision_round=0)
+
+        assert isr.claims == []
+        assert isr.unparsed_answer == self.PROSE
+
+    def test_a_block_that_states_no_confidence_is_not_given_one(self) -> None:
+        from maljan.agents.base_agent import parse_structured_claims_counted
+
+        claims, without = parse_structured_claims_counted(
+            "CLAIM: The sample is packed.\nEVIDENCE: entropy 7.9 [ev_0004]\nTECHNIQUE: T1027\n"
+        )
+
+        assert claims == []
+        assert without == 1
+
+    def test_no_claim_is_constructed_with_a_constant_confidence(self) -> None:
+        found: list[str] = []
+        for path in sorted(SRC.rglob("*.py")):
+            relative = _relative(path)
+            if _is_exempt(relative):
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=relative)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+                if name != "ClaimEvidence":
+                    continue
+                for keyword in node.keywords:
+                    value = keyword.value
+                    if (
+                        keyword.arg == "confidence"
+                        and isinstance(value, ast.Constant)
+                        and isinstance(value.value, int | float)
+                        and not isinstance(value.value, bool)
+                    ):
+                        found.append(f"{relative}:{node.lineno}: confidence={value.value!r}")
+
+        assert not found, "A claim carries the confidence its analyst stated:\n  " + "\n  ".join(
+            found
+        )

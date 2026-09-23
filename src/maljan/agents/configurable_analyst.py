@@ -198,12 +198,12 @@ class ConfigurableAnalyst(BaseAnalyst):
         """Wrap a run's text into an ISR — zero-claim when the run degraded.
 
         A degraded run's text is a warning, not analysis; passing it through
-        ``_text_to_isr``'s free-text sentence splitter would mint a fake
-        0.5-confidence claim out of the warning sentence itself. Short-
-        circuiting on ``run.degraded`` — never on the text — keeps the same
-        rule ``_text_to_isr`` already applies to its own placeholder text: a
-        failure is zero claims, never a claim, and a genuine finding is never
-        mistaken for one because of how it happens to start.
+        ``_text_to_isr`` would keep the warning as the analyst's prose and ask
+        the analyst about its format. Short-circuiting on ``run.degraded`` —
+        never on the text — keeps the same rule ``_text_to_isr`` already
+        applies to its own placeholder text: a failure is zero claims, never a
+        claim, and a genuine finding is never mistaken for one because of how
+        it happens to start.
         """
         if run.degraded:
             return AgentISR(

@@ -213,13 +213,7 @@ class DynamicAnalyst(BaseAnalyst):
         if not claims:
             return self._text_to_isr(content, revision_round=0)
 
-        return AgentISR(
-            agent_id=self.name,
-            domain="dynamic",
-            claims=claims,
-            dissent_items=[],
-            revision_round=0,
-        )
+        return self._parsed_isr(claims, content, "dynamic")
 
     def revise_isr(
         self,

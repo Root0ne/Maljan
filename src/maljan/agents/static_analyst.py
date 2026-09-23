@@ -652,16 +652,11 @@ class StaticAnalyst(BaseAnalyst):
             )
 
         if not claims:
-            # Fallback to text extraction if parsing fails
+            # No block the strict parser reads: the lenient reading, which
+            # keeps an answer with no claim as prose and says so.
             return self._text_to_isr(content, revision_round=0)
 
-        return AgentISR(
-            agent_id=self.name,
-            domain="static",
-            claims=claims,
-            dissent_items=[],
-            revision_round=0,
-        )
+        return self._parsed_isr(claims, content, "static")
 
     def revise_isr(
         self,
@@ -916,7 +911,10 @@ def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
         try:
             confidence = max(0.0, min(1.0, float(confidence_match.group(1))))
         except ValueError:
-            confidence = 0.5
+            # A CONFIDENCE line that is not a number states no confidence, and
+            # a claim carries only the one its analyst stated. The block is
+            # counted by ``BaseAnalyst._parsed_isr`` and asked about.
+            continue
 
         technique_raw = technique_match.group(1).upper() if technique_match else "NONE"
         technique_id = None if technique_raw == "NONE" else technique_raw

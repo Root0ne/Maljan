@@ -47,6 +47,7 @@ from maljan.pipeline.validation import (
     ValidationTally,
     Violation,
     mark_invalid_technique_ids,
+    parse_violations,
     retry_with_feedback_sync,
     validate_isr,
     validity_check_available,
@@ -809,6 +810,21 @@ FINAL_ANSWER_NUDGE = "Your last message was not a final report. Return your fina
 NO_STRUCTURED_REPORT_STATUS = "no_claims"
 NO_STRUCTURED_REPORT_REASON = "the model ended without a structured report"
 
+# What an analyst reports for itself when it answered in prose the parser could
+# not read a single claim out of, after it was asked once for the claim
+# format. The prose is the analyst's report and is kept as written; nothing is
+# made a claim of, because a claim carries a confidence the analyst stated and
+# prose states none.
+UNPARSED_ANSWER_REASON = "the answer did not parse into claims; its prose is kept as the report"
+
+
+def unparsed_answers_reason(names: Sequence[str]) -> str:
+    """The run's degradation reason for analysts whose answer stayed prose."""
+    return (
+        "analyst answers kept as prose, with no claim read from them after one "
+        f"question about the claim format: {', '.join(names)}"
+    )
+
 
 def answer_is_isr(text: str) -> bool:
     """Whether an answer carries a report at all.
@@ -1179,22 +1195,33 @@ def evidence_ref_text(evidence_text: str) -> str:
 
 
 def parse_structured_claims(text: str) -> list[ClaimEvidence]:
-    """Parse ``CLAIM:``-delimited blocks, tolerating missing optional fields.
+    """Parse ``CLAIM:``-delimited blocks, tolerating a missing ``EVIDENCE:`` line.
+
+    The claims alone; ``parse_structured_claims_counted`` also says how many
+    blocks were not claims for want of a confidence.
+    """
+    return parse_structured_claims_counted(text)[0]
+
+
+def parse_structured_claims_counted(text: str) -> tuple[list[ClaimEvidence], int]:
+    """``(claims, blocks that stated no confidence)`` for the ``CLAIM:`` blocks in ``text``.
 
     The view/tier decomposition prompts (``_VIEW_SYSTEM``)
-    require this exact format, but the parsed output was handed to
-    ``_text_to_isr``'s free-text sentence splitter, which has no notion of a
-    ``TECHNIQUE:`` line. Every technique ID produced through those paths was
-    therefore silently dropped and the raw "CLAIM: ..." prefix leaked into the
-    claim text.
+    require this exact format; the parsed output used to be handed to a
+    free-text sentence splitter, which has no notion of a ``TECHNIQUE:`` line,
+    so every technique ID produced through those paths was dropped and the raw
+    "CLAIM: ..." prefix leaked into the claim text.
 
-    Deliberately more lenient than the static analyst's strict variant: a block
-    is kept as long as it has a ``CLAIM:``. A model that omits ``CONFIDENCE:``
-    or ``EVIDENCE:`` still produced a real finding, and discarding it loses
-    evidence — the defaults below mark it as unsourced/medium-confidence
-    instead.
+    More lenient than the static analyst's strict variant about the citation:
+    a block without ``EVIDENCE:`` is still a finding, recorded as unsourced.
+    Not about the confidence. A block that states none, or one that cannot be
+    read as a number, is not a claim: the confidence on a claim is the
+    analyst's own statement, and this parser used to write 0.5 where the
+    analyst wrote nothing. Such blocks are counted instead, and the count is
+    what the validation turn asks the analyst about.
     """
     claims: list[ClaimEvidence] = []
+    without_confidence = 0
     # Stripped per field rather than over the whole text: removing a block
     # that sat between ``CLAIM:`` and ``EVIDENCE:`` would leave the claim
     # marker with nothing after it, and the next line would slide up into the
@@ -1224,12 +1251,10 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
         confidence_match = _BLOCK_CONFIDENCE_RE.search(block)
         technique_match = _BLOCK_TECHNIQUE_RE.search(block)
 
-        confidence = 0.5
-        if confidence_match:
-            try:
-                confidence = max(0.0, min(1.0, float(confidence_match.group(1))))
-            except ValueError:
-                confidence = 0.5
+        confidence = _stated_confidence(confidence_match)
+        if confidence is None:
+            without_confidence += 1
+            continue
 
         technique_id: str | None = None
         if technique_match:
@@ -1249,7 +1274,21 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
                 technique_id=technique_id,
             )
         )
-    return claims
+    return claims, without_confidence
+
+
+def _stated_confidence(match: re.Match[str] | None) -> float | None:
+    """The confidence a ``CONFIDENCE:`` line states, or ``None`` when it states none.
+
+    A number above one or below zero is still the analyst's number, held to
+    the range the schema carries; a line that is not a number states nothing.
+    """
+    if match is None:
+        return None
+    try:
+        return max(0.0, min(1.0, float(match.group(1))))
+    except ValueError:
+        return None
 
 
 def _extract_technique_ids(text: str) -> list[str]:
@@ -2072,7 +2111,9 @@ class _PriorAnswer:
 
     def __init__(self, isr: AgentISR) -> None:
         self.isr = isr
-        self.content = isr.to_text_summary()
+        # An answer that parsed into nothing is shown back as the prose it was,
+        # so the question about its format is asked over what was written.
+        self.content = isr.unparsed_answer or isr.to_text_summary()
 
 
 def alignment_gate(knowledge: Any, cfg_validation: Any, log: Any, name: str) -> Any | None:
@@ -3167,6 +3208,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 )
                 spoken: set[str] = set()
                 pace = TurnPace(_rate_of_the_answering_model)
+                # Kept past the loop: what one turn and a final answer cost at
+                # this model's pace is what the stage asks before it gives
+                # this analyst a second loop.
+                self._last_pace = pace
                 async with contextlib.aclosing(stream) as snapshots:
                     try:
                         async for snapshot in snapshots:
@@ -4047,6 +4092,35 @@ class BaseAnalyst(BudgetMeter, ABC):
         with lock_for(self):
             return self._analyze_isr_guarded(data)
 
+    def safe_analyze_isr_within(self, data: str, seconds: float) -> AgentISR:
+        """``safe_analyze_isr`` with the loop held to ``seconds``, what the stage has left.
+
+        The ceiling a delegated ask uses, with this agent's own step budget:
+        the loop's budget, its hard cap and its salvage are all sized from
+        what is left, not from a fresh copy of the stage's whole time.
+        """
+        self.current_round = 0
+        _timeout, max_steps = loop_limits(self.name)
+        with lock_for(self):
+            before = getattr(self, "_budget_ceiling", None)
+            self._budget_ceiling = BudgetCeiling(max_steps, max(1.0, float(seconds)))
+            try:
+                return self._analyze_isr_guarded(data)
+            finally:
+                self._budget_ceiling = before
+
+    def seconds_a_loop_needs(self) -> float:
+        """One turn and the final answer after it, at the pace this agent's last loop measured.
+
+        The longest turn of the model that answered last, plus the reserve the
+        loop keeps for a final answer (``TurnPace.reserve``). A loop that
+        measured no turn needs at least the salvage's own minimum.
+        """
+        pace = getattr(self, "_last_pace", None)
+        if not isinstance(pace, TurnPace):
+            return float(_SYNTHESIS_MIN_SECONDS)
+        return pace.longest() + pace.reserve()
+
     def _analyze_isr_guarded(self, data: str) -> AgentISR:
         # Whatever the loop is given, kept where the handlers below can reach
         # it: the salvage needs the same text the analysis had, and asking for
@@ -4522,19 +4596,31 @@ class BaseAnalyst(BudgetMeter, ABC):
         # batch the analyst has already answered.
         asked: list[bool] = []
 
+        # An answer the loop already asked once for a report — the nudge — is
+        # not asked again for the claim format: that was the question. What it
+        # left unread is recorded instead of asked.
+        nudged = bool(getattr(self, "_answer_unstructured", False))
+
         def _validator(candidate: AgentISR) -> list[Violation]:
             first = not asked
             asked.append(True)
-            return validate_isr(
-                candidate,
-                attck=knowledge,
-                ledger_ids=ledger_ids,
-                sample=sample,
-                alignment=gate,
-                alignment_threshold=threshold,
-                alignment_margin=margin,
-                weak_alignment_challenges=challenges and first,
-            )
+            unread = [] if nudged else parse_violations(candidate)
+            return [
+                *unread,
+                *validate_isr(
+                    candidate,
+                    attck=knowledge,
+                    ledger_ids=ledger_ids,
+                    sample=sample,
+                    alignment=gate,
+                    alignment_threshold=threshold,
+                    alignment_margin=margin,
+                    weak_alignment_challenges=challenges and first,
+                ),
+            ]
+
+        if nudged:
+            self.validation_findings.extend(parse_violations(isr))
 
         try:
             if not _validator(isr):
@@ -4600,6 +4686,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         # analyst's original findings with nothing recording that it happened —
         # the exact silence this whole phase is about. Keep the first answer and
         # label whatever was wrong with it.
+        # An answer that is still prose after being asked keeps the loop's own
+        # prose, which is what the analyst wrote from everything it gathered;
+        # the retry was asked over the evidence text alone.
+        if retries and not revised.claims and isr.unparsed_answer:
+            revised = isr
         if retries and len(revised.claims) < len(isr.claims):
             self.logger.warning(
                 "Validation: the retry for '%s' returned %d claim(s) against %d; "
@@ -4810,18 +4901,36 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         return [c for c in claims if not self._is_meta_claim_text(c.claim)]
 
+    def _parsed_isr(
+        self, claims: list[ClaimEvidence], content: str, domain: str, revision_round: int = 0
+    ) -> AgentISR:
+        """The ISR for claims a strict parser read out of ``content``.
+
+        With the count of CLAIM blocks the strict parser passed over for
+        stating no confidence, which the validation turn asks about: a strict
+        parser that drops a block says nothing, and the analyst wrote it.
+        """
+        isr = AgentISR(
+            agent_id=self.name,
+            domain=domain,
+            claims=claims,
+            dissent_items=[],
+            revision_round=revision_round,
+        )
+        isr.note_parse(blocks_without_confidence=parse_structured_claims_counted(content)[1])
+        return isr
+
     def _text_to_isr(self, text: str, revision_round: int) -> AgentISR:
         """Convert a free-text report into a minimal AgentISR."""
         domain = self._infer_domain()
 
         # A model that writes its tool calls into
-        # the assistant channel leaves them here, and the sentence splitter
-        # below has no way to tell a call from prose -- a live static_r2 run
-        # put raw ``<tool_call>`` blocks in front of an operator as findings.
-        # Removed before anything reads the text, so no path derives a claim
-        # from scaffolding; a report that is nothing else yields no claims at
-        # all, which is what the meta-claim branch already does for the
-        # placeholder case.
+        # the assistant channel leaves them here -- a live static_r2 run put
+        # raw ``<tool_call>`` blocks in front of an operator as findings.
+        # Removed before anything reads the text, so neither a claim nor the
+        # kept prose carries scaffolding; a report that is nothing else yields
+        # no claims at all, which is what the meta-claim branch already does
+        # for the placeholder case.
         text = strip_tool_call_scaffolding(text)
 
         # When the agent returned only the placeholder
@@ -4844,59 +4953,42 @@ class BaseAnalyst(BudgetMeter, ABC):
                 )
             )
 
-        # Structured output first. Several prompts —
+        # Structured output first, and only. Several prompts —
         # notably the view/tier decomposition ones — mandate the
-        # CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE block format. Running the
-        # free-text sentence splitter over that shape kept the literal
-        # "CLAIM: " prefix in the claim text and threw away every
-        # ``TECHNIQUE:`` line, so those paths produced technique-less claims.
+        # CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE block format, and every ISR
+        # prompt asks for it.
+        structured: list[ClaimEvidence] = []
+        without_confidence = 0
         if "CLAIM:" in text:
-            structured = parse_structured_claims(text)
-            if structured:
-                return AgentISR(
-                    agent_id=self.name,
-                    domain=domain,
-                    claims=structured,
-                    dissent_items=[],
-                    revision_round=revision_round,
-                )
-
-        # A sentence the model wrote on its way somewhere — "Let me search for
-        # more specific strings related to malware indicators:" — is scaffolding
-        # in exactly the way a raw tool call is, and the splitter cannot tell
-        # prose from intention any more than it could tell prose from a call.
-        raw_sentences = [
-            s.strip()
-            for s in self._SENTENCE_SPLIT_RE.split(text)
-            if len(s.strip()) > 20 and not self._is_meta_claim_text(s.strip())
-        ]
-        claims: list[ClaimEvidence] = []
-        for sentence in raw_sentences[:10]:
-            # Bind a technique ID to the sentence that actually mentions it,
-            # not by positional index. The previous ``technique_ids[i]``
-            # stapled a T-code extracted anywhere in the report onto an
-            # unrelated sentence, so the report attributed a technique to a
-            # claim that never mentioned it.
-            _sentence_tids = _extract_technique_ids(sentence)
-            tid = _sentence_tids[0] if _sentence_tids else None
-            claims.append(
-                ClaimEvidence(
-                    claim=sentence[:200],
-                    evidence_ref=f"text-extracted from {self.name} report",
-                    confidence=0.5,
-                    technique_id=tid,
-                )
-            )
-
-        return self._with_answer_status(
-            AgentISR(
+            structured, without_confidence = parse_structured_claims_counted(text)
+        if structured:
+            isr = AgentISR(
                 agent_id=self.name,
                 domain=domain,
-                claims=claims,
+                claims=structured,
                 dissent_items=[],
                 revision_round=revision_round,
             )
+            isr.note_parse(blocks_without_confidence=without_confidence)
+            return isr
+
+        # An answer with no claim this parser can read is prose, and prose is
+        # kept as the analyst's report rather than cut into claims. The
+        # sentence splitter that stood here made a claim of every sentence
+        # longer than twenty characters, Markdown headings included, at a flat
+        # 0.50 nobody stated. The validation turn asks once for the claim
+        # format; what survives that is recorded, and the stage keeps the prose.
+        isr = AgentISR(
+            agent_id=self.name,
+            domain=domain,
+            claims=[],
+            dissent_items=[],
+            revision_round=revision_round,
         )
+        isr.note_parse(unparsed_answer=text.strip(), blocks_without_confidence=without_confidence)
+        isr.status = NO_STRUCTURED_REPORT_STATUS
+        isr.status_reason = UNPARSED_ANSWER_REASON
+        return isr
 
     # Class-level default so an analyst built without ``__init__`` — a test
     # stand-in, a script — still answers the question the parser asks it.

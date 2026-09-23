@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 # What a claim carrying an id the catalogue does not have is labelled with,
 # wherever it is printed. One string so the ISR summary the judge reads, the
@@ -175,6 +175,30 @@ class AgentISR(BaseModel):
     status_reason: str | None = Field(
         default=None, description="Why the analyst reports that status, in one sentence."
     )
+    # What the parser could not read out of the answer this ISR was parsed
+    # from, for the validation turn to ask about and the stage to keep. Not
+    # fields: they describe one parse, not the analyst's answer, and they are
+    # never serialised. ``unparsed_answer`` is the prose of an answer that
+    # yielded no claim at all, kept as the analyst wrote it; the count is the
+    # CLAIM blocks that stated no confidence, which are not claims — a number
+    # nobody stated is not put on one.
+    _unparsed_answer: str = PrivateAttr(default="")
+    _blocks_without_confidence: int = PrivateAttr(default=0)
+
+    @property
+    def unparsed_answer(self) -> str:
+        """The prose of an answer that parsed into no claim, or ``""``."""
+        return self._unparsed_answer
+
+    @property
+    def blocks_without_confidence(self) -> int:
+        """How many CLAIM blocks of the parsed answer stated no confidence."""
+        return self._blocks_without_confidence
+
+    def note_parse(self, *, unparsed_answer: str = "", blocks_without_confidence: int = 0) -> None:
+        """Record what the parse of this ISR's answer could not read."""
+        self._unparsed_answer = str(unparsed_answer or "")
+        self._blocks_without_confidence = max(0, int(blocks_without_confidence or 0))
 
     @property
     def mean_confidence(self) -> float:

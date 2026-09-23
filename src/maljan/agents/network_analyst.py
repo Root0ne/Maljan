@@ -268,13 +268,7 @@ class NetworkAnalyst(BaseAnalyst):
                 if not claims:
                     return self._text_to_isr(content, revision_round=0)
 
-                return AgentISR(
-                    agent_id=self.name,
-                    domain="network",
-                    claims=claims,
-                    dissent_items=[],
-                    revision_round=0,
-                )
+                return self._parsed_isr(claims, content, "network")
 
         # Fallback: text-based ISR analysis
         target_info = (
@@ -311,13 +305,7 @@ class NetworkAnalyst(BaseAnalyst):
         if not claims:
             return self._text_to_isr(content, revision_round=0)
 
-        return AgentISR(
-            agent_id=self.name,
-            domain="network",
-            claims=claims,
-            dissent_items=[],
-            revision_round=0,
-        )
+        return self._parsed_isr(claims, content, "network")
 
     def revise_isr(
         self,

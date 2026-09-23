@@ -1431,6 +1431,32 @@ def stage_runs(stage: Any, state: AnalysisState) -> tuple[bool, str]:
     return False, f"condition not met: {when}"
 
 
+def _stage_seconds_left(agent: Any, started: float) -> float:
+    """What is left of one analyst's stage time: its loop budget less what the node spent."""
+    timeout, _steps = agent._loop_limits()
+    return float(timeout) - (time.monotonic() - started)
+
+
+def _second_loop_decision(agent: Any, started: float) -> str:
+    """``""`` when a second loop fits in what is left of the stage, else why it does not.
+
+    A loop needs one turn and the final answer after it, at the pace this
+    analyst's own first loop measured (``BaseAnalyst.seconds_a_loop_needs``).
+    The second loop used to be given a fresh copy of the whole budget whatever
+    the first had spent: on a model that took 1,100 s over its first loop and
+    400 s over the salvage, it ran another 1,500 s and ended empty again.
+    """
+    left = _stage_seconds_left(agent, started)
+    needs = agent.seconds_a_loop_needs()
+    timeout, _steps = agent._loop_limits()
+    if left >= needs:
+        return ""
+    return (
+        f"not run a second time: {max(0.0, left):.0f}s of its {float(timeout):.0f}s stage "
+        f"were left, and a loop needs {needs:.0f}s at the pace its first loop measured"
+    )
+
+
 def stage_record(
     stage: Any,
     *,
@@ -2157,14 +2183,43 @@ def make_stage_agent_node(
                 # fallback — that would silently drop the rest of the sample.
                 fallback_text = ""
 
+            # An analyst whose loop ended with nothing — no claim and no prose —
+            # is given one more loop over the same material, when what is left
+            # of its stage time can hold one at the pace its first loop
+            # measured. What that loop answers is the analyst's answer, parsed
+            # and validated like the first; a stage that cannot hold it says
+            # why instead. An analyst that answered in prose already answered,
+            # and one whose loop ran out of room would meet the same full
+            # window.
+            second_loop_note = ""
+            if (
+                not isr.claims
+                and not isr.unparsed_answer
+                and fallback_text
+                and getattr(agent, "ended_out_of_room", False) is not True
+            ):
+                second_loop_note = _second_loop_decision(agent, started)
+                if not second_loop_note:
+                    again = agent.safe_analyze_isr_within(
+                        fallback_text, _stage_seconds_left(agent, started)
+                    )
+                    if again.claims or again.unparsed_answer:
+                        isr = again
+                    else:
+                        second_loop_note = "a second loop over the same material ended empty too"
+                if second_loop_note:
+                    logger.info("Agent '%s': %s.", agent_name, second_loop_note)
+
             if isr.claims:
                 report = isr.to_text_summary()
-            elif getattr(agent, "ended_out_of_room", False) is True:
-                # A second loop over the same material meets the same full
-                # window. The analyst has no prose; why is on its budget record.
-                report = ""
+            elif isr.unparsed_answer:
+                # The analyst's answer in its own words, which is what it
+                # wrote: nothing in it could be read as a claim, and nothing
+                # is made one.
+                report = isr.unparsed_answer
             elif fallback_text:
-                report = agent.safe_analyze(fallback_text)
+                # No prose; why is on the budget record and the stage record.
+                report = ""
             else:
                 report = (
                     f"[WARN] {agent_name}: ISR produced no claims (multi-chunk fallback empty)."
@@ -2208,6 +2263,7 @@ def make_stage_agent_node(
                     stage,
                     ran=True,
                     agents=(agent_name,),
+                    agent_reasons={agent_name: second_loop_note} if second_loop_note else None,
                     claim_count=len(isr.claims),
                     technique_ids=technique_ids,
                     duration_ms=_elapsed_ms(),
@@ -3399,6 +3455,18 @@ def make_judge_node(
                 _degradation_reasons.append(
                     f"analysts produced no claims: {', '.join(_empty_analysts)}"
                 )
+            # Which of those answered in prose that did not parse into a claim
+            # after being asked once for the claim format. The prose is their
+            # report; nothing in it was made a claim.
+            from maljan.agents.base_agent import UNPARSED_ANSWER_REASON, unparsed_answers_reason
+
+            _prose_analysts = [
+                name
+                for name in _empty_analysts
+                if getattr(isr_reports.get(name), "status_reason", None) == UNPARSED_ANSWER_REASON
+            ]
+            if _prose_analysts:
+                _degradation_reasons.append(unparsed_answers_reason(_prose_analysts))
             # Technique claims the analyst kept after being asked to cite the
             # entry it read them from. A live run put sixteen of these in front
             # of the judge, which read them as sixteen techniques.
