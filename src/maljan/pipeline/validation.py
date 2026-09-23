@@ -1143,9 +1143,16 @@ class CapabilityGrounding:
                 if base:
                     techniques.add(base)
                 words.append(str(getattr(row, "technique_name", "") or ""))
-            for block in ("static", "dynamic", "network"):
+            for block in ("static", "dynamic"):
                 if getattr(report, block, None) is not None:
                     keys.add(block)
+            # The network block exists whenever the string sweep found a run of
+            # bytes shaped like a host, and its presence grounded "lateral
+            # movement", "command and control" and "exfiltration" in a run
+            # that observed no traffic at all. It grounds them when something
+            # other than the sweep recorded a row of it.
+            if _network_observed(getattr(report, "network", None)):
+                keys.add("network")
             if list(getattr(report, "persistence", None) or []):
                 keys.add("persistence")
             for section in getattr(report, "sections", None) or []:
@@ -1172,6 +1179,25 @@ class CapabilityGrounding:
             evidence_keys=frozenset(keys),
             evidence_text=" ".join(w for w in words if w).lower(),
         )
+
+
+def _network_observed(network: Any) -> bool:
+    """Whether a network block holds anything but the string sweep's own rows.
+
+    A sandbox's or an analyst's row, or a fingerprint a capture recorded. A
+    row that records no source is read as the sweep's, the reading the export
+    gives it.
+    """
+    if network is None:
+        return False
+    for kind in ("domains", "ips", "urls"):
+        for row in getattr(network, kind, None) or []:
+            if str(getattr(row, "source", "") or "").strip().lower() not in ("", "strings"):
+                return True
+    return any(
+        getattr(network, recorded, None)
+        for recorded in ("user_agents", "ja3_fingerprints", "ja3s_fingerprints")
+    )
 
 
 # What ends the clause a term was written in. A capability word after one of

@@ -83,13 +83,21 @@ class TestTheRunThatProducedIt:
         grounding = CapabilityGrounding.from_report(_report(techniques=("T1055.012",)))
         assert ungrounded_capabilities("It performs process injection.", grounding) == []
 
-    def test_a_typed_network_block_grounds_the_channel(self) -> None:
-        from maljan.reporting.models import NetworkIOCs
+    def test_an_observed_network_block_grounds_the_channel(self) -> None:
+        """A block something other than the string sweep recorded a row of;
+        an empty block, or one of swept rows only, grounds nothing."""
+        from maljan.reporting.models import NetworkDomain, NetworkIOCs
 
+        observed = NetworkIOCs(domains=[NetworkDomain(fqdn="gate9.example.org", source="sandbox")])
         grounding = CapabilityGrounding.from_report(
-            _report(techniques=("T1027",), network=NetworkIOCs())
+            _report(techniques=("T1027",), network=observed)
         )
         assert ungrounded_capabilities("It has a C2 channel.", grounding) == []
+
+        empty = CapabilityGrounding.from_report(
+            _report(techniques=("T1027",), network=NetworkIOCs())
+        )
+        assert ungrounded_capabilities("It has a C2 channel.", empty)
 
     def test_an_analyst_who_said_it_grounds_it(self) -> None:
         """A report is allowed to repeat what its own evidence says, mapped or not."""
