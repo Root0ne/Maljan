@@ -155,22 +155,37 @@ columns, the `MalwareReport` document, the run summary, the exported STIX
 bundle and the per-agent findings — and nothing else. It states what each
 record says; it does not say which run is right, does not merge them and
 writes into neither. The same function, `maljan.reporting.run_diff.diff_runs`,
-can be called on any two records; it is linear in their sizes and the route
-runs it off the event loop.
+can be called on any two records; it is linear in their sizes, and the route
+runs it and encodes its answer off the event loop.
 
 The answer carries `a` and `b` (report id, job id, time, SHA-256, file name),
 `totals`, and `sections` in a fixed order. Each section has a `match_key`
 saying what its rows are paired by, `counts` per status, `recorded` saying
 whether each run's record holds the source the section reads, `notes`, and
-`rows`. A row has its `status`, both sides' fields as recorded (`a`, `b`, null
-where the run has no such row), `changes` naming each differing field with
-both values, and the evidence-ledger ids each run's record cites for it.
+`rows`, plus `section_evidence`: the ledger ids a record cites for the
+section as a whole (the rule-match sections and the capability profile cite
+their entries that way, not per row). A row has its `status`, both sides'
+fields as recorded (`a`, `b`, null where the run has no such row), `changes`
+naming each differing field with both values, and the evidence-ledger ids
+each run's record cites for that row. Ids are read only from fields that hold
+ids — `family_evidence_ids`, a key finding's `evidence_ids`, a configuration
+item's, a command's and a C2 channel's `evidence_refs`, a persistence
+mechanism's and a claim's `evidence_ref`, a STIX object's
+`x_maljan_evidence_refs` — and never out of a quote, a note, a title or a
+sample's own strings. A row whose record holds no such field cites none; that
+is every ATT&CK mapping and every indicator.
+
+A `stated_by` names who stated a value only where the record shows it. A
+confidence is the judge's when the verdict reading is `stated`. A family's is
+its `family_source`. A severity is the judge's only on a report that carries
+`verdict_reading`: a report stored before that carries a rating the builder
+computed, and its severity row has no `stated_by` at all.
 
 | Section | Paired by |
 | :-- | :-- |
 | `verdict` | the field: verdict (with `verdict_reading`), confidence, severity, family (with `family_source` and its evidence ids), category |
 | `attack` | `ttp_mappings.technique_id`; the confidence source comes from the capability matrix |
-| `indicators` | `consolidated_iocs` kind and value (case-blind for domains, addresses, e-mail and hashes); a report without that table is read from its network block, which records no publish decision, and says so |
+| `indicators` | `consolidated_iocs` kind and value. A row stored without a kind (a report stored before the column existed, whose network values may be defanged) is keyed by its type and value as stored and pairs only with rows of that shape; against the other shape both runs' rows are listed by run, with a note. A report without the table is read from its network block, which records no publish decision, and says so |
 | `key_findings` | exact text only |
 | `analysts` | `agent_findings.agent_name` |
 | `persistence` | kind and target |
@@ -179,7 +194,7 @@ both values, and the evidence-ledger ids each run's record cites for it.
 | `c2_channels` | the channel name |
 | `capability_profile` | the behaviour category of `static.api_capabilities` |
 | `detection` | engine and rule name from the `yara_matches`, `sigma_matches` and `capa_capabilities` sections |
-| `stix` | STIX type and an identifying property: the ATT&CK id, an indicator's pattern, a name, a value, a file's SHA-256 or name, a registry key, a directory path; a relationship by its type and both ends' keys, a sighting by what it sights |
+| `stix` | STIX type and an identifying property: the ATT&CK id, an indicator's pattern, a name (as written, and compared), a value, a file's SHA-256 or name, a registry key, a directory path; a relationship by its type and both ends' keys, a sighting by what it sights. Any other object pairs only with an identical object, id included |
 | `run` | the fact: profile, analysts, models per agent, token figures, wall time, job duration, degraded |
 | `tools` | the tool name of `run_summary.evidence.by_tool` |
 | `degradation` | exact text only |
@@ -188,10 +203,21 @@ A status is `added` or `removed` (present in B only or A only by key),
 `changed`, `unchanged`, or `only_in_a` / `only_in_b`. The last two are rows
 the record does not key stably — a key finding's prose, a degradation
 sentence, a STIX object with no identifying property such as a report, a
-note or a process, a relationship to one, or a second row under a key the
-same run already used. They are listed by run and never paired by
-resemblance. Object ids are not a key: the platform mints some ids per run,
-so two runs of one sample carry different ids for the same content.
+note or a process, a relationship to one — and indicators of two storage
+shapes. They are listed by run and never paired by resemblance. Object ids
+are not a key: the platform mints some ids per run, so two runs of one sample
+carry different ids for the same content.
+
+Rows under one key pair as a multiset. When both runs hold a key n times the
+rows pair, identical rows first; the rows one run holds beyond the other's
+count are `added` or `removed` with a note that they are a repeat. A record
+compared with itself is unchanged in every row.
+
+One case rule applies to indicator values and STIX keys alike: a value is
+compared without regard to case only where it is case-insensitive by
+definition — a domain name, an IP address, a hash, a MAC address and a
+Windows registry key; an e-mail address in its domain part only. A URL, a
+path, a mutex name and a malware or tool name are compared as written.
 
 ### Settings
 

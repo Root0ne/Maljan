@@ -33,7 +33,8 @@ export interface DiffRow {
   b: Record<string, DiffValue> | null;
   /** Each field that differs on a paired row, with both values. */
   changes: DiffChange[];
-  /** The evidence-ledger ids each run's record cites for this row. */
+  /** The evidence-ledger ids each run's record cites for this row, read only
+   *  from structured id fields; empty when the record holds none. */
   evidence: { a: string[]; b: string[] };
   note: string | null;
 }
@@ -51,6 +52,9 @@ export interface DiffSection {
   counts: Record<DiffStatus, number>;
   rows: DiffRow[];
   notes: string[];
+  /** Ids the record cites for the section as a whole rather than for one row
+   *  (the rule-match and capability-profile sections). */
+  section_evidence: { a: string[]; b: string[] };
 }
 
 export interface DiffSide {

@@ -29,6 +29,10 @@ import {
   visibleRows,
 } from "./runDiff";
 
+/** Rows drawn per section before "Show all": a large bundle with unchanged
+ *  rows shown would otherwise put tens of thousands of rows in the page. */
+const ROW_LIMIT = 200;
+
 const STATUS_ICON: Record<DiffStatus, LucideIcon> = {
   changed: Pencil,
   added: Plus,
@@ -59,12 +63,15 @@ function SideCard({ label, side }: { label: string; side: DiffSide }) {
   return (
     <div className="min-w-0 flex-1 rounded border border-border bg-bg-surface p-3">
       <div className="text-[11px] uppercase tracking-wider text-text-muted">Run {label}</div>
-      <div className="truncate text-sm font-semibold text-text-primary" title={side.file_name ?? ""}>
+      <div
+        className="truncate text-sm font-semibold text-text-primary print:whitespace-normal print:break-all"
+        title={side.file_name ?? ""}
+      >
         {side.file_name || "File name not recorded"}
       </div>
       <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
         <dt className="text-text-muted">Run</dt>
-        <dd className="min-w-0 truncate font-mono">
+        <dd className="min-w-0 truncate font-mono print:whitespace-normal print:break-all">
           <Link href={`/analysis/${side.job_id}`} className="text-accent-strong hover:underline">
             {side.job_id}
           </Link>
@@ -123,7 +130,7 @@ function SectionTable({
   diff: RunDiff;
 }) {
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto print:overflow-visible">
       <table className="w-full text-xs">
         <caption className="sr-only">
           {section.title}: rows paired by {section.match_key}
@@ -190,8 +197,11 @@ function SectionBlock({
   diff: RunDiff;
   showUnchanged: boolean;
 }) {
-  const rows = visibleRows(section, showUnchanged);
+  const [showAll, setShowAll] = useState(false);
+  const all = visibleRows(section, showUnchanged);
+  const rows = showAll ? all : all.slice(0, ROW_LIMIT);
   const headingId = `diff-${section.key}-heading`;
+  const { a: evA, b: evB } = section.section_evidence ?? { a: [], b: [] };
   return (
     <section
       id={`diff-${section.key}`}
@@ -209,9 +219,39 @@ function SectionBlock({
             {note}
           </p>
         ))}
+        {(evA.length > 0 || evB.length > 0) && (
+          <div className="mt-1 space-y-1 text-[11px] text-text-muted">
+            <div>Section evidence, cited for the section as a whole rather than for one row:</div>
+            {evA.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1">
+                <span>A</span>
+                <EvidenceChips ids={evA} jobId={diff.a.job_id} />
+              </div>
+            )}
+            {evB.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1">
+                <span>B</span>
+                <EvidenceChips ids={evB} jobId={diff.b.job_id} />
+              </div>
+            )}
+          </div>
+        )}
       </div>
       {rows.length > 0 ? (
-        <SectionTable section={section} rows={rows} diff={diff} />
+        <>
+          <SectionTable section={section} rows={rows} diff={diff} />
+          {all.length > rows.length && (
+            <div className="px-4 py-2 print:hidden">
+              <button
+                type="button"
+                onClick={() => setShowAll(true)}
+                className="rounded border border-border px-2 py-0.5 text-xs text-text-secondary hover:border-text-muted hover:text-text-primary"
+              >
+                Show all {all.length} rows ({all.length - rows.length} more)
+              </button>
+            </div>
+          )}
+        </>
       ) : (
         <p className="px-4 py-3 text-xs text-text-muted">
           {section.rows.length === 0

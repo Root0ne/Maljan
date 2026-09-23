@@ -17,8 +17,10 @@ change landed on `main`.
   and an identifying property rather than by id; and run facts — profile,
   models, token figures, wall time, tools called, degradation reasons. Each
   section names the key its rows are paired by, and a row the record does not
-  key stably is listed as present in one run, never paired by guess. Changed
-  rows cite both runs' evidence-ledger ids. It is read only from the two
+  key stably is listed as present in one run, never paired by guess, and rows
+  under one key pair as a multiset, so a run compared with itself shows no
+  difference. Rows cite each run's evidence-ledger ids where the record holds
+  them in an id field, and never an id read out of prose. It is read only from the two
   stored records, says whether the SHA-256 is the same, and answers 404 unless
   the caller may read both runs. The console's analysis header gains "Compare
   with another run", which offers the same sample's runs first and then any

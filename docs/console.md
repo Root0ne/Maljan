@@ -478,12 +478,17 @@ icon, a mark and a word together (Changed `~`, Added in B `+`, Removed in B
 a key finding reworded or a STIX report object, and are never paired by
 guess. A changed row lists the fields that differ with both values; the
 evidence column links each run's cited ledger ids into that run's EVIDENCE
-tab. Differences come first; "Show unchanged rows" lists the rest.
+tab, and shows none where the record holds no id for the row. Ids a record
+cites for a whole section, as the rule-match sections do, are listed under
+the section heading as section evidence. Differences come first; "Show
+unchanged rows" lists the rest, and a section longer than 200 rows offers
+"Show all".
 
 Every control is a link, a button or a checkbox, so the keyboard reaches
 all of it, and the section list at the top jumps to each section. "Swap A and
 B" reverses the comparison. Print hides the navigation and prints dark text
-on white, a section at a time where it fits.
+on white, a section at a time where it fits, with tables unclipped and run ids
+in full.
 
 ## Evidence
 

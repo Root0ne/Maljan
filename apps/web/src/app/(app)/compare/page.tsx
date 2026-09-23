@@ -122,7 +122,7 @@ function RunPicker({ a }: { a: string }) {
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          className="mb-2 w-full max-w-xl rounded border border-border bg-bg-deep px-2.5 py-1.5 text-sm text-text-primary focus:border-accent focus:outline-none"
+          className="mb-2 w-full max-w-xl rounded border border-border bg-bg-deep px-2.5 py-1.5 text-sm text-text-primary focus:border-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
         />
         {isRunId(typedId) && typedId !== a && !matches.some((r) => r.id === typedId) && (
           <p className="mb-2 text-xs">

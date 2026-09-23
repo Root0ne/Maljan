@@ -52,6 +52,7 @@ function section(key: string, group: string, rows: DiffRow[]): DiffSection {
     counts: c,
     rows,
     notes: [],
+    section_evidence: { a: [], b: [] },
   };
 }
 
