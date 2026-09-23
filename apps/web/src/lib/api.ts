@@ -16,6 +16,7 @@ import type {
   ProbeResult,
   SettingsSchema,
   SettingsValues,
+  TeamLintResult,
   VirustotalRegistration,
 } from "@/types/settings";
 
@@ -676,6 +677,23 @@ class ApiClient {
       "/api/v1/settings/validate-condition",
       { method: "POST", body: JSON.stringify({ expression }) }
     );
+  }
+
+  /**
+   * Lint every team as staged and lay each one out. Nothing is stored; the
+   * errors are the refusals apply would make, in the same words.
+   */
+  lintTeams(
+    profiles: Record<string, unknown>,
+    definitions: Record<string, unknown>,
+    profile: string,
+    init: { signal?: AbortSignal } = {}
+  ) {
+    return this.request<TeamLintResult>("/api/v1/settings/lint-teams", {
+      method: "POST",
+      body: JSON.stringify({ profiles, definitions, profile }),
+      signal: init.signal,
+    });
   }
 
   /** Run a REST-sandbox mapping against a pasted response. Nothing is stored. */

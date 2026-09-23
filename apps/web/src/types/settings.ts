@@ -201,6 +201,56 @@ export interface ProfileEntry {
   static_provider?: string | null;
 }
 
+/**
+ * One finding of `POST /settings/lint-teams`. An error is a refusal the apply
+ * path would make, in the same words; a warning never blocks apply. `path` is
+ * the dotted key a refusal would carry, so it routes to the same card.
+ */
+export interface TeamFinding {
+  severity: "error" | "warning";
+  code: string;
+  message: string;
+  team: string;
+  stage: string | null;
+  field: string | null;
+  agent: string | null;
+  path: string;
+}
+
+/** One stage as the shared team layout places it. */
+export interface TeamGraphNode {
+  key: string;
+  label: string;
+  kind: string;
+  agents: string[];
+  when: string;
+  reads: string;
+  mode: string;
+  row: number;
+  column: number;
+}
+
+/** A `depends_on` edge; `implicit` is the triage pack adopting a root stage,
+ *  `legal: false` a dependency on a stage written further down. */
+export interface TeamGraphEdge {
+  source: string;
+  target: string;
+  implicit: boolean;
+  legal: boolean;
+}
+
+export interface TeamGraph {
+  nodes: TeamGraphNode[];
+  edges: TeamGraphEdge[];
+  rows: number;
+  columns: number;
+}
+
+export interface TeamLintResult {
+  findings: TeamFinding[];
+  graphs: Record<string, TeamGraph>;
+}
+
 /** `ProbeResult.details` as the agent probe fills it in. */
 export interface AgentProbeDetails {
   prompt_chars: number;
