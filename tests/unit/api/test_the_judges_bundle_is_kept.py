@@ -132,3 +132,43 @@ class TestTheMigration:
                 module.downgrade()
             columns = {c["name"] for c in sa.inspect(conn).get_columns("analysis_reports")}
             assert "judge_stix_bundle" not in columns
+
+
+class TestTheEndpointSaysWhatIsTrue:
+    @pytest.mark.asyncio
+    async def test_a_report_stored_before_the_record_says_it_has_none(self) -> None:
+        from app.api.v1.reports import get_stix_bundle
+
+        report = MagicMock(judge_stix_bundle=None)
+        svc = ReportService(db=AsyncMock())
+        svc.get_report = AsyncMock(return_value=report)  # type: ignore[method-assign]
+
+        answer = await get_stix_bundle(uuid.uuid4(), "judge", MagicMock(), svc)
+
+        assert answer["kept"] is False
+        assert "stored before" in answer["reason"]
+
+    @pytest.mark.asyncio
+    async def test_a_missing_report_is_a_404(self) -> None:
+        from fastapi import HTTPException
+
+        from app.api.v1.reports import get_stix_bundle
+
+        svc = ReportService(db=AsyncMock())
+        svc.get_report = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+        with pytest.raises(HTTPException) as caught:
+            await get_stix_bundle(uuid.uuid4(), "judge", MagicMock(), svc)
+        assert caught.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_a_kept_record_is_served_whole(self) -> None:
+        from app.api.v1.reports import get_stix_bundle
+
+        report = MagicMock(judge_stix_bundle={"bundle": {"id": "judge"}, "labels": {"a": "b"}})
+        svc = ReportService(db=AsyncMock())
+        svc.get_report = AsyncMock(return_value=report)  # type: ignore[method-assign]
+
+        answer = await get_stix_bundle(uuid.uuid4(), "judge", MagicMock(), svc)
+
+        assert answer == {"kept": True, "bundle": {"id": "judge"}, "labels": {"a": "b"}}

@@ -221,6 +221,47 @@ def offences(source: str, label: str) -> list[str]:
     return found
 
 
+# The export's two guarded copies, which live in ``schemas/stix_models.py``.
+# The ``schemas/`` exemption is for a model constructing its own fields; these
+# two copy an object the judge wrote with one guarded field changed, so they are
+# named here with the reason each is allowed, and the test below holds them to
+# it rather than letting their placement pass them.
+EXPORT_DECLINE_COPIES: dict[str, str] = {
+    "produced_by": (
+        "names this platform's identity on the export's copy of an object that named no "
+        "producer the bundle holds; a replaced one is recorded as stix.unpublishable_producer"
+    ),
+    "crediting_only": (
+        "leaves off the export's copy a credit the judge kept after stix.credit_without_claim; "
+        "recorded as stix.unpublishable_credit, and the judge's own bundle keeps it"
+    ),
+}
+
+
+def _function_at(tree: ast.AST, line: int) -> str:
+    """The name of the innermost function holding ``line``, or ``""``."""
+    found = ""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            end = getattr(node, "end_lineno", node.lineno)
+            if node.lineno <= line <= end:
+                found = node.name
+    return found
+
+
+def test_the_stix_models_guarded_writes_are_the_named_export_copies_only():
+    """Scanned despite the ``schemas/`` exemption, and each write accounted for."""
+    path = SRC / "schemas" / "stix_models.py"
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    writers = {
+        _function_at(tree, int(found.split(":")[1]))
+        for found in offences(source, "schemas/stix_models.py")
+    }
+
+    assert writers == set(EXPORT_DECLINE_COPIES), writers
+
+
 def test_nothing_outside_schemas_tools_and_validation_overrides_a_decision():
     found: list[str] = []
     for path in sorted(SRC.rglob("*.py")):

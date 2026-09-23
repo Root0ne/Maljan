@@ -134,8 +134,26 @@ async def get_stix_bundle(
     """Get the STIX 2.1 threat intelligence bundle.
 
     ``source=judge`` serves the judge's own bundle with its label map instead
-    of the export: the record the export's decline rows point at.
+    of the export: the record the export's decline rows point at. A report
+    stored before that record was kept answers 200 with ``"kept": false`` and
+    the reason — the report exists and says it has none, which is not the
+    404 of a report that does not.
     """
+    if source == "judge":
+        report = await svc.get_report(report_id, user)
+        if report is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+        if report.judge_stix_bundle is None:
+            return {
+                "kept": False,
+                "reason": (
+                    "No judge bundle was kept for this report: it was stored before the "
+                    "judge's own bundle was recorded beside the export."
+                ),
+                "bundle": None,
+                "labels": {},
+            }
+        return {"kept": True, **report.judge_stix_bundle}
     bundle = await svc.get_stix_bundle(report_id, user, source=source)
     if bundle is None:
         raise HTTPException(

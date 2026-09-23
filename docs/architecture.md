@@ -531,7 +531,14 @@ block is moved to the property it belongs to, unchanged, and recorded as
 there is nothing left for the judge to fix. A top-level block already present
 wins, and the inner copy is set aside. Any other item whose `type` is not one
 of `schemas/stix_models.BUNDLE_OBJECT_TYPES` is set aside under
-`stix.unknown_object` and fed back once. What is left is validated.
+`stix.unknown_object` and fed back once. So is an object of a type the bundle
+holds that cannot be read as written — a `file` or `process` carrying a
+property STIX 2.1 does not define for it, an observed-data carrying the
+deprecated `objects` dictionary, a value its model cannot hold — because each
+object is read on its own before the bundle is, and one object's failure used
+to cost the whole answer to the text fallback. The `file` and `process` models
+declare every property the standard defines, so what the judge wrote under a
+defined name is kept as written. What is left is validated.
 
 ### The published ids are the platform's
 

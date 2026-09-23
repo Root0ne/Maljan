@@ -3459,6 +3459,19 @@ change landed on `main`.
   technique id is read only from a MITRE ATT&CK reference, and the judge's
   bundle and the export derive technique ids in one namespace.
 
+- **A cyber-observable the judge writes never costs the rest of its bundle,
+  and the export never publishes an object the standard refuses.** A judge
+  `file` without a `name` failed the bundle model and sent the judge's whole
+  answer to the text fallback, its verdict read from prose and its confidence
+  lost; a named `file` dropped its `hashes` and a `process` its `name`, with
+  nothing recorded. Every property STIX 2.1 defines for a `file` or a `process`
+  is now kept as written, and every judge object is read on its own first: one
+  carrying a property its type does not define, or a value the model cannot
+  hold, is set aside as `stix.unknown_object` and the rest is read. A file with
+  neither `hashes` nor `name` is asked `stix.file_unidentified`; kept, it and a
+  malware object without `is_family` are declined as `stix.unpublishable_object`
+  and the platform's own sample object stands in.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**
@@ -3635,7 +3648,10 @@ per-run identity id; nothing is rewritten.
 A consumer of the exported STIX bundle or of the report's technique rows
 should know what else moved. `x_maljan_confidence` and `x_maljan_evidence_basis`
 are absent on a relationship whose writer gave none, where they used to be
-present as `0.5` and `unknown`; read them as optional. `contributing_layers`
+present as `0.5` and `unknown`; read them as optional, and do not assume a
+number or a list: an annotation outside the schema is kept as the judge wrote
+it (`x_maljan_confidence` may be `95` or `"high"`, `x_maljan_contributing_agents`
+a single string) beside a `stix.annotation_out_of_schema` row. `contributing_layers`
 no longer lists the agents a judge relationship credits, so `is_corroborated`
 is true only when two analysts named the technique themselves — a dashboard
 counting corroborated techniques moves down. A technique's `confidence` in
@@ -3654,4 +3670,16 @@ on them: `stix.unknown_observable_type`, `stix.unknown_object_path`,
 `stix.unpublishable_pattern`, `stix.unpublishable_credit`,
 `stix.unpublishable_producer` (the export's own decisions). Apply migration
 `20260929000000` for `analysis_reports.judge_stix_bundle`; a report stored
-before it has none, and `/reports/{id}/stix?source=judge` answers 404 for it.
+before it has none, and `/reports/{id}/stix?source=judge` answers
+`{"kept": false, "reason": …}` for it (404 only for a report that does not
+exist); a kept record carries `"kept": true`, and a label the judge gave two
+objects maps to a list of ids. Violation paths on the judge's rows now read
+`objects[i] 'label'` — the judge's own position and the id it wrote — where
+they read `objects[i]` over the post-processed list; a consumer parsing `path`
+should read the index up to the closing bracket. Judge-written `file` and
+`process` objects now reach the export with every property the standard
+defines; one carrying a property it does not define is set aside as
+`stix.unknown_object`, a file with neither `hashes` nor `name` is asked
+`stix.file_unidentified`, and a malware object kept without `is_family` or
+such a file is declined as `stix.unpublishable_object`, two more codes for a
+consumer that partitions on them.
