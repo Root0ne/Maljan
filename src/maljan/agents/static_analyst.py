@@ -535,6 +535,7 @@ class StaticAnalyst(BaseAnalyst):
                 "data": _reframe_static_raw_data(original_data, bool(self.tools)),
             }
         )
+        self._record_usage(response)
         return str(response.content)
 
     # ------------------------------------------------------------------
@@ -718,6 +719,7 @@ class StaticAnalyst(BaseAnalyst):
         # downstream of here — the claim parser, the transcript, the Composer —
         # should ever see it.
         response = self.llm.invoke(self.frame_messages(messages))
+        self._record_usage(response)
         content = self._capture_findings(str(response.content))
 
         parsed = _parse_claim_blocks(content)

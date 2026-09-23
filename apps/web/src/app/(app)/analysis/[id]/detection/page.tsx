@@ -66,8 +66,9 @@ export default function DetectionTab() {
               STIX 2.1 bundle (export)
             </h2>
             <p className="text-xs text-text-muted mt-0.5">
-              Machine-readable STIX 2.1 bundle for sharing with other tooling —
-              copy or download from the controls below.
+              Machine-readable STIX 2.1 bundle for sharing with other tooling,
+              drawn as a relationship graph, listed as a table, or shown as
+              JSON to copy or download.
             </p>
           </div>
           <StixPanel />

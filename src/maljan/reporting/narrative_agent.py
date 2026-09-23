@@ -23,6 +23,7 @@ familiar to anyone debugging existing agents.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -30,15 +31,19 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.agents.base_agent import retry_on_connection_error
+from maljan.core.config import REPORTER_AGENT_KEY
 from maljan.core.logger import logger
+from maljan.core.token_ledger import structured_answer
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
     KEPT_WITH_A_FINDING,
     CapabilityGrounding,
     ValidationTally,
     Violation,
+    citation_violations,
     key_finding_citation_violations,
     narrative_capability_violations,
+    pack_line_ids,
     retry_with_feedback,
     schema_violations,
 )
@@ -398,6 +403,10 @@ def build_prompt_text(report: MalwareReport) -> str:
 # ---------------------------------------------------------------------------
 
 
+# The narrative's prose fields: the only ones a citation is looked for in.
+NARRATIVE_PROSE = ("executive_summary", "key_findings")
+
+
 class NarrativeAgent:
     """One LLM round producing ``NarrativeOutput``. Async, no retry."""
 
@@ -406,13 +415,17 @@ class NarrativeAgent:
         llm: BaseChatModel,
         max_input_tokens: int = 3000,
         token_ledger: Any | None = None,
+        model_label: str = "",
     ) -> None:
         self.llm = llm
         self.max_input_tokens = max_input_tokens
-        # The narrative round is a real LLM call
-        # and must count toward run_summary token metrics. Recorded on the raw
-        # path below (the structured path hides usage behind the parser).
+        # The narrative round is a real LLM call and counts toward the run's
+        # token total on both paths: the structured one asks for the raw turn
+        # beside the parsed answer, because the parser hides the usage.
         self.token_ledger = token_ledger
+        # The label of the model the round calls first, so a call is recorded
+        # under a model even when the answer does not name one.
+        self.model_label = model_label
         # The job's event sink, set by the container, so a switch of the
         # reporter's model list is said in the conversation like any agent's.
         self.event_sink: Any | None = None
@@ -427,6 +440,7 @@ class NarrativeAgent:
         isr_reports: Any = None,
         facts_block: str = "",
         run_state: str = "",
+        citable_ids: Sequence[str] | None = None,
     ) -> NarrativeOutput | None:
         """Return a ``NarrativeOutput`` or ``None`` if both paths fail.
 
@@ -449,6 +463,15 @@ class NarrativeAgent:
         # The entries a key finding may cite: the ledger's, which the pack's
         # own entries are part of.
         known_ids = [row.id for row in report.evidence_index]
+        # The ids a bracketed citation in the prose may name: the ones the
+        # run's ledger issued, or, handed none, the report's evidence index
+        # and the pack's own line ids — never ids read out of prompt text,
+        # where a sample's decoded string can carry any.
+        citable = (
+            list(citable_ids)
+            if citable_ids is not None
+            else list(dict.fromkeys([*known_ids, *pack_line_ids(facts_block)]))
+        )
 
         # Skip the structured path entirely on endpoints where it does not
         # work. Measured live 2026-08-07: against llama-server this call hung
@@ -458,16 +481,23 @@ class NarrativeAgent:
         # in seconds instead of an hour and a half.
         if structured_output_supported_for_llm(self.llm):
             try:
-                structured = self.llm.with_structured_output(NarrativeOutput)
-                result = await retry_on_connection_error(
-                    lambda: structured.ainvoke(messages), what="NarrativeAgent structured"
+                structured = self.llm.with_structured_output(NarrativeOutput, include_raw=True)
+                result = structured_answer(
+                    await retry_on_connection_error(
+                        lambda: structured.ainvoke(messages), what="NarrativeAgent structured"
+                    ),
+                    self.token_ledger,
+                    agent=REPORTER_AGENT_KEY,
+                    model=self.model_label,
                 )
                 if isinstance(result, NarrativeOutput):
-                    return self._kept_with_ungrounded_recorded(result, grounding, known_ids)
+                    return self._kept_with_ungrounded_recorded(
+                        result, grounding, known_ids, citable
+                    )
                 # Some providers return a dict — coerce defensively.
                 if isinstance(result, dict):
                     return self._kept_with_ungrounded_recorded(
-                        NarrativeOutput.model_validate(result), grounding, known_ids
+                        NarrativeOutput.model_validate(result), grounding, known_ids, citable
                     )
                 logger.warning(
                     "NarrativeAgent: unexpected structured-output type %s; "
@@ -496,7 +526,9 @@ class NarrativeAgent:
                 try:
                     from maljan.core.token_ledger import record_response_usage
 
-                    record_response_usage(self.token_ledger, raw, agent="reporter")
+                    record_response_usage(
+                        self.token_ledger, raw, agent=REPORTER_AGENT_KEY, model=self.model_label
+                    )
                     from maljan.pipeline.events import announce_model_fallback
 
                     announce_model_fallback(
@@ -515,6 +547,7 @@ class NarrativeAgent:
                     lambda p: schema_violations(NarrativeOutput, p, code="narrative.schema"),
                     lambda p: narrative_capability_violations(p, grounding),
                     lambda p: key_finding_citation_violations(p, known_ids),
+                    lambda p: citation_violations(p, citable, prose=NARRATIVE_PROSE),
                 ],
                 parse=_narrative_payload,
                 on_feedback=self.validation_tally.count,
@@ -531,7 +564,8 @@ class NarrativeAgent:
         # template. The second leaves a summary that says more than the run
         # found, and dropping it would replace one wrong summary with none —
         # so it is kept and the terms are recorded, which is what a reader can
-        # act on. Nothing rewrites the prose.
+        # act on. A citation that is not an evidence id is kept the same way.
+        # Nothing rewrites the prose.
         broken = [v for v in violations if v.code not in KEPT_WITH_A_FINDING]
         ungrounded = [v for v in violations if v.code in KEPT_WITH_A_FINDING]
         if broken:
@@ -553,7 +587,7 @@ class NarrativeAgent:
             return None
 
     def _record_ungrounded(self, violations: list[Violation]) -> None:
-        """Keep the over-claims on the record, without touching the prose."""
+        """Keep the over-claims and stray citations on the record, without touching the prose."""
         if not violations:
             return
         logger.warning(
@@ -569,8 +603,9 @@ class NarrativeAgent:
         output: NarrativeOutput,
         grounding: CapabilityGrounding,
         known_ids: list[str] | None = None,
+        citable: Sequence[str] = (),
     ) -> NarrativeOutput:
-        """The structured path's answer, with its over-claims recorded.
+        """The structured path's answer, with its over-claims and stray citations recorded.
 
         No retry here: ``with_structured_output`` owns the conversation and
         there is no turn to add one to. The answer is still checked, because a
@@ -581,6 +616,7 @@ class NarrativeAgent:
         found = [
             *narrative_capability_violations(answer, grounding),
             *key_finding_citation_violations(answer, known_ids or []),
+            *citation_violations(answer, citable, prose=NARRATIVE_PROSE),
         ]
         self.validation_tally.count(found)
         self._record_ungrounded(found)

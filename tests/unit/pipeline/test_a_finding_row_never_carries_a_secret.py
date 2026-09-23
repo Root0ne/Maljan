@@ -225,6 +225,10 @@ CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
     ),
     # The field names of this repository's own schema.
     ("pipeline/validation.py", "_schema_message"): frozenset({"keys"}),
+    # The evidence ids the answer was shown, each one matched as ``ev_`` and
+    # digits before this function joins them. The cited item itself is the
+    # producer's and is wrapped where it is quoted.
+    ("pipeline/validation.py", "citation_violations"): frozenset({"remedy"}),
     # How many hexadecimal characters a digest of a named algorithm has, read
     # out of this codebase's own table.
     ("pipeline/validation.py", "_indicator_problem"): frozenset({"expected"}),

@@ -214,6 +214,15 @@ class Malware(STIXObject):
     x_maljan_fallback_reasoning: str | None = None
     x_maljan_degraded_path: bool | None = None
     x_maljan_model_only_technique_ids: list[str] | None = None
+    # See ``EVIDENCE_REFS_PROPERTY``.
+    x_maljan_evidence_refs: list[str] | None = None
+
+
+# The ledger entries the run's record ties to an exported object: ``ev_``
+# ids, deduplicated, in ledger order. The export writes it from the record
+# (``reporting.renderers.stix_renderer``), and only where the record holds
+# such a tie; an object the record ties to nothing carries no such property.
+EVIDENCE_REFS_PROPERTY = "x_maljan_evidence_refs"
 
 
 class Relationship(STIXObject):
@@ -224,6 +233,8 @@ class Relationship(STIXObject):
     relationship_type: str
     source_ref: str
     target_ref: str
+    # See ``EVIDENCE_REFS_PROPERTY``.
+    x_maljan_evidence_refs: list[str] | None = None
 
 
 class ConfidenceAnnotatedRelationship(STIXObject):
@@ -272,6 +283,8 @@ class ConfidenceAnnotatedRelationship(STIXObject):
     x_maljan_evidence_basis: str | None = None
     x_maljan_contributing_agents: list[str] | str = Field(default_factory=list)
     x_maljan_technique_id: str | None = None
+    # See ``EVIDENCE_REFS_PROPERTY``.
+    x_maljan_evidence_refs: list[str] | None = None
 
     @property
     def is_high_confidence(self) -> bool:

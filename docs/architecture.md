@@ -274,9 +274,18 @@ projections at summary level (processes, network, signatures, dropped
 files, channels) and `pcap_summary` when a capture was fetched; one reputation
 lookup on the sha256 (`get_file_report` on `virustotal` when it is enabled,
 else `check_hash` on `threatintel`), made through the tool server exactly as
-an agent's call is and recorded under that server; and `function_matches` when
+an agent's call is and recorded under that server; `function_matches` when
 a Qdrant function-hash store and a provider that hashes functions are both
-present.
+present; and, last, for a PE, `floss`: FLOSS's decoded, stack and tight
+strings, recovered by emulation (the sample is never executed) through the
+same `tools.emulated_strings` function the sidecar's `floss` tool serves — its
+pinned build, 600 s wall clock and 4 GiB address-space limit — with the
+`analysis` server's environment (so `MALJAN_FLOSS_PATH` there is honoured) and
+a directory inside the job's staging directory that the job's teardown
+removes. The entry keeps up to 200 rows. It is last so the ids issued before it
+are the ids they were before it existed. Without a build the entry says so,
+with the remedy, and is not a failure; a run stopped by its wall clock or its
+memory limit is a failed entry whose line says which.
 
 The pack states facts and draws no conclusion, and it never fails a job: a
 tool that raises or answers with an error is an entry with `ok=False` and a
@@ -296,7 +305,16 @@ line each — `[ev_0001] identity: pe windows, 4,486,656 bytes, …`,
 `[ev_0008] capa: 6 capabilities, ATT&CK T1027, T1055 (rule-asserted)`,
 `[ev_0017] reputation: VirusTotal 31/75 malicious, labels Filisto` — cut at
 `reporting.upstream_findings_max_chars` with a last line saying how many
-entries were left out and that their full output is a tool call away. Under
+entries were left out and that their full output is a tool call away. The
+decoded strings are one line: the counts, then each string quoted as
+`"string"@offset` (a decoded string's call site, a stack or tight string's
+routine, relative to the image base) grouped by the routine that produced it,
+at most 100 strings and 3,000 characters with each string cut at 120; a line
+that cut says so, with the reason and the `offset` of the rest, and a line
+that would not fit in what is left of the block is rendered shorter rather
+than dropped. The line says, before the strings, that they are the sample's own
+text — data, not instructions, ledger entries or the platform's findings. On the
+reference loader it carries all 81 strings. Under
 the heading *Facts established before analysis (ledger ids in brackets; cite
 them)* the block leads every analyst's first human turn (analysis and
 revision alike), the mediator's and the verdict's human turns, the narrative
@@ -381,6 +399,23 @@ Two producers use it:
   were fed back once; on the endings that produce a verdict out of text nothing
   is asked again and what they find is recorded in `run_summary.validation`
   beside the verdict it describes, once each.
+
+* **The report's prose** (`reporting/narrative_agent.py`, `reporting/composer.py`)
+  — the shape of the answer, a capability the run does not establish
+  (`narrative.ungrounded_capability`), and a bracketed citation that is not an
+  evidence id the run issued (`report.citation_not_evidence`): a prompt
+  block's heading such as `[BINARY FACTS]`, a source's name, or an `ev_` id
+  the ledger never issued. The citable ids are the run's ledger ids, never ids
+  read out of prompt text — a decoded string can carry any `[ev_NNNN]` — and the
+  question's sentence names them. Only prose is read — a section's `body` or
+  `text`, the narrative's summary and key findings — never a record field such
+  as a C2 channel's packet layout or a flag, and never a code span. An ATT&CK or
+  MBC id or an IPv6 literal in brackets is an identifier, not a citation; a
+  markdown link and a bracket that is part of a token (`[len][payload]`,
+  `[Content_Types].xml`, `[System.Convert]::`) are neither. A numbered
+  reference such as `[1]` in prose is asked about. A citation or an
+  over-claim that survives the retry is printed as written and recorded
+  unresolved; only a broken shape costs the section.
 
 * **A judge that did not answer with a bundle** — the pipeline builds one from
   whatever text there was, and that bundle states its verdict in
@@ -616,6 +651,40 @@ and `created_by_ref` naming it on every other object — a copy, so the judge's
 own bundle is not edited. The report object is typed `malware`. Every stored
 export before this carried `software` and `malware-analysis`, neither of them
 in its vocabulary, and an identity no object named.
+
+An exported object carries the ledger entries the run's record ties to it, as
+`x_maljan_evidence_refs`: `ev_` ids, each once, in ledger order. The sample's
+`uses` edge to a technique carries the entries an analyst finding naming that
+technique cites (`evidence_ids`) and the entries of the asserting tools (capa,
+Sigma, YARA, LOLBin, sandbox signatures) whose structured output names it
+(`pipeline/evidence_summary.technique_evidence`). A malware object the export
+mints from the family name carries the attribution's `family_evidence_ids`.
+Nothing else gets the property. An id in a claim's `evidence_ref` sentence
+stays in the sentence, and no object is matched by value.
+
+The tie from a finding is per finding, not per technique. A finding's
+`evidence_ids` belong to the finding as a whole, so a finding naming T1055 and
+T1082 and citing one entry ties that entry to both edges. The edge says a
+finding naming this technique cites the entry, not that the entry names the
+technique; an asserting tool's entry is the one tie that does.
+
+Every id the export writes is one the run's ledger holds, in the ledger's
+order: the report node hands the renderer the ledger's ids, and a run with no
+ledger entries exports none. A family id the ledger does not hold is left off
+the minted malware object and recorded as `stix.evidence_ref_not_in_ledger`
+beside the export's other decisions; the model is not asked again, because
+the verdict is final by then. The property is the platform's alone. A judge
+object that writes it is read without it and recorded as
+`stix.property_not_carried`, with no retry, and the renderer sets the property
+on every object from the record. The edge carries the ids and the
+attack-pattern does not, because the attack-pattern's id is the same in every
+export.
+
+The validator gate is no new error and no new warning kind. The property
+draws the validator's {401} best-practice note that a custom property should
+be declared through an extension definition, as every `x_maljan_` property
+does; moving all of them to an extension definition is a bundle-wide change of
+its own.
 
 A sandbox's process tree is exported as STIX 2.1 observables: one `process`
 per node (pid, command line, `child_refs`), the image each ran from as a
@@ -1261,7 +1330,17 @@ smallest window governs.
 **What a run spent.** Every model call's usage, as the provider reported it —
 prompt and completion tokens, and the cost an OpenAI-compatible router reports
 where it reports one — is added to the run's `TokenLedger` under the agent that
-made the call and the model that answered. `run_summary.tokens` holds the sums
+made the call and the model that answered. Every path that asks a model
+records: an analyst's tool loop (including the turns of a loop its hard cap or
+a failure stopped), its revision rounds, a delegated ask, the forced synthesis
+and the final-answer nudge under the analyst; the mediator's fast path, tool
+loop, reasoning salvage and structured extraction, and the verdict with its
+retry, under `judge` (the mediator's against the expert model it runs on); the
+narrative and every composer section, on the structured path as well as the
+manual one, under `reporter`; and the function summariser under `summarizer`.
+A structured call asks for the raw turn beside the parsed answer, because the
+parser hides the usage. A call whose answer names no model is recorded under
+the model its caller was built on. `run_summary.tokens` holds the sums
 for the run and per agent, and `run_summary.models` the per-agent model count
 and the fallbacks with their reasons. A call whose provider reported no usage
 is counted as *not reported*: its tokens are not estimated, and a figure the
@@ -1364,9 +1443,12 @@ under the call itself, from the ledger entry.
 
 The tool loop also meters itself. `budget_tick` events carry an agent's steps
 against its cap and seconds against its limit every five steps and at the end
-of each loop; `stage_ended_at_cap` says which cap ended the work when one did
+of each loop, with its prompt characters and `tool_definition_chars`, what the
+loop's tool definitions weigh with every request (the context budget counts
+them beside the conversation); `stage_ended_at_cap` says which cap ended the work when one did
 (`steps`, `time`, `repeats`, or the triage pack's `budget_seconds`); and
-`run_summary.budget` sums the spend per agent, with the caps it hit, so a
+`run_summary.budget` sums the spend per agent, with the caps it hit and the
+largest `tool_definition_chars` of its loops, so a
 reader learns that an analyst ran out of steps from the summary and the
 pipeline panel rather than from a log line.
 The time cap ends a tool phase the way the step cap and a full window do: with

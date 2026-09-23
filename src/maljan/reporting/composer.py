@@ -19,6 +19,7 @@ no evidence, leave it empty — never invent** (the renderer states absence).
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from types import UnionType
 from typing import Any, Literal, Union, get_args, get_origin
 
@@ -27,7 +28,9 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.agents.base_agent import retry_on_connection_error
+from maljan.core.config import REPORTER_AGENT_KEY
 from maljan.core.logger import logger
+from maljan.core.token_ledger import structured_answer
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
     KEPT_WITH_A_FINDING,
@@ -35,9 +38,11 @@ from maljan.pipeline.validation import (
     ValidationTally,
     Validator,
     Violation,
+    citation_violations,
     configuration_citation_violations,
     flow_voice_violations,
     keep_known_keys,
+    pack_line_ids,
     retry_with_feedback,
     schema_violations,
     section_capability_violations,
@@ -137,6 +142,14 @@ _SYSTEM = (
     "for what a sandbox entry records.\n"
     "9. Output MUST be the JSON object shown in the request, with its keys."
 )
+
+# The fields of each section that are prose, and so the only ones a citation
+# is looked for in. A section of records — C2 channels, flags, a cipher, a
+# ransom note — has none: its fields are notation, not sentences.
+_PROSE_FIELDS: dict[type[BaseModel], tuple[str, ...]] = {
+    _ProseOut: ("body",),
+    _IntroOut: ("text",),
+}
 
 # How many invented keys a degradation reason names. A model that invents
 # forty writes forty names into the report header otherwise, and the sentence
@@ -345,6 +358,7 @@ class ReportComposer:
         section_max_tokens: int = 900,
         per_section_timeout: int = 120,
         token_ledger: Any | None = None,
+        model_label: str = "",
         generation_rates: Any | None = None,
         output_cap: int | None = None,
         caps_by_model: dict[str, int] | None = None,
@@ -366,6 +380,9 @@ class ReportComposer:
         self.turn_share = turn_share
         self.per_section_timeout = per_section_timeout
         self.token_ledger = token_ledger
+        # The label of the model the sections call first, so a call is
+        # recorded under a model even when the answer does not name one.
+        self.model_label = model_label
         # The job's event sink, set by the container, so a switch of the
         # reporter's model list is said in the conversation like any agent's.
         self.event_sink: Any | None = None
@@ -397,6 +414,7 @@ class ReportComposer:
         isr_reports: dict[str, Any] | None = None,
         facts_block: str = "",
         run_state: str = "",
+        citable_ids: Sequence[str] | None = None,
     ) -> None:
         """Fill report.intro_background / technical_analysis / c2_channels.
 
@@ -411,6 +429,10 @@ class ReportComposer:
         authored = 0
         self._facts_block = facts_block
         self._run_state = run_state
+        # The ids a section may cite: the ones the run's ledger issued, or,
+        # handed none, the pack's own line ids — never ids read out of prompt
+        # text, where a sample's decoded string can carry any.
+        self._citable = list(citable_ids) if citable_ids is not None else pack_line_ids(facts_block)
         # What this run established, read once and asked of every section, so
         # a conclusion cannot be the first place "command-and-control" appears.
         self._grounding = CapabilityGrounding.from_report(report, isr_reports)
@@ -658,12 +680,19 @@ class ReportComposer:
         # — see ``structured_output_supported``. The per-section timeout below
         # bounds the damage here, unlike the narrative round, but paying it on
         # every one of eight sections is still eight timeouts nobody needs.
+        citable = list(getattr(self, "_citable", None) or [])
+        prose = _PROSE_FIELDS.get(schema, ())
         try:
             if not structured_output_supported_for_llm(self.llm):
                 raise _StructuredOutputUnavailable
-            structured = self.llm.with_structured_output(schema)
-            result = await retry_on_connection_error(
-                lambda: structured.ainvoke(messages), what="ReportComposer structured"
+            structured = self.llm.with_structured_output(schema, include_raw=True)
+            result = structured_answer(
+                await retry_on_connection_error(
+                    lambda: structured.ainvoke(messages), what="ReportComposer structured"
+                ),
+                self.token_ledger,
+                agent=REPORTER_AGENT_KEY,
+                model=self.model_label,
             )
             if isinstance(result, dict):
                 result = schema.model_validate(result)
@@ -673,7 +702,10 @@ class ReportComposer:
                 # answer is still checked: a section that over-claims is no
                 # better for having come from the path that usually works.
                 answer = result.model_dump()
-                found = section_capability_violations(answer, self._grounding)
+                found = [
+                    *section_capability_violations(answer, self._grounding),
+                    *citation_violations(answer, citable, prose=prose),
+                ]
                 for extra in validators or []:
                     found.extend(extra(answer))
                 self.validation_tally.count(found)
@@ -700,7 +732,9 @@ class ReportComposer:
                 try:
                     from maljan.core.token_ledger import record_response_usage
 
-                    record_response_usage(self.token_ledger, raw, agent="reporter")
+                    record_response_usage(
+                        self.token_ledger, raw, agent=REPORTER_AGENT_KEY, model=self.model_label
+                    )
                     from maljan.pipeline.events import announce_model_fallback
 
                     announce_model_fallback(
@@ -749,6 +783,7 @@ class ReportComposer:
             found = [
                 *schema_violations(schema, payload, code="composer.schema"),
                 *section_capability_violations(payload, self._grounding),
+                *citation_violations(payload, citable, prose=prose),
             ]
             for extra in validators or []:
                 found.extend(extra(payload))
@@ -772,9 +807,10 @@ class ReportComposer:
             )
             return None
         # A section whose shape is wrong cannot be published; a section that
-        # over-claims can, and dropping it would leave the report with neither
-        # the claim nor the record of it. The terms are kept on the record and
-        # the prose is left exactly as the model wrote it.
+        # over-claims, or cites something that is not an evidence id, can, and
+        # dropping it would leave the report with neither the sentence nor the
+        # record of it. What is wrong is kept on the record and the prose is
+        # left exactly as the model wrote it.
         broken = [v for v in violations if v.code not in KEPT_WITH_A_FINDING]
         ungrounded = [v for v in violations if v.code in KEPT_WITH_A_FINDING]
         if broken:
@@ -824,7 +860,7 @@ class ReportComposer:
             self.degradations.append(reason)
 
     def _record_ungrounded(self, section: str, violations: list[Violation]) -> None:
-        """Keep a section's over-claims on the record, without editing its prose.
+        """Keep a section's over-claims and stray citations on the record, prose untouched.
 
         Records only. The manual path has already counted these as leftovers of
         its retry loop, and counting them twice would say the model was told

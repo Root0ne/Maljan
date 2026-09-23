@@ -182,6 +182,7 @@ class NetworkAnalyst(BaseAnalyst):
             # literal JSON example and a template would read its braces as
             # variables.
             response = self.llm.invoke(self.frame_messages(prompt_to_messages(prompt_messages)))
+            self._record_usage(response)
             content = self._capture_findings(str(response.content))
 
         return str(content)
@@ -214,6 +215,7 @@ class NetworkAnalyst(BaseAnalyst):
             isr=False,
         )
         response = self.llm.invoke(self.frame_messages(prompt_to_messages(messages)))
+        self._record_usage(response)
         return str(response.content)
 
     # ------------------------------------------------------------------
@@ -301,6 +303,7 @@ class NetworkAnalyst(BaseAnalyst):
             # literal JSON example and a template would read its braces as
             # variables.
             response = self.llm.invoke(self.frame_messages(prompt_to_messages(prompt_messages)))
+            self._record_usage(response)
             content = self._capture_findings(str(response.content))
 
         claims = _parse_claim_blocks(content)
@@ -342,6 +345,7 @@ class NetworkAnalyst(BaseAnalyst):
         # downstream of here — the claim parser, the transcript, the Composer —
         # should ever see it.
         response = self.llm.invoke(self.frame_messages(prompt_to_messages(messages)))
+        self._record_usage(response)
         content = self._capture_findings(str(response.content))
 
         claims = _parse_claim_blocks(content)

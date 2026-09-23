@@ -946,10 +946,15 @@ def floss(
 ) -> dict[str, Any]:
     """Recover the strings a PE only builds at run time: decoded, stack and tight strings.
 
+    Use it when the strings of a PE look encrypted or are missing: ``strings``
+    shows mostly noise, few readable paths, URLs or messages, and the import
+    table is tiny. Those strings (mutex names, file paths, URLs, User-Agents,
+    commands, keys) only appear here. The triage pack already ran it once on a
+    PE and shows the first strings with their ledger id; call it for the rest
+    (``offset``) or to search them (``pattern``).
+
     FLOSS emulates the sample's own decoding routines and string-building
-    functions under vivisect; the sample is never executed. Use it when
-    ``strings`` shows little but noise — encrypted strings (mutex names, file
-    paths, URLs, User-Agents, commands) only appear here. Each row carries the
+    functions under vivisect; the sample is never executed. Each row carries the
     ``kind``, the ``string``, the ``function`` that decoded or built it (a
     virtual address, and ``function_rva`` relative to the image base, which is
     the address to look at in a disassembler) and, for a decoded string, the

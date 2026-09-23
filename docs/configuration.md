@@ -873,7 +873,14 @@ tool runs only the executable whose sha256 is the pinned one. Without it the
 capability manifest marks `floss` unavailable with the reason and the remedy and
 the model is not offered the tool; with it, the first call on a sample emulates
 for up to ten minutes (the tool's declared `timeout_s`) within 4 GiB of address
-space, and later pages of the answer come from the kept result.
+space, and later pages of the answer come from the kept result. The triage pack
+runs the same function once on every PE, reading `MALJAN_FLOSS_PATH` and
+`MALJAN_STAGING_DIR` from this process's environment with the `analysis`
+server's `env` over it. Name a build in the server's `env` and the pack and
+the tool find the same one; a `MALJAN_FLOSS_PATH` set only in the worker's own
+environment reaches the pack and not the tool, whose child environment carries
+only the server's `env` and its allowed keys. Without a build the pack's entry
+says so and names the remedy.
 
 Five teams ship built in; they are listed under **Teams** below. `default` is
 the three analysts with their tools.
@@ -1644,10 +1651,12 @@ and `GET /api/v1/jobs/{id}/evidence` serves them.
 
 **The budget meter** needs nothing from a server. The tool loop emits
 `budget_tick` every five steps and once more when it ends (steps used against
-the cap, seconds against the limit, prompt characters, ledger entries so far)
+the cap, seconds against the limit, prompt characters, the characters of the
+tool definitions sent with every request, ledger entries so far)
 and `stage_ended_at_cap` when a cap ended the work — `steps`, `time`,
 `repeats` or, for the triage pack, `budget_seconds`; `run_summary.budget` sums
-the spend per agent with the caps it hit, and the console's pipeline panel
+the spend per agent with the caps it hit and keeps the largest
+`tool_definition_chars` of its loops, and the console's pipeline panel
 says beside the step which cap ended it.
 
 ## Export and import

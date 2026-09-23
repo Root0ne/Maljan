@@ -192,3 +192,24 @@ def record_response_usage(
         ledger.add(turn_usage(response), agent=agent, model=answered_by, fallback=fallback)
     except Exception:  # noqa: BLE001 — telemetry must never break analysis
         return
+
+
+def structured_answer(
+    answer: Any, ledger: TokenLedger | None, *, agent: str = "", model: str = ""
+) -> Any:
+    """The parsed value of a ``with_structured_output(..., include_raw=True)`` answer.
+
+    The raw turn is recorded on ``ledger`` first: the parser hides the usage,
+    and a structured call the ledger never sees is a call the run's total
+    leaves out. A parse that failed raises its error, as the structured call
+    would have without ``include_raw``, so a caller's fallback still runs. An
+    answer in any other shape — a stand-in that ignores ``include_raw`` — is
+    handed back as it is.
+    """
+    if not (isinstance(answer, dict) and "raw" in answer and "parsed" in answer):
+        return answer
+    record_response_usage(ledger, answer.get("raw"), agent=agent, model=model)
+    error = answer.get("parsing_error")
+    if answer.get("parsed") is None and error is not None:
+        raise error if isinstance(error, BaseException) else ValueError(str(error))
+    return answer.get("parsed")

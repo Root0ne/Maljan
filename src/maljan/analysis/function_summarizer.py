@@ -34,7 +34,7 @@ Usage:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
 
@@ -93,9 +93,22 @@ class FunctionSummarizer:
         self,
         llm: BaseChatModel,
         max_summary_words: int = 150,
+        token_ledger: Any | None = None,
+        model_label: str = "",
     ) -> None:
         self._llm = llm
         self._max_words = max_summary_words
+        # Each summary is a model call the run pays for, recorded under
+        # ``summarizer`` and the model the summariser calls.
+        self._token_ledger = token_ledger
+        self._model_label = model_label
+
+    def _record(self, response: Any) -> None:
+        from maljan.core.token_ledger import record_response_usage
+
+        record_response_usage(
+            self._token_ledger, response, agent="summarizer", model=self._model_label
+        )
 
     def summarize_chunk(self, code_chunk: str) -> str:
         """Summarise a single block of code or list of functions.
@@ -121,6 +134,7 @@ class FunctionSummarizer:
 
         try:
             response = self._llm.invoke(messages)
+            self._record(response)
             summary: str = response.content  # type: ignore[assignment,union-attr]
             word_count = len(summary.split())
             logger.debug(
@@ -206,6 +220,7 @@ class FunctionSummarizer:
 
         try:
             response = self._llm.invoke(messages)
+            self._record(response)
             result: str = response.content  # type: ignore[assignment,union-attr]
             return result.strip()
         except Exception as exc:
