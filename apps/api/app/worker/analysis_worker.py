@@ -2505,14 +2505,25 @@ def _extract_category(result: dict) -> str | None:
 def judge_bundle_record(result: dict) -> dict | None:
     """The judge's own bundle and its label map, as the report stores them.
 
-    The export's decline rows say an object "is unchanged in the judge's own
-    bundle"; this is that bundle, kept beside the export rather than only when
-    there is no export. ``None`` when the judge produced none.
+    The export's decline and not-carried rows say an object or a property "is
+    kept in the judge's own bundle"; this is that bundle, kept beside the
+    export rather than only when there is no export. It is the judge's JSON as
+    the judge wrote it (``as_written``), so a property the platform's models do
+    not declare is still in it. A run recorded without that answer keeps the
+    parsed bundle instead, and says so. ``None`` when the judge produced none.
     """
     bundle = result.get("stix_output")
     if not isinstance(bundle, dict) or not bundle:
         return None
     labels = result.get("stix_labels")
+    kept_labels = dict(labels) if isinstance(labels, dict) else {}
+    written = result.get("stix_written")
+    if isinstance(written, dict) and written:
+        return {
+            "bundle": json.loads(json.dumps(written, default=str)),
+            "labels": kept_labels,
+            "as_written": True,
+        }
     # The pipeline keeps the bundle as a Python dump, timestamps as datetimes;
     # the column stores JSON, in STIX's own timestamp form.
     from maljan.schemas.stix_models import Bundle
@@ -2523,7 +2534,8 @@ def judge_bundle_record(result: dict) -> dict | None:
         as_json = json.loads(json.dumps(bundle, default=str))
     return {
         "bundle": {"spec_version": "2.1", **as_json},
-        "labels": dict(labels) if isinstance(labels, dict) else {},
+        "labels": kept_labels,
+        "as_written": False,
     }
 
 

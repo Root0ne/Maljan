@@ -98,6 +98,30 @@ ASSESSMENT_RELOCATED_CODE = "verdict.assessment_relocated"
 # and a bundle is not worth losing over one of them.
 UNKNOWN_OBJECT_CODE = "stix.unknown_object"
 
+# A property of a judge object that the platform's model for its type does not
+# declare, so the export does not carry it. Recorded, not asked about: nothing
+# is wrong with the judge's answer, and the retry is not spent on it.
+PROPERTY_NOT_CARRIED_CODE = "stix.property_not_carried"
+
+
+def _not_carried(obj: dict[str, Any]) -> list[str]:
+    """The keys of a readable judge object that its model does not declare.
+
+    A custom ``x_`` property of an observable is kept (its model allows them);
+    every other undeclared key, on any type, is one the export does not carry.
+    """
+    from maljan.schemas.stix_models import bundle_model_for
+
+    model = bundle_model_for(str(obj.get("type") or ""))
+    if model is None:
+        return []
+    keeps_custom = model.model_config.get("extra") == "allow"
+    return [
+        key
+        for key in obj
+        if key not in model.model_fields and not (keeps_custom and key.startswith("x_"))
+    ]
+
 
 def _object_type(obj: Any) -> str:
     return str(obj.get("type") or "").strip() if isinstance(obj, dict) else ""
@@ -187,6 +211,20 @@ def lift_misplaced_extensions(bundle_dict: dict[str, Any]) -> list[Violation]:
             problem = _object_problem(obj)
             if not problem:
                 kept.append(obj)
+                not_carried = _not_carried(obj)
+                if not_carried:
+                    found.append(
+                        Violation(
+                            code=PROPERTY_NOT_CARRIED_CODE,
+                            message=(
+                                f"objects[{index}] {safe_finding_value(obj.get('id') or kind)!r} "
+                                f"carries {', '.join(repr(safe_finding_value(k)) for k in not_carried)}, "
+                                "which this platform does not carry into the export; they are "
+                                "recorded here, and the judge's own bundle keeps them as written."
+                            ),
+                            path=f"objects[{index}]",
+                        )
+                    )
                 continue
             found.append(
                 Violation(
@@ -705,11 +743,12 @@ def enforce_bundle_integrity(
     ids = {_oid(o) for o in objects}
     _refs_trimmed = 0
     for o in objects:
-        refs = _oget(o, "object_refs")
-        if isinstance(refs, list):
-            surviving = [r for r in refs if r in ids]
-            _refs_trimmed += len(refs) - len(surviving)
-            _oset(o, "object_refs", surviving)
+        for ref_key in ("object_refs", "sample_refs"):
+            refs = _oget(o, ref_key)
+            if isinstance(refs, list):
+                surviving = [r for r in refs if r in ids]
+                _refs_trimmed += len(refs) - len(surviving)
+                _oset(o, ref_key, surviving)
 
     if ledger is not None:
         try:

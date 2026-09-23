@@ -208,6 +208,9 @@ class Malware(STIXObject):
     # defaulted to was a statement nobody made.
     is_family: bool | None = None
     malware_types: list[str] = Field(default_factory=list)
+    # The sample files this malware object stands for, as the judge related
+    # them: the ids of ``file`` objects in the same bundle.
+    sample_refs: list[str] = Field(default_factory=list)
     x_maljan_fallback_reasoning: str | None = None
     x_maljan_degraded_path: bool | None = None
     x_maljan_model_only_technique_ids: list[str] | None = None

@@ -135,9 +135,10 @@ async def get_stix_bundle(
 
     ``source=judge`` serves the judge's own bundle with its label map instead
     of the export: the record the export's decline rows point at. A report
-    stored before that record was kept answers 200 with ``"kept": false`` and
-    the reason — the report exists and says it has none, which is not the
-    404 of a report that does not.
+    with no such record — stored before it was kept, or from a run whose judge
+    produced no bundle — answers 200 with ``"kept": false`` and the reason: the
+    report exists and says it has none, which is not the 404 of a report that
+    does not.
     """
     if source == "judge":
         report = await svc.get_report(report_id, user)
@@ -147,8 +148,9 @@ async def get_stix_bundle(
             return {
                 "kept": False,
                 "reason": (
-                    "No judge bundle was kept for this report: it was stored before the "
-                    "judge's own bundle was recorded beside the export."
+                    "No judge bundle is on record for this report: either it was stored "
+                    "before the judge's own bundle was kept beside the export, or the "
+                    "judge produced none."
                 ),
                 "bundle": None,
                 "labels": {},

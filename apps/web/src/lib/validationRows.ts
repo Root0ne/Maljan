@@ -37,6 +37,7 @@ const EXPORT_DECIDED: ReadonlySet<string> = new Set([
   "stix.unpublishable_producer",
   "stix.unpublishable_credit",
   "stix.unpublishable_object",
+  "stix.property_not_carried",
   "stix.unlinked_technique",
 ]);
 

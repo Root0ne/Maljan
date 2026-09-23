@@ -136,7 +136,7 @@ class TestTheMigration:
 
 class TestTheEndpointSaysWhatIsTrue:
     @pytest.mark.asyncio
-    async def test_a_report_stored_before_the_record_says_it_has_none(self) -> None:
+    async def test_a_report_without_the_record_names_both_reasons(self) -> None:
         from app.api.v1.reports import get_stix_bundle
 
         report = MagicMock(judge_stix_bundle=None)
@@ -147,6 +147,7 @@ class TestTheEndpointSaysWhatIsTrue:
 
         assert answer["kept"] is False
         assert "stored before" in answer["reason"]
+        assert "the judge produced none" in answer["reason"]
 
     @pytest.mark.asyncio
     async def test_a_missing_report_is_a_404(self) -> None:

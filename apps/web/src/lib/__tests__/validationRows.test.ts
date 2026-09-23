@@ -70,6 +70,7 @@ describe("what an unresolved row says", () => {
   it("says the same for an object the judge kept without what the standard requires", () => {
     expect(isExportDecision("stix.unpublishable_object")).toBe(true);
     expect(isExportDecision("stix.unpublishable_credit")).toBe(true);
+    expect(isExportDecision("stix.property_not_carried")).toBe(true);
     // The questions the judge was asked are its own rows.
     expect(isExportDecision("stix.is_family_missing")).toBe(false);
     expect(isExportDecision("stix.file_unidentified")).toBe(false);

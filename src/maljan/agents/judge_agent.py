@@ -51,7 +51,10 @@ from maljan.agents.base_agent import (
     run_on_agent_loop,
     synthesis_budget_chars,
 )
-from maljan.agents.judge_postprocess import ASSESSMENT_RELOCATED_CODE
+from maljan.agents.judge_postprocess import (
+    ASSESSMENT_RELOCATED_CODE,
+    PROPERTY_NOT_CARRIED_CODE,
+)
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger
@@ -84,6 +87,10 @@ from maljan.schemas.stix_models import Bundle
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
+
+# Rows the judge's parse settles itself, so the retry is never spent on them:
+# an assessment moved to its property, and a property the export does not carry.
+_SETTLED_CODES = frozenset({ASSESSMENT_RELOCATED_CODE, PROPERTY_NOT_CARRIED_CODE})
 
 # How many times the judge is asked again about a verdict answer that was
 # wrong. One: a second correction has never produced a better bundle than the
@@ -179,6 +186,10 @@ class JudgeVerdict(NamedTuple):
     # ``{the judge's label: the published id}`` for the answer this verdict
     # stands on, so the judge's own bundle and the export can be read together.
     labels: dict[str, str | list[str]] = {}
+    # The judge's answer this verdict stands on, as it wrote it: parsed and
+    # otherwise untouched, the record the export's decline and not-carried
+    # rows point at. ``None`` when the verdict is not the judge's own bundle.
+    written: dict[str, Any] | None = None
 
 
 # The judge's system prompt. A module constant so that
@@ -1224,6 +1235,7 @@ class JudgeAgent(BudgetMeter):
         # not the ones left after set-aside objects and folded duplicates.
         where: list[tuple[int | None, str]] = []
         labels: dict[str, str | list[str]] = {}
+        as_written: list[dict[str, Any]] = []
         tally = ValidationTally()
 
         def _parse(answer: Any) -> Bundle:
@@ -1232,6 +1244,7 @@ class JudgeAgent(BudgetMeter):
             shape.clear()
             where.clear()
             labels.clear()
+            as_written.clear()
             if timed_out:
                 not_json = False
                 return self._fallback_bundle_from_text(
@@ -1248,7 +1261,13 @@ class JudgeAgent(BudgetMeter):
                     # A retry is coming and this bundle would be thrown away.
                     return Bundle(objects=[])
             parsed = self._bundle_from_response(
-                answer, reports, isr_reports, record=shape, origins=where, labels=labels
+                answer,
+                reports,
+                isr_reports,
+                record=shape,
+                origins=where,
+                labels=labels,
+                as_written=as_written,
             )
             # The relocation is done and nothing is left to ask about, so it is
             # published as settled and counted where the round's other codes
@@ -1322,7 +1341,7 @@ class JudgeAgent(BudgetMeter):
                 # relocation is not among them: it is settled, announced in
                 # ``_parse``, and a retry for it would be a turn spent on a
                 # problem that no longer exists.
-                *(v for v in shape if v.code != ASSESSMENT_RELOCATED_CODE),
+                *(v for v in shape if v.code not in _SETTLED_CODES),
                 *validate_verdict_bundle(
                     bundle,
                     evidence_corpus,
@@ -1377,6 +1396,14 @@ class JudgeAgent(BudgetMeter):
                 violations.append(
                     Violation(code=VERDICT_FALLBACK_CODE, message=VERDICT_FALLBACK_REASON)
                 )
+        # The judge's own answer, when the verdict stands on it: what the
+        # export does not carry of it is recorded beside the run's findings
+        # (never fed back — nothing in it is wrong), and the answer itself is
+        # kept as written.
+        written: dict[str, Any] | None = None
+        if not timed_out and bundle.x_maljan_fallback_verdict is None:
+            written = as_written[0] if as_written else None
+            violations.extend(v for v in shape if v.code == PROPERTY_NOT_CARRIED_CODE)
         # And the two verdict checks over the bundle that is actually going to
         # be reported, on every ending. One row each: a check the loop already
         # fed back and that survived is in ``violations`` already, and asking
@@ -1407,6 +1434,7 @@ class JudgeAgent(BudgetMeter):
             retries=retries,
             fed_back=dict(tally.by_code),
             labels=dict(labels),
+            written=written,
         )
 
     def _bundle_from_response(
@@ -1417,6 +1445,7 @@ class JudgeAgent(BudgetMeter):
         record: list[Violation] | None = None,
         origins: list[tuple[int | None, str]] | None = None,
         labels: dict[str, Any] | None = None,
+        as_written: list[dict[str, Any]] | None = None,
     ) -> Bundle:
         """The model's raw answer as a Bundle, or the text fallback.
 
@@ -1452,6 +1481,10 @@ class JudgeAgent(BudgetMeter):
             # Before the schema, and before anything that walks the objects: an
             # item the Bundle cannot hold fails the whole model, and the judge's
             # other twenty-four objects are not the model's to lose.
+            if as_written is not None:
+                import copy
+
+                as_written.append(copy.deepcopy(data))
             # Positions and labels as the judge wrote them, before anything is
             # set aside or folded: the dicts are the same objects after both.
             written = {

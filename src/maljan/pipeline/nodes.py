@@ -3684,6 +3684,7 @@ def make_judge_node(
                     # The map from each label the judge wrote to the id it was
                     # published under, kept with the judge's own bundle.
                     "stix_labels": dict(verdict.labels),
+                    "stix_written": verdict.written,
                     # Set when the judge's answer was not the verdict it was
                     # asked for — text, or nothing at all. Written rather than
                     # left alone: the verdict stage runs once today, and a
