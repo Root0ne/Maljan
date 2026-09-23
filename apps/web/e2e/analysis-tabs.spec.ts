@@ -115,6 +115,24 @@ test.describe("Analysis tabs", () => {
     });
   }
 
+  test("the summary gives each stage's time, the same figure the strip prints", async ({
+    sessionPage: page,
+  }) => {
+    await page.goto(`/analysis/${JOB_ID}`);
+    const timing = page.getByRole("region", { name: "Time per stage" });
+    await expect(timing).toBeVisible();
+    await expect(timing).toContainText("Total elapsed: 29m 55s");
+
+    const rows = timing.getByRole("listitem");
+    // The declined debate took no time and has no row.
+    await expect(rows).toHaveCount(3);
+    const strip = page.getByTestId("pipeline-strip");
+    for (const figure of ["42.0 s", "9.5 s", "2.1 s"]) {
+      await expect(timing.getByText(figure, { exact: true })).toBeVisible();
+      await expect(strip.getByText(figure, { exact: true })).toBeVisible();
+    }
+  });
+
   test("/attribution shows every evidence source, not just the name", async ({
     sessionPage: page,
   }) => {
