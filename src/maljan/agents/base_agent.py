@@ -35,7 +35,12 @@ from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
-from maljan.llm.context_window import NO_ROOM_RUN_STATE
+from maljan.llm.context_window import (
+    CHARS_PER_TOKEN,
+    NO_ROOM_RUN_STATE,
+    tool_definition_chars,
+    window_reported_full,
+)
 from maljan.pipeline.validation import (
     ALIGNMENT_MARGIN,
     VALIDITY_CODE,
@@ -179,6 +184,30 @@ def _message_chars(m: object) -> int:
     if calls:
         total += len(str(calls))
     return total
+
+
+def _reported_request_chars(messages: list, per_token: int) -> int:
+    """What the server said the conversation weighs, in the budget's characters.
+
+    The last assistant turn that carries usage is the answer to a request the
+    server counted in full: ``input_tokens`` is everything before that turn,
+    tool definitions and template included. That count converted at the
+    budget's rate, plus the measured size of that turn and of everything after
+    it, is what the next request weighs as far as anything reported can say.
+    Zero where no turn carries a count, and the measure alone then answers.
+    """
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if getattr(message, "type", "") != "ai":
+            continue
+        usage = getattr(message, "usage_metadata", None) or {}
+        try:
+            prompt = int(usage.get("input_tokens") or 0)
+        except (AttributeError, TypeError, ValueError):
+            prompt = 0
+        if prompt > 0:
+            return prompt * max(1, per_token) + sum(_message_chars(m) for m in messages[index:])
+    return 0
 
 
 def _conversation_units(msgs: list) -> list[list]:
@@ -2328,19 +2357,35 @@ class BaseAnalyst(BudgetMeter, ABC):
             return None
 
     def _note_conversation(self, messages: list) -> None:
-        """Tell the job's budget what this loop's conversation now weighs.
+        """Tell the job's budget what this loop's next request will weigh.
 
         Called from the run-state refresher, which already runs before every
         model turn and already holds the messages. Measured with
         ``_message_chars``, the same rule the salvage trim uses: an assistant
         turn that requests tools carries its whole request outside ``content``,
         and counting the text alone under-reported a ReAct transcript fourfold.
+
+        Two things a request carries that the messages do not show are added.
+        The definitions of the loop's tools go with every request; left out,
+        a static analyst with 35 tools was over a quarter of its tool budget
+        fuller than it believed, and the server refused with the budget still saying
+        there was room. And where the server reported what the last request
+        really weighed, that figure — converted at the budget's own rate, plus
+        what the conversation gained since — is a floor under the measure:
+        content that tokenises worse than the rate assumes, and the template
+        the server wraps every message in, are in the server's count and in
+        nobody else's.
         """
         budget = self._context_budget()
         if budget is None:
             return
         try:
-            budget.note_conversation(self.name, sum(_message_chars(m) for m in messages))
+            measured = sum(_message_chars(m) for m in messages) + int(
+                getattr(self, "_tool_definition_chars", 0) or 0
+            )
+            per_token = int(getattr(budget, "chars_per_token", CHARS_PER_TOKEN) or CHARS_PER_TOKEN)
+            reported = _reported_request_chars(messages, per_token)
+            budget.note_conversation(self.name, max(measured, reported))
         except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
             self.logger.debug("%s: the conversation size was not recorded (%s).", self.name, exc)
 
@@ -2742,6 +2787,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         recorded = record_tools(
             self.pinned_tools(), recorder, repeats, repairs, self._context_budget()
         )
+        # Sent with every request of this loop, so counted with its conversation.
+        self._tool_definition_chars = tool_definition_chars(recorded)
         agent_executor = create_react_agent(
             _model_that_closes_off_truncated_calls(self.llm, recorded, _close_off_truncated_calls),
             recorded,
@@ -2753,6 +2800,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                 recorder=recorder,
             ),
         )
+
+        # Whether the server, rather than the budget, said the window was full.
+        window_full = False
 
         # Run the ReAct coroutine on the shared, never-closing agent
         # loop (see ``_get_agent_loop``) instead of a throwaway per-call loop.
@@ -2847,6 +2897,23 @@ class BaseAnalyst(BudgetMeter, ABC):
                             *list(latest.get("messages") or []),
                             AIMessage(content=RECURSION_STOP_TEXT),
                         ]
+                    except Exception as exc:
+                        # The server saying the window is full is this
+                        # conversation out of room, whatever the budget
+                        # believed: the tool phase ends the way it does when
+                        # the budget sees it first, and what was gathered is
+                        # salvaged rather than lost with the analyst.
+                        if not window_reported_full(exc):
+                            raise
+                        nonlocal window_full
+                        window_full = True
+                        note_a_window_that_moved(exc)
+                        self.logger.warning(
+                            "%s ReAct loop ended: the model server reported its context "
+                            "window full (%s); synthesising from what it gathered.",
+                            self.name,
+                            type(exc).__name__,
+                        )
                 return dict(latest)
 
             last_conn_exc: Exception | None = None
@@ -3018,12 +3085,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         # read another answer, is in the same place as one that spent its
         # steps: it has evidence and no answer, and the salvage is what turns
         # the first into the second.
-        ended_early = repeats.ending_the_loop() or no_room
+        ended_early = repeats.ending_the_loop() or no_room or window_full
         self._record_react_loop(hit_step_cap=hit_step_cap)
         if repeats.ending_the_loop():
             cap, why = "repeats", f"{repeats.served_repeats} repeated tool call(s)"
         elif no_room:
             cap, why = "no_room", "the conversation had no room left for a tool answer"
+        elif window_full:
+            cap, why = "no_room", "the model server reported its context window full"
         elif hit_step_cap:
             cap, why = "steps", ""
         else:
@@ -4403,6 +4472,8 @@ class BaseAnalyst(BudgetMeter, ABC):
     # stand-in that never asks anyone and is never asked still runs a loop.
     call_chain: tuple[str, ...] = ()
     loop_budget: LoopBudget | None = None
+    # What the definitions of the running loop's tools weigh in a request.
+    _tool_definition_chars: int = 0
     _budget_ceiling: BudgetCeiling | None = None
     steps_spent: int = 0
     current_round: int = 0

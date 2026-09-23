@@ -589,6 +589,24 @@ What is outside that guarantee is the model's own output: its tool requests and
 its prose are not the platform's to cap, and on a very small window they reach
 the window before the platform's text does.
 
+What a conversation is measured at is what its next request will weigh, not the
+messages alone. The definitions of the loop's tools go with every request, and
+they are counted: a static analyst holding 35 tools carries more than 19,000
+characters of them, over a quarter of a 32,768-token window's tool budget, and a count
+that left them out said there was room until the server refused. Where the
+server reported how many tokens the last request really took, that figure,
+converted at the same three characters per token, plus what the conversation
+gained since, is a floor under the measure, so content that tokenises worse
+than three characters a token — pages of `strings` noise do — or the template
+the server wraps each message in cannot hide room that is gone.
+
+And where a server says the window is full anyway — llama.cpp's "context shift
+is disabled", "the request exceeds the available context size", or a hosted
+provider's "maximum context length" — that agent's tool phase ends with
+`no_room` ("the model server reported its context window full" on the record
+and the stage event), and the forced synthesis writes the answer from what was
+gathered, rather than the agent failing and its work being lost.
+
 The window itself is learned free of charge and without asking the operator
 anything. In order:
 

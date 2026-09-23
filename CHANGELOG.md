@@ -3244,6 +3244,26 @@ change landed on `main`.
   before it reads 0. `tool_output_chars_dropped` includes the whitespace a
   compacted answer lost, though no value was.
 
+- **The context budget counts what a request carries besides its messages, and
+  a full window ends the tool phase instead of the agent.** On a live run the
+  static analyst reached step 36 of 40 with the budget holding 61,762
+  characters — inside the 73,728-character tool budget of a 32,768-token window
+  with 8,192 kept for the reply — when llama answered HTTP 500 "context shift is
+  disabled"; the run said `tool_output_no_room 0` and the analyst's work was
+  lost. The count left out the definitions of the loop's tools, which go with
+  every request: 35 tools, more than 19,000 characters. They are now counted with
+  the conversation, and where the server reported the token count of the last
+  request, that count plus what the conversation gained since is a floor under
+  the measure, so content that tokenises worse than three characters a token
+  cannot hide the room that is gone. A server error that says the window is full
+  ("context shift is disabled" joins the overflow wordings already recognised)
+  now ends that agent's tool phase with `no_room` and the detail "the model
+  server reported its context window full", and the forced synthesis writes the
+  answer from what was gathered; any other server error still fails the agent.
+  **Upgrading:** a derived cap reaches zero sooner for an agent with many tools,
+  so a run on a small window ends tool phases earlier than before and says
+  `no_room` where it used to overflow.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**

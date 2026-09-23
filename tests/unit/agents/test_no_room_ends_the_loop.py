@@ -44,7 +44,7 @@ TASK = "look at it"
 
 # What the framing weighs: enough that the fourth answer meets a conversation
 # with no room for an answer and still room for the sentence saying so.
-FRAMING = 11_500
+FRAMING = 11_300
 
 CLAIM = (
     "CLAIM: the sample reads its own strings\nEVIDENCE: ev_0001\nCONFIDENCE: 0.6\nTECHNIQUE: NONE"
@@ -173,9 +173,10 @@ def _run(
 def _a_budget_that_runs_out() -> cw.ContextBudget:
     """An 8,192-token window with a quarter kept back for the reply.
 
-    The tool budget is 18,432 characters; the framing takes 11,500 of it, so
-    the answers the guardrail hands over — 2,000 characters each, the floor —
-    leave no room for a fourth one, and room for the sentence that says so.
+    The tool budget is 18,432 characters; the framing and the tool's definition
+    take about 11,500 of it, so the answers the guardrail hands over — 2,000
+    characters each, the floor — leave no room for a fourth one, and room for
+    the sentence that says so.
     """
     return cw.ContextBudget(cw.WindowFact(8192, cw.DECLARED, "test"), reply_tokens=2048)
 

@@ -128,6 +128,8 @@ __all__ = [
     "probe_window",
     "reply_reserve_tokens",
     "table_window",
+    "tool_definition_chars",
+    "window_reported_full",
     "unknown_window",
     "window_for_settings",
     "window_from_llama_props",
@@ -1032,6 +1034,9 @@ _OVERFLOW_SIGNATURES = (
     "context length",
     "context window",
     "context size",
+    # llama.cpp with context shift off, when prompt and reply together reach
+    # the window: the prompt fitted and the reply ran out of room.
+    "context shift",
     "maximum context",
     "n_ctx",
     "max_model_len",
@@ -1040,6 +1045,20 @@ _OVERFLOW_SIGNATURES = (
 )
 
 _OVERFLOW_RE = re.compile("|".join(re.escape(word) for word in _OVERFLOW_SIGNATURES))
+
+
+def window_reported_full(message: object) -> bool:
+    """Whether a server's error says a request did not fit the window it serves.
+
+    The same wordings :func:`note_provider_error` retires a learned window on.
+    Asked by a tool loop so a full window ends that agent's tool phase the way
+    running out of room does, rather than failing the agent and losing what it
+    had gathered. Never raises.
+    """
+    try:
+        return bool(_OVERFLOW_RE.search(str(message or "").lower()))
+    except Exception:  # noqa: BLE001 — an error path never raises another error
+        return False
 
 
 def note_provider_error(message: object) -> bool:
@@ -1203,6 +1222,31 @@ def answering_for(agent: str) -> Iterator[None]:
         yield
     finally:
         _ANSWERING_FOR.reset(token)
+
+
+def tool_definition_chars(tools: Iterable[Any]) -> int:
+    """What the definitions of ``tools`` weigh in a request, in characters.
+
+    Every request a tool loop makes carries them beside the messages — the
+    name, the description and the argument schema of each tool, as the
+    provider sends them — and none of it is in the conversation a loop
+    measures. A static analyst with 35 tools spent over a quarter of a
+    32,768-token window's tool budget on them before its first message, and a
+    count that left them out said there was room until the server refused.
+
+    Measured as the OpenAI-compatible definition, which is what the providers
+    this platform uses send. A tool that cannot be described costs nothing
+    here rather than failing the loop.
+    """
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+
+    total = 0
+    for tool in tools:
+        try:
+            total += len(json.dumps(convert_to_openai_tool(tool), ensure_ascii=False))
+        except Exception as exc:  # noqa: BLE001 — a definition is never worth a lost loop
+            logger.debug("context window: a tool definition was not measured (%s)", exc)
+    return total
 
 
 class ContextBudget:
