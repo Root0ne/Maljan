@@ -803,10 +803,16 @@ change landed on `main`.
   drafts are generated after the export. Import names are no longer YARA
   strings. A Benign verdict gets no draft, and §10.2 says why. A registry key
   is compared without its hive or value name on both sides, and the
-  twelve-value cap on each Sigma selection is gone.
+  twelve-value cap on each Sigma selection is gone. A Sigma registry
+  selection names the key without its hive, so it matches Sysmon's
+  `HKU\<SID>\...` events.
 - **Every analyst claim reaches its composer section.** The fixed claim cuts
   (ten per prompt; twelve, eight and fourteen in three bundles) are gone; the
-  claims share the window's room with the tool answers.
+  claims share the window's room with the tool answers. A section's facts
+  enter whole (the fixed cuts on techniques, network values, user agents,
+  process lines, command lines, persistence, capabilities, packers and carved
+  files are gone), and a section whose facts alone exceed the window records a
+  degradation.
 - **A citation check asks about a whole digest and a word spelled with hex
   letters**; only `0x` hex, a hex run with a digit, or a bare number is
   undecidable. The version-word check before an address reads a bounded
@@ -4277,7 +4283,10 @@ decline recorded as `stix.indicator_not_published`. A report stored before
 A report now stores `emulated_strings`. A report stored before it existed
 reads its emulation record from its kept section rows, and a value published
 from it says "(the record is partial: …)"; re-render it from a new run for a
-whole record. A Sigma draft may carry more than twelve values in a selection.
+whole record. A Sigma draft may carry more than twelve values in a selection,
+and its registry selection names keys without a hive (`\Software\...`), not
+`HKCU\Software\...`. A composer section's prompt may be longer, since its
+facts are no longer cut.
 
 Draft detection rules are no longer generated for a Benign verdict, and a
 YARA draft no longer carries import names as strings; a Suricata draft alerts

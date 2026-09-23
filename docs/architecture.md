@@ -448,7 +448,11 @@ Two producers use it:
   model's context window leaves after the section's output budget and the rest
   of its prompt, evenly; no count cuts a section's claims. A full window shows
   a sentence in place of a claim or an answer, and the run summary's budget
-  line says how they are sized. A text the platform shortens
+  line says how they are sized. A section's facts (its techniques, network
+  values, process lines and command lines, persistence, capability profile,
+  carved and dropped files) enter whole, with no count cutting them, and are
+  measured as the rest of the prompt; a section whose facts alone exceed what
+  the window leaves records a degradation naming it. A text the platform shortens
   before showing it — a claim's stored evidence, a tool answer cut to its
   share, a procedure quote in the ATT&CK table, a claim in the live transcript
   — ends in `…` (`utils.marked_cut`), so a cut is never read, or copied, as a
@@ -2094,9 +2098,13 @@ is assembled from what the run gathered rather than recomputed beside it:
   recorded it, and the sandbox's own signature names (`sigma_admits`); an
   analyst's persistence target the table does not publish selects nothing.
   A registry key is compared in one form on both sides — without its hive
-  (`HKCU`, `HKEY_CURRENT_USER`, `HKU\<SID>`, `\REGISTRY\USER\<SID>`) and
-  without the table's trailing value name — admission is asked of every value
-  before anything is collected, and no count cuts a selection. A
+  (`HKCU`, `HKEY_CURRENT_USER`, `HKU\<SID>`, `\REGISTRY\USER\<SID>`,
+  stripped until the text stops changing) and without the table's trailing
+  value name — admission is asked of every value before anything is
+  collected, and no count cuts a selection. The selection names the key
+  without its hive (`TargetObject|contains: '\Software\...'`), since Sysmon
+  logs a user hive as `HKU\<SID>\...` and a `HKCU` selection would match no
+  event. A
   Benign verdict publishes no malicious indicator, so it gets no draft, and
   §10.2 says so. A signed benign tool once got twenty `trojan-activity` alerts
   for certificate hosts and a "C2 IP" rule for a version number.
