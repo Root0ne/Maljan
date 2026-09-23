@@ -1216,9 +1216,48 @@ def strip_tool_call_scaffolding(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
-# The width of the evidence field as the ISR stores it, and how many dropped
-# ids are written back after the cut.
-_EVIDENCE_REF_CHARS = 200
+def evidence_ref_width() -> int:
+    """How much of one claim's evidence line the ISR stores: what the window allows one answer.
+
+    The line feeds prompts — the ISR text the mediator and the peer revision
+    rounds read, the claims the report composer is handed, the judge's
+    memory query — as well as the report. So it is sized the way one tool
+    answer is: the largest share of the served window one answer may take
+    (``context_window.derive_tool_output_chars`` over an empty conversation),
+    and the documented 6,000 characters where no window is known. It used to
+    be a fixed 200 characters, which cut an analyst's own citation mid-sentence
+    on every window. Where the cut still lands, it is marked where the kept
+    text ends.
+    """
+    from maljan.llm.context_window import (
+        FALLBACK,
+        UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS,
+        derive_tool_output_chars,
+        window_for_settings,
+    )
+
+    try:
+        fact = window_for_settings(get_settings(), [], probe=False)
+    except Exception:  # noqa: BLE001 — an unknown window is the documented fallback
+        return UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
+    if fact.source == FALLBACK or fact.tokens <= 0:
+        return UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
+    return derive_tool_output_chars(window_tokens=int(fact.tokens)) or (
+        UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
+    )
+
+
+class _EvidenceWidth:
+    """``evidence_ref_width()`` read at the moment of each cut, usable as a slice bound."""
+
+    def __index__(self) -> int:
+        return evidence_ref_width()
+
+
+# The width of the evidence field as the ISR stores it — derived from the
+# window each time it is read — and how many dropped ids are written back
+# after the cut.
+_EVIDENCE_REF_CHARS = _EvidenceWidth()
 _EVIDENCE_REF_IDS = 3
 
 # The start of an id the cut sliced through, at the end of the kept text: any
@@ -4384,7 +4423,8 @@ class BaseAnalyst(BudgetMeter, ABC):
     def _note_on_last_loop(self, key: str, value: Any) -> None:
         """Put one fact on the last loop's budget record. Never raises."""
         try:
-            with self._the_meter_s_lock():
+            lock = getattr(self, "_meter_lock", None) or contextlib.nullcontext()
+            with lock:
                 records = list(getattr(self, "_budget_records", None) or [])
                 if not records:
                     return
@@ -4917,8 +4957,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         # a loop that ended at its time cap used to be handed the whole budget
         # again, and after a second loop the whole of what that loop was given.
         timeout, _steps = loop_limits(self.name, getattr(self, "_budget_ceiling", None))
-        left = self._seconds_the_last_loop_left(float(timeout))
-        needs = self.seconds_an_answer_needs()
+        # Through the class's functions, so a duck-typed analyst that borrows
+        # this method alone is held to the same rule.
+        left = BaseAnalyst._seconds_the_last_loop_left(self, float(timeout))  # type: ignore[arg-type]
+        needs = BaseAnalyst.seconds_an_answer_needs(self)  # type: ignore[arg-type]
         if left < needs:
             detail = (
                 f"not asked: {max(0.0, left):.0f}s of the loop's time were left, and an answer "
@@ -4927,7 +4969,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.logger.warning("%s: validation turn %s.", self.name, detail)
             mark_invalid_technique_ids(isr, initial)
             self.validation_findings.extend(initial)
-            self._note_on_last_loop("validation", detail)
+            BaseAnalyst._note_on_last_loop(self, "validation", detail)  # type: ignore[arg-type]
             return isr
 
         from langchain_core.messages import HumanMessage, SystemMessage
