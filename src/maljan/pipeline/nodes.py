@@ -116,6 +116,27 @@ if TYPE_CHECKING:
 _NARRATIVE_TIMEOUT_SECONDS = 600
 
 
+def _restart_reporter(container: Any, narrative_agent: Any) -> None:
+    """Start the reporter's model list for this report stage. Never raises."""
+    try:
+        from maljan.llm.fallback import restart_models
+
+        llm = getattr(narrative_agent, "llm", None)
+        if llm is None:
+            composer = container.get_report_composer()
+            llm = getattr(composer, "llm", None)
+        reporting = getattr(getattr(container, "config", None), "reporting", None)
+        section = getattr(reporting, "composer_per_section_timeout", None)
+        share = getattr(getattr(container.config, "llm", None), "fallback_turn_share", None)
+        restart_models(
+            llm,
+            loop_seconds=float(section) if isinstance(section, int | float) else None,
+            share=float(share) if isinstance(share, int | float) else None,
+        )
+    except Exception as exc:  # noqa: BLE001 — a restart never costs the report
+        logger.debug("report_node: the reporter's model list was not restarted (%s).", exc)
+
+
 # What the run summary calls a judge annotation whose technique did not
 # survive validation. Its own code: the technique's own rejection is recorded
 # under its own, and this row says what that rejection cost the export.
@@ -3983,6 +4004,12 @@ def make_report_node(
         except Exception as exc:  # noqa: BLE001
             logger.warning("report_node: NarrativeAgent unavailable (%s); using fallback.", exc)
             narrative_agent = None
+
+        # The report stage is the reporter's loop: its model list starts at its
+        # first model again here, and each model's turn deadline is a share of
+        # ``reporting.composer_per_section_timeout`` — the shortest limit any of
+        # its calls runs under (the narrative round's is the 600 s above it).
+        _restart_reporter(container, narrative_agent)
 
         if narrative_agent is not None:
             try:

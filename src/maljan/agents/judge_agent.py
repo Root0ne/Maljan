@@ -522,9 +522,6 @@ class JudgeAgent(BudgetMeter):
 
         from maljan.llm.fallback import restart_models
 
-        # Sticky for this loop only; the judge's next loop starts at its first model.
-        restart_models(self.llm)
-
         messages_pre: list[BaseMessage] = []
         for role, content in prompt_messages:
             if role == "system":
@@ -538,6 +535,8 @@ class JudgeAgent(BudgetMeter):
             # same hard timeout used by the tools path so a stalled / queued
             # llama-server cannot freeze the judge node.
             no_tools_timeout = loop_limits("judge")[0]
+            # Sticky for this call only, with a deadline shorter than its clock.
+            restart_models(self.llm, loop_seconds=float(no_tools_timeout), share=self._turn_share())
             response = await asyncio.wait_for(
                 retry_on_connection_error(
                     lambda: self.llm.ainvoke(messages_pre),
@@ -580,6 +579,9 @@ class JudgeAgent(BudgetMeter):
 
         settings = get_settings()
         timeout = settings.react_agent_timeout
+        # Sticky for this loop only, with a turn deadline shorter than its clock;
+        # the judge's next loop starts at its first model.
+        restart_models(self.llm, loop_seconds=float(timeout), share=self._turn_share())
         max_steps = int(settings.react_agent_max_steps)
         # The judge is an agent by every other measure here — its ledger
         # entries carry its name, it binds servers by role, the console draws

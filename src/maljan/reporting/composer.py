@@ -224,6 +224,9 @@ class ReportComposer:
         self.section_max_tokens = section_max_tokens
         self.per_section_timeout = per_section_timeout
         self.token_ledger = token_ledger
+        # The job's event sink, set by the container, so a switch of the
+        # reporter's model list is said in the conversation like any agent's.
+        self.event_sink: Any | None = None
         # What each section was told was wrong with its answer, by code, across
         # every section. The composer runs after the run summary is built, so
         # the report node reads this and folds it in.
@@ -432,6 +435,11 @@ class ReportComposer:
                     from maljan.core.token_ledger import record_response_usage
 
                     record_response_usage(self.token_ledger, raw, agent="reporter")
+                    from maljan.pipeline.events import announce_model_fallback
+
+                    announce_model_fallback(
+                        getattr(self, "event_sink", None), raw, agent="reporter", stage="report"
+                    )
                 except Exception as exc:  # noqa: BLE001
                     # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
                     logger.debug("ReportComposer: token usage not recorded (%s).", exc)

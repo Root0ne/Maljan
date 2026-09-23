@@ -352,7 +352,11 @@ class TestAStallReachesTheFallback:
         chain, second = self._chain()
         answer = asyncio.run(chain.ainvoke([HumanMessage(content="go")]))
         assert answer.content == "second says"
-        assert "openai/stalls did not answer within its" in answer.response_metadata[FALLBACK_KEY]
+        reason = answer.response_metadata[FALLBACK_KEY]
+        assert reason.startswith(
+            "openai/stalls: did not answer within its turn deadline of 200 ms"
+        ), reason
+        assert reason.count("openai/stalls") == 1, "the model is named once"
         assert provider_failure(ModelStalled("x did not answer")) == "x did not answer"
 
     def test_the_blocking_path_is_bounded_the_same_way(self) -> None:
@@ -446,3 +450,113 @@ def test_an_ollama_model_is_built_with_a_request_timeout() -> None:
 
     model = OllamaProvider(Settings()).build_model("gemma", 0.1)
     assert model.client_kwargs["timeout"] == PROVIDER_REQUEST_TIMEOUT_SECONDS
+
+
+class TestTheDeadlineIsTheLoopsOwn:
+    def test_a_stall_inside_an_ask_reaches_the_fallback_and_is_recorded(self) -> None:
+        """An ask's clock, far shorter than the agent's own budget, sets the deadline."""
+        from unittest.mock import MagicMock
+
+        from maljan.agents.base_agent import BaseAnalyst, BudgetCeiling
+        from maljan.core.token_ledger import TokenLedger
+
+        class _Analyst(BaseAnalyst):
+            def analyze(self, data: str) -> str:  # pragma: no cover - unused
+                return ""
+
+            def revise(self, *a: Any, **k: Any) -> str:  # pragma: no cover - unused
+                return ""
+
+        second = _Scripted(script=["CLAIM: x\nEVIDENCE: ev_0001"], bound=[])
+        chain = FallbackChatModel(
+            models=[_Stalling(script=["never"], bound=[]), second],
+            labels=["openai/stalls", "ollama/answers"],
+            agent="static",
+            # What the build time gave it from static's own budget: longer
+            # than the whole ask.
+            turn_deadline=750.0,
+        )
+        agent = _Analyst(llm=chain, name="static", tools=[])
+        agent.pipeline_stage = "analysis"
+        agent._container = MagicMock()
+        agent.token_ledger = TokenLedger()
+        agent._budget_ceiling = BudgetCeiling(steps=4, seconds=2.0)
+
+        started = time.monotonic()
+        answer = agent.execute_tool_loop([("system", "s"), ("human", "h")])
+
+        assert "CLAIM: x" in answer
+        assert chain.turn_deadline == 1.0, "a share of the ask's two seconds"
+        assert time.monotonic() - started < 2.0
+        (switch,) = agent.token_ledger.snapshot()["fallbacks"]
+        assert switch["model"] == "ollama/answers"
+        assert "openai/stalls: did not answer within its turn deadline of 1 s" in switch["reason"]
+
+    def test_a_loop_start_sets_the_deadline_from_that_loops_budget(self) -> None:
+        chain, _models = _chain(["a"], ["b"])
+        restart_models(chain, loop_seconds=300.0, share=0.5)
+        assert chain.turn_deadline == 150.0
+        restart_models(chain, loop_seconds=None)
+        assert chain.turn_deadline == 150.0, "no budget named leaves the deadline as it was"
+
+
+def test_an_abandoned_stall_does_not_hold_up_the_process_exit() -> None:
+    import subprocess
+    import sys
+    import textwrap
+
+    script = textwrap.dedent(
+        """
+        import time
+        from typing import Any
+        from langchain_core.language_models.chat_models import BaseChatModel
+        from langchain_core.language_models.fake_chat_models import FakeListChatModel
+        from langchain_core.messages import HumanMessage
+        from maljan.llm.fallback import FallbackChatModel
+
+        class Stalls(BaseChatModel):
+            @property
+            def _llm_type(self) -> str:
+                return "stalls"
+
+            def _generate(self, *a: Any, **k: Any) -> Any:
+                time.sleep(8)
+                raise RuntimeError("never reached")
+
+        chain = FallbackChatModel(
+            models=[Stalls(), FakeListChatModel(responses=["answered"])],
+            labels=["a", "b"],
+            turn_deadline=0.2,
+        )
+        print(chain.invoke([HumanMessage(content="go")]).content)
+        """
+    )
+    started = time.monotonic()
+    done = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=60, check=False
+    )
+    assert done.stdout.strip().splitlines()[-1] == "answered", done.stderr
+    assert time.monotonic() - started < 6.0, "the stalled thread held the exit"
+
+
+class TestRetryAfter:
+    def test_the_http_date_form_is_read(self) -> None:
+        from datetime import UTC, datetime, timedelta
+        from email.utils import format_datetime
+
+        from maljan.llm.fallback import retry_after_seconds
+
+        when = format_datetime(datetime.now(UTC) + timedelta(seconds=10), usegmt=True)
+        response = httpx.Response(503, request=_request(), headers={"retry-after": when})
+        wait = retry_after_seconds(APIStatusError("busy", response=response, body=None))
+        assert wait is not None and 5 < wait <= 10
+
+    def test_a_date_past_thirty_seconds_moves_on(self) -> None:
+        from datetime import UTC, datetime, timedelta
+        from email.utils import format_datetime
+
+        from maljan.llm.fallback import retry_after_seconds
+
+        when = format_datetime(datetime.now(UTC) + timedelta(minutes=5), usegmt=True)
+        response = httpx.Response(503, request=_request(), headers={"retry-after": when})
+        assert retry_after_seconds(APIStatusError("busy", response=response, body=None)) is None

@@ -1112,6 +1112,7 @@ class ServiceContainer:
                     max_input_tokens=max_tokens,
                     token_ledger=getattr(self, "_token_ledger", None),
                 )
+                self._narrative_agent_cache.event_sink = self.event_sink
             return self._narrative_agent_cache
 
     def get_report_composer(self) -> Any | None:
@@ -1136,6 +1137,7 @@ class ServiceContainer:
                     per_section_timeout=rc.composer_per_section_timeout,
                     token_ledger=getattr(self, "_token_ledger", None),
                 )
+                self._report_composer_cache.event_sink = self.event_sink
             return self._report_composer_cache
 
     # ------------------------------------------------------------------

@@ -27,7 +27,6 @@ conversation event and the run summary.
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import threading
 import time
 from typing import Any
@@ -164,18 +163,43 @@ class ModelStalled(TimeoutError):
 
 
 def retry_after_seconds(exc: BaseException) -> float | None:
-    """The provider's own ``Retry-After`` when it is at most thirty seconds, else ``None``."""
+    """The provider's own ``Retry-After`` when it is at most thirty seconds, else ``None``.
+
+    Both forms RFC 9110 allows: delta-seconds, and an HTTP-date, which several
+    hosted providers send on 429 and 503.
+    """
     headers = getattr(getattr(exc, "response", None), "headers", None)
     if headers is None:
         return None
     try:
         raw = str(headers.get("retry-after") or "").strip()
-        seconds = float(raw)
     except (TypeError, ValueError, AttributeError):
         return None
+    if not raw:
+        return None
+    try:
+        seconds = float(raw)
+    except ValueError:
+        from datetime import UTC, datetime
+        from email.utils import parsedate_to_datetime
+
+        try:
+            when = parsedate_to_datetime(raw)
+        except (TypeError, ValueError):
+            return None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=UTC)
+        seconds = (when - datetime.now(UTC)).total_seconds()
     if 0 < seconds <= MAX_RETRY_AFTER_SECONDS:
         return seconds
     return None
+
+
+def _duration(seconds: float) -> str:
+    """A deadline as a reader reads it: milliseconds under a second, seconds above."""
+    if seconds < 1:
+        return f"{seconds * 1000:.0f} ms"
+    return f"{seconds:.0f} s"
 
 
 class FallbackChatModel(BaseChatModel):
@@ -294,25 +318,35 @@ class FallbackChatModel(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=message)])
 
     def _stalled(self, index: int, deadline: float) -> ModelStalled:
-        return ModelStalled(
-            f"{self._label(index)} did not answer within its {deadline:.0f} s turn deadline"
-        )
+        # The label is added once, by ``_failed``, in front of this reason.
+        return ModelStalled(f"did not answer within its turn deadline of {_duration(deadline)}")
 
     def _ask_sync(self, index: int, runnable: Any, messages: Any, stop: Any, call: Any) -> Any:
         deadline = self._deadline(index)
         if deadline is None:
             return runnable.invoke(messages, stop=stop, **call)
-        # A thread, because a blocking call cannot be cancelled: the one left
-        # behind ends at its provider's own request timeout.
-        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        try:
-            future = pool.submit(runnable.invoke, messages, stop=stop, **call)
+        # A daemon thread, because a blocking call cannot be cancelled: the one
+        # left behind ends at its provider's own request timeout, and as a
+        # daemon it does not hold up the process's exit while it does — a
+        # pool's worker is joined at interpreter exit, which let one stalled
+        # model delay a worker's graceful shutdown by up to that timeout.
+        outcome: dict[str, Any] = {}
+        done = threading.Event()
+
+        def _run() -> None:
             try:
-                return future.result(timeout=deadline)
-            except concurrent.futures.TimeoutError as exc:
-                raise self._stalled(index, deadline) from exc
-        finally:
-            pool.shutdown(wait=False)
+                outcome["answer"] = runnable.invoke(messages, stop=stop, **call)
+            except BaseException as exc:  # noqa: BLE001 — handed back to the caller
+                outcome["error"] = exc
+            finally:
+                done.set()
+
+        threading.Thread(target=_run, name=f"model-turn:{self._label(index)}", daemon=True).start()
+        if not done.wait(timeout=deadline):
+            raise self._stalled(index, deadline)
+        if "error" in outcome:
+            raise outcome["error"]
+        return outcome["answer"]
 
     async def _ask_async(
         self, index: int, runnable: Any, messages: Any, stop: Any, call: Any
@@ -390,23 +424,57 @@ class FallbackChatModel(BaseChatModel):
         raise RuntimeError(f"{self.agent or 'agent'} has no model to call")
 
 
-def restart_models(model: Any) -> None:
-    """Hand the next loop back to the first model of a list; a no-op for any other model."""
-    restart = getattr(model, "restart", None)
-    if isinstance(model, FallbackChatModel) and callable(restart):
-        restart()
+def restart_models(
+    model: Any, *, loop_seconds: float | None = None, share: float | None = None
+) -> None:
+    """Start a loop on a model list: its first model again, and a deadline for this loop.
+
+    ``loop_seconds`` is the budget *this* loop runs under — the one the loop
+    itself read, a caller's ask ceiling included — so the turn deadline is a
+    share of the limit that would otherwise cancel a stalled model first. An
+    agent asked for help runs under the ask's clock, which can be far shorter
+    than its own; a deadline fixed from its own budget let the ask cancel the
+    stall before the list ever moved. A no-op for any other model.
+    """
+    if not isinstance(model, FallbackChatModel):
+        return
+    model.restart()
+    if loop_seconds is None or loop_seconds <= 0:
+        return
+    if share is None:
+        share = _configured_share()
+    if share > 0:
+        model.turn_deadline = float(loop_seconds) * float(share)
+
+
+def _configured_share() -> float:
+    try:
+        from maljan.core.config import get_settings
+
+        return float(get_settings().llm.fallback_turn_share)
+    except Exception as exc:  # noqa: BLE001 — the shipped share, when settings are unreadable
+        logger.debug("fallback turn share not read (%s).", exc)
+        return 0.5
 
 
 def turn_share_seconds(cfg: Any, agent: str) -> float:
-    """One model's turn deadline on a list: ``llm.fallback_turn_share`` of the agent's loop budget.
+    """The deadline a model list is built with: ``llm.fallback_turn_share`` of the agent's budget.
 
-    The loop budget is read the way the loop reads it — the agent's own
+    The budget is read the way the loop reads it — the agent's own
     definition, then the per-agent override map, then the deployment's
-    default — so the deadline is always shorter than the ``wait_for`` that
-    would otherwise cancel the whole loop first.
+    default. The reporter, which runs no loop, takes a share of
+    ``reporting.composer_per_section_timeout``, the limit each of its calls
+    runs under. Every loop start resets it to a share of the budget that loop
+    actually has (:func:`restart_models`).
     """
     try:
         share = float(getattr(cfg.llm, "fallback_turn_share", 0.5))
+        if agent == "reporter":
+            # The reporter runs no loop: what bounds each of its calls is the
+            # composer's per-section timeout, which the narrative round sits
+            # inside as well.
+            section = getattr(getattr(cfg, "reporting", None), "composer_per_section_timeout", 0)
+            return float(section) * share if section and share > 0 else 0.0
         definitions = getattr(getattr(cfg, "agents", None), "definitions", None) or {}
         definition = definitions.get(agent) if isinstance(definitions, dict) else None
         own = getattr(definition, "timeout_seconds", None)

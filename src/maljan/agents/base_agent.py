@@ -1893,6 +1893,12 @@ class BudgetMeter:
 
         return model_label_for(config, name, role=self._model_role)
 
+    def _turn_share(self) -> float | None:
+        """``llm.fallback_turn_share`` from the job's settings, or ``None`` for the process's."""
+        llm = getattr(getattr(getattr(self, "_container", None), "config", None), "llm", None)
+        share = getattr(llm, "fallback_turn_share", None)
+        return float(share) if isinstance(share, int | float) else None
+
     def _record_usage(self, response: Any, *, announce: bool = True) -> None:
         """One model answer onto the run's ledger, under this agent and the model that gave it.
 
@@ -1918,22 +1924,14 @@ class BudgetMeter:
         stays moved for the loop and only the turn that moved it carries the
         reason. Never raises.
         """
-        try:
-            from maljan.llm.fallback import turn_model
-            from maljan.pipeline.events import emit_model_fallback, scrub
+        from maljan.pipeline.events import announce_model_fallback
 
-            model, reason = turn_model(message)
-            if not reason:
-                return
-            emit_model_fallback(
-                self._event_sink(),
-                stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
-                agent=str(getattr(self, "name", "") or ""),
-                model=model,
-                reason=scrub(reason),
-            )
-        except Exception as exc:  # noqa: BLE001 — an announcement never costs a turn
-            logger.debug("model fallback not announced (%s).", exc)
+        announce_model_fallback(
+            self._event_sink(),
+            message,
+            agent=str(getattr(self, "name", "") or ""),
+            stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+        )
 
     def _event_sink(self) -> Any:
         """The job's event sink, or ``None`` for an agent outside a job."""
@@ -2665,12 +2663,6 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-        from maljan.llm.fallback import restart_models
-
-        # A model list that moved on in an earlier loop starts this one at its
-        # first model again: the switch is sticky for a loop, not for the job.
-        restart_models(self.llm)
-
         # Build BaseMessages directly so literal `{...}` substrings in the
         # report content (e.g. JSON like {"programs": [...]}) are not parsed
         # as ChatPromptTemplate f-string variables.
@@ -2689,6 +2681,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         # "need more steps" stop message instead of real claims. Both are
         # capped by a caller's ceiling when this loop answers an ask.
         timeout, max_steps = self._loop_limits()
+
+        # A model list that moved on in an earlier loop starts this one at its
+        # first model again — the switch is sticky for a loop, not for the job
+        # — and its turn deadline is a share of *this* loop's budget, which
+        # inside an ask is the ask's, not the agent's own.
+        from maljan.llm.fallback import restart_models
+
+        restart_models(self.llm, loop_seconds=float(timeout), share=self._turn_share())
 
         # The two standing blocks: the pack at the head of the task, the run
         # state in the system turn with this loop's whole budget still ahead.

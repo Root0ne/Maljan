@@ -215,9 +215,12 @@ ANNOTATIONS: dict[str, Annotation] = {
     "llm.fallback_turn_share": {
         "title": "Turn deadline for a model on a fallback list (share of the loop)",
         "description": (
-            "How much of an agent's loop budget one model on its fallback list may spend "
+            "How much of the current loop's budget one model on its fallback list may spend "
             "on a turn before it is treated as stalled and the next model is asked; the "
-            "model that answers then stays for the rest of that loop. A share of the "
+            "model that answers then stays for the rest of that loop. Set at every loop "
+            "start from the budget that loop runs under, so an agent answering an ask gets "
+            "a share of the ask's clock; the reporter's is a share of "
+            "reporting.composer_per_section_timeout. A share of the "
             "loop, because the loop budget is what would otherwise cancel a stalled model "
             "before any timeout inside it: the default of a half leaves the other half of "
             "the loop to the model that took over. The last model on a list has no "

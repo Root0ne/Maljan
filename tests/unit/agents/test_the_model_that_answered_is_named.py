@@ -146,3 +146,49 @@ def test_the_report_says_what_the_run_spent_and_which_turns_fell_back() -> None:
     assert "- Tokens: 900 in and 30 out over 4 model calls; not reported for 1 of them." in text
     assert "- Model fallback (static): openai/qwen: timed out" in text
     assert "Tool server analysis was rested for 60 s" in text
+
+
+class TestTheReporter:
+    def test_its_list_restarts_where_the_report_stage_starts(self) -> None:
+        from unittest.mock import MagicMock
+
+        from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+        from maljan.llm.fallback import FallbackChatModel
+        from maljan.pipeline.nodes import _restart_reporter
+
+        chain = FallbackChatModel(
+            models=[FakeListChatModel(responses=["a"]), FakeListChatModel(responses=["b"])],
+            labels=["a", "b"],
+            agent="reporter",
+        )
+        chain._stick(1)
+        container = MagicMock()
+        container.config.reporting.composer_per_section_timeout = 120
+        container.config.llm.fallback_turn_share = 0.5
+        _restart_reporter(container, MagicMock(llm=chain))
+        assert chain.answering == 0
+        assert chain.turn_deadline == 60.0, "a share of the limit its calls run under"
+
+    def test_its_switch_is_announced(self) -> None:
+        from maljan.pipeline.events import announce_model_fallback
+
+        events: list[tuple[str, dict[str, Any]]] = []
+        announce_model_fallback(
+            lambda k, d: events.append((k, d)), _fallback_turn(), agent="reporter", stage="report"
+        )
+        announce_model_fallback(
+            lambda k, d: events.append((k, d)),
+            AIMessage(content="x"),
+            agent="reporter",
+            stage="report",
+        )
+        assert [(k, d["agent"], d["stage"]) for k, d in events] == [
+            (MODEL_FALLBACK, "reporter", "report")
+        ]
+
+    def test_the_narrative_round_announces_through_its_sink(self) -> None:
+        from maljan.reporting.narrative_agent import NarrativeAgent
+
+        agent = NarrativeAgent(llm=AIMessage(content="unused"))  # type: ignore[arg-type]
+        assert agent.event_sink is None

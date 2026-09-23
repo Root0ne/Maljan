@@ -177,6 +177,27 @@ def emit_model_fallback(
     )
 
 
+def announce_model_fallback(
+    sink: EventSink | None, message: Any, *, agent: str, stage: str
+) -> None:
+    """Publish ``model_fallback`` when ``message`` is the answer its model list moved on for.
+
+    Published whatever ``core.events.stream_deltas`` says: the switch is a
+    fact about the run a reader of the conversation has to see, not part of
+    the text being streamed. Once per switch, because a list that moved stays
+    moved for the loop and only the answer that moved it carries the reason.
+    Never raises.
+    """
+    try:
+        from maljan.llm.fallback import turn_model
+
+        model, reason = turn_model(message)
+        if reason:
+            emit_model_fallback(sink, stage=stage, agent=agent, model=model, reason=scrub(reason))
+    except Exception as exc:  # noqa: BLE001 — an announcement never costs a turn
+        logger.debug("model fallback not announced (%s).", exc)
+
+
 def emit_tool_server_rested(sink: EventSink | None, record: dict[str, Any]) -> None:
     """A tool server is resting: which one, after how many failures, for how long and why."""
     emit(
