@@ -96,22 +96,13 @@ def _load():
 
 
 class TestTheMigration:
-    def test_it_chains_onto_the_head_and_nothing_else_does(self) -> None:
-        module = _load()
-
-        assert module.down_revision == "20260928000000"
-        for path in (_API / "alembic" / "versions").glob("*.py"):
-            if path != _REV:
-                assert (
-                    '"20260929000000"'
-                    not in path.read_text(encoding="utf-8")
-                    .split("down_revision", 1)[-1]
-                    .split("\n", 1)[0]
-                ), path
+    def test_it_follows_the_revision_it_names(self) -> None:
+        assert _load().down_revision == "20260928000000"
 
     def test_the_revisions_form_one_chain_with_one_head(self) -> None:
         """Two revisions sharing an id, or two with the same parent, are what
-        alembic cannot load; this one arrived beside another branch's."""
+        alembic cannot load; this one arrived beside another branch's. A later
+        revision on top of the head is the chain growing and passes."""
         revisions: dict[str, str | None] = {}
         for path in (_API / "alembic" / "versions").glob("*.py"):
             spec = importlib.util.spec_from_file_location(path.stem, path)
@@ -124,7 +115,7 @@ class TestTheMigration:
 
         assert len(parents) == len(set(parents)), "two revisions share a parent"
         heads = set(revisions) - set(parents)
-        assert heads == {"20260929000000"}
+        assert len(heads) == 1, heads
 
     def test_it_adds_the_column_and_takes_it_back(self) -> None:
         from alembic.operations import Operations

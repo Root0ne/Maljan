@@ -165,7 +165,7 @@ class JudgeVerdict(NamedTuple):
     fed_back: dict[str, int] = {}
     # ``{the judge's label: the published id}`` for the answer this verdict
     # stands on, so the judge's own bundle and the export can be read together.
-    labels: dict[str, str] = {}
+    labels: dict[str, str | list[str]] = {}
 
 
 # The judge's system prompt. A module constant so that
@@ -1081,7 +1081,7 @@ class JudgeAgent(BudgetMeter):
         # and the label it gave it: feedback names the judge's own positions,
         # not the ones left after set-aside objects and folded duplicates.
         where: list[tuple[int | None, str]] = []
-        labels: dict[str, str] = {}
+        labels: dict[str, str | list[str]] = {}
         tally = ValidationTally()
 
         def _parse(answer: Any) -> Bundle:
@@ -1274,7 +1274,7 @@ class JudgeAgent(BudgetMeter):
         isr_reports: dict[str, AgentISR] | None,
         record: list[Violation] | None = None,
         origins: list[tuple[int | None, str]] | None = None,
-        labels: dict[str, str] | None = None,
+        labels: dict[str, Any] | None = None,
     ) -> Bundle:
         """The model's raw answer as a Bundle, or the text fallback.
 
@@ -1321,7 +1321,11 @@ class JudgeAgent(BudgetMeter):
             if record is not None:
                 record.extend(lifted)
             if record is not None:
-                record.extend(duplicate_label_violations(data))
+                record.extend(
+                    duplicate_label_violations(
+                        data, {key: index for key, (index, _label) in written.items()}
+                    )
+                )
             data = postprocess_judge_bundle(
                 data, ledger=getattr(self, "truncation_ledger", None), labels=labels
             )

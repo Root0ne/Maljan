@@ -448,6 +448,7 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
             "stix.annotation_out_of_schema",
             "stix.duplicate_label",
             "stix.unknown_object_path",
+            "stix.file_unidentified",
         }
     )
 

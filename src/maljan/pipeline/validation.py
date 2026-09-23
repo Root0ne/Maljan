@@ -1415,6 +1415,7 @@ def indicator_type_contradicts_verdict(
 
 UNKNOWN_OBSERVABLE_TYPE_CODE = "stix.unknown_observable_type"
 IS_FAMILY_MISSING_CODE = "stix.is_family_missing"
+FILE_UNIDENTIFIED_CODE = "stix.file_unidentified"
 UNKNOWN_OBJECT_PATH_CODE = "stix.unknown_object_path"
 INDICATOR_TYPE_VOCABULARY_CODE = "stix.indicator_type_vocabulary"
 
@@ -1846,6 +1847,19 @@ def validate_verdict_bundle(
                         advisory=absent and how_whole.partial,
                     )
                 )
+        elif kind == "file" and not getattr(obj, "hashes", None) and not getattr(obj, "name", None):
+            violations.append(
+                Violation(
+                    code=FILE_UNIDENTIFIED_CODE,
+                    message=(
+                        f"the file at {where} has neither hashes nor name, and STIX needs at "
+                        "least one of them to say which file it is. Give it the hashes or the "
+                        "name a tool in this run reported, or leave it out; a file kept with "
+                        "neither is not exported."
+                    ),
+                    path=where,
+                )
+            )
         elif kind == "malware" and getattr(obj, "is_family", None) is None:
             named = str(getattr(obj, "name", "") or "").strip()
             violations.append(

@@ -32,7 +32,10 @@ from maljan.reporting.models import (
     NetworkIP,
     ProcessNode,
 )
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from maljan.reporting.renderers.stix_renderer import (
+    UNPUBLISHABLE_OBJECT_CODE,
+    ExtendedSTIXRenderer,
+)
 from maljan.schemas.stix_models import Bundle
 
 SHA256 = "36dabc40fa8983ce900a90b8156d2c754875fe1b5413a997843c4a0ef3908220"
@@ -201,3 +204,73 @@ def test_the_rich_and_benign_exports_carry_the_judges_technique() -> None:
     """The gate grades the shapes a real run publishes, attack-patterns included."""
     for bundle in (_rich(), _benign()):
         assert [o.type for o in bundle.objects].count("attack-pattern") == 1
+
+
+def _judge_observables() -> Bundle:
+    judge = _judge(
+        {
+            "type": "bundle",
+            "objects": [
+                {"type": "malware", "id": "malware--1", "name": "loader", "is_family": False},
+                {
+                    "type": "file",
+                    "id": "file--1",
+                    "name": "putty.exe",
+                    "size": 1706136,
+                    "hashes": {"SHA-256": "d" * 64},
+                    "mime_type": "application/octet-stream",
+                },
+                {"type": "file", "id": "file--2", "hashes": {"MD5": "a" * 32}},
+                {
+                    "type": "process",
+                    "id": "process--1",
+                    "pid": 100,
+                    "command_line": "putty.exe -ssh",
+                    "image_ref": "file--1",
+                },
+            ],
+        }
+    )
+    return ExtendedSTIXRenderer().render(_report("Malware", judge), judge)
+
+
+def test_an_export_carrying_the_judges_file_and_process_objects_is_valid() -> None:
+    bundle = _judge_observables()
+    dumped = bundle.model_dump(mode="json")
+    kinds = [o["type"] for o in dumped["objects"]]
+
+    assert kinds.count("file") == 2 and kinds.count("process") == 1
+    (named,) = [o for o in dumped["objects"] if o["type"] == "file" and o.get("name")]
+    assert named["hashes"] == {"SHA-256": "d" * 64} and named["size"] == 1706136
+    assert _errors(bundle) == []
+
+
+class TestWhatTheStandardRequiresIsNeverPublishedAbsent:
+    """A malware object without ``is_family`` or a file with neither ``hashes`` nor
+    ``name`` is an object the standard refuses. Kept after the question, it is
+    declined with a record — never published invalid, never filled in — and the
+    platform mints its own sample object as it does when the judge wrote none."""
+
+    def _render(self, *objects: dict) -> tuple[Bundle, list]:
+        judge = _judge({"type": "bundle", "objects": list(objects)})
+        renderer = ExtendedSTIXRenderer()
+        return renderer.render(_report("Malware", judge), judge), renderer.declined
+
+    def test_a_malware_object_without_is_family(self) -> None:
+        bundle, declined = self._render({"type": "malware", "id": "malware--1", "name": "loader"})
+
+        malware = [o for o in bundle.objects if o.type == "malware"]
+        assert [m.is_family for m in malware] == [False]
+        assert [m.name for m in malware] != ["loader"]
+        assert [code for code, _why in declined] == [UNPUBLISHABLE_OBJECT_CODE]
+        assert _errors(bundle) == []
+
+    def test_a_file_with_nothing_to_identify_it(self) -> None:
+        bundle, declined = self._render(
+            {"type": "malware", "id": "malware--1", "name": "loader", "is_family": False},
+            {"type": "file", "id": "file--1", "size": 10},
+        )
+
+        assert [o for o in bundle.objects if o.type == "file"] == []
+        assert [code for code, _why in declined] == [UNPUBLISHABLE_OBJECT_CODE]
+        assert _errors(bundle) == []

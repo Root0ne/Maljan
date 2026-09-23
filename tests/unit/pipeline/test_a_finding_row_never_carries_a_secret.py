@@ -260,7 +260,11 @@ BUILTIN_NAMES: frozenset[str] = BUILTIN_ANSWERS | frozenset(
 # catalogue lookup returns the catalogue's words, not the question's.
 # ``_object_path`` answers with a position this codebase counted and the
 # judge's label, which it passes through ``safe_finding_value`` itself.
-CODE_OWNED_CALLS: frozenset[str] = frozenset({"_retired_note", "_object_path"}) | BUILTIN_ANSWERS
+# ``_object_problem`` answers in the same way: its sentence is this codebase's,
+# and every value of the judge's it quotes goes through the helper inside it.
+CODE_OWNED_CALLS: frozenset[str] = (
+    frozenset({"_retired_note", "_object_path", "_object_problem"}) | BUILTIN_ANSWERS
+)
 
 # The functions that build a message for somebody else to put in a Violation.
 # Their own f-strings are walked by the same rule, so a ``message=mismatch`` is

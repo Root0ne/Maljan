@@ -240,6 +240,20 @@ def unknown_object_types(pattern: str) -> list[str]:
 # section 6), which is as deep as this reader asks. A step past a reference or
 # into an extension is the referenced object's or the extension's business,
 # and a custom ``x_`` property is the producer's own.
+# The properties every Cyber-observable carries, whatever its type (STIX 2.1,
+# the SCO common properties).
+SCO_COMMON_PROPERTIES: frozenset[str] = frozenset(
+    {
+        "id",
+        "type",
+        "spec_version",
+        "defanged",
+        "object_marking_refs",
+        "granular_markings",
+        "extensions",
+    }
+)
+
 SCO_PROPERTIES: dict[str, frozenset[str]] = {
     "artifact": frozenset(
         {"mime_type", "payload_bin", "url", "hashes", "encryption_algorithm", "decryption_key"}
@@ -405,7 +419,7 @@ def object_path_problems(pattern: str) -> list[str]:
                 continue
             listed = ", ".join(sorted(allowed)) if allowed else "no predefined extension"
             problem = f"{kind} has no extension {key!r} (it has {listed})"
-        elif name in properties or name.startswith("x_"):
+        elif name in properties or name in SCO_COMMON_PROPERTIES or name.startswith("x_"):
             continue
         else:
             problem = f"{kind} has no property {name!r}"

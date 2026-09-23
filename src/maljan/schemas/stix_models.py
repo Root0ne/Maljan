@@ -43,7 +43,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.schemas.judgement import JudgeAssessment
 
@@ -381,39 +381,99 @@ SCO_NAMESPACE = uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7")
 
 
 class _Observable(_SpecConformantModel):
-    """A STIX 2.1 Cyber-observable: an id and a type, no SDO bookkeeping."""
+    """A STIX 2.1 Cyber-observable: an id, a type and the common SCO properties.
+
+    Every property the standard defines for the type is declared, optional as
+    the standard makes it, so nothing the judge wrote under a defined name is
+    lost at validation. A custom ``x_`` property is kept as written (``extra``
+    is allowed for that); a property the standard does not define for the type
+    never reaches this model — the post-processor sets such an object aside
+    with a recorded ``stix.unknown_object`` first, because keeping it would
+    publish an object the standard refuses and dropping it would be silent.
+    """
+
+    model_config = ConfigDict(extra="allow")
 
     type: str
     id: str
     spec_version: Literal["2.1"] = "2.1"
+    defanged: bool | None = None
+    object_marking_refs: list[str] = Field(default_factory=list)
+    granular_markings: list[dict[str, Any]] = Field(default_factory=list)
+    extensions: dict[str, Any] | None = None
 
 
 class File(_Observable):
-    """STIX 2.1 ``file`` observable, here the image a process ran from.
+    """STIX 2.1 ``file`` observable, with every property the standard defines.
 
-    Its id is derived from its name, as the standard derives a file's id from
-    its identifying properties, so one image is one object in every export.
+    The standard needs at least one of ``hashes`` and ``name``; a file with
+    neither is a question the judge is asked (``stix.file_unidentified``), not
+    a parse failure. An id the platform derives for its own image objects is
+    derived from the name, as the standard derives a file's id from its
+    identifying properties, so one image is one object in every export.
     """
 
     type: Literal["file"] = "file"
     id: str = ""
-    name: str
+    hashes: dict[str, str] | None = None
+    size: int | None = None
+    name: str | None = None
+    name_enc: str | None = None
+    magic_number_hex: str | None = None
+    mime_type: str | None = None
+    ctime: str | None = None
+    mtime: str | None = None
+    atime: str | None = None
+    parent_directory_ref: str | None = None
+    contains_refs: list[str] = Field(default_factory=list)
+    content_ref: str | None = None
 
     def model_post_init(self, __context: Any) -> None:
         if not self.id:
-            key = json_canonical({"name": self.name})
+            key = json_canonical({"name": self.name} if self.name else {"hashes": self.hashes})
             self.id = f"file--{uuid.uuid5(SCO_NAMESPACE, key)}"
 
 
 class Process(_Observable):
-    """STIX 2.1 ``process`` observable: a pid, its command line, its image and children."""
+    """STIX 2.1 ``process`` observable, with every property the standard defines.
+
+    A process has no ``name`` in STIX 2.1: the image it ran from is a ``file``
+    it names by ``image_ref``.
+    """
 
     type: Literal["process"] = "process"
     id: str = Field(default_factory=lambda: f"process--{_generate_uuid()}")
+    is_hidden: bool | None = None
     pid: int | None = None
+    created_time: str | None = None
+    cwd: str | None = None
     command_line: str | None = None
+    environment_variables: dict[str, str] | None = None
+    opened_connection_refs: list[str] = Field(default_factory=list)
+    creator_user_ref: str | None = None
     image_ref: str | None = None
+    parent_ref: str | None = None
     child_refs: list[str] = Field(default_factory=list)
+
+
+def undefined_properties(obj: dict[str, Any]) -> list[str]:
+    """The properties a judge-written object carries that its type does not define.
+
+    Asked of the observables this bundle holds, whose models declare every
+    property the standard defines, and of observed-data for the one property
+    2.1 deprecated: ``objects``, the embedded dictionary the model no longer
+    reads. A custom ``x_`` property is the writer's own and is kept. Anything
+    listed here would be lost at validation, so the caller sets the object
+    aside with a record instead.
+    """
+    kind = str(obj.get("type") or "")
+    if kind == "observed-data":
+        return ["objects"] if "objects" in obj else []
+    models: dict[str, type[BaseModel]] = {"file": File, "process": Process}
+    model = models.get(kind)
+    if model is None:
+        return []
+    return [key for key in obj if key not in model.model_fields and not key.startswith("x_")]
 
 
 def json_canonical(value: Any) -> str:
@@ -478,6 +538,23 @@ _BundleObject = (
     | Process
     | File
 )
+
+
+def bundle_model_for(kind: str) -> type[BaseModel] | None:
+    """The model a bundle object of ``kind`` is read with, the union's own choice.
+
+    For a caller that reads one object on its own before the whole bundle is
+    read, so one object's failure is that object's and not the bundle's. The
+    first member of the union declaring the type answers, which is the
+    annotated relationship for ``relationship``.
+    """
+    import typing
+
+    for member in typing.get_args(_BundleObject):
+        field = member.model_fields.get("type")
+        if field is not None and kind in typing.get_args(field.annotation):
+            return typing.cast(type[BaseModel], member)
+    return None
 
 
 class FallbackVerdict(_SpecConformantModel):

@@ -107,6 +107,11 @@ UNPUBLISHABLE_PRODUCER_CODE = "stix.unpublishable_producer"
 # A judge credit naming an agent that did not name the technique, which the
 # judge was asked about (``stix.credit_without_claim``) and kept.
 UNPUBLISHABLE_CREDIT_CODE = "stix.unpublishable_credit"
+# A judge object without a property the standard requires of it — a malware
+# object with no ``is_family``, a file with neither ``hashes`` nor ``name`` —
+# that the judge was asked about and kept absent. Published, the bundle is one a
+# consumer may refuse; filled in, it says something the judge did not.
+UNPUBLISHABLE_OBJECT_CODE = "stix.unpublishable_object"
 # An indicator over something that is not an endpoint: a mailbox that is not
 # one, a file name that names a directory or a root.
 UNPUBLISHABLE_ARTEFACT_CODE = "stix.unpublishable_artefact"
@@ -397,6 +402,26 @@ def _without_unconfirmed_credit(obj: Any, credit: Any) -> tuple[Any, Declined]:
         "exported bundle: no source by that name named the technique in this run, and the "
         "judge kept the credit when asked. It is unchanged in the judge's own bundle.",
     )
+
+
+def _missing_what_the_standard_requires(obj: Any) -> str:
+    """The recorded sentence for a judge object the standard refuses as written, or ``""``."""
+    kind = str(getattr(obj, "type", "") or "")
+    label = safe_finding_value(getattr(obj, "name", "") or getattr(obj, "id", ""))
+    if kind == "malware" and getattr(obj, "is_family", None) is None:
+        return (
+            f"the malware object {label!r} is not in the exported bundle: it does not say "
+            "is_family, which STIX requires, and the judge kept it absent when asked. The "
+            "export stands the platform's own sample object in for it, and the judge's "
+            "relationships from it go with it. It is unchanged in the judge's own bundle."
+        )
+    if kind == "file" and not getattr(obj, "hashes", None) and not getattr(obj, "name", None):
+        return (
+            f"the file {label!r} is not in the exported bundle: it has neither hashes nor "
+            "name, and STIX needs one of them to say which file it is. It is unchanged in the "
+            "judge's own bundle."
+        )
+    return ""
 
 
 def replaced_producer_sentence(obj: Any, named: str) -> str:
@@ -690,6 +715,10 @@ class ExtendedSTIXRenderer:
                             "run's validation findings.",
                         )
                     )
+                    continue
+                incomplete = _missing_what_the_standard_requires(obj)
+                if incomplete:
+                    self.declined.append(Declined(UNPUBLISHABLE_OBJECT_CODE, incomplete))
                     continue
                 if _points_at(obj, gone):
                     continue

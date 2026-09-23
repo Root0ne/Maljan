@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from maljan.analysis.technique_ids import attack_reference_id
@@ -102,6 +103,60 @@ def _object_type(obj: Any) -> str:
     return str(obj.get("type") or "").strip() if isinstance(obj, dict) else ""
 
 
+# The object types the judge's bundle is for, as the sentence about a set-aside
+# object names them. The bundle model holds more — the identity, report,
+# observed data and notes the export mints — and naming those invited the
+# judge to write objects the export builds itself.
+JUDGE_OBJECT_TYPES = (
+    "attack-pattern",
+    "file",
+    "indicator",
+    "malware",
+    "note",
+    "process",
+    "relationship",
+)
+
+
+def _object_problem(obj: dict[str, Any]) -> str:
+    """Why one object of a bundle type cannot be read as written, or ``""``.
+
+    A property its type does not define would be lost at validation, and a
+    value the model cannot hold would fail it — and a failure there cost the
+    whole bundle, the verdict with it, to the text fallback. Either is this
+    object's problem alone: it is set aside with a record, and the rest of the
+    answer is read.
+    """
+    from pydantic import ValidationError
+
+    from maljan.pipeline.events import safe_finding_value
+    from maljan.schemas.stix_models import bundle_model_for, undefined_properties
+
+    extra = undefined_properties(obj)
+    if extra:
+        named = ", ".join(repr(safe_finding_value(key)) for key in extra)
+        hint = (
+            "; the image a process ran from is a file it names by image_ref"
+            if obj.get("type") == "process" and "name" in extra
+            else "; name each observable as an object of its own and list it in object_refs"
+            if obj.get("type") == "observed-data"
+            else ""
+        )
+        return f"carries {named}, which STIX 2.1 does not define for it{hint}"
+    model = bundle_model_for(str(obj.get("type") or ""))
+    if model is None:
+        return ""
+    try:
+        model.model_validate(obj)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        where = ".".join(str(step) for step in first.get("loc", ()) if not isinstance(step, int))
+        return (
+            f"does not read as one: {safe_finding_value(where or 'value')} {first.get('msg', '')}"
+        )
+    return ""
+
+
 def lift_misplaced_extensions(bundle_dict: dict[str, Any]) -> list[Violation]:
     """Move the assessment out of ``objects``, set aside what cannot be held.
 
@@ -129,7 +184,21 @@ def lift_misplaced_extensions(bundle_dict: dict[str, Any]) -> list[Violation]:
     for index, obj in enumerate(objects):
         kind = _object_type(obj)
         if kind in BUNDLE_OBJECT_TYPES:
-            kept.append(obj)
+            problem = _object_problem(obj)
+            if not problem:
+                kept.append(obj)
+                continue
+            found.append(
+                Violation(
+                    code=UNKNOWN_OBJECT_CODE,
+                    message=(
+                        f"objects[{index}] of type {safe_finding_value(kind)!r} {problem}, so it "
+                        "was set aside and the rest of the bundle was read. Write it with the "
+                        "properties its type defines, or leave it out."
+                    ),
+                    path=f"objects[{index}]",
+                )
+            )
             continue
         if kind == ASSESSMENT_PROPERTY and not bundle_dict.get(ASSESSMENT_PROPERTY):
             bundle_dict[ASSESSMENT_PROPERTY] = obj
@@ -153,7 +222,7 @@ def lift_misplaced_extensions(bundle_dict: dict[str, Any]) -> list[Violation]:
             f"a second {ASSESSMENT_PROPERTY}; the one at the top level of the bundle is the "
             "one that was read"
             if kind == ASSESSMENT_PROPERTY
-            else f"not a STIX type a bundle can hold ({', '.join(sorted(BUNDLE_OBJECT_TYPES))})"
+            else f"not a type this bundle takes from you ({', '.join(JUDGE_OBJECT_TYPES)})"
         )
         found.append(
             Violation(
@@ -189,11 +258,15 @@ def _shared_labels(objects: list[Any]) -> set[str]:
     return shared
 
 
-def duplicate_label_violations(bundle_dict: dict[str, Any]) -> list[Violation]:
+def duplicate_label_violations(
+    bundle_dict: dict[str, Any], positions: Mapping[int, int] | None = None
+) -> list[Violation]:
     """One question per id the judge gave to more than one object.
 
-    Asked before any id is minted, with the positions as the judge wrote them,
-    so the sentence names the objects the judge can find in its own answer.
+    Asked before any id is minted. ``positions`` maps each object (by
+    ``id()``) to where the judge wrote it, so the sentence names the objects the
+    judge can find in its own answer even after set-aside objects have left the
+    list; without it the list's own positions are all there is.
     """
     from maljan.pipeline.events import safe_finding_value
     from maljan.pipeline.validation import Violation
@@ -201,19 +274,22 @@ def duplicate_label_violations(bundle_dict: dict[str, Any]) -> list[Violation]:
     objects = bundle_dict.get("objects")
     if not isinstance(objects, list):
         return []
+
+    def written(index: int, obj: Any) -> int:
+        return positions.get(id(obj), index) if positions is not None else index
+
     shared = _shared_labels(objects)
     out: list[Violation] = []
     for label in sorted(shared):
-        where = [
-            f"objects[{index}] (a {safe_finding_value(_object_type(obj))})"
+        named = [
+            (written(index, obj), obj)
             for index, obj in enumerate(objects)
             if isinstance(obj, dict) and obj.get("id") == label
         ]
-        first = next(
-            index
-            for index, obj in enumerate(objects)
-            if isinstance(obj, dict) and obj.get("id") == label
-        )
+        where = [
+            f"objects[{index}] (a {safe_finding_value(_object_type(obj))})" for index, obj in named
+        ]
+        first = named[0][0]
         out.append(
             Violation(
                 code=DUPLICATE_LABEL_CODE,
@@ -232,7 +308,7 @@ def postprocess_judge_bundle(
     bundle_dict: dict[str, Any],
     *,
     ledger: Any | None = None,
-    labels: dict[str, str] | None = None,
+    labels: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Apply the defensive bundle fixes in place; return the same dict.
 
@@ -240,8 +316,8 @@ def postprocess_judge_bundle(
     exactly as the judge wrote it; the technique check reports what is wrong
     with its ids, it does not filter them. ``labels``, when given, is filled
     with ``{the judge's label: the published id}`` for every label that names
-    one object, which is the record that lets a reader find the judge's object
-    in the export.
+    one object, and ``{label: [id, id]}`` for one two objects share, which is
+    the record that lets a reader find the judge's object in the export.
     Everything done here is a shape repair — the published ids, a missing
     MITRE reference, a relationship pointing at an object that is not
     in the bundle. None of it changes what the judge decided.
@@ -267,18 +343,29 @@ def postprocess_judge_bundle(
     # integrity pass then folded them away as duplicates.
     shared = _shared_labels(objects)
     id_remap: dict[str, str] = {}
+    old_ids: dict[int, str] = {}
     for obj in objects:
         if not isinstance(obj, dict):
             continue
         old_id = obj.get("id")
         if not isinstance(old_id, str):
             continue
+        old_ids[id(obj)] = old_id
         new_id = _mint_id(obj, old_id)
         if old_id not in shared:
             id_remap[old_id] = new_id
         obj["id"] = new_id
     if labels is not None:
         labels.update(id_remap)
+        # A label two objects share maps to every object it names, in the
+        # order written, so the record says which published ids the judge's
+        # one label stood for.
+        for obj in objects:
+            label = old_ids.get(id(obj))
+            if label in shared:
+                listed = labels.setdefault(label, [])
+                if isinstance(listed, list):
+                    listed.append(obj["id"])
     if id_remap:
         logger.info("judge_postprocess: minted the published ids of %d object(s).", len(id_remap))
         _rewrite_references(objects, id_remap)
@@ -394,18 +481,23 @@ def _attack_pattern_technique_id(obj: dict[str, Any]) -> str | None:
 
 
 def _rewrite_references(objects: list[Any], id_remap: dict[str, str]) -> None:
-    """In-place: rewrite ``source_ref`` / ``target_ref`` / ``object_refs``."""
+    """In-place: rewrite every ``*_ref`` and ``*_refs`` property through ``id_remap``.
+
+    Every one, because an observable names others by more than the three an
+    SDO does — a process's ``image_ref``, ``parent_ref`` and ``child_refs``, a
+    file's ``parent_directory_ref`` — and a reference left on the judge's label
+    would name nothing in the published bundle.
+    """
     if not id_remap:
         return
     for obj in objects:
         if not isinstance(obj, dict):
             continue
-        for key in ("source_ref", "target_ref", "created_by_ref"):
-            if obj.get(key) in id_remap:
-                obj[key] = id_remap[obj[key]]
-        refs = obj.get("object_refs")
-        if isinstance(refs, list):
-            obj["object_refs"] = [id_remap.get(r, r) for r in refs]
+        for key, value in list(obj.items()):
+            if key.endswith("_ref") and isinstance(value, str) and value in id_remap:
+                obj[key] = id_remap[value]
+            elif key.endswith("_refs") and isinstance(value, list):
+                obj[key] = [id_remap.get(r, r) if isinstance(r, str) else r for r in value]
 
 
 def _oid(o: Any) -> Any:

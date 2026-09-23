@@ -93,11 +93,12 @@ class TestNothingIsChosen:
         assert len(indicators) == 2
         assert not [e for e in edges if e["source_ref"] in indicators]
 
-    def test_the_label_map_holds_only_labels_that_name_one_object(self) -> None:
-        labels: dict[str, str] = {}
+    def test_the_label_map_keeps_a_shared_label_with_every_object_it_names(self) -> None:
+        labels: dict = {}
         out = postprocess_judge_bundle(_answer(), labels=labels)
 
-        assert "indicator--1" not in labels
+        indicators = [o["id"] for o in out["objects"] if o["type"] == "indicator"]
+        assert labels["indicator--1"] == indicators
         (malware,) = [o for o in out["objects"] if o["type"] == "malware"]
         assert labels["malware--1"] == malware["id"]
 
@@ -146,6 +147,15 @@ class TestTheJudgesOwnRound:
 
         assert verdict.fed_back.get(DUPLICATE_LABEL_CODE) == 1
 
+    def test_the_repeat_is_named_where_the_judge_wrote_it(self) -> None:
+        answer = _answer()
+        # A set-aside object first: the judge wrote the repeats at 2 and 3,
+        # though they sit at 1 and 2 once it has left the list.
+        answer["objects"].insert(0, {"type": "sighting", "id": "sighting--1"})
+
+        (row,) = _duplicate_rows(answer)
+        assert "objects[2]" in row.message and "objects[3]" in row.message
+
     def test_a_path_names_the_judges_own_position_and_label(self) -> None:
         answer = {
             "type": "bundle",
@@ -169,6 +179,14 @@ class TestTheJudgesOwnRound:
         # Every object the judge's bundle kept is found from a label; a label
         # whose object the integrity pass folded maps to an id nothing holds.
         assert published <= set(verdict.labels.values())
+
+
+def _duplicate_rows(answer: dict) -> list:
+    import json
+
+    record: list = []
+    _judge(json.dumps(answer))._bundle_from_response(json.dumps(answer), {}, None, record=record)
+    return [v for v in record if v.code == DUPLICATE_LABEL_CODE]
 
 
 def test_a_drop_follows_the_judges_positions_back_to_the_bundle() -> None:

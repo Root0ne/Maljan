@@ -54,7 +54,7 @@ def _indicator(pattern: str, *types: str) -> Indicator:
 
 def _bundle(*indicators: Indicator) -> Bundle:
     return Bundle(
-        objects=[Malware(name="sample"), *indicators],
+        objects=[Malware(name="sample", is_family=False), *indicators],
         x_maljan_assessment=JudgeAssessment(verdict="Malware", confidence=0.9),
     )
 
@@ -224,3 +224,13 @@ class TestTheObjectPathIsAsked:
             o for o in exported.objects if isinstance(o, Indicator) and "pe_imphash" in o.pattern
         ]
         assert [code for code, _why in renderer.declined] == [UNPUBLISHABLE_PATTERN_CODE]
+
+
+def test_the_common_observable_properties_are_paths_every_type_has() -> None:
+    for pattern in (
+        "[file:id = 'file--0f1e2d3c-4b5a-4968-8776-655443332211']",
+        "[domain-name:defanged = 'true']",
+        "[url:spec_version = '2.1']",
+        "[ipv4-addr:object_marking_refs[*] = 'marking-definition--1']",
+    ):
+        assert object_path_problems(pattern) == [], pattern
