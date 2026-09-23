@@ -7,6 +7,7 @@ import {
   clip,
   nodeSummary,
   placeGraph,
+  readLintResult,
   stageCardId,
   teamFindings,
   worstOf,
@@ -153,5 +154,33 @@ describe("the words behind the picture", () => {
   it("gives every stage card of every team its own id", () => {
     expect(stageCardId("mine", "a")).not.toBe(stageCardId("mine_a", ""));
     expect(stageCardId("mine", "Bad Key")).not.toMatch(/\s/);
+  });
+});
+
+describe("an answer that is not a lint result", () => {
+  /* What the e2e stubs' catch-all for `settings/*` answered the lint route
+   * with, and what the editor dereferenced until it crashed. */
+  const MALFORMED: unknown[] = [
+    { reset: ["lint-teams"] },
+    null,
+    "<html>502</html>",
+    [],
+    { findings: [], graphs: [] },
+    { findings: {}, graphs: {} },
+    { findings: [], graphs: { mine: { nodes: "no" } } },
+    { findings: [{ severity: "error" }], graphs: {} },
+  ];
+
+  it("is refused without throwing, so the editor reports a check that failed", () => {
+    for (const body of MALFORMED) {
+      expect(() => readLintResult(body)).not.toThrow();
+      expect(readLintResult(body)).toBeNull();
+    }
+  });
+
+  it("is told apart from a real one, empty or not", () => {
+    expect(readLintResult({ findings: [], graphs: {} })).toEqual({ findings: [], graphs: {} });
+    const real = { findings: [finding()], graphs: { mine: FORK } };
+    expect(readLintResult(real)).toBe(real);
   });
 });

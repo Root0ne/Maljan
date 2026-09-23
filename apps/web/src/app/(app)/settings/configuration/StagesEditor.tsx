@@ -23,7 +23,7 @@ import {
   type KeyError,
 } from "./mapEditorHelpers";
 import TeamGraph from "./TeamGraph";
-import { stageCardId, teamFindings } from "./teamGraph";
+import { readLintResult, stageCardId, teamFindings } from "./teamGraph";
 
 /** How long the editor waits after the last keystroke before it asks the lint. */
 const LINT_DELAY_MS = 400;
@@ -139,9 +139,12 @@ export default function StagesEditor({
       setChecking(true);
       api
         .lintTeams(profiles, defs, active, { signal: controller.signal })
-        .then((result) => {
-          setLint(result);
-          setLintFailed(false);
+        .then((answer: unknown) => {
+          // An answer of the wrong shape is a check that failed: the last
+          // good picture stays up, marked as not current.
+          const read = readLintResult(answer);
+          if (read) setLint(read);
+          setLintFailed(read === null);
         })
         .catch(() => {
           // Apply still refuses what the lint would have found, so a lint the
@@ -376,7 +379,7 @@ export default function StagesEditor({
             <div className="xl:sticky xl:top-2 self-start">
               <TeamGraph
                 team={key}
-                graph={lint?.graphs[key]}
+                graph={lint?.graphs?.[key]}
                 findings={findings}
                 checking={checking}
                 failed={lintFailed}

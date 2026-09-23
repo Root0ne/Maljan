@@ -1,4 +1,10 @@
-import type { TeamFinding, TeamGraph, TeamGraphEdge, TeamGraphNode } from "@/types/settings";
+import type {
+  TeamFinding,
+  TeamGraph,
+  TeamGraphEdge,
+  TeamGraphNode,
+  TeamLintResult,
+} from "@/types/settings";
 
 /**
  * Geometry for the team preview beside the stage editor.
@@ -9,6 +15,26 @@ import type { TeamFinding, TeamGraph, TeamGraphEdge, TeamGraphNode } from "@/typ
  * into pixels and attaches each lint finding to the stage it concerns, and it
  * stays in the settings area: nothing outside the team editor draws with it.
  */
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * ``value`` as a lint answer, or null when it is not one.
+ *
+ * The editor draws from whatever the lint route answers, so an answer of the
+ * wrong shape — a proxy's error page, a stub that answers every settings
+ * path alike — has to be recognised here rather than dereferenced there.
+ */
+export function readLintResult(value: unknown): TeamLintResult | null {
+  if (!isRecord(value) || !Array.isArray(value.findings) || !isRecord(value.graphs)) return null;
+  for (const graph of Object.values(value.graphs)) {
+    if (!isRecord(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return null;
+  }
+  if (!value.findings.every((f) => isRecord(f) && typeof f.message === "string")) return null;
+  return value as unknown as TeamLintResult;
+}
 
 export const NODE_WIDTH = 176;
 export const NODE_HEIGHT = 54;
