@@ -170,6 +170,25 @@ heartbeat noticed or the cancel landed between two of its polls. No flag: arq's
 writing a row races its own teardown — the heartbeat goes with it, so the next
 sweep pass marks the job failed within ten minutes.
 
+A cancel stops the run as well as marking it. Each job carries one
+cancellation (`maljan.core.cancellation`), bound for the whole run: every graph
+node checks it on the way in, every LangChain model call the job makes — in a
+node, on the agent loop, in a thread started from either — checks it before
+anything is sent, and every call the job has in flight on the agent loop is
+registered with it, so a cancel cancels the model request itself and the
+server stops generating. A check raises `JobCancelled`, a `BaseException`, so
+no node's own `except Exception` reads a cancelled job as a failure and carries
+on, and the bridge to the agent loop passes a caller's own cancellation on
+instead of turning it into an ordinary error. The heartbeat sets the flag
+before it cancels the pipeline task; a job task that is itself cancelled — by
+SIGTERM or arq's `job_timeout` — sets it, cancels the pipeline and waits for it
+at most `PIPELINE_STOP_GRACE` (10 s). The `cancelled` event says where the
+pipeline stopped (`stopped`). A synchronous model call already on the wire in a
+thread cannot be cancelled and is not waited on at exit either: after the
+shutdown hook the worker leaves any such thread after `EXIT_GRACE` (10 s), so
+SIGTERM ends it within 10 s, the job's teardown (`WORKER_TEARDOWN_TIMEOUT`,
+60 s) and 10 s more.
+
 ### What a request holds while it waits on somebody else
 
 Nothing either. A request-scoped session is in a transaction from its first
@@ -285,7 +304,16 @@ a directory inside the job's staging directory that the job's teardown
 removes. The entry keeps up to 200 rows. It is last so the ids issued before it
 are the ids they were before it existed. Without a build the entry says so,
 with the remedy, and is not a failure; a run stopped by its wall clock or its
-memory limit is a failed entry whose line says which.
+memory limit is a failed entry whose line says which. FLOSS reads the file and
+nothing the pack writes, so it starts as soon as the routed format says PE and
+runs beside the rest of the pack, capa included — when the host reports at
+least twice its 4 GiB address-space bound available (`MemAvailable`), because
+running beside capa adds its own memory to the pack's peak. Below that, as on a
+host with a local model loaded beside the worker, the two run in turn. Its
+entry is written last either way, with its own clock, and a run it began within
+the pack's budget is recorded whatever the clock says by then. Measured on
+PuTTY: 312 s in turn, 183 s beside capa; the pack's process tree peaked at
+1.6 GB and 2.3 GB resident.
 
 The pack states facts and draws no conclusion, and it never fails a job: a
 tool that raises or answers with an error is an entry with `ok=False` and a
@@ -835,6 +863,18 @@ The reason is recorded once: a judge that raised is filed under
 other than a bundle has already filed `verdict.fallback` or `verdict.timeout`
 itself, so the summary carries one row and not two.
 
+The verdict prompt states its output budget (`judge_max_tokens`, reasoning
+included), and an answer that stopped at it is told so —
+`verdict.cut_at_output_cap`, with the cap and how far it got — rather than that
+it was not JSON, which made a judge whose bundle was too large write the same
+bundle again. When the retry is still not a bundle, the fallback reads the
+`x_maljan_assessment` object the answer wrote whole, if it did, through the
+reader a whole answer goes through and `JudgeAssessment`, and keeps it only
+when its verdict is one of the three words. The run then publishes that
+verdict with the judge's own confidence, severity and family, still read as
+`fallback` and still filed under `verdict.fallback`. Nothing is read out of
+prose.
+
 Two metrics record the outcome:
 
 * `run_summary.validation` — how many feedback retries the run spent, a count
@@ -859,6 +899,25 @@ send the transcript without such a call — the turn's own words stay — and wh
 the plain request still fails, the nudge asks once more with the loop's tools
 bound and `tool_choice="none"`, the one other shape the server accepts.
 `run_summary.nudge.retry_mode` names which analysts needed which repair.
+
+An answer with no CLAIM block that parses is the analyst's prose and nothing
+more. It used to be cut into sentences, each a claim at a flat 0.50 no analyst
+stated, Markdown headings included. The analyst's validation turn now asks
+once for the claim format (`isr.unparsed_answer`) — unless the final-answer
+nudge already asked — and an answer that is still prose leaves the analyst
+with no claims, its prose as its report, status `no_claims` with the reason,
+and the run's degradation reasons naming it ("analyst answers kept as prose,
+…"). A CLAIM block that states no confidence, or one that is not a number, is
+not a claim either: it is counted and asked about
+(`isr.claim_without_confidence`), where the parsers used to write 0.5.
+
+An analyst whose loop ended with nothing at all — no claim and no prose — is
+given a second loop over the same material only when what is left of its
+stage time, its loop budget less what the node has spent, holds one turn and a
+final answer at the pace its first loop measured, and the loop runs under that
+remainder rather than a fresh budget. It is the same ISR path as the first, so
+what it answers is parsed and validated like a first answer. When it does not
+fit, or ends empty too, the stage record's `agent_reasons` says so.
 
 ## Agents and teams
 
@@ -1236,8 +1295,15 @@ surrounding pair passed through exactly. The repair is recorded the way
 `carved_path`'s is: the ledger keeps the arguments as the model wrote them, and
 a structured answer carries `read_as` first, the value each argument was read
 as (a `threatintel` answer is prose and names the value it looked up). Each
-such tool's description says the argument is the raw text or pattern,
-unquoted. Content arguments — the text `iocs_from_text` and `yara_scan` scan,
+such tool's description says to give the argument the value itself, without
+quotes, and that the parameter's own name is not a value; it used to say "pass
+`pattern` as the raw text or pattern itself", and a static analyst sent
+`"pattern": "\"pattern\""` twice. A call whose argument is nothing but its own
+parameter's name — bare, quoted or in a placeholder bracket — is not run and
+not written to the ledger: the model is told which argument named its
+parameter and asked for the value it meant, the value is never rewritten, the
+question is counted under `tool.argument_names_its_parameter` in
+`run_summary.validation.by_code`, and asking the same again counts as a repeat. Content arguments — the text `iocs_from_text` and `yara_scan` scan,
 the command lines `lolbin_lookup` matches — are left as they arrive, because a
 command line can begin and end with a quote that belongs to it.
 
@@ -1475,6 +1541,23 @@ still reach the budget itself; the loop then keeps what it gathered instead of
 aborting the analyst, and the salvage gets what time is left. Either way the
 cap is recorded as `time`; a budget that runs out with nothing gathered says
 so rather than naming the hard cap. The hard cap stays the hard cap.
+The salvage is sized to finish in the time it is given. It re-sends the
+conversation without the loop's tools, so the server reads all of it again
+before it writes the answer. Where both of the model's rates are measured —
+the generation rate, and the prompt reading rate from Ollama's
+`prompt_eval_count`/`prompt_eval_duration` or llama.cpp's
+`timings.prompt_n`/`prompt_ms`, both under `run_summary.generation` — the
+request holds what the time left can read once a 1,000-token answer has been
+written, with the same 1.5 margin: 393 s left at 150 tokens/s read and 5.5
+written hold about 35,000 characters, where the slow run re-sent 50,000 and ran
+into its hard cap on every PE sample. The task and the pack are always kept and
+the oldest tool calls go first; when not even the task can be read and
+answered in the time left, the salvage is not sent. It never exceeds what the
+window allows either, and where a rate is unmeasured the window alone bounds
+it. The call is the model's own async one, so its timeout cancels the request
+instead of leaving the server generating into the next loop's first turn.
+What each salvage sent, how it was sized and how it ended is on the loop's
+budget record and in `run_summary.budget.<agent>.salvages`.
 That stamp is what makes a report checkable: the model can cite the call it read
 a fact from, a report section lists the entries it was built from, and `GET
 /api/v1/jobs/{id}/evidence` serves those entries back.

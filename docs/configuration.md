@@ -686,7 +686,10 @@ before gathering anything fails as before. Both salvages re-send the
 conversation trimmed to two fifths of the window the budget counts on — the
 smaller of the declared and the probed one, so a `context_size` left larger
 than the served window cannot size a salvage close to the request the server
-just refused — and each gets only what is left of its loop's time.
+just refused — and each gets only what is left of its loop's time. An
+analyst's salvage is also held to what that time can read and answer at the
+model's measured rates, and is not sent when not even the task fits (see the
+time cap in [architecture](architecture.md)).
 
 The window itself is learned free of charge and without asking the operator
 anything. In order:
@@ -782,7 +785,9 @@ model's reasoning counts against the judge's and the analysts' caps too;
 `disable_thinking`, or a larger cap, is the remedy. The verdict call records
 whether it reached `judge_max_tokens`, Ollama's `done_reason: "length"`
 included. `run_summary.generation` records
-each model's rate, tokens, seconds, calls and source, and for each sized call
+each model's rate, tokens, seconds, calls and source, its prompt reading rate
+where the server reports one (`prompt_tokens_per_second`, `prompt_tokens`,
+`prompt_seconds`, `prompt_sources`), and for each sized call
 the configured value, the budget, the rate, the derived and the applied
 seconds; the report's Run Summary prints the same numbers.
 

@@ -745,6 +745,15 @@ change landed on `main`.
 
 ### Changed
 
+- **FLOSS runs beside capa in the triage pack** when the host reports at least
+  twice FLOSS's 4 GiB address-space bound available; otherwise the two run in
+  turn as before. Its entry is still last, with its own clock. On PuTTY:
+  312 s → 183 s, peak resident memory of the pack's process tree 1.6 GB →
+  2.3 GB.
+- **The prompt reading rate is measured** beside the generation rate, from
+  Ollama's `prompt_eval_count`/`prompt_eval_duration` and llama.cpp's
+  `timings.prompt_n`/`prompt_ms`, and recorded in `run_summary.generation`.
+
 - **The STIX export cites the ledger.** An exported object now carries the
   ledger entries the run's record ties to it, as `x_maljan_evidence_refs`
   (`ev_` ids, each once, in ledger order): the sample's `uses` edge to a
@@ -1722,6 +1731,52 @@ change landed on `main`.
   `MALJAN_FLOSS_PATH` to a missing file unless a test names a build.
 
 ### Fixed
+
+- **A cancelled job stops.** A cancel reached the pipeline as a task
+  cancellation, the bridge to the agent loop turned it into an ordinary error,
+  a node caught that as a failed mediation, and the graph went on to the judge
+  and the report while the worker held connections to the model server and
+  ignored SIGTERM until SIGKILL. Each job now carries a cancellation
+  (`maljan.core.cancellation`): every graph node checks it on the way in,
+  every model call checks it before anything is sent, every call in flight on
+  the agent loop is cancelled with it, and a check raises `JobCancelled`, which
+  no `except Exception` reads as a failure. The worker sets it on an operator's
+  cancel and on its own shutdown, waits for the pipeline at most 10 s, names in
+  the `cancelled` event where the pipeline stopped, and leaves any thread still
+  blocked in a synchronous call 10 s after its shutdown hook.
+- **The time-cap salvage is sized to finish.** It re-sent the whole
+  conversation to a slow model that had to read it all again, and ran into its
+  hard cap on every PE sample of the benchmark's small model, still generating
+  on the server after the worker gave up. It now sends the task, the pack and
+  the latest tool results in what the time left can read and answer at the
+  model's measured generation and prompt reading rates, is not sent when not
+  even the task fits, and cancels its request at its timeout. What it sent and
+  how it ended is in `run_summary.budget.<agent>.salvages`.
+- **A second loop's answer counts.** An analyst with no claim was run again
+  from scratch through the text path with a fresh copy of its whole budget,
+  and what that loop wrote stayed prose. The second loop is now the ISR path,
+  runs only when what is left of the analyst's stage holds a turn and a final
+  answer at the pace its first loop measured, and runs under that remainder;
+  otherwise the stage record's `agent_reasons` says why it did not.
+- **An unparsed analyst answer is prose, not claims at 0.50.** It was cut into
+  sentences — headings included — each a claim at a confidence nobody stated,
+  and the run did not call it a degradation. It is asked once for the claim
+  format (`isr.unparsed_answer`); what is still prose is the analyst's report,
+  the analyst has no claims, and the degradation reasons name it. A CLAIM block
+  with no confidence is counted and asked about
+  (`isr.claim_without_confidence`) instead of being given 0.5.
+- **A verdict the output cap cut off is told so.** The judge wrote a bundle
+  larger than `judge_max_tokens` twice and was told only that the answer was
+  not JSON. The prompt now states the budget, a cut answer is asked about
+  under `verdict.cut_at_output_cap`, and after a failed retry the fallback
+  keeps the assessment the answer stated whole — verdict, confidence,
+  severity, family — read through the bundle's own readers.
+- **A tool argument that names its own parameter is asked about.** A call
+  such as `strings` with `"pattern": "\"pattern\""` is not run; the model is
+  asked for the value it meant, the question is counted under
+  `tool.argument_names_its_parameter`, and a repeat of it counts as a repeat.
+  The unquoted-argument sentence in the tool descriptions no longer reads
+  "the raw text or pattern itself".
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was
   written into one directory under the system temp directory, shared by every
@@ -4142,6 +4197,21 @@ change landed on `main`.
 - **`reporting.builder.defang`**, replaced by `reporting.defang.defang(value, kind)`.
 
 ### Upgrading
+
+Operators see these changes in a run's record, and nothing needs migrating:
+`run_summary.budget.<agent>.salvages` lists each salvage (what it sent, what it
+was sized by, how it ended); `run_summary.generation.models.<model>` gains
+`prompt_tokens_per_second`, `prompt_tokens`, `prompt_seconds` and
+`prompt_sources`; `validation.by_code` can carry `isr.unparsed_answer`,
+`isr.claim_without_confidence`, `verdict.cut_at_output_cap` and
+`tool.argument_names_its_parameter`; the degradation reasons can name
+"analyst answers kept as prose"; a stage's `agent_reasons` says when an
+analyst was not given a second loop; and the `cancelled` event can carry
+`stopped`. An analyst answer with no CLAIM block no longer yields claims at
+0.50, so a run that used to show such claims shows none, with the analyst's
+prose as its report; reports stored before this change keep what they
+recorded. A judge fallback whose answer stated its assessment whole now
+publishes that assessment's confidence, severity and family.
 
 A stored STIX bundle keeps the shape it was stored with: `x_maljan_evidence_refs`
 appears only in exports rendered after this change, so the relationship graph
