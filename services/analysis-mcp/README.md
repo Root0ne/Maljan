@@ -211,7 +211,7 @@ The tool looks for the executable at `MALJAN_FLOSS_PATH` (set in this server's
 `env`) and, when that is unset, in the user tools directory and then on `PATH`,
 and runs it only when its sha256 is the pinned one. `scripts/install_floss.sh`
 downloads the asset, checks both digests and installs the executable at
-`${XDG_DATA_HOME:-~/.local/share}/maljan/tools/floss-3.1.1/floss`, the first
+`~/.local/share/maljan/tools/floss-3.1.1/floss`, the first
 place looked. The backend image does the same in a build stage and puts it at
 `/usr/local/bin/floss`. Without it the manifest marks `floss` unavailable with
 the reason (not installed, or not the pinned build) and the remedy, and a call

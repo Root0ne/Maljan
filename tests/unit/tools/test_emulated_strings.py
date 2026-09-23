@@ -332,7 +332,7 @@ class TestTheExecutable:
         import hashlib
 
         monkeypatch.delenv("MALJAN_FLOSS_PATH", raising=False)
-        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+        monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("PATH", str(tmp_path / "empty"))
         body = b"#!/bin/sh\n"
         installed = tool.default_install_path()
@@ -342,7 +342,10 @@ class TestTheExecutable:
         monkeypatch.setattr(tool, "FLOSS_BINARY_SHA256", hashlib.sha256(body).hexdigest())
 
         assert tool.find_floss() == (installed, "")
-        assert installed == tmp_path / "maljan" / "tools" / "floss-3.1.1" / "floss"
+        assert (
+            installed
+            == tmp_path / ".local" / "share" / "maljan" / "tools" / "floss-3.1.1" / "floss"
+        )
 
 
 class TestTheChild:

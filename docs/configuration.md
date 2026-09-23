@@ -729,7 +729,7 @@ pinned standalone Linux build, v3.1.1 (zip sha256
 `40c05a869f34f7e2417b17ca290cc54bd3671ee1f0a2d9bd5103284c01a54666`), outside the
 Python environment. The backend image installs it at `/usr/local/bin/floss` in
 a checksum-verified build stage; on a host, `scripts/install_floss.sh` installs
-it at `${XDG_DATA_HOME:-~/.local/share}/maljan/tools/floss-3.1.1/floss`. To use a
+it at `~/.local/share/maljan/tools/floss-3.1.1/floss`. To use a
 build elsewhere, set `MALJAN_FLOSS_PATH` in the `analysis` server's `env`. The
 tool runs only the executable whose sha256 is the pinned one. Without it the
 capability manifest marks `floss` unavailable with the reason and the remedy and

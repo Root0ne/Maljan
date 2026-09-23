@@ -128,9 +128,13 @@ Runner = Callable[[Sequence[str], float], "subprocess.CompletedProcess[str]"]
 
 
 def user_tools_dir() -> Path:
-    """Where ``scripts/install_floss.sh`` puts the build for this user."""
-    data = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
-    return Path(data) / "maljan" / "tools"
+    """Where ``scripts/install_floss.sh`` puts the build for this user.
+
+    Under ``HOME`` alone: the sidecar is started with ``HOME`` and not with the
+    XDG variables, so a directory chosen by them in the installer's shell could
+    be one the server never looks in.
+    """
+    return Path.home() / ".local" / "share" / "maljan" / "tools"
 
 
 def default_install_path() -> Path:

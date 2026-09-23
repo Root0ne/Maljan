@@ -3556,7 +3556,7 @@ as a Python dependency: the lockfile does not change. The backend image
 downloads the release zip in a build stage, checks it against its pinned sha256
 and installs the executable at `/usr/local/bin/floss`. On a host outside the
 image, run `scripts/install_floss.sh`, which does the same into
-`${XDG_DATA_HOME:-~/.local/share}/maljan/tools/floss-3.1.1/`, or name a copy of
+`~/.local/share/maljan/tools/floss-3.1.1/`, or name a copy of
 the pinned build in `MALJAN_FLOSS_PATH` in the `analysis` server's `env`.
 Without it the capability manifest marks `floss` unavailable and the model is
 not offered the tool.
