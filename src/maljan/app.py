@@ -392,6 +392,8 @@ class MaljanApp:
             "final_decision": None,
             "judge_report": None,
             "stix_output": None,
+            "stix_labels": None,
+            "stix_written": None,
             "run_summary": None,
             "malware_report": None,
             "malware_report_markdown": None,

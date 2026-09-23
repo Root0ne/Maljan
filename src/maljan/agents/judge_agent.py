@@ -29,7 +29,7 @@ import asyncio
 import contextlib
 import re
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -51,7 +51,10 @@ from maljan.agents.base_agent import (
     run_on_agent_loop,
     synthesis_budget_chars,
 )
-from maljan.agents.judge_postprocess import ASSESSMENT_RELOCATED_CODE
+from maljan.agents.judge_postprocess import (
+    ASSESSMENT_RELOCATED_CODE,
+    PROPERTY_NOT_CARRIED_CODE,
+)
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger
@@ -84,6 +87,10 @@ from maljan.schemas.stix_models import Bundle
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
+
+# Rows the judge's parse settles itself, so the retry is never spent on them:
+# an assessment moved to its property, and a property the export does not carry.
+_SETTLED_CODES = frozenset({ASSESSMENT_RELOCATED_CODE, PROPERTY_NOT_CARRIED_CODE})
 
 # How many times the judge is asked again about a verdict answer that was
 # wrong. One: a second correction has never produced a better bundle than the
@@ -176,6 +183,13 @@ class JudgeVerdict(NamedTuple):
     # Every violation the judge was shown, by code — including the ones the
     # retry fixed, which nothing else in the run records.
     fed_back: dict[str, int] = {}
+    # ``{the judge's label: the published id}`` for the answer this verdict
+    # stands on, so the judge's own bundle and the export can be read together.
+    labels: dict[str, str | list[str]] = {}
+    # The judge's answer this verdict stands on, as it wrote it: parsed and
+    # otherwise untouched, the record the export's decline and not-carried
+    # rows point at. ``None`` when the verdict is not the judge's own bundle.
+    written: dict[str, Any] | None = None
 
 
 # The judge's system prompt. A module constant so that
@@ -186,19 +200,31 @@ JUDGE_VERDICT_SYSTEM = (
     "You are the Chief Malware Judge. Based on the expert reports below, "
     "provide a final verdict: Malware, Benign, or Suspicious.\n\n"
     "RULES:\n"
-    "- Map findings to MITRE ATT&CK using AttackPattern objects (valid IDs: T#### or T####.###).\n"
-    "- Omit technique ID if unsure.\n"
-    "- On every Relationship, set x_maljan_confidence (0.0-1.0), "
-    "x_maljan_evidence_basis (static|dynamic|network|all|unknown), "
-    "and x_maljan_contributing_agents list.\n"
-    "- ALL STIX object IDs MUST be ``<type>--<random uuid4>`` "
-    "(spec-compliant 8-4-4-4-12 hex). NEVER reuse example UUIDs from "
-    "the schema description. NEVER use ``<type>--T####`` (non-UUID).\n"
+    "- Map findings to MITRE ATT&CK with AttackPattern objects, each naming its "
+    "technique in external_references: "
+    '{"source_name": "mitre-attack", "external_id": "T####" or "T####.###"}. '
+    "A behaviour you cannot give a technique id is not an AttackPattern: say "
+    "what was observed in severity.rationale instead.\n"
+    "- Relate them as malware uses attack-pattern and indicator indicates "
+    "malware. On every Relationship set x_maljan_confidence (0.0-1.0) and "
+    "x_maljan_evidence_basis (static|dynamic|network|all|unknown), and list in "
+    "x_maljan_contributing_agents only the sources that named what it is about, "
+    "by the names the EVIDENCE SUMMARY gives them.\n"
+    "- Leave out created, modified, spec_version and valid_from: they are "
+    "stamped after you answer.\n"
+    "- Give every object an ``id`` of the form ``<type>--<label>``, unique in "
+    "this bundle, and name those ids in every ``*_ref``. A short label is "
+    "enough (``malware--1``): the published ids are assigned after you answer.\n"
     "- DO NOT emit Indicator objects whose pattern values are inferred, "
     "hypothetical, or example. Every Indicator's pattern value MUST "
     "appear verbatim in the deterministic evidence (static strings, "
     "sandbox observations, or network IOCs). When in doubt, emit zero "
     "Indicators — the deterministic renderer will fill them in.\n"
+    "- An Indicator's pattern compares a STIX Cyber-observable type (ipv4-addr, "
+    "ipv6-addr, domain-name, url, file, email-addr, mutex, windows-registry-key, "
+    "process, network-traffic), and its indicator_types say what the value "
+    "indicates: malicious-activity, anomalous-activity, benign, compromised, "
+    "anonymization, attribution or unknown.\n"
     "- You decide the verdict, the severity, the malware category and the "
     "family; nothing downstream computes them for you and nothing overrides "
     "what you say. ``x_maljan_assessment`` is a sibling of ``objects``, beside "
@@ -221,7 +247,8 @@ JUDGE_VERDICT_SYSTEM = (
     "ids it was read from; a family with no evidence ids is a guess, and the "
     "report will say so.\n"
     "- Write a STIX ``malware`` object only for a sample you conclude is "
-    "malware. The objects illustrate the verdict you stated; they are not a "
+    "malware, with is_family (false when it stands for this one sample). The "
+    "objects illustrate the verdict you stated; they are not a "
     "second way of stating one, and a malware object added as a container for "
     "a sample you call benign contradicts your own assessment.\n"
     "- Benign is a finding, not a default. It says the evidence was examined "
@@ -234,7 +261,7 @@ JUDGE_VERDICT_SYSTEM = (
     "``x_maljan_assessment`` sits beside ``objects`` rather than inside it:\n"
     "{\n"
     '  "type": "bundle",\n'
-    '  "id": "bundle--<uuid4>",\n'
+    '  "id": "bundle--1",\n'
     '  "x_maljan_assessment": {\n'
     '    "verdict": "Malware" | "Suspicious" | "Benign",\n'
     '    "confidence": 0.0-1.0,\n'
@@ -1074,6 +1101,7 @@ class JudgeAgent(BudgetMeter):
         ledger_ids: Sequence[str] | None = None,
         facts_block: str = "",
         run_state: str = "",
+        technique_sources: Mapping[str, Sequence[str]] | None = None,
     ) -> JudgeVerdict:
         """The final decision: a STIX bundle plus the judge's own assessment.
 
@@ -1083,7 +1111,10 @@ class JudgeAgent(BudgetMeter):
         the judge is the component that should be weighing them. ``facts_block``
         is the triage pack as every analyst saw it and ``run_state`` the run's
         state block; both lead the human turn so the verdict is drawn over the
-        same facts the analysts were given.
+        same facts the analysts were given. ``technique_sources`` is the
+        evidence summary as data, ``{technique id: [source]}``: a relationship
+        crediting an agent with a technique it never named is asked about
+        against it, and ``None`` asks nothing.
 
         The answer is validated (``pipeline.validation.validate_verdict_bundle``)
         and, when something is wrong, handed back once with the problems named.
@@ -1199,12 +1230,21 @@ class JudgeAgent(BudgetMeter):
         # cannot hold set aside. Refilled per parse, because the retry's answer
         # is a different answer and the previous one's findings are spent.
         shape: list[Violation] = []
+        # Where each parsed object sits in the answer as the judge wrote it,
+        # and the label it gave it: feedback names the judge's own positions,
+        # not the ones left after set-aside objects and folded duplicates.
+        where: list[tuple[int | None, str]] = []
+        labels: dict[str, str | list[str]] = {}
+        as_written: list[dict[str, Any]] = []
         tally = ValidationTally()
 
         def _parse(answer: Any) -> Bundle:
             nonlocal not_json, attempts
             attempts += 1
             shape.clear()
+            where.clear()
+            labels.clear()
+            as_written.clear()
             if timed_out:
                 not_json = False
                 return self._fallback_bundle_from_text(
@@ -1220,7 +1260,15 @@ class JudgeAgent(BudgetMeter):
                 if attempts <= _VERDICT_RETRIES:
                     # A retry is coming and this bundle would be thrown away.
                     return Bundle(objects=[])
-            parsed = self._bundle_from_response(answer, reports, isr_reports, record=shape)
+            parsed = self._bundle_from_response(
+                answer,
+                reports,
+                isr_reports,
+                record=shape,
+                origins=where,
+                labels=labels,
+                as_written=as_written,
+            )
             # The relocation is done and nothing is left to ask about, so it is
             # published as settled and counted where the round's other codes
             # are, rather than spending the one retry this round has.
@@ -1293,7 +1341,7 @@ class JudgeAgent(BudgetMeter):
                 # relocation is not among them: it is settled, announced in
                 # ``_parse``, and a retry for it would be a turn spent on a
                 # problem that no longer exists.
-                *(v for v in shape if v.code != ASSESSMENT_RELOCATED_CODE),
+                *(v for v in shape if v.code not in _SETTLED_CODES),
                 *validate_verdict_bundle(
                     bundle,
                     evidence_corpus,
@@ -1302,6 +1350,8 @@ class JudgeAgent(BudgetMeter):
                     shortened_tools=shortened_tools,
                     searched=searched,
                     corpus_state=corpus_state,
+                    technique_sources=technique_sources,
+                    origins=where,
                 ),
                 *assessment_violations(bundle),
                 *assessment_conflict_violations(bundle),
@@ -1346,6 +1396,14 @@ class JudgeAgent(BudgetMeter):
                 violations.append(
                     Violation(code=VERDICT_FALLBACK_CODE, message=VERDICT_FALLBACK_REASON)
                 )
+        # The judge's own answer, when the verdict stands on it: what the
+        # export does not carry of it is recorded beside the run's findings
+        # (never fed back — nothing in it is wrong), and the answer itself is
+        # kept as written.
+        written: dict[str, Any] | None = None
+        if not timed_out and bundle.x_maljan_fallback_verdict is None:
+            written = as_written[0] if as_written else None
+            violations.extend(v for v in shape if v.code == PROPERTY_NOT_CARRIED_CODE)
         # And the two verdict checks over the bundle that is actually going to
         # be reported, on every ending. One row each: a check the loop already
         # fed back and that survived is in ``violations`` already, and asking
@@ -1363,7 +1421,7 @@ class JudgeAgent(BudgetMeter):
             violations=[v for v in violations if v not in _from_the_loop],
             retry_index=retries,
         )
-        dropped = drop_ungrounded_indicators(bundle, violations)
+        dropped = drop_ungrounded_indicators(bundle, violations, origins=where)
         if dropped:
             self.logger.warning(
                 "Judge verdict: %d indicator(s) stayed ungrounded after the retry and were "
@@ -1371,7 +1429,12 @@ class JudgeAgent(BudgetMeter):
                 dropped,
             )
         return JudgeVerdict(
-            bundle=bundle, violations=violations, retries=retries, fed_back=dict(tally.by_code)
+            bundle=bundle,
+            violations=violations,
+            retries=retries,
+            fed_back=dict(tally.by_code),
+            labels=dict(labels),
+            written=written,
         )
 
     def _bundle_from_response(
@@ -1380,6 +1443,9 @@ class JudgeAgent(BudgetMeter):
         reports: dict[str, str],
         isr_reports: dict[str, AgentISR] | None,
         record: list[Violation] | None = None,
+        origins: list[tuple[int | None, str]] | None = None,
+        labels: dict[str, Any] | None = None,
+        as_written: list[dict[str, Any]] | None = None,
     ) -> Bundle:
         """The model's raw answer as a Bundle, or the text fallback.
 
@@ -1407,6 +1473,7 @@ class JudgeAgent(BudgetMeter):
             # attack-pattern with nothing saying why. ``pipeline.validation`` is
             # the single place that decides an id is wrong, and it says so.
             from maljan.agents.judge_postprocess import (
+                duplicate_label_violations,
                 lift_misplaced_extensions,
                 postprocess_judge_bundle,
             )
@@ -1414,11 +1481,33 @@ class JudgeAgent(BudgetMeter):
             # Before the schema, and before anything that walks the objects: an
             # item the Bundle cannot hold fails the whole model, and the judge's
             # other twenty-four objects are not the model's to lose.
+            if as_written is not None:
+                import copy
+
+                as_written.append(copy.deepcopy(data))
+            # Positions and labels as the judge wrote them, before anything is
+            # set aside or folded: the dicts are the same objects after both.
+            written = {
+                id(obj): (index, str(obj.get("id") or ""))
+                for index, obj in enumerate(data.get("objects") or [])
+                if isinstance(obj, dict)
+            }
             lifted = lift_misplaced_extensions(data)
             if record is not None:
                 record.extend(lifted)
-            data = postprocess_judge_bundle(data, ledger=getattr(self, "truncation_ledger", None))
-            return Bundle.model_validate(data)
+            if record is not None:
+                record.extend(
+                    duplicate_label_violations(
+                        data, {key: index for key, (index, _label) in written.items()}
+                    )
+                )
+            data = postprocess_judge_bundle(
+                data, ledger=getattr(self, "truncation_ledger", None), labels=labels
+            )
+            bundle = Bundle.model_validate(data)
+            if origins is not None:
+                origins[:] = [written.get(id(obj), (None, "")) for obj in data["objects"]]
+            return bundle
         except Exception as exc:  # noqa: BLE001 — a malformed bundle degrades to the fallback
             self.logger.warning(
                 "LLM did not return a valid Bundle: %s. Attempting text-based fallback.", exc
@@ -1567,11 +1656,19 @@ class JudgeAgent(BudgetMeter):
 
         _VALID_TID_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
         tids: set[str] = set()
+        # Who claimed each one, named the way the evidence summary names them.
+        # A relationship this pipeline builds names the agents whose claims it
+        # carries and nobody else.
+        claimed_by: dict[str, list[str]] = {}
         if isr_reports:
-            for isr in isr_reports.values():
+            for name, isr in isr_reports.items():
+                source = str(getattr(isr, "agent_id", "") or name)
                 for claim in isr.claims:
                     if claim.technique_id and _VALID_TID_RE.match(claim.technique_id):
                         tids.add(claim.technique_id)
+                        agents = claimed_by.setdefault(claim.technique_id, [])
+                        if source not in agents:
+                            agents.append(source)
         model_only = sorted(set(_VALID_TID_RE.findall(text)) - tids)
         if model_only:
             self.logger.warning(
@@ -1640,7 +1737,9 @@ class JudgeAgent(BudgetMeter):
                         {
                             "source_name": "mitre-attack",
                             "external_id": tid,
-                            "url": f"https://attack.mitre.org/techniques/{tid}",
+                            "url": (
+                                f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/"
+                            ),
                         }
                     ],
                 }
@@ -1649,6 +1748,9 @@ class JudgeAgent(BudgetMeter):
                 # Nothing to relate the technique to, and a relationship with a
                 # dangling source is a defect the integrity pass would prune.
                 continue
+            # No confidence: the judge gave none, and the 0.5 this used to
+            # carry was published as the judge's own number on every technique
+            # of every fallback run.
             objects.append(
                 {
                     "type": "relationship",
@@ -1656,9 +1758,7 @@ class JudgeAgent(BudgetMeter):
                     "relationship_type": "uses",
                     "source_ref": malware_id,
                     "target_ref": attack_id,
-                    "x_maljan_confidence": 0.5,
-                    "x_maljan_evidence_basis": "unknown",
-                    "x_maljan_contributing_agents": [],
+                    "x_maljan_contributing_agents": claimed_by.get(tid, []),
                     "x_maljan_technique_id": tid,
                 }
             )

@@ -29,12 +29,13 @@ class TestExtendedSDOs:
             first_observed=datetime(2025, 1, 1, tzinfo=UTC),
             last_observed=datetime(2025, 1, 1, 0, 0, 5, tzinfo=UTC),
             number_observed=1,
-            objects={"0": {"type": "process", "pid": 42, "name": "rat.exe"}},
+            object_refs=["process--0f1e2d3c-4b5a-4968-8776-655443332211"],
         )
         dumped = observed.model_dump(mode="json")
         rebuilt = ObservedData.model_validate(dumped)
         assert rebuilt.number_observed == 1
-        assert rebuilt.objects["0"]["pid"] == 42
+        assert rebuilt.object_refs == ["process--0f1e2d3c-4b5a-4968-8776-655443332211"]
+        assert "objects" not in dumped
 
     def test_note_round_trip(self) -> None:
         note = Note(abstract="exec summary", content="long-form text", object_refs=["x--y"])

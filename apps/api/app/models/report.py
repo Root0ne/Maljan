@@ -31,6 +31,13 @@ class AnalysisReport(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     # Structured data (stored as JSONB for flexibility)
     stix_bundle: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # The judge's own bundle, as the judge wrote it when ``as_written`` is
+    # true, and the map from each label the judge wrote to the id it was
+    # published under: ``{"bundle": {...}, "labels": {...}, "as_written": ...}``.
+    # The export's decline rows say an object "is unchanged in the judge's own
+    # bundle"; this is that bundle. ``NULL`` on a report stored before it was
+    # kept, or when the judge produced none.
+    judge_stix_bundle: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     mitre_techniques: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     agent_reports: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     negotiation_log: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

@@ -1492,6 +1492,33 @@ change landed on `main`.
   marked degraded with its reason, as a run with no report already was;
   `run_summary` has a `sandbox` key (`null` when a sandbox observed the run).
 
+- **The exported STIX bundle names its producer, in STIX's vocabulary.** The
+  platform's `identity` was `identity_class: "software"` under a new random id
+  every run, the report object was typed `"malware-analysis"`, and no object
+  carried `created_by_ref` — in all forty stored exports, with an OASIS warning
+  for each word. The identity is now `identity_class: "system"` under one
+  derived id, `identity--9f9e2570-073b-5b46-b156-05d12a086911` in every export;
+  every other object carries `created_by_ref` naming it, and the report is
+  typed `"malware"`. **What a consumer does:** a filter on `report_types`
+  containing `malware-analysis` or on `identity_class: software` stops matching
+  new exports; match `malware` and `system`, or the producer's
+  `created_by_ref`.
+
+- **The judge's prompt asks for what the judge decides and agrees with the
+  checks.** It said *"Omit technique ID if unsure"* while `attck.missing_id`
+  asks for the id or for the object to go — the code the judge's one retry was
+  spent on in ten of the twenty-four stored runs that retried. It now says an
+  attack-pattern names its technique in `external_references` and a behaviour
+  with no id belongs in `severity.rationale`. It no longer asks for
+  `created`, `modified`, `spec_version` or `valid_from`, which are stamped after
+  the answer (about a fifth of what the judge wrote for its objects, beside the
+  ids, which are minted now too), names the two relationship types the bundle
+  uses, and says a relationship credits sources by the names the evidence
+  summary gives them. **What changes for a reader:** an unmapped behaviour is
+  more often in the severity rationale than in the report's unmapped-behaviour
+  list, and an indicator's `valid_from` is the analysis time rather than a
+  date copied out of the STIX documentation.
+
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was
@@ -3467,6 +3494,146 @@ change landed on `main`.
   `no_room` where it used to overflow; unticking the tools an agent does not
   need in the Tools step gives the room back.
 
+- **Every id in an exported STIX bundle is a UUID the platform minted.** The
+  judge was asked for random UUIDs, which a model cannot produce, and the id
+  check accepted any eight-four-four-four-twelve hex. The judge copied
+  documentation-shaped runs instead: one malware id appeared in fourteen stored
+  runs of six different samples, so a consumer merging on id folded those
+  analyses into one object, and its version digit is one no RFC 4122 UUID has,
+  so the OASIS validator refused every object that carried or named it — 22 of
+  40 stored exports. The judge now writes `<type>--<label>` ids unique in its
+  bundle, a short label being enough, and the post-processor mints every
+  published id under the object's own type and rewrites every reference to
+  match.
+
+- **An indicator over an object type STIX does not have is asked about, and
+  not exported unasked.** A live export carried
+  `[ipv-addr:value = '82.157.13.47']` — the type is `ipv4-addr` — which no
+  consumer can match, and because the export's endpoint question reads only the
+  paths it knows, the address was never asked it: the same misspelling around
+  `127.0.0.1` would have published a loopback. The judge is now asked
+  `stix.unknown_observable_type`, with the type the value is named where the
+  value or the spelling says; the pattern is never rewritten, and one it keeps
+  is declined from the export as `stix.unpublishable_pattern`, which the
+  console draws as the export's decision. `indicator_types` outside STIX's
+  vocabulary (`ip-addr`, `file` — the kind of value where the vocabulary says
+  what it indicates) is asked about under `stix.indicator_type_vocabulary` and
+  published as the judge answers. The prompt names the Cyber-observable types
+  and the vocabulary, which it never did.
+
+- **A technique the judge named is published with the judge's own number, and
+  the judge's credits are not sources.** The capability matrix read a judge
+  relationship's technique only from `x_maljan_technique_id`, which the prompt
+  never asks for and no stored judge relationship carried, so every number the
+  judge put on a technique was dropped: all twenty judge-only techniques in the
+  stored runs were published at confidence 0.0 in `ttp_mappings`, the
+  report's ATT&CK section and the narrative's prompt — T1490 on the ELF run at
+  0.0, while the bundle's own `uses` edge carried the judge's 0.95.
+  The technique is now read from the attack-pattern the relationship points
+  at. The agents the judge credits (`STATIC ANALYST` for T1490, which the static
+  analyst never claimed) stay on the relationship as written and are no longer
+  counted as contributing layers, which would have made one analyst's claim
+  read as corroborated. Relationship annotations nobody wrote are absent rather
+  than `0.5` / `unknown`, and the text fallback's edges name the agents whose
+  claims they carry instead of stating a 0.5 the judge never gave.
+
+- **A judge relationship that credits an agent with a technique it never named
+  is asked about.** The ELF run published `malware uses T1490` and
+  `uses T1048.001` crediting `STATIC ANALYST`; the static analyst claimed
+  neither and no tool named either, and nothing asked. The judge node now
+  passes the evidence summary as data, and `stix.credit_without_claim` tells
+  the judge which sources did name the technique, by the names the summary
+  gives them (a parent or sub-technique counts). The credit is never
+  rewritten in the judge's own bundle; one the judge keeps is left off the
+  export's copy of the relationship and recorded as
+  `stix.unpublishable_credit`, so no surface prints an agent as having named a
+  technique it never named.
+
+- **Nothing is written into a judge object that the judge did not write.** An
+  indicator with no `indicator_types` was published as `malicious-activity`
+  and, under a Benign verdict, the judge was then asked about that word; it now
+  stays untyped (the property is optional in STIX 2.1). A malware object with
+  no `is_family` was published as `false`; the judge is now asked
+  (`stix.is_family_missing`), and a judge's `is_family: true` is published as
+  written — the renderer used to force it to `false`. A relationship annotation
+  outside the schema — a confidence of `1.5` or `95`, a basis such as
+  `static+dynamic+network` — used to parse as a plain relationship and lose the whole annotation silently; it
+  is now kept as written and asked about (`stix.annotation_out_of_schema`), and
+  no reader puts a number off the 0–1 scale on a technique.
+
+- **A label the judge repeats is asked about, never resolved.** Two objects
+  sharing an id had every reference rewired onto the first, and the integrity
+  pass folded the second object's edges away. The label is now a
+  `stix.duplicate_label` question naming both objects, and no reference naming
+  it is rewired onto either. Feedback names the judge's own positions and
+  labels (`objects[3] 'indicator--2'`) rather than positions in the
+  post-processed list.
+
+- **A technique nobody put a number on is published without one.** The
+  matrix printed `conf=0.00` for a technique no source numbered — every
+  technique the judge names alone under a Suspicious or Benign verdict, where
+  there is no malware object to hang a numbered edge on.
+  `CapabilityCell.confidence` and `TTPMapping.confidence` are now `null` there,
+  and the report and the narrative's prompt print "not given".
+
+- **The export's observed data is STIX 2.1, and the official validator gates
+  every export shape.** The process tree was a deprecated `objects` dictionary
+  of processes with no id and a `name` 2.1 does not define, with the process
+  count in `number_observed`; the OASIS validator crashed on it. It is now
+  `process` and `file` observables named by `object_refs`, with
+  `number_observed: 1`. `stix2-validator` is pinned at 3.2.0 (3.3.1 ships no
+  schemas and validates nothing), and a test renders a rich, a sandbox and a
+  Benign export and fails on any validator error.
+
+- **The judge's own bundle is kept, and the export says who did what.**
+  `analysis_reports.judge_stix_bundle` (migration `20260929000000`) holds the
+  judge's bundle and the map from each label it wrote to the published id,
+  served at `/reports/{id}/stix?source=judge` — the bundle every decline row
+  says an object "is unchanged in". A network-block row the export declines is
+  filed under the source that recorded it rather than under the judge; a
+  text-fallback bundle credits the analysts whose claims it carries rather
+  than the judge; a producer the export names in place of one it cannot hold
+  is recorded (`stix.unpublishable_producer`). A pattern over a path its type
+  does not have, or a type written in the wrong case, is asked
+  (`stix.unknown_object_path`) and declined as `stix.unpublishable_pattern`. A
+  technique id is read only from a MITRE ATT&CK reference, and the judge's
+  bundle and the export derive technique ids in one namespace.
+
+- **A cyber-observable the judge writes never costs the rest of its bundle,
+  and the export never publishes an object the standard refuses.** A judge
+  `file` without a `name` failed the bundle model and sent the judge's whole
+  answer to the text fallback, its verdict read from prose and its confidence
+  lost; a named `file` dropped its `hashes` and a `process` its `name`, with
+  nothing recorded. Every property STIX 2.1 defines for a `file` or a `process`
+  is now kept as written, and every judge object is read on its own first: one
+  carrying a property its type does not define, or a value the model cannot
+  hold, is set aside as `stix.unknown_object` and the rest is read. A file with
+  neither `hashes` nor `name` is asked `stix.file_unidentified`; kept, it and a
+  malware object without `is_family` are declined as `stix.unpublishable_object`
+  and the platform's own sample object stands in.
+
+- **A declined judge malware object's relationships move onto the object that
+  stands in for it.** Declining the judge's malware object dropped its `uses`
+  and `indicates` edges with it, so the technique the judge numbered was
+  published unrelated while the report published it at the judge's
+  confidence, and the judge's indicators indicated nothing. The edges now move
+  onto the platform's sample object unchanged and the decline sentence says
+  so. A test checks over every Malware export shape that each technique is
+  used by a malware object, that every `indicates` edge is the judge's own or
+  the sample hash's (any other indicator is related to nothing and listed in
+  the report's `object_refs`), and that the export and the report publish the
+  same techniques at the same numbers.
+
+- **What the export does not carry of the judge's bundle is recorded, and the
+  judge's own record holds it.** The domain-object models ignore properties
+  they do not declare, so an indicator's `valid_until` and
+  `kill_chain_phases`, a relationship's `description` and a malware object's
+  `aliases` left the judge's bundle with no row, and the stored judge bundle, a
+  model dump, lost them as well. Each object's undeclared keys are now a
+  recorded `stix.property_not_carried` row that does not spend the judge's
+  retry, `analysis_reports.judge_stix_bundle` stores the judge's JSON as
+  written, and a malware object's `sample_refs` is carried into the export.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**
@@ -3641,3 +3808,58 @@ image, run `scripts/install_floss.sh`, which does the same into
 the pinned build in `MALJAN_FLOSS_PATH` in the `analysis` server's `env`.
 Without it the capability manifest marks `floss` unavailable and the model is
 not offered the tool.
+
+A consumer of the exported STIX bundle that filters on the platform's own
+words should update the filter: the producer identity is now
+`identity_class: system` under the one id
+`identity--9f9e2570-073b-5b46-b156-05d12a086911`, named by `created_by_ref` on
+every other object, and the report object's `report_types` is `malware`. A
+bundle stored before this change keeps `software`, `malware-analysis` and a
+per-run identity id; nothing is rewritten.
+
+A consumer of the exported STIX bundle or of the report's technique rows
+should know what else moved. `x_maljan_confidence` and `x_maljan_evidence_basis`
+are absent on a relationship whose writer gave none, where they used to be
+present as `0.5` and `unknown`; read them as optional, and do not assume a
+number or a list: an annotation outside the schema is kept as the judge wrote
+it (`x_maljan_confidence` may be `95` or `"high"`, `x_maljan_contributing_agents`
+a single string) beside a `stix.annotation_out_of_schema` row. `contributing_layers`
+no longer lists the agents a judge relationship credits, so `is_corroborated`
+is true only when two analysts named the technique themselves — a dashboard
+counting corroborated techniques moves down. A technique's `confidence` in
+`capability_matrix` and `ttp_mappings` is `null` when no source gave one. The
+judge's malware, indicator and relationship ids are fresh per run: the
+documentation-copied ids some runs shared were stable by accident, and a
+consumer that merged on them sees new objects. An untyped judge indicator
+carries no `indicator_types`, and a judge malware object marked
+`is_family: true` keeps it. Observed data carries `object_refs` to `process` and
+`file` objects instead of an `objects` dictionary. New codes in
+`run_summary.validation` and the export's rows, for a consumer that partitions
+on them: `stix.unknown_observable_type`, `stix.unknown_object_path`,
+`stix.indicator_type_vocabulary`, `stix.credit_without_claim`,
+`stix.annotation_out_of_schema`, `stix.duplicate_label`,
+`stix.is_family_missing` (questions the judge is asked) and
+`stix.unpublishable_pattern`, `stix.unpublishable_credit`,
+`stix.unpublishable_producer` (the export's own decisions). Apply migration
+`20260929000000` for `analysis_reports.judge_stix_bundle`; a report stored
+before it has none, and `/reports/{id}/stix?source=judge` answers
+`{"kept": false, "reason": …}` for it (404 only for a report that does not
+exist); a kept record carries `"kept": true`, and a label the judge gave two
+objects maps to a list of ids. Violation paths on the judge's rows now read
+`objects[i] 'label'` — the judge's own position and the id it wrote — where
+they read `objects[i]` over the post-processed list; a consumer parsing `path`
+should read the index up to the closing bracket. Judge-written `file` and
+`process` objects now reach the export with every property the standard
+defines; one carrying a property it does not define is set aside as
+`stix.unknown_object`, a file with neither `hashes` nor `name` is asked
+`stix.file_unidentified`, and a malware object kept without `is_family` or
+such a file is declined as `stix.unpublishable_object`, two more codes for a
+consumer that partitions on them. The judge's relationships from a declined
+malware object name the platform's sample object instead. `stix.property_not_carried` is a new recorded row on the judge's
+findings (an export decision, never fed back). `judge_stix_bundle` records now
+carry `as_written`: `true` when the bundle is the judge's JSON as written (it
+may then carry properties the models do not declare, and the judge's own
+labels rather than the published ids — read those through `labels`), `false`
+for a record kept as the parsed bundle. A `/reports/{id}/stix?source=judge`
+answer with `"kept": false` now covers a run whose judge produced no bundle
+too. Malware objects may carry `sample_refs`.

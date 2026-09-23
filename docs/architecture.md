@@ -415,6 +415,19 @@ retry; a smaller model wrote it inside `objects[0]` in three of three, which
 costs no retry because a misplaced block is moved. Prompt text only: nothing in
 this pipeline writes a verdict.
 
+The STIX rules around it ask the judge for what the judge decides and agree
+with the checks that read its answer. An attack-pattern names its technique in
+`external_references`, and a behaviour with no id goes in `severity.rationale`
+— the prompt used to say *"Omit technique ID if unsure"*, which is exactly what
+`attck.missing_id` then asks about, and that code took the judge's one retry
+in ten of the twenty-four stored runs that retried. Ids are labels (see *The
+published ids are the platform's*), `created`, `modified`, `spec_version` and
+`valid_from` are left out because they are stamped after the answer — ids and
+stamps were about two fifths of what the judge wrote for its objects, output a
+small reply budget runs out on — and a relationship credits sources by the
+names the evidence summary gives them, which is what `stix.credit_without_claim`
+reads.
+
 The statement is read three ways, not two, and `pipeline.outcome.StatedVerdict`
 carries the difference: the judge wrote a word this pipeline knows, it wrote a
 word this pipeline does not, or it wrote nothing. Only the third is a question
@@ -529,7 +542,83 @@ block is moved to the property it belongs to, unchanged, and recorded as
 there is nothing left for the judge to fix. A top-level block already present
 wins, and the inner copy is set aside. Any other item whose `type` is not one
 of `schemas/stix_models.BUNDLE_OBJECT_TYPES` is set aside under
-`stix.unknown_object` and fed back once. What is left is validated.
+`stix.unknown_object` and fed back once. So is an object of a type the bundle
+holds that cannot be read as written — a `file` or `process` carrying a
+property STIX 2.1 does not define for it, an observed-data carrying the
+deprecated `objects` dictionary, a value its model cannot hold — because each
+object is read on its own before the bundle is, and one object's failure used
+to cost the whole answer to the text fallback. The `file` and `process` models
+declare every property the standard defines, so what the judge wrote under a
+defined name is kept as written. What is left is validated.
+
+### The published ids are the platform's
+
+An id carries no decision: it only says which object a reference means. The
+prompt asks the judge for `<type>--<label>` ids unique in its bundle — a short
+label is enough — and `postprocess_judge_bundle` mints every published id: a
+random UUID under the object's own type (a technique-derived one for an
+attack-pattern) with every `*_ref` rewritten to match. The judge used to be
+asked for random UUIDs, which a model cannot produce; it copied
+documentation-shaped hex instead, one malware id reached fourteen stored runs
+of six samples, and its version digit is one no RFC 4122 UUID has, so the OASIS
+validator refused every object that carried or named it.
+
+A label two objects share is not resolved: `duplicate_label_violations` asks
+the judge (`stix.duplicate_label`), each object gets its own id, and no
+reference naming the label is rewired onto either. The map from each label to
+its published id travels with the verdict and is kept, with the judge's own
+bundle, in `analysis_reports.judge_stix_bundle`, served at
+`/reports/{id}/stix?source=judge` — the bundle every export decline row says an
+object "is unchanged in". That bundle is the judge's JSON as the judge wrote
+it (`"as_written": true`), not a dump of the platform's models, so it holds
+every property the judge wrote. A property the models for its type do not
+declare — an indicator's `valid_until` or `kill_chain_phases`, a
+relationship's `description`, a malware object's `aliases` — does not reach
+the export, and each object that carried one is a recorded
+`stix.property_not_carried` row naming the keys. The row is never fed back:
+nothing in the judge's answer is wrong, and the retry is not spent on it. A
+malware object's `sample_refs` is carried. Feedback names the judge's own positions and labels
+(`objects[3] 'indicator--2'`), not positions in the post-processed list, and a
+drop maps them back. Nothing is written into a judge object that the judge left
+out: an untyped indicator stays untyped, and a malware object without
+`is_family`, which STIX requires, is asked about (`stix.is_family_missing`),
+and an `is_family` the judge wrote is published as written.
+
+A judge malware object the export declines for a property the standard
+requires does not take the judge's relationships with it. The platform's own
+sample object stands in for it, and every relationship that named it moves
+onto that object unchanged — confidence, basis and credits as the judge wrote
+them — so the technique the judge numbered is used by the export's malware
+object and published at the judge's number, as the report publishes it.
+
+An indicator indicates the malware object only by an edge somebody made: the
+judge's own `indicates` edges, and the sample's hash indicator, whose edge is a
+fact the platform owns. Every other indicator — the network and string rows the
+renderer mints, a judge indicator the judge related to nothing — is published
+related to nothing and listed in the report object's `object_refs`. In STIX
+`indicates` says the pattern detects the malware, and a Malware verdict does
+not say that of every value the run saw; the same reason types those rows
+`anomalous-activity`.
+
+The export names its producer in STIX's own vocabulary: one `identity` for this
+platform, `identity_class: system`, under an id derived once
+(`stix_renderer.PRODUCER_IDENTITY_ID`) so every export carries the same one,
+and `created_by_ref` naming it on every other object — a copy, so the judge's
+own bundle is not edited. The report object is typed `malware`. Every stored
+export before this carried `software` and `malware-analysis`, neither of them
+in its vocabulary, and an identity no object named.
+
+A sandbox's process tree is exported as STIX 2.1 observables: one `process`
+per node (pid, command line, `child_refs`), the image each ran from as a
+`file` whose id is derived from its name, and an `observed-data` naming them
+by `object_refs` with `number_observed: 1` — one run is one observation. The
+2.0 form it replaced embedded unnamed processes carrying a `name` 2.1 does not
+define and put the process count in `number_observed`; the OASIS validator
+could not read it. `tests/unit/reporting/test_the_export_passes_the_official_validator.py`
+renders a rich Malware export, a sandbox export and a Benign export through
+the real path and fails on any error the validator reports (`stix2-validator`
+is pinned at 3.2.0, the last release that ships its schemas; 3.3.1 validates
+nothing).
 
 ### The technique check
 
@@ -1544,7 +1633,33 @@ is assembled from what the run gathered rather than recomputed beside it:
   arithmetic over constants chosen in the builder, by code that had read no
   evidence.
 * The capability matrix is a projection of the judge's technique list and the
-  analysts' claims, carrying each source's own confidence unadjusted. It is
+  analysts' claims, carrying each source's own confidence unadjusted. A judge
+  relationship's technique is the attack-pattern it points at
+  (`x_maljan_technique_id` wins where written, which the judge never does), so
+  the number the judge put on it is the judge's number; reading the property
+  alone published all twenty judge-only techniques in the stored runs at 0.0.
+  A relationship with no number adds none, and a number off the 0–1 scale is
+  no number (`stix.annotation_out_of_schema` asks about it; the annotation is
+  kept as written rather than lost to a plain relationship). A technique no
+  source numbered has `confidence: null` and is printed "not given" — the case
+  for every technique the judge names alone under a verdict with no malware
+  object to hang a numbered edge on. A technique's
+  `contributing_layers` are the judge and the analysts whose own claims name
+  it: the agents a judge relationship credits are its words about the
+  evidence, published on the relationship and not counted as sources, so one
+  analyst's claim the judge credits to two analysts is not corroborated. A
+  credit is still asked about when it names an agent that did not name the
+  technique: the judge node passes the evidence summary as data
+  (`evidence_summary.collect`), and `stix.credit_without_claim` tells the
+  judge which sources did name it, by the summary's names — a parent or
+  sub-technique counts. Nothing rewrites the credit in the judge's bundle; one
+  the judge keeps is left off the export's copy of the relationship and
+  recorded as `stix.unpublishable_credit`, so no surface prints it. The ELF run
+  credited `STATIC ANALYST` with T1490 and T1048.001, which no source named. A
+  bundle the pipeline built from the analysts' claims because the judge's
+  answer was not one credits those analysts, not the judge. A technique id is
+  read only from a reference filed under MITRE ATT&CK
+  (`analysis.technique_ids.attack_reference_id`). It is
   where an id the ATT&CK check rejected stays on the record, marked
   `technique_id_valid=False` and spelled as the producer wrote it. **Every id
   that reaches the report is collected into it**, from all three carriers: the
@@ -1899,6 +2014,26 @@ first and then matches a digest as a *whole token*, never as the prefix of a
 longer run of hexadecimal, because a truncated digest is not "present in the
 evidence" however the substring search answers. An algorithm the table does not
 name is left alone.
+
+Before any of that, the object type. A pattern compares a property of a STIX
+Cyber-observable (`schemas.stix_pattern.CYBER_OBSERVABLE_TYPES`) or of a custom
+`x-` type; one live export carried `[ipv-addr:value = '82.157.13.47']`, a type
+no consumer holds objects of, and because the endpoint table above lists only
+the paths it knows, the address was never asked the host question either — the
+same misspelling around `127.0.0.1` would have exported a loopback. The judge
+is asked `stix.unknown_observable_type`, with the type the value is named when
+the value or the spelling says (`82.157.13.47` is an `ipv4-addr`) and the list
+of types when neither does; nothing rewrites the pattern. An indicator that
+keeps the type is declined as `stix.unpublishable_pattern`. A type is read as
+written — STIX types are lower case, so `IPv4-Addr` is not one — and the path
+after it must be one the type defines (`SCO_PROPERTIES`, `SCO_EXTENSIONS`):
+`[file:extensions['pe'].pe_imphash = …]` names an extension a file does not
+have, is asked `stix.unknown_object_path` and, kept, is declined the same way.
+Its `indicator_types` is asked about under `stix.indicator_type_vocabulary` when a
+value is outside STIX's vocabulary — the same run typed the address `ip-addr`
+and a file name `file`, the kind of value where the vocabulary says what the
+value indicates — and, the vocabulary being open, what the judge keeps is
+published as written.
 
 **What the corpus is.** The grounding checks search what the run *saw*, not
 what its ledger kept. `reporting.evidence_budget_bytes` blanks an entry's

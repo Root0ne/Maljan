@@ -150,7 +150,7 @@ class TestNetworkIndicators:
 
 class TestBaseBundlePreserved:
     def test_existing_malware_kept(self) -> None:
-        existing = Malware(name="pre-existing", malware_types=["trojan"])
+        existing = Malware(name="pre-existing", malware_types=["trojan"], is_family=False)
         base = Bundle(objects=[existing])
         report = _build()
         bundle = ExtendedSTIXRenderer().render(report, base_bundle=base)
@@ -168,6 +168,7 @@ class TestBaseBundlePreserved:
             id="malware--b2c3d4e5-f6a7-8901-bcde-f12345678901",
             name="Packed Dropper",
             malware_types=["dropper"],
+            is_family=False,
             created=epoch,
             modified=epoch,
         )
@@ -188,10 +189,11 @@ class TestBaseBundlePreserved:
         malware_ids = [o.id for o in bundle.objects if isinstance(o, Malware)]
         assert "malware--b2c3d4e5-f6a7-8901-bcde-f12345678901" in malware_ids
 
-    def test_judge_is_family_normalized_to_false(self) -> None:
-        # The LLM copies ``is_family: true`` from STIX docs, but
-        # Maljan analyses a single specimen — the renderer must force it to False
-        # so the SDO doesn't claim to represent a whole malware family.
+    def test_the_judges_is_family_is_published_as_written(self) -> None:
+        # The renderer used to force a judge's ``is_family: true`` to false,
+        # on the reasoning that one sample is not a family. Whether the object
+        # stands for the family is the judge's statement; the export publishes
+        # it and edits nothing.
         judge_malware = Malware(
             id="malware--b2c3d4e5-f6a7-8901-bcde-f12345678901",
             name="Packed Dropper",
@@ -201,8 +203,8 @@ class TestBaseBundlePreserved:
         base = Bundle(objects=[judge_malware])
         bundle = ExtendedSTIXRenderer().render(_build(), base_bundle=base)
         malware_objs = [o for o in bundle.objects if isinstance(o, Malware)]
-        assert malware_objs
-        assert all(m.is_family is False for m in malware_objs)
+        assert [m.is_family for m in malware_objs] == [True]
+        assert judge_malware.is_family is True
 
 
 class TestObservedDataAndNote:
