@@ -71,6 +71,19 @@ _RECURSION_STOP_RE = re.compile(r"need more steps to process", re.IGNORECASE)
 # so the salvage path that follows treats it the way it treats langgraph's.
 RECURSION_STOP_TEXT = "Sorry, need more steps to process this request."
 
+# The mark on an assistant turn this code wrote itself rather than a model:
+# the step-cap stop appended after a recursion error. No model served it, so
+# it is not a call on the token ledger.
+SYNTHETIC_TURN_KEY = "maljan_synthetic_turn"
+
+
+def is_model_turn(message: Any) -> bool:
+    """Whether ``message`` is an assistant turn a model answered, and so a call to count."""
+    if getattr(message, "type", "") != "ai":
+        return False
+    metadata = getattr(message, "response_metadata", None)
+    return not (isinstance(metadata, dict) and metadata.get(SYNTHETIC_TURN_KEY))
+
 
 def is_the_graph_s_step_stop(message: Any) -> bool:
     """Whether ``message`` is langgraph's step-limit sentence rather than a model turn."""
@@ -2158,7 +2171,7 @@ class BudgetMeter:
         took; a finished loop records its turns from its result instead.
         """
         for message in list(latest.get("messages") or [])[sent:]:
-            if getattr(message, "type", "") == "ai":
+            if is_model_turn(message):
                 self._record_usage(message, announce=False)
 
     def _announce_fallback(self, message: Any) -> None:
@@ -3223,7 +3236,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                         )
                         latest["messages"] = [
                             *list(latest.get("messages") or []),
-                            AIMessage(content=RECURSION_STOP_TEXT),
+                            AIMessage(
+                                content=RECURSION_STOP_TEXT,
+                                response_metadata={SYNTHETIC_TURN_KEY: True},
+                            ),
                         ]
                     except Exception as exc:
                         # The server saying the window is full is this
@@ -3294,6 +3310,12 @@ class BaseAnalyst(BudgetMeter, ABC):
                 except APIConnectionError as conn_exc:
                     last_conn_exc = conn_exc
                     if _attempt < 2:
+                        # The abandoned attempt's turns were answered; the
+                        # replay starts from the loop's first messages, so what
+                        # it records next is its own.
+                        self._record_turns_taken(latest, len(messages))
+                        latest.clear()
+                        latest["messages"] = list(messages)
                         _wait = 2**_attempt
                         self.logger.warning(
                             "ReAct LLM connection error (attempt %d/3): %s — retrying in %ds.",
@@ -3347,6 +3369,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 self._record_turns_taken(latest, len(messages))
                 raise
             except AnalystError:
+                self._record_turns_taken(latest, len(messages))
                 raise
             except Exception as exc:
                 self._record_turns_taken(latest, len(messages))
@@ -3393,7 +3416,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Record every AI turn the executor produced (each carries its own
         # ``usage_metadata``) so the ledger reflects real LLM spend.
         for _m in msgs:
-            if getattr(_m, "type", "") == "ai":
+            if is_model_turn(_m):
                 self._record_usage(_m, announce=False)
         elapsed = _time.monotonic() - _t0
         # A loop that overran is a slow model or a slow tool, and the loop's
