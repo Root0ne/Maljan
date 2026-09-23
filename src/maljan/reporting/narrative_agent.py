@@ -58,7 +58,9 @@ class NarrativeOutput(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     executive_summary: str = Field(min_length=120, max_length=1200)
-    key_findings: list[KeyFinding] = Field(min_length=3, max_length=6)
+    # Asked for three to six; two good bullets are kept rather than failing the
+    # whole round and losing the summary with them.
+    key_findings: list[KeyFinding] = Field(min_length=2, max_length=6)
     defensive_recommendations: list[DefensiveRecommendation] = Field(min_length=3, max_length=8)
 
 

@@ -143,6 +143,15 @@ class TestNarrativeOutputSchema:
         assert rebuilt.executive_summary == out.executive_summary
         assert len(rebuilt.key_findings) == 3
 
+    def test_two_good_key_findings_are_kept(self) -> None:
+        """Three to six are asked for; two do not cost the round its summary."""
+        out = NarrativeOutput(
+            executive_summary="A" * 200,
+            key_findings=_valid_narrative().key_findings[:2],
+            defensive_recommendations=_valid_narrative().defensive_recommendations,
+        )
+        assert len(out.key_findings) == 2
+
     def test_too_few_key_findings_rejected(self) -> None:
         with pytest.raises(ValidationError):
             NarrativeOutput(
@@ -311,9 +320,9 @@ class TestTheNarrativeGetsOneTurnToFixItsShape:
 
     @pytest.mark.asyncio
     async def test_an_off_schema_answer_earns_one_retry_and_is_then_accepted(self) -> None:
-        # Two key findings where the schema needs three.
+        # One key finding where the schema needs two.
         thin = _valid_narrative().model_dump()
-        thin["key_findings"] = thin["key_findings"][:2]
+        thin["key_findings"] = thin["key_findings"][:1]
         llm = self._llm(json.dumps(thin), _valid_narrative().model_dump_json())
 
         out = await NarrativeAgent(llm=llm).generate(_make_report())
@@ -325,7 +334,7 @@ class TestTheNarrativeGetsOneTurnToFixItsShape:
     @pytest.mark.asyncio
     async def test_the_feedback_names_the_field_and_the_rule(self) -> None:
         thin = _valid_narrative().model_dump()
-        thin["key_findings"] = thin["key_findings"][:2]
+        thin["key_findings"] = thin["key_findings"][:1]
         llm = self._llm(json.dumps(thin), _valid_narrative().model_dump_json())
 
         await NarrativeAgent(llm=llm).generate(_make_report())
@@ -344,7 +353,7 @@ class TestTheNarrativeGetsOneTurnToFixItsShape:
     @pytest.mark.asyncio
     async def test_an_answer_that_stays_off_schema_ships_no_narrative(self) -> None:
         thin = _valid_narrative().model_dump()
-        thin["key_findings"] = thin["key_findings"][:2]
+        thin["key_findings"] = thin["key_findings"][:1]
         llm = self._llm(json.dumps(thin), json.dumps(thin))
 
         assert await NarrativeAgent(llm=llm).generate(_make_report()) is None
