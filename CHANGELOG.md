@@ -577,8 +577,10 @@ change landed on `main`.
   verdict yet shows its status. A "Tools used" list draws the tools the
   caller's last 20 completed runs called as flat bars with the counts printed,
   from the new authenticated `GET /api/v1/dashboard/tools?limit=` (default 20,
-  at most 100), which sums each run's `run_summary.evidence.by_tool` and says
-  how many runs it read.
+  at most 100), which sums each run's `run_summary.evidence.by_tool`. Its
+  `runs` counts only the runs whose report carries that per-tool record, and
+  `read` every completed run it looked at, so a report older than the record
+  is said on the dashboard rather than counted as a run that called nothing.
 - **Copy a row's SHA-256 and job id.** Every row of the analyses list copies
   its sample's SHA-256 and its job id in one press each, with the confirmation
   announced to a screen reader. The IDENTITY hash rows and the DETECTION rule
@@ -1323,18 +1325,36 @@ change landed on `main`.
   renamed or removed, so a consumer reading `category` alone is unaffected.
 - **One severity ladder in the console.** Severity order and colour live in
   `apps/web/src/lib/severity.ts`, and the Summary, DETECTION, DYNAMIC and the
-  header's verdict-against-severity rule read it. On DETECTION a Medium rule
-  match is now purple and a Low one blue, as on the Summary, the Sigma rows are
-  ordered by the ladder's rank, and the legend lists only the rungs that have a
-  match. A guard fails the unit suite on a severity coloured, compared by its
-  spelling or sorted by its label anywhere else.
+  header's verdict-against-severity rule read it. A guard fails the unit suite
+  on a severity coloured, compared by its spelling (either way round or in a
+  `switch`) or sorted by its label anywhere else.
+- **DETECTION shows a Sigma rule's own level, not a severity made from its
+  confidence.** The console used to turn each match's confidence — the rule's
+  maturity status as a number — into "High" or "Medium", and could never say
+  Critical. The Sigma layer now carries the rule author's `level` on each match
+  (`SigmaMatch.level`, and `level=<level>` at the end of the claim text), and
+  DETECTION shows it labelled as the rule's level, sorted and dotted by it. A
+  row stored before this says "level not recorded", draws no dots and follows
+  the rest in its recorded order; the confidence is printed as the number it
+  is. A reader of the claim text that parsed `source=` up to the closing
+  parenthesis now meets `, level=…` after it.
+- **DYNAMIC colours a signature's number on the sandbox's scale.** CAPEv2
+  signatures declare 1 to 3; 1 is now Low, 2 Medium and 3 High, where the
+  thresholds used to assume a 0–10 scale and drew almost every signature grey.
+- **One colour per run status.** `apps/web/src/lib/status.ts` colours
+  completed, running, pending, failed and cancelled for the dashboard, the
+  analyses list, the search palette and the analysis header, and a stage's or
+  participant's running and done; the search palette's running job is blue like
+  everywhere else, not orange. A dashboard run that has a report but did not
+  complete shows its status beside the verdict chip.
 - **A tested tool server's unavailable tools are said on their own rows.** The
   separate list above the Tools section is drawn only where the tool table is
   not, and a tick list the table writes keeps the manifest's order rather than
   the order the boxes were ticked in.
 - **The console's style guard covers charts.** `styleRules.test.ts` also fails
-  on an SVG gradient and on a colour transition written as an arbitrary
-  `transition-[…]` class, an inline style or a stylesheet declaration.
+  on an SVG gradient, on Tailwind's bare `transition` class, and on a colour
+  transition written as an arbitrary `transition-[…]` class, an inline style or
+  a stylesheet declaration.
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was

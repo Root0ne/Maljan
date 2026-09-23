@@ -42,20 +42,34 @@ Each row of that list copies its sample's SHA-256 and its job id in one press
 each, the two values an operator pastes somewhere else. The buttons sit outside
 the row's link, their names say which row's value they copy, and the
 confirmation is read out from a live region rather than left to the button's
-word changing under focus. One control does this everywhere a value is copied
-from a row (`apps/web/src/components/ui/CopyButton.tsx`), the IDENTITY hashes
-and the DETECTION rule cards included.
+word changing under focus. The same control
+(`apps/web/src/components/ui/CopyButton.tsx`) copies the IDENTITY hashes and
+the DETECTION rule cards; its name stays the same under focus and holds the
+word it shows, the "Copied" a sighted reader sees is not read a second time,
+and each button is at least 24 px tall.
 
 **The dashboard.** Each of the five latest runs carries its verdict as a chip,
 in the verdict colours every surface shares (`apps/web/src/lib/verdict.ts`)
 and in words; a run with no verdict yet — still running, failed, or a report
-the page could not read — shows its status instead of an empty chip. Under
+the page could not read — shows its status instead of an empty chip, and a run
+that has a report but did not complete shows its status beside the chip. Under
 them, "Tools used" lists the tools the caller's last 20 completed runs called,
 most calls first, as flat bars with the count printed. It is read from each
 run's own `run_summary.evidence.by_tool` by `GET /api/v1/dashboard/tools`, so
 it counts what the ledger recorded rather than what the feed happened to
-carry. A long tool name is cut on screen and whole on hover and to a screen
-reader, and the section is absent while no run has called anything.
+carry. Only runs whose report carries that per-tool record stand behind the
+bars and the "N of M runs" each row speaks; a run written before the record
+existed says nothing about which tools ran, so it is not counted as a run that
+called none of them, and the heading says how many such runs it read. A long
+tool name is cut on screen and whole on hover and to a screen reader, and the
+section is absent while no run has called anything.
+
+**Status colours.** A run's status — completed, running, pending, failed,
+cancelled — is coloured by one map (`apps/web/src/lib/status.ts`), read by the
+dashboard, the analyses list, the search palette and the analysis header, and
+a stage's or a participant's running and done take the same two colours. The
+status word is always printed beside it. `status.test.ts` fails on a status
+given a status colour anywhere else.
 
 The analysis header carries the verdict, the sample, the job status and the
 run's stages, and the stage strip is there and nowhere else, so the shape of
@@ -243,15 +257,33 @@ for the format the run routed on and drops the rest.
 
 One ladder owns severity: Critical, High, Medium, Low, Informational, the
 judge's five words, with one colour each (`apps/web/src/lib/severity.ts`).
-The Summary's rating, the DETECTION rule rows and their legend, the DYNAMIC
-signature badges and the header's verdict-against-severity rule all read it,
-and anything sorted by severity is sorted by the ladder's rank, never by the
-label's alphabetical order — which would put High before Informational before
-Low before Medium. A word that is not a rung sorts last and is drawn in
-Informational's colour with its own word beside it. The colour is never the
-only carrier: the rung's word is always printed. `severity.test.ts` fails on a
-rung given a colour, compared by its spelling, or sorted by its label anywhere
-else in the tree.
+The Summary's rating, the DYNAMIC signature badges and the header's
+verdict-against-severity rule read it, and anything sorted by severity is
+sorted by the ladder's rank, never by the label's alphabetical order — which
+would put High before Informational before Low before Medium. A word that is
+not a rung sorts last and is drawn in Informational's colour with its own word
+beside it. The colour is never the only carrier: the rung's word is always
+printed.
+
+A DETECTION Sigma row shows the rule's own `level` — the severity the rule's
+author declared, which the Sigma layer now carries into the match it records —
+labelled as the rule's level, sorted and dotted by it on the same ladder (one
+dot per rung from Informational up). A row stored before the layer carried it
+says "level not recorded", draws no dots and takes no part in the sort; it
+follows the rows that have one, in the order the layer recorded them. The
+confidence beside each row is the layer's, set from the rule's maturity
+status, and is printed as the number it is: nothing reads it as a severity.
+
+A DYNAMIC signature's number is the sandbox's own, on CAPEv2's 1 to 3 scale:
+1 is drawn as Low, 2 as Medium and 3 as High, and a number above the scale
+keeps its top colour rather than becoming Critical. The number is printed as
+it came.
+
+`severity.test.ts` fails, anywhere outside the ladder module, on a rung given a
+status colour; on a rung compared by its spelling against a `severity`,
+`rating`, `level` or `sev` value, either way round; on a `case` of a rung in a
+switch; and on a severity sorted by `localeCompare` or by comparing two labels
+with `<` or `>`.
 
 ## Settings
 
@@ -269,8 +301,9 @@ the same keys, and each group header links to the guide that covers it.
 
 **A server's tools.** Once a tool server has been tested, its Tools section is
 a table: a search that narrows the rows by name, "Select all" and "Select
-none" (which act on the rows a search left on screen, and say so), a live
-"enabled N of M" count, and — when the server offers a capability manifest —
+none" (which act on the rows a search left on screen, and say so), an
+"enabled N of M" count that is announced politely once a search or a run of
+ticks settles rather than at every keystroke, and — when the server offers a capability manifest —
 each tool's standing on its host, with the manifest's reason, what the tool
 still answers without the missing part and the remedy on the row of every tool
 it marks unavailable. It edits the per-server tick list and nothing else. A
@@ -318,8 +351,9 @@ that says what it does in the console's own language.
 No gradients, and no colour or background that eases from one value to
 another: a hover state is a state, so it arrives when the pointer does. That
 holds for the charts and bars too: a bar is one flat fill, and an SVG
-gradient, an arbitrary `transition-[…]` over a colour and an inline or
-stylesheet `transition` over one are caught like the class names are. The
+gradient, Tailwind's bare `transition` class (which eases colours by default),
+an arbitrary `transition-[…]` over a colour and an inline or stylesheet
+`transition` over one are caught like the class names are. The
 transitions that stay are the ones that move something — a rail widening, a
 chevron turning. Icons are `lucide-react`, drawn in `currentColor` with
 nothing filled behind them: 16 or 18 px everywhere except the conversation
