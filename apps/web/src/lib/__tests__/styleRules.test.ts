@@ -55,13 +55,23 @@ const RULES: Rule[] = [
   { what: "colour transition", pattern: /\btransition-(colors|background|border)\b/g },
   {
     // Tailwind's bare `transition` eases colour, background, border, fill and
-    // stroke by default, so it is a colour transition under another name. Read
-    // as a whole token in a class-name context only — a `className` or
-    // `class` attribute, or a constant named for a class list — so prose that
-    // uses the word is left alone.
+    // stroke by default, so it is a colour transition under another name.
+    // Two rules find it without reading prose. This one: the whole token in a
+    // string inside a `className` or `class` attribute, a ternary between the
+    // attribute's braces included, whatever else the string holds.
     what: "bare transition class",
     pattern:
-      /(?:\bclass(?:Name)?\s*=\s*\{?\s*|\b[A-Za-z_]*(?:CLASS|Class|STYLE|Style|BUTTON|INPUT)\w*\s*=\s*)["'`](?:[^"'`\n]*\s)?transition(?:\s[^"'`\n]*)?["'`]/g,
+      /\bclass(?:Name)?\s*=\s*(?:\{[^}\n]*?)?["'`](?:[^"'`\n]*\s)?transition(?:\s[^"'`\n]*)?["'`]/g,
+  },
+  {
+    // And this one: the whole token in any string that reads as a class list
+    // — every token lower-case and made of the characters class names use,
+    // with at least one of them holding `-` or `:` — wherever the string sits:
+    // a constant of any name, a map of classes, a helper's argument. A
+    // sentence has capitals, punctuation or no hyphenated token, and passes.
+    what: "bare transition in a class string",
+    pattern:
+      /["'`](?=[^"'`\n]*[-:])(?:[a-z0-9!:_/[\].%#()-]+\s+)*transition(?:\s+[a-z0-9!:_/[\].%#()-]+)*\s*["'`]/g,
   },
   {
     what: "colour transition by arbitrary property",
@@ -88,16 +98,33 @@ describe("the style rules", () => {
     expect(files.length).toBeGreaterThan(50);
   });
 
-  it("catches the bare transition class and not the word or a moving transition", () => {
-    const rule = RULES.find((r) => r.what === "bare transition class")!;
-    const hits = (text: string) => [...text.matchAll(rule.pattern)].length;
-    expect(hits('className="transition duration-150 hover:bg-bg-hover"')).toBe(1);
-    expect(hits("className={`px-2 transition`}")).toBe(1);
-    expect(hits('const BUTTON = "px-2 transition hover:text-text-primary";')).toBe(1);
+  it("catches the bare transition class in every place a class list is written", () => {
+    const rules = RULES.filter((r) => r.what.startsWith("bare transition"));
+    const hits = (text: string) =>
+      rules.reduce((sum, rule) => sum + [...text.matchAll(rule.pattern)].length, 0);
+    // An attribute, alone and in a template.
+    expect(hits('<a className="transition" />')).toBeGreaterThan(0);
+    expect(hits("className={`px-2 transition`}")).toBeGreaterThan(0);
+    // A ternary inside the attribute's braces.
+    expect(hits('className={on ? "transition duration-150" : ""}')).toBeGreaterThan(0);
+    expect(hits('className={on ? "" : "transition"}')).toBeGreaterThan(0);
+    // A class-string constant, whatever its name.
+    expect(hits('const rowCls = "px-2 transition";')).toBeGreaterThan(0);
+    expect(hits('const BUTTON = "px-2 transition hover:text-text-primary";')).toBeGreaterThan(0);
+    // A map of classes.
+    expect(hits('{ hover: "transition hover:bg-bg-hover" }')).toBeGreaterThan(0);
+  });
+
+  it("leaves prose, and a transition that moves something, alone", () => {
+    const rules = RULES.filter((r) => r.what.startsWith("bare transition"));
+    const hits = (text: string) =>
+      rules.reduce((sum, rule) => sum + [...text.matchAll(rule.pattern)].length, 0);
     expect(hits('className="transition-transform duration-200"')).toBe(0);
+    expect(hits('const rail = "transition-[width] duration-200";')).toBe(0);
     expect(hits("// a staged transition is ours")).toBe(0);
     expect(hits('<p>{"Skip the transition"}</p>')).toBe(0);
     expect(hits('const note = "the transition is ours";')).toBe(0);
+    expect(hits('setError("A transition failed: retry.")')).toBe(0);
   });
 
   for (const rule of RULES) {

@@ -61,10 +61,11 @@ const GUARDS: { what: string; pattern: RegExp }[] = [
   },
   {
     // `job.status === "running" ? "text-status-blue" : …`, on any variable,
-    // either way round.
+    // either way round, with the colour in either branch:
+    // `x.status !== "failed" ? "" : "text-status-red"` is the same map.
     what: "a status coloured by a comparison of its spelling",
     pattern: new RegExp(
-      `(?:[\\w.?\\]\\[]+\\s*[!=]==?\\s*["']${STATE}["']|["']${STATE}["']\\s*[!=]==?\\s*[\\w.?\\]\\[]+)\\s*\\?\\s*["'\`][^"'\`\\n]*status-`,
+      `(?:[\\w.?\\]\\[]+\\s*[!=]==?\\s*["']${STATE}["']|["']${STATE}["']\\s*[!=]==?\\s*[\\w.?\\]\\[]+)\\s*\\?\\s*(?:["'\`][^"'\`\\n]*status-|["'\`][^"'\`\\n]*["'\`]\\s*:\\s*["'\`][^"'\`\\n]*status-)`,
       "g",
     ),
   },
@@ -79,6 +80,9 @@ describe("the status guard's own reach", () => {
     expect(hits(1, 's === "running" ? "text-status-orange" : ""')).toBe(1);
     expect(hits(1, 'row.state === "cancelled" ? "bg-status-red/10" : ""')).toBe(1);
     expect(hits(1, '"failed" === x ? "text-status-red" : ""')).toBe(1);
+    // The colour in the false branch.
+    expect(hits(1, 'x.status !== "failed" ? "" : "text-status-red"')).toBe(1);
+    expect(hits(1, 'state === "done" ? "text-text-muted" : "bg-status-green"')).toBe(1);
   });
 
   it("leaves a word that is not a state, and a neutral colour, alone", () => {
