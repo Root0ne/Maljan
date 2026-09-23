@@ -23,6 +23,7 @@ import ipaddress
 import re
 import uuid
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from maljan.agents._indicator_denylists import (
@@ -1649,6 +1650,67 @@ def publish_answer(
 def corroborating_values(report: Any, corpus: Any = None) -> str:
     """The run's second-source record, as :func:`publish_answer` asks it."""
     return _corroborating_values(report, corpus)
+
+
+# What one comparison of an exported pattern names, as the IOC table's kind.
+# The inverse of :func:`indicator_pattern` for the kinds it writes, plus the
+# digests a hash indicator compares.
+_EXPORTED_KINDS: dict[tuple[str, str], str] = {
+    ("domain-name", "value"): "domain",
+    ("ipv4-addr", "value"): "ip",
+    ("ipv6-addr", "value"): "ip",
+    ("url", "value"): "url",
+    ("email-addr", "value"): "email",
+    ("file", "name"): "path",
+    ("windows-registry-key", "key"): "registry",
+    ("mutex", "name"): "mutex",
+    ("process", "command_line"): "command",
+}
+_HASH_PROPERTY_RE = re.compile(r"^hashes\.'([^']+)'$")
+
+
+@dataclass(frozen=True)
+class ExportedValue:
+    """One value an exported indicator compares: its kind, the value, and a hash's algorithm."""
+
+    kind: str
+    value: str
+    algorithm: str = ""
+
+
+def exported_indicator_values(bundle: Any) -> list[ExportedValue]:
+    """Every value the export's indicators publish, one per single-comparison pattern.
+
+    The export is the run's publish decision made concrete: whatever it
+    carries was published. The IOC table and ``/reports/{id}/iocs`` read it
+    here so that none of the three surfaces can publish a value the others
+    withhold — the export carried the judge's C2 names, and the table beside it
+    listed four hashes. A compound pattern (``[a] AND [b]``) is not one value
+    and is left to the bundle.
+    """
+    objects = (bundle or {}).get("objects") if isinstance(bundle, dict) else None
+    found: list[ExportedValue] = []
+    seen: set[tuple[str, str]] = set()
+    for obj in objects or []:
+        if not isinstance(obj, dict) or obj.get("type") != "indicator":
+            continue
+        comparisons = read_comparisons(str(obj.get("pattern") or ""))
+        if len(comparisons) != 1:
+            continue
+        (comparison,) = comparisons
+        if not comparison.readable or comparison.operator != "=":
+            continue
+        value = comparison.literal.strip()
+        kind = _EXPORTED_KINDS.get((comparison.object_type, comparison.prop), "")
+        algorithm = ""
+        digest = _HASH_PROPERTY_RE.match(comparison.prop)
+        if comparison.object_type == "file" and digest:
+            kind, algorithm = "hash", digest.group(1).upper()
+        if not kind or not value or (kind, value.lower()) in seen:
+            continue
+        seen.add((kind, value.lower()))
+        found.append(ExportedValue(kind=kind, value=value, algorithm=algorithm))
+    return found
 
 
 def _stix_pattern_for_string_ioc(ioc: StringIOC) -> str | None:

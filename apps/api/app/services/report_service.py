@@ -7,7 +7,10 @@ import uuid
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from arq import ArqRedis
-from maljan.reporting.renderers.stix_renderer import indicator_publish_reason
+from maljan.reporting.renderers.stix_renderer import (
+    exported_indicator_values,
+    indicator_publish_reason,
+)
 from maljan.reporting.run_diff import RunRecord, diff_runs
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -101,6 +104,42 @@ def _publishable(kind: str, value: Any, source: Any, reputation: Any) -> bool:
             log_safe(exc),
         )
         return False
+
+
+def _with_what_the_export_publishes(out: list[dict], bundle: Any, kind: str | None) -> None:
+    """Add to the feed every value the STIX export publishes that the feed withheld.
+
+    The export is the run's publish decision made concrete, and it carries the
+    judge's indicators beside the rows minted from the report. A value only the
+    judge's objects carry — two C2 names decoded from the sample's strings, an
+    address the string sweep alone had — was exported and absent from this
+    feed, or served here as unpublished. It is served as the report's IOC table
+    serves it: a published row whose source is ``judge``, in place of a
+    withheld row of the same value. A value this feed already publishes keeps
+    its own row. Rows are changed in place.
+    """
+    for item in exported_indicator_values(bundle if isinstance(bundle, dict) else None):
+        if kind and item.kind != kind:
+            continue
+        value = (
+            f"{item.algorithm.lower().replace('-', '')}:{item.value}"
+            if item.kind == "hash"
+            else item.value
+        )
+        wanted = value.strip().lower()
+        same = [
+            index
+            for index, row in enumerate(out)
+            if row.get("kind") == item.kind
+            and str(row.get("value") or "").strip().lower() == wanted
+        ]
+        if any(bool(out[index].get("published", True)) for index in same):
+            continue
+        row = {"kind": item.kind, "value": value, "source": "judge", "published": True}
+        if same:
+            out[same[0]] = row
+        else:
+            out.append(row)
 
 
 def _url_host(raw: Any) -> str:
@@ -564,6 +603,7 @@ class ReportService:
                 continue
             for value in network.get(field) or []:
                 out.append({"kind": row_kind, "value": value, "source": "sandbox"})
+        _with_what_the_export_publishes(out, mr.get("stix_bundle_extended"), kind)
         rows = [row for row in out if row.get("value")]
         wanted = str(include or "published").strip().lower()
         if wanted == "all":

@@ -289,14 +289,18 @@ class ReportDetailResponse(BaseModel):
 class IOCEntry(BaseModel):
     """One flattened IOC row used by the ``/iocs`` endpoint."""
 
-    kind: str  # "domain" | "ip" | "url" | "user_agent" | "ja3" | "ja3s" | "hash"
+    # "domain" | "ip" | "url" | "user_agent" | "ja3" | "ja3s" | "hash", and for
+    # a value the STIX export carries from the judge's objects "email" |
+    # "path" | "registry" | "mutex" | "command" as well.
+    kind: str
     value: str
     is_suspicious: bool = False
     notes: str | None = None
     # Where the row came from: ``sandbox`` for something the sample resolved,
     # reached or requested, ``analyst`` for something an agent put in an
     # artefact, ``strings`` for a run of bytes in the file that has the shape
-    # of one. The service has always attached it and this model did not declare
+    # of one, ``judge`` for a value the export publishes from the judge's own
+    # indicators. The service has always attached it and this model did not declare
     # it, so ``response_model`` dropped it and a name only the sample's own
     # bytes knew shipped looking exactly like one the sandbox watched.
     source: str | None = None

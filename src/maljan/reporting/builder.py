@@ -744,7 +744,80 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 is_network=True,
             )
 
-    return rows
+    return _with_what_the_export_publishes(rows, report)
+
+
+# The table's type for each kind an exported indicator can name.
+_EXPORTED_TYPE_LABELS = {
+    "domain": "Domain",
+    "url": "URL",
+    "email": "Email",
+    "path": "File path",
+    "registry": "Registry key",
+    "mutex": "Mutex",
+    "command": "Command line",
+}
+
+
+def _with_what_the_export_publishes(
+    rows: list[ConsolidatedIOC], report: MalwareReport
+) -> list[ConsolidatedIOC]:
+    """The table with every value the STIX export publishes on it, marked published.
+
+    The export mints indicators from this table's own rows, and carries the
+    judge's indicators besides, asked the host question and grounded in the
+    run's evidence before it did. A value only the judge's objects carry was
+    published by the export and missing here: a run exported the two C2 names
+    FLOSS decoded while this table and ``/iocs`` listed four hashes, and another
+    exported an address this table called "seen only in the file's strings".
+    Such a value is a row whose source is ``judge``: added where the table had
+    none, and standing in for the string sweep's row of the same value where
+    the table had that one refused. A value this table already publishes stays
+    the table's own row.
+    """
+    from maljan.reporting.renderers.stix_renderer import exported_indicator_values
+
+    exported = exported_indicator_values(getattr(report, "stix_bundle_extended", None))
+    if not exported:
+        return rows
+    out = list(rows)
+    for item in exported:
+        wanted = item.value.strip().lower()
+        same = [
+            index
+            for index, row in enumerate(out)
+            if (row.kind or "") == item.kind and row.value.strip().lower() == wanted
+        ]
+        if any(out[index].published == "yes" for index in same):
+            continue
+        if item.kind == "hash":
+            label = item.algorithm or "Hash"
+        elif item.kind == "ip":
+            label = "IPv6" if ":" in item.value else "IPv4"
+        else:
+            label = _EXPORTED_TYPE_LABELS.get(item.kind, item.kind)
+        network = item.kind in ("domain", "ip", "url", "email")
+        row = ConsolidatedIOC(
+            type=label,
+            kind=item.kind,
+            value=item.value,
+            source="judge",
+            context="the judge's indicator, carried by the STIX export",
+            description="the judge's indicator, carried by the STIX export",
+            published="yes",
+            is_network=network,
+        )
+        if same:
+            out[same[0]] = row
+            continue
+        if network:
+            out.append(row)
+            continue
+        last_host = max(
+            (index for index, existing in enumerate(out) if not existing.is_network), default=-1
+        )
+        out.insert(last_host + 1, row)
+    return out
 
 
 _PIPE_PREFIXES = ("\\\\.\\pipe\\", "//./pipe/")

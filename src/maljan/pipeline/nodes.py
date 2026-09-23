@@ -4418,6 +4418,15 @@ def make_report_node(
                     break
 
             report.stix_bundle_extended = extended_dump
+            # The IOC table read again, now that the export exists: a value
+            # the export publishes from the judge's objects is a published row
+            # of the table, the one ``/iocs`` serves as well.
+            try:
+                from maljan.reporting.builder import build_consolidated_iocs
+
+                report.consolidated_iocs = build_consolidated_iocs(report)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("report_node: the IOC table was not re-read (%s).", exc)
 
         # Post-pipeline FP linter. Run after every other
         # mutation has happened (narrative + detection sigs + STIX dump)
