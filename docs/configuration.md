@@ -876,8 +876,11 @@ for up to ten minutes (the tool's declared `timeout_s`) within 4 GiB of address
 space, and later pages of the answer come from the kept result. The triage pack
 runs the same function once on every PE, reading `MALJAN_FLOSS_PATH` and
 `MALJAN_STAGING_DIR` from this process's environment with the `analysis`
-server's `env` over it, so the pack and the tool find one build; without a
-build the pack's entry says so and names the remedy.
+server's `env` over it. Name a build in the server's `env` and the pack and
+the tool find the same one; a `MALJAN_FLOSS_PATH` set only in the worker's own
+environment reaches the pack and not the tool, whose child environment carries
+only the server's `env` and its allowed keys. Without a build the pack's entry
+says so and names the remedy.
 
 Five teams ship built in; they are listed under **Teams** below. `default` is
 the three analysts with their tools.

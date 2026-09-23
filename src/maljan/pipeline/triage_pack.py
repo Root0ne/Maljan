@@ -31,10 +31,10 @@ pipeline knows the question was asked.
 A PE's decoded strings come last. FLOSS runs through ``maljan.tools
 .emulated_strings`` — the function the sidecar's ``floss`` tool serves, with
 its pinned build, its wall clock and its memory limit — with the analysis
-server's environment and a directory inside this job's staging directory, so
-the pack and the tool find one build and leave nothing the job's teardown does
-not remove. It is last so that every id issued before it is the id it was
-before the step existed.
+server's ``env`` over this process's environment — a build named there is
+the one both find — and a directory inside this job's staging directory, so
+nothing is left that the job's teardown does not remove. It is last so that
+every id issued before it is the id it was before the step existed.
 """
 
 from __future__ import annotations
