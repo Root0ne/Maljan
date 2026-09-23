@@ -785,6 +785,13 @@ change landed on `main`.
   command line (never published). `/iocs` may serve `email`, `path`,
   `registry`, `mutex` and `command` rows, and a `hash` of another file, with
   source `judge`.
+- **A network value recovered by emulation is its own publish source.** A
+  domain, address or URL the run's FLOSS entry holds as a decoded, stack or
+  tight string is publishable when it passes every other check of the rule
+  and is not a well-known benign host, with the reason "recovered by emulation
+  (decoded strings), ev_NNNN"; never under a Benign verdict, and a value only
+  the static string sweep read stays unpublished. The export, the IOC table
+  and `/iocs` read it through the one rule.
 - **A draft detection rule matches only what the run publishes.** YARA
   strings and Suricata alerts are drawn from the IOC table's published rows,
   and a Sigma selection from published rows and what a sandbox recorded; the

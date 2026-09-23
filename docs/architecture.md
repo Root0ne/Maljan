@@ -2056,6 +2056,22 @@ is assembled from what the run gathered rather than recomputed beside it:
   listed four hashes; under the rule both are unpublished rows ("seen only in
   the file's strings") and the export declines them. A test holds the export
   and the table to one decision.
+* **A value emulation recovered is a source of its own.** A domain, an
+  address or a URL that the run's FLOSS entry holds as a decoded, stack or
+  tight string — text the sample hid and only running it recovers — is
+  publishable when it passes every other question of the rule (the host
+  question, the address classes, the reputation half, the URL host denylist)
+  and is not a well-known benign host; the reason reads "recovered by
+  emulation (decoded strings), ev_NNNN", the FLOSS entry's own id. Hiding a
+  host behind encoding is a deliberate act benign software rarely performs,
+  while a plain string in a binary is routinely benign, so a value only the
+  static string sweep read stays unpublished. Under a Benign verdict it
+  publishes nothing, and the table's refusal says so. The export, the IOC
+  table and `/iocs` read it through the one rule (`emulation_record` reads the
+  report's `tool_floss_strings` section, so a stored report answers the same
+  way). Replayed on the benchmark's stored runs, the two C2 names the sample
+  decrypted now publish on both models' runs, and nothing new publishes on the
+  benign control.
 * **Draft detection rules match only what the run publishes.** The YARA,
   Sigma and Suricata drafts (`reporting.detection_signatures`) are generated
   after the export. A YARA string or a Suricata alert matches on the IOC
