@@ -18,6 +18,16 @@ call's wall clock instead; that clock includes reading the prompt, so the rate
 comes out lower than the server's and the timeout longer, which is the safe
 side. Until a model has answered once, no rate is known and the configured
 value stands.
+
+The same answers say how fast the model read its prompt, and that is recorded
+beside the generation rate: Ollama's ``prompt_eval_count`` and
+``prompt_eval_duration``, llama.cpp's ``timings.prompt_n``/``prompt_ms``. Both
+count only the tokens the server actually read — a prefix it had cached is not
+in them — so the rate is the reading speed itself. It is what a request that
+re-sends a whole conversation to a model that must read all of it again is
+sized from (``BaseAnalyst._force_final_synthesis``). Where the provider does
+not report it — the OpenAI-compatible client drops llama.cpp's ``timings`` — no
+reading rate is known and nothing is sized from one.
 """
 
 from __future__ import annotations
@@ -52,6 +62,30 @@ TIMEOUT_CEILING_SECONDS = float(PROVIDER_REQUEST_TIMEOUT_SECONDS)
 OLLAMA_SOURCE = "ollama eval_count/eval_duration"
 LLAMA_CPP_SOURCE = "llama.cpp timings.predicted_n/predicted_ms"
 WALL_CLOCK_SOURCE = "output tokens over the call's wall clock (prompt read included)"
+OLLAMA_PROMPT_SOURCE = "ollama prompt_eval_count/prompt_eval_duration"
+LLAMA_CPP_PROMPT_SOURCE = "llama.cpp timings.prompt_n/prompt_ms"
+
+
+def measured_prompt_read(message: Any) -> tuple[int, float, str] | None:
+    """``(tokens, seconds, source)`` the server spent reading one prompt, or ``None``.
+
+    Only the server's own count and clock: a wall clock cannot tell reading
+    from generating, and a rate that mixed them would size a request as if
+    reading were as slow as writing.
+    """
+    meta = getattr(message, "response_metadata", None) or {}
+    try:
+        count, duration = meta.get("prompt_eval_count"), meta.get("prompt_eval_duration")
+        if count and duration and int(count) > 0 and float(duration) > 0:
+            return int(count), float(duration) / 1e9, OLLAMA_PROMPT_SOURCE
+        timings = meta.get("timings")
+        if isinstance(timings, dict):
+            n, ms = timings.get("prompt_n"), timings.get("prompt_ms")
+            if n and ms and int(n) > 0 and float(ms) > 0:
+                return int(n), float(ms) / 1000.0, LLAMA_CPP_PROMPT_SOURCE
+    except (TypeError, ValueError, AttributeError):
+        return None
+    return None
 
 
 def measured_generation(message: Any, wall_seconds: float) -> tuple[int, float, str] | None:
@@ -89,9 +123,18 @@ class _ModelRate:
     seconds: float = 0.0
     calls: int = 0
     sources: list[str] = field(default_factory=list)
+    # The prompt the server read, measured the same way from the same answers.
+    prompt_tokens: int = 0
+    prompt_seconds: float = 0.0
+    prompt_sources: list[str] = field(default_factory=list)
 
     def rate(self) -> float | None:
         return self.tokens / self.seconds if self.tokens > 0 and self.seconds > 0 else None
+
+    def prompt_rate(self) -> float | None:
+        if self.prompt_tokens > 0 and self.prompt_seconds > 0:
+            return self.prompt_tokens / self.prompt_seconds
+        return None
 
 
 class GenerationRates:
@@ -117,11 +160,34 @@ class GenerationRates:
             if source not in row.sources:
                 row.sources.append(source)
 
+    def observe_prompt(self, model: str, tokens: int, seconds: float, source: str) -> None:
+        """One prompt the server read: how many tokens, and how long it took."""
+        if tokens <= 0 or seconds <= 0:
+            return
+        with self._lock:
+            row = self._models.setdefault(str(model), _ModelRate())
+            row.prompt_tokens += int(tokens)
+            row.prompt_seconds += float(seconds)
+            if source not in row.prompt_sources:
+                row.prompt_sources.append(source)
+
     def rate(self, model: str) -> float | None:
         """Tokens a second over every measured answer of ``model``, or ``None``."""
         with self._lock:
             row = self._models.get(str(model))
             return row.rate() if row is not None else None
+
+    def rate_source(self, model: str) -> list[str]:
+        """Where ``model``'s generation rate was read from, in the order first seen."""
+        with self._lock:
+            row = self._models.get(str(model))
+            return list(row.sources) if row is not None else []
+
+    def prompt_rate(self, model: str) -> float | None:
+        """Prompt tokens read a second over every measured answer of ``model``, or ``None``."""
+        with self._lock:
+            row = self._models.get(str(model))
+            return row.prompt_rate() if row is not None else None
 
     def call_timeout(
         self, call: str, model: str, configured: float, max_tokens: int, *, budget: str = ""
@@ -169,6 +235,14 @@ class GenerationRates:
                         "seconds": round(row.seconds, 3),
                         "calls": row.calls,
                         "sources": list(row.sources),
+                        "prompt_tokens_per_second": (
+                            None
+                            if row.prompt_rate() is None
+                            else round(row.prompt_rate() or 0.0, 3)
+                        ),
+                        "prompt_tokens": row.prompt_tokens,
+                        "prompt_seconds": round(row.prompt_seconds, 3),
+                        "prompt_sources": list(row.prompt_sources),
                     }
                     for name, row in sorted(self._models.items())
                 },
@@ -229,6 +303,11 @@ class RateMeter(BaseCallbackHandler):
             )
         if measured is not None:
             self.rates.observe(self.model, *measured)
+        read = measured_prompt_read(message)
+        if read is None and isinstance(info, dict):
+            read = measured_prompt_read(SimpleNamespace(response_metadata=info))
+        if read is not None:
+            self.rates.observe_prompt(self.model, *read)
 
 
 def _fallback_list(llm: Any) -> list[Any] | None:

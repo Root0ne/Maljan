@@ -133,7 +133,7 @@ class FunctionSummarizer:
         ]
 
         try:
-            response = self._llm.invoke(messages)
+            response = self._ask(messages)
             self._record(response)
             summary: str = response.content  # type: ignore[assignment,union-attr]
             word_count = len(summary.split())
@@ -149,6 +149,26 @@ class FunctionSummarizer:
             )
             # Graceful degradation: on error return the raw chunk.
             return code_chunk[: self._max_words * 6]  # Approximate char limit.
+
+    def _ask(self, messages: list[Any]) -> Any:
+        """One summariser call, on the agent loop so a cancelled job cancels it in flight.
+
+        Held to the provider's own request timeout, the longest a call could
+        have taken before. A model that has only a synchronous ``invoke`` is
+        called as before.
+        """
+        import inspect
+
+        from maljan.agents.base_agent import run_coro_blocking
+        from maljan.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
+
+        if not inspect.iscoroutinefunction(getattr(type(self._llm), "ainvoke", None)):
+            return self._llm.invoke(messages)
+        return run_coro_blocking(
+            self._llm.ainvoke(messages),
+            float(PROVIDER_REQUEST_TIMEOUT_SECONDS),
+            label="function-summarizer",
+        )
 
     def summarize_chunks(self, chunks: list[str]) -> str:
         """Summarise multiple chunks and merge the results.
@@ -219,7 +239,7 @@ class FunctionSummarizer:
         ]
 
         try:
-            response = self._llm.invoke(messages)
+            response = self._ask(messages)
             self._record(response)
             result: str = response.content  # type: ignore[assignment,union-attr]
             return result.strip()

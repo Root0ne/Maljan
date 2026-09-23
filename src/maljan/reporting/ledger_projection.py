@@ -349,14 +349,25 @@ def static_from_ledger(
         static.exports.extend(str(name) for name in data.get("permissions") or [])
         if data.get("pdb_path"):
             static.pdb_path = str(data["pdb_path"])
+        rows = [row for row in data.get("packer_signatures") or [] if row]
         packers = [
-            str(row.get("name") or row) for row in data.get("packer_signatures") or [] if row
+            str(row.get("name") or row) if isinstance(row, dict) else str(row) for row in rows
         ]
         if packers and not static.packer_hint:
             static.packer_hint = packers[0]
+            # What ``pe_info`` states: the packer's name and the sections that
+            # carry it. No confidence — the tool states none, and the flat 0.50
+            # this used to write printed under "Measured" as if it had.
             static.packer_matches = [
-                {"name": name, "kind": "packer", "confidence": 0.5, "method": "section_name"}
-                for name in packers
+                {
+                    "name": name,
+                    "kind": "packer",
+                    "method": "section_name",
+                    "evidence": [str(s) for s in (row.get("sections") or [])]
+                    if isinstance(row, dict)
+                    else [],
+                }
+                for name, row in zip(packers, rows, strict=True)
             ]
 
     for _entry, data in _payloads(ledger, "iocs_from_file", "iocs_from_text"):
@@ -390,7 +401,8 @@ def static_from_ledger(
                     {
                         "technique_id": tid,
                         "name": str(row.get("rule") or ""),
-                        "confidence": 0.6,
+                        # No confidence: capa says a rule matched, which is
+                        # a presence and not a probability.
                         "matched_apis": [namespace] if namespace else [],
                         "source": "capa",
                     }

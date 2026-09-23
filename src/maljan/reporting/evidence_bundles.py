@@ -620,7 +620,7 @@ _EVASION_TECHNIQUES = frozenset(
 def _packer_line(match: dict[str, Any]) -> str:
     """A packer match as the tool stated it: a confidence only when it gave one."""
     confidence = match.get("confidence")
-    if confidence is None:
+    if not isinstance(confidence, int | float):
         return f"{match.get('name')} ({match.get('method')})"
     return f"{match.get('name')} ({float(confidence):.2f}, {match.get('method')})"
 

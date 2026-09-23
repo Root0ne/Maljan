@@ -572,22 +572,23 @@ class MarkdownRenderer:
             measured.append(f"_{MEASURED}:_ section entropy {entropies}.")
         if static is not None and static.packer_matches:
             measured.extend(["", f"_{MEASURED}:_ packer signatures", ""])
-            measured.append(_row("Name", "Kind", "Confidence", "Method", "Evidence"))
-            measured.append(_divider(5))
+            # A confidence column only where a match states one: a column of
+            # "not recorded" under "Measured" reads as a measurement too.
+            rated = any(
+                isinstance(pm.get("confidence"), int | float) for pm in static.packer_matches[:6]
+            )
+            head = ["Name", "Kind", *(["Confidence"] if rated else []), "Method", "Evidence"]
+            measured.append(_row(*head))
+            measured.append(_divider(len(head)))
             for pm in static.packer_matches[:6]:
                 evidence = ", ".join(f"`{e}`" for e in (pm.get("evidence") or [])[:4])
                 stated = pm.get("confidence")
-                measured.append(
-                    _row(
-                        pm.get("name") or "not recorded",
-                        pm.get("kind") or "-",
-                        f"{float(stated):.2f}"
-                        if isinstance(stated, int | float)
-                        else "not recorded",
-                        pm.get("method") or "-",
-                        evidence or "-",
+                cells = [pm.get("name") or "not recorded", pm.get("kind") or "-"]
+                if rated:
+                    cells.append(
+                        f"{float(stated):.2f}" if isinstance(stated, int | float) else "not stated"
                     )
-                )
+                measured.append(_row(*cells, pm.get("method") or "-", evidence or "-"))
         elif static is not None and static.packer_hint:
             measured.append(f"_{MEASURED}:_ packer hint {_one_line(static.packer_hint)}.")
         measured.extend(_capa_table(capa, _is_evasion_rule))
@@ -2654,7 +2655,7 @@ def _family_words(report: MalwareReport) -> str:
         return "none attributed"
     if attr.family_source == "sandbox":
         return f"{family} (named by the sandbox's own classification; the judge named none)"
-    said = f"{family} ({confidence_phrase(attr.family_confidence)})"
+    said = f"{family} ({confidence_phrase(attr.family_confidence, 'the judge')})"
     if attr.family_evidence_ids:
         said += f" [{_ids(attr.family_evidence_ids)}]"
     elif not attr.family_grounded:

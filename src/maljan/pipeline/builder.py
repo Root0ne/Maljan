@@ -35,9 +35,12 @@ llama-server slot to itself for its whole timeout budget. The global
 a plain analyst list and has never been opened as stages.
 """
 
+from typing import Any
+
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from maljan.core.cancellation import stops_when_cancelled
 from maljan.core.config import ProfileDefinition
 from maljan.core.container import ServiceContainer
 from maljan.core.memprobe import instrument_node
@@ -63,6 +66,11 @@ from maljan.pipeline.topology import (
     dependents,
     plan,
 )
+
+
+def _node(name: str, fn: Any) -> Any:
+    """One graph node: memory reported on each side, and not started once its job is cancelled."""
+    return instrument_node(name, stops_when_cancelled(name, fn))
 
 
 def build_graph(container: ServiceContainer) -> CompiledStateGraph:
@@ -157,7 +165,7 @@ def _add_stage(
         node = entry.nodes[0]
         builder.add_node(
             node,
-            instrument_node(
+            _node(
                 node,
                 make_triage_node(
                     container,
@@ -174,7 +182,7 @@ def _add_stage(
     elif stage.kind == "verdict":
         builder.add_node(
             JUDGE_NODE,
-            instrument_node(
+            _node(
                 JUDGE_NODE,
                 make_judge_node(
                     container,
@@ -187,7 +195,7 @@ def _add_stage(
     else:
         builder.add_node(
             REPORT_NODE,
-            instrument_node(
+            _node(
                 REPORT_NODE,
                 make_report_node(
                     container,
@@ -210,7 +218,7 @@ def _add_analysis_stage(
         name = analyst_node(agent)
         builder.add_node(
             name,
-            instrument_node(
+            _node(
                 name,
                 make_stage_agent_node(
                     stage,
@@ -229,7 +237,7 @@ def _add_analysis_stage(
     for barrier in barriers:
         builder.add_node(
             barrier,
-            instrument_node(barrier, make_join_node(stage, container, closes.get(barrier, ()))),
+            _node(barrier, make_join_node(stage, container, closes.get(barrier, ()))),
         )
         for agent in stage.agents:
             builder.add_edge(analyst_node(agent), barrier)
@@ -256,7 +264,7 @@ def _add_debate_stage(
     negotiation, revision = debate_nodes(profile, stage)
     builder.add_node(
         negotiation,
-        instrument_node(
+        _node(
             negotiation,
             make_negotiation_node(
                 container,
@@ -266,9 +274,7 @@ def _add_debate_stage(
             ),
         ),
     )
-    builder.add_node(
-        revision, instrument_node(revision, make_revision_node(container, stage=stage))
-    )
+    builder.add_node(revision, _node(revision, make_revision_node(container, stage=stage)))
 
     heads: list[str] = []
     for dependent in dependents(profile, stage.key):
@@ -288,7 +294,7 @@ def _add_debate_stage(
         barrier = entry.exit[0]
         builder.add_node(
             barrier,
-            instrument_node(barrier, make_join_node(stage, container, closes.get(barrier, ()))),
+            _node(barrier, make_join_node(stage, container, closes.get(barrier, ()))),
         )
         onward = barrier
     else:

@@ -56,12 +56,6 @@ __all__ = [
 _SUSPICIOUS_TIERS = frozenset({"high", "medium"})
 _VALID_TIERS = frozenset({"high", "medium", "informational"})
 
-# Hard ceiling on any deterministic import-derived claim. The YARA layer's floor
-# is 0.70; staying under it means this evidence corroborates other layers but
-# can never solo-drive a verdict, which is the same rationale the import layer's
-# original _CONF_BASE/_CONF_WITH_IOC constants were chosen under.
-_CONFIDENCE_CEILING = 0.65
-
 
 def _variants(name: str) -> tuple[str, ...]:
     """``name`` plus its ANSI/wide sibling.
@@ -287,18 +281,6 @@ class TechniqueRule:
     confidence_base: float
     confidence_max: float
     platforms: tuple[str, ...]
-
-    def confidence_for(self, distinct_matches: int) -> float:
-        """Scale confidence with corroboration, bounded at both ends.
-
-        Each import beyond the minimum is worth a little more certainty, but the
-        curve is deliberately shallow and capped: a technique evidenced by
-        twelve imports is more likely than one evidenced by two, not six times
-        more likely. Counting matches as a raw score — the obvious approach —
-        produces exactly that six-times-more-likely claim.
-        """
-        extra = max(0, distinct_matches - self.min_apis)
-        return round(min(self.confidence_max, self.confidence_base + 0.05 * extra), 4)
 
 
 @dataclass(frozen=True)
@@ -580,11 +562,11 @@ def _parse_rule(row: Any) -> TechniqueRule | None:
         return None
     min_apis = floor
 
-    # The ceiling is enforced here as well as in the builder, because the data
-    # file is editable in place and a hand-edited 0.95 would otherwise let an
-    # import-table guess outrank a real YARA match.
-    conf_max = min(conf_max, _CONFIDENCE_CEILING)
-    conf_base = min(conf_base, conf_max)
+    # The authored numbers are kept as written. They used to be clamped under
+    # a 0.65 ceiling here, which silently lowered a hand-edited value; nothing
+    # reads them as a claim's confidence (a rule hit is reported by name and
+    # the imports it matched), and the data file's builder states its own
+    # bound where the numbers are written.
 
     platforms_raw = row.get("platforms")
     platforms = tuple(

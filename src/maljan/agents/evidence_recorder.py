@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
@@ -593,15 +593,63 @@ def served_repeat_notice(
     )
 
 
+# The question a call is answered with when an argument's value is the name of
+# its own parameter. A static analyst sent ``strings`` the pattern
+# ``"\"pattern\""`` twice — the parameter's name, quoted — which searched for
+# the word "pattern", matched eleven noise runs past the page it asked for, and
+# spent two of its repeats on it. The call is not run and the argument is not
+# rewritten: the model is asked for the value it meant.
+SELF_NAMED_ARGUMENT_CODE = "tool.argument_names_its_parameter"
+
+# The ways a value can be nothing but the name of its parameter: the name, or
+# the name in the placeholder brackets a template or a schema example writes it
+# in. One pair of quotes around the whole value is read off first, the way the
+# tool servers read it.
+_PLACEHOLDER_FORMS = ("{}", "<{}>", "{{{}}}", "${{{}}}", "[{}]")
+
+
+def _names_its_parameter(name: str, value: Any) -> bool:
+    from maljan.tools.arguments import unquoted
+
+    if isinstance(value, list):
+        return bool(value) and all(_names_its_parameter(name, item) for item in value)
+    if not isinstance(value, str):
+        return False
+    read = unquoted(value).strip().lower()
+    return any(read == form.format(name.lower()) for form in _PLACEHOLDER_FORMS)
+
+
+def self_named_arguments(kwargs: dict[str, Any]) -> list[tuple[str, Any]]:
+    """``(name, value)`` for each argument whose value is only its own parameter's name."""
+    return [(name, value) for name, value in kwargs.items() if _names_its_parameter(name, value)]
+
+
+def self_named_notice(tool: str, found: Sequence[tuple[str, Any]]) -> str:
+    """What the model is told instead of an answer to a call that named its own parameters."""
+    listed = "; ".join(f"`{name}` is {json.dumps(value)}" for name, value in found)
+    return (
+        f"{tool} was not run: {listed}, which is the name of the parameter itself and not a "
+        "value for it. Call it again with the value you mean, or leave the argument out."
+    )
+
+
 def record_tools(
     tools: list[Any],
     recorder: EvidenceRecorder,
     repeats: RepeatGuard | None = None,
     repairs: ArgumentRepairs | None = None,
     context_budget: Any | None = None,
+    on_question: Callable[[str], None] | None = None,
 ) -> list[BaseTool]:
-    """Every tool, each writing its call to ``recorder`` and stamping the id."""
-    return [_record_tool(tool, recorder, repeats, repairs, context_budget) for tool in tools]
+    """Every tool, each writing its call to ``recorder`` and stamping the id.
+
+    ``on_question`` is told the code of every question a call is answered with
+    instead of being run, so the run summary counts what the model was asked.
+    """
+    return [
+        _record_tool(tool, recorder, repeats, repairs, context_budget, on_question)
+        for tool in tools
+    ]
 
 
 def _record_tool(
@@ -610,6 +658,7 @@ def _record_tool(
     repeats: RepeatGuard | None = None,
     repairs: ArgumentRepairs | None = None,
     context_budget: Any | None = None,
+    on_question: Callable[[str], None] | None = None,
 ) -> Any:
     """One tool, rebuilt so its result is recorded and stamped.
 
@@ -670,6 +719,39 @@ def _record_tool(
             return ""
         context_budget.charge(len(TOOL_PHASE_ENDED_NOTICE), recorder.agent)
         return TOOL_PHASE_ENDED_NOTICE
+
+    # How often each self-named call has been asked about in this loop. The
+    # first time is a question; asking the same thing again is a repeat, and
+    # counts toward the end the repeat guard gives a loop that only repeats.
+    asked_about: dict[str, int] = {}
+
+    def _names_its_own_parameter(kwargs: dict[str, Any]) -> str | None:
+        """The question for a call whose argument is its own parameter's name, if it is one.
+
+        Not run and not written to the ledger, like a refused repeat: no tool
+        ran, and an entry would be a citable id for evidence that does not
+        exist. The model is told which argument and why, and the value is
+        left exactly as it wrote it.
+        """
+        found = self_named_arguments(kwargs)
+        if not found:
+            return None
+        key = RepeatGuard._key(name, kwargs)
+        asked_about[key] = asked_about.get(key, 0) + 1
+        if asked_about[key] > 1 and repeats is not None:
+            repeats.note_repeat()
+        logger.warning(
+            "%s: %s was not run; its argument names its own parameter (%s).",
+            recorder.agent,
+            name,
+            ", ".join(argument for argument, _value in found),
+        )
+        if on_question is not None:
+            try:
+                on_question(SELF_NAMED_ARGUMENT_CODE)
+            except Exception as exc:  # noqa: BLE001 — a count never costs a call
+                logger.debug("the question was not counted (%s).", exc)
+        return self_named_notice(name, found)
 
     def _already_answered(kwargs: dict[str, Any]) -> str | None:
         """The note for a call that has been made twice already, if it has."""
@@ -806,6 +888,9 @@ def _record_tool(
             ended = _the_room_is_gone()
             if ended is not None:
                 return ended
+            question = _names_its_own_parameter(kwargs)
+            if question is not None:
+                return question
             answered = _already_answered(kwargs)
             if answered is not None:
                 return answered
@@ -828,6 +913,9 @@ def _record_tool(
             ended = _the_room_is_gone()
             if ended is not None:
                 return ended
+            question = _names_its_own_parameter(kwargs)
+            if question is not None:
+                return question
             answered = _already_answered(kwargs)
             if answered is not None:
                 return answered

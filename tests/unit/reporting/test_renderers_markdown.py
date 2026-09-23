@@ -137,7 +137,16 @@ class TestHonestySignals:
         report.attribution.family_confidence = 0.0
         report.attribution.family_grounded = False
         md = MarkdownRenderer().render(report)
-        assert "evilcorp (very low confidence, 0.00) (no evidence cited)" in md
+        assert "evilcorp (very low confidence, 0.00, stated by the judge) (no evidence cited)" in md
+
+    def test_a_family_without_a_stated_number_is_not_assessed(self) -> None:
+        report = _build()
+        report.attribution.family = "evilcorp"
+        report.attribution.family_confidence = None
+        report.attribution.family_evidence_ids = ["ev_0010"]
+        md = MarkdownRenderer().render(report)
+        assert "evilcorp (not assessed) [" in md
+        assert "0.00" not in md.split("**Family:**", 1)[1].splitlines()[0]
 
     def test_unknown_family_has_no_confidence_noise(self) -> None:
         report = _build(malware_category=None)

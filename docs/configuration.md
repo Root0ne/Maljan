@@ -686,7 +686,10 @@ before gathering anything fails as before. Both salvages re-send the
 conversation trimmed to two fifths of the window the budget counts on — the
 smaller of the declared and the probed one, so a `context_size` left larger
 than the served window cannot size a salvage close to the request the server
-just refused — and each gets only what is left of its loop's time.
+just refused — and each gets only what is left of its loop's time. An
+analyst's salvage is also held to what that time can read and answer at the
+model's measured rates, and is not sent when not even the task fits (see the
+time cap in [architecture](architecture.md)).
 
 The window itself is learned free of charge and without asking the operator
 anything. In order:
@@ -799,7 +802,9 @@ model's reasoning counts against the judge's and the analysts' caps too;
 `disable_thinking`, or a larger cap, is the remedy. The verdict call records
 whether it reached `judge_max_tokens`, Ollama's `done_reason: "length"`
 included. `run_summary.generation` records
-each model's rate, tokens, seconds, calls and source, and for each sized call
+each model's rate, tokens, seconds, calls and source, its prompt reading rate
+where the server reports one (`prompt_tokens_per_second`, `prompt_tokens`,
+`prompt_seconds`, `prompt_sources`), and for each sized call
 the configured value, the budget, the rate, the derived and the applied
 seconds; the report's Run Summary prints the same numbers.
 
@@ -1080,14 +1085,17 @@ deterministic tools over the sample and writing each result to the evidence
 ledger before any analyst starts (see *The triage pack* in
 [architecture.md](architecture.md)). Every team but `measurement` ships with
 it first, a team written by hand may leave it out, and a stored team gains it
-on upgrade (`make migrate`). Its three settings sit in the Analysis layers
+on upgrade (`make migrate`). Its five settings sit in the Analysis layers
 group: `triage.enabled` (off leaves the stage in place and makes it decline
 with that reason), `triage.strings_head` (how many printable runs the strings
 entry keeps; 300), `triage.reputation` (`auto` asks the enabled reputation
 server once for the sample hash — VirusTotal's own server when enabled, else
 the threat-intel sidecar, never one the team lists in `exclude_servers` — and
-`off` records a skipped entry instead) and `triage.budget_seconds` (1200; a
-step that would start after the budget is spent is recorded as not run). The
+`off` records a skipped entry instead), `triage.budget_seconds` (1200; a
+step that would start after the budget is spent is recorded as not run) and
+`triage.memory_floor_mb` (10,240: what the host must still have available
+after capa's measured peak and FLOSS's 4 GiB bound for the two to run together;
+0 checks only that both fit, and the worker's cgroup limit is always checked). The
 pack runs the real tools in mock mode too, so a local observation run with a
 reputation server enabled makes that one outbound call; a team that withholds
 the server, or `triage.reputation = off`, keeps such a run offline.

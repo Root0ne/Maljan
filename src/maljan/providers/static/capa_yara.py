@@ -37,6 +37,8 @@ from __future__ import annotations
 
 import json
 import multiprocessing as mp
+import threading
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -58,17 +60,11 @@ _BACKEND_NAMES: dict[str, str] = {
     "binja": "BACKEND_BINJA",
 }
 
-# The confidence a fired capa rule reports for the technique it names. The
-# other producer of ``api_technique_hits`` is the API-to-ATT&CK map, whose rows
-# start around 0.38-0.5 (data/api_attck_map_v1.json) and rise with the number
-# of distinct imports corroborating the technique, because a resolved import
-# merely *being present* is weak evidence on its own. A fired capa rule is not
-# that: capa requires the matching code pattern — an instruction sequence, a
-# string, an API call in the right context — to be there, which is the same bar
-# a YARA rule clears. So this matches the YARA corpus's own floor rather than
-# the map's low-and-rising scheme: the corroboration the map earns through
-# extra imports, a capa match already has by construction.
-_CAPA_TECHNIQUE_CONFIDENCE: float = 0.70
+# A fired capa rule's technique hit carries no confidence. capa says the
+# rule's pattern is present — an instruction sequence, a string, an API call in
+# the right context — which is a presence and not a probability; the 0.70 each
+# hit used to carry was this platform's number, read by the analysts as if capa
+# had stated it.
 
 
 class _CapaWorker(Protocol):
@@ -131,9 +127,39 @@ def _capa_worker(
             [], path, input_format, capa_loader.OS_AUTO, [rules_path], extractor, capabilities
         )
         document = capa_rd.ResultDocument.from_capa(meta, rules, capabilities.matches)
+        # This process's peak resident memory, measured by the kernel, before
+        # the result: the parent reads what capa costs on this host from it.
+        import resource
+
+        queue.put(("peak", resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024))
         queue.put(("ok", document.model_dump(mode="json")))
     except Exception as exc:  # noqa: BLE001 - reported to the parent, never raised here
         queue.put(("error", f"{type(exc).__name__}: {exc}"))
+
+
+# The largest resident memory a capa child reached in this process's lifetime,
+# as its own kernel accounting reported it; ``None`` until one has run.
+_CAPA_PEAK_BYTES: int | None = None
+_CAPA_PEAK_LOCK = threading.Lock()
+
+
+def note_capa_peak(value: Any) -> None:
+    """Keep the largest capa peak seen. Never raises."""
+    global _CAPA_PEAK_BYTES
+    try:
+        peak = int(value)
+    except (TypeError, ValueError):
+        return
+    if peak <= 0:
+        return
+    with _CAPA_PEAK_LOCK:
+        _CAPA_PEAK_BYTES = max(peak, _CAPA_PEAK_BYTES or 0)
+
+
+def measured_capa_peak_bytes() -> int | None:
+    """The largest resident memory a capa run has reached in this process, or ``None``."""
+    with _CAPA_PEAK_LOCK:
+        return _CAPA_PEAK_BYTES
 
 
 def run_capa_document(
@@ -182,7 +208,14 @@ def run_capa_document(
         # child is killed as a false "exceeded its budget", and a real result
         # is thrown away. Draining the queue first lets that feeder thread
         # unblock and the child exit on its own well within the same budget.
+        started = time.monotonic()
         kind, payload = queue.get(timeout=timeout_seconds)
+        # A child may say what it cost before it answers; the answer still has
+        # the rest of the same budget.
+        while kind == "peak":
+            note_capa_peak(payload)
+            left = max(0.001, timeout_seconds - (time.monotonic() - started))
+            kind, payload = queue.get(timeout=left)
     except Exception:  # noqa: BLE001 - stdlib queue.Empty, or a crashed child
         logger.warning(
             "capa on %s exceeded its %ss budget; terminating the worker process.",
@@ -277,7 +310,6 @@ class CapaYaraStaticProvider(StaticProvider):
                     {
                         "technique_id": tid,
                         "name": str(name),
-                        "confidence": _CAPA_TECHNIQUE_CONFIDENCE,
                         "matched_apis": [namespace] if namespace else [],
                         "source": "capa",
                     }

@@ -165,16 +165,15 @@ class DynamicAnalyst(BaseAnalyst):
             ]
         )
 
-        response = (prompt | self.llm).invoke(
-            {
-                "own_report": own_report,
-                "peer_section": peer_section,
-                "mediator_feedback": mediator_feedback,
-                "data": original_data,
-            }
+        return self.ask_the_model(
+            prompt.format_messages(
+                own_report=own_report,
+                peer_section=peer_section,
+                mediator_feedback=mediator_feedback,
+                data=original_data,
+            ),
+            what="revision",
         )
-        self._record_usage(response)
-        return str(response.content)
 
     # ------------------------------------------------------------------
     # ISR interface
@@ -213,13 +212,7 @@ class DynamicAnalyst(BaseAnalyst):
         if not claims:
             return self._text_to_isr(content, revision_round=0)
 
-        return AgentISR(
-            agent_id=self.name,
-            domain="dynamic",
-            claims=claims,
-            dissent_items=[],
-            revision_round=0,
-        )
+        return self._parsed_isr(claims, content, "dynamic")
 
     def revise_isr(
         self,
@@ -274,9 +267,9 @@ class DynamicAnalyst(BaseAnalyst):
         # that obeys it puts a JSON fence into the revised report, and nothing
         # downstream of here — the claim parser, the transcript, the Composer —
         # should ever see it.
-        response = self.llm.invoke(self.frame_messages(messages))
-        self._record_usage(response)
-        content = self._capture_findings(str(response.content))
+        content = self._capture_findings(
+            self.ask_the_model(self.frame_messages(messages), what="revision")
+        )
 
         claims = _parse_claim_blocks(content)
         dissent = _parse_disputes(content)

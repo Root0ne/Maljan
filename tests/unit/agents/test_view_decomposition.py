@@ -15,11 +15,16 @@ from maljan.agents.base_agent import BaseAnalyst, _tier_specs, _view_specs
 from maljan.core.exceptions import AnalystError
 
 
+def _block(claim: str, technique: str) -> str:
+    """One CLAIM block in the format every view prompt asks for, confidence included."""
+    return f"CLAIM: {claim}\nCONFIDENCE: 0.7\nTECHNIQUE: {technique}\n---"
+
+
 class _StubAnalyst(BaseAnalyst):
     """Minimal concrete analyst. ``_invoke_view`` is stubbed per-test."""
 
     def analyze(self, data: str) -> str:
-        return "CLAIM: monolithic path used.\nTECHNIQUE: T1055\n---"
+        return _block("monolithic path used.", "T1055")
 
     def revise(self, original_data, own_report, peer_reports, mediator_feedback) -> str:
         return "revised"
@@ -60,7 +65,7 @@ class TestAnalyzeIsrViews:
             # Distinct technique per view so the merge keeps both (the two static
             # facets are "code" and "artifacts").
             tid = "T1071" if "artifacts" in instruction else "T1055"
-            return f"CLAIM: focused finding about the sample under test.\nTECHNIQUE: {tid}\n---"
+            return _block("focused finding about the sample under test.", tid)
 
         agent._invoke_view = _stub  # type: ignore[method-assign]
         isr = agent.analyze_isr_views("evidence text", 2)
@@ -74,7 +79,7 @@ class TestAnalyzeIsrViews:
 
         def _stub(instruction: str, data: str, max_tokens: int | None) -> str:
             budgets.append(max_tokens)
-            return "CLAIM: a sufficiently long finding sentence here.\nTECHNIQUE: T1055\n---"
+            return _block("a sufficiently long finding sentence here.", "T1055")
 
         agent._invoke_view = _stub  # type: ignore[method-assign]
         agent.analyze_isr_views("evidence", 4, total_max_tokens=1000)
@@ -87,7 +92,7 @@ class TestAnalyzeIsrViews:
         def _stub(instruction: str, data: str, max_tokens: int | None) -> str:
             if "artifacts" in instruction:
                 raise RuntimeError("view derailed")
-            return "CLAIM: surviving finding about behaviour.\nTECHNIQUE: T1055\n---"
+            return _block("surviving finding about behaviour.", "T1055")
 
         agent._invoke_view = _stub  # type: ignore[method-assign]
         isr = agent.analyze_isr_views("evidence", 2)
@@ -148,10 +153,10 @@ def _tier_stub_factory(calls: list[dict[str, Any]]):
     def _stub(instruction: str, data: str, max_tokens: int | None) -> str:
         calls.append({"instruction": instruction, "data": data, "budget": max_tokens})
         if "tier 1" in instruction:
-            return "CLAIM: foundational artifact VirtualAllocEx observed.\nTECHNIQUE: T1055\n---"
+            return _block("foundational artifact VirtualAllocEx observed.", "T1055")
         if "tier 2" in instruction:
-            return "CLAIM: behaviour process injection synthesized.\nTECHNIQUE: T1055\n---"
-        return "CLAIM: semantics maps to credential access.\nTECHNIQUE: T1056\n---"
+            return _block("behaviour process injection synthesized.", "T1055")
+        return _block("semantics maps to credential access.", "T1056")
 
     return _stub
 
@@ -202,8 +207,8 @@ class TestAnalyzeIsrTiered:
             if "tier 2" in instruction:
                 raise RuntimeError("tier derailed")
             if "tier 1" in instruction:
-                return "CLAIM: foundational CreateRemoteThread seen.\nTECHNIQUE: T1055\n---"
-            return "CLAIM: semantics conclusion drawn here.\nTECHNIQUE: T1056\n---"
+                return _block("foundational CreateRemoteThread seen.", "T1055")
+            return _block("semantics conclusion drawn here.", "T1056")
 
         agent._invoke_view = _stub  # type: ignore[method-assign]
         isr = agent.analyze_isr_tiered("evidence text", 3)

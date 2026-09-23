@@ -138,13 +138,13 @@ def _isr_from_text(text: str):
     return analyst._text_to_isr(text, revision_round=1)
 
 
-def test_the_free_text_path_never_turns_a_tool_call_into_a_claim():
+def test_the_free_text_path_never_keeps_a_tool_call_in_the_prose():
     isr = _isr_from_text(
         f"{CAPTURED}\nThe sample allocates executable memory and copies a payload into it."
     )
-    assert len(isr.claims) == 1
-    assert "tool_call" not in isr.claims[0].claim
-    assert isr.claims[0].claim.startswith("The sample allocates")
+    assert isr.claims == []
+    assert "tool_call" not in isr.unparsed_answer
+    assert isr.unparsed_answer.startswith("The sample allocates")
 
 
 def test_a_report_that_is_only_scaffolding_yields_no_claims():

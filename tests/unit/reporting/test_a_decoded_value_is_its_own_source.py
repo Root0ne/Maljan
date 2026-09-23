@@ -88,6 +88,7 @@ def _ledger() -> list[LedgerEntry]:
 def _report(verdict: str = "Malware", *, decoded: bool = True, **over: Any) -> MalwareReport:
     sections = [_floss(("decoded", C2_URL), ("decoded", BENIGN), ("static", "plain.example.org"))]
     over.setdefault("emulated_strings", emulation_from_ledger(_ledger() if decoded else []))
+    over.setdefault("overall_confidence", 0.8)
     return MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
         verdict=verdict,
