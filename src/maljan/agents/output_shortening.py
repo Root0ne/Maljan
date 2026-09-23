@@ -123,11 +123,17 @@ _NEVER_TOUCHED = "error"
 
 
 class Shortening(NamedTuple):
-    """What became of one answer: the text, and why it is that text."""
+    """What became of one answer: the text, and why it is that text.
+
+    ``compacted`` is the answer written again without its whitespace, whole:
+    every value is the one the tool wrote, so it is not a shortening and says
+    nothing about itself.
+    """
 
     text: str
     shortened: bool
     timed_out: bool = False
+    compacted: bool = False
 
 
 # How many leading units of one value are measured one by one. Beyond it a cut
@@ -233,26 +239,26 @@ def _parsed(text: str) -> tuple[Any, bool]:
     return document, faithful
 
 
-# Above this the separators the tool used are not probed. The probe is a whole
-# extra serialisation and what it buys is form rather than meaning; on an
-# answer this size the form is the least of what the shortening is deciding.
-_SEPARATOR_PROBE_LIMIT = 1_000_000
+# How every document this module hands back is written: no space after a
+# separator and no indentation. Whitespace is no part of what a tool said, and
+# on an indented answer it is a quarter of the characters or more — room that
+# belongs to the answer, not to its layout.
+_COMPACT = (",", ":")
 
 
-def _separators(text: str, document: Any) -> tuple[str, str] | None:
-    """The separators the tool used, as far as that can be known cheaply.
+def _encodable(compact: str, document: Any) -> str:
+    """``compact``, or the same document with everything outside ASCII escaped.
 
-    A compact answer comes back compact rather than gaining a space per
-    element, which on a paged list is hundreds of characters of somebody
-    else\'s budget. Anything the two candidates do not explain — an indented
-    answer, most often — takes the library default.
+    A lone surrogate reaches a parsed document only from an escape the tool
+    wrote — a binary's badly decoded bytes, typically — and written back raw it
+    is a string no UTF-8 encoder accepts, so the answer would fail on its way
+    to the model. Escaped again it is the value the tool sent.
     """
-    if len(text) > _SEPARATOR_PROBE_LIMIT:
-        return None
-    compact = (",", ":")
-    if len(json.dumps(document, ensure_ascii=False, separators=compact)) == len(text):
-        return compact
-    return None
+    try:
+        compact.encode("utf-8")
+    except UnicodeEncodeError:
+        return json.dumps(document, ensure_ascii=True, separators=_COMPACT)
+    return compact
 
 
 def _cost_of(value: Any, separators: tuple[str, str] | None) -> int:
@@ -646,9 +652,24 @@ def _safe_string_cut(value: str, kept: int) -> int:
 
 
 def shorten_json_document(
-    text: str, limit: int, *, budget_seconds: float | None = None
+    text: str, limit: int, *, budget_seconds: float | None = None, cap: int = 0
 ) -> Shortening:
     """One tool answer, made to fit, or handed back for the caller to cut.
+
+    First the answer is written again without its whitespace. If that alone
+    brings it inside ``cap`` it comes back that way, whole, with ``compacted``
+    set: every value is the one the tool wrote, nothing was left out, and so
+    nothing is said about it. ``cap`` is the limit itself where ``limit`` is
+    less than it by the room a shortening notice needs — an answer that loses
+    nothing carries no notice — and defaults to ``limit``. An answer over the
+    cap only because of its indentation used to come back from here unchanged,
+    because the shortener measured it compact and found nothing to cut, and
+    the caller then cut it as text: a document that fitted whole reached the
+    model as a prefix and the ledger as prose.
+
+    Only when the compact form still does not fit is anything shortened, and
+    it is the compact form that is: what a shortened answer keeps is measured
+    in characters of content, not of layout.
 
     ``shortened`` is false, with the text unchanged, for everything this cannot
     shorten into a document a reader can still parse and reconcile: text that
@@ -661,13 +682,23 @@ def shorten_json_document(
     deadline = time.monotonic() + (
         SHORTENING_BUDGET_SECONDS if budget_seconds is None else budget_seconds
     )
-    if limit <= 0 or len(text) <= limit or len(text) > MAX_SHORTENABLE_CHARS:
+    whole_cap = max(int(limit), int(cap))
+    if limit <= 0 or len(text) <= whole_cap or len(text) > MAX_SHORTENABLE_CHARS:
         return Shortening(text, False)
     if time.monotonic() >= deadline:
         return Shortening(text, False, True)
 
     document, faithful = _parsed(text)
-    if not faithful or not isinstance(document, dict):
+    if not faithful:
+        return Shortening(text, False)
+    try:
+        compact = json.dumps(document, ensure_ascii=False, separators=_COMPACT)
+        whole = _encodable(compact, document)
+    except (ValueError, TypeError, RecursionError):
+        return Shortening(text, False)
+    if len(whole) <= whole_cap:
+        return Shortening(whole, False, compacted=True)
+    if not isinstance(document, dict):
         return Shortening(text, False)
     # An answer this module has already shortened is left alone: a second map
     # would count against a baseline the first one already moved, so the two
@@ -677,20 +708,14 @@ def shorten_json_document(
     if our_key_in(document):
         return Shortening(text, False)
 
-    separators = _separators(text, document)
+    separators = _COMPACT
     candidates = _walk(document, separators)
     if not candidates:
         return Shortening(text, False)
     if time.monotonic() >= deadline:
         return Shortening(text, False, True)
 
-    # The tool's own text when its form is the one this will write back, which
-    # is the common case and saves a serialisation of the whole document.
-    base = (
-        len(text)
-        if separators is not None
-        else len(json.dumps(document, ensure_ascii=False, separators=separators))
-    )
+    base = len(compact)
     room = _room_for_bookkeeping(candidates, separators)
     # Everything that could give, given entirely, against what the document
     # would still weigh: one subtraction, before a single unit is measured.

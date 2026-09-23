@@ -26,6 +26,7 @@ is returned alongside the bundle for the run summary to record.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 import uuid
 from collections.abc import Iterable, Sequence
@@ -38,16 +39,28 @@ from langchain_core.prompts import ChatPromptTemplate
 from maljan.agents.base_agent import (
     BudgetMeter,
     LoopBudget,
+    _trim_for_synthesis,
     _turn_key,
+    counted_window_tokens,
+    is_the_graph_s_step_stop,
     loop_limits,
+    note_a_window_that_moved,
+    nudge_turns,
+    request_chars,
     retry_on_connection_error,
     run_on_agent_loop,
+    synthesis_budget_chars,
 )
 from maljan.agents.judge_postprocess import ASSESSMENT_RELOCATED_CODE
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
+from maljan.llm.context_window import (
+    ContextBudget,
+    tool_definition_chars,
+    window_full_error,
+)
 from maljan.pipeline.events import emit_judge_question, scrub
 from maljan.pipeline.mediation_models import MediatorVerdict
 from maljan.pipeline.state import AgentArgument
@@ -423,6 +436,17 @@ class JudgeAgent(BudgetMeter):
         except Exception as exc:  # noqa: BLE001 — a prompt hook never fails a loop
             self.logger.debug("judge question not published (%s).", exc)
 
+    def _context_budget(self) -> Any | None:
+        """The job's context budget, or None when the judge runs bare."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        try:
+            return container.get_context_budget()
+        except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
+            self.logger.debug("judge: the context budget is unavailable (%s).", exc)
+            return None
+
     def _server_registry(self) -> Any | None:
         """The job's tool-server registry, or None when this judge runs bare."""
         container = getattr(self, "_container", None)
@@ -594,6 +618,34 @@ class JudgeAgent(BudgetMeter):
 
         asked: set[str] = set()
 
+        # The job's context budget, and the judge's conversation in it under
+        # the judge's own name — the analysts' accounting, the same rule: its
+        # messages, the definitions of its tools, and the server's own count
+        # of the last request as a floor. Without it every judge answer was
+        # capped against whatever conversation happened to be live, which
+        # after the analysts had finished was none, so each reputation answer
+        # got the widest cap and nothing could say the room was gone.
+        room = self._context_budget()
+        recorded = record_tools(self.tools, recorder, context_budget=room)
+        definitions = tool_definition_chars(recorded)
+
+        def _note_the_conversation(conversation: list[Any]) -> None:
+            if not isinstance(room, ContextBudget):
+                return
+            try:
+                room.note_conversation(
+                    recorder.agent,
+                    request_chars(conversation, definitions, room.chars_per_token),
+                )
+            except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
+                self.logger.debug("judge: the conversation size was not recorded (%s).", exc)
+
+        def _out_of_room() -> bool:
+            try:
+                return isinstance(room, ContextBudget) and room.out_of_room(recorder.agent)
+            except Exception:  # noqa: BLE001 — a budget is never worth a lost loop
+                return False
+
         def _count_the_turns(state: Any) -> list[Any]:
             """Count the conversation before every model turn, and change nothing.
 
@@ -619,26 +671,48 @@ class JudgeAgent(BudgetMeter):
             # exactly that, one verdict call that ran past its wall clock.
             budget.note_turns(conversation)
             budget.own_steps += 1
+            _note_the_conversation(conversation)
             self._publish_questions(conversation, asked)
             return conversation
 
-        agent_executor = create_react_agent(
-            self.llm, record_tools(self.tools, recorder), prompt=_count_the_turns
-        )
+        agent_executor = create_react_agent(self.llm, recorded, prompt=_count_the_turns)
         self.logger.info(
             "JudgeAgent invoking ReAct (timeout=%ds, tools=%d)...",
             timeout,
             len(self.tools),
         )
-        try:
-            result = await asyncio.wait_for(
-                agent_executor.ainvoke(
-                    {"messages": messages},
-                    {"recursion_limit": max_steps},
-                ),
-                timeout=timeout,
+        # Streamed rather than awaited whole, for the analysts' reason: a loop
+        # that has run out of room is ended on the step it did, with the
+        # conversation as it stands, and a server that says the window is full
+        # leaves behind what was gathered rather than nothing.
+        latest: dict[str, Any] = {"messages": list(messages)}
+        ended: dict[str, bool] = {"no_room": False, "window_full": False}
+
+        async def _until_it_answers_or_runs_out() -> None:
+            stream: Any = agent_executor.astream(
+                {"messages": messages},
+                {"recursion_limit": max_steps},
+                stream_mode="values",
             )
-            _msgs = result.get("messages", []) or []
+            async with contextlib.aclosing(stream) as snapshots:
+                try:
+                    async for snapshot in snapshots:
+                        latest.update(snapshot)
+                        if _out_of_room():
+                            ended["no_room"] = True
+                            break
+                except Exception as exc:
+                    # Only a provider's own full-window answer, and only once
+                    # something was gathered; anything else fails the judge's
+                    # loop as it always did.
+                    if not (window_full_error(exc) and recorder.entries):
+                        raise
+                    ended["window_full"] = True
+                    note_a_window_that_moved(exc)
+
+        try:
+            await asyncio.wait_for(_until_it_answers_or_runs_out(), timeout=timeout)
+            _msgs = list(latest.get("messages") or [])
             turns = list(_msgs)
             msg_count = len(_msgs)
             self.logger.info("JudgeAgent ReAct loop completed: %d messages.", msg_count)
@@ -649,7 +723,29 @@ class JudgeAgent(BudgetMeter):
             for _m in _msgs:
                 if getattr(_m, "type", "") == "ai":
                     self._record_usage(_m)
-            return str(_msgs[-1].content)
+            if ended["no_room"] or ended["window_full"]:
+                cap = "no_room"
+                why = (
+                    "the model server reported its context window full"
+                    if ended["window_full"]
+                    else "the conversation had no room left for a tool answer"
+                )
+                self.logger.warning(
+                    "JudgeAgent ReAct loop ended: %s; writing the reasoning from what it gathered.",
+                    why,
+                )
+                # What is left of the loop's own time, as the analysts'
+                # salvage gets: loop and salvage together stay inside it.
+                return await self._reasoning_from_what_was_gathered(
+                    _msgs, budget.seconds_left(), settings, counted_window_tokens(room)
+                )
+            # The graph's own sentence at its step limit is not the judge's
+            # reasoning, and what reads the reasoning next is a model. The
+            # judge wrote none; the budget record says why.
+            if _msgs and is_the_graph_s_step_stop(_msgs[-1]):
+                cap = "steps"
+                return ""
+            return str(_msgs[-1].content) if _msgs else ""
         except TimeoutError:
             self.logger.error("JudgeAgent ReAct timed out after %ds.", timeout)
             cap = "time"
@@ -658,13 +754,53 @@ class JudgeAgent(BudgetMeter):
             # In a ``finally`` for the reason the analysts' loop uses one: a
             # mediation that timed out still made the calls it made.
             self._evidence_entries.extend(recorder.entries)
-            self._record_budget(
-                budget,
-                turns,
-                cap,
-                detail=(f"the loop did not answer within {timeout}s" if cap else ""),
-            )
+            details = {
+                "time": f"the loop did not answer within {timeout}s",
+                "no_room": (
+                    "the model server reported its context window full"
+                    if ended["window_full"]
+                    else "the conversation had no room left for a tool answer"
+                ),
+            }
+            self._record_budget(budget, turns, cap, detail=details.get(cap or "", ""))
             self._budget_tick(budget, turns, final=True, ledger_entries=len(recorder.entries))
+            # The loop is over, so its size stops binding every later cap.
+            if isinstance(room, ContextBudget):
+                with contextlib.suppress(Exception):
+                    room.forget_conversation(recorder.agent)
+
+    async def _reasoning_from_what_was_gathered(
+        self, msgs: list[Any], timeout: float, settings: Any, window_tokens: int = 0
+    ) -> str:
+        """The judge's reasoning, asked for once from what its loop gathered.
+
+        The analysts' salvage, for the judge: the conversation trimmed to the
+        salvage budget, and one turn with no tools asking for the reasoning
+        the loop did not get to write. What comes back is the model's own; a
+        salvage that fails leaves the reasoning empty, which mediation reads
+        as no agreement.
+        """
+        if timeout < 1.0:
+            self.logger.warning("JudgeAgent reasoning salvage skipped: no time left.")
+            return ""
+        sendable, _dropped = nudge_turns(msgs)
+        trimmed = _trim_for_synthesis(
+            sendable, synthesis_budget_chars(settings, "judge", window_tokens)
+        )
+        directive = HumanMessage(
+            content=(
+                "Do NOT call any more tools. Using ONLY the tool output already in this "
+                "conversation, write your mediation reasoning now: the contradictions you "
+                "found and a single agreement_confidence score."
+            )
+        )
+        try:
+            response = await asyncio.wait_for(self.llm.ainvoke([*trimmed, directive]), timeout)
+        except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves no reasoning
+            self.logger.warning("JudgeAgent reasoning salvage failed (%s).", type(exc).__name__)
+            return ""
+        self._record_usage(response)
+        return str(getattr(response, "content", "") or "")
 
     def drain_evidence_entries(self) -> list[LedgerEntry]:
         """Every entry the judge's tool loops gathered, handing over ownership."""
@@ -896,8 +1032,14 @@ class JudgeAgent(BudgetMeter):
 
         # Structured output extraction with bounded retry; if every attempt
         # still fails, fall back to the regex-based extractor so the
-        # negotiation loop can keep running.
-        verdict = await self._extract_mediator_verdict(extract_prompt, reasoning_text)
+        # negotiation loop can keep running. A loop that wrote no reasoning has
+        # nothing for a model to extract from: it is read as no agreement,
+        # which is what the text fallback makes of an empty log.
+        verdict = (
+            await self._extract_mediator_verdict(extract_prompt, reasoning_text)
+            if reasoning_text.strip()
+            else self._fallback_mediate(reasoning_text)
+        )
 
         is_consensus = verdict.confidence >= self._consensus_threshold(consensus_threshold)
         log_msg = "Consensus reached" if is_consensus else "No consensus yet"

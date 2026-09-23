@@ -3327,6 +3327,86 @@ change landed on `main`.
   `run_summary.validation.unresolved`; a consumer that partitions on validation
   codes should know the name.
 
+- **Out of room, an agent's tool phase now ends where the room did.** Once a
+  conversation had no room left for a tool answer, every later call was refused
+  without running a tool, but nothing stopped the graph: a live analyst that
+  kept asking spent about nineteen more steps and five minutes on refusals, was
+  stopped by the step limit, and its budget record, `stage_ended_at_cap` event
+  and `run_summary.budget` said `steps`. Two causes: the stream loop broke only
+  for a repeating loop, and the no-room mark was read after the loop had
+  forgotten its conversation, which clears the mark. The stream now breaks on
+  the step at which the agent is out of room, exactly as it does for repeated
+  calls, the mark is read before it is cleared, and the three surfaces say
+  `no_room`; the forced synthesis still writes the answer from what was
+  gathered. langgraph's step-limit sentence ("Sorry, need more steps to process
+  this request.") is no longer published as the agent's words in the
+  conversation feed, no longer sent back to a model as the agent's own turn in
+  the salvage or the nudge, and no longer returned as the judge's mediation
+  reasoning. Where a loop a cap ended produced no answer and the salvage wrote
+  none either, the agent's answer is now empty and its status `no_claims`,
+  instead of the graph's sentence or a tool's notice handed on as the agent's
+  answer; why the loop ended is on the budget record and the
+  `stage_ended_at_cap` event. A judge loop that ends the same way returns no
+  reasoning, and mediation reads that as no agreement without asking a model to
+  extract a verdict from nothing. The analysis node no longer runs an analyst
+  that ended `no_room` a second time over the same material.
+
+- **A JSON answer over the cap only because of its indentation is handed over
+  whole.** The document shortener measured an indented answer at its compact
+  size, found it already inside the target, cut nothing and handed back the
+  indented text, which the guardrail then cut as characters: on a live run
+  `elf_info` (8,628 characters indented, 5,577 compact, cap 8,486) and
+  `strings` (8,442 against 7,334) both reached the model ending in
+  `[OUTPUT TRUNCATED]` and the ledger with `structured: null`, so neither
+  reached the report. A JSON answer whose compact form fits the cap is now
+  handed over in that form — every value the tool's, parseable, with no
+  shortening notice — on both the MCP toolkit and the Ghidra HTTP client, and
+  counted as the new `tool_output_compacted` in the truncation ledger,
+  `run_summary.truncation` and the report's Bounds Hit table. When the compact
+  form still does not fit, the structural shortener now acts on it, and every
+  document it returns is written compactly, where an indented answer used to be
+  shortened in the library's spaced form.
+  **Upgrading:** `run_summary.truncation.tool_output_compacted` is new and is
+  one of the outcomes counted under `tool_output_over_limit`; a summary stored
+  before it reads 0. `tool_output_chars_dropped` includes the whitespace a
+  compacted answer lost, though no value was.
+
+- **The context budget counts what a request carries besides its messages, and
+  a full window ends the tool phase instead of the agent.** On a live run the
+  static analyst reached step 36 of 40 with the budget holding 61,762
+  characters — inside the 73,728-character tool budget of a 32,768-token window
+  with 8,192 kept for the reply — when llama answered HTTP 500 "context shift is
+  disabled"; the run said `tool_output_no_room 0` and the analyst's work was
+  lost. The count left out the definitions of the loop's tools, which go with
+  every request: 35 tools, about 20,500 characters, 28% of the tool budget.
+  They are now counted with the conversation, and where the server reported the
+  token count of the last request, that count plus what the conversation gained
+  since is a floor under the measure, so content that tokenises worse than three
+  characters a token cannot hide the room that is gone. A provider's own answer
+  that the window is full ("context shift is disabled", "exceeds the available
+  context size", "maximum context length", "prompt is too long"), met after the
+  loop has gathered at least one tool answer, now ends that agent's tool phase
+  with `no_room` and the detail "the model server reported its context window
+  full", and the forced synthesis writes the answer from what was gathered. The
+  same sentence on the first request, a reply cap at least as large as the
+  window, an error that is not a provider's, and any other server error still
+  fail the agent; vLLM's wording of a full conversation, which names the reply
+  cap beside the input-token count, counts as full. After the server reported
+  the window full the final-answer nudge is no longer sent. The judge's tool loop
+  is now accounted the same way under its own name — its conversation and tool
+  definitions counted, its answers capped from its own room, its loop streamed
+  and ended on `no_room`, and its reasoning then written once from what it
+  gathered — where before every judge answer was capped against whatever
+  conversation happened to be live, usually none. "context shift" also joins the
+  wordings that retire a learned window. The forced synthesis, the analysts' and
+  the judge's, now trims its conversation from the window the budget counts on
+  (the smaller of the declared and the probed one) rather than from the declared
+  size alone, and the judge's gets only what is left of its loop's time.
+  **Upgrading:** a derived cap reaches zero sooner for an agent with many tools,
+  so a run on a small window ends tool phases earlier than before and says
+  `no_room` where it used to overflow; unticking the tools an agent does not
+  need in the Tools step gives the room back.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**

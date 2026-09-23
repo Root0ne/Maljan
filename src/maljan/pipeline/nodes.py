@@ -2057,6 +2057,10 @@ def make_stage_agent_node(
 
             if isr.claims:
                 report = isr.to_text_summary()
+            elif getattr(agent, "ended_out_of_room", False) is True:
+                # A second loop over the same material meets the same full
+                # window. The analyst has no prose; why is on its budget record.
+                report = ""
             elif fallback_text:
                 report = agent.safe_analyze(fallback_text)
             else:
