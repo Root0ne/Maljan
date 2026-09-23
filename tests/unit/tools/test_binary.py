@@ -571,3 +571,66 @@ class TestWhichImportWarningMeansDamage:
 
     def test_no_warnings_at_all(self) -> None:
         assert tool._import_table_damaged([]) is False
+
+
+class TestTheExportDirectoryIsReadWhole:
+    """Names, ordinals, addresses and the library's own name, as the header states them.
+
+    Read through stand-ins shaped like pefile's objects, because hand-building an
+    export directory proves pefile's parser rather than this reading of it.
+    """
+
+    @staticmethod
+    def _pe(*symbols: tuple[bytes | None, int, int], name: bytes | None = b"LibraryTag.dll"):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            DIRECTORY_ENTRY_EXPORT=SimpleNamespace(
+                name=name,
+                symbols=[SimpleNamespace(name=n, ordinal=o, address=a) for n, o, a in symbols],
+            )
+        )
+
+    def test_every_symbol_carries_its_ordinal_and_address(self) -> None:
+        pe = self._pe((b"extra", 1, 0x3CE4), (b"run", 2, 0x3CE4), (None, 3, 0x1000))
+
+        assert tool._pe_export_rows(pe) == [
+            {"name": "extra", "ordinal": 1, "rva": "0x3ce4"},
+            {"name": "run", "ordinal": 2, "rva": "0x3ce4"},
+            {"name": "", "ordinal": 3, "rva": "0x1000"},
+        ]
+
+    def test_the_directory_s_own_name_is_reported(self) -> None:
+        assert tool._pe_export_name(self._pe()) == "LibraryTag.dll"
+        assert tool._pe_export_name(self._pe(name=None)) == ""
+
+    def test_a_binary_with_no_export_directory_has_no_rows(self) -> None:
+        from types import SimpleNamespace
+
+        assert tool._pe_export_rows(SimpleNamespace()) == []
+        assert tool._pe_export_name(SimpleNamespace()) == ""
+
+
+class TestTheVersionResourceNamesTheBinary:
+    def test_the_naming_strings_are_read_and_nothing_else(self) -> None:
+        from types import SimpleNamespace
+
+        table = SimpleNamespace(
+            entries={
+                b"InternalName": b"updater",
+                b"OriginalFilename": b"updater.dll\x00",
+                b"CompanyName": b"Example Org",
+                b"ProductName": b"",
+            }
+        )
+        pe = SimpleNamespace(FileInfo=[[SimpleNamespace(StringTable=[table])]])
+
+        assert tool._pe_version_strings(pe) == {
+            "InternalName": "updater",
+            "OriginalFilename": "updater.dll",
+        }
+
+    def test_a_binary_without_a_version_resource_names_nothing(self) -> None:
+        from types import SimpleNamespace
+
+        assert tool._pe_version_strings(SimpleNamespace()) == {}
