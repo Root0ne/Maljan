@@ -324,9 +324,7 @@ def bundle_for(
                 ),
                 "category": report.malware_category,
                 "severity": report.severity.rating if report.severity else None,
-                "top_ttps": [
-                    f"{m.technique_id} {m.technique_name}" for m in report.ttp_mappings[:6]
-                ],
+                "top_ttps": [f"{m.technique_id} {m.technique_name}" for m in report.ttp_mappings],
             },
         }
     if section == "introduction":
@@ -359,13 +357,13 @@ def bundle_for(
             "tool_outputs": [],
             "binary": base,
             "facts": {
-                "process_tree": tree[:20],
+                "process_tree": tree,
                 "sandbox_entries": [
                     f"{row.id} ({row.tool})"
                     for row in report.evidence_index
                     if row.id in sandbox_ids
-                ][:20],
-                "exports": list(report.static.exports[:10]) if report.static else [],
+                ],
+                "exports": list(report.static.exports) if report.static else [],
             },
         }
     if section == "mitigations":
@@ -388,10 +386,10 @@ def bundle_for(
             "tool_outputs": _filter_tool_outputs(tech_ev, _SECTION_TOOL_HINTS[section]),
             "binary": base,
             "facts": {
-                "domains": [d.fqdn for d in (net.domains if net else [])][:20],
-                "ips": [f"{i.address}:{i.port}" for i in (net.ips if net else [])][:20],
-                "urls": [u.url for u in (net.urls if net else [])][:20],
-                "user_agents": (net.user_agents if net else [])[:5],
+                "domains": [d.fqdn for d in (net.domains if net else [])],
+                "ips": [f"{i.address}:{i.port}" for i in (net.ips if net else [])],
+                "urls": [u.url for u in (net.urls if net else [])],
+                "user_agents": (net.user_agents if net else []),
             },
         }
 
@@ -453,7 +451,7 @@ def _process_lines(node: Any, depth: int) -> list[str]:
     """One line per process: pid, name and command line, children indented."""
     line = f"{'  ' * depth}pid {node.pid} {node.name}".rstrip()
     if node.command_line:
-        line += f": {node.command_line[:200]}"
+        line += f": {node.command_line}"
     out = [line]
     for child in node.children:
         out.extend(_process_lines(child, depth + 1))
@@ -488,9 +486,9 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     if section == "configuration":
         net = report.network
         return {
-            "urls": [u.url for u in (net.urls if net else [])][:10],
-            "domains": [d.fqdn for d in (net.domains if net else [])][:10],
-            "user_agents": (net.user_agents if net else [])[:3],
+            "urls": [u.url for u in (net.urls if net else [])],
+            "domains": [d.fqdn for d in (net.domains if net else [])],
+            "user_agents": (net.user_agents if net else []),
             "string_entries": _string_entries(report),
         }
     if section == "host_identifiers":
@@ -530,16 +528,13 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
 
     if section == "packing_obfuscation":
         facts: dict[str, Any] = {
-            "obfuscation_indicators": list(static.obfuscation_indicators)[:8],
+            "obfuscation_indicators": list(static.obfuscation_indicators),
             "high_entropy_sections": [
                 f"{s.name} ({s.entropy:.2f})" for s in static.sections if s.entropy > 7.0
-            ][:8],
+            ],
         }
         if static.packer_matches:
-            facts["packer_matches"] = [
-                f"{m.get('name')} ({float(m.get('confidence') or 0.0):.2f}, {m.get('method')})"
-                for m in static.packer_matches[:5]
-            ]
+            facts["packer_matches"] = [_packer_line(m) for m in static.packer_matches]
         elif static.packer_hint:
             facts["packer_hint"] = static.packer_hint
         else:
@@ -567,19 +562,19 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
         }
     if section == "persistence_detail":
         return {
-            "persistence_mechanisms": [p.kind for p in report.persistence][:10],
+            "persistence_mechanisms": [p.kind for p in report.persistence],
             "persistence_api_count": caps.get("persistence", 0),
             "registry_api_count": caps.get("registry", 0),
         }
     if section == "cli_flags":
-        return {"capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1])[:8])}
+        return {"capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1]))}
     if section == "string_resolution":
         return {
             "static_import_count": len(static.imports),
             "interesting_string_count": len(static.interesting_strings),
-            "capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1])[:8]),
+            "capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1])),
         }
-    return {"capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1])[:8])}
+    return {"capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1]))}
 
 
 # Technique IDs the import-derived ATT&CK table can emit for these two
@@ -622,11 +617,19 @@ _EVASION_TECHNIQUES = frozenset(
 )
 
 
+def _packer_line(match: dict[str, Any]) -> str:
+    """A packer match as the tool stated it: a confidence only when it gave one."""
+    confidence = match.get("confidence")
+    if confidence is None:
+        return f"{match.get('name')} ({match.get('method')})"
+    return f"{match.get('name')} ({float(confidence):.2f}, {match.get('method')})"
+
+
 def _payload_facts(report: MalwareReport) -> dict[str, Any]:
     """The carved payloads and the dropped files, as the tools stated them."""
     carved = [
         f"{res.get('id')} ({res.get('type') or '?'}, {res.get('size', 0)} bytes, "
-        f"sha256 {str(res.get('sha256') or '')[:16]})"
+        f"sha256 {str(res.get('sha256') or '')})"
         for res in (report.static.embedded_resources if report.static else [])
         if res.get("carved")
     ]
@@ -635,7 +638,7 @@ def _payload_facts(report: MalwareReport) -> dict[str, Any]:
         for op in (report.dynamic.file_operations if report.dynamic else [])
         if isinstance(op, dict) and op.get("operation") == "write"
     ]
-    return {"carved_payloads": carved[:10], "dropped_files": [d for d in dropped if d][:10]}
+    return {"carved_payloads": carved, "dropped_files": [d for d in dropped if d]}
 
 
 def is_empty(bundle: dict[str, Any]) -> bool:

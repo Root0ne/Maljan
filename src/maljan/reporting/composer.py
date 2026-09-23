@@ -383,7 +383,8 @@ def _bundle_text(
     ``item_chars`` characters: the share of the room the section's window
     leaves (``ReportComposer._item_chars``), a cut marked as one; ``None`` is a
     composer that knows no window and shows each whole; ``0`` shows the
-    sentence saying there was no room.
+    sentence saying there was no room; a negative value shows each empty,
+    which is how the rest of the prompt is measured. The facts enter whole.
 
     The heading used to be the bare line ``SECTION: <name>``, which is a key
     with a value next to it: both models answered with ``{"SECTION": ...,
@@ -440,7 +441,9 @@ def _within(text: str, chars: int | None) -> str:
     """``text`` within ``chars`` characters: whole, cut with a mark, or the no-room sentence."""
     if chars is None:
         return text
-    if chars <= 0:
+    if chars < 0:
+        return ""
+    if chars == 0:
         return NO_ROOM_FOR_THE_ANSWER
     return marked_cut(text, chars)
 
@@ -772,12 +775,21 @@ class ReportComposer:
         entries = getattr(self, "_entries", None)
         # The claims and the tool answers share what the model's window leaves
         # after its reply and the rest of this prompt; measured on the prompt
-        # without them.
+        # with each of them empty, so only its line's own lead is charged.
         without = "\n\n".join(
-            [*head, instruction, contract, _bundle_text(section, bundle, entries, item_chars=0)]
+            [*head, instruction, contract, _bundle_text(section, bundle, entries, item_chars=-1)]
         )
+        prompt_chars = len(_SYSTEM) + len(without)
+        room = self._room_chars()
+        if room is not None and prompt_chars > room:
+            # The facts enter whole: a section that cannot hold them says so.
+            self._note_degradation(
+                f"The {section} section's prompt without its claims and tool answers "
+                f"({prompt_chars} characters) exceeds the {room} its model's context "
+                "window leaves after the reply."
+            )
         item_chars = self._item_chars(
-            len(_SYSTEM) + len(without),
+            prompt_chars,
             len(bundle.get("claims") or []) + len(bundle.get("tool_outputs") or []),
         )
         human = "\n\n".join(
@@ -821,14 +833,23 @@ class ReportComposer:
         window is known (the answers are shown whole), ``0`` when nothing is
         left. A fixed 1,200 characters used to stand here.
         """
+        room = self._room_chars()
+        if room is None or answers <= 0:
+            return None
+        return max(0, (room - int(prompt_chars)) // answers)
+
+    def _room_chars(self) -> int | None:
+        """The characters a section's whole prompt may take, or ``None`` with no window known.
+
+        ``(window − output budget) × chars per token``.
+        """
         window = int(getattr(self, "window_tokens", 0) or 0)
-        if window <= 0 or answers <= 0:
+        if window <= 0:
             return None
         from maljan.llm.context_window import CHARS_PER_TOKEN
 
         reply = int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0)
-        room = (window - reply) * CHARS_PER_TOKEN - int(prompt_chars)
-        return max(0, room // answers)
+        return (window - reply) * CHARS_PER_TOKEN
 
     def _start_the_section_clock(self, seconds: float) -> None:
         """Measure the model list's turn deadline against this section's clock.

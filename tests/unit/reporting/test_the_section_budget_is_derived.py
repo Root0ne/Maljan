@@ -10,6 +10,7 @@ reached. An operator's own positive value is used as it always was.
 from __future__ import annotations
 
 import inspect
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -204,7 +205,120 @@ class TestTheClaimsShareTheWindow:
 
         assert f"- {NO_ROOM_FOR_THE_ANSWER}" in _bundle_text("introduction", bundle, None, 0)
 
-    def test_the_claims_and_the_answers_are_counted_together(self) -> None:
-        source = inspect.getsource(ReportComposer._author)
+    def test_a_built_prompt_shows_every_claim_within_the_window(self) -> None:
+        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from maljan.utils.marked_cut import CUT_MARK
 
-        assert 'len(bundle.get("claims") or []) + len(bundle.get("tool_outputs") or [])' in source
+        claim = "The sample writes example value {} under its settings key. " + "x" * 260
+        isrs = {
+            "static": SimpleNamespace(
+                claims=[
+                    SimpleNamespace(claim=claim.format(i), evidence_ref="ev_0001")
+                    for i in range(40)
+                ]
+            )
+        }
+        sent = _compose(isrs, window_tokens=4000, output_cap=1000)
+
+        prompt = sent["introduction"]
+        shown = [line for line in prompt.splitlines() if line.startswith("- The sample writes")]
+        assert len(shown) == 40
+        assert all(line.endswith(CUT_MARK) for line in shown)
+        assert len(prompt) <= (4000 - 1000) * CHARS_PER_TOKEN
+        assert len(prompt) > (4000 - 1000) * CHARS_PER_TOKEN * 3 // 4
+
+
+def _compose(isr_reports: dict[str, Any], report: Any = None, **composer: int) -> dict[str, str]:
+    """The human turn each section was sent, by section, from a live ``compose``."""
+    import asyncio
+    import json
+
+    from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+
+    sent: dict[str, str] = {}
+
+    class _Capture:
+        def with_structured_output(self, schema: type, **_: Any) -> Any:  # pragma: no cover
+            raise RuntimeError("structured output is unavailable")
+
+        async def ainvoke(self, messages: Any) -> Any:
+            prompt = str(messages[-1].content)
+            section = prompt.split("The evidence for the ", 1)[-1].split(" section", 1)[0]
+            sent.setdefault(section, prompt)
+            return SimpleNamespace(content=json.dumps({"text": "An example."}))
+
+    report = report or MalwareReport(
+        identity=SampleIdentity(hashes=FileHashes(sha256="e" * 64)), verdict="Malware"
+    )
+    comp = ReportComposer(llm=_Capture(), per_section_timeout=5, **composer)  # type: ignore[arg-type]
+    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=False):
+        asyncio.run(comp.compose(report, isr_reports=isr_reports))
+    sent["_degradations"] = "\n".join(comp.degradations)
+    return sent
+
+
+class TestTheFactsEnterWhole:
+    """No count cuts a section's facts; a section whose facts alone overflow says so."""
+
+    def test_every_network_value_reaches_the_configuration_section(self) -> None:
+        from maljan.reporting.evidence_bundles import bundle_for
+        from maljan.reporting.models import (
+            FileHashes,
+            MalwareReport,
+            NetworkDomain,
+            NetworkIOCs,
+            SampleIdentity,
+        )
+
+        hosts = [f"relay{i}.example.net" for i in range(35)]
+        report = MalwareReport(
+            identity=SampleIdentity(hashes=FileHashes(sha256="e" * 64)),
+            network=NetworkIOCs(domains=[NetworkDomain(fqdn=h, source="sandbox") for h in hosts]),
+        )
+
+        for section in ("configuration", "communications"):
+            facts = bundle_for(section, report)["facts"]
+            assert facts["domains"] == hosts
+
+    def test_a_long_command_line_is_shown_whole(self) -> None:
+        from maljan.reporting.evidence_bundles import _process_lines
+        from maljan.reporting.models import ProcessNode
+
+        command = "example.exe " + "-o value " * 60
+        node = ProcessNode(pid=4, name="example.exe", command_line=command)
+
+        assert _process_lines(node, 0) == [f"pid 4 example.exe: {command}"]
+
+    def test_a_packer_match_without_a_confidence_states_none(self) -> None:
+        from maljan.reporting.evidence_bundles import _packer_line
+
+        assert _packer_line({"name": "ExamplePack", "method": "signature"}) == (
+            "ExamplePack (signature)"
+        )
+
+    def test_facts_that_overflow_the_window_record_a_degradation(self) -> None:
+        from maljan.reporting.models import (
+            FileHashes,
+            MalwareReport,
+            NetworkDomain,
+            NetworkIOCs,
+            SampleIdentity,
+        )
+
+        report = MalwareReport(
+            identity=SampleIdentity(hashes=FileHashes(sha256="e" * 64)),
+            verdict="Malware",
+            network=NetworkIOCs(
+                domains=[
+                    NetworkDomain(fqdn=f"relay{i}.example.net", source="sandbox")
+                    for i in range(3000)
+                ]
+            ),
+        )
+
+        sent = _compose({}, report, window_tokens=4000, output_cap=1000)
+
+        assert "section's prompt without its claims and tool answers" in sent["_degradations"]
+        assert "relay2999.example.net" in "".join(
+            v for k, v in sent.items() if k != "_degradations"
+        )
