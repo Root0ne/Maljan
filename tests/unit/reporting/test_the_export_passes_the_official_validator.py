@@ -39,7 +39,7 @@ SHA256 = "36dabc40fa8983ce900a90b8156d2c754875fe1b5413a997843c4a0ef3908220"
 C2 = "82.157.13.47"
 
 
-def _report(verdict: str) -> MalwareReport:
+def _report(verdict: str, judge: Bundle | None = None) -> MalwareReport:
     report = MalwareReportBuilder(
         file_hash=SHA256,
         file_name="sample.elf",
@@ -47,7 +47,7 @@ def _report(verdict: str) -> MalwareReport:
         sandbox_report={},
         reports={},
         isr_reports={},
-        stix_output={"objects": []},
+        stix_output=judge.model_dump(mode="json") if judge is not None else {"objects": []},
         run_summary={},
         discussion_history=[],
         final_decision=verdict,
@@ -116,6 +116,7 @@ def _rich() -> Bundle:
             ],
         }
     )
+    report.ttp_mappings = _report("Malware", judge).ttp_mappings
     return ExtendedSTIXRenderer().render(report, judge)
 
 
@@ -150,7 +151,7 @@ def _benign() -> Bundle:
             ],
         }
     )
-    return ExtendedSTIXRenderer().render(_report("Benign"), judge)
+    return ExtendedSTIXRenderer().render(_report("Benign", judge), judge)
 
 
 def test_a_rich_malware_export_is_valid() -> None:
@@ -194,3 +195,9 @@ class TestTheObservedData:
         assert by_id[parent["image_ref"]]["name"] == "sample.exe"
         (child_ref,) = parent["child_refs"]
         assert by_id[child_ref]["pid"] == 101
+
+
+def test_the_rich_and_benign_exports_carry_the_judges_technique() -> None:
+    """The gate grades the shapes a real run publishes, attack-patterns included."""
+    for bundle in (_rich(), _benign()):
+        assert [o.type for o in bundle.objects].count("attack-pattern") == 1
