@@ -159,37 +159,41 @@ _PROSE_SECTIONS: dict[str, str] = {
 # to be. The object alone names the keys; the example shows what goes in them
 # — an ordered list with its marks, a value with how it was obtained — which a
 # key name cannot. Each is valid against its schema, and a test says so.
+# The examples describe an invented file-encrypting sample on purpose: a
+# different class of malware from any the evaluation keys describe, with
+# placeholder values that match no real sample, so a model that copies the
+# shape it is shown cannot copy a finding with it.
 _PROSE_EXAMPLE = (
-    '{"body": "The loader resolves its imports at run time by hashing export names '
-    '[ev_0009]; we assess the hash is CRC32 from the constant it compares against.", '
+    '{"body": "The note text is stored in a compressed resource [ev_0009]; we assess it is '
+    'expanded at run time from the size field that precedes it.", '
     '"evidence_refs": ["ev_0009"]}'
 )
 _EXAMPLES: dict[str, str] = {
     "prose": _PROSE_EXAMPLE,
     "execution_flow": (
         '{"steps": ['
-        '{"order": 1, "action": "Resolves its Windows APIs by hash", "voice": "assessed", '
-        '"evidence_refs": ["ev_0009"]}, '
-        '{"order": 2, "action": "Creates a mutex and exits if it already exists", '
+        '{"order": 1, "action": "Enumerates fixed and mapped drives", "voice": "assessed", '
+        '"evidence_refs": ["ev_0008"]}, '
+        '{"order": 2, "action": "Deletes volume shadow copies with vssadmin", '
         '"voice": "observed", "evidence_refs": ["ev_0021"]}]}'
     ),
     "configuration": (
         '{"items": ['
-        '{"key": "C2 URL", "value": "https://example.org/submit/", '
-        '"how_obtained": "decrypted", "evidence_refs": ["ev_0015"]}, '
-        '{"key": "Sleep interval", "value": "600 s", "how_obtained": "inferred", '
-        '"evidence_refs": []}]}'
+        '{"key": "Encrypted file extension", "value": ".example-locked", '
+        '"how_obtained": "static-string", "evidence_refs": ["ev_0015"]}, '
+        '{"key": "Skipped folders", "value": "Windows, Program Files", '
+        '"how_obtained": "inferred", "evidence_refs": []}]}'
     ),
     "commands": (
         '{"commands": ['
-        '{"id": "12", "name": "run_exe", "description": "Downloads and runs an executable", '
+        '{"id": "--path", "name": "path", "description": "Limits encryption to one directory", '
         '"evidence_refs": ["ev_0031"]}]}'
     ),
     "communications": (
-        '{"channels": [{"name": "HTTPS beacon", "protocol": "HTTPS POST", '
-        '"encryption": "RC4 then base64", "packet_layout": null, '
-        '"beacon_format": "key=value pairs joined by &", "evidence_ref": null, '
-        '"endpoints": ["https://example.org/submit/"], "evidence_refs": ["ev_0019"]}]}'
+        '{"channels": [{"name": "Leak upload", "protocol": "SFTP", '
+        '"encryption": "SSH transport", "packet_layout": null, '
+        '"beacon_format": null, "evidence_ref": null, '
+        '"endpoints": ["sftp://upload.example.invalid"], "evidence_refs": ["ev_0019"]}]}'
     ),
 }
 

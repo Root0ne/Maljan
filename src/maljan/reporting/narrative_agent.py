@@ -83,31 +83,33 @@ EXPECTED_OBJECT = """{
 }"""
 
 EXAMPLE_OBJECT = """{
-  "executive_summary": "The sample is a 64-bit DLL loader that we assess with moderate confidence \
-belongs to a known downloader family. It persists through a scheduled task created at logon \
-and posts an encrypted beacon to a hard-coded HTTPS endpoint [ev_0012, ev_0019]. Hosts that \
-loaded it should be isolated and the task removed.",
+  "executive_summary": "The sample is a file-encrypting ransomware executable that we assess \
+with moderate confidence belongs to a known ransomware family. It encrypts documents on local \
+and mapped drives, appends one fixed extension to each file and leaves a note in every folder \
+it touches [ev_0012, ev_0019]. Affected hosts should be isolated and restored \
+from offline backups.",
   "key_findings": [
-    {"text": "The DLL resolves its Windows APIs at run time by hashing export names.",
-     "evidence_ids": ["ev_0009"]},
-    {"text": "It creates a scheduled task that runs a copy of itself at logon.",
-     "evidence_ids": ["ev_0014", "ev_0022"]},
-    {"text": "It likely beacons over HTTPS POST; no traffic was observed because the sandbox \
-did not run.", "evidence_ids": ["ev_0019"]}
+    {"text": "It enumerates fixed and mapped network drives before encrypting.",
+     "evidence_ids": ["ev_0008"]},
+    {"text": "It deletes volume shadow copies with vssadmin before encrypting.",
+     "evidence_ids": ["ev_0014"]},
+    {"text": "It likely uses a separate key for each file; no key material was recovered.",
+     "evidence_ids": []}
   ],
   "defensive_recommendations": [
-    {"category": "edr_hunting", "action": "Hunt for scheduled tasks created by rundll32.exe.",
-     "rationale": "The sample persists through a logon task.", "priority": "P1",
-     "technique_id": "T1053.005",
-     "detection": "Windows Security event 4698 with a task action that runs rundll32.exe."},
-    {"category": "firewall", "action": "Block the beacon host at the egress proxy.",
-     "rationale": "The sample's only channel is HTTPS to one host.", "priority": "P0",
-     "technique_id": "T1071.001",
-     "detection": "Proxy log POST requests to the host with the sample's User-Agent."},
-    {"category": "edr_hunting", "action": "Alert on rundll32.exe loading a DLL from AppData.",
-     "rationale": "The sample is a DLL run through rundll32.", "priority": "P2",
-     "technique_id": "T1218.011",
-     "detection": "Sysmon event 1 with rundll32.exe and a command line under AppData."}
+    {"category": "edr_hunting", "action": "Alert on vssadmin.exe deleting shadow copies.",
+     "rationale": "The sample removes shadow copies before encrypting.", "priority": "P0",
+     "technique_id": "T1490",
+     "detection": "Sysmon event 1 for vssadmin.exe with delete shadows on its command line."},
+    {"category": "other", "action": "Keep offline, versioned backups of file shares.",
+     "rationale": "Encrypted files cannot be recovered without them.", "priority": "P1",
+     "technique_id": "T1486",
+     "detection": "Many renames to one new extension within minutes on a file server."},
+    {"category": "user_awareness",
+     "action": "Warn users not to open unexpected executables from shared folders.",
+     "rationale": "The sample needs a user to start it.", "priority": "P2",
+     "technique_id": "T1204.002",
+     "detection": "Process creation of an unsigned executable from a user share."}
   ]
 }"""
 
