@@ -15,8 +15,9 @@ import {
   SEVERITY_LADDER,
   atLeast,
   bySeverityDesc,
+  NEUTRAL_TONE,
   ladderDots,
-  scoreTone,
+  signatureScore,
   severityRank,
   severityRung,
   severityTone,
@@ -86,15 +87,37 @@ describe("the severity ladder", () => {
     expect(severityWord("unrated")).toBe("unrated");
   });
 
-  it("colours a sandbox score by the sandbox's own 1 to 3 scale", () => {
-    expect(scoreTone(1)).toEqual(severityTone("Low"));
-    expect(scoreTone(2)).toEqual(severityTone("Medium"));
-    expect(scoreTone(3)).toEqual(severityTone("High"));
-    expect(scoreTone(0)).toEqual(severityTone("Informational"));
+  it("reads a CAPE signature on CAPE's 1 to 3 scale", () => {
+    expect(signatureScore(1, "cape2")).toMatchObject({ rung: "Low", label: "1/3" });
+    expect(signatureScore(2, "cape2")).toMatchObject({ rung: "Medium", label: "2/3" });
+    expect(signatureScore(3, "cape2")).toMatchObject({ rung: "High", label: "3/3" });
+    expect(signatureScore(3, "cape2").tone).toEqual(severityTone("High"));
   });
 
-  it("keeps a score above that scale at its top rather than calling it Critical", () => {
-    expect(scoreTone(8)).toEqual(severityTone("High"));
+  it("reads a Triage signature on Triage's 1 to 10 scale", () => {
+    expect(signatureScore(1, "triage").rung).toBe("Informational");
+    expect(signatureScore(3, "triage").rung).toBe("Low");
+    expect(signatureScore(6, "triage").rung).toBe("Medium");
+    expect(signatureScore(8, "triage")).toMatchObject({ rung: "High", label: "8/10" });
+    expect(signatureScore(10, "triage").rung).toBe("Critical");
+  });
+
+  it("draws a number whose scale is not known in one neutral tone, as it came", () => {
+    // An uploaded report can be either sandbox's, so its provider says nothing
+    // about the scale.
+    for (const provider of ["upload", "rest", "mock", "", null]) {
+      expect(signatureScore(8, provider)).toEqual({
+        tone: NEUTRAL_TONE,
+        rung: null,
+        label: "8",
+        scale: null,
+      });
+    }
+  });
+
+  it("draws a number outside its provider's scale neutrally, not at the scale's top", () => {
+    expect(signatureScore(8, "cape2")).toMatchObject({ tone: NEUTRAL_TONE, rung: null, label: "8" });
+    expect(signatureScore(0, "triage").rung).toBeNull();
   });
 });
 

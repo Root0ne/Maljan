@@ -112,21 +112,85 @@ export function severityWord(label: string | null | undefined): string {
   return severityRung(label) ?? String(label ?? "");
 }
 
+/** The tone of a number whose scale is not known: no rung, no colour. */
+export const NEUTRAL_TONE: SeverityTone = {
+  text: "text-text-secondary",
+  bg: "bg-bg-active",
+  border: "border-border",
+  dot: "bg-text-muted",
+};
+
+interface SignatureScale {
+  /** The provider's own name for the scale, for the reader. */
+  name: string;
+  max: number;
+  /** The rung each score from 1 to `max` means, by the provider's own
+   *  documented reading of it. */
+  rungs: readonly SeverityRating[];
+}
+
 /**
- * How a sandbox signature's numeric severity is coloured.
+ * The signature scales of the sandboxes whose scale is documented, keyed by
+ * the provider a run records in `run_summary.settings_snapshot`
+ * (`sandbox.provider`).
  *
- * The scale is CAPEv2's (inherited from Cuckoo): a signature declares a
- * severity from 1, the least, to 3, the most. The fixtures in the tree hold
- * only 1, 2 and 3, and so did all but two of the stored reports on the dev
- * database. So 1 is drawn as Low, 2 as Medium and 3 as High. A number above 3
- * is off that scale: it keeps the scale's top colour rather than being
- * promoted to Critical, which no sandbox signature claims. Zero or less says
- * nothing and is drawn as Informational. The number itself is printed as the
- * sandbox gave it; this only picks its colour.
+ * - `cape2`: a CAPEv2 (and Cuckoo) signature declares a severity from 1 to 3 —
+ *   low, medium, high.
+ * - `triage`: a Hatching Triage signature carries a `score` from 1 to 10, the
+ *   same scale as its sample score. 1 is no malicious behaviour; 2 to 5 is
+ *   likely benign; 6 and 7 are suspicious; 8 and 9 are likely malicious; 10 is
+ *   known bad. The provider writes that score into the same `severity` field
+ *   (`src/maljan/schemas/sandbox_report.py`), which is why the scale has to
+ *   come from the provider and never from the number.
+ *
+ * `upload`, `rest` and `mock` carry whatever report they were handed, which
+ * may be on either scale, so they have none here.
  */
-export function scoreTone(score: number): SeverityTone {
-  if (score >= 3) return TONES.High;
-  if (score >= 2) return TONES.Medium;
-  if (score >= 1) return TONES.Low;
-  return TONES.Informational;
+const SIGNATURE_SCALES: Record<string, SignatureScale> = {
+  cape2: { name: "CAPE 1–3", max: 3, rungs: ["Low", "Medium", "High"] },
+  triage: {
+    name: "Triage 1–10",
+    max: 10,
+    rungs: [
+      "Informational",
+      "Low",
+      "Low",
+      "Low",
+      "Low",
+      "Medium",
+      "Medium",
+      "High",
+      "High",
+      "Critical",
+    ],
+  },
+};
+
+export interface SignatureScore {
+  tone: SeverityTone;
+  /** The rung the score means on its provider's scale, or null off it. */
+  rung: SeverityRating | null;
+  /** "8/10" on a known scale, the bare number otherwise. */
+  label: string;
+  /** The scale's name, or null when the provider's scale is not known. */
+  scale: string | null;
+}
+
+/**
+ * How a sandbox signature's number is drawn.
+ *
+ * On a provider whose scale is documented, a whole score inside that scale
+ * takes the rung it means and prints as "n/max". Anything else — a provider
+ * whose report could be on either scale, one this console does not know, or a
+ * number outside its provider's scale — is drawn in one neutral tone with the
+ * number as it came, rather than coloured by a guess.
+ */
+export function signatureScore(score: number, provider: string | null | undefined): SignatureScore {
+  const scale = SIGNATURE_SCALES[String(provider ?? "").trim().toLowerCase()];
+  const whole = Number.isInteger(score);
+  if (!scale || !whole || score < 1 || score > scale.max) {
+    return { tone: NEUTRAL_TONE, rung: null, label: String(score), scale: scale?.name ?? null };
+  }
+  const rung = scale.rungs[score - 1];
+  return { tone: TONES[rung], rung, label: `${score}/${scale.max}`, scale: scale.name };
 }

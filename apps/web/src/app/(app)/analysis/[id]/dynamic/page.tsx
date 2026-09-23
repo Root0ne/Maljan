@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useReport } from "../layout";
 import type { ProcessNode } from "@/types/malware-report";
 import { confidenceClass } from "@/lib/report-utils";
-import { scoreTone } from "@/lib/severity";
+import { signatureScore } from "@/lib/severity";
 import Th from "@/components/ui/Th";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import { hasSection, isCoveredBySection, sectionsForTab } from "@/components/analysis/reportSections";
@@ -96,6 +96,13 @@ export default function DynamicTab() {
     );
   }
 
+  /* The provider the run recorded, which is what says which scale a
+   * signature's number is on (`signatureScore`). */
+  const snapshot = (report?.run_summary as { settings_snapshot?: Record<string, unknown> } | null)
+    ?.settings_snapshot;
+  const sandboxProvider =
+    typeof snapshot?.["sandbox.provider"] === "string" ? (snapshot["sandbox.provider"] as string) : null;
+
   const sortedSignatures = [...dyn.sandbox_signatures].sort(
     (a, b) => b.severity - a.severity,
   );
@@ -163,11 +170,21 @@ export default function DynamicTab() {
             {sortedSignatures.map((sig, i) => (
               <div key={i} className="p-4">
                 <div className="flex items-start gap-3">
-                  <span
-                    className={`text-[11px] font-mono px-1.5 py-0.5 rounded shrink-0 ${scoreTone(sig.severity).bg} ${scoreTone(sig.severity).text}`}
-                  >
-                    SEV {sig.severity}
-                  </span>
+                  {(() => {
+                    const score = signatureScore(sig.severity, sandboxProvider);
+                    return (
+                      <span
+                        className={`text-[11px] font-mono px-1.5 py-0.5 rounded shrink-0 ${score.tone.bg} ${score.tone.text}`}
+                        title={
+                          score.rung
+                            ? `${score.rung} on the ${score.scale} scale`
+                            : "The sandbox's own number; its scale is not recorded for this run"
+                        }
+                      >
+                        SEV {score.label}
+                      </span>
+                    );
+                  })()}
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-text-primary">{sig.name}</div>
                     {sig.description && (
