@@ -49,6 +49,7 @@ from maljan.pipeline.validation import (
     retry_with_feedback,
     schema_violations,
     section_capability_violations,
+    technique_name_violations,
     wrong_entry_citations,
 )
 from maljan.reporting.evidence_bundles import bundle_for, is_empty, sandbox_entry_ids
@@ -859,6 +860,7 @@ class ReportComposer:
                     *section_capability_violations(answer, self._grounding),
                     *citation_violations(answer, citable, prose=prose),
                     *wrong_entry_citations(answer, entries, prose=prose),
+                    *technique_name_violations(answer),
                 ]
                 for extra in validators or []:
                     found.extend(extra(answer))
@@ -939,6 +941,7 @@ class ReportComposer:
                 *section_capability_violations(payload, self._grounding),
                 *citation_violations(payload, citable, prose=prose),
                 *wrong_entry_citations(payload, entries, prose=prose),
+                *technique_name_violations(payload),
             ]
             for extra in validators or []:
                 found.extend(extra(payload))

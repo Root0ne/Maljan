@@ -565,6 +565,25 @@ def technique_entry(technique_id: str) -> VendoredTechnique | None:
     return _technique_table()[0].get(tid) if tid else None
 
 
+def technique_ids_named(name: str) -> list[str]:
+    """The ids the vendored table gives ``name`` to, compared without case or punctuation.
+
+    The reverse of :func:`technique_entry`, for a sentence that wrote a name
+    beside the wrong id: it can say which id the name belongs to.
+    """
+    wanted = _folded_name(name)
+    if not wanted:
+        return []
+    return sorted(
+        tid for tid, entry in _technique_table()[0].items() if _folded_name(entry.name) == wanted
+    )
+
+
+def _folded_name(name: str) -> str:
+    """A technique name with case, punctuation and spacing taken out, for comparing."""
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", str(name or "").lower()).split())
+
+
 def tactic_entry(domain: str | None, shortname: str) -> VendoredTactic | None:
     """The matrix column a kill-chain slug names in a domain, or ``None``.
 

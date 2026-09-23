@@ -1480,6 +1480,7 @@ FLOW_VOICE_CODE = "report.flow_voice"
 UNCITED_CONFIGURATION_CODE = "report.configuration_uncited"
 CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
 UNCITED_IDENTIFIER_CODE = "report.identifier_uncited"
+TECHNIQUE_NAME_CODE = "report.technique_name"
 
 # The codes a report round's answer is kept with. A broken shape leaves nothing
 # to print; each of these leaves a printable answer with a finding beside it.
@@ -1492,6 +1493,7 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         CITATION_NOT_EVIDENCE_CODE,
         CITATION_WRONG_ENTRY_CODE,
         UNCITED_IDENTIFIER_CODE,
+        TECHNIQUE_NAME_CODE,
     }
 )
 
@@ -1639,6 +1641,68 @@ def identifier_citation_violations(payload: Any, known_ids: Iterable[str]) -> li
                 path=f"identifiers.{index}.evidence_refs",
             )
         )
+    return out
+
+
+# A technique id with a name written after it in brackets, the way a report
+# writes one: "T1027 (Obfuscated Files or Information)". The name is words; a
+# bracket holding an id, a count or a list is not a name and is not read.
+_ID_THEN_NAME_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\s*\(([A-Za-z][A-Za-z0-9 ,:/&'\-]{2,80})\)")
+
+
+def technique_name_violations(payload: Any) -> list[Violation]:
+    """Technique ids written with a name the ATT&CK catalogue gives another technique.
+
+    "T1027 (Binary Padding)" names T1027.001, and "T1027 (Indicator Removal from
+    Host)" names a technique T1027 is not. A reader acts on the id and reads the
+    name, and the two disagree. Asked once per id and name, with the
+    catalogue's name for the id and the id the written name belongs to, from
+    the vendored table; kept as written if the model keeps it. A name the
+    catalogue gives the id — alone, or after its parent's name for a
+    sub-technique — stands, and an id the table does not have is the
+    catalogue check's question, not this one.
+    """
+    if payload is None:
+        return []
+    from maljan.memory.attck_loader import technique_entry, technique_ids_named
+
+    def _fold(name: str) -> str:
+        return " ".join(re.sub(r"[^a-z0-9]+", " ", str(name or "").lower()).split())
+
+    seen: set[tuple[str, str]] = set()
+    out: list[Violation] = []
+    for text in _strings_of(payload):
+        for match in _ID_THEN_NAME_RE.finditer(text):
+            tid, written = match.group(1).upper(), match.group(2).strip()
+            entry = technique_entry(tid)
+            if entry is None or (tid, _fold(written)) in seen:
+                continue
+            accepted = {_fold(entry.name)}
+            if "." in tid:
+                parent = technique_entry(tid.split(".")[0])
+                if parent is not None:
+                    accepted.add(_fold(f"{parent.name} {entry.name}"))
+            if _fold(written) in accepted:
+                continue
+            seen.add((tid, _fold(written)))
+            owners = [owner for owner in technique_ids_named(written) if owner != tid]
+            belongs = (
+                f" The name {safe_finding_value(written)!r} is "
+                f"{safe_finding_value(', '.join(owners))}'s."
+                if owners
+                else ""
+            )
+            out.append(
+                Violation(
+                    code=TECHNIQUE_NAME_CODE,
+                    message=(
+                        f"{safe_finding_value(tid)} is {safe_finding_value(entry.name)!r} in the "
+                        f"ATT&CK catalogue, not {safe_finding_value(written)!r}.{belongs} Write "
+                        "the catalogue's name beside the id, or the id the name belongs to."
+                    ),
+                    path="technique_name",
+                )
+            )
     return out
 
 

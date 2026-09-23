@@ -42,7 +42,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.analysis.technique_ids import attack_reference_id
+from maljan.analysis.technique_ids import attack_reference_id, says_no_technique
 from maljan.core.logger import logger
 from maljan.reporting.models import CapabilityCell, TTPMapping
 from maljan.schemas.stix_models import stated_confidence
@@ -385,7 +385,7 @@ def _collect_techniques(
         for agent_name, isr in isr_reports.items():
             for claim in getattr(isr, "claims", None) or []:
                 claim_tid = getattr(claim, "technique_id", None)
-                if not claim_tid:
+                if not claim_tid or says_no_technique(claim_tid):
                     continue
                 row = _row(str(claim_tid))
                 # The same id on a claim and on a finding is judged as the
@@ -423,7 +423,7 @@ def _collect_techniques(
                 layer = getattr(isr, "domain", None) or agent_name or "agent"
                 for raw in getattr(finding, "technique_ids", None) or []:
                     tid = str(raw or "").strip().upper()
-                    if not tid:
+                    if not tid or says_no_technique(tid):
                         continue
                     row = _row(tid)
                     # A finding with no number adds none, and names no one

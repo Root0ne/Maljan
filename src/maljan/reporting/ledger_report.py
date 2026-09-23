@@ -32,7 +32,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from maljan.agents.output_shortening import BOOKKEEPING_KEY, our_key_in
-from maljan.analysis.technique_ids import sigma_technique_ids
+from maljan.analysis.technique_ids import says_no_technique, sigma_technique_ids
 from maljan.reporting.dedupe import (
     MergeTally,
     finding_fingerprint,
@@ -989,7 +989,8 @@ def _technique_cell(technique_ids: Any, published: frozenset[str] | None) -> str
         tid = str(raw or "").strip()
         if not tid:
             continue
-        if published is None or tid.upper() in published:
+        # A word for "no technique" is printed as written and is no claim.
+        if published is None or tid.upper() in published or says_no_technique(tid):
             written.append(tid)
         else:
             written.append(f"{tid} ({NOT_PUBLISHED_MARKER})")
