@@ -178,9 +178,9 @@ JUDGE_VERDICT_SYSTEM = (
     "- On every Relationship, set x_maljan_confidence (0.0-1.0), "
     "x_maljan_evidence_basis (static|dynamic|network|all|unknown), "
     "and x_maljan_contributing_agents list.\n"
-    "- ALL STIX object IDs MUST be ``<type>--<random uuid4>`` "
-    "(spec-compliant 8-4-4-4-12 hex). NEVER reuse example UUIDs from "
-    "the schema description. NEVER use ``<type>--T####`` (non-UUID).\n"
+    "- Give every object an ``id`` of the form ``<type>--<label>``, unique in "
+    "this bundle, and name those ids in every ``*_ref``. A short label is "
+    "enough (``malware--1``): the published ids are assigned after you answer.\n"
     "- DO NOT emit Indicator objects whose pattern values are inferred, "
     "hypothetical, or example. Every Indicator's pattern value MUST "
     "appear verbatim in the deterministic evidence (static strings, "
@@ -221,7 +221,7 @@ JUDGE_VERDICT_SYSTEM = (
     "``x_maljan_assessment`` sits beside ``objects`` rather than inside it:\n"
     "{\n"
     '  "type": "bundle",\n'
-    '  "id": "bundle--<uuid4>",\n'
+    '  "id": "bundle--1",\n'
     '  "x_maljan_assessment": {\n'
     '    "verdict": "Malware" | "Suspicious" | "Benign",\n'
     '    "confidence": 0.0-1.0,\n'

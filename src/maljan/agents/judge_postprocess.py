@@ -15,10 +15,11 @@ of the bundle is validated.
 :func:`postprocess_judge_bundle` then applies the defensive fixes, all three
 of them shape repairs:
 
-* STIX ID rewrite — replace placeholder / non-UUID STIX IDs the LLM smuggled in
-  from the example schema (``malware--12345678-1234-1234-1234-123456789012``
-  or non-UUID ``attack-pattern--T1497``) with spec-compliant UUIDs and
-  rewrite every cross-reference so the bundle stays internally consistent.
+* STIX ids — every object's id is minted here, a random UUID (a derived one
+  for an attack-pattern) under the object's own type, and every
+  cross-reference is rewritten to match. The judge's ids are labels that link
+  its objects; the ones it copies out of documentation are neither UUIDs nor
+  unique across runs.
 * Reference back-fill — add ``external_references`` to each ``AttackPattern``
   SDO with the canonical MITRE ATT&CK URL when the LLM left it empty.
 * Integrity pass — drop empty patterns, deduplicate, and sweep references that
@@ -47,16 +48,6 @@ if TYPE_CHECKING:
 # UUID5 namespace for ATT&CK technique IDs — same value on every run so a
 # downstream consumer can dedupe ``attack-pattern--<uuid5>`` across reports.
 _MITRE_NS = uuid.UUID("6ba7b815-9dad-11d1-80b4-00c04fd430c8")
-
-# Strict ``<type>--<uuid4>`` validation. Accepts any UUID variant
-# (1/3/4/5) — STIX 2.1 only requires the canonical 8-4-4-4-12 hex shape.
-_STIX_ID_RE = re.compile(
-    r"^(?P<type>[a-z][a-z0-9-]+)--"
-    r"(?P<uuid>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
-)
-
-# The literal placeholder UUID found in this codebase's prompt example.
-_PLACEHOLDER_UUID = "12345678-1234-1234-1234-123456789012"
 
 # Curated technique ID → (display name, URL) map. Extend over time; the
 # back-fill is best-effort and falls back to a deterministic URL when the
@@ -197,15 +188,22 @@ def postprocess_judge_bundle(
     ``bundle_dict`` is the parsed JSON Bundle returned by the verdict LLM,
     exactly as the judge wrote it; the technique check reports what is wrong
     with its ids, it does not filter them.
-    Everything done here is a shape repair — a STIX id that is not a UUID, a
-    missing MITRE reference, a relationship pointing at an object that is not
+    Everything done here is a shape repair — the published ids, a missing
+    MITRE reference, a relationship pointing at an object that is not
     in the bundle. None of it changes what the judge decided.
     """
     objects = bundle_dict.get("objects")
     if not isinstance(objects, list):
         return bundle_dict
 
-    # ── rewrite invalid / placeholder STIX IDs ──────────────────────
+    # ── the published ids are minted here, every one of them ────────
+    # The judge's ids only say which of its objects a reference means. A model
+    # cannot generate a random UUID, so it writes one it has seen: the stored
+    # exports carried one documentation-shaped malware id in fourteen runs of
+    # six samples, with a version digit no RFC 4122 UUID has. A consumer
+    # merging on id would fold those analyses into one object, and the OASIS
+    # validator refused every object that carried or named it. The labels are
+    # read once, to rewire the references, and replaced.
     id_remap: dict[str, str] = {}
     for obj in objects:
         if not isinstance(obj, dict):
@@ -213,18 +211,11 @@ def postprocess_judge_bundle(
         old_id = obj.get("id")
         if not isinstance(old_id, str):
             continue
-        m = _STIX_ID_RE.match(old_id)
-        if m is None or m.group("uuid") == _PLACEHOLDER_UUID:
-            new_id = _mint_id(obj, old_id)
-            if new_id != old_id:
-                id_remap[old_id] = new_id
-                obj["id"] = new_id
+        new_id = _mint_id(obj, old_id)
+        id_remap.setdefault(old_id, new_id)
+        obj["id"] = new_id
     if id_remap:
-        logger.warning(
-            "judge_postprocess: rewrote %d invalid STIX IDs: %s",
-            len(id_remap),
-            ", ".join(f"{k} -> {v}" for k, v in list(id_remap.items())[:5]),
-        )
+        logger.info("judge_postprocess: minted the published ids of %d object(s).", len(id_remap))
         _rewrite_references(objects, id_remap)
 
     # ── back-fill external_references on AttackPatterns ────────────
@@ -286,7 +277,7 @@ def postprocess_judge_bundle(
 
 
 def _mint_id(obj: dict[str, Any], old_id: str) -> str:
-    """Generate a spec-compliant STIX ID for ``obj``.
+    """Generate a spec-compliant STIX ID for ``obj``, under its own type.
 
     For ``attack-pattern--T1497`` we hash the technique ID into a stable
     UUID5 so identical techniques map to identical IDs across runs.
@@ -294,7 +285,10 @@ def _mint_id(obj: dict[str, Any], old_id: str) -> str:
     """
     stix_type = obj.get("type") or _parse_type(old_id) or "indicator"
     if stix_type == "attack-pattern":
-        tid = _attack_pattern_technique_id(obj) or _parse_type_suffix(old_id)
+        suffix = _parse_type_suffix(old_id) or ""
+        tid = _attack_pattern_technique_id(obj) or (
+            suffix if re.match(r"^T\d{4}(?:\.\d{3})?$", suffix) else None
+        )
         if tid:
             return f"attack-pattern--{uuid.uuid5(_MITRE_NS, tid)}"
     return f"{stix_type}--{uuid.uuid4()}"

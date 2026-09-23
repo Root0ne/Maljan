@@ -520,6 +520,18 @@ wins, and the inner copy is set aside. Any other item whose `type` is not one
 of `schemas/stix_models.BUNDLE_OBJECT_TYPES` is set aside under
 `stix.unknown_object` and fed back once. What is left is validated.
 
+### The published ids are the platform's
+
+An id carries no decision: it only says which object a reference means. The
+prompt asks the judge for `<type>--<label>` ids unique in its bundle — a short
+label is enough — and `postprocess_judge_bundle` mints every published id: a
+random UUID under the object's own type (a technique-derived one for an
+attack-pattern) with every `*_ref` rewritten to match. The judge used to be
+asked for random UUIDs, which a model cannot produce; it copied
+documentation-shaped hex instead, one malware id reached fourteen stored runs
+of six samples, and its version digit is one no RFC 4122 UUID has, so the OASIS
+validator refused every object that carried or named it.
+
 ### The technique check
 
 Four parts, all in `pipeline/validation.py` and `tools/knowledge.py`, none of

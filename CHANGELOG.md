@@ -3204,6 +3204,18 @@ change landed on `main`.
   `run_summary.validation.unresolved`; a consumer that partitions on validation
   codes should know the name.
 
+- **Every id in an exported STIX bundle is a UUID the platform minted.** The
+  judge was asked for random UUIDs, which a model cannot produce, and the id
+  check accepted any eight-four-four-four-twelve hex. The judge copied
+  documentation-shaped runs instead: one malware id appeared in fourteen stored
+  runs of six different samples, so a consumer merging on id folded those
+  analyses into one object, and its version digit is one no RFC 4122 UUID has,
+  so the OASIS validator refused every object that carried or named it — 21 of
+  39 stored exports. The judge now writes `<type>--<label>` ids unique in its
+  bundle, a short label being enough, and the post-processor mints every
+  published id under the object's own type and rewrites every reference to
+  match.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**
