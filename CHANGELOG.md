@@ -3250,6 +3250,23 @@ change landed on `main`.
   `run_summary.validation.unresolved`; a consumer that partitions on validation
   codes should know the name.
 
+- **What a run measured reaches its report, once and from the right source.**
+  The header's timestamp, machine and library flag reach the sample overview —
+  from the identity, or on a stored report from the format tool's own section.
+  One binary read twice (the triage pack's pe_info and the analyst's, capa run
+  twice) is one section table, one import table, one export list and one set of
+  rule rows. A similar sample is named by the id it carries rather than `?`. A
+  technique's source is every producer that named it — the rules that asserted
+  it, the analysts, the judge's verdict — and a confidence no producer stated
+  (the 0.0 a judge-only or rule-only technique carried, now flagged
+  `confidence_stated: false`) prints "not assessed" or "rule match", never
+  "0.00, judge". Every identity hash `/iocs` publishes is in the indicator table.
+- **An empty sandbox answer is not an observation.** The report speaks in the
+  sandbox's voice only over what a sandbox recorded; a sandbox whose tools
+  answered with nothing — a mock with no fixture — gets one sentence in the
+  run's own voice saying nothing shows the sample was executed, with the reason
+  the run recorded. The report models are told the same in their prompts.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**

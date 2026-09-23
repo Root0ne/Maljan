@@ -1595,7 +1595,31 @@ is assembled from what the run gathered rather than recomputed beside it:
 * `pe_info` reports each export's ordinal and address, the export directory's
   name and the version resource's naming strings; the identity carries the
   architecture, whether the image is a library, those names and the header's
-  timestamp, printed as a header value that can be forged.
+  timestamp, printed as a header value that can be forged. A report stored
+  before the identity carried them reads the same measurement from its
+  `pe_header` section. One binary read twice — the triage pack's `pe_info` and
+  the analyst's own, `capa` run by both — is projected as one section table,
+  one import table, one export list and one set of rule rows.
+* **The sandbox's voice is used only over what a sandbox recorded.** A run
+  whose sandbox tools answered with empty lists — a mock with no fixture for
+  the sample — has no observation, and the report says so in the run's own
+  voice ("No sandbox observation: the sandbox tools returned nothing for this
+  sample, and nothing in this run shows it was executed"), with the reason the
+  run recorded; §6 is then tagged Measured, and no "no persistence observed"
+  line is printed. The narrative and composer prompts say an empty sandbox
+  answer is not an execution. What the model writes anyway is printed as
+  written.
+* **A technique's source is everyone who named it.** The ATT&CK table's Source
+  column is the rules that asserted it (`capa (rule match)`), the analysts that
+  claimed it and the capability matrix's own layers — the judge's verdict among
+  them, which the corroboration does not count. `CapabilityCell.confidence_stated`
+  is `false` when no producer put a number on the technique (a judge
+  attack-pattern with no relationship annotating it, a rule-only technique),
+  and the row then reads "rule match" or "not assessed" rather than a
+  confidence of zero; a stored cell without the flag reads a 0.0 the same way.
+  The matrix reads a judge relationship's confidence and agents from
+  `x_maljan_technique_id` only; a relationship that names its technique by
+  `target_ref` alone contributes neither.
 * `qa/fp_linter.py` runs last and reports; it changes nothing. Its findings land
   in `run_summary.fp_warnings`, including C6 (a section or TTP row with nothing
   citable behind it) and C7 (a technique id the validation loop could not get
