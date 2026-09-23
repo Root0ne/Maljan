@@ -312,3 +312,15 @@ class TestMinorLeaks:
         defang = ProseDefanger([("c2.evil.tld", "domain")])
         assert defang("see http://c2.evil.tld/other") == "see hxxp://c2[.]evil[.]tld/other"
         assert defang("see https://other.example/") == "see https://other.example/"
+
+    def test_a_model_s_list_is_printed_whole(self) -> None:
+        from maljan.reporting.models import ServiceProcessKill
+
+        report = rich_report()
+        assert report.technical_analysis is not None
+        names = [f"svc{n}" for n in range(45)]
+        report.technical_analysis.service_process_kill = ServiceProcessKill(kill_list=names)
+        report.technical_analysis.shadow_copy_destruction = [f"cmd {n}" for n in range(12)]
+        technical = _section(_render(report), "## 5. Technical analysis")
+        assert "`svc44`" in technical
+        assert "`cmd 11`" in technical

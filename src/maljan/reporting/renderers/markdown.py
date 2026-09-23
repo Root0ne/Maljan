@@ -2317,6 +2317,10 @@ def _voice_of(measured: list[str]) -> str:
     return MEASURED
 
 
+# How much of a ransom note's verbatim text the report prints before saying so.
+_NOTE_LIMIT = 4000
+
+
 def _ransomware_block(ta: Any, ctx: _Context) -> str:
     lines: list[str] = []
     spk = ta.service_process_kill
@@ -2325,15 +2329,15 @@ def _ransomware_block(ta: Any, ctx: _Context) -> str:
         if spk.mechanism:
             lines.append(_item(f"Mechanism: {ctx.line(spk.mechanism)}"))
         if spk.kill_list:
-            lines.append(_item("Kill list: " + ", ".join(f"`{x}`" for x in spk.kill_list[:30])))
+            lines.append(_item("Kill list: " + ", ".join(f"`{x}`" for x in spk.kill_list)))
         if spk.white_list:
             # The exclusions are often the more identifying half: a list that
             # spares the attacker's own tooling names it.
-            lines.append(_item("Spared: " + ", ".join(f"`{x}`" for x in spk.white_list[:30])))
+            lines.append(_item("Spared: " + ", ".join(f"`{x}`" for x in spk.white_list)))
         lines.append("")
     if ta.shadow_copy_destruction:
         lines.extend(["Shadow copy destruction:", ""])
-        lines.extend(_item(f"`{cmd}`") for cmd in ta.shadow_copy_destruction[:10])
+        lines.extend(_item(f"`{cmd}`") for cmd in ta.shadow_copy_destruction)
         lines.append("")
     enc = ta.encryption_scheme
     if enc is not None:
@@ -2369,9 +2373,18 @@ def _ransomware_block(ta: Any, ctx: _Context) -> str:
             # Fenced, not inlined: note text routinely contains markdown
             # characters and onion URLs, and the verbatim wording is what
             # links one incident to another.
-            lines.extend([*_fenced(note.verbatim_content.strip()[:4000], "text"), ""])
+            verbatim = note.verbatim_content.strip()
+            lines.extend([*_fenced(verbatim[:_NOTE_LIMIT], "text"), ""])
+            if len(verbatim) > _NOTE_LIMIT:
+                lines.extend(
+                    [
+                        f"_The note is cut here at {_NOTE_LIMIT:,} of its {len(verbatim):,} "
+                        "characters; the JSON report carries it whole._",
+                        "",
+                    ]
+                )
         elif note.sections:
-            lines.extend(_item(ctx.line(part)) for part in note.sections[:10])
+            lines.extend(_item(ctx.line(part)) for part in note.sections)
             lines.append("")
     if not lines:
         return ""
