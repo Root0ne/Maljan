@@ -150,7 +150,8 @@ def hit_length_cap(response: object) -> bool:
     meta = getattr(response, "response_metadata", None)
     if not isinstance(meta, dict):
         return False
-    for key in ("finish_reason", "stop_reason"):
+    # Ollama says ``done_reason: "length"`` for the same event.
+    for key in ("finish_reason", "stop_reason", "done_reason"):
         value = meta.get(key)
         if isinstance(value, str) and value.lower() in {"length", "max_tokens"}:
             return True

@@ -19,6 +19,8 @@ import pytest
 from app.services import settings_probes  # noqa: E402
 from app.services.settings_probes import PROBES, probe_agent, run_agent_probe  # noqa: E402
 
+_REAL_COMPLETE_ONE_TURN = settings_probes.complete_one_turn
+
 
 class _Exploding:
     """Any attempt to build or call a model fails the test."""
@@ -682,3 +684,33 @@ class TestTheProbeMakesTheCallTheJobWillMake:
         }
         assert set(asked) == filed, "every filed pair was the pair that was called"
         assert not any(model == "qwen3:70b" for _endpoint, model in asked), "the judge was listed"
+
+    @pytest.mark.asyncio
+    async def test_an_ollama_model_is_loaded_at_the_window_the_job_uses(self, monkeypatch) -> None:
+        """Ollama reloads a model asked at another context size; the probe asks at the job's."""
+        monkeypatch.setattr(settings_probes, "complete_one_turn", _REAL_COMPLETE_ONE_TURN)
+        bodies: list[dict[str, Any]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/api/generate"):
+                bodies.append(json.loads(request.content))
+                return httpx.Response(200, json={"response": "OK"})
+            return httpx.Response(200, json={"models": [{"name": "qwen3:8b"}]})
+
+        monkeypatch.setattr(
+            settings_probes,
+            "_client",
+            lambda *_a, **_k: httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=10),
+        )
+        staged = {
+            "llm.provider": "ollama",
+            "llm.ollama.expert_model": "qwen3:8b",
+            "llm.ollama.num_ctx": 24576,
+            "llm.ollama.keep_alive": "45m",
+        }
+        result = await probe_agent({"name": "network", "settings": staged})
+
+        assert result.ok is True, result.detail
+        assert bodies, "the model was not asked"
+        assert bodies[-1]["options"]["num_ctx"] == 24576
+        assert bodies[-1]["keep_alive"] == "45m"

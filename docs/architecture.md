@@ -232,6 +232,15 @@ judge
 report  ->  END
 ```
 
+Agreement is measured only between analysts that produced claims. With fewer
+than two of them, or a debate stage that did not run, consensus is not
+applicable: the mediator still speaks and its words are kept, but no agreement
+value is extracted or recorded — `is_consensus` is `null` beside
+`consensus_applicable: false`, the confidence series gets nothing, the run
+summary's `negotiation.termination_reason` is `not_applicable` with no
+`final_confidence` and no `converged_early`, the report prints one sentence
+saying so, and the loop goes to the judge without a revision round.
+
 Sequential is the default because a single local model server has one slot, and
 fanning out three analysts onto it produces queue thrash rather than speed. Set
 `parallel_analysts` when each request gets its own slot, as with a hosted API.
@@ -704,10 +713,21 @@ decides.
    stays off: 5 questions over 105 rankings is a small enough yield that a run
    pays the turn only when an operator asks for it.
 4. **Corroboration** (exact). Per technique in the run, `asserted_by` — the
-   deterministic sources carrying their own ATT&CK ids: capa's `attck`
-   field, a Sigma rule's technique tags, a YARA TTP rule's
-   `meta.technique_id`, `lolbin_lookup` — and `claimed_by`, the agents.
-   `api_capability` is not among the sources: the API catalogue associates a
+   deterministic sources that assert a technique from this sample: capa's
+   `attck` field, a Sigma rule's technique tags, a YARA TTP rule's
+   `meta.technique_id`, `lolbin_lookup` on one of its command lines, a
+   sandbox signature — and `claimed_by`, the agents. Those tools are the
+   whole list (`evidence_summary.ASSERTING_SOURCES`). A reference lookup is
+   never a source: `attck_lookup`, `attck_validate` and `resolve_technique`
+   say what an id is, and `similar_cases` and `family_lookup` return other
+   samples' techniques, so none of them adds a row or counts as an assertion.
+   An id any ledger entry of the run marks invalid (`valid: false` from
+   `attck_lookup`, a row under `invalid` from `attck_validate`) is never
+   counted as asserted, whichever rule named it. The judge's evidence block
+   reads the same rule.
+   The import rules (`api_capability`) are not among the sources either: by
+   the platform's own rule they are a reference association, not an
+   assertion. The API catalogue associates a
    technique with an import set, and an import set is what a program can do
    rather than what it did, so its associations travel under `associated_by`,
    shown in a Catalogue column for reference and counted for nothing. Each
@@ -1349,6 +1369,30 @@ of each loop; `stage_ended_at_cap` says which cap ended the work when one did
 `run_summary.budget` sums the spend per agent, with the caps it hit, so a
 reader learns that an analyst ran out of steps from the summary and the
 pipeline panel rather than from a log line.
+The time cap ends a tool phase the way the step cap and a full window do: with
+the salvage writing the answer from what was gathered. It has to end early to
+do that, because the thirty seconds of grace past the budget are a fraction of
+one turn of a slow model. So the loop times its own turns — from one model
+answer to the next, the tools it asked for included — per answering model, and
+leaves out the turn on which a model list switched, which holds the dead
+model's deadline and not the new model's pace. Once the time left cannot hold
+the longest turn plus a reserve for the final answer, it stops calling tools
+and salvages. The reserve is 1.5 (the margin the per-call timeouts use) times
+the larger of the longest turn and, where the model's generation rate is
+measured, a 1,000-token answer at that rate — the size of the slow run's own
+final-answer calls, 222 s and 158 s at 3.8 tokens a second — and at least the
+salvage's 60 s floor. On a model at about 100 s a turn with one 240 s turn and
+a measured 3.8 tokens a second, 1,000 / 3.8 ≈ 263 s is the larger, the reserve
+is about 395 s, and the tool phase ends once under 635 s of a 1,500 s budget
+are left. The turn the clock ended holds calls that never ran; they are taken
+off it, its text kept and the record saying so, because a hosted provider
+refuses a transcript with an unanswered call. A model list's turn deadline is
+held at the reserve for the final-answer turn, and the answer asked for after
+it gets only the time that turn left. A turn longer than any measured can
+still reach the budget itself; the loop then keeps what it gathered instead of
+aborting the analyst, and the salvage gets what time is left. Either way the
+cap is recorded as `time`; a budget that runs out with nothing gathered says
+so rather than naming the hard cap. The hard cap stays the hard cap.
 That stamp is what makes a report checkable: the model can cite the call it read
 a fact from, a report section lists the entries it was built from, and `GET
 /api/v1/jobs/{id}/evidence` serves those entries back.

@@ -2026,13 +2026,19 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                                 else arg.get("agent_name", "")
                             ),
                             "position": "",  # derived by confidence on frontend
-                            "confidence": (
-                                arg.confidence_score * 100
-                                if hasattr(arg, "confidence_score")
-                                else arg.get("confidence_score", 0) * 100
-                            ),
+                            # ``None`` on a round where consensus did not
+                            # apply: no agreement was measured, so none is
+                            # stored, neither 100 nor 0.
+                            "confidence": _argument_confidence(arg),
                             "argument": (
                                 arg.finding if hasattr(arg, "finding") else arg.get("finding", "")
+                            ),
+                            # The platform's sentence about the round, apart
+                            # from the mediator's own words.
+                            "note": (
+                                getattr(arg, "note", "")
+                                if hasattr(arg, "finding")
+                                else arg.get("note", "")
                             ),
                             # ``complete`` | ``failed`` | ``timeout``. Without
                             # it a mediation that never ran is indistinguishable
@@ -2050,7 +2056,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     ],
                     "confidence_history": pipeline_result.get("confidence_history", []),
                     "iteration_count": pipeline_result.get("iteration_count", 0),
+                    # ``None`` beside ``consensus_applicable: false`` when
+                    # fewer than two analysts produced claims.
                     "is_consensus": pipeline_result.get("is_consensus", False),
+                    "consensus_applicable": pipeline_result.get("consensus_applicable", True)
+                    is not False,
                     # True when at least one round failed outright, so consumers
                     # can say "the negotiation did not run" rather than "the
                     # agents did not agree".
@@ -2455,6 +2465,20 @@ def _roster_for(container: Any) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 — a roster never costs a run
         logger.warning("Could not build the roster for this run (%s).", exc)
         return {"agents": [], "stages": []}
+
+
+def _argument_confidence(arg: Any) -> float | None:
+    """One negotiation argument's confidence as a percentage, or ``None``.
+
+    ``None`` is a mediator round where consensus did not apply; a missing
+    field on an older stored argument reads as zero, as it always did.
+    """
+    value = (
+        getattr(arg, "confidence_score", None)
+        if hasattr(arg, "confidence_score")
+        else arg.get("confidence_score", 0)
+    )
+    return None if value is None else float(value) * 100
 
 
 def _extract_confidence(result: dict) -> float | None:

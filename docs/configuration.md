@@ -275,6 +275,13 @@ setting and what it does. A measured 12B reasoning model failed the probe in
 55 s at the default and passed in 243 ms with the setting on; with
 `llm.require_probe` on, every job is refused in between. See the low-memory
 option in [getting-started.md](getting-started.md).
+Ollama's body also carries `options.num_ctx` and `keep_alive` from
+`llm.ollama.num_ctx` and `llm.ollama.keep_alive`, the two fields a run sends
+with every call that decide which instance Ollama keeps loaded. Ollama loads a
+model at the context size the request names and reloads it when a later
+request names another, so a probe asked at the server's default (4,096) left
+the model at that size and the job's first call paid a full reload out of its
+analyst's time budget.
 The completion gets ninety seconds of its own, because a local server reloads a
 model it had unloaded and a large one is not a ten-second load.
 
@@ -717,6 +724,67 @@ the window, its source, the characters-per-token figure and the smallest and
 largest cap the run used. A run that landed on `fallback` is the one to act on
 — set `core.llm.openai.context_size` to the window the server was started with,
 and the cap is derived from then on.
+
+### A call waits as long as its answer takes at the model's pace
+
+Two calls have an output budget of their own: the judge's verdict
+(`core.llm.judge_max_tokens`, 8,192 by default, under the judge definition's
+timeout — 600 s in the shipped team) and each composer section
+(`core.reporting.composer_section_max_tokens`, 900, under
+`core.reporting.composer_per_section_timeout`, 120 s). A timeout chosen for a
+fast model cuts a slow one off: at 3.8 tokens a second only about 2,280 of the
+judge's tokens fit in 600 s, and a full composer section needs about 237 s.
+
+So each of those calls waits
+`max(configured, min(max_tokens / measured rate × 1.5, 1800 s))`. The rate is
+the model's own for this job, read off every answer it has already given
+without a token of its own: Ollama's `eval_count` over `eval_duration`, and on
+an OpenAI-compatible endpoint the answer's output token count over the call's
+wall clock (the client drops llama.cpp's `timings`, and the wall clock includes
+reading the prompt, so that rate is lower than the server's and the wait
+longer). The margin, 1.5, covers the prompt read and the spread between turns.
+The ceiling, 1,800 s, is the HTTP request timeout every provider's client is
+built with (`PROVIDER_REQUEST_TIMEOUT_SECONDS`), so no derived wait outlives the
+request carrying it. A configured value above the ceiling is not lowered, but
+the request timeout still ends any single call at 1,800 s. At 3.8 tokens a
+second the judge's budget needs 8,192 / 3.8 × 1.5 ≈ 3,234 s, so the verdict
+call is held at 1,800 s and can receive about 6,840 tokens (3.8 × 1,800) where
+600 s allowed about 2,280. A composer section is its answer and the one retry
+its validation allows, so its wait holds two calls of its output cap. At 3.8
+tokens a second that is 2 × 900 / 3.8 × 1.5 ≈ 710 s with the reporter's
+`disable_thinking` on (cap 900), and 2 × min(9,092 / 3.8 × 1.5, 1,800) =
+3,600 s with the shipped default, which leaves thinking on (cap 900 + 8,192,
+below). A fast model's derived time falls under its
+configured one, which then stands. Until a model has answered once, and for a
+call with no output budget, the configured value stands. Rates are kept per
+model and per server, so one tag served by a local and a remote Ollama is two
+paces. The verdict call starts its model list on its sized wait. The report
+stage starts the reporter's list once; each section then measures the list's
+turn deadline against its own wait, with the job's `llm.fallback_turn_share`,
+without putting the list back on its first model — a model that failed as a
+provider in one section is not waited out again in the next, and a switch
+holds for the rest of the report stage.
+
+The section budget is also the section's real cap, and a model's reasoning
+counts against it: Ollama's `num_predict` and llama.cpp's `n_predict` include
+the thinking channel. Where the reporter's provider has been told to keep
+reasoning out (`llm.ollama.disable_thinking` or `llm.openai.disable_thinking`),
+the composer's model is capped at `composer_section_max_tokens` alone. Where it
+has not, the cap is that budget plus `judge_max_tokens` — the reporter's own
+room — for the reasoning. Each model of the reporter's list is capped by its
+own provider's switch, and the wait is sized from the largest cap: the platform
+cannot tell a reasoning tag from its name, and sending `think: false` to a
+model that does not reason is an error on Ollama. A section the cap cut is
+recorded as cut at that cap, not as a schema failure. On Ollama every output
+cap — this one, `judge_max_tokens`, `expert_max_tokens` — now reaches the
+server as `num_predict`, which `ChatOllama` otherwise drops, so a thinking
+model's reasoning counts against the judge's and the analysts' caps too;
+`disable_thinking`, or a larger cap, is the remedy. The verdict call records
+whether it reached `judge_max_tokens`, Ollama's `done_reason: "length"`
+included. `run_summary.generation` records
+each model's rate, tokens, seconds, calls and source, and for each sized call
+the configured value, the budget, the rate, the derived and the applied
+seconds; the report's Run Summary prints the same numbers.
 
 ### The evidence budget
 

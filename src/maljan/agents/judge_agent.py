@@ -64,8 +64,13 @@ from maljan.llm.context_window import (
     tool_definition_chars,
     window_full_error,
 )
+from maljan.llm.generation_rate import GenerationRates, model_name_of
 from maljan.pipeline.events import emit_judge_question, scrub
-from maljan.pipeline.mediation_models import MediatorVerdict
+from maljan.pipeline.mediation_models import (
+    MediatorVerdict,
+    analysts_with_claims,
+    consensus_applies,
+)
 from maljan.pipeline.state import AgentArgument
 from maljan.pipeline.validation import (
     ValidationTally,
@@ -385,6 +390,10 @@ class JudgeAgent(BudgetMeter):
         # Per-run token ledger (findings-log §4 Item 1); attached by the
         # container in get_judge_agent(). None when run standalone.
         self.token_ledger: TokenLedger | None = None
+        # The job's measured generation rates, attached by the container; the
+        # verdict call's timeout is sized from them. None when run standalone,
+        # and the configured timeout then stands.
+        self.generation_rates: GenerationRates | None = None
         # Which stage of the active team this judge is running as. Set by the
         # node before it works — the debate stage when it mediates, the verdict
         # stage when it rules — and read by the evidence recorder.
@@ -896,7 +905,7 @@ class JudgeAgent(BudgetMeter):
         sample: Any = None,
         facts_block: str = "",
         run_state: str = "",
-    ) -> tuple[AgentArgument, bool]:
+    ) -> tuple[AgentArgument, bool | None]:
         """Find contradictions between expert reports and determine consensus.
 
         Accepts a generic dict of agent reports so any number of agents can
@@ -915,7 +924,10 @@ class JudgeAgent(BudgetMeter):
                 scores and explicit dissent signals.
 
         Returns:
-            Tuple of (AgentArgument with mediator findings, bool indicating consensus).
+            Tuple of (AgentArgument with mediator findings, bool indicating
+            consensus). The bool is ``None`` when fewer than two of the
+            reporting analysts produced claims: consensus does not apply, and
+            the argument carries no confidence.
         """
         self.logger.info("Mediating %d expert reports for contradictions...", len(reports))
         needs_tools = self._has_explicit_dissent(isr_reports)
@@ -1036,6 +1048,33 @@ class JudgeAgent(BudgetMeter):
                 reasoning_text = await self.execute_tool_loop(prompt_messages)
             else:
                 reasoning_text = str(response.content)
+
+        # Agreement among fewer than two analysts that said something measures
+        # nothing, whatever number the reasoning ended on: the mediator's words
+        # are kept, no agreement value is extracted, and ``None`` tells the
+        # caller consensus does not apply. ``isr_reports`` absent is a caller
+        # with no structured claims to count, which keeps the measured path.
+        if isr_reports is not None and not consensus_applies(reports, isr_reports):
+            claimants = analysts_with_claims(reports, isr_reports)
+            self.logger.info(
+                "Consensus not applicable: %d of %d analyst(s) produced claims.",
+                len(claimants),
+                len(reports),
+            )
+            return (
+                AgentArgument(
+                    agent_name="Mediator",
+                    # The mediator's words whole, and the platform's own
+                    # sentence in a field of its own rather than inside them.
+                    finding=reasoning_text.strip(),
+                    confidence_score=None,
+                    note=(
+                        f"Consensus: not applicable — {len(claimants)} of {len(reports)} "
+                        "analyst(s) produced claims."
+                    ),
+                ),
+                None,
+            )
 
         # Now extract the final structured output from the detailed reasoning.
         # IMPORTANT: reasoning_text may contain curly braces from LLM output
@@ -1181,8 +1220,19 @@ class JudgeAgent(BudgetMeter):
         # own ``timeout_seconds`` first, then the deprecated override map
         # (which ships 600 for the judge, so a local Qwen3.6-35B has headroom
         # for the verdict round), then the global ``react_agent_timeout``.
-        timeout = float(loop_limits("judge")[0])
+        # And then held to the model's measured pace: the verdict may take its
+        # whole ``judge_max_tokens``, which a slow model cannot generate inside
+        # a timeout chosen for a fast one (``llm.generation_rate``).
+        timeout = self._verdict_timeout(float(loop_limits("judge")[0]))
         self.logger.info("JudgeAgent invoking verdict LLM (timeout=%ds)...", timeout)
+        # A model list's turn deadline is a share of the clock it was last
+        # started on — mediation's, by now. The verdict call is its own clock,
+        # sized from the model's pace, so the list starts again on it; without
+        # this the primary was declared stalled long before the sized wait.
+        from maljan.llm.fallback import restart_models
+
+        restart_models(self.llm, loop_seconds=float(timeout), share=self._turn_share())
+        cap = int(getattr(get_settings().llm, "judge_max_tokens", 0) or 0) or None
 
         # Reset per call, not once: a first call that timed out and left the
         # flag set made every later parse return the fallback, and a fallback
@@ -1191,11 +1241,16 @@ class JudgeAgent(BudgetMeter):
         timed_out = False
 
         async def _ask(turns: list[Any]) -> Any:
-            return await retry_on_connection_error(
+            answer = await retry_on_connection_error(
                 lambda: self.llm.ainvoke(turns),
                 what="Judge verdict",
                 log=self.logger,
             )
+            # Whether the verdict reached its token cap, recorded like every
+            # other judge call: a cut bundle reads as malformed JSON, and the
+            # count is what says the cap, not the model, ended it.
+            record_judge_response(getattr(self, "truncation_ledger", None), answer, cap=cap)
+            return answer
 
         async def _run(turns: list[Any]) -> Any:
             nonlocal timed_out
@@ -1791,6 +1846,19 @@ class JudgeAgent(BudgetMeter):
         negotiation = getattr(self._config, "negotiation", None)
         value = getattr(negotiation, "consensus_threshold", None)
         return float(value) if value is not None else CONSENSUS_THRESHOLD
+
+    def _verdict_timeout(self, configured: float) -> float:
+        """The verdict call's timeout: configured, or what its budget needs at the model's pace.
+
+        ``GenerationRates.call_timeout`` decides and records it; with no rates
+        attached, no rate measured yet or no ``judge_max_tokens``, the
+        configured value stands.
+        """
+        rates = getattr(self, "generation_rates", None)
+        if rates is None:
+            return configured
+        cap = int(getattr(get_settings().llm, "judge_max_tokens", 0) or 0)
+        return float(rates.call_timeout("judge:verdict", model_name_of(self.llm), configured, cap))
 
     def _supports_structured_output(self) -> bool:
         """Delegates to the registry — see ``structured_output_supported``.

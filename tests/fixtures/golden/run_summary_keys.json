@@ -53,6 +53,12 @@
       "severity": null
     }
   ],
+  "generation": {
+    "ceiling_s": null,
+    "margin": null,
+    "models": "<data-keyed map>",
+    "timeouts": "<data-keyed map>"
+  },
   "models": "<data-keyed map>",
   "negotiation": {
     "confidence_history": [

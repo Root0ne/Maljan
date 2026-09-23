@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
+from maljan.analysis.run_summary import NOT_APPLICABLE
 from maljan.core.logger import logger
 from maljan.extractors.attribution import build_family_attribution
 from maljan.extractors.capability_matrix import build_capability_matrix, unmapped_behaviours
@@ -159,28 +160,7 @@ class MalwareReportBuilder:
             sandbox_report=self.sandbox_report,
         )
 
-        # Negotiation summary — compact projection of run_summary fields most
-        # useful for the report header.
-        negotiation_summary = {
-            "rounds_completed": self.run_summary.get("negotiation", {}).get("rounds_completed", 0),
-            "termination_reason": self.run_summary.get("negotiation", {}).get(
-                "termination_reason", "unknown"
-            ),
-            # A float wherever this key is declared, so a run whose judge never
-            # answered — and which therefore has no assessed confidence and no
-            # negotiation block to read one from — contributes 0.0 rather than
-            # a ``None`` a reader of the projection has no field for. What was
-            # not assessed is said once, by ``overall_confidence`` itself.
-            "final_confidence": self.run_summary.get("negotiation", {}).get(
-                "final_confidence", self.overall_confidence or 0.0
-            ),
-            "confidence_history": self.run_summary.get("negotiation", {}).get(
-                "confidence_history", []
-            ),
-            "sycophancy_events": self.run_summary.get("negotiation", {}).get(
-                "sycophancy_events", 0
-            ),
-        }
+        negotiation_summary = self._negotiation_summary(self.run_summary, self.overall_confidence)
 
         references = self._build_references(mappings, identity.hashes.sha256)
 
@@ -268,6 +248,32 @@ class MalwareReportBuilder:
             len(report.evidence_index),
         )
         return report
+
+    @staticmethod
+    def _negotiation_summary(
+        run_summary: dict[str, Any], overall_confidence: float | None
+    ) -> dict[str, Any]:
+        """The compact projection of the run summary's negotiation block.
+
+        ``final_confidence`` is a float wherever this key is declared, so a run
+        whose judge never answered — and which therefore has no negotiation
+        block to read one from — contributes 0.0 rather than a ``None`` a
+        reader of the projection has no field for. A debate that measured no
+        agreement has none to project: the key is absent, and the verdict's
+        own confidence is not borrowed for it.
+        """
+        negotiation = run_summary.get("negotiation", {}) or {}
+        summary: dict[str, Any] = {
+            "rounds_completed": negotiation.get("rounds_completed", 0),
+            "termination_reason": negotiation.get("termination_reason", "unknown"),
+            "confidence_history": negotiation.get("confidence_history", []),
+            "sycophancy_events": negotiation.get("sycophancy_events", 0),
+        }
+        if negotiation.get("termination_reason") != NOT_APPLICABLE:
+            summary["final_confidence"] = negotiation.get(
+                "final_confidence", overall_confidence or 0.0
+            )
+        return summary
 
     # ------------------------------------------------------------------
     # Narrative + detection attachment (called by report_node)

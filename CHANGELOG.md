@@ -1571,6 +1571,53 @@ change landed on `main`.
   STATIC the export ordinals and addresses, ATTRIBUTION who named the family
   and the entries cited.
 
+- **The judge's verdict call and each composer section wait as long as their
+  answer takes at the model's measured pace.** At 3.8 tokens a second a 600 s
+  verdict call could receive about 2,280 of `judge_max_tokens`' 8,192 and a
+  120 s section about 456 of its 900. Every model the container builds now
+  carries a meter that reads each answer's generation count and time as it
+  returns — Ollama's `eval_count`/`eval_duration`, otherwise the output token
+  count over the call's wall clock — and those two calls wait
+  `max(configured, min(max_tokens / rate × 1.5, 1800 s))`
+  (`llm.generation_rate`), a composer section twice that for its one
+  validation retry. With no rate yet the configured value stands. Rates are
+  kept per model and server, and each answer of a model list counts against
+  the model that gave it. The 1,800 s ceiling is the providers' shared request
+  timeout. The verdict call starts its model list on its own wait; the report
+  stage starts the reporter's list once and each section measures its turn
+  deadline against the section's wait with the job's share, so a switch holds
+  for the whole report stage and a stalled first model is not waited out again
+  in every section.
+  `run_summary.generation` records each model's rate and source and each sized
+  call's configured, derived and applied seconds, and the report's Run Summary
+  and the run summary's markdown print them.
+  **Upgrading:** a slow model's verdict call and composer sections can now run
+  up to 1,800 s each where they were cut at 600 s and 120 s, so a job on such a
+  model can take longer before a section is dropped; a fast model's timeouts
+  do not change. `run_summary.generation` is a new key, absent on a run that
+  measured no answer.
+
+- **A composer section is capped at `composer_section_max_tokens`, and an
+  Ollama model at its configured output cap.** The composer ran on the
+  reporter's model, built with `judge_max_tokens` (8,192), so a section could
+  generate nine times the 900 tokens its setting names; its model is now built
+  with `core.reporting.composer_section_max_tokens` as its output cap, plus
+  `judge_max_tokens` of room for reasoning where the model's provider has not
+  been told to keep reasoning out (`disable_thinking`), each model of the
+  reporter's list by its own provider. And `ChatOllama`
+  drops a `max_tokens` it is handed, so on Ollama no cap reached the server at
+  all — not the judge's, the analysts' or a section's; the Ollama provider now
+  passes it as `num_predict`. A section the cap cut is recorded as cut at that
+  cap, the verdict call records whether it reached `judge_max_tokens`, and
+  Ollama's `done_reason: "length"` counts as a cut.
+  **Upgrading:** a model's reasoning counts against these caps — Ollama's
+  `num_predict` and llama.cpp's `n_predict` include the thinking channel. A
+  composer section longer than its cap is now cut by the model server, and on
+  Ollama the judge's answer at `judge_max_tokens` and an analyst's at
+  `expert_max_tokens`, reasoning included. With a reasoning model, set
+  `disable_thinking` or raise the cap where a section or verdict comes back
+  empty or cut.
+
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was
@@ -3758,6 +3805,85 @@ change landed on `main`.
   a ransomware heading, and a block of placeholder values ("none", "unknown")
   is not content. A Malware Behavior Catalog id claimed as a technique is listed
   under the ATT&CK table as a behaviour, not as an unresolved technique row.
+
+- **The Ollama probe loads the model the way the job will.** The `llm` and
+  `agent` probes asked Ollama with no `num_ctx` and no `keep_alive`, so the
+  model was left loaded at the server's default 4,096-token context and the
+  job's first call reloaded it at `core.llm.ollama.num_ctx` (32,768 by default)
+  out of the first analyst's time budget. Both probes now send
+  `options.num_ctx` and `keep_alive` from `core.llm.ollama.num_ctx` and
+  `core.llm.ollama.keep_alive`, staged values included. The other providers'
+  bodies are unchanged.
+
+- **A reference lookup is not an assertion.** The corroboration rows counted
+  any ledger tool that returned a technique id as a deterministic source, so an
+  analyst that looked up twenty ids with `attck_lookup`, and a `similar_cases`
+  call returning other samples' techniques, made a report print "29 asserted by
+  a deterministic source" where capa had asserted two — six of them ids the
+  lookup itself answered `valid: false`. Only capa, Sigma, YARA, `lolbin_lookup`
+  and a sandbox signature assert now (`evidence_summary.ASSERTING_SOURCES`); a
+  lookup adds no row and no count, and an id any ledger entry of the run marks
+  invalid is never counted as asserted. The import rules (`api_capability`)
+  stay a reference association and count for nothing, as before. The report's
+  TTP line, its corroboration table, the run summary's per-source attribution and
+  `techniques_by_layer`, the judge's evidence block and the console's
+  Capabilities page all read the same rows.
+  **Upgrading:** `run_summary.corroboration` on a new run has fewer rows and
+  no `attck_lookup`, `similar_cases`, `resolve_technique` or other lookup name
+  in `asserted_by` or `techniques_by_layer`; a report stored before this keeps
+  the rows it was written with.
+
+- **No consensus among analysts who said nothing.** A run whose only analyst
+  timed out went to the mediator with nothing to compare, the mediator answered
+  "no analyst provided a substantive report … agreement_confidence: 1.0", and
+  the run recorded "Consensus reached (confidence=1.00)", a `consensus`
+  termination and a final confidence of 1.000. Agreement is now measured only
+  when at least two of the debate's analysts produced claims, on the model
+  path, the text fallback, the mock mediator, a failed mediation round and a
+  debate stage that did not run alike. Otherwise the mediator still speaks, but
+  no agreement value is extracted, the confidence series gets nothing, and the
+  router goes to the judge rather than asking the same analysts to revise.
+  **Upgrading:** on such a run the pipeline state and the stored
+  `negotiation_log` carry `is_consensus: null` and `consensus_applicable:
+  false`, a mediator argument's `confidence_score` (and the stored
+  `confidence`) is `null`, `run_summary.negotiation.termination_reason` is
+  `not_applicable` with **no** `final_confidence` or `converged_early` key, the
+  report's `negotiation_summary` has no `final_confidence`, and the negotiation
+  timeline's `reached_consensus` is `null`. The mediator's words are kept
+  whole in the argument's `finding`, and the platform's "not applicable"
+  sentence is in its own `note` field (stored as `note` beside each negotiation
+  entry). A consumer must read an absent or
+  `null` value as "not measured", never as 0.0 or as no consensus. A mock run's
+  analysts file no claims, so a mock run now takes this path too.
+
+- **The time cap salvages, like the step cap and a full window.** A static
+  analyst on a model at about 100 s a turn reached its 1,500 s budget at step 28
+  of 40 and was aborted ("exceeded the 1530s hard cap; aborting this analyst"),
+  and everything it had gathered was lost with no final-answer turn. The soft
+  timeout was reported as the hard cap and handled like it. The loop now times
+  its own turns — answer to answer, tools included — per answering model,
+  leaving out the turn a model list switched on, and ends its tool phase once
+  the time left cannot hold the longest turn plus a final-answer reserve: 1.5 ×
+  the larger of that turn and a 1,000-token answer at the model's measured
+  rate, at least the salvage's 60 s floor. The salvage writes the answer from
+  what was gathered. At that pace with one 240 s turn and 3.8 tokens a second,
+  the reserve is about 395 s and the tool phase ends once under 635 s are left.
+  The last turn's calls that never ran are taken off the transcript the final
+  answer is sent — from `tool_calls`, from `additional_kwargs` (OpenAI's
+  `tool_calls`, Gemini's `function_call`) and from the content's `tool_use`
+  blocks, since hosted providers refuse an unanswered call — its text kept
+  and the record saying they did not run; a model list's deadline is held at
+  the reserve for that turn; the answer asked for after it gets only what that
+  turn left. A turn longer than any measured that still reaches the budget
+  ends the phase there, with what was gathered kept, rather than failing the
+  analyst; a budget that runs out with nothing gathered says so instead of
+  naming the hard cap. The budget record, the `stage_ended_at_cap` event and
+  `run_summary.budget` say `time`, with a detail naming the time left, the
+  answering model's longest turn and the reserve.
+  **Upgrading:** an analyst on a slow model now stops calling tools before its
+  budget and returns claims where it used to fail with a `TimeoutError`, so
+  such a run makes fewer tool calls and has one more analyst reporting; the
+  hard cap is unchanged.
 
 ### Removed
 

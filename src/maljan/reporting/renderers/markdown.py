@@ -38,8 +38,11 @@ from typing import Any
 from urllib.parse import urlparse
 
 from maljan.analysis.run_summary import (
+    NOT_APPLICABLE,
+    NOT_APPLICABLE_SENTENCE,
     bundle_loss_sentence,
     corpus_held_sentence,
+    generation_lines,
     server_rest_sentence,
     stage_duration_lines,
     tokens_sentence,
@@ -475,7 +478,14 @@ class MarkdownRenderer:
         if isinstance(negotiation, dict) and negotiation.get("rounds_completed") is not None:
             rounds = negotiation.get("rounds_completed")
             reason = str(negotiation.get("termination_reason") or "").strip()
-            if reason == "consensus" and ctx.no_analyst_claims:
+            if reason == NOT_APPLICABLE:
+                # Fewer than two analysts produced claims: no agreement was
+                # measured, so none is stated.
+                said = (
+                    "not applicable; fewer than two analysts produced claims, "
+                    "so no agreement was measured"
+                )
+            elif reason == "consensus" and ctx.no_analyst_claims:
                 # Agreement among analysts that claimed nothing is not agreement.
                 said = (
                     f"the negotiation ended by consensus after {rounds} round(s) with no "
@@ -1749,13 +1759,19 @@ class MarkdownRenderer:
             final_conf = negotiation.get("final_confidence")
             if rounds is not None:
                 lines.append(_item(f"Negotiation rounds: {rounds}"))
-            if reason:
+            if reason == NOT_APPLICABLE:
+                # No agreement was measured, so no final confidence is stored
+                # and the one sentence says why.
+                lines.append(_item(NOT_APPLICABLE_SENTENCE))
+            elif reason:
                 lines.append(_item(f"Termination reason: `{reason}`"))
             if final_conf is not None:
                 try:
                     lines.append(_item(f"Final confidence: {float(final_conf):.3f}"))
                 except (TypeError, ValueError):
                     pass
+        for line in generation_lines(run_summary.get("generation")):
+            lines.append(_item(line))
         ungrounded = run_summary.get("sections_without_evidence")
         if ungrounded:
             lines.append(_item(f"Report sections with no evidence: {ungrounded}"))
