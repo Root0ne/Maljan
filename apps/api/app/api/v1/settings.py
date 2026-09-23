@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Awaitable
 from contextlib import suppress
@@ -758,12 +759,20 @@ async def lint_teams_route(
 
     Nothing is stored. The console calls this as a team is edited, debounced,
     and draws the preview and the findings from the answer. The errors are the
-    ones the apply path refuses from, in the same words, so a team the preview
-    passes is a team apply accepts; a warning never blocks apply.
+    team refusals the apply path makes, in the same words; a warning never
+    blocks apply.
+
+    The lint and the layout are CPU work over whatever the body holds, so they
+    run in a worker thread, as the API's other blocking work does, and the
+    event loop keeps serving every other request while a large team is read.
     """
+    stored = await SettingsService(db).load_overrides()
+    return await asyncio.to_thread(_lint_response, stored, body)
+
+
+def _lint_response(stored: dict[str, Any], body: TeamLintRequest) -> TeamLintResponse:
     from app.services.agent_map import lint_team_map
 
-    stored = await SettingsService(db).load_overrides()
     findings, graphs = lint_team_map(
         stored, profiles=body.profiles, definitions=body.definitions, active=body.profile
     )

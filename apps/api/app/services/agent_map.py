@@ -221,7 +221,7 @@ def finding_path(finding: TeamFinding) -> str:
     routes a lint finding and a save refusal to the same card by the same
     lookup. A finding about the agent map sits under the agent it names.
     """
-    if not finding.team:
+    if finding.team is None:
         if finding.agent:
             return f"{AGENT_DEFINITIONS_KEY}.{finding.agent}"
         return AGENT_DEFINITIONS_KEY

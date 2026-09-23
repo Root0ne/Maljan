@@ -198,7 +198,7 @@ class TeamFindingDTO(BaseModel):
     severity: str
     code: str
     message: str
-    team: str
+    team: str | None = None
     stage: str | None = None
     field: str | None = None
     agent: str | None = None

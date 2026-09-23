@@ -301,3 +301,31 @@ def test_the_lint_route_is_admin_only():
     app.include_router(router, prefix="/api/v1")
     r = TestClient(app).post("/api/v1/settings/lint-teams", json={})
     assert r.status_code in (401, 403)
+
+
+def test_a_team_of_a_thousand_stages_depending_on_later_ones_is_a_422(client):
+    """Each stage depends on the next: the model refuses it, and so does apply, by name."""
+    n = 1200
+    keys = [f"s{i}" for i in range(n)]
+    team = {
+        "stages": [
+            {
+                "key": key,
+                "kind": "analysis",
+                "agents": ["static"] if i == 0 else [],
+                "depends_on": keys[i + 1 : i + 2],
+            }
+            for i, key in enumerate(keys)
+        ]
+        + [{"key": "v", "kind": "verdict", "agents": ["judge"], "depends_on": ["s0"]}]
+    }
+    with patch("app.api.v1.settings.SettingsService.load_overrides", AsyncMock(return_value={})):
+        r = client.patch(
+            "/api/v1/settings", json={"changes": {"core.agents.profiles": {"mine": team}}}
+        )
+    assert r.status_code == 422
+    errors = r.json()["errors"]
+    assert errors["core.agents.profiles.mine.stages.s0.depends_on"] == (
+        "stage 's0' depends on 's1', which is declared after it; a stage may only "
+        "depend on an earlier stage"
+    )
