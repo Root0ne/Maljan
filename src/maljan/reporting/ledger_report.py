@@ -330,6 +330,8 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
         "min_sdk",
         "target_sdk",
         "pdb_path",
+        "export_name",
+        "version_info",
         "filetype",
         "flags",
     ):
@@ -374,8 +376,23 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
             acc.add_row(table, [_text(row.get("dll")), _text(row.get("function"))])
         acc.credit(table, entry)
 
+    # With the ordinals and addresses when the tool reported them: several
+    # exports sharing one address is a fact the names alone hide.
+    export_rows = [row for row in data.get("export_rows") or [] if isinstance(row, dict)]
     exports = data.get("exports")
-    if isinstance(exports, list) and exports:
+    if export_rows:
+        table = acc.get(
+            f"{prefix}_exports",
+            f"{prefix.upper()} exports",
+            "table",
+            columns=["Name", "Ordinal", "RVA"],
+        )
+        for row in export_rows[:MAX_ROWS]:
+            acc.add_row(
+                table, [_text(row.get("name")), _text(row.get("ordinal")), _text(row.get("rva"))]
+            )
+        acc.credit(table, entry)
+    elif isinstance(exports, list) and exports:
         listing = acc.get(f"{prefix}_exports", f"{prefix.upper()} exports", "list")
         for name in exports[:MAX_ROWS]:
             acc.add_item(listing, _text(name))

@@ -64,6 +64,22 @@ class TestBinaryBuilders:
         assert sections["pe_exports"].items == ["StartService"]
         assert sections["packer_signatures"].rows == [["UPX", ".text"]]
 
+    def test_export_addresses_and_the_export_name_are_carried_when_reported(self) -> None:
+        payload = {
+            "machine": 34404,
+            "exports": ["extra", "run"],
+            "export_rows": [
+                {"name": "extra", "ordinal": 1, "rva": "0x3ce4"},
+                {"name": "run", "ordinal": 2, "rva": "0x3ce4"},
+            ],
+            "export_name": "LibraryTag.dll",
+        }
+        sections = _by_key(build_sections([_entry("pe_info", payload)]))
+        exports = sections["pe_exports"]
+        assert (exports.kind, exports.columns) == ("table", ["Name", "Ordinal", "RVA"])
+        assert exports.rows == [["extra", "1", "0x3ce4"], ["run", "2", "0x3ce4"]]
+        assert dict(sections["pe_header"].rows)["export name"] == "LibraryTag.dll"
+
     def test_elf_info_yields_its_own_tables(self) -> None:
         sections = _by_key(build_sections([_entry("elf_info")]))
         assert dict(sections["elf_header"].rows)["interpreter"].endswith("ld-linux-x86-64.so.2")
