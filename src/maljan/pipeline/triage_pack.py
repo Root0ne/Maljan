@@ -1251,6 +1251,10 @@ def _reputation_facts(entry: LedgerEntry) -> str:
 # short enough that the line stays one line in every model's prompt; the
 # count of the rest is stated beside them.
 _DETECTION_LABELS_SHOWN = 20
+# How much of one label the line prints. Engine labels run to a few dozen
+# characters; the answer is a service's, and a label as long as the answer is
+# not something a single line should carry whole.
+_DETECTION_LABEL_CHARS = 80
 
 
 def _detection_labels(data: dict[str, Any]) -> str:
@@ -1258,11 +1262,10 @@ def _detection_labels(data: dict[str, Any]) -> str:
 
     VirusTotal's answer through its own MCP server carries ``detections``, one
     result label per engine that detected the file, and no popular threat
-    classification — so a pack that read only the classification told every
-    model "52/75 malicious" and nothing else. The labels are counted exactly
-    as written, most engines first and then in the order the answer lists
-    them; nothing is merged, normalised or read for a family, which is the
-    reader's to decide.
+    classification. The labels are counted exactly as written, most engines
+    first and then in the order the answer lists them, and each is printed to
+    at most ``_DETECTION_LABEL_CHARS`` characters; nothing is merged,
+    normalised or read for a family, which is the reader's to decide.
     """
     rows = _find_key(data, "detections")
     if not isinstance(rows, list):
@@ -1279,7 +1282,7 @@ def _detection_labels(data: dict[str, Any]) -> str:
     text = (
         f"{len(labels)} detection labels, {len(ranked)} distinct "
         f"(engines per label, most first{bound}): "
-        + ", ".join(f"{label} ×{counts[label]}" for label in shown)
+        + ", ".join(f"{_short(label, _DETECTION_LABEL_CHARS)} ×{counts[label]}" for label in shown)
     )
     if len(ranked) > len(shown):
         text += f" (+{len(ranked) - len(shown)} more distinct labels)"

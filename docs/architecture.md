@@ -1047,11 +1047,10 @@ forever. Given, the file is read in place of the sample and the answer carries
 `read_path` saying which; left out, the sample is read.
 
 **A quoted search is the same search.** A model writes a search the way a
-person types one, between quotes: one scored run's static analyst sent every
-`pattern` with a pair of literal double quotes around `CreateMutex` and was
-told nothing matched, although `CreateMutexW` was a string of the sample. Every
-argument a sidecar tool searches for or looks up by is read without one
-matching pair of surrounding `"`, `'` or `` ` `` — `pattern` on `strings` and
+person types one, between quotes, and a quoted needle matches nothing the bare
+one would. Every argument a sidecar tool searches for or looks up by is read
+without the pair of `"`, `'` or `` ` `` that encloses the whole value (the same
+character at both ends and nowhere between) — `pattern` on `strings` and
 `floss`; `text`, `technique_id`, `ids`, `api_names` and `query` on the
 knowledge lookups; `ip_address`, `domain` and `file_hash` on `threatintel` —
 by `maljan.tools.arguments`, with nothing else rewritten and a value without a
@@ -1088,6 +1087,9 @@ each class of external tool, so the choice is configuration rather than code.
 - **Sandbox** — `mock` (the default), `cape2`, `triage`, `upload` for a report
   produced elsewhere, and `rest`, a mapping-driven adapter for a sandbox
   Maljan has never heard of.
+- **Tool servers (MCP)** — additional servers declared in the settings store,
+  each with the tools it is allowed to expose and the agents allowed to call
+  it.
 
 **No sandbox observation where no sandbox ran.** `mock` executes nothing: it
 returns a recorded fixture for a sample it has one for (marked
@@ -1098,16 +1100,14 @@ stand-in is *not run*, a fixture is *recorded fixture*, anything else is
 triage pack writes one `sandbox_status` entry with the sentence that says so
 (`[ev_0010] sandbox: No sandbox ran for this sample: …`) and none of the
 sandbox views, `sigma_match_sandbox` or `lolbin_lookup`, so a stand-in's empty
-sections are never rendered as "0 processes"; the dynamic and network analysts
+sections are never rendered as "0 processes"; the in-process sandbox tools
+answer the stand-in with the same sentence; the dynamic and network analysts
 are skipped; the run carries the degradation reason `no sandbox ran …` (or,
 with no report at all, the reason it always had); `run_summary.sandbox` holds
 `{status, statement}` and the report's run summary prints it; and the entry
 becomes the report's *Sandbox* section, which the console files on the dynamic
 tab. A recorded fixture is said to be one — the same entry, then the sandbox
 views as before. A live sandbox's report is read as it always was.
-- **Tool servers (MCP)** — additional servers declared in the settings store,
-  each with the tools it is allowed to expose and the agents allowed to call
-  it.
 
 Every provider that can be reached over the network has a probe behind a Test
 button in the console; see [configuration.md](configuration.md).

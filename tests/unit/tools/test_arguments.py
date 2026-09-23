@@ -10,8 +10,12 @@ class TestUnquoted:
         for wrapped in ('"CreateMutex"', "'CreateMutex'", "`CreateMutex`", '  "CreateMutex" '):
             assert arguments.unquoted(wrapped) == "CreateMutex", wrapped
 
-    def test_only_one_pair(self) -> None:
-        assert arguments.unquoted('""CreateMutex""') == '"CreateMutex"'
+    def test_a_value_that_is_not_one_enclosed_value_is_left_as_written(self) -> None:
+        for kept in ('""CreateMutex""', '"a" or "b"', "'it's'"):
+            assert arguments.unquoted(kept) == kept, kept
+
+    def test_the_other_quote_characters_inside_are_part_of_the_value(self) -> None:
+        assert arguments.unquoted('"it\'s"') == "it's"
 
     def test_whitespace_inside_the_quotes_is_part_of_the_value(self) -> None:
         assert arguments.unquoted('" Mutex "') == " Mutex "

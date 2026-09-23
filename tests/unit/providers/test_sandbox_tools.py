@@ -259,6 +259,22 @@ class TestNoReport:
         ):
             assert call() == {"error": "no sandbox report for this job", "tool": "sandbox"}
 
+    def test_the_mock_s_stand_in_is_answered_as_no_sandbox_run(self) -> None:
+        from maljan.pipeline.sandbox_status import sandbox_status
+
+        stand_in = {"synthetic": True, "behavior": {"processes": []}, "signatures": []}
+        statement = sandbox_status(stand_in).statement
+
+        for call in (
+            lambda: sandbox_tools.sandbox_processes(stand_in),
+            lambda: sandbox_tools.sandbox_signatures(stand_in),
+            lambda: sandbox_tools.sandbox_report_section(stand_in, "behavior"),
+        ):
+            assert call() == {"error": statement, "tool": "sandbox"}
+        tools = sandbox_tools.sandbox_tools(_Container(stand_in))
+        processes = next(t for t in tools if t.name == "sandbox_processes")
+        assert processes.invoke({})["error"] == statement
+
 
 class TestToolSet:
     def test_the_tools_are_built_over_the_container_s_report(self) -> None:

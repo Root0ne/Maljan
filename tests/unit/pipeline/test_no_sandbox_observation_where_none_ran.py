@@ -1,12 +1,10 @@
 """No sandbox observation is stated where no sandbox ran.
 
-A scored run used the mock sandbox, which had no fixture for the sample and
-answered with an empty stand-in report. The pack rendered that stand-in as
-facts — "sandbox processes: 0 processes", "no network activity recorded" — and
-the report went on to speak of what the sample did "during sandbox
-execution", although nothing was executed. Every reader of the sandbox report
-now says what is true: no sandbox ran, or the report is a recorded fixture and
-not a live detonation, or (unchanged) what a sandbox observed.
+The mock sandbox answers a sample it has no fixture for with an empty
+stand-in report whose sections read like a detonation that did nothing. Every
+reader of the sandbox report says what is true of it: no sandbox ran, or the
+report is a recorded fixture and not a live detonation, or (unchanged) what a
+sandbox observed.
 """
 
 from __future__ import annotations

@@ -296,9 +296,8 @@ def sandbox_degradation_reason(report: Any) -> str | None:
     """The degradation reason a run whose sandbox never ran carries, or ``None``.
 
     No report at all keeps the reason it always had. The mock sandbox's empty
-    stand-in is the same absence and used to carry none, because it is a
-    non-empty dict: a scored run's judge and report were told nothing was
-    missing while the pack listed "0 processes" as an observation.
+    stand-in is the same absence, said with its cause; a report with contents,
+    a recorded fixture included, carries none.
     """
     if not isinstance(report, dict) or not report:
         return "no sandbox report (dynamic detonation unavailable) — static-only evidence"

@@ -1,20 +1,19 @@
-"""Reading a search argument the way the model meant it: without the quotes it copied.
+"""Reading a search argument without the quotes a model wrapped it in.
 
 A model that has just read a JSON answer, or that writes a search the way a
-person types one into a search box, wraps the value in quotes. Every
-``pattern`` one scored run's static analyst sent arrived as
-``"\\"CreateMutex\\""`` and matched nothing, although ``CreateMutexW`` was
-among the strings; the quotes were part of the needle. The analysis server
-already reads ``carved_path`` this way, and this is the same reading for the
-arguments a tool searches for or looks up by.
+person types one into a search box, wraps the value in quotes, and a quoted
+needle matches nothing the unquoted one would. The analysis server already
+reads ``carved_path`` this way, and this is the same reading for the arguments
+a tool searches for or looks up by.
 
-One matching pair around the whole value comes off, and nothing else changes:
-no unescaping, no case folding, no whitespace inside the quotes touched, and a
-value with no surrounding pair is passed through exactly as it arrived. The
-repair is never silent — every structured answer to a call whose argument was
-read this way carries, first, ``read_as``: the value each such argument was
-read as; a tool that answers in prose names the value it looked up. The
-ledger keeps the arguments as the model wrote them, so the record holds both.
+A pair of quotes that encloses the whole value comes off — the same quote
+character at both ends and nowhere between them — and nothing else changes: no
+unescaping, no case folding, no whitespace inside the quotes touched, and any
+other value is passed through exactly as it arrived. The repair is never
+silent: every structured answer to a call whose argument was read this way
+carries, first, ``read_as``, the value each such argument was read as; a tool
+that answers in prose names the value it looked up. The ledger keeps the
+arguments as the model wrote them, so the record holds both.
 """
 
 from __future__ import annotations
@@ -42,15 +41,19 @@ _RECORDED_IN_TEXT = "the answer names the value that was looked up"
 
 
 def unquoted(value: str) -> str:
-    """``value`` without one matching pair of surrounding quotes, or unchanged.
+    """``value`` without the pair of quotes that encloses it, or unchanged.
 
-    Whitespace outside the pair goes with it; whitespace inside stays, because
-    inside the quotes it is part of what was searched for.
+    The pair encloses the value when the same quote character opens and closes
+    it and does not occur between them: ``"a" or "b"`` is two quoted parts, not
+    one quoted value, and is left as written. Whitespace outside the pair goes
+    with it; whitespace inside stays, because inside the quotes it is part of
+    what was searched for.
     """
     text = value.strip()
-    if len(text) >= 2 and text[0] == text[-1] and text[0] in SURROUNDING_QUOTES:
-        return text[1:-1]
-    return value
+    if len(text) < 2 or text[0] not in SURROUNDING_QUOTES or text[-1] != text[0]:
+        return value
+    inner = text[1:-1]
+    return value if text[0] in inner else inner
 
 
 def _read(value: Any) -> Any:

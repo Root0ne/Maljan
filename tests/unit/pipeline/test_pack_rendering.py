@@ -177,14 +177,11 @@ class TestTheLines:
     def test_the_detection_labels_the_answer_carries_are_stated_with_their_counts(
         self,
     ) -> None:
-        """The recorded answer of a scored run carries no popular classification.
+        """A recorded answer that carries ``detections`` and no popular classification.
 
-        It carries ``detections``, one result label per engine that detected
-        the file, and every model of that run read "52/75 malicious" and
-        nothing else although eight of the labels named the same family. The
-        line now states the labels with how many engines gave each, most first
-        and then in the order the answer lists them, bounded, and says how
-        many distinct labels it left out. It counts; it does not decide.
+        Its labels are stated with how many engines gave each, most first and
+        then in the order the answer lists them, bounded, with the number of
+        distinct labels left out. The line counts; it does not decide.
         """
         entry = _entry("get_file_report", seq=17, server="virustotal")
 
@@ -213,6 +210,20 @@ class TestTheLines:
             "[ev_0001] reputation: VirusTotal 3/10 malicious, 3 detection labels, "
             "2 distinct (engines per label, most first): Trojan.Example ×2, Other.Label ×1"
         )
+
+    def test_each_label_is_bounded_as_well_as_their_number(self) -> None:
+        long_label = "Trojan." + "x" * 500
+        answer = {
+            "data": {
+                "detections": [long_label, long_label],
+                "last_analysis_stats": {"malicious": 2, "undetected": 8},
+            }
+        }
+        line = render_pack([_entry("get_file_report", answer, server="virustotal")], 0)
+
+        shown = line.split("most first): ", 1)[1]
+        assert shown.endswith("… ×2")
+        assert len(shown) == 80 + len(" ×2")
 
     def test_the_threat_intel_prose_is_read_for_its_count(self) -> None:
         entry = _entry(

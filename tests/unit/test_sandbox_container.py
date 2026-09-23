@@ -256,12 +256,15 @@ class TestMaljanAppSandboxProvider:
         report = _run(provider, sample)
 
         assert report is not None
-        # ``to_cape_shaped_dict`` hands a mock/cape source its ``raw`` back.
+        # ``to_cape_shaped_dict`` hands a mock/cape source its ``raw`` back. The
+        # stub reports as the mock, and a mock report that is not the stand-in
+        # was read from a fixture file, which it now says of itself.
         assert report == {
             "target": {"sha256": "abc"},
             "behavior": {},
             "signatures": [],
             "network": {},
+            "recorded_fixture": True,
         }
         names = [c[0] for c in provider.calls]
         assert names == ["submit", "wait", "fetch"]

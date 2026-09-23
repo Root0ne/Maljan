@@ -581,8 +581,9 @@ change landed on `main`.
   own dependencies.
 - **An emulating string decoder on the analysis server.** `floss` recovers the
   decoded, stack and tight strings of a PE by emulating the sample's own
-  decoding and string-building functions under vivisect (FLOSS, run as a child
-  process with a 600 s ceiling; the sample is never executed). Each row names
+  decoding and string-building functions under vivisect (FLOSS, FLARE's pinned
+  standalone build run as a child process with a 600 s ceiling and a 4 GiB
+  address-space limit; the sample is never executed). Each row names
   the function that decoded or built the string, as a virtual address and
   relative to the image base, and a decoded string its call site. The answer is
   paged like `strings`, with `kinds` and `pattern` filters, and only the first
@@ -1358,11 +1359,16 @@ change landed on `main`.
   A report the mock read from a fixture file is marked `recorded_fixture` and
   said to be a recorded fixture, not a live detonation, before its contents.
   A live sandbox's report is read as before.
-  **Upgrading:** a run with no sandbox report, or with the mock's stand-in,
-  has one more pack entry (`sandbox_status`) before the reputation lookup, so
-  that lookup's ledger id moves by one; a stand-in run is now marked degraded
-  with its reason, as a run with no report already was; `run_summary` has a
-  `sandbox` key (`null` when a sandbox observed the run).
+  **Upgrading:** the pack's ledger ids move, differently per case (a PE's pack
+  as the example). With no sandbox report, `sandbox_status` is added before the
+  reputation lookup, which moves by +1 (`ev_0010` → `ev_0011`). With the mock's
+  stand-in, `sigma_match_sandbox`, `lolbin_lookup` and the five sandbox views
+  (seven entries) give way to the one `sandbox_status`, so the reputation lookup
+  moves by −6 (`ev_0017` → `ev_0011`). With a recorded fixture, `sandbox_status`
+  comes before the sandbox views, so every sandbox view, the capture summary
+  when there is one, and the reputation lookup move by +1. A stand-in run is now
+  marked degraded with its reason, as a run with no report already was;
+  `run_summary` has a `sandbox` key (`null` when a sandbox observed the run).
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was
@@ -3407,11 +3413,12 @@ and `core.preprocessing.category_inference_backend`. `core.analysis.sigma_rules_
 is not dropped but moved: it becomes `MALJAN_SIGMA_RULES_DIR` in the `analysis`
 tool server's `env`, and the migration moves a stored value across for you.
 
-`floss` needs the new `floss` extra: `uv sync --extra floss` (or
-`--all-extras`, which `make setup` already runs) pins `flare-floss` 3.1.1,
-Apache-2.0. Its `networkx<3.2` bound moves networkx from 3.6.1 to 3.1 in the
-lockfile, which the `capa` and `tools` extras share; nothing in the product's
-core dependencies moves. `binary2strings`, which FLOSS needs, ships no Linux
-wheel and is built from source, so a host installing this extra needs a C++
-compiler. The backend image does not install it; without it the capability
-manifest marks `floss` unavailable and the model is not offered the tool.
+`floss` runs FLOSS 3.1.1 (Apache-2.0) as FLARE's standalone Linux build, not
+as a Python dependency: the lockfile does not change. The backend image
+downloads the release zip in a build stage, checks it against its pinned sha256
+and installs the executable at `/usr/local/bin/floss`. On a host outside the
+image, run `scripts/install_floss.sh`, which does the same into
+`${XDG_DATA_HOME:-~/.local/share}/maljan/tools/floss-3.1.1/`, or name a copy of
+the pinned build in `MALJAN_FLOSS_PATH` in the `analysis` server's `env`.
+Without it the capability manifest marks `floss` unavailable and the model is
+not offered the tool.

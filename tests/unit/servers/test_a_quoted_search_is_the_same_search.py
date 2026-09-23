@@ -1,10 +1,9 @@
 """A search argument wrapped in quotes searches for what is inside them.
 
-A scored run's static analyst sent every ``pattern`` as ``"\\"CreateMutex\\""``
-and was told ``total_matched: 0`` each time, although ``CreateMutexW`` was one
-of the sample's strings: the quotes were part of the needle. ``carved_path``
-was already read without them; every argument a sidecar tool searches for or
-looks up by now is too, the answer says what it was read as, and the tool's
+A pattern sent with a pair of literal quotes around ``CreateMutex`` finds
+``CreateMutexW`` as the bare pattern does. Every argument a sidecar tool
+searches for or looks up by is read without the quotes that enclose it, as
+``carved_path`` is; the answer says what it was read as, and the tool's
 description says the argument is the raw text, unquoted.
 """
 

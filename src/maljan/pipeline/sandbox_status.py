@@ -1,18 +1,16 @@
 """Whether a sandbox ran, read once, in the words every reader of the report uses.
 
-A run's sandbox report is one of three things, and they read alike. A live
-sandbox's report is an observation, empty or not. The mock sandbox's recorded
-fixture is an observation too, but of some earlier detonation, not of this
-run. And when the mock has no fixture for the sample it answers with an empty
-stand-in, marked ``synthetic``, which is no observation at all — one scored
-run's pack rendered it as "sandbox processes: 0 processes" and "no network
-activity recorded", and the report built on that spoke of what the sample did
-"during sandbox execution" when nothing had been executed.
+A run's sandbox report is one of three things, and their sections read alike.
+A live sandbox's report is an observation, empty or not. The mock sandbox's
+recorded fixture is an observation too, but of some earlier detonation, not of
+this run. And when the mock has no fixture for the sample it answers with an
+empty stand-in, marked ``synthetic``, which is no observation at all.
 
-The pack, the degradation reasons, the run summary and the report all ask this
-module rather than the report's keys, so each says the same true thing: no
-sandbox ran, or the report is a recorded fixture and not a live detonation, or
-nothing is added to what a sandbox observed.
+The pack, the in-process sandbox tools, the degradation reasons, the run
+summary and the report all ask this module rather than the report's keys, so
+each says the same true thing: no sandbox ran, or the report is a recorded
+fixture and not a live detonation, or nothing is added to what a sandbox
+observed.
 """
 
 from __future__ import annotations
