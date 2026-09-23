@@ -41,6 +41,7 @@ from maljan.agents.base_agent import (
     LoopBudget,
     _trim_for_synthesis,
     _turn_key,
+    counted_window_tokens,
     is_the_graph_s_step_stop,
     loop_limits,
     note_a_window_that_moved,
@@ -723,7 +724,11 @@ class JudgeAgent(BudgetMeter):
                     "JudgeAgent ReAct loop ended: %s; writing the reasoning from what it gathered.",
                     why,
                 )
-                return await self._reasoning_from_what_was_gathered(_msgs, float(timeout), settings)
+                # What is left of the loop's own time, as the analysts'
+                # salvage gets: loop and salvage together stay inside it.
+                return await self._reasoning_from_what_was_gathered(
+                    _msgs, budget.seconds_left(), settings, counted_window_tokens(room)
+                )
             # The graph's own sentence at its step limit is not the judge's
             # reasoning, and what reads the reasoning next is a model. The
             # judge wrote none; the budget record says why.
@@ -755,7 +760,7 @@ class JudgeAgent(BudgetMeter):
                     room.forget_conversation(recorder.agent)
 
     async def _reasoning_from_what_was_gathered(
-        self, msgs: list[Any], timeout: float, settings: Any
+        self, msgs: list[Any], timeout: float, settings: Any, window_tokens: int = 0
     ) -> str:
         """The judge's reasoning, asked for once from what its loop gathered.
 
@@ -765,8 +770,13 @@ class JudgeAgent(BudgetMeter):
         salvage that fails leaves the reasoning empty, which mediation reads
         as no agreement.
         """
+        if timeout < 1.0:
+            self.logger.warning("JudgeAgent reasoning salvage skipped: no time left.")
+            return ""
         sendable, _dropped = nudge_turns(msgs)
-        trimmed = _trim_for_synthesis(sendable, synthesis_budget_chars(settings, "judge"))
+        trimmed = _trim_for_synthesis(
+            sendable, synthesis_budget_chars(settings, "judge", window_tokens)
+        )
         directive = HumanMessage(
             content=(
                 "Do NOT call any more tools. Using ONLY the tool output already in this "

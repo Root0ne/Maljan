@@ -1070,8 +1070,13 @@ _WINDOW_FULL_SIGNATURES = (
 # The reply cap and the window, as a server that names ``max_tokens`` states
 # them: "'max_tokens' … is too large: 8192. This model's maximum context length
 # is 32768 tokens and your request has 24808 input tokens".
-_REPLY_CAP_RE = re.compile(r"too large:\s*(\d+)")
-_WINDOW_RE = re.compile(r"maximum context length is\s*(\d+)")
+_REPLY_CAP_RE = re.compile(r"too large:\s*(\d[\d,]*)")
+_WINDOW_RE = re.compile(r"maximum context length is\s*(\d[\d,]*)")
+
+
+def _number(written: str) -> int:
+    """A count as a server wrote it, with or without thousands separators."""
+    return int(written.replace(",", ""))
 
 
 def window_full_error(exc: BaseException) -> bool:
@@ -1100,7 +1105,7 @@ def window_full_error(exc: BaseException) -> bool:
         window = _WINDOW_RE.search(text)
         if cap is None or window is None:
             return False
-        return int(cap.group(1)) < int(window.group(1))
+        return _number(cap.group(1)) < _number(window.group(1))
     except Exception:  # noqa: BLE001 — an error path never raises another error
         return False
 

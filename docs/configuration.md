@@ -639,7 +639,11 @@ its own room; its loop is streamed, ends on the step it runs out of room, and
 ends with `no_room` on the same strict full-window answer once it has gathered
 something. Its reasoning is then asked for once, with no tools, from what it
 gathered, and mediation reads the verdict from that; a judge loop that fails
-before gathering anything fails as before.
+before gathering anything fails as before. Both salvages re-send the
+conversation trimmed to two fifths of the window the budget counts on — the
+smaller of the declared and the probed one, so a `context_size` left larger
+than the served window cannot size a salvage close to the request the server
+just refused — and each gets only what is left of its loop's time.
 
 The window itself is learned free of charge and without asking the operator
 anything. In order:

@@ -3275,7 +3275,10 @@ change landed on `main`.
   and ended on `no_room`, and its reasoning then written once from what it
   gathered — where before every judge answer was capped against whatever
   conversation happened to be live, usually none. "context shift" also joins the
-  wordings that retire a learned window.
+  wordings that retire a learned window. The forced synthesis, the analysts' and
+  the judge's, now trims its conversation from the window the budget counts on
+  (the smaller of the declared and the probed one) rather than from the declared
+  size alone, and the judge's gets only what is left of its loop's time.
   **Upgrading:** a derived cap reaches zero sooner for an agent with many tools,
   so a run on a small window ends tool phases earlier than before and says
   `no_room` where it used to overflow; unticking the tools an agent does not

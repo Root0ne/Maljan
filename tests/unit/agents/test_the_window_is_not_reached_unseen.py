@@ -391,3 +391,49 @@ class TestNoNudgeIntoAWindowTheServerSaysIsFull:
         assert len(asked_to_stop) == 1, "the salvage only; no nudge re-sends the full window"
         assert answer == ""
         assert agent._answer_unstructured is True
+
+
+class TestTheSalvageIsSizedFromTheCountedWindow:
+    def test_a_declared_window_larger_than_the_probed_one_does_not_size_it(self) -> None:
+        from unittest.mock import MagicMock
+
+        from maljan.agents.base_agent import counted_window_tokens, synthesis_budget_chars
+
+        cfg = MagicMock()
+        cfg.llm.provider = "openai"
+        cfg.llm.agents = {}
+        cfg.llm.openai.context_size = 65_536
+        budget = _budget()  # probed 32,768
+
+        declared_only = synthesis_budget_chars(cfg, "static")
+        counted = synthesis_budget_chars(cfg, "static", counted_window_tokens(budget))
+
+        assert declared_only > budget.tool_budget_chars(), "the stale declaration overshoots"
+        assert counted == int(WINDOW * 4 * 0.4)
+        assert counted < budget.tool_budget_chars()
+
+    def test_a_budget_that_derives_nothing_leaves_the_declaration_in_charge(self) -> None:
+        from maljan.agents.base_agent import counted_window_tokens
+
+        unknown = cw.ContextBudget(cw.WindowFact(8192, cw.FALLBACK, "none"))
+        assert counted_window_tokens(unknown) == 0
+        assert counted_window_tokens(None) == 0
+
+
+class TestNumbersWrittenWithSeparators:
+    @pytest.mark.parametrize(
+        ("said", "full"),
+        [
+            ("'max_tokens' is too large: 900. This model's maximum context length is 1,000", True),
+            (
+                "'max_tokens' is too large: 8,192. This model's maximum context length is 32,768",
+                True,
+            ),
+            (
+                "'max_tokens' is too large: 40,000. This model's maximum context length is 32,768",
+                False,
+            ),
+        ],
+    )
+    def test_the_numbers_are_compared_whole(self, said: str, full: bool) -> None:
+        assert cw.window_full_error(_server_error(said, status=400)) is full

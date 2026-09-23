@@ -132,9 +132,17 @@ def _model_context_tokens(cfg: Any, agent_name: str) -> int:
         return 0
 
 
-def synthesis_budget_chars(cfg: Any, agent_name: str) -> int:
-    """How many characters of conversation the salvage may re-send."""
-    tokens = _model_context_tokens(cfg, agent_name)
+def synthesis_budget_chars(cfg: Any, agent_name: str, window_tokens: int = 0) -> int:
+    """How many characters of conversation the salvage may re-send.
+
+    ``window_tokens`` is the window the job's context budget counts on — the
+    smaller of the declared and the probed one — and wins over the declared
+    size alone when there is one. A declaration left larger than the served
+    window sized a salvage after a server-reported full window at close to the
+    conversation the server had just refused.
+    """
+    served = int(window_tokens or 0)
+    tokens = served if served > 0 else _model_context_tokens(cfg, agent_name)
     if tokens <= 0:
         return _SYNTHESIS_MIN_CHARS
     return max(_SYNTHESIS_MIN_CHARS, int(tokens * _CHARS_PER_TOKEN * _SYNTHESIS_CONTEXT_SHARE))
@@ -206,6 +214,15 @@ def request_chars(messages: list, definition_chars: int, per_token: int) -> int:
     """
     measured = sum(_message_chars(m) for m in messages) + max(0, int(definition_chars))
     return max(measured, _reported_request_chars(messages, per_token))
+
+
+def counted_window_tokens(budget: Any) -> int:
+    """The window a job's context budget derives from, or ``0`` where it derives nothing."""
+    from maljan.llm.context_window import ContextBudget
+
+    if isinstance(budget, ContextBudget) and budget.derives:
+        return int(budget.window.tokens)
+    return 0
 
 
 def _conversation_units(msgs: list) -> list[list]:
@@ -3421,7 +3438,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             return ""
 
-        budget = synthesis_budget_chars(get_settings(), self.name)
+        budget = synthesis_budget_chars(
+            get_settings(), self.name, counted_window_tokens(self._context_budget())
+        )
         # The same transcript rule the nudge follows: a tool call whose
         # arguments never parsed is not sent back to the server.
         sendable, _dropped = nudge_turns(msgs)

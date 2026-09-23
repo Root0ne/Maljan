@@ -156,14 +156,14 @@ def _judge(budget: Any, model: _Server) -> JudgeAgent:
 
 
 @contextlib.contextmanager
-def _settings() -> Iterator[None]:
+def _settings(declared: int = 0) -> Iterator[None]:
     with patch("maljan.agents.judge_agent.get_settings") as settings:
         cfg = settings.return_value
         cfg.react_agent_timeout = 600
         cfg.react_agent_max_steps = 40
         cfg.llm.provider = "openai"
         cfg.llm.agents = {}
-        cfg.llm.openai.context_size = 0
+        cfg.llm.openai.context_size = declared
         yield
 
 
@@ -214,7 +214,14 @@ class TestTheJudgeNeverReachesTheWindow:
 
 
 class TestAGenuineOverflowAfterGathering:
-    def test_it_ends_the_tool_phase_and_the_verdict_is_still_reached(self) -> None:
+    @pytest.mark.parametrize("declared", [0, 65_536], ids=["undeclared", "declared-larger"])
+    def test_it_ends_the_tool_phase_and_the_verdict_is_still_reached(self, declared: int) -> None:
+        """Also where the settings declare a window larger than the one served.
+
+        The salvage is sized from the window the budget counts on, not from the
+        declaration: sized from 65,536 it would re-send close to the
+        conversation the server had just refused, and be refused in turn.
+        """
         # Content that tokenises worse than the budget's three characters a
         # token, and no usage from the server: only the server can see it.
         model = _Server(chars_per_token=2.4)
@@ -227,7 +234,7 @@ class TestAGenuineOverflowAfterGathering:
             return judge._fallback_mediate(reasoning)
 
         with (
-            _settings(),
+            _settings(declared),
             patch.object(judge, "_initialize_mcp_client", AsyncMock()),
             patch.object(judge, "_extract_mediator_verdict", _extract),
         ):
@@ -247,3 +254,30 @@ class TestAGenuineOverflowAfterGathering:
 
         with pytest.raises(openai.InternalServerError):
             _loop(judge)
+
+
+class TestTheJudgeSalvageKeepsToTheLoopsTime:
+    def test_it_is_given_what_is_left_not_a_fresh_timeout(self) -> None:
+        model = _Server(chars_per_token=3.0)
+        judge = _judge(_budget(), model)
+        given: list[float] = []
+
+        async def _salvage(msgs: Any, timeout: float, settings: Any, window: int = 0) -> str:
+            given.append(timeout)
+            return REASONING
+
+        with patch.object(judge, "_reasoning_from_what_was_gathered", _salvage):
+            _loop(judge)
+
+        assert given and 0 < given[0] < 600
+
+    def test_with_no_time_left_it_is_not_sent(self) -> None:
+        model = _Server(chars_per_token=3.0)
+        judge = _judge(_budget(), model)
+
+        with _settings():
+            reasoning = asyncio.run(
+                judge._reasoning_from_what_was_gathered([HumanMessage(content="x")], 0.2, None)
+            )
+
+        assert reasoning == ""
