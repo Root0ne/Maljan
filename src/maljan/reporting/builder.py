@@ -71,8 +71,9 @@ class MalwareReportBuilder:
         report = builder.build_deterministic()
         if not is_mock:
             report = builder.apply_narrative(narrative_output)
-        report = builder.attach_detection_signatures(report)
         builder.render_extended_stix(report)  # mutates report.stix_bundle_extended
+        report.consolidated_iocs = build_consolidated_iocs(report)  # reads the export
+        report = builder.attach_detection_signatures(report)  # published rows only
     """
 
     def __init__(

@@ -4323,20 +4323,6 @@ def make_report_node(
         except Exception as exc:  # noqa: BLE001
             logger.warning("report_node: figure generation failed (%s).", exc)
 
-        # Detection signatures — template-based YARA/Sigma/Suricata
-        # generation. Runs after narrative so the LLM-written family name can
-        # influence rule metadata. Disabled via config when desired.
-        if cfg is None or cfg.auto_generate_detection_rules:
-            try:
-                report = MalwareReportBuilder.attach_detection_signatures(report)
-                logger.info(
-                    "report_node: detection rules generated (count=%d, errors=%d).",
-                    len(report.detection_signatures),
-                    sum(1 for r in report.detection_signatures if r.compile_error),
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("report_node: detection rule generation failed (%s).", exc)
-
         extended_dump: dict[str, Any] | None = None
         if cfg is None or cfg.include_extended_stix:
             try:
@@ -4427,6 +4413,22 @@ def make_report_node(
                 report.consolidated_iocs = build_consolidated_iocs(report)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("report_node: the IOC table was not re-read (%s).", exc)
+
+        # Detection signatures — template-based YARA/Sigma/Suricata
+        # generation. Runs after narrative so the LLM-written family name can
+        # influence rule metadata, and after the export, because a draft matches
+        # only on what the run publishes: the IOC table's published rows, read
+        # once the export has decided them. Disabled via config when desired.
+        if cfg is None or cfg.auto_generate_detection_rules:
+            try:
+                report = MalwareReportBuilder.attach_detection_signatures(report)
+                logger.info(
+                    "report_node: detection rules generated (count=%d, errors=%d).",
+                    len(report.detection_signatures),
+                    sum(1 for r in report.detection_signatures if r.compile_error),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("report_node: detection rule generation failed (%s).", exc)
 
         # Post-pipeline FP linter. Run after every other
         # mutation has happened (narrative + detection sigs + STIX dump)

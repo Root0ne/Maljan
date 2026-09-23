@@ -1405,7 +1405,11 @@ class MarkdownRenderer:
                 _absent_subsection(
                     "10.2",
                     "Draft detection rules",
-                    "Nothing generated in this run: no draft rule was built from this report.",
+                    "Nothing generated in this run: the verdict is Benign, and a Benign run "
+                    "publishes no malicious indicator to draft a rule from."
+                    if str(report.verdict or "").strip().lower() == "benign"
+                    else "Nothing generated in this run: no draft rule was built from the "
+                    "indicators this report publishes.",
                 )
             )
         hunting = [rec for rec in report.defensive_recommendations if rec.detection]

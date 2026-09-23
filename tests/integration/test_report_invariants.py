@@ -57,7 +57,7 @@ def _report(*, degraded: bool = False, confidence: float = 0.91) -> MalwareRepor
         static=StaticAnalysis(
             sections=[PESection(name=".text", virtual_address="0x1000", entropy=7.7)]
         ),
-        network=NetworkIOCs(domains=[NetworkDomain(fqdn="c2.invariant.test")]),
+        network=NetworkIOCs(domains=[NetworkDomain(fqdn="c2.invariant.example.org")]),
         ttp_mappings=[
             TTPMapping(
                 technique_id="T1055",

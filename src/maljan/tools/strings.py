@@ -41,6 +41,13 @@ _IOC_SOURCE = "strings"
 
 _URL_RE = re.compile(rb"https?://[A-Za-z0-9._\-/?=&%:#~+]+")
 _IP_RE = re.compile(rb"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+# What a version number is written after: ``version="6.0.0.0"`` in an
+# application manifest, ``FileVersion 10.0.19041.1``, ``v2.1.0.4``. Four
+# dotted numbers there are a version, not an address; a signed benign tool's
+# manifest put ``6.0.0.0`` into the network block and from there into a drafted
+# alert rule for "C2 IP".
+_VERSION_BEFORE_RE = re.compile(rb"(?:version|ver|\bv)\s*[=:]?\s*[\"']?$", re.IGNORECASE)
+_VERSION_LOOKBACK = 16
 _REG_RE = re.compile(rb"HK(?:LM|CU|CR|U|CC)[\\\\][A-Za-z0-9_\-\\\\ ./]+")
 # NB the single backslashes. This pattern used to read ``[A-Za-z]:\\\\`` and
 # ``[...\\\\ ]``, which in a raw bytes literal is an escaped backslash *pair* —
@@ -178,10 +185,12 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
             break
         for match in _URL_RE.findall(text.encode("ascii", errors="ignore")):
             _add("url", match.decode("ascii", errors="ignore"))
-        for match in _IP_RE.findall(text.encode("ascii", errors="ignore")):
-            ip = match.decode("ascii", errors="ignore")
-            # 127.0.0.1 / 0.0.0.0 / RFC1918 filtered as noise
-            if _is_meaningful_ip(ip):
+        encoded = text.encode("ascii", errors="ignore")
+        for found in _IP_RE.finditer(encoded):
+            ip = found.group().decode("ascii", errors="ignore")
+            # 127.0.0.1 / 0.0.0.0 / RFC1918 filtered as noise, and a version
+            # number is not an address whatever its shape.
+            if _is_meaningful_ip(ip) and not _written_as_a_version(encoded, found.start()):
                 _add("ip", ip)
         for match in _REG_RE.findall(text.encode("ascii", errors="ignore")):
             _add("registry", match.decode("ascii", errors="ignore"))
@@ -255,6 +264,12 @@ def _inside_a_longer_host(start: int, end: int, found: list[tuple[int, int, str]
             continue
         return True
     return False
+
+
+def _written_as_a_version(text: bytes, start: int) -> bool:
+    """Whether the dotted numbers at ``start`` follow a version word."""
+    before = text[max(0, start - _VERSION_LOOKBACK) : start]
+    return _VERSION_BEFORE_RE.search(before) is not None
 
 
 def _is_meaningful_ip(ip: str) -> bool:

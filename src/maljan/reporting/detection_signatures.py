@@ -37,7 +37,6 @@ from maljan.reporting.models import (
     PersistenceMechanism,
     RegistryMod,
     SandboxSignature,
-    StringIOC,
 )
 
 # yara-python is an optional dependency (C extension). When absent we still
@@ -81,7 +80,18 @@ def build_detection_rules(report: MalwareReport) -> list[DetectionRule]:
       ungrounded OR the sample platform is unknown.
     * **Suricata** is network-fokus; the rule body fires on PCAP IOCs
       regardless of host OS, so it's safe to ship.
+
+    Every value a draft matches on is one this run **publishes**: a row of the
+    report's IOC table the one publish rule answered ``yes`` for, which is what
+    the STIX export and ``/iocs`` carry. A Benign verdict publishes no
+    malicious indicator, so it gets no draft at all, and the report says so.
+    Twenty ``trojan-activity`` rules were drafted for a signed benign tool —
+    certificate hosts, the vendor's home page and a version number read as an
+    address — because the drafts read every row the string sweep produced.
     """
+    if is_benign(report):
+        logger.info("detection_signatures: the verdict is Benign; no draft rule is generated.")
+        return []
     sigma_skip = _sigma_gate_reason(report)
     yara_skip = _yara_gate_reason(report)
     if sigma_skip:
@@ -119,6 +129,30 @@ def build_detection_rules(report: MalwareReport) -> list[DetectionRule]:
         "yes" if yara_skip else "no",
     )
     return rules
+
+
+def is_benign(report: MalwareReport) -> bool:
+    """Whether the run's published verdict is Benign."""
+    return str(getattr(report, "verdict", "") or "").strip().lower() == "benign"
+
+
+# The IOC-table kinds a draft may match on, and the network kinds among them.
+_DRAFT_STRING_KINDS = frozenset({"url", "domain", "ip", "registry", "mutex", "command", "path"})
+_DRAFT_NETWORK_KINDS = frozenset({"domain", "ip", "url"})
+
+
+def _published_rows(report: MalwareReport) -> list[Any]:
+    """The rows of the report's IOC table this run publishes, in the table's order.
+
+    The table the report prints and ``/iocs`` serves, and the one publish rule's
+    answer on each row: a draft matches only on what the platform publishes.
+    """
+    rows = list(getattr(report, "consolidated_iocs", None) or [])
+    if not rows:
+        from maljan.reporting.builder import build_consolidated_iocs
+
+        rows = build_consolidated_iocs(report)
+    return [row for row in rows if str(getattr(row, "published", "") or "") == "yes"]
 
 
 # Names that assert an attribution the report does not actually have. A rule
@@ -217,20 +251,6 @@ def _yara_gate_reason(report: MalwareReport) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _rule_matched_imports(report: MalwareReport) -> list[str]:
-    """API names the pack's technique rules matched, in first-seen order."""
-    out: list[str] = []
-    static = report.static
-    for hit in static.api_technique_hits if static is not None else []:
-        if hit.get("source") != "api_capability":
-            continue
-        for api in hit.get("matched_apis") or []:
-            name = str(api).strip()
-            if name and name not in out:
-                out.append(name)
-    return out
-
-
 def _build_yara(report: MalwareReport) -> DetectionRule | None:
     """Build a single YARA rule that matches the sample by hash and IOC strings.
 
@@ -238,6 +258,11 @@ def _build_yara(report: MalwareReport) -> DetectionRule | None:
     - ``hash.sha256(0, filesize) == "..."`` always present (sha256 is required)
     - ``pe.imphash() == "..."`` when imphash is known
     - ``N of them`` when at least two string IOCs are collected
+
+    The strings are the published rows of the IOC table and nothing else. The
+    import names the pack's technique rules fired on used to be strings here
+    too, and ``8 of them`` over common API names matches a great deal of
+    ordinary software: an import name is not an indicator this run publishes.
     """
     sha256 = report.identity.hashes.sha256
     if not sha256:
@@ -247,21 +272,14 @@ def _build_yara(report: MalwareReport) -> DetectionRule | None:
     strings: list[tuple[str, str]] = []  # (slot, value)
     sources: list[str] = [f"sha256:{sha256}"]
 
-    if report.static is not None:
-        for ioc in report.static.interesting_strings[:_MAX_YARA_STRINGS]:
-            if not _yara_string_eligible(ioc):
-                continue
-            slot = f"$s{len(strings)}"
-            strings.append((slot, ioc.value))
-            sources.append(f"string:{ioc.kind}:{ioc.value[:80]}")
-        # The imports worth a string are the ones a rule fired on: the pack's
-        # ``api_capability`` rows carry the API names that cleared a technique
-        # rule's floor, and the report keeps them under ``api_technique_hits``.
-        # Bare names, since that is how they sit in an import table.
-        for api in _rule_matched_imports(report)[: max(0, _MAX_YARA_STRINGS - len(strings))]:
-            slot = f"$s{len(strings)}"
-            strings.append((slot, api))
-            sources.append(f"import:{api}")
+    for row in _published_rows(report):
+        if len(strings) >= _MAX_YARA_STRINGS:
+            break
+        if not _yara_string_eligible(row):
+            continue
+        slot = f"$s{len(strings)}"
+        strings.append((slot, row.value))
+        sources.append(f"string:{row.kind}:{row.value[:80]}")
 
     # Gated above when the seed is a placeholder, so this normally uses the real
     # family; _rule_name_component keeps the name honest anyway should the gate
@@ -335,15 +353,14 @@ def _render_yara(
     return "\n".join(lines) + "\n"
 
 
-def _yara_string_eligible(ioc: StringIOC) -> bool:
+def _yara_string_eligible(ioc: Any) -> bool:
     """Filter out IOCs that would produce noisy or unsafe YARA strings."""
-    if not ioc.value:
+    value = str(getattr(ioc, "value", "") or "")
+    if not value:
         return False
-    if len(ioc.value) < 4 or len(ioc.value) > 200:
+    if len(value) < 4 or len(value) > 200:
         return False
-    if ioc.kind in {"url", "domain", "ip", "registry", "mutex", "command", "path"}:
-        return True
-    return False
+    return str(getattr(ioc, "kind", "") or "") in _DRAFT_STRING_KINDS
 
 
 def _escape_yara(value: str) -> str:
@@ -560,11 +577,11 @@ _SURICATA_MAX_BODY_BYTES = 16_000
 
 
 def _build_suricata(report: MalwareReport) -> DetectionRule | None:
-    if report.network is None:
-        return None
-    domains = [d for d in report.network.domains if d.is_suspicious] or list(report.network.domains)
-    ips = list(report.network.ips)
-    urls = list(report.network.urls)
+    """Alert rules over the network indicators this run publishes, and no others."""
+    published = [row for row in _published_rows(report) if row.kind in _DRAFT_NETWORK_KINDS]
+    domains = [NetworkDomain(fqdn=row.value) for row in published if row.kind == "domain"]
+    ips = [NetworkIP(address=row.value) for row in published if row.kind == "ip"]
+    urls = [NetworkURL(url=row.value) for row in published if row.kind == "url"]
 
     if not (domains or ips or urls):
         return None
