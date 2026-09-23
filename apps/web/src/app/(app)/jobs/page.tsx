@@ -25,6 +25,10 @@ import {
 } from "@/lib/analyses";
 import { countLabel, formatDuration, timeAgo } from "@/lib/report-utils";
 import { verdictLabel, verdictTone } from "@/lib/verdict";
+import CopyButton from "@/components/ui/CopyButton";
+
+const COPY_CLASS =
+  "px-2 py-0.5 text-[11px] font-mono border border-border rounded text-text-secondary hover:text-text-primary hover:border-text-muted";
 
 const STATUS_BADGE: Record<string, { class: string; dot: string }> = {
   completed: { class: "text-status-green", dot: "bg-status-green" },
@@ -292,7 +296,25 @@ function AnalysesList() {
                         </span>
                       )}
                     </Link>
-                    <div className="flex items-center gap-3 ml-3">
+                    <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 ml-3">
+                      {/* Outside the link, because a control inside a link is
+                          two targets in one. The two values an operator pastes
+                          elsewhere — into a lookup, into a log search — one
+                          press each, and the name says which row's. */}
+                      {row.sha256 && (
+                        <CopyButton
+                          value={row.sha256}
+                          what={`SHA-256 of ${row.sample}, ${timeAgo(row.createdAt)}`}
+                          label="SHA-256"
+                          className={COPY_CLASS}
+                        />
+                      )}
+                      <CopyButton
+                        value={row.id}
+                        what={`job id of ${row.sample}, ${timeAgo(row.createdAt)}`}
+                        label="job id"
+                        className={COPY_CLASS}
+                      />
                       {canCancel && (
                         <button
                           onClick={(e) => {

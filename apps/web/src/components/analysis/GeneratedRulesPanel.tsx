@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 
 import { useReport } from "@/app/(app)/analysis/[id]/layout";
 import { api } from "@/lib/api";
-import { copyToClipboard, downloadBlob } from "@/lib/report-utils";
+import { downloadBlob } from "@/lib/report-utils";
+import CopyButton from "@/components/ui/CopyButton";
 import { getErrorMessage } from "@/lib/errors";
 import type { DetectionKind, DetectionRule } from "@/types/malware-report";
 
@@ -140,7 +141,6 @@ function KindButton({
 }
 
 function RuleCard({ rule }: { rule: DetectionRule }) {
-  const [copied, setCopied] = useState(false);
   const filename = `${rule.name}.${KIND_EXT[rule.kind]}`;
   return (
     <div className="bg-bg-surface border border-border rounded">
@@ -175,17 +175,11 @@ function RuleCard({ rule }: { rule: DetectionRule }) {
           )}
         </div>
         <div className="flex gap-2 shrink-0">
-          <button
-            onClick={async () => {
-              if (await copyToClipboard(rule.body)) {
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-              }
-            }}
+          <CopyButton
+            value={rule.body}
+            what={`${rule.kind} rule ${rule.name}`}
             className="px-2 py-1 text-[11px] uppercase tracking-wider text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted"
-          >
-            {copied ? "copied" : "copy"}
-          </button>
+          />
           <button
             onClick={() => downloadBlob(rule.body, filename, KIND_MIME[rule.kind])}
             className="px-2 py-1 text-[11px] uppercase tracking-wider text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted"

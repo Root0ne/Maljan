@@ -104,6 +104,12 @@ describe("one list from the two endpoints", () => {
   it("answers an empty list for nothing at all", () => {
     expect(analysisRows(null, null)).toEqual([]);
   });
+
+  it("carries the full sha256 from the job, and none for a report-only row", () => {
+    const rows = analysisRows([job()], [report({ id: "r2", job_id: "job-7" })]);
+    expect(rows.find((r) => r.id === "job-1")?.sha256).toBe("a".repeat(64));
+    expect(rows.find((r) => r.id === "job-7")?.sha256).toBeNull();
+  });
 });
 
 describe("the dashboard's latest runs", () => {

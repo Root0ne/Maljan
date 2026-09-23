@@ -21,6 +21,9 @@ export interface AnalysisRow {
   sampleId: string;
   /** The filename, else a hash prefix, else the sample id's prefix. */
   sample: string;
+  /** The sample's full SHA-256, when the job listing carried it. A row built
+   *  from a report alone has none, and offers nothing to copy. */
+  sha256: string | null;
   status: string;
   createdAt: string;
   durationSeconds: number | null;
@@ -70,6 +73,7 @@ export function analysisRows(
       id: job.id,
       sampleId: job.sample_id,
       sample: sampleLabel(job),
+      sha256: job.sample_sha256 || null,
       status: job.status,
       createdAt: job.created_at,
       durationSeconds: job.duration_seconds,
@@ -84,6 +88,7 @@ export function analysisRows(
       id: report.job_id,
       sampleId: "",
       sample: report.sample_filename || report.job_id.slice(0, 12),
+      sha256: null,
       status: "completed",
       createdAt: report.created_at,
       durationSeconds: null,

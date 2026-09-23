@@ -56,6 +56,39 @@ test.describe("Analyses", () => {
     await expectNoAlerts(page);
   });
 
+  test("a row copies its sha256 and its job id, and says so to a screen reader", async ({
+    sessionPage: page,
+  }) => {
+    const copied: string[] = [];
+    await page.exposeFunction("recordCopy", (text: string) => {
+      copied.push(text);
+    });
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: (text: string) =>
+            (window as unknown as { recordCopy: (t: string) => void }).recordCopy(text),
+        },
+      });
+    });
+    await page.goto("/jobs");
+
+    const sha = page.getByRole("button", { name: /^Copy SHA-256 of invoice_scan\.exe/ });
+    await sha.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("button", { name: /^Copied SHA-256 of invoice_scan\.exe/ })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /^Copied SHA-256 of invoice_scan\.exe/ })).toHaveCount(1);
+
+    await page.getByRole("button", { name: /^Copy job id of invoice_scan\.exe/ }).click();
+    await expect(page.getByRole("status").filter({ hasText: /^Copied job id of invoice_scan\.exe/ })).toHaveCount(1);
+
+    expect(copied).toEqual([
+      "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+      "job-1",
+    ]);
+  });
+
   test("a status nothing matches empties the list and says which one", async ({
     authenticatedPage: page,
   }) => {
