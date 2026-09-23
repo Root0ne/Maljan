@@ -125,6 +125,27 @@ class TestTheReader:
 
         assert found == []
 
+    @pytest.mark.parametrize(
+        ("text", "address"),
+        [
+            (b"server=185.23.44.10", "185.23.44.10"),
+            (b"Server: 185.23.44.10", "185.23.44.10"),
+            (b"c2server:91.200.10.4", "91.200.10.4"),
+            (b"driver 185.23.44.10", "185.23.44.10"),
+            (b"a_long_config_name_server=185.23.44.10", "185.23.44.10"),
+        ],
+    )
+    def test_a_word_that_ends_like_a_version_word_keeps_its_address(
+        self, text: bytes, address: str
+    ) -> None:
+        found = [
+            row["value"]
+            for row in iter_string_iocs(b"\x00" + text + b"\x00")
+            if row["kind"] == "ip"
+        ]
+
+        assert found == [address]
+
     def test_an_address_is_still_one(self) -> None:
         found = [
             row["value"]
