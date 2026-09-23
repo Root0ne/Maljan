@@ -36,12 +36,14 @@ REQUIRED_HEADINGS = [
 # The headings that appear only when the run filled the block behind them. An
 # empty heading reads as a gap in the sample rather than a run that never
 # called the tool behind it.
+# The sections a run fills only from evidence: printed with their one line
+# when a run has none, and never with a model's voice.
 EVIDENCE_DEPENDENT_HEADINGS = [
-    "## 4. Execution flow",
+    "## 4. Execution flow · _Measured_",
     "## 5. Technical analysis",
-    "## 7. Static properties",
+    "## 7. Static properties · _Measured_",
     "## 10. Detection",
-    "## 11. Recommendations",
+    "## 11. Recommendations · _Measured_",
 ]
 
 
@@ -87,11 +89,12 @@ class TestMinimalReport:
         for heading in REQUIRED_HEADINGS:
             assert heading in markdown, f"missing heading: {heading}"
 
-    def test_empty_typed_blocks_are_left_out(self) -> None:
+    def test_an_empty_section_is_printed_with_one_line_saying_so(self) -> None:
         report = MalwareReportBuilder.apply_fallback_narrative(_build())
         markdown = MarkdownRenderer().render(report)
         for heading in EVIDENCE_DEPENDENT_HEADINGS:
-            assert heading not in markdown, f"empty section printed: {heading}"
+            assert heading in markdown, f"section not printed: {heading}"
+        assert "_Written by the report model_" not in markdown
 
     def test_a_report_with_no_summary_says_so_and_lists_the_verdict_facts(self) -> None:
         report = MalwareReportBuilder.apply_fallback_narrative(_build(), "the round timed out")

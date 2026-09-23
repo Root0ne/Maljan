@@ -31,6 +31,11 @@ _EMAIL_KINDS = frozenset({"email", "email-addr"})
 # The schemes and the spellings they take once defanged.
 _SCHEMES = {"http": "hxxp", "https": "hxxps", "ftp": "fxp"}
 _SCHEME_RE = re.compile(r"^(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*)://")
+# A live scheme in prose whose host has just been defanged: the URL around an
+# indexed host that is not itself in the index.
+_LIVE_SCHEME_BEFORE_DEFANGED_RE = re.compile(
+    r"(?<![A-Za-z0-9+.-])(?P<scheme>https?|ftp)://(?=[^\s/?#]*\[[.:]\])", re.IGNORECASE
+)
 
 
 def _dots(value: str) -> str:
@@ -127,9 +132,18 @@ class ProseDefanger:
     def __call__(self, text: str) -> str:
         if not text or self._pattern is None:
             return text
-        return self._pattern.sub(
+        written = self._pattern.sub(
             lambda m: defang(m.group(0), self._kinds[m.group(0).lower()]), text
         )
+        # A host defanged inside a URL the index does not hold would otherwise
+        # leave the URL's scheme live in front of it.
+        return _LIVE_SCHEME_BEFORE_DEFANGED_RE.sub(_renamed_scheme, written)
+
+
+def _renamed_scheme(match: re.Match[str]) -> str:
+    scheme = match.group("scheme")
+    written = _SCHEMES[scheme.lower()]
+    return (written.upper() if scheme.isupper() else written) + "://"
 
 
 def defang_text(text: str, indicators: Iterable[tuple[str, str]]) -> str:

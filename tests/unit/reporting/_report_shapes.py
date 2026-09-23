@@ -8,7 +8,9 @@
   layout changed: a severity score, capability paragraphs, a conclusion, an IOC
   table with defanged values and no kinds, and none of the new fields.
 * :func:`hostile_report` — the rich report with a pipe and a newline written
-  into every value a sample or a model controls.
+  into every value a sample, a tool, a model or the judge controls; called with
+  another value it writes that one instead (a line that would open a heading,
+  a code fence).
 """
 
 from __future__ import annotations
@@ -140,6 +142,7 @@ def rich_report() -> MalwareReport:
             technique_name="Process Injection",
             evidence=[f"Injects into a suspended process [{ids['sandbox_signatures']}]"],
             confidence=0.8,
+            confidence_source="the static analyst",
             contributing_layers=["static", "capa"],
         ),
         CapabilityCell(
@@ -149,6 +152,7 @@ def rich_report() -> MalwareReport:
             technique_name="Registry Run Keys / Startup Folder",
             evidence=[f"Writes the Run key for its copy [{ids['sandbox_registry_ops']}]"],
             confidence=0.92,
+            confidence_source="the judge",
             contributing_layers=["dynamic", "judge"],
         ),
         CapabilityCell(
@@ -369,10 +373,9 @@ def stored_old_shape() -> MalwareReport:
 _HOSTILE = "a|b\nc"
 
 
-def hostile_report() -> MalwareReport:
-    """The rich report with a pipe and a newline in every value a sample or a model writes."""
+def hostile_report(h: str = _HOSTILE) -> MalwareReport:
+    """The rich report with ``h`` in every value a sample, a tool or a model writes."""
     report = rich_report()
-    h = _HOSTILE
     report.identity.file_name = f"in{h}voice.exe"
     report.identity.export_name = f"exp{h}.dll"
     report.identity.internal_name = f"int{h}"
@@ -386,6 +389,16 @@ def hostile_report() -> MalwareReport:
         s.value = f"{s.value}{h}"
         s.notes = f"note{h}"
     static.exports = [f"exp{h}"]
+    static.pdb_path = f"C:\\build{h}.pdb"
+    static.obfuscation_indicators = [f"xor{h}"]
+    static.embedded_resources = [{"type": f"RT_RCDATA{h}", "id": 1, "size": 10}]
+    report.unmapped_behaviours = [f"behaviour{h}"]
+    for cell in report.capability_matrix:
+        cell.technique_name = f"{cell.technique_name}{h}"
+    assert report.severity is not None
+    report.severity.affected_platforms = [f"Windows{h}"]
+    report.severity.likely_targets = [f"finance{h}"]
+    report.attribution.family_evidence_ids = [f"ev_0006{h}"]
     dynamic = report.dynamic
     assert dynamic is not None
     for node in dynamic.process_tree:
@@ -414,14 +427,17 @@ def hostile_report() -> MalwareReport:
     report.executive_summary = f"{report.executive_summary}{h}"
     for finding in report.key_findings:
         finding.text = f"{finding.text}{h}"
+        finding.evidence_ids = [*finding.evidence_ids, f"ev_9{h}"]
     for rec in report.defensive_recommendations:
         rec.action = f"{rec.action}{h}"
         rec.rationale = f"{rec.rationale}{h}"
         rec.detection = f"{rec.detection or 'd'}{h}"
+        rec.technique_id = f"{rec.technique_id}{h}"
     ta = report.technical_analysis
     assert ta is not None
     for step in ta.execution_flow:
         step.action = f"{step.action}{h}"
+        step.evidence_refs = [*step.evidence_refs, f"ev_9{h}"]
     for item in ta.configuration:
         item.key = f"{item.key}{h}"
         item.value = f"{item.value}{h}"
@@ -440,6 +456,8 @@ def hostile_report() -> MalwareReport:
     report.attribution.family = f"Example{h}Loader"
     report.malware_category = f"load{h}er"
     for section in report.sections:
+        section.title = f"{section.title}{h}"
         section.rows = [[f"{cell}{h}" for cell in row] for row in section.rows]
         section.items = [f"{item}{h}" for item in section.items]
+    report.intro_background = f"{report.intro_background}{h}"
     return report

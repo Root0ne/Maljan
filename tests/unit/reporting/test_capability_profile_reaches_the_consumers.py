@@ -70,19 +70,19 @@ class TestTheMarkdownReport:
     def test_the_rule_that_fired_is_a_row_with_its_source_and_entry(self) -> None:
         report, entry_id = _report()
         md = MarkdownRenderer().render(report)
-        (row,) = [
-            line for line in md.splitlines() if line.startswith("| - | T1055 | Process Injection")
-        ]
+        (row,) = [line for line in md.splitlines() if "| T1055 | Process Injection |" in line]
+        # The tactic is the catalogue's, not a dash.
+        assert not row.startswith("| - |")
         assert (
             "| rule allocating or writing memory in another process and starting a thread "
-            "in it, imports " in row
+            "in it (api_capability), imports " in row
         )
         # Nothing claimed T1055 in this run, so the rule's row is not a
         # published technique; it says so rather than borrowing the status.
         assert (
-            f"| pipeline:api_capability | rule match | rule match, not published | {entry_id} |"
-            in row
-        )
+            "| api_capability (rule match) | rule match | not published: a rule matched it "
+            f"and no producer claimed it | {entry_id} |"
+        ) in row
 
     def test_the_row_says_how_much_ordinary_software_the_same_rule_fires_on(self) -> None:
         """A deterministic association printed without its base rate reads as a

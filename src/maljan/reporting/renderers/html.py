@@ -29,7 +29,11 @@ from html import escape, unescape
 from markdown_it import MarkdownIt
 
 from maljan.reporting.models import Figure, MalwareReport
-from maljan.reporting.renderers.markdown import MarkdownRenderer, report_title
+from maljan.reporting.renderers.markdown import (
+    ABSENCE_PREFIXES,
+    MarkdownRenderer,
+    report_title,
+)
 
 # Each figure kind is anchored to the section it illustrates so the graphic sits
 # with the table or the prose it summarises rather than in a lump at the end.
@@ -235,8 +239,14 @@ class HtmlRenderer:
         appendix rather than being dropped.
         """
         chunks = [c for c in _H2_SPLIT_RE.split(body_html) if c]
-        present = {_heading_key(m.group(1)) for c in chunks for m in _H2_HEAD_RE.finditer(c)}
-        present |= {_heading_key(m.group(1)) for c in chunks for m in _H3_RE.finditer(c)}
+        # A heading whose body is only the line saying the run had nothing for
+        # it is no home for a figure; the next anchor in the list is.
+        present = {
+            _heading_key(m.group(1))
+            for c in chunks
+            for m in [*_H2_HEAD_RE.finditer(c), *_H3_RE.finditer(c)]
+            if not _only_an_absence(c, m.end())
+        }
         by_heading: dict[str, list[Figure]] = {}
         leftover: list[Figure] = []
         for fig in figures:
@@ -255,8 +265,9 @@ class HtmlRenderer:
                 # Everything before the first H2: <h1> + the verdict/degraded block.
                 (preamble_parts if not out else out).append(chunk)
                 continue
-            heading = unescape(_TAG_RE.sub("", match.group(1))).strip()
-            chunk = chunk.replace("<h2>", f'<h2 id="sec-{_slug(heading)}">', 1)
+            # The anchor is the title alone: a voice tag can change with what a
+            # run recorded, and a link to a section must not.
+            chunk = chunk.replace("<h2>", f'<h2 id="sec-{_slug(_heading_key(match.group(1)))}">', 1)
             # Insertion points inside the chunk, in document order: after each
             # anchored H3's block, then the chunk's own figures at its end.
             points: list[tuple[int, list[Figure]]] = []
@@ -302,11 +313,19 @@ class HtmlRenderer:
             match = re.match(r'^<h2 id="(sec-[^"]+)">(.*?)</h2>', chunk, re.DOTALL)
             if not match:
                 continue
-            heading = unescape(_TAG_RE.sub("", match.group(2))).strip()
+            heading = unescape(_TAG_RE.sub("", match.group(2))).strip().split(" · ", 1)[0]
             entries.append(f'<li><a href="#{match.group(1)}">{escape(heading)}</a></li>')
         if not entries:
             return ""
         return '<nav class="toc"><h2>Contents</h2><ol>' + "".join(entries) + "</ol></nav>\n"
+
+
+def _only_an_absence(chunk: str, after_heading: int) -> bool:
+    """Whether the paragraph right after a heading is the line saying it is empty."""
+    following = chunk[after_heading:].lstrip()
+    if not following.startswith("<p>"):
+        return False
+    return unescape(_TAG_RE.sub("", following[3:200])).startswith(ABSENCE_PREFIXES)
 
 
 def _heading_key(inner_html: str) -> str:

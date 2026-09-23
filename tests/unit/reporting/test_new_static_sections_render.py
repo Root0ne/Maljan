@@ -144,7 +144,7 @@ class TestCarvedPayloadsAreLocatable:
         payloads = md.split("### 5.8 Payloads and dropped files", 1)[1].split("## ", 1)[0]
         assert "overlay+0x100" in payloads
         assert "RT_ICON" not in payloads
-        assert "RT_ICON" in md.split("### 7.4 Resources", 1)[1]
+        assert "RT_ICON" in md.split("### Resources", 1)[1]
 
 
 class TestASectionCanBeFoundInTheFile:
@@ -371,14 +371,17 @@ class TestTheComposedSectionsReachTheReport:
         verdict = md.split("## 3. Verdict and assessment", 1)[1].split("## 4", 1)[0]
         assert "**Sophistication:** low" in verdict
 
-    def test_a_run_without_the_composer_is_unchanged(self) -> None:
-        """The sections must vanish entirely rather than render as empty
-        headings, so disabling the composer produces the report it always did.
-        """
+    def test_a_run_without_the_composer_says_so_in_each_section(self) -> None:
+        """Every numbered section is printed; one the composer did not write says
+        so in one line, in the platform's voice, and nothing is filled in."""
         md = MarkdownRenderer().render(_report())
-        assert "## 4. Execution flow" not in md
-        assert "## 5. Technical analysis" not in md
-        assert "Background" not in md
+        assert (
+            "## 4. Execution flow · _Measured_\n\n"
+            "Not written in this run: the report model wrote no execution flow."
+        ) in md
+        assert "### 12.3 Background · _Measured_" in md
+        assert "Not written in this run: the report model wrote no background." in md
+        assert "_Written by the report model_" not in md.split("## 4.", 1)[1]
 
     def test_the_html_export_inherits_the_fix(self) -> None:
         """HtmlRenderer builds from MarkdownRenderer and PdfRenderer from that,
@@ -423,15 +426,22 @@ class TestTheComposedSectionsReachTheReport:
         assert "[ev_0004]" in persistence
         assert "no evidence cited" not in persistence
 
-    def test_the_note_alone_does_not_create_a_section(self) -> None:
-        """Adding the note must not turn an empty TechnicalAnalysis into a
-        rendered heading — the emptiness check compares against the note too."""
+    def test_the_note_alone_writes_nothing_under_the_report_model(self) -> None:
+        """An empty TechnicalAnalysis carries the note and nothing else; no
+        subsection is headed as the report model's words."""
         from maljan.reporting.models import TechnicalAnalysis
 
         report = _report()
         report.technical_analysis = TechnicalAnalysis()
         md = MarkdownRenderer().render(report)
-        assert "## 5. Technical analysis" not in md
+        technical = md.split("## 5. Technical analysis", 1)[1].split("\n## ", 1)[0]
+        assert "_Written by the report model_" not in technical
+        assert (
+            technical.count("Not written in this run")
+            + technical.count("Nothing recorded in this run")
+            + technical.count("Not examined in this run")
+            == 9
+        )
 
     def test_the_querying_process_is_named(self) -> None:
         """The last producer-without-consumer field on the report models. Only

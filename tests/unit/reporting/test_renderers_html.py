@@ -33,15 +33,24 @@ from maljan.reporting.renderers.pdf import PdfRenderer, PdfUnavailableError
 # Mirrors REQUIRED_HEADINGS in test_renderers_markdown.py. Duplicated on
 # purpose: if a heading is renamed, the figure anchors in html.py silently stop
 # matching, and only a test that pins the HTML side catches that.
+# Every numbered section and every appendix is printed, with one line when it
+# has nothing in the run.
 REQUIRED_SECTIONS = [
     "1. Key findings",
     "2. Sample overview",
     "3. Verdict and assessment",
+    "4. Execution flow",
+    "5. Technical analysis",
     "6. Observed behaviour",
+    "7. Static properties",
     "8. MITRE ATT&amp;CK mapping",
     "9. Indicators of compromise",
+    "10. Detection",
+    "11. Recommendations",
     "12. Attribution and related activity",
     "13. Limitations and analysis notes",
+    "Appendix A. Evidence index",
+    "Appendix B. Run summary",
     "Appendix C. References",
     "Appendix D. Methodology",
 ]
@@ -135,6 +144,13 @@ class TestTableOfContents:
         for target in targets:
             assert f'<h2 id="{target}">' in html, f"dangling TOC link: {target}"
 
+    def test_an_anchor_is_the_title_alone(self) -> None:
+        """A voice tag can change with what a run recorded; a link to §6 must not."""
+        html = HtmlRenderer().render(_report())
+        assert '<h2 id="sec-observed-behaviour">' in html
+        toc = re.findall(r'<nav class="toc">.*?</nav>', html, re.DOTALL)[0]
+        assert "Measured" not in toc
+
 
 class TestEscaping:
     """Report text is LLM- and malware-derived; none of it may become markup."""
@@ -175,8 +191,8 @@ class TestFigures:
         # subsection in this report — under the network indicators.
         for anchor, fig_id in (
             ("5.1 Packing, obfuscation and anti-analysis · <em>", "fig-entropy"),
-            ("6.1 Process tree</h3>", "fig-process-tree"),
-            ("9.2 Network indicators · <em>", "fig-network"),
+            ("Process tree</h3>", "fig-process-tree"),
+            ("Network indicators · <em>", "fig-network"),
         ):
             start = html.index(f">{anchor}")
             following = min(
