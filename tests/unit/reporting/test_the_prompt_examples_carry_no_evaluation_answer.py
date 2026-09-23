@@ -1,4 +1,4 @@
-"""The examples shown to the report models describe nothing an evaluation scores.
+"""The words shown to the report models describe nothing an evaluation scores.
 
 A local model copies the shape it is shown, and sometimes the words. An example
 that describes the behaviour a scoring key expects lets a model that copies it
@@ -6,12 +6,16 @@ that describes the behaviour a scoring key expects lets a model that copies it
 meaningless and puts the platform's words in text the report labels as the
 model's. So the examples describe an invented sample of a different class, and
 this test holds them to it: no string value of any example may carry one of the
-distinctive terms of the evaluation key below.
+distinctive terms of the evaluation key below. The same holds for everything
+else the models are shown on every run — the answer contract, both system
+prompts and each section's instruction — because an id in a contract or a rule
+is copied as readily as one in an example.
 
-The list is data owned by this test, drawn from the behaviours, identifiers and
-technique ids the key scores. A term is matched case-insensitively as a
-substring of any example's string values; keys of the answer object are the
-schema's own names and are not checked.
+The list is data owned by this test, drawn from the behaviours, identifiers,
+values and technique ids the key scores. A term is matched case-insensitively
+as a substring: of any example's string values (the keys of the answer object
+are the schema's own names and are not checked), and of the whole text of the
+contract, the prompts and the instructions.
 """
 
 from __future__ import annotations
@@ -21,8 +25,8 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting.composer import _EXAMPLES
-from maljan.reporting.narrative_agent import EXAMPLE_OBJECT
+from maljan.reporting.composer import _EXAMPLES, _INSTRUCTIONS, _PROSE_SECTIONS, _SYSTEM
+from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXAMPLE_OBJECT, EXPECTED_OBJECT
 
 # The distinctive terms of the evaluation key: how the scored sample resolves its
 # APIs, checks its host, persists, configures itself, talks to its server and
@@ -91,6 +95,47 @@ KEY_TERMS: tuple[str, ...] = (
     "t1105",
     "t1622",
     "t1497",
+    # The key-writer's derived mapping and the reports' remaining rows.
+    "t1106",
+    "t1027.007",
+    "t1140",
+    "t1573",
+    "t1132",
+    "t1082",
+    "t1016",
+    "t1482",
+    "t1057",
+    "t1083",
+    "t1480",
+    "t1036",
+    "t1069.002",
+    "t1135",
+    "t1518.001",
+    "t1033",
+    "t1059.007",
+    "t1047",
+    "t1218.007",
+    # Identifiers and values the key names.
+    "/live/",
+    "updater",
+    "custom_update",
+    "runnung",
+    "msie 7",
+    "wininet",
+    "getadaptersinfo",
+    "12345",
+    "0x19660d",
+    "wtfbbq",
+    "tob 1.1",
+    "guid=",
+    "proclist",
+    "desklinks",
+    "clearurl",
+    "ifconfig.me",
+    "iphlpapi",
+    "bp.dat",
+    "scub",
+    "follower",
 )
 
 
@@ -106,12 +151,28 @@ def _strings(value: Any) -> list[str]:
 
 EXAMPLES: dict[str, str] = {"narrative": EXAMPLE_OBJECT, **_EXAMPLES}
 
+# Everything else a report model is shown on every run, as plain text.
+PROMPTS: dict[str, str] = {
+    "narrative contract": EXPECTED_OBJECT,
+    "narrative system prompt": _SYSTEM_PROMPT,
+    "composer system prompt": _SYSTEM,
+    **{f"composer instruction {name}": text for name, text in _INSTRUCTIONS.items()},
+    "composer section titles": " ".join(_PROSE_SECTIONS.values()),
+}
+
 
 @pytest.mark.parametrize("name", sorted(EXAMPLES))
 def test_no_example_carries_a_term_the_key_scores(name: str) -> None:
     text = " ".join(_strings(json.loads(EXAMPLES[name]))).lower()
     shared = [term for term in KEY_TERMS if term in text]
     assert not shared, f"the {name} example carries {shared}"
+
+
+@pytest.mark.parametrize("name", sorted(PROMPTS))
+def test_no_contract_prompt_or_instruction_carries_a_term_the_key_scores(name: str) -> None:
+    text = PROMPTS[name].lower()
+    shared = [term for term in KEY_TERMS if term in text]
+    assert not shared, f"the {name} carries {shared}"
 
 
 def test_the_guard_would_catch_one() -> None:

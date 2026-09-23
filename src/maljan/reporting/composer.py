@@ -131,7 +131,7 @@ _SYSTEM = (
     "7. State facts plainly and write inferences with estimative words ('likely', "
     "'we assess'). Present tense for what the sample does, past tense for what the "
     "run did. No second person.\n"
-    "8. Delivery, actors and campaigns this run did not see are context, not "
+    "8. Delivery and attribution this run did not see are context, not "
     "findings: say where they come from, and never write them as observed. A "
     "sandbox answer with nothing in it is not an execution: write 'observed' only "
     "for what a sandbox entry records.\n"
@@ -142,6 +142,27 @@ _SYSTEM = (
 # forty writes forty names into the report header otherwise, and the sentence
 # stops being readable long before that.
 _MAX_NAMED_KEYS = 6
+
+# What each section is asked for, in one line. Module data, not inline text,
+# so the test that holds the prompts to the invented class reads every word a
+# model is shown: a checklist of the evaluation key's own items ("campaign id",
+# "sleep interval") is a hint as surely as an example is.
+_INSTRUCTIONS: dict[str, str] = {
+    "introduction": "Write a 2-4 sentence intro.",
+    "execution_flow": (
+        "List what the sample does from its entry point to its steady state, in order."
+    ),
+    "prose": "Write the '{title}' subsection.",
+    "configuration": (
+        "Extract the sample's configuration: its network endpoints, identifiers, keys, "
+        "version, timing values and install path."
+    ),
+    "commands": "Extract the commands the sample accepts from its operator.",
+    "encryption_scheme": "Extract the encryption scheme.",
+    "cli_flags": "Extract command-line flags.",
+    "ransom_note": "Extract the ransom note.",
+    "communications": "Describe the C2 channel(s).",
+}
 
 # Narrative technical subsections authored as free prose (TechnicalSubsection),
 # in the order the report prints them.
@@ -358,7 +379,7 @@ class ReportComposer:
 
         # 1. Introduction / background.
         intro = await self._author(
-            "introduction", report, isr_reports, _IntroOut, "Write a 2-4 sentence intro."
+            "introduction", report, isr_reports, _IntroOut, _INSTRUCTIONS["introduction"]
         )
         if intro and isinstance(intro, _IntroOut) and intro.text.strip():
             report.intro_background = intro.text.strip()
@@ -376,7 +397,7 @@ class ReportComposer:
             report,
             isr_reports,
             _FlowOut,
-            "List what the sample does from its entry point to its steady state, in order.",
+            _INSTRUCTIONS["execution_flow"],
             validators=[lambda p: flow_voice_violations(p, sandbox_ids)],
         )
         if flow and isinstance(flow, _FlowOut) and flow.steps:
@@ -386,7 +407,11 @@ class ReportComposer:
         # 3. Free-prose technical subsections (only when evidence exists).
         for section, title in _PROSE_SECTIONS.items():
             out = await self._author(
-                section, report, isr_reports, _ProseOut, f"Write the '{title}' subsection."
+                section,
+                report,
+                isr_reports,
+                _ProseOut,
+                _INSTRUCTIONS["prose"].format(title=title),
             )
             if out and isinstance(out, _ProseOut) and out.body.strip():
                 sub = TechnicalSubsection(
@@ -402,8 +427,7 @@ class ReportComposer:
             report,
             isr_reports,
             _ConfigOut,
-            "Extract the sample's configuration: C2 list, campaign or group id, keys, "
-            "version, sleep interval, install path.",
+            _INSTRUCTIONS["configuration"],
             validators=[lambda p: configuration_citation_violations(p, known_ids)],
         )
         if config and isinstance(config, _ConfigOut) and config.items:
@@ -415,7 +439,7 @@ class ReportComposer:
             report,
             isr_reports,
             _CommandsOut,
-            "Extract the commands the sample accepts from its operator.",
+            _INSTRUCTIONS["commands"],
         )
         if commands and isinstance(commands, _CommandsOut) and commands.commands:
             ta.commands = self._kept("commands", commands.commands, 40)
@@ -426,21 +450,21 @@ class ReportComposer:
             report,
             isr_reports,
             EncryptionScheme,
-            "Extract the encryption scheme.",
+            _INSTRUCTIONS["encryption_scheme"],
         )
         if enc and isinstance(enc, EncryptionScheme) and _has_content(enc):
             ta.encryption_scheme = enc
             authored += 1
 
         cli = await self._author(
-            "cli_flags", report, isr_reports, _CliFlagsOut, "Extract command-line flags."
+            "cli_flags", report, isr_reports, _CliFlagsOut, _INSTRUCTIONS["cli_flags"]
         )
         if cli and isinstance(cli, _CliFlagsOut) and cli.flags:
             ta.cli_flags = self._kept("cli_flags", cli.flags, 30)
             authored += 1
 
         note = await self._author(
-            "ransom_note", report, isr_reports, RansomNote, "Extract the ransom note."
+            "ransom_note", report, isr_reports, RansomNote, _INSTRUCTIONS["ransom_note"]
         )
         if note and isinstance(note, RansomNote) and _has_content(note):
             ta.ransom_note = note
@@ -448,7 +472,7 @@ class ReportComposer:
 
         # 5. Communications / C2 channels.
         c2 = await self._author(
-            "communications", report, isr_reports, _C2Out, "Describe the C2 channel(s)."
+            "communications", report, isr_reports, _C2Out, _INSTRUCTIONS["communications"]
         )
         if c2 and isinstance(c2, _C2Out) and c2.channels:
             report.c2_channels = self._kept("communications", c2.channels, 6)

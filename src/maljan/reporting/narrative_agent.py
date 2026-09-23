@@ -58,8 +58,9 @@ class NarrativeOutput(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     executive_summary: str = Field(min_length=120, max_length=1200)
-    # Asked for three to six; two good bullets are kept rather than failing the
-    # whole round and losing the summary with them.
+    # The prompt asks for three to six; the schema accepts two, so two good
+    # bullets are kept rather than failing the whole round and losing the
+    # summary with them.
     key_findings: list[KeyFinding] = Field(min_length=2, max_length=6)
     defensive_recommendations: list[DefensiveRecommendation] = Field(min_length=3, max_length=8)
 
@@ -78,7 +79,7 @@ EXPECTED_OBJECT = """{
       "action": "The concrete step to take.",
       "rationale": "Why this sample makes it necessary.",
       "priority": "P1",
-      "technique_id": "T1053.005",
+      "technique_id": "T1490",
       "detection": "The exact observable: API, registry key, event id or rule."
     }
   ]
@@ -130,7 +131,7 @@ _SYSTEM_PROMPT = (
     "not an execution: describe sandbox behaviour, seen or absent, only where a "
     "sandbox entry above records some.\n"
     "2. Every MITRE ATT&CK technique you cite must appear in parentheses with "
-    "its ID, e.g. 'process injection (T1055)'.\n"
+    "its ID, e.g. 'inhibit system recovery (T1490)'.\n"
     "3. executive_summary: 120-900 characters, one paragraph, no headings. This "
     "is a verdict/impact briefing ONLY — state the classification, the severity, "
     "the single most important risk, and the containment call to action. Do NOT "
