@@ -1342,8 +1342,9 @@ change landed on `main`.
 - **DYNAMIC colours a signature's number only where its scale is known.** The
   run's recorded sandbox provider says which scale the number is on: CAPEv2's
   1 to 3 or Triage's 1 to 10 signature score, each drawn on the ladder by what
-  it means and printed as "n/max". An uploaded, REST or unknown provider's
-  number, and one outside its scale, is drawn in one neutral tone as it came.
+  it means, printed in words beside the number ("High, 8/10"). An uploaded,
+  REST or unknown provider's number, and one outside its scale, is drawn in
+  one neutral tone as it came, beside the word "unrated".
 - **One colour per run status.** `apps/web/src/lib/status.ts` colours
   completed, running, pending, failed and cancelled for the dashboard, the
   analyses list, the search palette and the analysis header, and a stage's or

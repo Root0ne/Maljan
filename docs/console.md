@@ -70,8 +70,8 @@ dashboard, the analyses list, the search palette and the analysis header, and
 a stage's or a participant's running and done, and an analyst's or a
 message's failed, take the same colours. The status word is always printed
 beside it. `status.test.ts` fails, anywhere else, on a state word given a
-status colour in a map and on a ternary that colours by comparing any value
-with a state word.
+status colour in a map and on a ternary that compares any value with a state
+word and holds a status colour in either branch.
 
 The analysis header carries the verdict, the sample, the job status and the
 run's stages, and the stage strip is there and nowhere else, so the shape of
@@ -268,8 +268,9 @@ beside it. The colour is never the only carrier: the rung's word is always
 printed.
 
 DETECTION's rule matches are the report sections the rule tools' ledger rows
-build: `yara_matches` and `sigma_matches`, whose Level column is the level the
-Sigma rule's author declared. They are routed to DETECTION and to nowhere
+build, each headed by the chips of the ledger entries it came from, as STATIC
+drew them before: `yara_matches` and `sigma_matches`, whose Level column is
+the level the Sigma rule's author declared. They are routed to DETECTION and to nowhere
 else; STATIC says where they are and links there rather than drawing the same
 table twice. A Sigma row shows its level labelled as the rule's level, sorted
 and dotted by it on the same ladder (one dot per rung from Informational up);
@@ -286,10 +287,10 @@ high), and Hatching Triage writes its 1 to 10 signature score into the same
 field (1 no malicious behaviour, 2–5 likely benign, 6–7 suspicious, 8–9 likely
 malicious, 10 known bad). The console reads the provider the run recorded
 (`sandbox.provider` in `run_summary.settings_snapshot`). On `cape2` and
-`triage` a score inside the scale takes the rung it means and prints as
-"n/max". On any other provider — an uploaded or REST report can be on either
-scale — and for a number outside its scale, the number is drawn in one neutral
-tone as it came.
+`triage` a score inside the scale takes the rung it means and prints it in
+words beside the number — "High, 8/10". On any other provider — an uploaded or
+REST report can be on either scale — and for a number outside its scale, the
+number is drawn in one neutral tone as it came, beside the word "unrated".
 
 `severity.test.ts` fails, anywhere outside the ladder module, on a rung given a
 status colour; on a rung compared by its spelling against a `severity`,
@@ -363,10 +364,15 @@ that says what it does in the console's own language.
 No gradients, and no colour or background that eases from one value to
 another: a hover state is a state, so it arrives when the pointer does. That
 holds for the charts and bars too: a bar is one flat fill, and an SVG
-gradient, Tailwind's bare `transition` class in a class list (it eases colours
-by default),
-an arbitrary `transition-[…]` over a colour and an inline or stylesheet
-`transition` over one are caught like the class names are. The
+gradient, an arbitrary `transition-[…]` over a colour and an inline or
+stylesheet `transition` over one are caught like the class names are.
+Tailwind's bare `transition` class eases colours by default, and it is caught
+as a whole token in two places: in any string inside a `className` or `class`
+attribute, a ternary between the attribute's braces included; and in any
+string that reads as a class list wherever it sits — a constant of any name, a
+map of classes — meaning every token is lower-case and made of the characters
+class names use, and at least one token holds `-` or `:`. A sentence, which
+has capitals, punctuation or no such token, is not read as one. The
 transitions that stay are the ones that move something — a rail widening, a
 chevron turning. Icons are `lucide-react`, drawn in `currentColor` with
 nothing filled behind them: 16 or 18 px everywhere except the conversation
