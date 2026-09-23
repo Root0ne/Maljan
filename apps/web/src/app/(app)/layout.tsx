@@ -7,7 +7,7 @@ import Header from "@/components/layout/Header";
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <AuthProvider>
-      <div className="flex h-screen overflow-hidden">
+      <div className="flex h-screen overflow-hidden print:block print:h-auto print:overflow-visible">
         {/* The first thing the keyboard reaches, and visible once it has it:
             without this every page begins with five rail links, the search box
             and the account menu before any content. */}
@@ -28,11 +28,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             `overflow-x-auto` table and code block — engage as they were meant
             to. */}
         <div
-          className="flex flex-col flex-1 min-w-0"
+          className="flex flex-col flex-1 min-w-0 print:ml-0!"
           style={{ marginLeft: "var(--sidebar-width)" }}
         >
           <Header />
-          <main id="main-content" tabIndex={-1} className="flex-1 min-w-0 overflow-y-auto p-6">
+          <main id="main-content" tabIndex={-1} className="flex-1 min-w-0 overflow-y-auto p-6 print:overflow-visible print:p-0">
             {children}
           </main>
         </div>

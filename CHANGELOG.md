@@ -8,6 +8,25 @@ change landed on `main`.
 
 ### Added
 
+- **What changed between two runs.** `GET /api/v1/reports/diff?a=&b=`
+  (`by=job` for job ids) compares two stored analyses section by section:
+  verdict, confidence, severity and family with who stated each; ATT&CK
+  techniques published; indicators by kind and value; key findings, analyst
+  findings, persistence, configuration, commands, C2 channels and the
+  capability profile; YARA, Sigma and capa rule matches; STIX objects by type
+  and an identifying property rather than by id; and run facts — profile,
+  models, token figures, wall time, tools called, degradation reasons. Each
+  section names the key its rows are paired by, and a row the record does not
+  key stably is listed as present in one run, never paired by guess, and rows
+  under one key pair as a multiset, so a run compared with itself shows no
+  difference. Rows cite each run's evidence-ledger ids where the record holds
+  them in an id field, and never an id read out of prose. It is read only from the two
+  stored records, says whether the SHA-256 is the same, and answers 404 unless
+  the caller may read both runs. The console's analysis header gains "Compare
+  with another run", which offers the same sample's runs first and then any
+  run, and a printable compare page. `GET /jobs` takes `sample_id`. The one
+  implementation is `maljan.reporting.run_diff.diff_runs`.
+
 - **A team is checked before it is saved, and shown as the graph it is.** The
   rules the settings model applies to a team are now problem lists
   (`stage_list_problems`, `stage_member_problems`, `stage_condition_problem`,

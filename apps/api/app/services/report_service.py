@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from arq import ArqRedis
 from maljan.reporting.renderers.stix_renderer import indicator_publish_reason
+from maljan.reporting.run_diff import RunRecord, diff_runs
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -112,6 +113,37 @@ def _url_host(raw: Any) -> str:
         return ""
 
 
+def run_record(report: AnalysisReport) -> RunRecord:
+    """A stored report as the run diff reads it, every value as stored."""
+    job = report.job
+    sample = job.sample if job is not None else None
+    duration = job.duration_seconds if job is not None else None
+    return RunRecord(
+        report_id=str(report.id),
+        job_id=str(report.job_id),
+        created_at=report.created_at.isoformat() if report.created_at else None,
+        verdict=report.verdict,
+        overall_confidence=report.overall_confidence,
+        malware_category=report.malware_category,
+        malware_report=report.malware_report,
+        run_summary=report.run_summary,
+        stix_bundle=report.stix_bundle,
+        agent_findings=[
+            {
+                "agent_name": f.agent_name,
+                "status": f.status,
+                "final_confidence": f.final_confidence,
+                "revision_rounds": f.revision_rounds,
+                "claims": f.claims,
+            }
+            for f in (report.agent_findings or [])
+        ],
+        sample_sha256=sample.sha256 if sample is not None else None,
+        sample_file_name=sample.original_filename if sample is not None else None,
+        duration_seconds=float(duration) if duration is not None else None,
+    )
+
+
 class ReportService:
     """Handles report retrieval, STIX export, and MITRE mapping."""
 
@@ -208,6 +240,56 @@ class ReportService:
             )
         )
         return result.scalar_one_or_none()
+
+    async def get_report_for_diff(
+        self,
+        run_id: uuid.UUID,
+        user: User,
+        *,
+        by: str = "report",
+    ) -> AnalysisReport | None:
+        """One report the caller may read, with its job and sample loaded.
+
+        The same ownership rule as ``get_report`` and ``get_report_by_job``:
+        the report's job must belong to the caller, and anything else is
+        ``None``. ``by="job"`` looks the run up by its job id, which is the id
+        the console's analysis pages carry.
+        """
+        match = AnalysisReport.job_id == run_id if by == "job" else AnalysisReport.id == run_id
+        result = await self.db.execute(
+            select(AnalysisReport)
+            .options(
+                selectinload(AnalysisReport.agent_findings),
+                selectinload(AnalysisReport.job).selectinload(AnalysisJob.sample),
+            )
+            .join(AnalysisJob, AnalysisReport.job_id == AnalysisJob.id)
+            .where(match, AnalysisJob.created_by == user.id)
+        )
+        return result.scalar_one_or_none()
+
+    async def diff_reports(
+        self,
+        run_a: uuid.UUID,
+        run_b: uuid.UUID,
+        user: User,
+        *,
+        by: str = "report",
+    ) -> dict[str, Any] | None:
+        """What changed between two stored runs, or ``None`` when either is not readable.
+
+        Both runs must be readable by the caller; one that is not answers
+        exactly as a missing one does, so the route's 404 says nothing about
+        whether someone else's run exists. The comparison itself is pure and
+        linear in the two records, and runs on a worker thread because two
+        large reports and their bundles are real work.
+        """
+        report_a = await self.get_report_for_diff(run_a, user, by=by)
+        if report_a is None:
+            return None
+        report_b = await self.get_report_for_diff(run_b, user, by=by)
+        if report_b is None:
+            return None
+        return await asyncio.to_thread(diff_runs, run_record(report_a), run_record(report_b))
 
     async def delete_report(
         self,

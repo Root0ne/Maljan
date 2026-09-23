@@ -12,6 +12,7 @@ import {
   CircleHelp,
   CircleMinus,
   FileText,
+  GitCompareArrows,
   Globe,
   IdCard,
   LayoutGrid,
@@ -421,6 +422,16 @@ export default function AnalysisLayout({
                   <span className="text-text-muted">Analyzed: </span>
                   {analyzedAt}
                 </div>
+                {/* Only a finished run has a stored record to compare. */}
+                {report && job?.status === "completed" && (
+                  <Link
+                    href={`/compare?a=${encodeURIComponent(id)}`}
+                    className="inline-flex items-center gap-1 text-accent-strong hover:underline"
+                  >
+                    <GitCompareArrows size={16} aria-hidden="true" />
+                    Compare with another run
+                  </Link>
+                )}
               </div>
 
               {/* The shape of the run, in the one place every tab can see it. */}
