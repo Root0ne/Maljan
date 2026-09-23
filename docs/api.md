@@ -137,10 +137,10 @@ Every row carries `kind`, `value`, `is_suspicious`, `notes`, **`source`** —
 `sandbox` for something the sample resolved, reached or requested, `analyst`
 for something an agent put in an artefact, `strings` for a run of bytes in the
 file that has the shape of one, `identity` for the sample's own hashes,
-`judge` for a value the exported bundle publishes from the judge's own
-indicators — and **`published`**. The feed publishes what the export
-publishes: a value the export carries that the report's own rows withheld is
-served as a published `judge` row in place of the withheld one. A name only the sample's own byte image knows is not an
+`judge` for a value the judge's own indicators name — and **`published`**.
+A judge value is asked the same publish rule as every other row, with the
+judge not counting as a second source; the exported bundle carries it only
+when the rule publishes it, and this feed says the same. A name only the sample's own byte image knows is not an
 observation of infrastructure, so it is withheld from the default feed and
 labelled in the wider ones rather than shipped looking like one the sandbox
 watched.

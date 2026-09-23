@@ -148,6 +148,9 @@ _SECTION_CLAIM_KEYWORDS: dict[str, tuple[str, ...]] = {
         "decrypt",
     ),
     "commands": ("command", "handler", "opcode", "instruction", "dispatch", "switch", "task id"),
+    # Generic category words, never a sample's values, and never shown to a
+    # model: they pick which analyst claims reach the section's bundle. The
+    # prompt-leak test reads what a model is shown, so it does not read this.
     "host_identifiers": (
         "mutex",
         "path",

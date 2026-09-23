@@ -775,17 +775,28 @@ change landed on `main`.
   (`llm.context_window.reply_budget`). The run summary prints the derivation
   beside the section's wait. A positive value is an operator's own budget, as
   before. The fixed 900 dropped a live report's payloads section.
-- **The IOC table and `/iocs` publish what the STIX export publishes.** A
-  value the export carries from the judge's own indicators
-  (`stix_renderer.exported_indicator_values`) is a published row with source
-  `judge`, in place of a withheld row of the same value; the table is built
-  again once the export exists. `/iocs` may now serve `email`, `path`,
-  `registry`, `mutex` and `command` rows, and a `hash` of another file, from
-  that source.
+- **One publish decision for the judge's values.** The export asks every
+  value a judge indicator names the one publish rule, as the report's own row
+  for it is asked, and the judge's assertion is not a second source; a
+  refused value declines the indicator (`stix.indicator_not_published`). The
+  IOC table and `/iocs` ask the same rule of the same values (stored on the
+  report as `judge_indicators`) and print the same answer. The rule now
+  answers a hash (publishable when a whole digest a second source knows) and a
+  command line (never published). `/iocs` may serve `email`, `path`,
+  `registry`, `mutex` and `command` rows, and a `hash` of another file, with
+  source `judge`.
 - **A draft detection rule matches only what the run publishes.** YARA
   strings and Suricata alerts are drawn from the IOC table's published rows,
-  and the drafts are generated after the export. Import names are no longer
-  YARA strings. A Benign verdict gets no draft, and §10.2 says why.
+  and a Sigma selection from published rows and what a sandbox recorded; the
+  drafts are generated after the export. Import names are no longer YARA
+  strings. A Benign verdict gets no draft, and §10.2 says why.
+- **A technique only a rule match stands behind is marked** in the ATT&CK
+  table ("rule match only (yara `rule`, N string(s)), no analyst claim") and
+  grounds no capability word. The publish rule is unchanged.
+- **A section's tool answers share the reporter model's window** after the
+  section's output budget and the rest of its prompt, instead of a fixed 1,200
+  characters (and 2,500 before that); the host-identifier section and its
+  bundle carry no fixed row cap.
 - **A composer section is shown the techniques the report publishes and,
   after each analyst claim, the entries that hold the values the claim
   quotes.** A section shown only a claim had called it unsupported while a
@@ -4229,18 +4240,26 @@ derived budget. The report stage learns each reporter model's window when it
 builds the composer, the way the analysts' tool-output cap does (metadata
 endpoints only, cached per model and endpoint).
 
+A derived section budget can be many times the old 900 tokens, so a section
+on a slow model may wait far longer: its wait holds two calls of the budget at
+the model's measured pace, up to the 1,800 s request ceiling each, and a report
+has about eleven sections. Set `composer_section_max_tokens` to bound it.
+
 `/reports/{id}/iocs` and `consolidated_iocs` may carry rows whose `source` is
 `judge`, of kinds the feed never served before (`email`, `path`, `registry`,
 `mutex`, `command`, and a `hash` of another file). A consumer that switches on
-`kind` should expect them. A stored report is read the same way from its
-stored export, so its feed can change without a new run.
+`kind` should expect them. A judge indicator the publish rule refuses is no
+longer exported: an export may carry fewer judge indicators than before, each
+decline recorded as `stix.indicator_not_published`. A report stored before
+`judge_indicators` existed shows no judge rows.
 
 Draft detection rules are no longer generated for a Benign verdict, and a
 YARA draft no longer carries import names as strings; a Suricata draft alerts
 only on published network values. `technical_analysis.host_identifiers` is a
 new optional field; a report stored before it renders without the rows.
 `run_summary.validation` may carry `report.citation_wrong_entry`,
-`report.identifier_uncited` and `report.technique_name`.
+`report.identifier_uncited` and `report.technique_name`. A Sigma draft is no
+longer generated from an analyst's persistence target alone.
 
 A stored STIX bundle keeps the shape it was stored with: `x_maljan_evidence_refs`
 appears only in exports rendered after this change, so the relationship graph
