@@ -148,6 +148,7 @@ class TestTheRunSummaryRecordsTheProfileThatRan:
             "tool_latency",
             "models",
             "server_rests",
+            "sandbox",
         }
 
     def test_the_per_layer_attribution_lists_the_profiles_analysts_then_the_rule_layers(

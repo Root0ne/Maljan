@@ -642,6 +642,18 @@ change landed on `main`.
   report and the console print. Every default's origin is written beside it
   in `docs/configuration.md`; all three are judgements, because no recorded
   live run had a tool server fail at the transport.
+- **An emulating string decoder on the analysis server.** `floss` recovers the
+  decoded, stack and tight strings of a PE by emulating the sample's own
+  decoding and string-building functions under vivisect (FLOSS, FLARE's pinned
+  standalone build run as a child process with a 600 s ceiling and a 4 GiB
+  address-space limit; the sample is never executed). Each row names
+  the function that decoded or built the string, as a virtual address and
+  relative to the image base, and a decoded string its call site. The answer is
+  paged like `strings`, with `kinds` and `pattern` filters, and only the first
+  call on a file emulates. On an encrypted-string loader it recovered 81
+  strings in 38 s — the mutex name, the install directory and file names, the
+  scheduled-task name, both C2 URLs, the User-Agent, the beacon format and the
+  command words that a plain `strings` pass cannot see.
 
 ### Changed
 
@@ -1431,6 +1443,54 @@ change landed on `main`.
   than left to its SDK. A tool call is sent with a deadline
   (`core.mcp.breaker.call_timeout_seconds`, derived from capa's budget by
   default) and a call that passes it is a transport failure the breaker counts.
+- **A quoted search argument searches for what is inside the quotes.** Every
+  argument a sidecar tool searches for or looks up by — `pattern` on `strings`
+  and `floss`; `text`, `technique_id`, `ids`, `api_names` and `query` on the
+  knowledge lookups; `ip_address`, `domain` and `file_hash` on `threatintel` —
+  is read without one matching pair of surrounding quotes, as `carved_path`
+  already was, and each tool's description says the argument is the raw text,
+  unquoted. A pattern sent as `"CreateMutex"` with its quotes used to match
+  nothing although `CreateMutexW` was among the strings. Nothing else is
+  rewritten, and the repair is recorded: the ledger keeps the arguments as the
+  model wrote them and a structured answer carries `read_as` first, the value
+  each argument was read as.
+  **Upgrading:** a consumer that reads the first key of a `strings`, `floss` or
+  knowledge answer will find `read_as` there when a quoted argument was read;
+  an unquoted call's answer is unchanged.
+- **The triage pack's reputation line states the detection labels.** A
+  VirusTotal answer that carries `detections` (one result label per engine,
+  as VirusTotal's own MCP server answers) and no popular threat classification
+  used to render as `VirusTotal 52/75 malicious` and nothing else, although
+  the labels named a family eight times. The line now counts the labels
+  exactly as written and names up to twenty with how many engines gave each,
+  most first, with the number of distinct labels it left out. Nothing is
+  merged, normalised or read for a family.
+  **Upgrading:** the reputation line of a pack is longer (about 700 characters
+  for 50 labels) and counts against `reporting.upstream_findings_max_chars`
+  like every other line.
+- **No sandbox observation is stated where no sandbox ran.** The mock
+  sandbox's empty stand-in for a sample it has no fixture for used to reach
+  the triage pack as "sandbox processes: 0 processes" and "no network activity
+  recorded", and a report built on it spoke of what the sample did during
+  sandbox execution. Where no sandbox ran — no report, or the stand-in — the
+  pack now writes one `sandbox_status` entry that says so in one sentence and
+  none of the sandbox views, `sigma_match_sandbox` or `lolbin_lookup`; the run
+  carries the degradation reason `no sandbox ran …`; `run_summary.sandbox`
+  holds `{status, statement}` and the report's run summary prints it; and the
+  entry becomes the report's *Sandbox* section, on the console's dynamic tab.
+  A report the mock read from a fixture file is marked `recorded_fixture` and
+  said to be a recorded fixture, not a live detonation, before its contents.
+  A live sandbox's report is read as before.
+  **Upgrading:** the pack's ledger ids move, differently per case (a PE's pack
+  as the example). With no sandbox report, `sandbox_status` is added before the
+  reputation lookup, which moves by +1 (`ev_0010` → `ev_0011`). With the mock's
+  stand-in, `sigma_match_sandbox`, `lolbin_lookup` and the five sandbox views
+  (seven entries) give way to the one `sandbox_status`, so the reputation lookup
+  moves by −6 (`ev_0017` → `ev_0011`). With a recorded fixture, `sandbox_status`
+  comes before the sandbox views, so every sandbox view, the capture summary
+  when there is one, and the reputation lookup move by +1. A stand-in run is now
+  marked degraded with its reason, as a run with no report already was;
+  `run_summary` has a `sandbox` key (`null` when a sandbox observed the run).
 
 - **The judge's verdict call and each composer section wait as long as their
   answer takes at the model's measured pace.** At 3.8 tokens a second a 600 s
@@ -3670,3 +3730,13 @@ new settings with defaults. A tool server that legitimately takes longer than
 the longest tool budget configured for this deployment (capa's, 300 s by
 default) needs `core.mcp.breaker.call_timeout_seconds` set, or its tools to
 declare their budget in the server's `capabilities` manifest.
+
+`floss` runs FLOSS 3.1.1 (Apache-2.0) as FLARE's standalone Linux build, not
+as a Python dependency: the lockfile does not change. The backend image
+downloads the release zip in a build stage, checks it against its pinned sha256
+and installs the executable at `/usr/local/bin/floss`. On a host outside the
+image, run `scripts/install_floss.sh`, which does the same into
+`~/.local/share/maljan/tools/floss-3.1.1/`, or name a copy of
+the pinned build in `MALJAN_FLOSS_PATH` in the `analysis` server's `env`.
+Without it the capability manifest marks `floss` unavailable and the model is
+not offered the tool.
