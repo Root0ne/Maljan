@@ -387,6 +387,10 @@ class GhidraHTTPClient:
         including the pass-through: pitfall P6 asks for truncation *frequency*,
         and a frequency needs its denominator.
 
+        A JSON answer over the limit only because of its whitespace is handed
+        over whole, written without it, and counted as ``compacted``; only a
+        compact form that still does not fit is shortened.
+
         A JSON object is shortened as a document: elements come off the end of
         its largest lists, then characters off the end of its largest long
         strings, until it fits, and one reserved key says what was left out
@@ -435,7 +439,17 @@ class GhidraHTTPClient:
             limit,
         )
 
-        attempt = shorten_json_document(output, shorten_target(limit, narrowing))
+        attempt = shorten_json_document(output, shorten_target(limit, narrowing), cap=limit)
+        if attempt.compacted:
+            record_guardrail_outcome(
+                self._truncation_ledger,
+                chars_in=chars_in,
+                chars_kept=len(attempt.text),
+                over_limit=True,
+                compacted=True,
+                limit=limit,
+            )
+            return attempt.text
         if attempt.shortened:
             self._charge_overage(len(attempt.text), limit)
             record_guardrail_outcome(

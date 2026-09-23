@@ -35,7 +35,12 @@ from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
-from maljan.llm.context_window import NO_ROOM_RUN_STATE
+from maljan.llm.context_window import (
+    CHARS_PER_TOKEN,
+    NO_ROOM_RUN_STATE,
+    tool_definition_chars,
+    window_full_error,
+)
 from maljan.pipeline.validation import (
     ALIGNMENT_MARGIN,
     VALIDITY_CODE,
@@ -65,6 +70,16 @@ _RECURSION_STOP_RE = re.compile(r"need more steps to process", re.IGNORECASE)
 # before langgraph could say so. Worded so ``_RECURSION_STOP_RE`` reads it, and
 # so the salvage path that follows treats it the way it treats langgraph's.
 RECURSION_STOP_TEXT = "Sorry, need more steps to process this request."
+
+
+def is_the_graph_s_step_stop(message: Any) -> bool:
+    """Whether ``message`` is langgraph's step-limit sentence rather than a model turn."""
+    return (
+        getattr(message, "type", "") == "ai"
+        and not getattr(message, "tool_calls", None)
+        and bool(_RECURSION_STOP_RE.search(str(getattr(message, "content", "") or "")))
+    )
+
 
 # Bounds for the forced-synthesis salvage (see ``_force_final_synthesis``).
 #
@@ -128,9 +143,20 @@ def _model_context_tokens(cfg: Any, agent_name: str) -> int:
         return 0
 
 
-def synthesis_budget_chars(cfg: Any, agent_name: str) -> int:
-    """How many characters of conversation the salvage may re-send."""
-    tokens = _model_context_tokens(cfg, agent_name)
+def synthesis_budget_chars(cfg: Any, agent_name: str, window_tokens: int = 0) -> int:
+    """How many characters of conversation the salvage may re-send.
+
+    ``window_tokens`` is the window the job's context budget counts on — the
+    smaller of the declared and the probed one. The salvage is sized from the
+    smaller of it and every window this agent's models declare: a declaration
+    left larger than the served window sized a salvage after a server-reported
+    full window at close to the conversation the server had just refused, and
+    a fallback model with a smaller window must still be able to read it.
+    """
+    windows = [
+        t for t in (int(window_tokens or 0), _model_context_tokens(cfg, agent_name)) if t > 0
+    ]
+    tokens = min(windows) if windows else 0
     if tokens <= 0:
         return _SYNTHESIS_MIN_CHARS
     return max(_SYNTHESIS_MIN_CHARS, int(tokens * _CHARS_PER_TOKEN * _SYNTHESIS_CONTEXT_SHARE))
@@ -165,6 +191,52 @@ def _message_chars(m: object) -> int:
     if calls:
         total += len(str(calls))
     return total
+
+
+def _reported_request_chars(messages: list, per_token: int) -> int:
+    """What the server said the conversation weighs, in the budget's characters.
+
+    The last assistant turn that carries usage is the answer to a request the
+    server counted in full: ``input_tokens`` is everything before that turn,
+    tool definitions and template included. That count converted at the
+    budget's rate, plus the measured size of that turn and of everything after
+    it, is what the next request weighs as far as anything reported can say.
+    Zero where no turn carries a count, and the measure alone then answers.
+    """
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if getattr(message, "type", "") != "ai":
+            continue
+        usage = getattr(message, "usage_metadata", None) or {}
+        try:
+            prompt = int(usage.get("input_tokens") or 0)
+        except (AttributeError, TypeError, ValueError):
+            prompt = 0
+        if prompt > 0:
+            return prompt * max(1, per_token) + sum(_message_chars(m) for m in messages[index:])
+    return 0
+
+
+def request_chars(messages: list, definition_chars: int, per_token: int) -> int:
+    """What a tool loop's next request weighs, in the budget's characters.
+
+    The messages as the server will see them, plus the definitions of the
+    loop's tools, which go with every request; and never less than what the
+    server itself reported for the last request plus what came after it. One
+    rule for every loop that sizes itself against the window — the analysts'
+    and the judge's.
+    """
+    measured = sum(_message_chars(m) for m in messages) + max(0, int(definition_chars))
+    return max(measured, _reported_request_chars(messages, per_token))
+
+
+def counted_window_tokens(budget: Any) -> int:
+    """The window a job's context budget derives from, or ``0`` where it derives nothing."""
+    from maljan.llm.context_window import ContextBudget
+
+    if isinstance(budget, ContextBudget) and budget.derives:
+        return int(budget.window.tokens)
+    return 0
 
 
 def _conversation_units(msgs: list) -> list[list]:
@@ -1967,6 +2039,10 @@ class BudgetMeter:
             for index, message in enumerate(list(messages or [])):
                 if getattr(message, "type", "") != "ai":
                     continue
+                # The graph's own sentence at its step limit, not the agent's:
+                # the ``stage_ended_at_cap`` event is what says the loop ended.
+                if is_the_graph_s_step_stop(message):
+                    continue
                 marker = _turn_key(message, index)
                 if marker in already:
                     continue
@@ -2361,19 +2437,37 @@ class BaseAnalyst(BudgetMeter, ABC):
             return None
 
     def _note_conversation(self, messages: list) -> None:
-        """Tell the job's budget what this loop's conversation now weighs.
+        """Tell the job's budget what this loop's next request will weigh.
 
         Called from the run-state refresher, which already runs before every
         model turn and already holds the messages. Measured with
         ``_message_chars``, the same rule the salvage trim uses: an assistant
         turn that requests tools carries its whole request outside ``content``,
         and counting the text alone under-reported a ReAct transcript fourfold.
+
+        Two things a request carries that the messages do not show are added.
+        The definitions of the loop's tools go with every request; left out,
+        a static analyst with 35 tools was over a quarter of its tool budget
+        fuller than it believed, and the server refused with the budget still saying
+        there was room. And where the server reported what the last request
+        really weighed, that figure — converted at the budget's own rate, plus
+        what the conversation gained since — is a floor under the measure:
+        content that tokenises worse than the rate assumes, and the template
+        the server wraps every message in, are in the server's count and in
+        nobody else's.
         """
         budget = self._context_budget()
         if budget is None:
             return
         try:
-            budget.note_conversation(self.name, sum(_message_chars(m) for m in messages))
+            budget.note_conversation(
+                self.name,
+                request_chars(
+                    messages,
+                    int(getattr(self, "_tool_definition_chars", 0) or 0),
+                    int(getattr(budget, "chars_per_token", CHARS_PER_TOKEN) or CHARS_PER_TOKEN),
+                ),
+            )
         except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
             self.logger.debug("%s: the conversation size was not recorded (%s).", self.name, exc)
 
@@ -2789,6 +2883,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         recorded = record_tools(
             self.pinned_tools(), recorder, repeats, repairs, self._context_budget()
         )
+        # Sent with every request of this loop, so counted with its conversation.
+        self._tool_definition_chars = tool_definition_chars(recorded)
+        self.ended_out_of_room = False
         agent_executor = create_react_agent(
             _model_that_closes_off_truncated_calls(self.llm, recorded, _close_off_truncated_calls),
             recorded,
@@ -2800,6 +2897,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                 recorder=recorder,
             ),
         )
+
+        # Whether the server, rather than the budget, said the window was full.
+        window_full = False
 
         # Run the ReAct coroutine on the shared, never-closing agent
         # loop (see ``_get_agent_loop``) instead of a throwaway per-call loop.
@@ -2860,6 +2960,21 @@ class BaseAnalyst(BudgetMeter, ABC):
                                     repeats.served_repeats,
                                 )
                                 break
+                            # The same end for a conversation with no room
+                            # left. The guardrail marked this agent when it
+                            # told the model so, and every call after that is
+                            # refused without running a tool — so a model that
+                            # asks anyway is spending the step budget on
+                            # refusals, which is what ran a live loop from its
+                            # sixteenth step to its fortieth.
+                            if self._out_of_room():
+                                self.logger.warning(
+                                    "%s ReAct loop ended: the conversation has no room "
+                                    "left for a tool answer; synthesising from what it "
+                                    "gathered.",
+                                    self.name,
+                                )
+                                break
                     except GraphRecursionError:
                         # The step cap, reached without langgraph's own
                         # "need more steps" turn — which it only takes when
@@ -2879,6 +2994,28 @@ class BaseAnalyst(BudgetMeter, ABC):
                             *list(latest.get("messages") or []),
                             AIMessage(content=RECURSION_STOP_TEXT),
                         ]
+                    except Exception as exc:
+                        # The server saying the window is full is this
+                        # conversation out of room, whatever the budget
+                        # believed: the tool phase ends the way it does when
+                        # the budget sees it first, and what was gathered is
+                        # salvaged rather than lost with the analyst. Only
+                        # then. A failure that is not a provider's full-window
+                        # answer, or one met before any tool ran — the framing
+                        # alone does not fit, which is a configuration fault —
+                        # has nothing to salvage and fails the agent as it
+                        # always did.
+                        if not (window_full_error(exc) and recorder.entries):
+                            raise
+                        nonlocal window_full
+                        window_full = True
+                        note_a_window_that_moved(exc)
+                        self.logger.warning(
+                            "%s ReAct loop ended: the model server reported its context "
+                            "window full (%s); synthesising from what it gathered.",
+                            self.name,
+                            type(exc).__name__,
+                        )
                 return dict(latest)
 
             last_conn_exc: Exception | None = None
@@ -2962,6 +3099,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             # because the last one timed out is the opposite of a ledger.
             self._finish_evidence(recorder)
             self.loop_budget = None
+            # Read before the conversation is forgotten: forgetting it clears
+            # the mark, so a question asked afterwards is always answered no
+            # and a loop that ran out of room recorded the step cap instead.
+            no_room = self._out_of_room()
             # The loop is over and its conversation is gone, so it stops
             # deciding how much of an answer the next one may read. In the same
             # ``finally`` and for the same reason: a loop that died still held
@@ -3046,19 +3187,24 @@ class BaseAnalyst(BudgetMeter, ABC):
         # read another answer, is in the same place as one that spent its
         # steps: it has evidence and no answer, and the salvage is what turns
         # the first into the second.
-        no_room = self._out_of_room()
-        ended_early = repeats.ending_the_loop() or no_room
+        ended_early = repeats.ending_the_loop() or no_room or window_full
         self._record_react_loop(hit_step_cap=hit_step_cap)
         if repeats.ending_the_loop():
             cap, why = "repeats", f"{repeats.served_repeats} repeated tool call(s)"
         elif no_room:
             cap, why = "no_room", "the conversation had no room left for a tool answer"
+        elif window_full:
+            cap, why = "no_room", "the model server reported its context window full"
         elif hit_step_cap:
             cap, why = "steps", ""
         else:
             cap, why = None, ""
         self._record_budget(budget, msgs, cap, detail=why)
         self._budget_tick(budget, msgs, final=True, ledger_entries=len(recorder.entries))
+        # Counted above, where it cost a step; not sent back to a model, which
+        # would read the graph's sentence as its own last turn.
+        msgs = [message for message in msgs if not is_the_graph_s_step_stop(message)]
+        answered = False
         if tool_call_count > 0 and (not content.strip() or hit_step_cap or ended_early):
             self.logger.warning(
                 "%s ReAct loop ended without a final answer after %d tool calls "
@@ -3076,6 +3222,15 @@ class BaseAnalyst(BudgetMeter, ABC):
             if synthesized.strip() and not _RECURSION_STOP_RE.search(synthesized):
                 content = synthesized
                 msgs = [*msgs, AIMessage(content=synthesized)]
+                answered = True
+        # A loop a cap ended ends on the graph's sentence or on a tool's
+        # notice, and neither is what the agent said. Where the salvage wrote
+        # nothing the agent has no answer, and says nothing: why the loop
+        # ended is on the budget record and the ``stage_ended_at_cap`` event,
+        # in the platform's own voice, not in the agent's.
+        if cap is not None and not answered:
+            content = ""
+        self.ended_out_of_room = cap == "no_room"
 
         # A final message that is neither a structured report nor a findings
         # block is not an answer. The loop's own stop condition cannot see that
@@ -3085,6 +3240,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         # of "Let me search for more specific strings related to malware
         # indicators:" at 0.5. Say so once, in the same conversation, and give
         # it the step to answer in.
+        if window_full:
+            # The nudge re-sends the conversation the server has just refused,
+            # so it cannot fit and would only occupy the model's one slot for a
+            # full prefill to learn that again. After the platform's own budget
+            # ended the phase the conversation is inside the tool budget with
+            # the reply reserve whole, and the nudge below still has room.
+            self._answer_unstructured = not answer_is_isr(content)
+            return self._capture_findings(content)
         return self._capture_findings(
             self._settle_final_answer(content, msgs, timeout, elapsed, max_steps)
         )
@@ -3354,7 +3517,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             return ""
 
-        budget = synthesis_budget_chars(get_settings(), self.name)
+        budget = synthesis_budget_chars(
+            get_settings(), self.name, counted_window_tokens(self._context_budget())
+        )
         # The same transcript rule the nudge follows: a tool call whose
         # arguments never parsed is not sent back to the server.
         sendable, _dropped = nudge_turns(msgs)
@@ -4418,6 +4583,12 @@ class BaseAnalyst(BudgetMeter, ABC):
     # stand-in that never asks anyone and is never asked still runs a loop.
     call_chain: tuple[str, ...] = ()
     loop_budget: LoopBudget | None = None
+    # What the definitions of the running loop's tools weigh in a request.
+    _tool_definition_chars: int = 0
+    # Whether this agent's last loop ended for want of room. A caller that
+    # would run the agent again on the same material asks this first: a
+    # second loop meets the same full window.
+    ended_out_of_room: bool = False
     _budget_ceiling: BudgetCeiling | None = None
     steps_spent: int = 0
     current_round: int = 0

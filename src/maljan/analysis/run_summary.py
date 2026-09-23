@@ -244,6 +244,9 @@ class TruncationMetrics:
     # Answers the conversation had no room left for at all: the model was
     # handed one sentence saying so and the answer stayed on the ledger.
     tool_output_no_room: int = 0
+    # JSON answers over the cap only because of their whitespace, handed over
+    # whole without it. Nothing was left out of them.
+    tool_output_compacted: int = 0
     # References the pass took out of a report's or a note's ``object_refs``.
     # No object left the bundle for these, which is why they are their own
     # number rather than a reason under ``integrity_dropped``.
@@ -835,6 +838,7 @@ class RunSummary:
                 f"| — shortened as a document | {trunc.tool_output_shortened} |",
                 f"| — shortening gave up on its clock | {trunc.tool_output_shortening_timeouts} |",
                 f"| — no room left for the answer | {trunc.tool_output_no_room} |",
+                f"| — handed over whole without its whitespace | {trunc.tool_output_compacted} |",
                 f"| Characters dropped | {trunc.tool_output_chars_dropped} |",
                 f"| ReAct step cap | {trunc.react_step_cap_hits} / {trunc.react_invocations} |",
                 f"| Judge token cap | {trunc.judge_token_cap_hits} / {trunc.judge_invocations} |",
@@ -981,6 +985,7 @@ class RunSummary:
                 "tool_output_shortened": t.tool_output_shortened,
                 "tool_output_shortening_timeouts": t.tool_output_shortening_timeouts,
                 "tool_output_no_room": t.tool_output_no_room,
+                "tool_output_compacted": t.tool_output_compacted,
                 "tool_output_chars_dropped": t.tool_output_chars_dropped,
                 "react_invocations": t.react_invocations,
                 "react_step_cap_hits": t.react_step_cap_hits,
@@ -1244,6 +1249,7 @@ class RunSummaryBuilder:
             tool_output_shortened=int(snapshot.get("tool_output_shortened", 0)),
             tool_output_shortening_timeouts=int(snapshot.get("tool_output_shortening_timeouts", 0)),
             tool_output_no_room=int(snapshot.get("tool_output_no_room", 0)),
+            tool_output_compacted=int(snapshot.get("tool_output_compacted", 0)),
             tool_output_chars_dropped=int(snapshot.get("tool_output_chars_dropped", 0)),
             react_invocations=int(snapshot.get("react_invocations", 0)),
             react_step_cap_hits=int(snapshot.get("react_step_cap_hits", 0)),

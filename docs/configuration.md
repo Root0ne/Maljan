@@ -581,6 +581,15 @@ at 131,072 the first is 46,080; at a million, 371,928. At the floor the answer
 meets the structural shortener exactly as any other does and carries the same
 notice naming the arguments that would narrow it.
 
+An answer over the cap only because of its whitespace is not shortened. A tool
+that indents its JSON spends a quarter or more of its characters on layout, and
+a derived cap makes that gap the common case: a recorded `elf_info` was 8,628
+characters indented and 5,577 compact against a cap of 8,486. Such an answer is
+handed over whole, written without the whitespace — parseable, every value the
+tool's, and with no notice, because nothing was left out — and the run summary
+counts it as `tool_output_compacted`. Only a compact form that still does not
+fit meets the shortener, and what the shortener then cuts is the compact form.
+
 **When the room runs out, the tool phase ends.** Below about a thousand
 characters an answer cannot survive its own notice, so nothing of it is handed
 over. The model is told once, in one sentence, that the conversation has no
@@ -590,9 +599,17 @@ From there that agent's tool calls are **not run** — a server's time is not
 spent on an answer with nowhere to go — and a call made anyway returns one
 short line. The run-state block carries the same fact on every model turn,
 replaced rather than appended, so it costs the same whether the loop reads it
-once or forty times. The loop then ends the way a repeating loop already does:
-`no_room` on its budget record with the reason, and the forced synthesis turns
-what was gathered into the answer instead of a "need more steps" non-answer.
+once or forty times. The loop then ends on that same step, the way a repeating
+loop does, whatever the model asks next: `no_room` on its budget record with
+the reason, on the `stage_ended_at_cap` event and under the agent's `caps` in
+`run_summary.budget`, and the forced synthesis turns what was gathered into the
+answer. The graph's own step-limit sentence ("need more steps") is never shown
+or handed on as an agent's words, and the platform writes none of its own in
+their place: where a loop a cap ended leaves no answer and the salvage writes
+none, the agent's answer is empty and its status `no_claims`, and why is on the
+budget record and the `stage_ended_at_cap` event. The node does not run such an
+analyst a second time over the same material, which would meet the same full
+window.
 
 Both notices come out of the **tool budget** — the window less the room kept
 back for the model's reply — and are withheld when they would not fit. So does
@@ -610,6 +627,59 @@ window, 2,048 on 8,192, 1,024 on 4,096.
 What is outside that guarantee is the model's own output: its tool requests and
 its prose are not the platform's to cap, and on a very small window they reach
 the window before the platform's text does.
+
+What a conversation is measured at is what its next request will weigh, not the
+messages alone. The definitions of the loop's tools go with every request, and
+they are counted: a static analyst holding the default toolset — 35 tools
+from the analysis, knowledge and VirusTotal servers — carries about 20,500
+characters of them, 28% of a 32,768-token window's 73,728-character tool
+budget, and a count that left them out said there was room until the server
+refused. With the framing, about 46,000 characters (63%) are left for answers
+and the model's own turns. On a small window, or with a large toolset, untick
+the tools an agent does not need in each server's tick list in the Tools step:
+that list is the only thing that narrows what a server sends an agent, and
+every unticked tool is its definition's characters back on every request. Where the
+server reported how many tokens the last request really took, that figure,
+converted at the same three characters per token, plus what the conversation
+gained since, is a floor under the measure, so content that tokenises worse
+than three characters a token — pages of `strings` noise do — or the template
+the server wraps each message in cannot hide room that is gone.
+
+And where a server says the window is full anyway — llama.cpp's "context shift
+is disabled" or "the request exceeds the available context size", an
+OpenAI-compatible "maximum context length", Anthropic's "prompt is too long" —
+after the analyst's loop has gathered at least one tool answer, that agent's
+tool phase ends with `no_room` ("the model server reported its context window
+full" on the record and the stage event), and the forced synthesis writes the
+answer from what was gathered, rather than the agent failing and its work being
+lost. Only an error the provider's SDK raised for the server's answer counts.
+A server that names the reply cap is read by its numbers. vLLM words a full
+conversation as "'max_tokens' … is too large: 8192. This model's maximum
+context length is 32768 tokens and your request has 24808 input tokens": the
+cap fits the window on its own and the prompt grew until the two together did
+not, so that is a full window. A cap at least as large as the window, or one
+named with no numbers to read, is a configuration fault no conversation could
+avoid. The same full-window sentence on the first request, before anything was
+gathered, means the framing alone does not fit; and an error that is not a
+server's answer is the platform's own. Each of those faults still fails the
+agent, because there is nothing to salvage and the failure is the true
+statement. After the server has said the window is full, the final-answer
+nudge is not sent — it would re-send the conversation the server just refused
+— while after the platform's own budget ended the phase it still is, because
+that conversation is inside the tool budget with the reply reserve whole.
+
+The judge's tool loop is accounted the same way, under the judge's own name:
+its conversation and its tool definitions are measured before every model
+turn, with the server's reported count as a floor; its answers are capped from
+its own room; its loop is streamed, ends on the step it runs out of room, and
+ends with `no_room` on the same strict full-window answer once it has gathered
+something. Its reasoning is then asked for once, with no tools, from what it
+gathered, and mediation reads the verdict from that; a judge loop that fails
+before gathering anything fails as before. Both salvages re-send the
+conversation trimmed to two fifths of the window the budget counts on — the
+smaller of the declared and the probed one, so a `context_size` left larger
+than the served window cannot size a salvage close to the request the server
+just refused — and each gets only what is left of its loop's time.
 
 The window itself is learned free of charge and without asking the operator
 anything. In order:
