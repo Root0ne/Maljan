@@ -304,7 +304,7 @@ export function serverRestSentence(row: {
   const reason = (row.reason ?? "").trim();
   return (
     `Tool server ${row.server ?? ""} was rested for ${Math.round(Number(row.cooldown_s ?? 0) || 0)} s ` +
-    `after ${failures} transport ${failures === 1 ? "failure" : "failures"} in a row` +
+    `after ${failures} ${failures === 1 ? "call" : "calls"} in a row it did not answer` +
     (reason ? ` (the last: ${reason})` : "") +
     "."
   );

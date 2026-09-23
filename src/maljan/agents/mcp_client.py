@@ -327,7 +327,7 @@ class MCPLangChainToolkit:
                 # was, counted as one rather than let go as abandoned.
                 if guard is not None and not settled:
                     guard.failed(
-                        "the server had not answered when its caller's budget ran out",
+                        "the call did not finish within its caller's budget",
                         trial=trial,
                     )
                     settled = True

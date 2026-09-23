@@ -5,9 +5,10 @@ One :class:`ServerGuard` per server per job, held by the job's
 handle opened for a second event loop is the same server to the job, and a
 rest that one loop's calls earned is a rest for the other's too.
 
-**The breaker.** ``failures_to_open`` transport failures in a row open it. A
-transport failure is the server not answering at all: a timeout, a refused or
-dropped connection, the server's process gone. A tool that *answers* — with
+**The breaker.** ``failures_to_open`` unanswered calls in a row open it. An
+unanswered call is a transport failure — a timeout, a refused or dropped
+connection, the server's process gone — or a call that did not finish within
+its caller's own budget while it waited on the server. A tool that *answers* — with
 its result or with its own error, a bad argument, a missing file — has
 answered, and that is a success as far as the transport is concerned; it
 resets the count and never opens anything. While the breaker is open, a call
@@ -175,8 +176,8 @@ class ServerGuard:
         return (
             _resting_answer(
                 tool,
-                f"tool server '{self.server}' is resting after {failures} transport failure"
-                f"{'' if failures == 1 else 's'} in a row; {when}",
+                f"tool server '{self.server}' is resting after {failures} call"
+                f"{'' if failures == 1 else 's'} in a row it did not answer; {when}",
             ),
             False,
         )
@@ -231,7 +232,7 @@ class ServerGuard:
                 "reason": str(reason),
             }
         logger.warning(
-            "tool server '%s' is resting for %.0f s after %d transport failure(s) in a row (%s).",
+            "tool server '%s' is resting for %.0f s after %d unanswered call(s) in a row (%s).",
             self.server,
             self.cooldown_seconds,
             record["failures"],

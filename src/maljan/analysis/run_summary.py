@@ -196,13 +196,12 @@ def spend_blocks(snapshot: dict[str, Any] | None) -> dict[str, Any]:
 def server_rest_sentence(row: dict[str, Any]) -> str:
     """One rested tool server, in the words the report and the console print."""
     failures = int(row.get("failures") or 0)
-    noun = "failure" if failures == 1 else "failures"
+    noun = "call" if failures == 1 else "calls"
     reason = str(row.get("reason") or "").strip()
     return (
         f"Tool server {row.get('server', '')!s} was rested for "
-        f"{float(row.get('cooldown_s') or 0):.0f} s after {failures} transport {noun} in a row"
-        + (f" (the last: {reason})" if reason else "")
-        + "."
+        f"{float(row.get('cooldown_s') or 0):.0f} s after {failures} {noun} in a row it did not "
+        "answer" + (f" (the last: {reason})" if reason else "") + "."
     )
 
 

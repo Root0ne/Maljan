@@ -83,17 +83,17 @@ describe("a rested tool server", () => {
       }),
     ]);
     expect(lines).toEqual([
-      "system: Tool server analysis is resting for 60 s after 3 transport failures in a row (the last: the server did not answer in time).",
+      "system: Tool server analysis is resting for 60 s after 3 calls in a row it did not answer (the last: the server did not answer in time).",
     ]);
   });
 
   it("counts one failure in the singular", () => {
-    expect(restedLine({ server: "s", failures: 1, cooldown_s: 5 })).toContain("1 transport failure in a row");
+    expect(restedLine({ server: "s", failures: 1, cooldown_s: 5 })).toContain("1 call in a row it did not answer");
   });
 
   it("is recorded in the words the report prints", () => {
     expect(serverRestSentence({ server: "analysis", failures: 3, cooldown_s: 60, reason: "timed out" })).toBe(
-      "Tool server analysis was rested for 60 s after 3 transport failures in a row (the last: timed out).",
+      "Tool server analysis was rested for 60 s after 3 calls in a row it did not answer (the last: timed out).",
     );
   });
 });

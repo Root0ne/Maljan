@@ -1073,12 +1073,17 @@ name an ordered list of models (`fallbacks`), held as one model object
 the one before failed *as a provider* — a refused or dropped connection, a
 timeout, an HTTP 5xx, 408 or 429, a model the server does not have, a refused
 credential, or a refusal the provider reports as an error. A timeout is real
-because every model on a list but the last has its own turn deadline,
-`core.llm.fallback_turn_share` of the agent's loop budget (a half by default),
-so a model that stops answering raises inside the list rather than being
-cancelled with the whole loop; and every provider's client has a request
+because every model on a list but the last has its own turn deadline, set at
+the start of every loop to `core.llm.fallback_turn_share` (a half by default)
+of the budget *that loop* runs under — an ask's ceiling included, so an agent
+asked for help under a shorter clock gets a shorter deadline — and for the
+reporter, which runs no loop, of `core.reporting.composer_per_section_timeout`,
+the shortest limit its calls run under. A model that stops answering raises
+inside the list rather than being cancelled with the whole loop (on the
+blocking path the abandoned call is left in a daemon thread, so it never holds
+up the process's exit); and every provider's client has a request
 timeout (1800 s, `PROVIDER_REQUEST_TIMEOUT_SECONDS` — Ollama's had none). A 429
-or 503 that asks, in `Retry-After`, for at most thirty seconds is waited out on
+or 503 that asks, in `Retry-After` (seconds or an HTTP date), for at most thirty seconds is waited out on
 the same model once before the list moves on. The switch is **sticky for the
 loop**: the model that took over answers the rest of that loop, so a stalled
 first model costs one turn deadline rather than one per turn, and the next loop
@@ -1110,8 +1115,9 @@ attaches — the built-in sidecars and every operator-configured server — has 
 guard (`maljan.providers.server_guard`), shared by every handle the registry
 opens for it. The Ghidra static provider and the CAPE sandbox provider build
 their own toolkits outside the registry and are not guarded; bringing them
-under it is a recorded follow-up. `core.mcp.breaker.failures_to_open` transport failures in a row —
-a timeout, a refused connection, the server's process gone — rest the server
+under it is a recorded follow-up. `core.mcp.breaker.failures_to_open` calls in a row the server
+did not answer — a timeout, a refused connection, the server's process gone, or
+a call that did not finish within its caller's budget — rest the server
 for `core.mcp.breaker.cooldown_seconds`. A call made while it rests is not
 sent; the platform answers it with a tool error in the structured shape
 (`maljan.tools.errors`, code `server_resting`) naming the server, that it is

@@ -454,7 +454,7 @@ export function restedLine(data: Record<string, unknown>): string {
   const reason = text(data.reason);
   return (
     `Tool server ${text(data.server)} is resting for ${Math.round(Number(data.cooldown_s ?? 0) || 0)} s ` +
-    `after ${failures} transport ${failures === 1 ? "failure" : "failures"} in a row` +
+    `after ${failures} ${failures === 1 ? "call" : "calls"} in a row it did not answer` +
     (reason ? ` (the last: ${reason})` : "") +
     "."
   );

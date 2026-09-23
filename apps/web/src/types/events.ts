@@ -52,7 +52,7 @@ export type WSEventType =
   | "budget_tick"
   | "stage_ended_at_cap"
   /* A tool server this job stopped calling for a while after a run of
-   * transport failures. See maljan/providers/server_guard.py. */
+   * calls it did not answer. See maljan/providers/server_guard.py. */
   | "tool_server_rested"
   /* An agent's model list moved on to its next model because the one before
    * failed as a provider; once per switch, whether or not deltas stream. */

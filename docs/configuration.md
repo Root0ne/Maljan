@@ -142,10 +142,14 @@ Never on what a model said: an answer the validation loop rejects is sent back
 to the model that wrote it, and a parse or validation error a model's answer
 raises reaches the loop rather than the next model. A timeout is a provider
 failure because every model on a list but the last has its own turn deadline —
-`core.llm.fallback_turn_share` (0.5) of the agent's loop budget, a share of the
-loop because the loop is what would otherwise cancel a stalled model first —
+`core.llm.fallback_turn_share` (0.5) of the budget the current loop runs under,
+set when the loop starts, so inside an ask it is a share of the ask's clock; a
+share of the loop because the loop is what would otherwise cancel a stalled
+model first. The reporter's is a share of
+`core.reporting.composer_per_section_timeout`, restarted where the report
+stage starts —
 and every provider's client has a 1800 s request timeout. A 429 or 503 whose
-`Retry-After` asks for at most thirty seconds is waited out on the same model
+`Retry-After` (seconds or an HTTP date) asks for at most thirty seconds is waited out on the same model
 once before the list moves on. Once the list has moved, the model that answered
 stays for the rest of that loop (a stalled first model costs one deadline, not
 one per turn), and the next loop starts at the first model again.
@@ -1345,17 +1349,18 @@ Per job and per tool server, three settings under **Tool servers → Resilience*
 | `core.mcp.breaker.call_timeout_seconds` | 0 (derived) | Derived from the longest tool budget the deployment configures — `core.static.capa.timeout_seconds`, 300 by default and 900 on a slow host — so a call never times out before the analysis it runs may finish. A tool whose server declares a longer budget in its manifest gets that; thirty seconds of grace are added either way. |
 | `core.mcp.breaker.max_concurrent_calls` | 4 | A judgement: the shipped teams run their analysts one after another, and four lets one analyst's parallel tool calls through while bounding a team that fans out. `0` leaves the calls uncapped, as every server was before. |
 
-A transport failure is the server not answering at all: a timeout, a refused
-or dropped connection, the server's process gone. Every call is sent with a
-deadline (above), so a server that hangs times out and is counted; a call still
-waiting when its caller's own loop budget runs out is counted too, rather than
-let go. After that many in a row the
+An unanswered call is either a transport failure — a timeout, a refused or
+dropped connection, the server's process gone — or a call that did not finish
+within its caller's own budget (a loop's or an ask's) while it waited on the
+server. Every call is sent with a deadline (above), so a server that hangs
+times out and is counted; a call its caller's budget cut short is counted too,
+under its own reason, rather than let go. After that many in a row the
 server rests: a call is not sent, and the model is answered with a tool error
 in the structured shape —
 
 ```json
 {"error": {"code": "server_resting",
-           "message": "tool server 'analysis' is resting after 3 transport failures in a row; it will be tried again in 60 s",
+           "message": "tool server 'analysis' is resting after 3 calls in a row it did not answer; it will be tried again in 60 s",
            "remediation": "this server failed at the transport several times in a row and is not being called for now; use another tool, or call this one again after the time the message names"},
  "tool": "pe_info"}
 ```
@@ -1363,7 +1368,7 @@ in the structured shape —
 — which the ledger records as a failed call like any other. After the cooldown
 one call is let through (the others are told that one call is trying the server
 again and nothing more is sent until it answers); a success ends the rest and
-its transport failure starts another. The guard covers every server the job's
+its own failure to answer starts another. The guard covers every server the job's
 registry attaches; the Ghidra and CAPE providers' own toolkits are outside it. A tool that answers with its own error (a bad argument, a file
 that is not there) has answered, and never counts. Each rest is published as a
 `tool_server_rested` event, drawn in the conversation, and kept in

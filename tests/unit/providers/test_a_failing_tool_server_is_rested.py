@@ -1,6 +1,6 @@
 """A tool server that keeps failing at the transport is rested, and says so.
 
-Per job and per server: a run of transport failures opens the breaker, a call
+Per job and per server: a run of calls the server did not answer opens the breaker, a call
 while it is open is answered by the platform in the structured tool-error
 shape, one call is let through after the cooldown and a success closes it. A
 tool that answers with its own error has answered, and never trips anything.
@@ -91,7 +91,9 @@ class TestTheBreaker:
         assert answer is not None
         code, message, remediation = error_parts(answer) or ("", "", "")
         assert code == SERVER_RESTING
-        assert "tool server 'analysis' is resting after 3 transport failures in a row" in message
+        assert (
+            "tool server 'analysis' is resting after 3 calls in a row it did not answer" in message
+        )
         assert "it will be tried again in 60 s" in message
         assert remediation
         assert json.loads(answer)["tool"] == "pe_info"
@@ -316,7 +318,7 @@ def test_the_run_summary_names_every_rest() -> None:
     )
     assert summary.to_dict()["server_rests"][0]["server"] == "analysis"
     assert (
-        "Tool server analysis was rested for 60 s after 3 transport failures in a row "
+        "Tool server analysis was rested for 60 s after 3 calls in a row it did not answer "
         "(the last: timed out)." in summary.to_markdown()
     )
 
@@ -326,7 +328,7 @@ def test_the_sentence_counts_in_words(failures: int) -> None:
     from maljan.analysis.run_summary import server_rest_sentence
 
     text = server_rest_sentence({"server": "s", "failures": failures, "cooldown_s": 5})
-    assert ("failure in a row" in text) == (failures == 1)
+    assert (" call in a row" in text) == (failures == 1)
 
 
 class TestTheHalfOpenPath:
