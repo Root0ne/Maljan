@@ -8,6 +8,8 @@ import { api } from "@/lib/api";
 import {
   bundleLossSentence,
   corpusHeldSentence,
+  serverRestSentence,
+  tokensSentence,
   countLabel,
   formatDuration,
   partialGroundingSentence,
@@ -547,6 +549,11 @@ function RunRecord({
   const bundleLoss = bundleLossSentence(runSummary.truncation ?? null);
   const partialGrounding = partialGroundingSentence(runSummary.truncation ?? null);
   const corpusHeld = corpusHeldSentence(runSummary.truncation ?? null);
+  const spent = tokensSentence(runSummary.tokens ?? null);
+  const fallbacks = Object.entries(runSummary.models ?? {}).flatMap(([agent, block]) =>
+    (block?.fallbacks ?? []).map((row) => ({ agent, reason: row.reason })),
+  );
+  const rests = runSummary.server_rests ?? [];
   const configRows = Object.entries(config ?? {}).filter(
     ([key]) => !SHOWN_IN_THE_HEADER.has(key),
   );
@@ -590,6 +597,17 @@ function RunRecord({
                 ? `${countLabel(validation.retries, "correction turn")} were spent on producers that answered in the wrong shape.`
                 : "No producer needed a correction turn."}
             </li>
+            {spent && <li>{spent}</li>}
+            {fallbacks.map((row, i) => (
+              <li key={`fallback-${i}`} className="text-text-muted">
+                {row.agent} fell back to another model — {row.reason}.
+              </li>
+            ))}
+            {rests.map((row, i) => (
+              <li key={`rest-${i}`} className="text-status-orange">
+                {serverRestSentence(row)}
+              </li>
+            ))}
             {bundleLoss && <li className="text-text-muted">{bundleLoss}</li>}
             {partialGrounding && <li className="text-text-muted">{partialGrounding}</li>}
             {corpusHeld && <li className="text-text-muted">{corpusHeld}</li>}

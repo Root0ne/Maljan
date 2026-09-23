@@ -36,8 +36,17 @@ class OllamaProvider:
         if self._config.llm.ollama.disable_thinking:
             kwargs.setdefault("reasoning", False)
 
+        # A request timeout, which the Ollama client has none of by default:
+        # a server that stops answering otherwise holds the call until the
+        # loop around it is cancelled. Caller-supplied client kwargs win.
+        from maljan.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
+
+        client_kwargs = dict(kwargs.pop("client_kwargs", None) or {})
+        client_kwargs.setdefault("timeout", PROVIDER_REQUEST_TIMEOUT_SECONDS)
+
         return ChatOllama(
             model=model,
+            client_kwargs=client_kwargs,
             base_url=base_url,
             temperature=temperature,
             keep_alive=self._config.llm.ollama.keep_alive,

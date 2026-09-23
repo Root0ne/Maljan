@@ -34,6 +34,12 @@ class AnthropicProvider:
 
         api_key = secret if isinstance(secret, SecretStr) else SecretStr(str(secret))
 
+        # The same request timeout as every other provider, named rather than
+        # left to the SDK's default.
+        from maljan.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
+
+        kwargs.setdefault("timeout", float(PROVIDER_REQUEST_TIMEOUT_SECONDS))
+
         return ChatAnthropic(
             model_name=model,
             api_key=api_key,

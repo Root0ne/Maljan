@@ -308,6 +308,46 @@ class TestTheGate:
 
         assert await unprobed_models(_Db([]), settings, ["static", "network"]) == []
 
+    @pytest.mark.asyncio
+    async def test_a_fallback_no_probe_reached_is_refused_as_a_fallback(self) -> None:
+        settings = _settings(
+            provider="ollama",
+            agents={
+                "static": {
+                    "provider": "ollama",
+                    "model": "qwen3:4b",
+                    "fallbacks": [{"provider": "ollama", "model": "gemma3:4b"}],
+                }
+            },
+        )
+        rows = [_Row("http://localhost:11434", "qwen3:4b", True, "ok")]
+
+        refusals = await unprobed_models(_Db(rows), settings, ["static"])
+
+        assert refusals == [
+            f"agent 'static' falls back to model 'gemma3:4b' at http://localhost:11434: "
+            f"{NEVER_PROBED}"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_list_whose_every_model_was_reached_passes(self) -> None:
+        settings = _settings(
+            provider="ollama",
+            agents={
+                "static": {
+                    "provider": "ollama",
+                    "model": "qwen3:4b",
+                    "fallbacks": [{"provider": "ollama", "model": "gemma3:4b"}],
+                }
+            },
+        )
+        rows = [
+            _Row("http://localhost:11434", "qwen3:4b", True, "ok"),
+            _Row("http://localhost:11434", "gemma3:4b", True, "ok"),
+        ]
+
+        assert await unprobed_models(_Db(rows), settings, ["static"]) == []
+
 
 class TestWhoTheGateChecks:
     def test_it_follows_the_agents_a_lead_can_ask(self) -> None:
@@ -421,6 +461,24 @@ class TestSavingAModel:
         )
 
         assert refusals and "agent 'static' names model 'qwen3:4b'" in refusals[0]
+
+    @pytest.mark.asyncio
+    async def test_a_fallback_added_to_a_stored_entry_is_asked_about(self) -> None:
+        from app.services.model_probes import AGENT_MODELS_KEY, unprobed_models_being_saved
+
+        primary = {"provider": "ollama", "model": "qwen3:4b"}
+        with_fallback = {**primary, "fallbacks": [{"provider": "ollama", "model": "gemma3:4b"}]}
+        settings = _settings(provider="ollama", agents={"static": with_fallback})
+        rows = [_Row("http://localhost:11434", "qwen3:4b", True, "ok")]
+
+        refusals = await unprobed_models_being_saved(
+            _Db(rows),
+            settings,
+            {AGENT_MODELS_KEY: {"static": with_fallback}},
+            {AGENT_MODELS_KEY: {"static": primary}},
+        )
+
+        assert refusals and "falls back to model 'gemma3:4b'" in refusals[0]
 
     @pytest.mark.asyncio
     async def test_a_save_that_names_no_model_asks_nothing(self) -> None:
