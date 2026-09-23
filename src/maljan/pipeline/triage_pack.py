@@ -1338,19 +1338,27 @@ def _quoted(text: str) -> str:
     """One recovered string, quoted, cut to ``DECODED_STRING_CHARS`` and on one line.
 
     Backslashes are left as FLOSS gave them, so a Windows path reads as a
-    path; only the quote and the control characters are written out.
+    path; only the quote and the control characters are written out, and a
+    backslash that would end the string, where it would read as escaping the
+    closing quote.
     """
     value = text if len(text) <= DECODED_STRING_CHARS else text[: DECODED_STRING_CHARS - 1] + "…"
     out = "".join(_ESCAPES.get(ch, ch if ch.isprintable() else f"\\x{ord(ch):02x}") for ch in value)
+    if out.endswith("\\"):
+        out = out[:-1] + "\\x5c"
     return f'"{out}"'
 
 
 def _decoded_item(row: dict[str, Any]) -> str:
-    """``"string"@offset``: a decoded string's call site, else its routine's offset."""
-    if row.get("kind") == "decoded":
-        where = row.get("called_at_rva") or row.get("called_at")
-    else:
-        where = row.get("function_rva") or row.get("function")
+    """``"string"@offset``: a decoded string's call site, else its routine's offset.
+
+    An address FLOSS gave only as a virtual address, with no offset from the
+    image base, is marked ``va`` so it is not read as one.
+    """
+    decoded = row.get("kind") == "decoded"
+    offset = row.get("called_at_rva") if decoded else row.get("function_rva")
+    virtual = row.get("called_at") if decoded else row.get("function")
+    where = str(offset) if offset else (f"va {virtual}" if virtual else "")
     text = _quoted(str(row.get("string") or ""))
     return f"{text}@{where}" if where else text
 
@@ -1396,6 +1404,14 @@ def _decoded_strings(data: dict[str, Any], max_chars: int = DECODED_STRINGS_LINE
     def _line(shown: int) -> str:
         if shown >= total:
             said = f"all {_n(total)} shown"
+            lengths = [len(str(row.get("string") or "")) for row in rows[:shown]]
+            cut = sum(1 for length in lengths if length > DECODED_STRING_CHARS)
+            if cut:
+                said += (
+                    f" ({_n(cut)} cut to {DECODED_STRING_CHARS} characters and ending in …, "
+                    "so the line stays within the pack every agent reads; the whole string is "
+                    "in the entry)"
+                )
         else:
             said = (
                 f"{_n(shown)} of {_n(total)} shown (every agent reads the pack, so this line "

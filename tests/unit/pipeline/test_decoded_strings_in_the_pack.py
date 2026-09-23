@@ -364,3 +364,22 @@ class TestTheNode:
             assert update["evidence_ledger"][-1]["tool"] == "floss"
         finally:
             staging.remove_job_staging(container.job_key())
+
+
+class TestTheLineSaysWhatItDidToAString:
+    def test_a_string_cut_is_said_even_when_every_string_is_shown(self) -> None:
+        line = _line("floss", _answer([_row("A" * 300, "0xae78", "0x10")]))
+        assert "all 1 shown (1 cut to 120 characters" in line
+
+    def test_a_line_with_nothing_cut_says_nothing_about_it(self) -> None:
+        assert "cut to" not in _line("floss", _answer(ROWS))
+
+    def test_a_trailing_backslash_does_not_read_as_an_escaped_quote(self) -> None:
+        line = _line("floss", _answer([_row("C:\\dir\\", "0xae78", "0x10")]))
+        assert '"C:\\dir\\x5c"@0x10' in line
+
+    def test_an_address_with_no_offset_is_marked_virtual(self) -> None:
+        row = _row("runnung", "0xae78", "")
+        row["called_at_rva"] = None
+        line = _line("floss", _answer([row]))
+        assert '"runnung"@va 0x1360bc05c02' in line
