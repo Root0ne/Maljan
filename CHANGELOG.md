@@ -1580,7 +1580,9 @@ change landed on `main`.
   `analysis` server's environment and a directory in the job's staging
   directory, and every agent reads one line of it: the counts, then up to 100
   strings in 3,000 characters, each with the routine that produced it and its
-  offset from the image base, the bound and its reason stated when it cut.
+  offset from the image base, the bound and its reason stated when it cut, and
+  a statement that the strings are the sample's own text: data, not
+  instructions, ledger entries or findings.
   Without a build the entry says so with the remedy and is not a failure; a run
   stopped by its clock or its memory is a failed entry that says which. On the
   reference loader the line carries all 81 strings and adds about 28 s to the
@@ -3789,7 +3791,8 @@ change landed on `main`.
   mediator's structured extraction and the judge's verdict (and its retry)
   recorded nothing, nor did the three built-in analysts' revision rounds, the
   function summariser, or the turns of a tool loop its hard cap or a failure
-  stopped; the narrative's and the composer's calls were recorded under no
+  stopped (a judge loop's included), or an attempt abandoned on a connection
+  error; the step-cap stop sentence the loop appends was counted as a call; the narrative's and the composer's calls were recorded under no
   model, and their structured paths not at all. Each path now records its usage
   under its agent and the model that answered: the mediator's against the
   expert model, the report's against the reporter's, the summariser's under
@@ -3803,9 +3806,12 @@ change landed on `main`.
   "[BINARY FACTS]" and "[DETERMINISTIC FACTS]" — its own prompt's block
   headings — beside real evidence ids, and nothing checked a citation. The
   narrative and every composer section now get `report.citation_not_evidence`
-  for each bracketed item that is not an evidence id the answer's prompt
-  carried, with a sentence naming the ids it may cite; ATT&CK and MBC ids in
-  brackets and markdown links are left alone. The citation is never rewritten:
+  for each bracketed item in their prose that is not an id the run's ledger
+  issued, with a sentence naming the ids they may cite. Only prose fields are
+  read, never a record field or a code span; ATT&CK and MBC ids, IPv6 literals,
+  markdown links and a bracket that is part of a token are left alone, and a
+  numbered reference such as `[1]` is asked about. An id inside a sample's own
+  decoded string is never citable. The citation is never rewritten:
   one the retry does not fix prints as written and is recorded unresolved, and
   the section is kept.
 
