@@ -95,21 +95,25 @@ class TestConfidenceAnnotatedRelationship:
         r = _make_annotated(technique_id=None)
         assert r.x_maljan_technique_id is None
 
-    def test_confidence_default_is_half(self) -> None:
+    def test_a_confidence_nobody_stated_is_absent(self) -> None:
         r = ConfidenceAnnotatedRelationship(
             relationship_type="uses",
             source_ref="a",
             target_ref="b",
         )
-        assert r.x_maljan_confidence == pytest.approx(0.5)
+        assert r.x_maljan_confidence is None
+        assert "x_maljan_confidence" not in r.model_dump(mode="json")
+        assert r.is_high_confidence is False
+        assert r.confidence_label() == "NOT ASSESSED"
 
-    def test_evidence_basis_default_is_unknown(self) -> None:
+    def test_an_evidence_basis_nobody_stated_is_absent(self) -> None:
         r = ConfidenceAnnotatedRelationship(
             relationship_type="uses",
             source_ref="a",
             target_ref="b",
         )
-        assert r.x_maljan_evidence_basis == "unknown"
+        assert r.x_maljan_evidence_basis is None
+        assert "x_maljan_evidence_basis" not in r.model_dump(mode="json")
 
     def test_contributing_agents_default_is_empty(self) -> None:
         r = ConfidenceAnnotatedRelationship(

@@ -85,8 +85,10 @@ class TestItProjectsTheJudgeAndTheAnalysts:
         cells, mappings = build_capability_matrix(stix_output=bundle, isr_reports=None)
 
         assert [c.confidence for c in cells] == [0.77]
-        assert cells[0].contributing_layers == ["judge", "static", "dynamic"]
-        assert mappings[0].is_corroborated is True
+        # The agents the judge credits are its words about the evidence, not
+        # sources that named the technique: no analyst claimed it here.
+        assert cells[0].contributing_layers == ["judge"]
+        assert mappings[0].is_corroborated is False
 
     def test_an_analyst_claim_adds_its_own_evidence_quote(self) -> None:
         cells, _ = build_capability_matrix(
@@ -254,7 +256,10 @@ class TestTheJudgeIsNotCountedAsCorroboration:
             ],
         )
 
-        _cells, mappings = build_capability_matrix(stix_output=bundle, isr_reports=None)
+        _cells, mappings = build_capability_matrix(
+            stix_output=bundle,
+            isr_reports={"static": _isr("static", _claim("T1055", 0.8))},
+        )
 
         assert mappings[0].contributing_layers == ["judge", "static"]
         assert mappings[0].is_corroborated is False

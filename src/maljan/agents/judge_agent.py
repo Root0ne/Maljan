@@ -1420,11 +1420,19 @@ class JudgeAgent(BudgetMeter):
 
         _VALID_TID_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
         tids: set[str] = set()
+        # Who claimed each one, named the way the evidence summary names them.
+        # A relationship this pipeline builds names the agents whose claims it
+        # carries and nobody else.
+        claimed_by: dict[str, list[str]] = {}
         if isr_reports:
-            for isr in isr_reports.values():
+            for name, isr in isr_reports.items():
+                source = str(getattr(isr, "agent_id", "") or name)
                 for claim in isr.claims:
                     if claim.technique_id and _VALID_TID_RE.match(claim.technique_id):
                         tids.add(claim.technique_id)
+                        agents = claimed_by.setdefault(claim.technique_id, [])
+                        if source not in agents:
+                            agents.append(source)
         model_only = sorted(set(_VALID_TID_RE.findall(text)) - tids)
         if model_only:
             self.logger.warning(
@@ -1493,7 +1501,9 @@ class JudgeAgent(BudgetMeter):
                         {
                             "source_name": "mitre-attack",
                             "external_id": tid,
-                            "url": f"https://attack.mitre.org/techniques/{tid}",
+                            "url": (
+                                f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/"
+                            ),
                         }
                     ],
                 }
@@ -1502,6 +1512,9 @@ class JudgeAgent(BudgetMeter):
                 # Nothing to relate the technique to, and a relationship with a
                 # dangling source is a defect the integrity pass would prune.
                 continue
+            # No confidence: the judge gave none, and the 0.5 this used to
+            # carry was published as the judge's own number on every technique
+            # of every fallback run.
             objects.append(
                 {
                     "type": "relationship",
@@ -1509,9 +1522,7 @@ class JudgeAgent(BudgetMeter):
                     "relationship_type": "uses",
                     "source_ref": malware_id,
                     "target_ref": attack_id,
-                    "x_maljan_confidence": 0.5,
-                    "x_maljan_evidence_basis": "unknown",
-                    "x_maljan_contributing_agents": [],
+                    "x_maljan_contributing_agents": claimed_by.get(tid, []),
                     "x_maljan_technique_id": tid,
                 }
             )

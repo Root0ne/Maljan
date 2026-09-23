@@ -312,12 +312,12 @@ def _collect_techniques(
         )
 
     # 1. The judge's bundle. An attack-pattern says the technique is in the
-    # verdict; the relationship annotations say how sure the judge was and which
-    # agents it credited. Its ids are checked against the catalogue here, the
+    # verdict; a relationship's annotation says how sure the judge was. Its ids
+    # are checked against the catalogue here, the
     # same way an analyst's were checked in the analyst's own loop.
     judge_ids = _judge_technique_ids(stix_output)
     judge_relationships = _judge_relationship_rows(stix_output)
-    unknown = _unknown_to_the_catalogue(judge_ids + [tid for tid, _c, _a in judge_relationships])
+    unknown = _unknown_to_the_catalogue(judge_ids + [tid for tid, _c in judge_relationships])
     for tid in judge_ids:
         row = _row(tid)
         row["claimed"] = True
@@ -330,15 +330,20 @@ def _collect_techniques(
         # verdict is printed in, marked or not.
         if _JUDGE_SOURCE not in row["layers"]:
             row["layers"].append(_JUDGE_SOURCE)
-    for tid, confidence, agents in judge_relationships:
+    for tid, confidence in judge_relationships:
         row = _row(tid)
         row["claimed"] = True
         if tid in unknown:
             row["valid"] = False
-        row["confidences"].append(confidence)
-        for agent in agents:
-            if agent and agent not in row["layers"]:
-                row["layers"].append(str(agent))
+        if confidence is not None:
+            row["confidences"].append(confidence)
+        # The relationship is the judge's statement, so the judge is its
+        # source. The agents it credits are the judge's words about the
+        # evidence and stay on the relationship as written; a layer is a source
+        # that named the technique itself, and one analyst's claim credited by
+        # the judge to two analysts is still one claim.
+        if _JUDGE_SOURCE not in row["layers"]:
+            row["layers"].append(_JUDGE_SOURCE)
 
     # 2. ISR claims. The analysts carry the evidence quotes and the techniques
     # the judge did not name.
@@ -453,21 +458,45 @@ def unmapped_behaviours(stix_output: dict[str, Any] | None) -> list[str]:
 
 def _judge_relationship_rows(
     stix_output: dict[str, Any] | None,
-) -> list[tuple[str, float, list[str]]]:
-    """``(technique_id, the judge's confidence, contributing agents)`` per relationship."""
-    rows: list[tuple[str, float, list[str]]] = []
-    for obj in _judge_objects(stix_output):
+) -> list[tuple[str, float | None]]:
+    """``(technique_id, the judge's confidence or None)`` per annotated relationship.
+
+    The technique is the attack-pattern the relationship points at. It used to
+    be read from ``x_maljan_technique_id`` alone, which the prompt never asks
+    for and no stored judge relationship carried, so every number the judge put
+    on a technique was dropped and a technique only the judge named was
+    published at 0.0. The property still wins where it is written. ``None``
+    where the judge wrote no number: an absent confidence is not a zero.
+    """
+    objects = _judge_objects(stix_output)
+    technique_of: dict[str, str] = {}
+    for obj in objects:
+        if obj.get("type") != "attack-pattern":
+            continue
+        for ref in obj.get("external_references") or []:
+            external_id = ref.get("external_id") if isinstance(ref, dict) else None
+            if isinstance(external_id, str) and external_id.strip():
+                technique_of[str(obj.get("id") or "")] = external_id.strip().upper()
+                break
+    rows: list[tuple[str, float | None]] = []
+    for obj in objects:
         if obj.get("type") != "relationship":
             continue
-        tid = obj.get("x_maljan_technique_id")
-        if not isinstance(tid, str) or not tid.strip():
+        written = obj.get("x_maljan_technique_id")
+        tid = (
+            written.strip().upper()
+            if isinstance(written, str) and written.strip()
+            else technique_of.get(str(obj.get("target_ref") or ""))
+            or technique_of.get(str(obj.get("source_ref") or ""))
+        )
+        if not tid:
             continue
+        raw = obj.get("x_maljan_confidence")
         try:
-            confidence = float(obj.get("x_maljan_confidence") or 0.0)
+            confidence = None if raw is None else float(raw)
         except (TypeError, ValueError):
-            confidence = 0.0
-        agents = [str(a) for a in obj.get("x_maljan_contributing_agents") or [] if a]
-        rows.append((tid.strip().upper(), confidence, agents))
+            confidence = None
+        rows.append((tid, confidence))
     return rows
 
 

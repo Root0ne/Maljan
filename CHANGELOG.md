@@ -3243,6 +3243,21 @@ change landed on `main`.
   published as the judge answers. The prompt names the Cyber-observable types
   and the vocabulary, which it never did.
 
+- **A technique the judge named is published with the judge's own number, and
+  the judge's credits are not sources.** The capability matrix read a judge
+  relationship's technique only from `x_maljan_technique_id`, which the prompt
+  never asks for and no stored judge relationship carried, so every number the
+  judge put on a technique was dropped: all twenty judge-only techniques in the
+  stored runs were published at confidence 0.0 on the report, `/mitre` and
+  the STIX bundle — T1490 on the ELF run at 0.0 beside the judge's own 0.95.
+  The technique is now read from the attack-pattern the relationship points
+  at. The agents the judge credits (`STATIC ANALYST` for T1490, which the static
+  analyst never claimed) stay on the relationship as written and are no longer
+  counted as contributing layers, which would have made one analyst's claim
+  read as corroborated. Relationship annotations nobody wrote are absent rather
+  than `0.5` / `unknown`, and the text fallback's edges name the agents whose
+  claims they carry instead of stating a 0.5 the judge never gave.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**

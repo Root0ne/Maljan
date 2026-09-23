@@ -1437,7 +1437,16 @@ is assembled from what the run gathered rather than recomputed beside it:
   arithmetic over constants chosen in the builder, by code that had read no
   evidence.
 * The capability matrix is a projection of the judge's technique list and the
-  analysts' claims, carrying each source's own confidence unadjusted. It is
+  analysts' claims, carrying each source's own confidence unadjusted. A judge
+  relationship's technique is the attack-pattern it points at
+  (`x_maljan_technique_id` wins where written, which the judge never does), so
+  the number the judge put on it is the judge's number; reading the property
+  alone published all twenty judge-only techniques in the stored runs at 0.0.
+  A relationship with no number adds none. A technique's
+  `contributing_layers` are the judge and the analysts whose own claims name
+  it: the agents a judge relationship credits are its words about the
+  evidence, published on the relationship and not counted as sources, so one
+  analyst's claim the judge credits to two analysts is not corroborated. It is
   where an id the ATT&CK check rejected stays on the record, marked
   `technique_id_valid=False` and spelled as the producer wrote it. **Every id
   that reaches the report is collected into it**, from all three carriers: the

@@ -234,24 +234,31 @@ class ConfidenceAnnotatedRelationship(STIXObject):
     source_ref: str
     target_ref: str
 
-    # Custom extension fields (STIX 2.1 custom property convention: x_ prefix)
-    x_maljan_confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
-    x_maljan_evidence_basis: EvidenceBasis = "unknown"
+    # Custom extension fields (STIX 2.1 custom property convention: x_ prefix).
+    # ``None`` where nobody wrote one, which keeps the property out of the
+    # bundle. They defaulted to 0.5 and ``unknown``, so a relationship the
+    # judge wrote without a number — and the relationships the text fallback
+    # builds — were published carrying a confidence nobody had stated.
+    x_maljan_confidence: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
+    x_maljan_evidence_basis: EvidenceBasis | None = None
     x_maljan_contributing_agents: list[str] = Field(default_factory=list)
     x_maljan_technique_id: str | None = None
 
     @property
     def is_high_confidence(self) -> bool:
-        """True if confidence >= 0.80 (two-sigma threshold)."""
-        return self.x_maljan_confidence >= 0.80
+        """True if confidence >= 0.80 (two-sigma threshold); a missing one is not."""
+        return self.x_maljan_confidence is not None and self.x_maljan_confidence >= 0.80
 
     @property
     def is_multi_domain(self) -> bool:
         """True if evidence spans more than one analysis domain."""
-        return "+" in self.x_maljan_evidence_basis or self.x_maljan_evidence_basis == "all"
+        basis = self.x_maljan_evidence_basis or ""
+        return "+" in basis or basis == "all"
 
     def confidence_label(self) -> str:
         """Human-readable confidence tier label."""
+        if self.x_maljan_confidence is None:
+            return "NOT ASSESSED"
         if self.x_maljan_confidence >= 0.90:
             return "HIGH"
         if self.x_maljan_confidence >= 0.70:
@@ -397,12 +404,16 @@ class Bundle(_SpecConformantModel):
     def mean_relationship_confidence(self) -> float | None:
         """Compute mean confidence across all annotated relationships.
 
-        Returns None if no annotated relationships exist.
+        Returns None if no relationship states a confidence.
         """
-        annotated = self.confidence_annotated_relationships()
-        if not annotated:
+        stated = [
+            r.x_maljan_confidence
+            for r in self.confidence_annotated_relationships()
+            if r.x_maljan_confidence is not None
+        ]
+        if not stated:
             return None
-        return sum(r.x_maljan_confidence for r in annotated) / len(annotated)
+        return sum(stated) / len(stated)
 
 
 def _bundle_object_types() -> frozenset[str]:
