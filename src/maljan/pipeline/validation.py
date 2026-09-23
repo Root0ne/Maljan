@@ -1509,7 +1509,69 @@ def indicator_type_vocabulary_violations(obj: Any, *, path: str) -> list[Violati
     ]
 
 
+ANNOTATION_OUT_OF_SCHEMA_CODE = "stix.annotation_out_of_schema"
+
+
+def annotation_out_of_schema_violations(bundle: Any) -> list[Violation]:
+    """A relationship annotation the schema does not describe, asked about as written.
+
+    A confidence that is not a number from 0.0 to 1.0, a basis outside the
+    list, credited agents written as something other than a list of names.
+    The values are kept: a reader takes a confidence only when it is one
+    (``schemas.stix_models.stated_confidence``), and the judge is told what
+    the property holds.
+    """
+    from maljan.schemas.stix_models import EvidenceBasis, stated_confidence
+
+    bases = get_args(EvidenceBasis)
+    out: list[Violation] = []
+    for index, obj in enumerate(list(getattr(bundle, "objects", None) or [])):
+        if str(getattr(obj, "type", "") or "") != "relationship":
+            continue
+        problems: list[str] = []
+        confidence = getattr(obj, "x_maljan_confidence", None)
+        if confidence is not None and stated_confidence(confidence) is None:
+            problems.append(
+                f"x_maljan_confidence is {safe_finding_value(confidence)!r}, and it is a number "
+                "from 0.0 to 1.0"
+            )
+        basis = getattr(obj, "x_maljan_evidence_basis", None)
+        if basis is not None and basis not in bases:
+            problems.append(
+                f"x_maljan_evidence_basis is {safe_finding_value(basis)!r}, and it is one of "
+                f"{', '.join(bases)}"
+            )
+        agents = getattr(obj, "x_maljan_contributing_agents", None)
+        if agents is not None and not isinstance(agents, list):
+            problems.append(
+                f"x_maljan_contributing_agents is {safe_finding_value(agents)!r}, and it is a "
+                "list of source names"
+            )
+        if problems:
+            out.append(
+                Violation(
+                    code=ANNOTATION_OUT_OF_SCHEMA_CODE,
+                    message=(
+                        f"the relationship at objects[{index}]: {'; '.join(problems)}. Write "
+                        "it that way, or leave the property out; a value you keep is published "
+                        "as written and read as no number."
+                    ),
+                    path=f"objects[{index}]",
+                )
+            )
+    return out
+
+
 CREDIT_WITHOUT_CLAIM_CODE = "stix.credit_without_claim"
+
+
+def credited_agents(obj: Any) -> list[str]:
+    """The names a relationship credits, whether written as a list or as one name."""
+    agents = getattr(obj, "x_maljan_contributing_agents", None)
+    if isinstance(agents, str):
+        return [agents] if agents.strip() else []
+    return [str(a) for a in (agents or []) if str(a).strip()]
+
 
 # The words a model adds to an agent's name when it writes one down. The
 # evidence summary names a source ``static`` and the judge credits
@@ -1573,7 +1635,7 @@ def credit_without_claim_violations(
     for index, obj in enumerate(objects):
         if str(getattr(obj, "type", "") or "") != "relationship":
             continue
-        credited = [str(a) for a in (getattr(obj, "x_maljan_contributing_agents", None) or [])]
+        credited = credited_agents(obj)
         if not credited:
             continue
         written = str(getattr(obj, "x_maljan_technique_id", "") or "").strip().upper()
@@ -1837,6 +1899,7 @@ def validate_verdict_bundle(
                 )
             )
 
+    violations.extend(annotation_out_of_schema_violations(bundle))
     violations.extend(credit_without_claim_violations(bundle, technique_sources))
     return violations
 

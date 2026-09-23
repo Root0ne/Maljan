@@ -44,6 +44,7 @@ from typing import Any
 
 from maljan.core.logger import logger
 from maljan.reporting.models import CapabilityCell, TTPMapping
+from maljan.schemas.stix_models import stated_confidence
 
 # Fallback MITRE ATT&CK Enterprise tactic catalogue (pre-v19 names). Used only
 # when the live bundle's tactic catalogue is unavailable. ``kill_chain_phases``
@@ -491,12 +492,10 @@ def _judge_relationship_rows(
         )
         if not tid:
             continue
-        raw = obj.get("x_maljan_confidence")
-        try:
-            confidence = None if raw is None else float(raw)
-        except (TypeError, ValueError):
-            confidence = None
-        rows.append((tid, confidence))
+        # A number outside 0–1, or no number, is no number: the judge is asked
+        # about it (``stix.annotation_out_of_schema``) and nothing here puts it
+        # on the scale.
+        rows.append((tid, stated_confidence(obj.get("x_maljan_confidence"))))
     return rows
 
 

@@ -439,6 +439,7 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
             "stix.indicator_type_vocabulary",
             "stix.credit_without_claim",
             "stix.is_family_missing",
+            "stix.annotation_out_of_schema",
         }
     )
 

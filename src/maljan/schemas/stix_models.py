@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -245,15 +245,24 @@ class ConfidenceAnnotatedRelationship(STIXObject):
     # bundle. They defaulted to 0.5 and ``unknown``, so a relationship the
     # judge wrote without a number — and the relationships the text fallback
     # builds — were published carrying a confidence nobody had stated.
-    x_maljan_confidence: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
-    x_maljan_evidence_basis: EvidenceBasis | None = None
-    x_maljan_contributing_agents: list[str] = Field(default_factory=list)
+    #
+    # Typed loosely on purpose. They were typed strictly (a number in 0–1, a
+    # basis from the list), and a relationship failing that type parsed as a
+    # plain ``Relationship`` instead — the whole annotation gone, nothing
+    # recorded. A value outside the schema is the judge's answer and is kept as
+    # written; ``pipeline.validation.annotation_out_of_schema_violations`` asks
+    # about it, and a reader takes a number only when it is one in 0–1
+    # (:func:`stated_confidence`).
+    x_maljan_confidence: float | str | None = None
+    x_maljan_evidence_basis: str | None = None
+    x_maljan_contributing_agents: list[str] | str = Field(default_factory=list)
     x_maljan_technique_id: str | None = None
 
     @property
     def is_high_confidence(self) -> bool:
         """True if confidence >= 0.80 (two-sigma threshold); a missing one is not."""
-        return self.x_maljan_confidence is not None and self.x_maljan_confidence >= 0.80
+        stated = stated_confidence(self.x_maljan_confidence)
+        return stated is not None and stated >= 0.80
 
     @property
     def is_multi_domain(self) -> bool:
@@ -263,15 +272,32 @@ class ConfidenceAnnotatedRelationship(STIXObject):
 
     def confidence_label(self) -> str:
         """Human-readable confidence tier label."""
-        if self.x_maljan_confidence is None:
+        stated = stated_confidence(self.x_maljan_confidence)
+        if stated is None:
             return "NOT ASSESSED"
-        if self.x_maljan_confidence >= 0.90:
+        if stated >= 0.90:
             return "HIGH"
-        if self.x_maljan_confidence >= 0.70:
+        if stated >= 0.70:
             return "MEDIUM"
-        if self.x_maljan_confidence >= 0.50:
+        if stated >= 0.50:
             return "LOW"
         return "SPECULATIVE"
+
+
+def stated_confidence(value: Any) -> float | None:
+    """A confidence as a number in 0–1, or ``None`` when it is not one.
+
+    ``None`` for an absent value and for one outside the scale: ``95`` or
+    ``"high"`` is a statement the judge is asked about, not a number any reader
+    may put on a technique.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if 0.0 <= number <= 1.0 else None
 
 
 class AttackPattern(STIXObject):
@@ -413,9 +439,9 @@ class Bundle(_SpecConformantModel):
         Returns None if no relationship states a confidence.
         """
         stated = [
-            r.x_maljan_confidence
+            number
             for r in self.confidence_annotated_relationships()
-            if r.x_maljan_confidence is not None
+            if (number := stated_confidence(r.x_maljan_confidence)) is not None
         ]
         if not stated:
             return None
