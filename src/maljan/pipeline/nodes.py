@@ -536,6 +536,18 @@ def mean_claim_confidence(isrs: Any) -> float | None:
     return sum(values) / len(values) if values else None
 
 
+def the_judge_stated_the_verdict(fallback: Mapping[str, Any] | None) -> bool:
+    """Whether the verdict published is one the judge stated, with its number beside it.
+
+    Every verdict the judge answered as a bundle is. A fallback is only when
+    the unreadable answer had stated its assessment whole before it went wrong
+    — the output cap cuts a bundle after the assessment the prompt puts first —
+    and that assessment's verdict is the one published (``stated`` on the
+    judge node's ``verdict_fallback``).
+    """
+    return not fallback or bool(fallback.get("stated"))
+
+
 def _overall_confidence(assessment: Any, *, judged: bool = True) -> float | None:
     """The judge's confidence in the verdict the judge itself stated, or ``None``.
 
@@ -3622,6 +3634,14 @@ def make_judge_node(
                     # that carries the mark and no code would otherwise leave
                     # the summary with nothing at all to say about it.
                     "recorded": _recorded,
+                    # Whether the unreadable answer had stated its assessment
+                    # whole, with the verdict this run publishes: then the
+                    # confidence beside that verdict is the judge's own.
+                    "stated": bool(
+                        isinstance(bundle, Bundle)
+                        and bundle.x_maljan_assessment is not None
+                        and normalise_verdict(bundle.x_maljan_assessment.verdict) == decision
+                    ),
                 }
 
             # What the analysts and the judge were told and did not fix. Both
@@ -4061,7 +4081,9 @@ def make_report_node(
         # judge's own number is the verdict's, and a verdict the judge put no
         # number on is published with none; see ``_overall_confidence``.
         _fallback = state.get("verdict_fallback") or None
-        overall_confidence = _overall_confidence(_bundle_assessment, judged=not _fallback)
+        overall_confidence = _overall_confidence(
+            _bundle_assessment, judged=the_judge_stated_the_verdict(_fallback)
+        )
 
         # A degraded run is not capped here. It is said to the judge in the
         # verdict prompt and printed in the report header, and the confidence

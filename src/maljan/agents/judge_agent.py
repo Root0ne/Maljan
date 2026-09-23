@@ -109,6 +109,66 @@ _NOT_JSON_FEEDBACK = (
     "no tool calls, no prose."
 )
 
+# The correction for an answer the output cap cut off. The benchmark's large
+# model wrote a bundle of about 25,000 characters on one sample, twice: both
+# answers stopped at exactly the 8,192 tokens ``judge_max_tokens`` allows,
+# before the bundle closed, and the only correction it was given said the
+# answer "was not a JSON STIX bundle" — so it wrote the same bundle again.
+VERDICT_CUT_CODE = "verdict.cut_at_output_cap"
+
+
+def _was_cut(answer: Any, cap: int | None) -> bool:
+    """Whether the output cap ended this answer, by the server's word or by its count."""
+    from maljan.core.truncation_ledger import completion_tokens_of, hit_length_cap
+
+    if hit_length_cap(answer):
+        return True
+    produced = completion_tokens_of(answer)
+    return bool(cap) and produced is not None and produced >= int(cap or 0)
+
+
+# The property the verdict prompt asks the assessment under. An answer the
+# output cap cut off usually wrote it whole before the cut: the prompt puts it
+# first.
+_ASSESSMENT_KEY = '"x_maljan_assessment"'
+
+
+def stated_assessment_in(text: str) -> Any | None:
+    """The assessment an unreadable answer stated whole, read by the bundle's own readers.
+
+    The JSON object written under ``"x_maljan_assessment"``, parsed with the
+    same reader a whole answer is parsed with (``safe_parse_json``, which takes
+    the first balanced object) and validated as a ``JudgeAssessment``. It is
+    kept only when its verdict is one ``pipeline.outcome.normalise_verdict``
+    recognises; then its confidence, severity and family are the judge's own
+    statements. ``None`` when the object is absent, cut off, or states no
+    verdict that can be read. Nothing is inferred from prose.
+    """
+    from maljan.pipeline.outcome import normalise_verdict
+    from maljan.schemas.judgement import JudgeAssessment
+    from maljan.utils.json_cleaner import safe_parse_json
+
+    at = text.find(_ASSESSMENT_KEY)
+    if at < 0:
+        return None
+    rest = text[at + len(_ASSESSMENT_KEY) :].lstrip()
+    if not rest.startswith(":"):
+        return None
+    rest = rest[1:].lstrip()
+    if not rest.startswith("{"):
+        return None
+    value = safe_parse_json(rest)
+    if not isinstance(value, dict):
+        return None
+    try:
+        assessment = JudgeAssessment.model_validate(value)
+    except Exception:  # noqa: BLE001 — an assessment that does not validate states nothing
+        return None
+    if normalise_verdict(assessment.verdict) is None:
+        return None
+    return assessment
+
+
 # What is recorded when even the retry was not a bundle. The code lands in
 # ``run_summary.validation.unresolved``; the reason joins the report's
 # degradation reasons, where a reader looking at a verdict with no severity
@@ -1245,6 +1305,16 @@ class JudgeAgent(BudgetMeter):
         # Built as messages rather than through ``ChatPromptTemplate``: the
         # system turn now contains a JSON skeleton, and a template would read
         # its braces as placeholders and refuse the prompt outright.
+        cap = int(getattr(get_settings().llm, "judge_max_tokens", 0) or 0) or None
+        # The answer's own budget, said where the answer is asked for. Nothing
+        # told the judge its bundle had to close inside it, and a bundle that
+        # does not close cannot be read at all.
+        within = (
+            f" It must close within {cap} output tokens, any reasoning included: "
+            "x_maljan_assessment first, then only the objects the evidence supports."
+            if cap
+            else ""
+        )
         messages: list[Any] = [
             SystemMessage(content=JUDGE_VERDICT_SYSTEM),
             HumanMessage(
@@ -1253,7 +1323,7 @@ class JudgeAgent(BudgetMeter):
                     f"{_identity_prefix(sample)}"
                     f"Expert Reports:\n{reports_text}\n\n"
                     f"Negotiation History:\n{str(history)[:800]}\n\n"
-                    "Return a JSON STIX 2.1 Bundle."
+                    f"Return a JSON STIX 2.1 Bundle.{within}"
                 )
             ),
         ]
@@ -1274,7 +1344,6 @@ class JudgeAgent(BudgetMeter):
         from maljan.llm.fallback import restart_models
 
         restart_models(self.llm, loop_seconds=float(timeout), share=self._turn_share())
-        cap = int(getattr(get_settings().llm, "judge_max_tokens", 0) or 0) or None
 
         # Reset per call, not once: a first call that timed out and left the
         # flag set made every later parse return the fallback, and a fallback
@@ -1322,6 +1391,8 @@ class JudgeAgent(BudgetMeter):
         # extraction over that text is worth building only once the model has
         # had its one chance to answer properly.
         not_json = False
+        # Whether the output cap ended that answer, and how much of it there was.
+        cut_at: int | None = None
         attempts = 0
         # What the shape pass did to this answer before the schema saw it: an
         # assessment moved to the property it belongs to, an object the bundle
@@ -1337,8 +1408,9 @@ class JudgeAgent(BudgetMeter):
         tally = ValidationTally()
 
         def _parse(answer: Any) -> Bundle:
-            nonlocal not_json, attempts
+            nonlocal not_json, attempts, cut_at
             attempts += 1
+            cut_at = None
             shape.clear()
             where.clear()
             labels.clear()
@@ -1349,11 +1421,14 @@ class JudgeAgent(BudgetMeter):
                     "[TIMEOUT]", reports, isr_reports, extracted=False
                 )
             not_json = _is_not_json(answer)
+            if not_json and _was_cut(answer, cap):
+                cut_at = len(_answer_text(answer))
             if not_json:
                 self.logger.warning(
                     "Judge verdict: the model answered with %d character(s) that are not a JSON "
-                    "bundle; asking once more before falling back to text extraction.",
+                    "bundle%s; asking once more before falling back to text extraction.",
                     len(_answer_text(answer)),
+                    f", cut off at its {cap}-token output limit" if cut_at is not None else "",
                 )
                 if attempts <= _VERDICT_RETRIES:
                     # A retry is coming and this bundle would be thrown away.
@@ -1432,6 +1507,22 @@ class JudgeAgent(BudgetMeter):
             # fallback bundle is recorded after the loop instead.
             if timed_out:
                 return []
+            if not_json and cut_at is not None and cap:
+                return [
+                    Violation(
+                        code=VERDICT_CUT_CODE,
+                        message=(
+                            f"Your previous answer stopped at the output limit of {int(cap)} "
+                            f"tokens, after {int(cut_at)} characters and before the bundle "
+                            "closed, so it could not be read. Any reasoning you write counts "
+                            "against the same limit. Return a bundle that closes well inside "
+                            f"{int(cap)} tokens: x_maljan_assessment first, then only the "
+                            "objects the evidence supports — one attack-pattern per technique "
+                            "with a short description, and no Indicator whose value you did "
+                            "not read verbatim in the evidence. JSON only."
+                        ),
+                    )
+                ]
             if not_json:
                 return [Violation(code="verdict.not_json", message=_NOT_JSON_FEEDBACK)]
             return [
@@ -1729,12 +1820,28 @@ class JudgeAgent(BudgetMeter):
         conservative one rather than anything a model said, and the bundle says
         so in ``x_maljan_fallback_verdict``.
         """
-        from maljan.pipeline.outcome import INCONCLUSIVE_VERDICT
+        from maljan.pipeline.outcome import INCONCLUSIVE_VERDICT, normalise_verdict
         from maljan.schemas.stix_models import Bundle
 
-        decision = self._verdict_from_text(text) if extracted else INCONCLUSIVE_VERDICT
+        # An answer that stated its assessment whole before it went wrong —
+        # the output cap cuts a bundle after the assessment the prompt puts
+        # first — has said its verdict, confidence, severity and family, and
+        # those are kept as it said them. Anything less is read for the
+        # verdict word alone.
+        stated = stated_assessment_in(text) if extracted else None
+        if stated is not None:
+            decision = str(normalise_verdict(stated.verdict))
+        else:
+            decision = self._verdict_from_text(text) if extracted else INCONCLUSIVE_VERDICT
 
-        if extracted:
+        if stated is not None:
+            self.logger.info(
+                "Fallback Bundle: the answer (%d chars) stated its assessment whole; its "
+                "verdict '%s' and what it stated beside it are kept as written.",
+                len(text),
+                decision,
+            )
+        elif extracted:
             self.logger.info(
                 "Fallback Bundle: extracted verdict='%s' from text response (%d chars).",
                 decision,
@@ -1873,6 +1980,7 @@ class JudgeAgent(BudgetMeter):
                     "decision": decision,
                     "source": "extracted" if extracted else "pipeline",
                 },
+                **({"x_maljan_assessment": stated} if stated is not None else {}),
             }
         )
 
