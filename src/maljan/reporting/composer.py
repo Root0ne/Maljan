@@ -371,7 +371,12 @@ def _example_for(section: str, schema: type[BaseModel]) -> str:
     return _EXAMPLES.get(section, "")
 
 
-def _bundle_text(section: str, bundle: dict[str, Any], entries: EntryTexts | None = None) -> str:
+def _bundle_text(
+    section: str,
+    bundle: dict[str, Any],
+    entries: EntryTexts | None = None,
+    tool_chars: int | None = None,
+) -> str:
     """Render an evidence bundle into a compact prompt body.
 
     The heading used to be the bare line ``SECTION: <name>``, which is a key
@@ -411,12 +416,26 @@ def _bundle_text(section: str, bundle: dict[str, Any], entries: EntryTexts | Non
         lines.append("")
     tools = bundle.get("tool_outputs") or []
     if tools:
+        # Each answer gets the share of the room the section's window leaves
+        # it (``ReportComposer._tool_chars``); ``None`` is a composer that
+        # knows no window and shows each whole.
         lines.append("CAPTURED TOOL OUTPUT:")
-        for t in tools[:6]:
+        for t in tools:
             sym = f" [{t.get('symbol')}]" if t.get("symbol") else ""
-            lines.append(f"- {t.get('tool', '')}{sym}: {marked_cut(t.get('output', ''), 1200)}")
+            output = str(t.get("output", "") or "")
+            if tool_chars is None:
+                shown = output
+            elif tool_chars <= 0:
+                shown = NO_ROOM_FOR_THE_ANSWER
+            else:
+                shown = marked_cut(output, tool_chars)
+            lines.append(f"- {t.get('tool', '')}{sym}: {shown}")
         lines.append("")
     return "\n".join(lines)
+
+
+# What a section is shown in place of a tool answer its window has no room for.
+NO_ROOM_FOR_THE_ANSWER = "(not shown: this section's context window has no room left for it)"
 
 
 # The headings of what the platform adds to a section's prompt beside the
@@ -491,6 +510,7 @@ class ReportComposer:
         caps_by_model: dict[str, int] | None = None,
         turn_share: float | None = None,
         budget_note: str = "",
+        window_tokens: int = 0,
     ) -> None:
         self.llm = llm
         self.section_max_tokens = section_max_tokens
@@ -503,6 +523,10 @@ class ReportComposer:
         # or the reply room of the model's own context window. Printed beside
         # the section's wait in the run summary, so the number can be checked.
         self.budget_note = budget_note
+        # The smallest context window of the reporter's models, in tokens: what
+        # a section's tool answers are sized against (``_tool_chars``). Zero is
+        # a window nobody learned, and the answers are then shown whole.
+        self.window_tokens = int(window_tokens or 0)
         # Each model of the reporter's list, by the label its answers carry,
         # and the cap its own provider was given: what "cut" means for the
         # model that answered.
@@ -647,7 +671,8 @@ class ReportComposer:
             validators=[lambda p: identifier_citation_violations(p, known_ids)],
         )
         if identifiers and isinstance(identifiers, _HostIdentifiersOut) and identifiers.identifiers:
-            ta.host_identifiers = self._kept("host_identifiers", identifiers.identifiers, 40)
+            # All of them: the section holds what the model writes.
+            ta.host_identifiers = list(identifiers.identifiers)
             authored += 1
 
         commands = await self._author(
@@ -738,7 +763,17 @@ class ReportComposer:
         # on that path nothing had ever shown the model a key name.
         contract = section_contract(section, schema)
         entries = getattr(self, "_entries", None)
-        human = "\n\n".join([*head, instruction, contract, _bundle_text(section, bundle, entries)])
+        # The tool answers share what the model's window leaves after its reply
+        # and the rest of this prompt; measured on the prompt without them.
+        without = "\n\n".join(
+            [*head, instruction, contract, _bundle_text(section, bundle, entries, tool_chars=0)]
+        )
+        tool_chars = self._tool_chars(
+            len(_SYSTEM) + len(without), len(bundle.get("tool_outputs") or [])
+        )
+        human = "\n\n".join(
+            [*head, instruction, contract, _bundle_text(section, bundle, entries, tool_chars)]
+        )
         messages = [
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=human),
@@ -765,6 +800,25 @@ class ReportComposer:
                 f"report section '{section}' is missing: the round failed ({type(exc).__name__})"
             )
             return None
+
+    def _tool_chars(self, prompt_chars: int, answers: int) -> int | None:
+        """How many characters of each tool answer this section may show, or ``None``.
+
+        What the model's context window leaves after the section's output
+        budget and the rest of its prompt, shared evenly across the answers:
+        ``((window − output budget) × chars per token − prompt) ÷ answers``,
+        the arithmetic the analysts' tool-output cap uses. ``None`` when no
+        window is known (the answers are shown whole), ``0`` when nothing is
+        left. A fixed 1,200 characters used to stand here.
+        """
+        window = int(getattr(self, "window_tokens", 0) or 0)
+        if window <= 0 or answers <= 0:
+            return None
+        from maljan.llm.context_window import CHARS_PER_TOKEN
+
+        reply = int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0)
+        room = (window - reply) * CHARS_PER_TOKEN - int(prompt_chars)
+        return max(0, room // answers)
 
     def _start_the_section_clock(self, seconds: float) -> None:
         """Measure the model list's turn deadline against this section's clock.

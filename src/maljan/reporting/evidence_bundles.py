@@ -19,7 +19,6 @@ from __future__ import annotations
 from typing import Any
 
 from maljan.reporting.models import MalwareReport
-from maljan.utils.marked_cut import marked_cut
 
 # Section keys the Composer authors. Kept as plain strings (not an enum) so the
 # Composer can iterate a config-driven subset per malware type.
@@ -207,7 +206,9 @@ def _filter_tool_outputs(
                     {
                         "tool": name,
                         "symbol": str(o.get("symbol") or ""),
-                        "output": marked_cut(str(o.get("output") or ""), 2500),
+                        # Whole: the composer shares the section's window
+                        # among the answers it shows (``ReportComposer._tool_chars``).
+                        "output": str(o.get("output") or ""),
                     }
                 )
     return picked
@@ -501,7 +502,7 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
                 f"{row.kind}: {row.value}"
                 for row in (static.interesting_strings if static else [])
                 if row.kind in _HOST_STRING_KINDS
-            ][:20],
+            ],
         }
     if section == "commands":
         # Nothing measured says what an operator can ask for; the section runs

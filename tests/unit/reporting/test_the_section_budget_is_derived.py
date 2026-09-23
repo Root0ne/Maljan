@@ -110,10 +110,52 @@ class TestAnOperatorsOwnBudget:
         registry.build_model_for_agent.return_value = FakeMessagesListChatModel(responses=[])
         container._llm_registry = registry  # type: ignore[assignment]
 
-        with patch("maljan.llm.context_window.learn_window") as learned:
+        fact = WindowFact(16384, "probed", "the server's /props")
+        with patch("maljan.llm.context_window.learn_window", return_value=fact):
             composer = container.get_report_composer()
 
         expected = 900 if thinking_off else 900 + 8192
         assert composer.output_cap == expected
         assert "composer_section_max_tokens is set to 900" in composer.budget_note
-        learned.assert_not_called()
+        # The window is still learned: a section's tool answers are sized by it.
+        assert composer.window_tokens == 16384
+
+
+class TestTheToolAnswersShareTheWindow:
+    """A section's tool answers get what the window leaves, not a fixed 1,200 characters."""
+
+    def test_the_share_is_the_room_left_divided_evenly(self) -> None:
+        composer, _built = _composer(16384, judge_max_tokens=8192, expert_max_tokens=8192)
+        from maljan.llm.context_window import CHARS_PER_TOKEN
+
+        room = (16384 - 4096) * CHARS_PER_TOKEN - 1000
+        assert composer._tool_chars(1000, 3) == room // 3
+
+    def test_a_full_window_shows_no_answer_and_says_so(self) -> None:
+        from maljan.reporting.composer import NO_ROOM_FOR_THE_ANSWER, _bundle_text
+
+        composer, _built = _composer(16384, judge_max_tokens=8192, expert_max_tokens=8192)
+        chars = composer._tool_chars(10**7, 2)
+        text = _bundle_text(
+            "payloads", {"tool_outputs": [{"tool": "x", "output": "y" * 50}]}, None, chars
+        )
+
+        assert chars == 0
+        assert NO_ROOM_FOR_THE_ANSWER in text
+
+    def test_no_window_shows_each_answer_whole(self) -> None:
+        from maljan.reporting.composer import _bundle_text
+
+        composer = ReportComposer(llm=None, per_section_timeout=5)  # type: ignore[arg-type]
+        chars = composer._tool_chars(100, 1)
+        text = _bundle_text(
+            "payloads", {"tool_outputs": [{"tool": "x", "output": "y" * 5000}]}, None, chars
+        )
+
+        assert chars is None
+        assert "y" * 5000 in text
+
+    def test_the_derivation_is_said(self) -> None:
+        composer, _built = _composer(16384, judge_max_tokens=8192, expert_max_tokens=8192)
+
+        assert "tool answers share what the 16384-token window leaves" in composer.budget_note

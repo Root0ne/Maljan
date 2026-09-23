@@ -65,8 +65,13 @@ class TestWhereItIsShown:
         assert row["evidence_ref"].endswith(CUT_MARK)
 
     def test_a_section_is_shown_a_cut_tool_answer_as_cut(self) -> None:
+        # The share the section's window leaves each answer (here 1,000
+        # characters) is where the cut falls, and the cut is marked.
         text = _bundle_text(
-            "payloads", {"tool_outputs": [{"tool": "decompile_function", "output": "z" * 5000}]}
+            "payloads",
+            {"tool_outputs": [{"tool": "decompile_function", "output": "z" * 5000}]},
+            None,
+            1000,
         )
 
         assert f"{'z' * 10}{CUT_MARK}" in text
