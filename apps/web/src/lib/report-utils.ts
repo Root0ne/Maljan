@@ -283,8 +283,11 @@ export function tokensSentence(tokens: TokenCounts | null | undefined): string |
     `Tokens: ${(tokens.input_tokens ?? 0).toLocaleString("en-US")} in and ` +
     `${(tokens.output_tokens ?? 0).toLocaleString("en-US")} out over ${calls} model ${noun}`;
   if (unreported) text += `; not reported for ${unreported} of them`;
-  if (typeof tokens.cost === "number" && (tokens.cost_calls ?? 0) > 0) {
-    text += `; cost ${tokens.cost.toFixed(4)} as the provider reported it for ${tokens.cost_calls}`;
+  const costCalls = tokens.cost_calls ?? 0;
+  if (typeof tokens.cost === "number" && costCalls > 0) {
+    text += `; a cost of ${tokens.cost.toFixed(4)} USD as the provider reported it for ${costCalls} ${
+      costCalls === 1 ? "call" : "calls"
+    }`;
   }
   return `${text}.`;
 }

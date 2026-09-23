@@ -27,44 +27,44 @@ function texts(events: RunEvent[]): string[] {
 describe("a turn a fallback model gave", () => {
   it("is named where it happened, with the model and the reason", () => {
     const lines = texts([
-      event("agent_message_delta", {
+      event("agent_message_delta", { stage: "a", agent: "static", text_delta: "Reading the imports" }),
+      event("model_fallback", {
         stage: "a",
         agent: "static",
-        text_delta: "Reading the imports",
         model: "ollama/gemma",
-        fallback: "openai/qwen: the provider timed out; answered by ollama/gemma",
+        reason: "openai/qwen: the provider timed out; answered by ollama/gemma, which answers the rest of this loop",
       }),
     ]);
     expect(lines).toEqual([
-      "system: Static's turn was answered by ollama/gemma — openai/qwen: the provider timed out; answered by ollama/gemma.",
       "says: Reading the imports",
+      "system: Static's turn was answered by ollama/gemma — openai/qwen: the provider timed out; answered by ollama/gemma, which answers the rest of this loop.",
     ]);
   });
 
-  it("is named even when the turn said nothing", () => {
+  it("is named when no text was streamed at all", () => {
     const lines = texts([
-      event("agent_message_delta", {
+      event("model_fallback", {
         stage: "a",
         agent: "static",
-        text_delta: "",
         model: "ollama/gemma",
-        fallback: "openai/qwen: the provider could not be reached",
+        reason: "openai/qwen: the provider could not be reached",
       }),
     ]);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatch(/^system: Static's turn was answered by ollama\/gemma/);
   });
 
-  it("leaves a first-model turn as it always was", () => {
+  it("leaves a turn that only carries its tokens out of the conversation", () => {
     const lines = texts([
       event("agent_message_delta", {
         stage: "a",
         agent: "static",
-        text_delta: "hello",
+        text_delta: "",
         model: "openai/qwen",
+        tokens: { input_tokens: 10, output_tokens: 2 },
       }),
     ]);
-    expect(lines).toEqual(["says: hello"]);
+    expect(lines).toEqual([]);
   });
 
   it("says who fell back when the model is not named", () => {
@@ -123,7 +123,7 @@ describe("what the run spent", () => {
   it("names a cost only where the provider reported one", () => {
     expect(
       tokensSentence({ llm_calls: 1, input_tokens: 1, output_tokens: 1, cost: 0.5, cost_calls: 1 }),
-    ).toContain("cost 0.5000 as the provider reported it for 1");
+    ).toContain("a cost of 0.5000 USD as the provider reported it for 1 call");
     expect(tokensSentence({ llm_calls: 1, input_tokens: 1, output_tokens: 1 })).not.toContain("cost");
   });
 

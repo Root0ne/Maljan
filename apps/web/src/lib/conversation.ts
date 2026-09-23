@@ -504,25 +504,6 @@ function fold(state: BuilderState, event: RunEvent): void {
     const stage = draftOf(state, stageKey);
     const who = participantOf(state, speaker);
     if (who) who.state = "working";
-    /* A turn another model answered, because the one before it failed as a
-     * provider, is named where it happened: the reader is reading a
-     * different model's words from here on. */
-    const fallback = text(data.fallback);
-    if (fallback) {
-      push(state, stage, {
-        id: `${id}:fallback`,
-        kind: "system",
-        stage: stageKey,
-        round: stage.round,
-        speaker: "",
-        displayName: "",
-        text: fallbackLine(nameOf(state, speaker), text(data.model), fallback),
-        ts: event.ts,
-        seq: event.seq,
-        claims: [],
-        dissent: [],
-      });
-    }
     if (!text(data.text_delta)) return;
     const openKey = `${stageKey}|${speaker}`;
     const open = state.streaming.get(openKey);
@@ -798,6 +779,28 @@ function fold(state: BuilderState, event: RunEvent): void {
     };
     state.textLength += closing.text.length - (state.closing?.text.length ?? 0);
     state.closing = closing;
+    return;
+  }
+
+  /* A turn another model answered, because the one before it failed as a
+   * provider, is named where it happened: the reader is reading a different
+   * model's words from here on. Published whether or not deltas stream. */
+  if (event.type === "model_fallback") {
+    const stage = draftOf(state, stageKey);
+    const agent = text(data.agent);
+    push(state, stage, {
+      id,
+      kind: "system",
+      stage: stageKey,
+      round: stage.round,
+      speaker: "",
+      displayName: "",
+      text: fallbackLine(nameOf(state, agent), text(data.model), text(data.reason)),
+      ts: event.ts,
+      seq: event.seq,
+      claims: [],
+      dissent: [],
+    });
     return;
   }
 

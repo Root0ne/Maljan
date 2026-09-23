@@ -54,6 +54,9 @@ export type WSEventType =
   /* A tool server this job stopped calling for a while after a run of
    * transport failures. See maljan/providers/server_guard.py. */
   | "tool_server_rested"
+  /* An agent's model list moved on to its next model because the one before
+   * failed as a provider; once per switch, whether or not deltas stream. */
+  | "model_fallback"
   | "completed"
   | "enrichment_complete"
   | "error"
@@ -120,17 +123,23 @@ export interface AgentMessageEventData {
 export interface AgentMessageDeltaEventData {
   stage: string;
   agent: string;
-  /** Empty on a turn that said nothing, which is published only when a
-   *  fallback model gave it. */
+  /** Empty on a turn that only asked for tools, published for its tokens. */
   text_delta: string;
   /** The model that gave this turn, as `provider/model`. */
   model?: string;
-  /** Why another model gave it, in words, when the one before failed as a
-   *  provider. Absent on a turn the agent's first model gave. */
-  fallback?: string;
   /** What the turn spent as the provider reported it; absent where it
    *  reported nothing. */
   tokens?: { input_tokens: number; output_tokens: number; cost?: number };
+  seq?: number;
+}
+
+export interface ModelFallbackEventData {
+  stage: string;
+  agent: string;
+  /** The model that answers from here on, as `provider/model`. */
+  model: string;
+  /** Why, in words: the failure of each model before it. */
+  reason: string;
   seq?: number;
 }
 
