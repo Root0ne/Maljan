@@ -1414,6 +1414,7 @@ def indicator_type_contradicts_verdict(
 
 
 UNKNOWN_OBSERVABLE_TYPE_CODE = "stix.unknown_observable_type"
+IS_FAMILY_MISSING_CODE = "stix.is_family_missing"
 INDICATOR_TYPE_VOCABULARY_CODE = "stix.indicator_type_vocabulary"
 
 # STIX 2.1's indicator-type vocabulary. Open, so a value outside it is legal
@@ -1732,6 +1733,20 @@ def validate_verdict_bundle(
                         advisory=absent and how_whole.partial,
                     )
                 )
+        elif kind == "malware" and getattr(obj, "is_family", None) is None:
+            named = str(getattr(obj, "name", "") or "").strip()
+            violations.append(
+                Violation(
+                    code=IS_FAMILY_MISSING_CODE,
+                    message=(
+                        f"the malware object {safe_finding_value(named)!r} does not say "
+                        "is_family, which STIX requires: false when the object stands for "
+                        "this one sample, true when it stands for a family. Nothing is "
+                        "filled in for you."
+                    ),
+                    path=f"objects[{index}]",
+                )
+            )
         elif kind == "attack-pattern":
             tid = _attack_pattern_technique_id(obj)
             if not tid:

@@ -162,7 +162,10 @@ class Indicator(STIXObject):
     id: str = Field(default_factory=lambda: f"indicator--{_generate_uuid()}")
     name: str | None = None
     description: str | None = None
-    indicator_types: list[str] = Field(default_factory=lambda: ["malicious-activity"])
+    # Empty, and so absent from the dump, when nobody wrote one: STIX 2.1 makes
+    # the property optional, and the ``malicious-activity`` this defaulted to
+    # was published as the judge's word on an indicator it had left untyped.
+    indicator_types: list[str] = Field(default_factory=list)
     pattern: str
     pattern_type: str = "stix"
     valid_from: datetime = Field(default_factory=get_utcnow)
@@ -188,7 +191,10 @@ class Malware(STIXObject):
     id: str = Field(default_factory=lambda: f"malware--{_generate_uuid()}")
     name: str
     description: str | None = None
-    is_family: bool = False
+    # ``None`` when the judge did not say. STIX requires the property, so the
+    # judge is asked for it (``stix.is_family_missing``); the ``False`` this
+    # defaulted to was a statement nobody made.
+    is_family: bool | None = None
     malware_types: list[str] = Field(default_factory=list)
     x_maljan_fallback_reasoning: str | None = None
     x_maljan_degraded_path: bool | None = None
