@@ -149,6 +149,25 @@ export interface DashboardStatsDTO {
   avg_duration_seconds: number | null;
 }
 
+/** One tool on the dashboard's "Tools used" list. */
+export interface ToolUsageRowDTO {
+  tool: string;
+  /** Calls summed across the runs read. */
+  calls: number;
+  /** How many of those runs called it at least once. */
+  runs: number;
+}
+
+/** What `GET /dashboard/tools` answers: the per-tool counts of the caller's
+ *  latest completed runs, read from each run's `run_summary.evidence.by_tool`. */
+export interface ToolUsageDTO {
+  /** How many completed runs were asked for. */
+  limit: number;
+  /** How many were read, which is fewer while the account is new. */
+  runs: number;
+  tools: ToolUsageRowDTO[];
+}
+
 export interface SystemStatusDTO {
   app_name: string;
   app_version: string;
@@ -557,6 +576,12 @@ class ApiClient {
   /* ── Dashboard ─────────────────────────────────────── */
   getDashboardStats() {
     return this.request<DashboardStatsDTO>("/api/v1/dashboard/stats");
+  }
+
+  /** The tools the caller's last `limit` completed runs called. */
+  getDashboardTools(limit?: number) {
+    const query = limit ? `?limit=${limit}` : "";
+    return this.request<ToolUsageDTO>(`/api/v1/dashboard/tools${query}`);
   }
 
   /* ── System ────────────────────────────────────────── */

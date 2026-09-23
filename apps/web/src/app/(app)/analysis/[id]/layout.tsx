@@ -34,7 +34,7 @@ import {
 } from "@/lib/runStore";
 import { useRun } from "@/lib/useRun";
 import { formatDateTime, formatDuration } from "@/lib/report-utils";
-import { verdictBucket } from "@/lib/verdict";
+import { VERDICT_TONE, verdictBucket } from "@/lib/verdict";
 import {
   assessedSeverity,
   verdictHeadline,
@@ -69,31 +69,12 @@ export function useReport() {
  * Keyed by the shared `VerdictBucket` rather than a
  * hand-rolled lower-cased raw verdict, so the backend's "Malware" spelling
  * can never miss the map and fall through to the muted "unknown" styling.
- * The human label comes from `verdictLabel` for the same reason. */
-const VERDICT_CONFIG: Record<
-  VerdictBucket,
-  { border: string; text: string; icon: LucideIcon }
-> = {
-  malicious: {
-    border: "border-status-red/40",
-    text: "text-status-red",
-    icon: CircleAlert,
-  },
-  suspicious: {
-    border: "border-status-orange/40",
-    text: "text-status-orange",
-    icon: CircleHelp,
-  },
-  benign: {
-    border: "border-status-green/40",
-    text: "text-status-green",
-    icon: CircleCheck,
-  },
-  unknown: {
-    border: "border-text-muted/40",
-    text: "text-text-muted",
-    icon: CircleMinus,
-  },
+ * The colours are the shared `VERDICT_TONE`; only the icon is the header's. */
+const VERDICT_ICON: Record<VerdictBucket, LucideIcon> = {
+  malicious: CircleAlert,
+  suspicious: CircleHelp,
+  benign: CircleCheck,
+  unknown: CircleMinus,
 };
 
 /** The icon each tab is drawn with, keyed by the name `analysisTabs` gives it. */
@@ -287,8 +268,8 @@ export default function AnalysisLayout({
   const analyzedAtIso = report?.created_at ?? job?.created_at;
   const analyzedAt = analyzedAtIso ? formatDateTime(analyzedAtIso) : "";
 
-  const v = VERDICT_CONFIG[verdict];
-  const VerdictIcon = v.icon;
+  const v = VERDICT_TONE[verdict];
+  const VerdictIcon = VERDICT_ICON[verdict];
 
   /* What a failed run says about itself. The status chip said that it failed
    * and nothing said why: the worker's own sentence, and the id the log

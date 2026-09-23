@@ -101,6 +101,23 @@ export function analysisRows(
   return rows.sort((a, b) => time(b.createdAt) - time(a.createdAt));
 }
 
+/**
+ * The dashboard's latest runs: exactly these jobs, each with its verdict.
+ *
+ * The same join as the full list, but the jobs are the whole answer: a report
+ * whose job is not one of the latest few is somebody else's row, so it is not
+ * appended the way the full list keeps it. A job whose report was not in the
+ * page of reports asked for keeps a null verdict and is drawn by its status,
+ * which is also what a run that has not finished looks like.
+ */
+export function latestRunRows(
+  jobs: JobDTO[] | null | undefined,
+  reports: ReportSummaryDTO[] | null | undefined,
+): AnalysisRow[] {
+  const wanted = new Set((jobs ?? []).map((job) => job.id));
+  return analysisRows(jobs, reports).filter((row) => wanted.has(row.id));
+}
+
 /** An ISO timestamp as a number, or 0 for one that cannot be read. */
 function time(iso: string | null | undefined): number {
   const at = new Date(iso ?? "").getTime();

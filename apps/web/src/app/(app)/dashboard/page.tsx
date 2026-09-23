@@ -5,11 +5,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { FileText } from "lucide-react";
 import { api } from "@/lib/api";
-import type { DashboardStatsDTO, JobDTO, SystemStatusDTO } from "@/lib/api";
-import { sampleLabel } from "@/lib/analyses";
+import type { DashboardStatsDTO, SystemStatusDTO, ToolUsageDTO } from "@/lib/api";
+import { latestRunRows, type AnalysisRow } from "@/lib/analyses";
 import { formatDuration, timeAgo } from "@/lib/report-utils";
-import { verdictBucket } from "@/lib/verdict";
+import { verdictBucket, verdictLabel, verdictTone } from "@/lib/verdict";
 import { enrichmentWorkerNotice } from "./enrichmentNotice";
+import { toolBars } from "./toolBars";
 import {
   PieChart,
   Pie,
@@ -30,16 +31,17 @@ interface DisplayStats {
   avg_duration_seconds: number;
 }
 
-const VERDICT_COLORS: Record<string, string> = {
-  malicious: "var(--status-red)",
-  suspicious: "var(--status-orange)",
-  benign: "var(--status-green)",
-};
-
 /* Five, because this is a way in rather than a list. The full list is one
  * click away and pages properly; restating ten of its rows here made the
  * dashboard a second, worse copy of it. */
 const LATEST_RUNS = 5;
+
+/* The verdicts of those five come from the reports list, which is ordered by
+ * when a report was written rather than when its job was created. Twenty
+ * reports reach every one of the five unless fifteen or more older runs
+ * finished after it; a job whose report still falls outside them is drawn by
+ * its status, never by a verdict it does not have. */
+const REPORTS_FOR_LATEST = LATEST_RUNS * 4;
 
 const STATUS_STYLES: Record<string, string> = {
   completed: "text-status-green",
@@ -108,24 +110,30 @@ function mapApiStats(s: DashboardStatsDTO): DisplayStats {
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DisplayStats | null>(null);
-  const [jobs, setJobs] = useState<JobDTO[]>([]);
+  const [jobs, setJobs] = useState<AnalysisRow[]>([]);
   const [systemStatus, setSystemStatus] = useState<SystemStatusDTO | null>(null);
+  const [toolUsage, setToolUsage] = useState<ToolUsageDTO | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const [s, j, sys] = await Promise.all([
+        const [s, j, reports, sys, tools] = await Promise.all([
           api.getDashboardStats(),
           api.getJobs(1, LATEST_RUNS),
-          // System status is best-effort: failure here must not block the
-          // rest of the dashboard from rendering.
+          // The verdicts, the system status and the tool counts are
+          // best-effort: a failure in any of them leaves its part of the page
+          // out rather than the whole dashboard unrendered. A row without its
+          // verdict is drawn by its status.
+          api.getReports(1, REPORTS_FOR_LATEST).catch(() => null),
           api.getSystemStatus().catch(() => null),
+          api.getDashboardTools().catch(() => null),
         ]);
         setStats(mapApiStats(s));
-        setJobs(j.items.slice(0, LATEST_RUNS));
+        setJobs(latestRunRows(j.items.slice(0, LATEST_RUNS), reports?.items ?? []));
         setSystemStatus(sys);
+        setToolUsage(tools);
       } catch (err) {
         setError(getErrorMessage(err) || "Failed to load dashboard data.");
       } finally {
@@ -179,13 +187,10 @@ export default function DashboardPage() {
       ].filter((d) => d.value > 0)
     : [];
 
-  const verdictColors = [
-    VERDICT_COLORS.malicious,
-    VERDICT_COLORS.suspicious,
-    VERDICT_COLORS.benign,
-  ];
+  const verdictColors = verdictData.map((d) => verdictTone(d.name).fill);
 
   const enrichment = enrichmentWorkerNotice(systemStatus?.enrichment_worker);
+  const bars = toolBars(toolUsage);
 
   return (
     <div>
@@ -272,24 +277,36 @@ export default function DashboardPage() {
                 <Link
                   key={job.id}
                   href={`/analysis/${job.id}`}
-                  className="flex items-center justify-between px-4 py-3 hover:bg-bg-hover"
+                  className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-bg-hover"
                 >
-                  <div className="flex items-center gap-3">
-                    <FileText size={16} aria-hidden="true" className="text-text-secondary" />
-                    <div>
-                      <p className="text-sm text-text-primary">
-                        {sampleLabel(job)}
+                  <div className="flex items-center gap-3 min-w-0">
+                    <FileText size={16} aria-hidden="true" className="text-text-secondary shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm text-text-primary truncate" title={job.sample}>
+                        {job.sample}
                       </p>
                       <p className="text-xs text-text-muted">
-                        {timeAgo(job.created_at)}
+                        {timeAgo(job.createdAt)}
                       </p>
                     </div>
                   </div>
-                  <span
-                    className={`text-xs font-medium uppercase tracking-wider ${STATUS_STYLES[job.status] || "text-text-muted"}`}
-                  >
-                    {job.status}
-                  </span>
+                  {/* What the run concluded, once it concluded anything; until
+                      then, where it is. A chip with nothing in it would say
+                      neither. The verdict is a word first and a colour second. */}
+                  {job.verdict ? (
+                    <span
+                      data-verdict-chip
+                      className={`shrink-0 text-[11px] font-medium px-2 py-0.5 rounded border bg-bg-elevated ${verdictTone(job.verdict).border} ${verdictTone(job.verdict).text}`}
+                    >
+                      {verdictLabel(job.verdict)}
+                    </span>
+                  ) : (
+                    <span
+                      className={`shrink-0 text-xs font-medium uppercase tracking-wider ${STATUS_STYLES[job.status] || "text-text-muted"}`}
+                    >
+                      {job.status}
+                    </span>
+                  )}
                 </Link>
               ))
             )}
@@ -368,6 +385,57 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* What recent runs leaned on, from each run's own ledger count. Drawn
+          only when some run called something: a heading over no bars is the
+          empty state in another shape. */}
+      {bars && (
+        <section
+          aria-labelledby="tools-used-heading"
+          className="mt-4 bg-bg-surface border border-border rounded"
+        >
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-4 py-3 border-b border-border">
+            <h2
+              id="tools-used-heading"
+              className="text-xs font-medium text-text-primary uppercase tracking-wider"
+            >
+              Tools used
+            </h2>
+            <p className="text-xs text-text-muted">Calls over the last {bars.window}</p>
+          </div>
+          <ul className="p-4 space-y-2">
+            {bars.rows.map((row) => (
+              <li key={row.tool} className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] items-center gap-3 text-xs">
+                {/* The name is cut by CSS alone and whole in the tooltip; a
+                    screen reader gets the whole row as one sentence instead,
+                    name, calls and runs, from the line beside it. */}
+                <span
+                  aria-hidden="true"
+                  className="font-mono text-text-secondary truncate"
+                  title={row.tool}
+                >
+                  {row.tool}
+                </span>
+                <span aria-hidden="true" className="h-2 bg-bg-active rounded-sm">
+                  <span
+                    className="block h-2 bg-accent rounded-sm"
+                    style={{ width: `${row.width}%` }}
+                  />
+                </span>
+                <span aria-hidden="true" className="font-mono text-text-primary text-right">
+                  {row.calls}
+                </span>
+                <span className="sr-only">{row.spoken}</span>
+              </li>
+            ))}
+          </ul>
+          {bars.more > 0 && (
+            <p className="px-4 pb-3 text-xs text-text-muted">
+              and {bars.more} more {bars.more === 1 ? "tool" : "tools"}, not drawn
+            </p>
+          )}
+        </section>
+      )}
     </div>
   );
 }

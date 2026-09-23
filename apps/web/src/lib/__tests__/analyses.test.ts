@@ -4,6 +4,7 @@ import type { JobDTO, ReportSummaryDTO } from "@/lib/api";
 import {
   analysisRows,
   countByStatus,
+  latestRunRows,
   sampleLabel,
   statusFilterFrom,
 } from "@/lib/analyses";
@@ -102,6 +103,26 @@ describe("one list from the two endpoints", () => {
 
   it("answers an empty list for nothing at all", () => {
     expect(analysisRows(null, null)).toEqual([]);
+  });
+});
+
+describe("the dashboard's latest runs", () => {
+  it("are exactly the jobs asked for, each with its own verdict", () => {
+    const rows = latestRunRows(
+      [job(), job({ id: "job-2", status: "running", created_at: "2026-09-17T10:00:00Z" })],
+      [report(), report({ id: "r9", job_id: "job-9" })],
+    );
+    expect(rows.map((r) => r.id)).toEqual(["job-2", "job-1"]);
+    expect(rows.find((r) => r.id === "job-1")?.verdict).toBe("Malware");
+    // Not finished, so no verdict: the row is drawn by its status instead.
+    expect(rows.find((r) => r.id === "job-2")?.verdict).toBeNull();
+  });
+
+  it("leave a completed job whose report was not fetched without a verdict", () => {
+    const rows = latestRunRows([job()], []);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].verdict).toBeNull();
+    expect(rows[0].status).toBe("completed");
   });
 });
 

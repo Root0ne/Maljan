@@ -24,7 +24,7 @@ import {
   type StatusFilter,
 } from "@/lib/analyses";
 import { countLabel, formatDuration, timeAgo } from "@/lib/report-utils";
-import { verdictBucket, verdictLabel } from "@/lib/verdict";
+import { verdictLabel, verdictTone } from "@/lib/verdict";
 
 const STATUS_BADGE: Record<string, { class: string; dot: string }> = {
   completed: { class: "text-status-green", dot: "bg-status-green" },
@@ -32,13 +32,6 @@ const STATUS_BADGE: Record<string, { class: string; dot: string }> = {
   pending: { class: "text-text-muted", dot: "bg-text-muted" },
   failed: { class: "text-status-red", dot: "bg-status-red" },
   cancelled: { class: "text-text-muted", dot: "bg-text-muted" },
-};
-
-const VERDICT_TEXT: Record<string, string> = {
-  malicious: "text-status-red",
-  suspicious: "text-status-orange",
-  benign: "text-status-green",
-  unknown: "text-text-muted",
 };
 
 function AnalysesList() {
@@ -287,9 +280,7 @@ function AnalysesList() {
                         </p>
                       </div>
                       {row.verdict && (
-                        <span
-                          className={`ml-auto text-xs ${VERDICT_TEXT[verdictBucket(row.verdict)] ?? VERDICT_TEXT.unknown}`}
-                        >
+                        <span className={`ml-auto text-xs ${verdictTone(row.verdict).text}`}>
                           {verdictLabel(row.verdict)}
                           {/* A bare `0` beside a confident verdict said
                               nothing about what the number was. */}

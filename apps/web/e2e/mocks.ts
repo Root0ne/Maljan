@@ -213,6 +213,18 @@ export const MOCK_DASHBOARD_STATS = {
   avg_duration_seconds: 120,
 };
 
+/** What `GET /dashboard/tools` answers: the per-tool ledger counts of the
+ *  latest completed runs. One name is long enough to be cut on screen. */
+export const MOCK_TOOL_USAGE = {
+  limit: 20,
+  runs: 3,
+  tools: [
+    { tool: "pe_info", calls: 9, runs: 3 },
+    { tool: "strings_extract_with_a_name_long_enough_to_truncate", calls: 4, runs: 2 },
+    { tool: "sandbox_network", calls: 1, runs: 1 },
+  ],
+};
+
 /** Matches `_SYSTEM_STATUS_SCHEMA`. */
 export const MOCK_SYSTEM_STATUS = {
   app_name: "Maljan",
@@ -1540,6 +1552,9 @@ export async function installApiMocks(
   /* ── Dashboard ────────────────────────────────────── */
   await page.route("**/api/v1/dashboard/stats", (route) =>
     json(route, MOCK_DASHBOARD_STATS)
+  );
+  await page.route("**/api/v1/dashboard/tools**", (route) =>
+    json(route, MOCK_TOOL_USAGE)
   );
   await page.route("**/api/v1/system/status", (route) =>
     json(route, MOCK_SYSTEM_STATUS)
