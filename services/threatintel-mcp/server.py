@@ -19,6 +19,7 @@ from typing import Any
 import httpx
 from mcp.server.fastmcp import FastMCP
 
+from maljan.tools.arguments import says_unquoted, unquoted
 from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, env, manifest
 from maljan.tools.errors import (
     NOT_CONFIGURED,
@@ -442,12 +443,16 @@ def _every_part_answered(text: str, parts: list[str]) -> bool:
 
 
 @mcp.tool()
+@says_unquoted("ip_address", text_answer=True)
 def check_ip_reputation(ip_address: str) -> str:
     """Check the reputation of an IP address.
 
     Queries VirusTotal and AbuseIPDB when API keys are available; falls back
     to heuristic mock data otherwise.
     """
+    # Read without one pair of surrounding quotes: a quoted address is not an
+    # address, and the answer names the one that was looked up.
+    ip_address = unquoted(ip_address)
     cached = _check_cache("ip", ip_address)
     if cached:
         return cached
@@ -467,12 +472,14 @@ def check_ip_reputation(ip_address: str) -> str:
 
 
 @mcp.tool()
+@says_unquoted("domain", text_answer=True)
 def check_domain_reputation(domain: str) -> str:
     """Check the reputation of a domain.
 
     Queries VirusTotal when an API key is available; falls back to heuristic
     mock data otherwise.
     """
+    domain = unquoted(domain)
     cached = _check_cache("domain", domain)
     if cached:
         return cached
@@ -487,12 +494,14 @@ def check_domain_reputation(domain: str) -> str:
 
 
 @mcp.tool()
+@says_unquoted("file_hash", text_answer=True)
 def check_hash(file_hash: str) -> str:
     """Check the reputation of a file hash (MD5, SHA1, or SHA256).
 
     Queries VirusTotal when an API key is available; falls back to heuristic
     mock data otherwise.
     """
+    file_hash = unquoted(file_hash)
     cached = _check_cache("hash", file_hash)
     if cached:
         return cached

@@ -1035,6 +1035,24 @@ sentence, because a reader that opened a FIFO with no writer would wait for one
 forever. Given, the file is read in place of the sample and the answer carries
 `read_path` saying which; left out, the sample is read.
 
+**A quoted search is the same search.** A model writes a search the way a
+person types one, between quotes: one scored run's static analyst sent every
+`pattern` with a pair of literal double quotes around `CreateMutex` and was
+told nothing matched, although `CreateMutexW` was a string of the sample. Every
+argument a sidecar tool searches for or looks up by is read without one
+matching pair of surrounding `"`, `'` or `` ` `` — `pattern` on `strings` and
+`floss`; `text`, `technique_id`, `ids`, `api_names` and `query` on the
+knowledge lookups; `ip_address`, `domain` and `file_hash` on `threatintel` —
+by `maljan.tools.arguments`, with nothing else rewritten and a value without a
+surrounding pair passed through exactly. The repair is recorded the way
+`carved_path`'s is: the ledger keeps the arguments as the model wrote them, and
+a structured answer carries `read_as` first, the value each argument was read
+as (a `threatintel` answer is prose and names the value it looked up). Each
+such tool's description says the argument is the raw text or pattern,
+unquoted. Content arguments — the text `iocs_from_text` and `yara_scan` scan,
+the command lines `lolbin_lookup` matches — are left as they arrive, because a
+command line can begin and end with a quote that belongs to it.
+
 `pin_paths` needs no rule for it — a qualified name is not in
 `SAMPLE_ARG_NAMES`, which is what the naming rule was built for. A payload
 carved out of a carved payload nests under the sample's own tree rather than

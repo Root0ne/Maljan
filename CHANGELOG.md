@@ -1320,6 +1320,20 @@ change landed on `main`.
   reads `1837` where it read `1842` and five category shares move by one
   rounding place; no Linux rule's rate moves at all. No behaviour category was
   renamed or removed, so a consumer reading `category` alone is unaffected.
+- **A quoted search argument searches for what is inside the quotes.** Every
+  argument a sidecar tool searches for or looks up by — `pattern` on `strings`
+  and `floss`; `text`, `technique_id`, `ids`, `api_names` and `query` on the
+  knowledge lookups; `ip_address`, `domain` and `file_hash` on `threatintel` —
+  is read without one matching pair of surrounding quotes, as `carved_path`
+  already was, and each tool's description says the argument is the raw text,
+  unquoted. A pattern sent as `"CreateMutex"` with its quotes used to match
+  nothing although `CreateMutexW` was among the strings. Nothing else is
+  rewritten, and the repair is recorded: the ledger keeps the arguments as the
+  model wrote them and a structured answer carries `read_as` first, the value
+  each argument was read as.
+  **Upgrading:** a consumer that reads the first key of a `strings`, `floss` or
+  knowledge answer will find `read_as` there when a quoted argument was read;
+  an unquoted call's answer is unchanged.
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was

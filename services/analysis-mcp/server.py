@@ -36,6 +36,7 @@ from maljan.tools import emulated_strings, staging
 from maljan.tools import identify as identify_tools
 from maljan.tools import rules as rule_tools
 from maljan.tools import strings as string_tools
+from maljan.tools.arguments import SURROUNDING_QUOTES, read_unquoted, says_unquoted, with_read_as
 from maljan.tools.binary import carved_name_prefix
 from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest, module
 from maljan.tools.errors import (
@@ -259,7 +260,15 @@ _ECHOED_VALUE_CHARS = 80
 # JSON it read. One matching pair is removed and nothing else is: no
 # unescaping, no globbing, no case folding, because anything more would be
 # guessing at what was meant rather than reading what was written.
-_SURROUNDING_QUOTES = ('"', "'", "`")
+_SURROUNDING_QUOTES = SURROUNDING_QUOTES
+
+# The arguments a tool here searches by. A model writes a search the way a
+# person types one, between quotes, and one scored run's every ``pattern``
+# arrived with a pair of literal double quotes around ``CreateMutex`` and
+# matched nothing although ``CreateMutexW`` was a string of the sample. Read in
+# ``_guard`` without the pair, the way ``carved_path`` is, and the answer says
+# what each was read as.
+SEARCH_ARGUMENTS = ("pattern",)
 
 # How many sample digests are remembered at once. One per sample a long-lived
 # server sees, and a digest is sixty-four characters: the bound is against a
@@ -549,7 +558,10 @@ def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
     may have been written by the sample's author.
     """
     try:
-        asked = _confined(_read_absent_words(call, kwargs))
+        # The quotes come off before the absence words are read, as they do for
+        # ``carved_path``: "null" between quotes is still no filter.
+        searched = read_unquoted(kwargs, SEARCH_ARGUMENTS)
+        asked = _confined(_read_absent_words(call, searched.values))
         answer = dict(normalise_error(dict(call(**asked))))
         # Which file was read, when it was not the sample. The ledger stores
         # the answer, so a run that analysed a carved payload says which one
@@ -564,7 +576,11 @@ def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
         # part of the answer every reader keeps.
         if _asked_for_a_carved_file(kwargs):
             answer = {"read_path": answer.get("read_path") or asked.get("path", ""), **answer}
-        return answer
+        # What a quoted search argument was read as, first for the same reason.
+        # A value the absence words then turned into no filter is recorded as
+        # what it became.
+        read_as = {name: asked.get(name) for name in searched.read_as}
+        return dict(with_read_as(answer, read_as))
     except PathOutsideRoots as refusal:
         # A ``carved_path`` refusal is answered in that argument's own words:
         # the general remediation names the sample path, which is a parameter
@@ -647,6 +663,7 @@ def signing_info(path: str, file_type: str = "", carved_path: str = "") -> dict[
 
 
 @mcp.tool()
+@says_unquoted("pattern")
 @reads_a_carved_file
 def strings(
     path: str,
@@ -913,6 +930,7 @@ def capa(
 
 
 @mcp.tool()
+@says_unquoted("pattern")
 @reads_a_carved_file
 def floss(
     path: str,

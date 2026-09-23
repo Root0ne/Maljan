@@ -141,6 +141,14 @@ the sample is the platform's to supply, and which of the payloads
 directories it puts samples in, so a default deployment sets nothing; see
 "Which directories a sidecar may read" in `docs/configuration.md`.
 
+`pattern` on `strings` and `floss` is read the same way `carved_path` is: one
+matching pair of surrounding quotes is not part of the pattern, so
+`"CreateMutex"` finds `CreateMutexW`. Nothing else is rewritten, a value
+without a surrounding pair is passed through exactly, and an answer to a call
+whose pattern was read this way carries `read_as` first — the pattern it
+searched for. The shared reading is `maljan.tools.arguments`; the knowledge and
+threatintel servers apply it to their lookup arguments too.
+
 The directory is created with mode 0o700 and refused if what is already at that
 path is a symlink or is owned by another user — the default name is predictable
 and the system temp directory is shared with every other local account. Files

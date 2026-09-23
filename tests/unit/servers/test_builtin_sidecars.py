@@ -155,7 +155,15 @@ def test_the_caveats_on_a_measured_number_reach_the_model_that_reads_them() -> N
     # empty, so a test on the attribute protects nothing; this is what a client
     # handshake returns and what the model is handed.
     served = {tool.name: tool.description or "" for tool in asyncio.run(server.mcp.list_tools())}
-    assert served["api_capability"] == knowledge_tools.api_capability.__doc__
+    # The in-process text whole, then the one sentence every lookup argument
+    # carries about quotes.
+    in_process = (knowledge_tools.api_capability.__doc__ or "").rstrip()
+    assert served["api_capability"].startswith(in_process)
+    assert (
+        served["api_capability"][len(in_process) :]
+        .strip()
+        .startswith("Pass ``api_names`` as the raw text or pattern itself, unquoted.")
+    )
     # Line wrapping is not the subject; the sentences are.
     described = " ".join(served["api_capability"].split())
     for promise in (
