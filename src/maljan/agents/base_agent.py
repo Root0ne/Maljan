@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import itertools
 import json
 import re
@@ -22,7 +23,7 @@ from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import tiktoken
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -47,6 +48,7 @@ from maljan.pipeline.validation import (
     ValidationTally,
     Violation,
     mark_invalid_technique_ids,
+    parse_violations,
     retry_with_feedback_sync,
     validate_isr,
     validity_check_available,
@@ -100,6 +102,16 @@ def is_the_graph_s_step_stop(message: Any) -> bool:
 # that cannot finish still consumes the time it was given, and starting one with
 # nothing left is precisely how the hard cap came to fire on 2026-08-11.
 _SYNTHESIS_MIN_SECONDS = 60
+
+# What the salvage tells the model before the ids it can still cite.
+_SYNTHESIS_DIRECTIVE = (
+    "You have gathered enough tool output above. Do NOT request or "
+    "call any more tools. Using ONLY the evidence already collected "
+    "in this conversation, write your FINAL answer now in the exact "
+    "format the system prompt requested. Where the evidence is "
+    "genuinely insufficient for a point, state that briefly instead "
+    "of asking for more steps. "
+)
 
 # The floor under the character budget for the conversation re-sent to the
 # model. The measured failure re-sent 19 tool outputs — the guardrail caps each
@@ -173,6 +185,44 @@ def synthesis_budget_chars(cfg: Any, agent_name: str, window_tokens: int = 0) ->
     if tokens <= 0:
         return _SYNTHESIS_MIN_CHARS
     return max(_SYNTHESIS_MIN_CHARS, int(tokens * _CHARS_PER_TOKEN * _SYNTHESIS_CONTEXT_SHARE))
+
+
+def salvage_chars_at_pace(
+    seconds: float,
+    *,
+    generation_rate: float | None,
+    prompt_rate: float | None,
+    chars_per_token: int,
+    answer_tokens: int | None = None,
+) -> int | None:
+    """Characters of conversation a no-tools salvage can send and still finish in ``seconds``.
+
+    The salvage re-sends the conversation without the loop's tools, so the
+    server cannot reuse what it had cached for the loop and reads the whole
+    request again, then writes the final answer. At the model's measured
+    rates that takes ``sent / chars_per_token / prompt_rate`` plus
+    ``answer_tokens / generation_rate`` seconds, and the two together, times
+    ``TIMEOUT_MARGIN`` for the spread between turns, must fit in what is left.
+    ``answer_tokens`` defaults to ``FINAL_ANSWER_EXPECTED_TOKENS``, the answer
+    the loop's own time reserve was sized for.
+
+    ``None`` when either rate is unmeasured: nothing is sized from a rate
+    nobody measured, and the window alone then bounds the request. ``0`` when
+    the answer alone does not fit.
+
+    The slow run's numbers are why: 393 s left, a 50,000-character
+    conversation read at 110–240 tokens a second and an answer written at 5.5,
+    and the call ran into its hard cap on all three PE samples.
+    """
+    from maljan.llm.generation_rate import TIMEOUT_MARGIN
+
+    if not generation_rate or not prompt_rate or generation_rate <= 0 or prompt_rate <= 0:
+        return None
+    tokens = FINAL_ANSWER_EXPECTED_TOKENS if answer_tokens is None else int(answer_tokens)
+    reading = float(seconds) / TIMEOUT_MARGIN - tokens / float(generation_rate)
+    if reading <= 0:
+        return 0
+    return int(reading * float(prompt_rate) * max(1, int(chars_per_token)))
 
 
 def ledger_ids_in(msgs: Sequence[Any]) -> list[str]:
@@ -274,6 +324,16 @@ def _conversation_units(msgs: list) -> list[list]:
 def _is_a_tool_pair(unit: list) -> bool:
     """Whether this unit is a tool call with its results."""
     return bool(getattr(unit[0], "tool_calls", None))
+
+
+def _framing_of(msgs: list) -> list:
+    """The leading framing a trimmed salvage always keeps: at most two turns before a tool result."""
+    head: list = []
+    for message in msgs:
+        if len(head) >= 2 or type(message).__name__ == "ToolMessage":
+            break
+        head.append(message)
+    return head
 
 
 def _trim_for_synthesis(msgs: list, budget: int) -> list:
@@ -809,6 +869,21 @@ FINAL_ANSWER_NUDGE = "Your last message was not a final report. Return your fina
 NO_STRUCTURED_REPORT_STATUS = "no_claims"
 NO_STRUCTURED_REPORT_REASON = "the model ended without a structured report"
 
+# What an analyst reports for itself when it answered in prose the parser could
+# not read a single claim out of, after it was asked once for the claim
+# format. The prose is the analyst's report and is kept as written; nothing is
+# made a claim of, because a claim carries a confidence the analyst stated and
+# prose states none.
+UNPARSED_ANSWER_REASON = "the answer did not parse into claims; its prose is kept as the report"
+
+
+def unparsed_answers_reason(names: Sequence[str]) -> str:
+    """The run's degradation reason for analysts whose answer stayed prose."""
+    return (
+        "analyst answers kept as prose, with no claim read from them after one "
+        f"question about the claim format: {', '.join(names)}"
+    )
+
 
 def answer_is_isr(text: str) -> bool:
     """Whether an answer carries a report at all.
@@ -1141,9 +1216,38 @@ def strip_tool_call_scaffolding(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
-# The width of the evidence field as the ISR stores it, and how many dropped
-# ids are written back after the cut.
-_EVIDENCE_REF_CHARS = 200
+def evidence_ref_width() -> int:
+    """How much of one claim's evidence line the ISR stores: what the window allows one answer.
+
+    The line feeds prompts — the ISR text the mediator and the peer revision
+    rounds read, the claims the report composer is handed, the judge's
+    memory query — as well as the report. So it is sized the way one tool
+    answer is: the largest share of the served window one answer may take
+    (``context_window.derive_tool_output_chars`` over an empty conversation),
+    and the documented 6,000 characters where no window is known. It used to
+    be a fixed 200 characters, which cut an analyst's own citation mid-sentence
+    on every window. Where the cut still lands, it is marked where the kept
+    text ends.
+    """
+    from maljan.llm.context_window import (
+        FALLBACK,
+        UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS,
+        derive_tool_output_chars,
+        window_for_settings,
+    )
+
+    try:
+        fact = window_for_settings(get_settings(), [], probe=False)
+    except Exception:  # noqa: BLE001 — an unknown window is the documented fallback
+        return UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
+    if fact.source == FALLBACK or fact.tokens <= 0:
+        return UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
+    return derive_tool_output_chars(window_tokens=int(fact.tokens)) or (
+        UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
+    )
+
+
+# How many dropped ids are written back after the evidence field's cut.
 _EVIDENCE_REF_IDS = 3
 
 # The start of an id the cut sliced through, at the end of the kept text: any
@@ -1155,15 +1259,16 @@ _PARTIAL_ID_AT_END_RE = re.compile(r"\s*(?:\[(?:e(?:v(?:_\d{0,4})?)?)?)?$", re.I
 def evidence_ref_text(evidence_text: str) -> str:
     """The evidence line as the ISR stores it, with its ledger ids kept.
 
-    The field is cut to a fixed width, and the claim format asks for the id at
+    The field is cut to the width the window allows one answer
+    (``evidence_ref_width``), and the claim format asks for the id at
     the end of a line whose front is prose, so on a long line the cut lands on
     the one part the run can check. Any id the cut dropped is written back
     after it, in the order the model wrote it, up to a few: the field is what
-    the report prints and what long-term memory embeds, and a constant named
-    for a width should bound it. An id the cut sliced through is removed from
+    the report prints and what long-term memory embeds, and the width should
+    bound it. An id the cut sliced through is removed from
     the kept text, since the whole id follows.
     """
-    kept = evidence_text[:_EVIDENCE_REF_CHARS]
+    kept = evidence_text[: evidence_ref_width()]
     if len(kept) == len(evidence_text):
         return kept
     kept = _PARTIAL_ID_AT_END_RE.sub("", kept)
@@ -1179,22 +1284,33 @@ def evidence_ref_text(evidence_text: str) -> str:
 
 
 def parse_structured_claims(text: str) -> list[ClaimEvidence]:
-    """Parse ``CLAIM:``-delimited blocks, tolerating missing optional fields.
+    """Parse ``CLAIM:``-delimited blocks, tolerating a missing ``EVIDENCE:`` line.
+
+    The claims alone; ``parse_structured_claims_counted`` also says how many
+    blocks were not claims for want of a confidence.
+    """
+    return parse_structured_claims_counted(text)[0]
+
+
+def parse_structured_claims_counted(text: str) -> tuple[list[ClaimEvidence], int]:
+    """``(claims, blocks that stated no confidence)`` for the ``CLAIM:`` blocks in ``text``.
 
     The view/tier decomposition prompts (``_VIEW_SYSTEM``)
-    require this exact format, but the parsed output was handed to
-    ``_text_to_isr``'s free-text sentence splitter, which has no notion of a
-    ``TECHNIQUE:`` line. Every technique ID produced through those paths was
-    therefore silently dropped and the raw "CLAIM: ..." prefix leaked into the
-    claim text.
+    require this exact format; the parsed output used to be handed to a
+    free-text sentence splitter, which has no notion of a ``TECHNIQUE:`` line,
+    so every technique ID produced through those paths was dropped and the raw
+    "CLAIM: ..." prefix leaked into the claim text.
 
-    Deliberately more lenient than the static analyst's strict variant: a block
-    is kept as long as it has a ``CLAIM:``. A model that omits ``CONFIDENCE:``
-    or ``EVIDENCE:`` still produced a real finding, and discarding it loses
-    evidence — the defaults below mark it as unsourced/medium-confidence
-    instead.
+    More lenient than the static analyst's strict variant about the citation:
+    a block without ``EVIDENCE:`` is still a finding, recorded as unsourced.
+    Not about the confidence. A block that states none, or one that cannot be
+    read as a number, is not a claim: the confidence on a claim is the
+    analyst's own statement, and this parser used to write 0.5 where the
+    analyst wrote nothing. Such blocks are counted instead, and the count is
+    what the validation turn asks the analyst about.
     """
     claims: list[ClaimEvidence] = []
+    without_confidence = 0
     # Stripped per field rather than over the whole text: removing a block
     # that sat between ``CLAIM:`` and ``EVIDENCE:`` would leave the claim
     # marker with nothing after it, and the next line would slide up into the
@@ -1224,12 +1340,10 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
         confidence_match = _BLOCK_CONFIDENCE_RE.search(block)
         technique_match = _BLOCK_TECHNIQUE_RE.search(block)
 
-        confidence = 0.5
-        if confidence_match:
-            try:
-                confidence = max(0.0, min(1.0, float(confidence_match.group(1))))
-            except ValueError:
-                confidence = 0.5
+        confidence = _stated_confidence(confidence_match)
+        if confidence is None:
+            without_confidence += 1
+            continue
 
         technique_id: str | None = None
         if technique_match:
@@ -1249,7 +1363,21 @@ def parse_structured_claims(text: str) -> list[ClaimEvidence]:
                 technique_id=technique_id,
             )
         )
-    return claims
+    return claims, without_confidence
+
+
+def _stated_confidence(match: re.Match[str] | None) -> float | None:
+    """The confidence a ``CONFIDENCE:`` line states, or ``None`` when it states none.
+
+    A number above one or below zero is still the analyst's number, held to
+    the range the schema carries; a line that is not a number states nothing.
+    """
+    if match is None:
+        return None
+    try:
+        return max(0.0, min(1.0, float(match.group(1))))
+    except ValueError:
+        return None
 
 
 def _extract_technique_ids(text: str) -> list[str]:
@@ -1817,6 +1945,36 @@ def _cancel_and_watch(
     threading.Thread(target=_watch_quietly, name="maljan-agent-loop-watchdog", daemon=True).start()
 
 
+def _job_s_cancellation(coro: Any, what: str) -> Any | None:
+    """The cancellation of the job this call runs for; a cancelled job's call is not started."""
+    from maljan.core.cancellation import JobCancelled, current
+
+    job = current()
+    if job is not None:
+        try:
+            job.check(f"before {what}")
+        except JobCancelled:
+            coro.close()
+            raise
+    return job
+
+
+def _in_flight(
+    job: Any | None,
+    loop: asyncio.AbstractEventLoop,
+    future: _ConcurrentFuture[Any],
+    running: list[asyncio.Task[Any]],
+    what: str,
+) -> Callable[[], None]:
+    """Register a call on the agent loop with its job, so a cancel stops it; the unregister."""
+    if job is None:
+        return lambda: None
+    return cast(
+        "Callable[[], None]",
+        job.track(lambda: _cancel_and_watch(loop, future, running, f"{what} (job cancelled)")),
+    )
+
+
 def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
     """Submit ``coro`` to the shared agent loop and block until done / timeout.
 
@@ -1849,7 +2007,11 @@ def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
             "thread, which cannot serve it: await it there instead, or move the "
             "synchronous caller to asyncio.to_thread"
         )
+    job = _job_s_cancellation(coro, what)
     future, running = _submit_to_agent_loop(coro, loop)
+    # A cancelled job stops this call where it is: the task on the agent loop
+    # is cancelled, which cancels the model request it is awaiting.
+    forget = _in_flight(job, loop, future, running, what)
     try:
         return future.result(timeout=hard_timeout)
     except _FuturesTimeout:
@@ -1859,6 +2021,8 @@ def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
         _cancel_and_watch(loop, future, running, what)
         raise TimeoutError(f"{what} exceeded hard cap of {int(hard_timeout)}s") from None
     except _FuturesCancelled as exc:
+        if job is not None and job.is_cancelled:
+            job.check(f"while {what} was in flight")
         # It cancelled itself. ``concurrent.futures.CancelledError`` is an
         # ``Exception`` whose ``str()`` is empty, so left alone it reaches the
         # operator as one uninformative word.
@@ -1866,6 +2030,8 @@ def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
             f"{what} was cancelled from inside — the underlying service closed the "
             f"connection or its task group aborted (no timeout was reached)"
         ) from exc
+    finally:
+        forget()
 
 
 # Public alias: callers outside this module (the sandbox/static providers)
@@ -1902,23 +2068,38 @@ async def run_on_agent_loop(coro: Any, hard_timeout: float, label: str = "") -> 
     ``asyncio.to_thread``, which binds no loop at all.
     """
     loop = _get_agent_loop()
-    future, running = _submit_to_agent_loop(coro, loop)
     what = label or "agent coroutine"
+    job = _job_s_cancellation(coro, what)
+    future, running = _submit_to_agent_loop(coro, loop)
+    forget = _in_flight(job, loop, future, running, what)
     try:
         return await asyncio.wait_for(asyncio.wrap_future(future), hard_timeout)
     except TimeoutError:
         _cancel_and_watch(loop, future, running, what)
         raise TimeoutError(f"{what} exceeded hard cap of {int(hard_timeout)}s") from None
     except (asyncio.CancelledError, _FuturesCancelled) as exc:
+        # The caller itself being cancelled is not the call failing: the
+        # cancellation goes on up, and the call on the agent loop is stopped
+        # with it. This branch used to turn it into ``AgentLoopCancelled``, an
+        # ordinary error: a cancelled job's mediation was then caught as a
+        # failed one, and the graph went on to the judge and the report.
+        task = asyncio.current_task()
+        if task is not None and task.cancelling():
+            _cancel_and_watch(loop, future, running, what)
+            raise
+        future.cancel()
+        if job is not None and job.is_cancelled:
+            job.check(f"while {what} was in flight")
         # Same distinction as ``_run_coro_blocking``, and here the old code was
         # actively misleading: it folded cancellation into ``TimeoutError``, so
         # a transport that died in milliseconds was reported as having "exceeded
         # a hard cap" of several minutes. This is the mediator and judge path.
-        future.cancel()
         raise AgentLoopCancelled(
             f"{what} was cancelled from inside — the underlying service closed the "
             f"connection or its task group aborted (no timeout was reached)"
         ) from exc
+    finally:
+        forget()
 
 
 # The negotiation-round instructions the ISR revision path appends to whatever
@@ -2072,7 +2253,9 @@ class _PriorAnswer:
 
     def __init__(self, isr: AgentISR) -> None:
         self.isr = isr
-        self.content = isr.to_text_summary()
+        # An answer that parsed into nothing is shown back as the prose it was,
+        # so the question about its format is asked over what was written.
+        self.content = isr.unparsed_answer or isr.to_text_summary()
 
 
 def alignment_gate(knowledge: Any, cfg_validation: Any, log: Any, name: str) -> Any | None:
@@ -2988,6 +3171,7 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         if not self.tools:
             plain = LoopBudget(int(max_steps), float(timeout))
+            self._last_loop_deadline = plain.started + float(timeout)
             try:
                 answer = self._invoke_llm_with_timeout(prebuilt, timeout)
             except TimeoutError:
@@ -3045,6 +3229,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The loop's budget, readable by an ask made from inside it and
         # charged by the delegation when the callee returns.
         budget = LoopBudget(int(max_steps), float(timeout))
+        # When this loop's time runs out: the validation turn that follows it
+        # is held to what is left, not given a fresh budget.
+        self._last_loop_deadline = budget.started + float(timeout)
         self.loop_budget = budget
 
         # The run-state block is regenerated on every model turn with the
@@ -3077,7 +3264,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             return repaired if repaired is not None else answer
 
         recorded = record_tools(
-            self.pinned_tools(), recorder, repeats, repairs, self._context_budget()
+            self.pinned_tools(),
+            recorder,
+            repeats,
+            repairs,
+            self._context_budget(),
+            on_question=self._count_question,
         )
         # Sent with every request of this loop, so counted with its conversation.
         self._tool_definition_chars = tool_definition_chars(recorded)
@@ -3167,6 +3359,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 )
                 spoken: set[str] = set()
                 pace = TurnPace(_rate_of_the_answering_model)
+                # Kept past the loop: what one turn and a final answer cost at
+                # this model's pace is what the stage asks before it gives
+                # this analyst a second loop.
+                self._last_pace = pace
                 async with contextlib.aclosing(stream) as snapshots:
                     try:
                         async for snapshot in snapshots:
@@ -3556,6 +3752,13 @@ class BaseAnalyst(BudgetMeter, ABC):
             self._settle_final_answer(content, msgs, timeout, elapsed, max_steps)
         )
 
+    def _count_question(self, code: str) -> None:
+        """Count one question a tool call was answered with, where the run summary reads it."""
+        with self._the_meter_s_lock():
+            fed_back = dict(getattr(self, "validation_fed_back", None) or {})
+            fed_back[code] = fed_back.get(code, 0) + 1
+            self.validation_fed_back = fed_back
+
     def _give_the_final_turn(self, reserve: float, remaining: float) -> None:
         """Hold a model list's per-turn deadline at the final answer's reserve.
 
@@ -3818,7 +4021,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         the deadline it was called to respect is not a salvage), skips entirely
         when too little remains to be worth starting, and re-sends a conversation
         trimmed to a character budget — the model cannot synthesise from context
-        it never finishes reading.
+        it never finishes reading. The budget is the smaller of what the window
+        allows and, where this model's reading and writing rates are measured,
+        what the time left can be read and answered in
+        (``salvage_chars_at_pace``); the framing — the task and the pack — is
+        always kept, and the oldest tool calls go first. When even the framing
+        cannot be read and answered in the time left, the salvage is not sent.
+        Either way what it sent and how it ended is on the loop's budget record
+        under ``salvage``.
 
         Best-effort throughout: on any failure it returns "" so the caller keeps
         the original content.
@@ -3828,7 +4038,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Not truncated to whole seconds: at the time cap a second is a large
         # share of what the final answer was kept.
         remaining = max(0.0, float(timeout) - elapsed)
-        if remaining < _SYNTHESIS_MIN_SECONDS:
+        generation_rate, prompt_rate = self._measured_rates()
+        paced_unknown = generation_rate is None or prompt_rate is None
+        if paced_unknown and remaining < _SYNTHESIS_MIN_SECONDS:
             self.logger.warning(
                 "%s skipping forced synthesis: only %ds of the %ds budget left "
                 "(minimum %ds) — starting it is how the hard cap fires.",
@@ -3837,22 +4049,63 @@ class BaseAnalyst(BudgetMeter, ABC):
                 timeout,
                 _SYNTHESIS_MIN_SECONDS,
             )
+            self._note_salvage(
+                seconds_left=remaining,
+                outcome="not sent",
+                detail=(
+                    f"{remaining:.0f}s were left, under the {_SYNTHESIS_MIN_SECONDS}s a salvage "
+                    "is started with when no rate of this model is measured"
+                ),
+            )
             return ""
 
-        budget = synthesis_budget_chars(
+        window_budget = synthesis_budget_chars(
             get_settings(), self.name, counted_window_tokens(self._context_budget())
         )
+        # What the time left can hold at this model's measured pace, when both
+        # of its rates are known; the window's bound applies either way.
+        paced = salvage_chars_at_pace(
+            remaining,
+            generation_rate=generation_rate,
+            prompt_rate=prompt_rate,
+            chars_per_token=self._chars_per_token(),
+        )
+        budget = window_budget if paced is None else min(window_budget, paced)
         # The same transcript rule the nudge follows: a tool call whose
         # arguments never parsed is not sent back to the server.
         sendable, _dropped = nudge_turns(msgs)
+        conversation = sum(_message_chars(m) for m in sendable)
+        framing = sum(_message_chars(m) for m in _framing_of(sendable))
+        rates = self._rates_sentence(generation_rate, prompt_rate)
+        if paced is not None and paced < framing + len(_SYNTHESIS_DIRECTIVE):
+            # Not even the task and the pack can be read and answered in the
+            # time left at this pace. Starting anyway is a call that runs into
+            # its hard cap and keeps the model busy past it.
+            detail = (
+                f"{remaining:.0f}s were left; at {rates} they hold {max(0, paced)} characters "
+                f"of request, and the task alone is {framing}"
+            )
+            self.logger.warning("%s skipping forced synthesis: %s.", self.name, detail)
+            self._note_salvage(
+                seconds_left=remaining,
+                conversation_chars=conversation,
+                budget_chars=max(0, paced),
+                sized_by="pace",
+                outcome="not sent",
+                detail=detail,
+            )
+            return ""
+
         trimmed = _trim_for_synthesis(sendable, budget)
+        sent = sum(_message_chars(m) for m in trimmed)
         if len(trimmed) < len(msgs):
             self.logger.warning(
-                "%s forced synthesis: trimmed %d of %d messages to fit %d chars.",
+                "%s forced synthesis: trimmed %d of %d messages to fit %d chars%s.",
                 self.name,
                 len(msgs) - len(trimmed),
                 len(msgs),
                 budget,
+                f" ({remaining:.0f}s left at {rates})" if paced is not None else "",
             )
         # What the model can still see, named for it. Trimming drops whole
         # tool calls, so an id that was in the conversation a moment ago may
@@ -3864,18 +4117,16 @@ class BaseAnalyst(BudgetMeter, ABC):
             if visible
             else "Cite only evidence ids that appear above."
         )
-        directive = HumanMessage(
-            content=(
-                "You have gathered enough tool output above. Do NOT request or "
-                "call any more tools. Using ONLY the evidence already collected "
-                "in this conversation, write your FINAL answer now in the exact "
-                "format the system prompt requested. Where the evidence is "
-                "genuinely insufficient for a point, state that briefly instead "
-                "of asking for more steps. " + citable
-            )
-        )
+        directive = HumanMessage(content=_SYNTHESIS_DIRECTIVE + citable)
+        record = {
+            "seconds_left": remaining,
+            "conversation_chars": conversation,
+            "sent_chars": sent,
+            "budget_chars": budget,
+            "sized_by": "window" if paced is None or window_budget <= paced else "pace",
+        }
         try:
-            return self._invoke_llm_with_timeout([*trimmed, directive], remaining)
+            answer = self._invoke_llm_with_timeout([*trimmed, directive], remaining)
         except Exception as exc:  # noqa: BLE001 - best-effort salvage
             self.logger.error(
                 "%s forced synthesis failed: %s (%s)",
@@ -3883,16 +4134,84 @@ class BaseAnalyst(BudgetMeter, ABC):
                 type(exc).__name__,
                 exc,
             )
+            self._note_salvage(**record, outcome="failed", detail=type(exc).__name__)
             return ""
+        self._note_salvage(**record, outcome="answered")
+        return answer
 
-    def _invoke_llm_with_timeout(self, messages: list, timeout: float) -> str:
-        """Run ``self.llm.invoke(messages)`` with a hard wall-clock timeout.
+    def _measured_rates(self) -> tuple[float | None, float | None]:
+        """``(generation, prompt reading)`` tokens a second of this agent's model, as measured."""
+        rates_of = getattr(getattr(self, "_container", None), "get_generation_rates", None)
+        if not callable(rates_of):
+            return None, None
+        try:
+            from maljan.llm.generation_rate import model_name_of
+
+            rates = rates_of()
+            model = model_name_of(self.llm)
+            generation, reading = rates.rate(model), rates.prompt_rate(model)
+        except Exception:  # noqa: BLE001 — an unmeasured model sizes nothing from a rate
+            return None, None
+        return (
+            generation if isinstance(generation, int | float) else None,
+            reading if isinstance(reading, int | float) else None,
+        )
+
+    @staticmethod
+    def _rates_sentence(generation: float | None, reading: float | None) -> str:
+        if generation is None or reading is None:
+            return "no measured rate"
+        return f"{reading:.0f} tokens/s read and {generation:.1f} tokens/s written"
+
+    def _chars_per_token(self) -> int:
+        """Characters a token of this run's requests holds, as the context budget counts them."""
+        from maljan.llm.context_window import CHARS_PER_TOKEN
+
+        budget = self._context_budget()
+        return int(getattr(budget, "chars_per_token", 0) or CHARS_PER_TOKEN)
+
+    def _note_salvage(self, **record: Any) -> None:
+        """Put what the salvage sent and how it ended on this loop's budget record.
+
+        On the last record, which is the loop the salvage belongs to: it is
+        written before the salvage starts. Never raises.
+        """
+        row = {
+            key: round(value, 1) if isinstance(value, float) else value
+            for key, value in record.items()
+        }
+        self._note_on_last_loop("salvage", row)
+
+    def ask_the_model(self, messages: list, *, model: Any = None, what: str = "turn") -> str:
+        """One tools-free model call outside a tool loop, cancellable in flight.
+
+        The revision rounds, the view and tier decomposition turns and the
+        other single calls an analyst makes used ``invoke`` on a thread: a
+        cancelled job refused the next such call but left the one on the wire
+        generating on the model server until the provider's request timeout,
+        with the next job queued behind it. This goes through
+        ``_invoke_llm_with_timeout``: the model's own async call on the agent
+        loop, registered with the job's cancellation, held to this agent's
+        loop budget.
+        """
+        timeout, _steps = loop_limits(self.name, getattr(self, "_budget_ceiling", None))
+        return self._invoke_llm_with_timeout(messages, float(timeout), model=model, what=what)
+
+    def _invoke_llm_with_timeout(
+        self,
+        messages: list,
+        timeout: float,
+        *,
+        model: Any = None,
+        what: str = "no-tools fallback",
+    ) -> str:
+        """Run ``model.ainvoke(messages)`` (``self.llm`` by default) with a hard wall-clock timeout.
 
         Used by ``execute_tool_loop`` when
-        the agent has no tools registered. Mirrors the daemon-thread pattern
-        from the tools path so a stalled / queued llama-server cannot freeze
-        the worker. The thread is daemonised so the OS will reap it if it
-        refuses to die after ``timeout + 30``s.
+        the agent has no tools registered, by the salvage, by the validation
+        turn and by ``ask_the_model``. Runs on the shared agent loop so a
+        stalled / queued llama-server cannot freeze the worker, and a timeout
+        or a cancelled job cancels the request itself.
         """
         import time as _time
 
@@ -3901,19 +4220,26 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Run on the shared agent loop (see ``_get_agent_loop``)
         # rather than a throwaway per-call loop, so no openai async client is
         # ever orphaned on a closed loop.
+        llm: Any = self.llm if model is None else model
+
         async def _invoke() -> str:
-            self.logger.info(
-                "Invoking LLM (no-tools fallback, timeout=%ds)...",
-                timeout,
+            # ``what`` goes into the format itself so the timeout stays the
+            # line's first argument, as log readers of this line expect.
+            self.logger.info(f"Invoking LLM ({what}, timeout=%ds)...", timeout)  # noqa: G004
+            # The model's own async call where it has one, so the timeout and
+            # a cancelled job cancel the request itself: the connection closes
+            # and the server stops generating. A synchronous ``invoke`` in a
+            # thread cannot be cancelled — the slow run's salvage timed out on
+            # the worker's side and went on generating on the server's, and
+            # the next loop's first turn queued behind it for 908 s. A stand-in
+            # that stubs only ``invoke`` is still run in a thread.
+            ask = getattr(type(llm), "ainvoke", None)
+            call = (
+                llm.ainvoke(messages)
+                if inspect.iscoroutinefunction(ask)
+                else asyncio.to_thread(llm.invoke, messages)
             )
-            # Run the (sync) ``invoke`` in a thread executor so ``wait_for`` can
-            # cancel it — mirrors langchain's own sync-bridge and keeps
-            # compatibility with MagicMock-based unit tests that only stub
-            # ``invoke``.
-            response = await asyncio.wait_for(
-                asyncio.to_thread(self.llm.invoke, messages),
-                timeout=float(timeout),
-            )
+            response = await asyncio.wait_for(call, timeout=float(timeout))
             self._record_usage(response)
             return str(response.content)
 
@@ -3923,21 +4249,23 @@ class BaseAnalyst(BudgetMeter, ABC):
             content = _run_coro_blocking(_invoke(), hard_timeout, label=f"llm:{self.name}")
         except TimeoutError:
             self.logger.critical(
-                "%s no-tools fallback exceeded the %ds hard cap.",
+                "%s %s exceeded the %ds hard cap.",
                 self.name,
+                what,
                 hard_timeout,
             )
             raise
         except AnalystError:
             raise
         except Exception as exc:
-            self.logger.error("LLM no-tools fallback failed: %s (%s)", type(exc).__name__, exc)
-            raise AnalystError(f"{self.name} no-tools fallback failed: {exc}") from exc
+            self.logger.error("LLM %s failed: %s (%s)", what, type(exc).__name__, exc)
+            raise AnalystError(f"{self.name} {what} failed: {exc}") from exc
 
         elapsed = _time.monotonic() - _t0
         self.logger.info(
-            "%s no-tools fallback: elapsed=%.1fs, timeout=%ds.",
+            "%s %s: elapsed=%.1fs, timeout=%ds.",
             self.name,
+            what,
             elapsed,
             timeout,
         )
@@ -4046,6 +4374,67 @@ class BaseAnalyst(BudgetMeter, ABC):
         self.current_round = 0
         with lock_for(self):
             return self._analyze_isr_guarded(data)
+
+    def safe_analyze_isr_within(self, data: str, seconds: float) -> AgentISR:
+        """``safe_analyze_isr`` with the loop held to ``seconds``, what the stage has left.
+
+        The ceiling a delegated ask uses, with this agent's own step budget:
+        the loop's budget, its hard cap and its salvage are all sized from
+        what is left, not from a fresh copy of the stage's whole time.
+        """
+        self.current_round = 0
+        _timeout, max_steps = loop_limits(self.name)
+        with lock_for(self):
+            before = getattr(self, "_budget_ceiling", None)
+            self._budget_ceiling = BudgetCeiling(max_steps, max(1.0, float(seconds)))
+            try:
+                return self._analyze_isr_guarded(data)
+            finally:
+                self._budget_ceiling = before
+
+    def seconds_an_answer_needs(self) -> float:
+        """One answer at the pace this agent's last loop measured: the loop's final-answer reserve.
+
+        ``TurnPace.reserve``: the longest turn, or a 1,000-token answer at the
+        measured rate where that is longer, times the margin, and at least the
+        salvage's minimum. A loop that measured nothing needs that minimum.
+        """
+        pace = getattr(self, "_last_pace", None)
+        if not isinstance(pace, TurnPace):
+            return float(_SYNTHESIS_MIN_SECONDS)
+        return pace.reserve()
+
+    def _seconds_the_last_loop_left(self, fallback: float) -> float:
+        """What is left of the last loop's time, or ``fallback`` when no loop has run."""
+        deadline = getattr(self, "_last_loop_deadline", None)
+        if not isinstance(deadline, int | float):
+            return float(fallback)
+        return float(deadline) - time.monotonic()
+
+    def _note_on_last_loop(self, key: str, value: Any) -> None:
+        """Put one fact on the last loop's budget record. Never raises."""
+        try:
+            lock = getattr(self, "_meter_lock", None) or contextlib.nullcontext()
+            with lock:
+                records = list(getattr(self, "_budget_records", None) or [])
+                if not records:
+                    return
+                records[-1] = {**records[-1], key: value}
+                self._budget_records = records
+        except Exception as exc:  # noqa: BLE001 — a record never costs an answer
+            self.logger.debug("%s: %s was not recorded (%s).", self.name, key, exc)
+
+    def seconds_a_loop_needs(self) -> float:
+        """One turn and the final answer after it, at the pace this agent's last loop measured.
+
+        The longest turn of the model that answered last, plus the reserve the
+        loop keeps for a final answer (``TurnPace.reserve``). A loop that
+        measured no turn needs at least the salvage's own minimum.
+        """
+        pace = getattr(self, "_last_pace", None)
+        if not isinstance(pace, TurnPace):
+            return float(_SYNTHESIS_MIN_SECONDS)
+        return pace.longest() + pace.reserve()
 
     def _analyze_isr_guarded(self, data: str) -> AgentISR:
         # Whatever the loop is given, kept where the handlers below can reach
@@ -4275,9 +4664,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 llm = self.llm.bind(max_tokens=max_tokens)
             except Exception:  # noqa: BLE001 — provider may not accept the kwarg
                 llm = self.llm
-        response = llm.invoke(messages)
-        self._record_usage(response)
-        return str(response.content)
+        return self.ask_the_model(messages, model=llm, what="view")
 
     def analyze_isr_views(
         self,
@@ -4522,25 +4909,58 @@ class BaseAnalyst(BudgetMeter, ABC):
         # batch the analyst has already answered.
         asked: list[bool] = []
 
+        # An answer the loop already asked once for a report — the nudge — is
+        # not asked again for the claim format: that was the question. What it
+        # left unread is recorded instead of asked.
+        nudged = bool(getattr(self, "_answer_unstructured", False))
+
         def _validator(candidate: AgentISR) -> list[Violation]:
             first = not asked
             asked.append(True)
-            return validate_isr(
-                candidate,
-                attck=knowledge,
-                ledger_ids=ledger_ids,
-                sample=sample,
-                alignment=gate,
-                alignment_threshold=threshold,
-                alignment_margin=margin,
-                weak_alignment_challenges=challenges and first,
-            )
+            unread = [] if nudged else parse_violations(candidate)
+            return [
+                *unread,
+                *validate_isr(
+                    candidate,
+                    attck=knowledge,
+                    ledger_ids=ledger_ids,
+                    sample=sample,
+                    alignment=gate,
+                    alignment_threshold=threshold,
+                    alignment_margin=margin,
+                    weak_alignment_challenges=challenges and first,
+                ),
+            ]
+
+        if nudged:
+            self.validation_findings.extend(parse_violations(isr))
 
         try:
-            if not _validator(isr):
-                return isr
+            initial = _validator(isr)
         except Exception as exc:  # noqa: BLE001
             self.logger.warning("Validation skipped (%s).", exc)
+            return isr
+        if not initial:
+            return isr
+
+        # The turn gets what the loop it follows left, and is not asked at all
+        # when that cannot hold an answer at this model's pace: a question after
+        # a loop that ended at its time cap used to be handed the whole budget
+        # again, and after a second loop the whole of what that loop was given.
+        timeout, _steps = loop_limits(self.name, getattr(self, "_budget_ceiling", None))
+        # Through the class's functions, so a duck-typed analyst that borrows
+        # this method alone is held to the same rule.
+        left = BaseAnalyst._seconds_the_last_loop_left(self, float(timeout))  # type: ignore[arg-type]
+        needs = BaseAnalyst.seconds_an_answer_needs(self)  # type: ignore[arg-type]
+        if left < needs:
+            detail = (
+                f"not asked: {max(0.0, left):.0f}s of the loop's time were left, and an answer "
+                f"needs {needs:.0f}s at the pace this agent's loop measured"
+            )
+            self.logger.warning("%s: validation turn %s.", self.name, detail)
+            mark_invalid_technique_ids(isr, initial)
+            self.validation_findings.extend(initial)
+            BaseAnalyst._note_on_last_loop(self, "validation", detail)  # type: ignore[arg-type]
             return isr
 
         from langchain_core.messages import HumanMessage, SystemMessage
@@ -4560,13 +4980,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             run_state=str(getattr(self, "run_state_block", "") or ""),
         )
 
-        timeout, _steps = loop_limits(self.name, getattr(self, "_budget_ceiling", None))
         first: list[Any] = [_PriorAnswer(isr)]
 
         def _run(turns: list[Any]) -> Any:
             if first:
                 return first.pop()
-            return self._invoke_llm_with_timeout(turns, timeout)
+            return self._invoke_llm_with_timeout(turns, left)
 
         def _parse(answer: Any) -> AgentISR:
             if isinstance(answer, _PriorAnswer):
@@ -4600,6 +5019,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         # analyst's original findings with nothing recording that it happened —
         # the exact silence this whole phase is about. Keep the first answer and
         # label whatever was wrong with it.
+        # An answer that is still prose after being asked keeps the loop's own
+        # prose, which is what the analyst wrote from everything it gathered;
+        # the retry was asked over the evidence text alone.
+        if retries and not revised.claims and isr.unparsed_answer:
+            revised = isr
         if retries and len(revised.claims) < len(isr.claims):
             self.logger.warning(
                 "Validation: the retry for '%s' returned %d claim(s) against %d; "
@@ -4810,18 +5234,36 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         return [c for c in claims if not self._is_meta_claim_text(c.claim)]
 
+    def _parsed_isr(
+        self, claims: list[ClaimEvidence], content: str, domain: str, revision_round: int = 0
+    ) -> AgentISR:
+        """The ISR for claims a strict parser read out of ``content``.
+
+        With the count of CLAIM blocks the strict parser passed over for
+        stating no confidence, which the validation turn asks about: a strict
+        parser that drops a block says nothing, and the analyst wrote it.
+        """
+        isr = AgentISR(
+            agent_id=self.name,
+            domain=domain,
+            claims=claims,
+            dissent_items=[],
+            revision_round=revision_round,
+        )
+        isr.note_parse(blocks_without_confidence=parse_structured_claims_counted(content)[1])
+        return isr
+
     def _text_to_isr(self, text: str, revision_round: int) -> AgentISR:
         """Convert a free-text report into a minimal AgentISR."""
         domain = self._infer_domain()
 
         # A model that writes its tool calls into
-        # the assistant channel leaves them here, and the sentence splitter
-        # below has no way to tell a call from prose -- a live static_r2 run
-        # put raw ``<tool_call>`` blocks in front of an operator as findings.
-        # Removed before anything reads the text, so no path derives a claim
-        # from scaffolding; a report that is nothing else yields no claims at
-        # all, which is what the meta-claim branch already does for the
-        # placeholder case.
+        # the assistant channel leaves them here -- a live static_r2 run put
+        # raw ``<tool_call>`` blocks in front of an operator as findings.
+        # Removed before anything reads the text, so neither a claim nor the
+        # kept prose carries scaffolding; a report that is nothing else yields
+        # no claims at all, which is what the meta-claim branch already does
+        # for the placeholder case.
         text = strip_tool_call_scaffolding(text)
 
         # When the agent returned only the placeholder
@@ -4844,59 +5286,42 @@ class BaseAnalyst(BudgetMeter, ABC):
                 )
             )
 
-        # Structured output first. Several prompts —
+        # Structured output first, and only. Several prompts —
         # notably the view/tier decomposition ones — mandate the
-        # CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE block format. Running the
-        # free-text sentence splitter over that shape kept the literal
-        # "CLAIM: " prefix in the claim text and threw away every
-        # ``TECHNIQUE:`` line, so those paths produced technique-less claims.
+        # CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE block format, and every ISR
+        # prompt asks for it.
+        structured: list[ClaimEvidence] = []
+        without_confidence = 0
         if "CLAIM:" in text:
-            structured = parse_structured_claims(text)
-            if structured:
-                return AgentISR(
-                    agent_id=self.name,
-                    domain=domain,
-                    claims=structured,
-                    dissent_items=[],
-                    revision_round=revision_round,
-                )
-
-        # A sentence the model wrote on its way somewhere — "Let me search for
-        # more specific strings related to malware indicators:" — is scaffolding
-        # in exactly the way a raw tool call is, and the splitter cannot tell
-        # prose from intention any more than it could tell prose from a call.
-        raw_sentences = [
-            s.strip()
-            for s in self._SENTENCE_SPLIT_RE.split(text)
-            if len(s.strip()) > 20 and not self._is_meta_claim_text(s.strip())
-        ]
-        claims: list[ClaimEvidence] = []
-        for sentence in raw_sentences[:10]:
-            # Bind a technique ID to the sentence that actually mentions it,
-            # not by positional index. The previous ``technique_ids[i]``
-            # stapled a T-code extracted anywhere in the report onto an
-            # unrelated sentence, so the report attributed a technique to a
-            # claim that never mentioned it.
-            _sentence_tids = _extract_technique_ids(sentence)
-            tid = _sentence_tids[0] if _sentence_tids else None
-            claims.append(
-                ClaimEvidence(
-                    claim=sentence[:200],
-                    evidence_ref=f"text-extracted from {self.name} report",
-                    confidence=0.5,
-                    technique_id=tid,
-                )
-            )
-
-        return self._with_answer_status(
-            AgentISR(
+            structured, without_confidence = parse_structured_claims_counted(text)
+        if structured:
+            isr = AgentISR(
                 agent_id=self.name,
                 domain=domain,
-                claims=claims,
+                claims=structured,
                 dissent_items=[],
                 revision_round=revision_round,
             )
+            isr.note_parse(blocks_without_confidence=without_confidence)
+            return isr
+
+        # An answer with no claim this parser can read is prose, and prose is
+        # kept as the analyst's report rather than cut into claims. The
+        # sentence splitter that stood here made a claim of every sentence
+        # longer than twenty characters, Markdown headings included, at a flat
+        # 0.50 nobody stated. The validation turn asks once for the claim
+        # format; what survives that is recorded, and the stage keeps the prose.
+        isr = AgentISR(
+            agent_id=self.name,
+            domain=domain,
+            claims=[],
+            dissent_items=[],
+            revision_round=revision_round,
         )
+        isr.note_parse(unparsed_answer=text.strip(), blocks_without_confidence=without_confidence)
+        isr.status = NO_STRUCTURED_REPORT_STATUS
+        isr.status_reason = UNPARSED_ANSWER_REASON
+        return isr
 
     # Class-level default so an analyst built without ``__init__`` — a test
     # stand-in, a script — still answers the question the parser asks it.
@@ -4912,6 +5337,9 @@ class BaseAnalyst(BudgetMeter, ABC):
     # second loop meets the same full window.
     ended_out_of_room: bool = False
     _budget_ceiling: BudgetCeiling | None = None
+    # When the last loop's time ran out, on the monotonic clock; ``None``
+    # before any loop.
+    _last_loop_deadline: float | None = None
     steps_spent: int = 0
     current_round: int = 0
     # The lock included: ``delegation.ask`` takes it on the callee, and a

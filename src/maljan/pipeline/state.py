@@ -18,7 +18,7 @@ class AgentArgument(BaseModel):
     agent_name: str = Field(..., description="Name of the agent submitting the argument")
     finding: str = Field(..., description="The main finding or rebuttal")
     confidence_score: float | None = Field(
-        0.0,
+        None,
         description=(
             "Confidence of this specific argument (0-1). ``None`` on a mediator "
             "round where consensus did not apply: fewer than two analysts "

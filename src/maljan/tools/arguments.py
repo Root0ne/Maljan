@@ -32,9 +32,14 @@ READ_AS_KEY = "read_as"
 
 # What each tool that takes such an argument says about it. Written once so no
 # two descriptions can come to disagree about what the argument is.
+# It used to say "Pass ``pattern`` as the raw text or pattern itself", which
+# sets the parameter's name beside the words "pattern itself"; a static analyst
+# twice sent ``"pattern": "\"pattern\""``, the word itself in quotes. The value
+# is named as a value here, and the name is said not to be one.
 UNQUOTED_NOTE = (
-    "Pass {names} as the raw text or pattern itself, unquoted. One pair of quotes "
-    "around the whole value is read as not part of it, and {record}."
+    "Give {names} the value itself, as it should be matched; a value that is only "
+    "the parameter's name is asked about, not run. One pair of quotes around the "
+    "whole value is read as not part of it, and {record}."
 )
 _RECORDED_AS_KEY = "the answer's ``read_as`` says so when that happened"
 _RECORDED_IN_TEXT = "the answer names the value that was looked up"

@@ -54,9 +54,6 @@ except ImportError:
 # Default rules file relative to the repository root
 _DEFAULT_RULES_PATH = Path(__file__).parent.parent.parent.parent / "data" / "yara_ttp_rules.yaml"
 
-# Minimum confidence to apply to any YARA match (deterministic floor)
-_CONFIDENCE_FLOOR: float = 0.70
-
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -70,7 +67,7 @@ class YaraTTPRule:
     Attributes:
         id:           Unique rule identifier (snake_case).
         technique_id: MITRE ATT&CK technique ID.
-        confidence:   Match confidence in [0.70, 1.0].
+        confidence:   The confidence the rule's author wrote, or ``None``.
         description:  Human-readable description of what the rule detects.
         patterns:     List of string patterns (case-insensitive, literal match).
         platform:     Sample-platform allowlist. Tuple
@@ -100,11 +97,14 @@ class YaraTTPRule:
         # A rule whose patterns cannot establish a technique statically is a
         # string note: it says what it found and asserts nothing, so it
         # carries no id and no authored confidence to be read as one. A rule
-        # that does assert keeps the old default when its author wrote none.
+        # that does assert carries the confidence its author wrote, as written,
+        # or none: it used to be given 0.75 when its author wrote none and
+        # raised to 0.70 when its author wrote less.
+        authored = data.get("confidence") if technique_id else None
         confidence = (
-            None
-            if not technique_id
-            else max(float(data.get("confidence", 0.75)), _CONFIDENCE_FLOOR)
+            float(authored)
+            if isinstance(authored, int | float) and not isinstance(authored, bool)
+            else None
         )
         patterns = tuple(str(p) for p in data.get("patterns", []))
         all_of = tuple(str(p) for p in data.get("all_of", []))

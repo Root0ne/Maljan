@@ -289,7 +289,11 @@ def build_prompt_text(report: MalwareReport) -> str:
         f"Malware category: {report.malware_category or 'unknown'}",
         (
             f"Attribution family: {report.attribution.family or 'unknown'} "
-            f"(confidence {report.attribution.family_confidence:.2f})"
+            + (
+                "(confidence not assessed)"
+                if report.attribution.family_confidence is None
+                else f"(confidence {report.attribution.family_confidence:.2f})"
+            )
         ),
         "",
     ]

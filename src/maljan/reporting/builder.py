@@ -88,7 +88,7 @@ class MalwareReportBuilder:
         run_summary: dict[str, Any] | None,
         discussion_history: list[dict[str, Any]] | None,
         final_decision: str,
-        overall_confidence: float | None = 0.0,
+        overall_confidence: float | None = None,
         judge_assessment: Any | None = None,
         malware_category: str | None = None,
         degraded_mode: bool = False,
@@ -255,12 +255,10 @@ class MalwareReportBuilder:
     ) -> dict[str, Any]:
         """The compact projection of the run summary's negotiation block.
 
-        ``final_confidence`` is a float wherever this key is declared, so a run
-        whose judge never answered — and which therefore has no negotiation
-        block to read one from — contributes 0.0 rather than a ``None`` a
-        reader of the projection has no field for. A debate that measured no
-        agreement has none to project: the key is absent, and the verdict's
-        own confidence is not borrowed for it.
+        ``final_confidence`` is present only where the mediator stated one. A
+        debate that measured no agreement — it did not apply, or its mediation
+        failed — has none to project: the key is absent, and neither the
+        verdict's own confidence nor a 0.0 is put in its place.
         """
         negotiation = run_summary.get("negotiation", {}) or {}
         summary: dict[str, Any] = {
@@ -269,10 +267,11 @@ class MalwareReportBuilder:
             "confidence_history": negotiation.get("confidence_history", []),
             "sycophancy_events": negotiation.get("sycophancy_events", 0),
         }
-        if negotiation.get("termination_reason") != NOT_APPLICABLE:
-            summary["final_confidence"] = negotiation.get(
-                "final_confidence", overall_confidence or 0.0
-            )
+        # The mediator's own last number, where it stated one. The verdict's
+        # confidence is not borrowed for it, and no 0.0 stands in for none.
+        final = negotiation.get("final_confidence")
+        if negotiation.get("termination_reason") != NOT_APPLICABLE and final is not None:
+            summary["final_confidence"] = final
         return summary
 
     # ------------------------------------------------------------------

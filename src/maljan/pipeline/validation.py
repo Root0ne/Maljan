@@ -214,6 +214,55 @@ def feedback_text(violations: Sequence[Violation]) -> str:
 
 UNGROUNDED_TECHNIQUE_CODE = "isr.ungrounded_technique"
 
+# What the parse of an analyst's answer could not read. Neither is corrected:
+# prose is not cut into claims and a block with no confidence is not given
+# one. Each is asked about once in the analyst's own validation turn, and what
+# is still unread after it is recorded.
+UNPARSED_ANSWER_CODE = "isr.unparsed_answer"
+CLAIM_WITHOUT_CONFIDENCE_CODE = "isr.claim_without_confidence"
+
+_UNPARSED_ANSWER_MESSAGE = (
+    "Your answer has no CLAIM block that can be read, so it carries no claim and "
+    "is kept as prose. Restate each finding as a block, with the confidence you "
+    "hold it at:\n"
+    "CLAIM: <claim text>\n"
+    "EVIDENCE: <artifact reference, naming the tool result you read it from, "
+    "for example [ev_0002]>\n"
+    "CONFIDENCE: <0.0-1.0>\n"
+    "TECHNIQUE: <T-ID or NONE>\n"
+    "---\n"
+    "A finding you cannot put a confidence on stays in your prose."
+)
+
+
+def parse_violations(isr: Any) -> list[Violation]:
+    """What the parse of one analyst answer could not read, as questions to it.
+
+    Two, each asked once: an answer with no CLAIM block that parses, which is
+    otherwise the analyst's prose and nothing more, and CLAIM blocks that state
+    no confidence, which are not claims because the confidence on a claim is
+    the analyst's own statement. An ISR built without a parse says nothing.
+    """
+    found: list[Violation] = []
+    if not getattr(isr, "claims", None) and str(getattr(isr, "unparsed_answer", "") or ""):
+        found.append(Violation(code=UNPARSED_ANSWER_CODE, message=_UNPARSED_ANSWER_MESSAGE))
+    try:
+        declined = int(getattr(isr, "blocks_without_confidence", 0) or 0)
+    except (TypeError, ValueError):
+        declined = 0
+    if declined:
+        found.append(
+            Violation(
+                code=CLAIM_WITHOUT_CONFIDENCE_CODE,
+                message=(
+                    f"{declined} CLAIM block(s) state no CONFIDENCE that reads as a number "
+                    "between 0.0 and 1.0, so they are not claims. Give each the confidence "
+                    "you hold it at, or leave it out."
+                ),
+            )
+        )
+    return found
+
 
 def _techniques_cited_by_findings(isr: Any, citable: set[str]) -> set[str]:
     """The techniques the findings block already cites one of this run's entries for.

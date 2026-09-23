@@ -14,6 +14,8 @@ import json
 import os
 import platform
 import signal
+import sys
+import threading
 import time
 import traceback
 import uuid
@@ -25,6 +27,8 @@ from typing import Any
 
 import redis.asyncio as aioredis
 from arq import cron
+from maljan.agents.base_agent import CANCEL_DELIVERY_GRACE
+from maljan.core.cancellation import Cancellation, JobCancelled
 from maljan.core.config import Settings as _CoreSettings
 from maljan.core.settings_catalog import core_catalog
 from maljan.core.settings_overrides import build_settings, public_snapshot
@@ -917,6 +921,122 @@ def _make_event_sink(
 # have to wait a quarter of a minute for it.
 CANCEL_POLL_SECONDS = 15.0
 
+# How long a pipeline that has been told to stop is waited for before the job
+# goes on without it, and how long the process waits at exit for threads still
+# blocked in a call nothing can cancel — a synchronous model call in flight on a
+# thread — before it leaves them. The grace a cancellation is given to be
+# delivered anywhere else (``base_agent.CANCEL_DELIVERY_GRACE``). SIGTERM ends
+# the worker within these two, the job's teardown (``WORKER_TEARDOWN_TIMEOUT``)
+# and the closing of its two connections, each held to the same grace:
+# 10 s + 60 s + 2 × 10 s + 10 s as shipped.
+PIPELINE_STOP_GRACE = CANCEL_DELIVERY_GRACE
+EXIT_GRACE = CANCEL_DELIVERY_GRACE
+
+
+async def await_the_pipeline(task: asyncio.Task[Any], cancellation: Cancellation) -> Any:
+    """The pipeline task's result, and a stop that reaches all of it when this job is cancelled.
+
+    The job's own task being cancelled — the worker shutting down on SIGTERM,
+    or arq's job timeout — used to reach the pipeline only as a cancellation of
+    the task it awaited, and a pipeline that turned the cancellation into an
+    ordinary error ran on: the worker ignored SIGTERM for three minutes, and
+    arq's shutdown waited on it. Now the job's cancellation is set first, which
+    stops every model call the job has in flight and every one it would make
+    next, the pipeline task is cancelled, and it is waited for at most
+    ``PIPELINE_STOP_GRACE`` before the cancellation carries on.
+    """
+    try:
+        await asyncio.wait({task})
+    except asyncio.CancelledError:
+        cancellation.cancel("the worker is shutting down")
+        task.cancel()
+        await asyncio.wait({task}, timeout=PIPELINE_STOP_GRACE)
+        raise
+    return task.result()
+
+
+# Whether this process has asked to be left by blocked threads at exit.
+_EXIT_GUARD_ARMED = False
+
+
+def blocked_threads() -> list[str]:
+    """The non-daemon threads still alive besides the main thread and the caller."""
+    here = threading.current_thread()
+    return sorted(
+        thread.name
+        for thread in threading.enumerate()
+        if thread.is_alive()
+        and not thread.daemon
+        and thread is not threading.main_thread()
+        and thread is not here
+    )
+
+
+def _leave_blocked_threads_after(grace: float) -> None:
+    """From the interpreter's own exit: end the process after ``grace`` if a thread still holds it.
+
+    Runs when the interpreter begins shutting down, before it joins the
+    threads that are still alive — the one point at which the process is
+    certainly leaving. It starts a daemon thread and returns, so the joins go
+    ahead; a process whose threads all end within the grace exits on its own
+    and the daemon dies with it. What can hold it is a thread blocked in a call
+    that cannot be cancelled — a synchronous model request in flight — which
+    ends only at its provider's request timeout. Such threads are left, the
+    names logged, and the process ends with status 1 so a supervisor sees
+    that it did not end cleanly. Nothing is left when nothing is blocked.
+    """
+
+    def _leave() -> None:
+        time.sleep(grace)
+        held = blocked_threads()
+        if not held:
+            return
+        logger.warning(
+            "Worker exit held %.0fs by %d thread(s) blocked in calls that cannot be "
+            "cancelled (%s); leaving them.",
+            grace,
+            len(held),
+            ", ".join(held),
+            extra={"component": "worker.lifecycle"},
+        )
+        os._exit(1)
+
+    threading.Thread(target=_leave, name="worker-exit-guard", daemon=True).start()
+
+
+def arm_the_exit_guard(grace: float | None = None) -> None:
+    """Have the process's own exit leave threads still blocked after ``grace``. Once per process.
+
+    Registered on the hook the interpreter runs as it starts to shut down,
+    before it joins non-daemon threads (the one ``concurrent.futures`` uses to
+    join its executors, which is what a blocked model call holds). Arming does
+    nothing to the running process: a caller of ``shutdown`` that goes on
+    running — a test — is untouched, and at its own exit the guard acts only
+    if a thread is still blocked.
+    """
+    global _EXIT_GUARD_ARMED
+    if _EXIT_GUARD_ARMED:
+        return
+    wait = EXIT_GRACE if grace is None else float(grace)
+    register = getattr(threading, "_register_atexit", None)
+    if register is None:
+        logger.warning(
+            "Worker exit guard not armed: this interpreter has no threading._register_atexit, "
+            "so a thread blocked in a call that cannot be cancelled can hold the exit open.",
+            extra={"component": "worker.lifecycle"},
+        )
+        return
+    try:
+        register(lambda: _leave_blocked_threads_after(wait))
+    except RuntimeError as exc:
+        logger.warning(
+            "Worker exit guard not armed (%s): the interpreter is already shutting down.",
+            exc,
+            extra={"component": "worker.lifecycle"},
+        )
+        return
+    _EXIT_GUARD_ARMED = True
+
 
 # ── Job ownership ───────────────────────────────────────────────
 
@@ -1795,6 +1915,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                                 job_id,
                                 extra={"job_id": job_id, "component": "heartbeat"},
                             )
+                            # The job's own flag first: it stops the model
+                            # calls in flight and refuses the next ones, which
+                            # a task cancellation alone does not reach.
+                            app.container.cancellation.cancel("the operator cancelled the job")
                             if pipeline_task is not None:
                                 pipeline_task.cancel()
                             return
@@ -1832,8 +1956,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     started_at=start_time,
                 )
             )
-            pipeline_result = await pipeline_task
-        except asyncio.CancelledError:
+            pipeline_result = await await_the_pipeline(pipeline_task, app.container.cancellation)
+        except (asyncio.CancelledError, JobCancelled):
             # Two things cancel this task and they end differently. An
             # operator's cancel leaves its flag in Redis — the heartbeat may
             # have read it already, or the cancel may have arrived between two
@@ -1846,13 +1970,25 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             if not cancelled_by_user:
                 cancelled_by_user = await cancel_was_requested(redis_conn, job_id)
             if not cancelled_by_user:
+                # arq finishes a job it cancelled only on ``CancelledError``; a
+                # ``JobCancelled`` reaching it would leave the job unfinished in
+                # its bookkeeping, since it is no ``Exception`` either.
+                if not isinstance(sys.exc_info()[1], asyncio.CancelledError):
+                    raise asyncio.CancelledError from sys.exc_info()[1]
                 raise
+            _stopped = app.container.cancellation.stopped_at
             logger.info(
-                "Pipeline cancelled by user request: job=%s",
+                "Pipeline cancelled by user request: job=%s (stopped %s)",
                 job_id,
+                _stopped or "before any check was reached",
                 extra={"job_id": job_id},
             )
-            await _publish_event(redis_conn, job_id, "cancelled", {})
+            await _publish_event(
+                redis_conn,
+                job_id,
+                "cancelled",
+                {"stopped": _stopped} if _stopped else {},
+            )
             # On a session of its own, like every other outcome this task
             # records: the one it was working through may be the one the
             # cancellation came with.
@@ -2894,21 +3030,26 @@ async def shutdown(ctx: dict) -> None:
             with suppress(asyncio.CancelledError):
                 await task
 
+    # Each close is bounded: a connection that does not close would otherwise
+    # hold the shutdown open before the process ever reaches its exit.
     redis_conn: aioredis.Redis | None = ctx.get("redis")
     if redis_conn:
-        await redis_conn.aclose()
+        with suppress(TimeoutError):
+            await asyncio.wait_for(redis_conn.aclose(), timeout=EXIT_GRACE)
 
     db_session = ctx.get("db_session")
     if db_session:
         # Dispose the engine
         engine = db_session.kw.get("bind")
         if engine:
-            await engine.dispose()
+            with suppress(TimeoutError):
+                await asyncio.wait_for(engine.dispose(), timeout=EXIT_GRACE)
 
     logger.info(
         "Worker shutdown complete",
         extra={"component": "worker.lifecycle"},
     )
+    arm_the_exit_guard()
 
 
 # The enrichment task lives in a sibling module. Importing it at module

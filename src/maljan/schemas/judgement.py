@@ -94,7 +94,11 @@ class FamilyVerdict(BaseModel):
     """Which malware family this is, and what the name was read from."""
 
     name: str = Field(..., description="Family name, e.g. 'AsyncRAT'.")
-    confidence: float = Field(0.0, ge=0.0, le=1.0, description="The judge's own confidence.")
+    # ``None`` when the judge put no number on the name: a default of 0.0
+    # printed as "low confidence, 0.00", a confidence nobody stated.
+    confidence: float | None = Field(
+        None, ge=0.0, le=1.0, description="The judge's own confidence, if it stated one."
+    )
     evidence_ids: list[str] = Field(
         default_factory=list,
         description="Ledger entry ids the name was drawn from, e.g. ['ev_0012'].",

@@ -43,6 +43,10 @@ from maljan.analysis.corroboration import (
 # The termination reason of a debate that measured no agreement: fewer than
 # two analysts produced claims, or the stage did not run.
 NOT_APPLICABLE = "not_applicable"
+# The termination reason of a debate whose last mediation raised or timed out:
+# no agreement was measured, and the reason says the mediation failed rather
+# than that the round limit was reached.
+MEDIATION_FAILED = "mediation_failed"
 
 # What every surface says for it. The record does not say which of the two
 # causes held, so the words name neither.
@@ -58,13 +62,16 @@ class NegotiationMetrics:
         rounds_completed:    Number of negotiation rounds actually executed.
         max_rounds:          Hard limit configured at startup.
         termination_reason:  Why the loop stopped (consensus / hard_limit /
-                             convergence / sycophancy / not_applicable).
+                             convergence / sycophancy / not_applicable /
+                             mediation_failed).
         sycophancy_events:   Number of rounds where sycophancy was detected.
         confidence_history:  Per-round mediator confidence scores.
         final_confidence:    Last recorded confidence value; ``None`` when
                              consensus did not apply, because fewer than two
                              analysts produced claims or the debate did not
-                             run. No agreement was measured, so none is stated.
+                             run, and when no round measured one — a
+                             mediation that failed. No agreement was
+                             measured, so none is stated.
     """
 
     rounds_completed: int
@@ -507,14 +514,24 @@ def generation_lines(generation: Any) -> list[str]:
         return []
     lines: list[str] = []
     for model, row in sorted((generation.get("models") or {}).items()):
-        if not isinstance(row, dict) or row.get("tokens_per_second") is None:
+        if not isinstance(row, dict):
             continue
-        sources = "; ".join(str(x) for x in row.get("sources") or []) or "unknown"
-        lines.append(
-            f"Generation rate of `{model}`: {float(row['tokens_per_second']):.2f} tokens/s "
-            f"({int(row.get('tokens') or 0)} tokens over {float(row.get('seconds') or 0.0):.1f}s "
-            f"in {int(row.get('calls') or 0)} call(s); from {sources})"
-        )
+        if row.get("tokens_per_second") is not None:
+            sources = "; ".join(str(x) for x in row.get("sources") or []) or "unknown"
+            lines.append(
+                f"Generation rate of `{model}`: {float(row['tokens_per_second']):.2f} tokens/s "
+                f"({int(row.get('tokens') or 0)} tokens over "
+                f"{float(row.get('seconds') or 0.0):.1f}s "
+                f"in {int(row.get('calls') or 0)} call(s); from {sources})"
+            )
+        if row.get("prompt_tokens_per_second") is not None:
+            read_from = "; ".join(str(x) for x in row.get("prompt_sources") or []) or "unknown"
+            lines.append(
+                f"Prompt reading rate of `{model}`: "
+                f"{float(row['prompt_tokens_per_second']):.2f} tokens/s "
+                f"({int(row.get('prompt_tokens') or 0)} tokens over "
+                f"{float(row.get('prompt_seconds') or 0.0):.1f}s; from {read_from})"
+            )
     margin = generation.get("margin")
     ceiling = generation.get("ceiling_s")
     for call, row in sorted((generation.get("timeouts") or {}).items()):
@@ -1170,6 +1187,13 @@ class RunSummaryBuilder:
                 cap = row.get("cap")
                 if cap and str(cap) not in caps:
                     caps.append(str(cap))
+            # Each loop's salvage as it was recorded: what it sent, what it
+            # was sized by and how it ended, in loop order. A list, not a sum,
+            # because two salvages of one agent are two requests and the
+            # question a reader asks is which could not finish and why.
+            salvages = [
+                dict(row["salvage"]) for row in loops if isinstance(row.get("salvage"), dict)
+            ]
             out[str(agent)] = {
                 "loops": len(loops),
                 "steps_used": sum(int(row.get("steps_used") or 0) for row in loops),
@@ -1183,6 +1207,17 @@ class RunSummaryBuilder:
                     int(row.get("tool_definition_chars") or 0) for row in loops
                 ),
                 "caps": caps,
+                **({"salvages": salvages} if salvages else {}),
+                # A validation turn a loop's time could not hold, and why.
+                **(
+                    {"validation_not_asked": skipped}
+                    if (
+                        skipped := [
+                            str(row["validation"]) for row in loops if row.get("validation")
+                        ]
+                    )
+                    else {}
+                ),
             }
         self._budget = out or None
         return self
@@ -1242,6 +1277,8 @@ class RunSummaryBuilder:
                 "entries": int(facts.get("entries") or 0),
                 "failed": int(facts.get("failed") or 0),
                 "duration_ms": int(facts.get("duration_ms") or 0),
+                # How FLOSS ran: beside capa, or in turn and why.
+                **({"floss": str(facts["floss"])} if facts.get("floss") else {}),
             }
         return self
 
@@ -1444,8 +1481,19 @@ class RunSummaryBuilder:
             sycophancy_events = 1
 
         applicable = state.get("consensus_applicable", True) is not False
+        last_mediator = next(
+            (
+                arg
+                for arg in reversed(discussion_history)
+                if getattr(arg, "agent_name", "") == "Mediator"
+            ),
+            None,
+        )
+        mediation_failed = getattr(last_mediator, "status", "complete") in ("failed", "timeout")
         if not applicable:
             termination_reason = NOT_APPLICABLE
+        elif mediation_failed:
+            termination_reason = MEDIATION_FAILED
         elif is_consensus:
             termination_reason = "consensus"
         elif len(confidence_history) >= 3:
@@ -1465,8 +1513,10 @@ class RunSummaryBuilder:
             termination_reason=termination_reason,
             sycophancy_events=sycophancy_events,
             confidence_history=confidence_history,
+            # The last agreement the mediator stated, or none: a series with
+            # nothing in it measured nothing, and 0.0 would say it had.
             final_confidence=(
-                None if not applicable else confidence_history[-1] if confidence_history else 0.0
+                confidence_history[-1] if applicable and confidence_history else None
             ),
         )
         return self

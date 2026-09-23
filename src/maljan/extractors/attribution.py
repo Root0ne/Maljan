@@ -80,7 +80,8 @@ def build_family_attribution(
     name = str(getattr(judge_family, "name", "") or "").strip()
     if name:
         evidence_ids = list(getattr(judge_family, "evidence_ids", None) or [])
-        confidence = float(getattr(judge_family, "confidence", 0.0) or 0.0)
+        stated = getattr(judge_family, "confidence", None)
+        confidence = float(stated) if isinstance(stated, int | float) else None
         if not evidence_ids:
             logger.info(
                 "Attribution: the judge named family=%r without citing evidence ids; "
@@ -89,7 +90,7 @@ def build_family_attribution(
             )
         return FamilyAttribution(
             family=name,
-            family_confidence=max(0.0, min(1.0, confidence)),
+            family_confidence=confidence,
             family_grounded=bool(evidence_ids),
             family_evidence_ids=[str(eid) for eid in evidence_ids],
             family_source="judge",
@@ -98,7 +99,7 @@ def build_family_attribution(
     sandbox_family = _extract_sandbox_family(sandbox_report)
     return FamilyAttribution(
         family=sandbox_family,
-        family_confidence=0.0,
+        family_confidence=None,
         family_grounded=True,
         family_source="sandbox" if sandbox_family else None,
     )

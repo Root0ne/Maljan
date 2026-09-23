@@ -77,8 +77,8 @@ class TestYaraTTPRule:
         assert rule.confidence == pytest.approx(0.85)
         assert "VirtualAllocEx" in rule.patterns
 
-    def test_from_dict_confidence_floor(self) -> None:
-        """Confidence below 0.70 is raised to the floor."""
+    def test_from_dict_keeps_the_authored_confidence(self) -> None:
+        """An authored 0.30 stays 0.30: it used to be raised to a 0.70 floor."""
         rule = YaraTTPRule.from_dict(
             {
                 "id": "low_conf",
@@ -88,11 +88,12 @@ class TestYaraTTPRule:
                 "patterns": ["pattern"],
             }
         )
-        assert rule.confidence >= 0.70
+        assert rule.confidence == 0.30
 
-    def test_from_dict_missing_confidence_defaults(self) -> None:
+    def test_from_dict_missing_confidence_is_none(self) -> None:
+        """A rule whose author wrote no confidence states none; it used to be given 0.75."""
         rule = YaraTTPRule.from_dict({"id": "r", "technique_id": "T1055", "patterns": ["x"]})
-        assert rule.confidence >= 0.70
+        assert rule.confidence is None
 
 
 # ---------------------------------------------------------------------------

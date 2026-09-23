@@ -332,7 +332,7 @@ class TestTheNodeDoesNotRunItAgain:
 
         source = inspect.getsource(nodes)
         guard = source.index('getattr(agent, "ended_out_of_room", False)')
-        fallback = source.index("report = agent.safe_analyze(fallback_text)")
+        fallback = source.index("again = agent.safe_analyze_isr_within(")
         assert guard < fallback
 
 

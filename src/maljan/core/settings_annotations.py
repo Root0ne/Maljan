@@ -952,6 +952,17 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Triage pack",
     },
+    "triage.memory_floor_mb": {
+        "title": "Triage memory floor (MiB)",
+        "description": (
+            "What running FLOSS beside capa must leave of the host's available "
+            "memory. The pack runs the two together only when the available memory, "
+            "less capa's measured peak and FLOSS's own bound, stays at or above this, "
+            "and the worker's memory limit, where it has one, holds both; otherwise it "
+            "runs them one after the other and records why."
+        ),
+        "subgroup": "Triage pack",
+    },
     "events.stream_deltas": {
         "title": "Stream partial answers",
         "description": (

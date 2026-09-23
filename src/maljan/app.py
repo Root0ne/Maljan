@@ -15,8 +15,9 @@ from __future__ import annotations
 import asyncio
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from maljan.core.cancellation import bound
 from maljan.core.config import Settings
 from maljan.core.container import ServiceContainer
 from maljan.core.logger import logger
@@ -344,6 +345,38 @@ class MaljanApp:
         # reads its environment rather than the settings store. The in-process
         # module is told directly, for the lookups this worker makes itself.
 
+        # Everything from here runs under this job's cancellation: the graph's
+        # nodes check it on the way in, and every model call the job makes —
+        # in a node, on the agent loop, in a thread started from either —
+        # checks it before it sends anything (``core.cancellation``).
+        with bound(self.container.cancellation):
+            result = await self._run_the_pipeline(
+                start,
+                file_hash=file_hash,
+                file_name=file_name,
+                sample_path=sample_path,
+                static_sample_path=static_sample_path,
+                static_sample_paths=static_sample_paths,
+            )
+
+        elapsed = time.time() - start
+        logger.info("=" * 60)
+        logger.info("ANALYSIS COMPLETE (%.1fs)", elapsed)
+        logger.info("=" * 60)
+
+        return result
+
+    async def _run_the_pipeline(
+        self,
+        start: float,
+        *,
+        file_hash: str,
+        file_name: str | None,
+        sample_path: str | None,
+        static_sample_path: str | None,
+        static_sample_paths: dict[str, str] | None,
+    ) -> dict[str, Any]:
+        """The sandbox submission and the graph, for ``arun``."""
         # Submit to sandbox if sample_path is provided
         sandbox_report = await self._submit_to_sandbox(sample_path)
 
@@ -419,11 +452,4 @@ class MaljanApp:
             "budget_records": {},
         }
 
-        result = await self.graph.ainvoke(initial_state)
-
-        elapsed = time.time() - start
-        logger.info("=" * 60)
-        logger.info("ANALYSIS COMPLETE (%.1fs)", elapsed)
-        logger.info("=" * 60)
-
-        return result
+        return cast("dict[str, Any]", await self.graph.ainvoke(initial_state))
