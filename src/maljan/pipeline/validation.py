@@ -1766,12 +1766,17 @@ class EntryTexts:
 
     texts: Mapping[str, str] = field(default_factory=dict)
     tools: Mapping[str, str] = field(default_factory=dict)
+    # The entries whose text is known not to be the whole answer — shortened
+    # for the model or trimmed by the byte budget. A value absent from one of
+    # them may be in the part that is not here, so no absence is read off it.
+    partial: frozenset[str] = frozenset()
 
     @classmethod
     def from_ledger(cls, ledger: Iterable[Any], corpus: Any = None) -> EntryTexts:
         """One text per entry: the corpus's copy first, the stored output after it."""
         texts: dict[str, str] = {}
         tools: dict[str, str] = {}
+        partial: set[str] = set()
         for entry in ledger or ():
             written = str(getattr(entry, "id", "") or "").strip()
             entry_id = written.lower()
@@ -1784,24 +1789,50 @@ class EntryTexts:
                 except Exception:  # noqa: BLE001 — a missing copy falls back to the stored one
                     text = ""
             text = text or str(getattr(entry, "output", "") or "").lower()
+            if getattr(entry, "truncated", False):
+                partial.add(entry_id)
             if text:
                 texts[entry_id] = text
                 tools[entry_id] = str(getattr(entry, "tool", "") or "")
-        return cls(texts=texts, tools=tools)
+        return cls(texts=texts, tools=tools, partial=frozenset(partial))
 
     def holds(self, entry_id: str, value: str) -> bool:
-        """Whether this entry's text holds ``value``, however the text spells it."""
+        """Whether this entry's text holds ``value`` as a value of its own, however spelt.
+
+        A whole value, never a slice of a longer run: ``443`` is not held by an
+        answer whose only ``443`` is inside a timestamp. See :func:`decidable`
+        for the values no text can answer for at all.
+        """
+        from maljan.agents._indicator_denylists import whole_value_in
+
         text = self.texts.get(str(entry_id).strip().lower(), "")
-        return bool(text) and any(form in text for form in written_forms(value.lower()))
+        return bool(text) and any(
+            whole_value_in(form, text) for form in written_forms(value.lower())
+        )
 
     def holding(self, value: str) -> list[str]:
-        """Every entry whose text holds ``value``, in ledger order."""
+        """Every entry whose text holds ``value``, in ledger order; none for an undecidable one."""
+        if not decidable(value):
+            return []
         return [entry_id for entry_id in self.texts if self.holds(entry_id, value)]
 
     def named(self, entry_id: str) -> str:
         """``ev_0012 (floss)``: an id with the tool that answered it."""
         tool = self.tools.get(entry_id, "")
         return f"{entry_id} ({tool})" if tool else entry_id
+
+
+# A value that is only a number — decimal, hex, dotted — is one no text can be
+# said to hold or lack: an answer may write it another way (``0x12c`` for
+# ``300``), and a reputation report or a strings dump holds almost every short
+# number inside some longer run. Such a value raises no question and no note.
+_ONLY_A_NUMBER_RE = re.compile(r"(?:0x)?[0-9a-f]+|[0-9][0-9.,:]*", re.IGNORECASE)
+
+
+def decidable(value: str) -> bool:
+    """Whether a text can be said to hold or to lack ``value``."""
+    text = str(value or "").strip()
+    return len(text) >= 3 and _ONLY_A_NUMBER_RE.fullmatch(text) is None
 
 
 def quoted_values(text: str) -> list[str]:
@@ -1868,9 +1899,13 @@ def wrong_entry_citations(
     def _ask(value: str, cited: Sequence[str]) -> None:
         value = str(value or "").strip()
         known = [entry_id for entry_id in cited if entry_id in entries.texts]
-        if len(value) < 3 or not known:
+        if not decidable(value) or not known:
             return
         if any(entries.holds(entry_id, value) for entry_id in known):
+            return
+        if any(entry_id in entries.partial for entry_id in known):
+            # A cited entry that is not the whole answer may hold it in the
+            # part that is missing; no "is not in" is said of it.
             return
         holders = entries.holding(value)
         if not holders:

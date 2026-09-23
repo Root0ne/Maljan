@@ -185,6 +185,52 @@ class TestTheEntryTexts:
         assert quoted_values("the sample's `%s` and 'ab' and `example.dat`") == ["example.dat"]
 
 
+class TestWhatCannotBeDecided:
+    """A value is held as a whole value; a bare number is held by nothing."""
+
+    @staticmethod
+    def _texts() -> EntryTexts:
+        report = json.dumps({"last_analysis_date": 1713004433, "size": 184320, "group": "Admins2"})
+        return EntryTexts.from_ledger(
+            [
+                _entry("ev_0011", "get_file_report", report),
+                _entry("ev_0020", "decompile_function", "sleep(0x12c); connect(host, 0x1bb)"),
+            ]
+        )
+
+    def test_a_number_raises_no_question(self) -> None:
+        payload = {
+            "items": [
+                {"key": "Delay", "value": "300", "evidence_refs": ["ev_0020"]},
+                {"key": "Port", "value": "443", "evidence_refs": ["ev_0020"]},
+            ]
+        }
+
+        assert wrong_entry_citations(payload, self._texts()) == []
+
+    def test_a_number_gets_no_holding_note(self) -> None:
+        assert self._texts().holding("443") == []
+
+    def test_a_word_inside_a_longer_run_is_not_held(self) -> None:
+        payload = {"items": [{"key": "Group", "value": "Admins", "evidence_refs": ["ev_0020"]}]}
+
+        assert wrong_entry_citations(payload, self._texts()) == []
+
+    def test_a_cited_entry_known_to_be_partial_is_not_said_to_lack_it(self) -> None:
+        partial = LedgerEntry(
+            id="ev_0011",
+            agent="pipeline",
+            server="pipeline",
+            tool="get_file_report",
+            output="{}",
+            truncated=True,
+        )
+        texts = EntryTexts.from_ledger([partial, *_ledger()[2:]])
+        body = f"The sample carries the marker `{MARKER}` [ev_0011]."
+
+        assert wrong_entry_citations({"body": body}, texts, prose=("body",)) == []
+
+
 class _RawLLM:
     """Structured output unavailable; the raw path answers from a queue."""
 
