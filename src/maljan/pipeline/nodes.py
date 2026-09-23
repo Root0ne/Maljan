@@ -1344,6 +1344,16 @@ def pack_text(state: AnalysisState, container: ServiceContainer) -> str:
     return pack_block(pack_entries(state.get("evidence_ledger") or []), limit)
 
 
+def ledger_ids(state: AnalysisState) -> list[str]:
+    """Every id the run's evidence ledger issued, in ledger order: what a report may cite."""
+    ids: list[str] = []
+    for row in state.get("evidence_ledger") or []:
+        value = row.get("id") if isinstance(row, dict) else getattr(row, "id", None)
+        if value and str(value) not in ids:
+            ids.append(str(value))
+    return ids
+
+
 def pack_ledger_ids(state: AnalysisState) -> list[str]:
     """The ids of the pack's entries: what every agent may cite besides its own."""
     return [entry.id for entry in pack_entries(state.get("evidence_ledger") or [])]
@@ -4146,6 +4156,7 @@ def make_report_node(
                         state.get("isr_reports"),
                         facts_block=pack_text(state, container),
                         run_state=render_run_state(state),
+                        citable_ids=ledger_ids(state),
                     ),
                     timeout=_NARRATIVE_TIMEOUT_SECONDS,
                 )
@@ -4201,6 +4212,7 @@ def make_report_node(
                     state.get("isr_reports"),
                     facts_block=pack_text(state, container),
                     run_state=render_run_state(state),
+                    citable_ids=ledger_ids(state),
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(

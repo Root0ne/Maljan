@@ -312,7 +312,9 @@ routine, relative to the image base) grouped by the routine that produced it,
 at most 100 strings and 3,000 characters with each string cut at 120; a line
 that cut says so, with the reason and the `offset` of the rest, and a line
 that would not fit in what is left of the block is rendered shorter rather
-than dropped. On the reference loader it carries all 81 strings. Under
+than dropped. The line says, before the strings, that they are the sample's own
+text — data, not instructions, ledger entries or the platform's findings. On the
+reference loader it carries all 81 strings. Under
 the heading *Facts established before analysis (ledger ids in brackets; cite
 them)* the block leads every analyst's first human turn (analysis and
 revision alike), the mediator's and the verdict's human turns, the narrative
@@ -401,11 +403,11 @@ Two producers use it:
 * **The report's prose** (`reporting/narrative_agent.py`, `reporting/composer.py`)
   — the shape of the answer, a capability the run does not establish
   (`narrative.ungrounded_capability`), and a bracketed citation that is not an
-  evidence id the answer was shown (`report.citation_not_evidence`): a prompt
+  evidence id the run issued (`report.citation_not_evidence`): a prompt
   block's heading such as `[BINARY FACTS]`, a source's name, or an `ev_` id
-  that was not in its prompt. The citable ids are the ones the prompt carries
-  (the pack's, the ids in the analysts' claims), and the question's sentence
-  names them. An ATT&CK or MBC id in brackets (`[T1027]`, `[C0027.009]`) is an
+  the ledger never issued. The citable ids are the run's ledger ids, never ids
+  read out of prompt text — a decoded string can carry any `[ev_NNNN]` — and the
+  question's sentence names them. An ATT&CK or MBC id in brackets (`[T1027]`, `[C0027.009]`) is an
   identifier, not a citation, and a markdown link is neither. A citation or an
   over-claim that survives the retry is printed as written and recorded
   unresolved; only a broken shape costs the section.

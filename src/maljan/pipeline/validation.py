@@ -43,7 +43,7 @@ from maljan.pipeline.events import (
     emit_validation_feedback,
     safe_finding_value,
 )
-from maljan.schemas.evidence import ENTRY_ID_RE, entry_ids_in
+from maljan.schemas.evidence import entry_ids_in
 from maljan.schemas.judgement import BENIGN_VERDICT, SEVERITY_RATINGS, VERDICT_VALUES
 from maljan.schemas.stix_pattern import read_comparisons
 
@@ -1346,13 +1346,20 @@ _IDENTIFIER_RE = re.compile(r"[A-Z]\d{4}(?:\.[A-Z]?\d{3})?|CVE-\d{4}-\d{4,}", re
 _CITABLE_SHOWN = 12
 
 
-def citable_ids_in(text: str) -> list[str]:
-    """The evidence ids ``text`` carries, lower-cased, once each, in the order they appear.
+# A pack line's own id: the ``[ev_NNNN]`` that begins a line of the block.
+# Only the pack writes a line's start; a quoted string inside a line, whatever
+# it carries, cannot begin one, because its line breaks are written out.
+_PACK_LINE_ID_RE = re.compile(r"^\[(ev_\d{3,})\] ", re.IGNORECASE | re.MULTILINE)
 
-    A section may cite what its prompt showed it: the pack's ids, the ids in
-    the analysts' claims, the ids beside the captured tool output.
+
+def pack_line_ids(block: str) -> list[str]:
+    """The ids the triage pack issued, read off the start of its lines, once each, in order.
+
+    For a caller that has the pack's block and not the run's ledger. The ids
+    that merely appear in a line — a decoded string the sample wrote, a model's
+    claim — are not ids anything issued, and are not read.
     """
-    return list(dict.fromkeys(found.lower() for found in ENTRY_ID_RE.findall(text or "")))
+    return list(dict.fromkeys(found.lower() for found in _PACK_LINE_ID_RE.findall(block or "")))
 
 
 def _strings_of(value: Any, depth: int = 0) -> list[str]:
@@ -1370,7 +1377,8 @@ def _strings_of(value: Any, depth: int = 0) -> list[str]:
 def citation_violations(payload: Any, citable: Sequence[str]) -> list[Violation]:
     """Each bracketed citation item in ``payload``'s prose that is not an id it may cite.
 
-    ``citable`` is the evidence ids the producer was shown. An item that is an
+    ``citable`` is the evidence ids the run's ledger issued — never ids read out
+    of the prompt's text, where a sample's own string can carry any. An item that is an
     ATT&CK or MBC identifier is left alone; any other item — a prompt block's
     heading, a source's name, an id the producer was not shown — is one
     violation, once however often it appears, with a sentence naming the ids

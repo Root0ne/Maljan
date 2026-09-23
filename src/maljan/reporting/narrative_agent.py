@@ -38,9 +38,9 @@ from maljan.pipeline.validation import (
     CapabilityGrounding,
     ValidationTally,
     Violation,
-    citable_ids_in,
     citation_violations,
     narrative_capability_violations,
+    pack_line_ids,
     retry_with_feedback,
     schema_violations,
 )
@@ -367,6 +367,7 @@ class NarrativeAgent:
         isr_reports: Any = None,
         facts_block: str = "",
         run_state: str = "",
+        citable_ids: Sequence[str] | None = None,
     ) -> NarrativeOutput | None:
         """Return a ``NarrativeOutput`` or ``None`` if both paths fail.
 
@@ -386,8 +387,10 @@ class NarrativeAgent:
         # the ISRs, a capability an analyst stated in a claim would be a
         # violation here and a pass there, on one run.
         grounding = CapabilityGrounding.from_report(report, isr_reports)
-        # The ids the summary may cite are the ones its prompt showed it.
-        citable = citable_ids_in("\n".join(_message_text(m) for m in messages))
+        # The ids the summary may cite: the ones the run's ledger issued, or,
+        # handed none, the pack's own line ids — never ids read out of prompt
+        # text, where a sample's decoded string can carry any.
+        citable = list(citable_ids) if citable_ids is not None else pack_line_ids(facts_block)
 
         # Skip the structured path entirely on endpoints where it does not
         # work. Measured live 2026-08-07: against llama-server this call hung

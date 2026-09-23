@@ -18,6 +18,7 @@ no evidence, leave it empty — never invent** (the renderer states absence).
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from types import UnionType
 from typing import Any, Union, get_args, get_origin
 
@@ -36,9 +37,9 @@ from maljan.pipeline.validation import (
     CapabilityGrounding,
     ValidationTally,
     Violation,
-    citable_ids_in,
     citation_violations,
     keep_known_keys,
+    pack_line_ids,
     retry_with_feedback,
     schema_violations,
     section_capability_violations,
@@ -300,6 +301,7 @@ class ReportComposer:
         isr_reports: dict[str, Any] | None = None,
         facts_block: str = "",
         run_state: str = "",
+        citable_ids: Sequence[str] | None = None,
     ) -> None:
         """Fill report.intro_background / technical_analysis / c2_channels /
         conclusion. Mutates ``report`` in place; each section is best-effort.
@@ -313,6 +315,10 @@ class ReportComposer:
         authored = 0
         self._facts_block = facts_block
         self._run_state = run_state
+        # The ids a section may cite: the ones the run's ledger issued, or,
+        # handed none, the pack's own line ids — never ids read out of prompt
+        # text, where a sample's decoded string can carry any.
+        self._citable = list(citable_ids) if citable_ids is not None else pack_line_ids(facts_block)
         # What this run established, read once and asked of every section, so
         # a conclusion cannot be the first place "command-and-control" appears.
         self._grounding = CapabilityGrounding.from_report(report, isr_reports)
@@ -504,8 +510,7 @@ class ReportComposer:
         # — see ``structured_output_supported``. The per-section timeout below
         # bounds the damage here, unlike the narrative round, but paying it on
         # every one of eight sections is still eight timeouts nobody needs.
-        # The ids this section may cite are the ones its prompt showed it.
-        citable = citable_ids_in("\n".join(_message_text(m) for m in messages))
+        citable = list(getattr(self, "_citable", None) or [])
         try:
             if not structured_output_supported_for_llm(self.llm):
                 raise _StructuredOutputUnavailable
