@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 
 import { useReport } from "../layout";
 import { entropyClass, formatBytes } from "@/lib/report-utils";
@@ -9,9 +10,11 @@ import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import {
   binarySectionKeys,
   importContainerLabel,
+  hasSection,
   isCoveredBySection,
   sectionsForTab,
 } from "@/components/analysis/reportSections";
+import { SIGMA_SECTION, YARA_SECTION } from "@/components/analysis/ruleMatches";
 import { fileTypeLabel } from "@/types/malware-report";
 import type { StringIOC, StringIOCKind } from "@/types/malware-report";
 
@@ -45,6 +48,20 @@ export default function StaticTab() {
   // said the same thing.
   const reportSections = report?.malware_report?.sections;
   const evidenceSections = sectionsForTab(reportSections, "static");
+  /* The YARA and Sigma rules that fired are DETECTION's, where each Sigma
+   * rule's level sits on the severity ladder. This page points there rather
+   * than drawing the same table a second time. */
+  const rulesFired =
+    hasSection(reportSections, YARA_SECTION) || hasSection(reportSections, SIGMA_SECTION);
+  const rulesLink = rulesFired && report?.job_id ? (
+    <p className="text-xs text-text-secondary" data-rules-moved>
+      The YARA and Sigma rules that fired on this sample are on{" "}
+      <Link href={`/analysis/${report.job_id}/detection`} className="text-accent-strong hover:underline">
+        DETECTION
+      </Link>
+      .
+    </p>
+  ) : null;
   const showsExtractedSections = !isCoveredBySection(
     reportSections,
     binarySectionKeys("sections")
@@ -95,6 +112,7 @@ export default function StaticTab() {
   if (!staticData) {
     return (
       <div className="space-y-4">
+        {rulesLink}
         <ArtifactSections sections={evidenceSections} />
         <div className="p-8 text-center text-sm text-text-secondary">
           No format-aware extractor produced a typed static block for this{" "}
@@ -109,6 +127,7 @@ export default function StaticTab() {
 
   return (
     <div className="space-y-4">
+      {rulesLink}
       <ArtifactSections sections={evidenceSections} />
 
       {/* Carved payloads lead the page. A nested executable inside a dropper

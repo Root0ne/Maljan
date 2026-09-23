@@ -26,6 +26,8 @@ class EvidenceEntryResponse(BaseModel):
     args: dict[str, Any] | None = None
     args_repaired: bool = False
     args_raw: str | None = None
+    # The model whose turn asked for the call; ``None`` where nothing named it.
+    model: str | None = None
     output: str = ""
     structured: Any | None = None
     # Whether the output was dropped to keep the agent inside its byte budget.

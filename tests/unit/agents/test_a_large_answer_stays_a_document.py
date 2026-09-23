@@ -946,7 +946,7 @@ class TestAServersParameterNameIsUntrustedText:
             content = [type("C", (), {"text": _strings_answer(400)})()]
 
         class _Session:
-            async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+            async def call_tool(self, name: str, arguments: dict[str, Any], **_: Any) -> Any:
                 return _Result()
 
         toolkit = MCPLangChainToolkit(max_output_chars=limit)

@@ -57,6 +57,9 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # (``maljan.agents.evidence_recorder``).
     args_repaired: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     args_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The model whose turn asked for the call, as ``provider/model``; NULL
+    # where nothing named it, including every row written before the column.
+    model: Mapped[str | None] = mapped_column(String(300), nullable=True)
     # Text, not String(n): a decompilation runs to thousands of characters and
     # the producer already caps it (schemas.evidence).
     output: Mapped[str] = mapped_column(Text, nullable=False, default="")
