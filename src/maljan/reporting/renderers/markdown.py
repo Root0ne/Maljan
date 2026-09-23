@@ -2239,16 +2239,37 @@ def _absent_subsection(number: str, title: str, line: str) -> str:
 
 
 def _escape_block(text: str) -> str:
-    """A paragraph whose lines cannot open a heading or a code fence."""
+    """A paragraph whose lines cannot open a heading, a code fence or a table.
+
+    Four shapes restructure a document from inside a paragraph: an ATX heading
+    (``#``), a code fence, a setext underline — a line of only ``=`` or ``-``
+    turns the line above it into an H1 or H2, which the HTML renderer would
+    then list in its contents with no voice tag — and a table's delimiter row,
+    which turns the lines around it into a table. A backslash in front of the
+    line's first character makes each of them text.
+    """
     # What opens a heading or a code fence at the start of a Markdown line.
     openers = ("#", "```", "~~~")
     out: list[str] = []
     for line in str(text or "").splitlines():
         body = line.lstrip()
-        if body.startswith(openers):
+        if body.startswith(openers) or _is_setext_underline(body) or _is_delimiter_row(body):
             line = line[: len(line) - len(body)] + "\\" + body
         out.append(line)
     return "\n".join(out)
+
+
+def _is_setext_underline(line: str) -> bool:
+    """Whether a line is only ``=`` or only ``-``: it would underline the line above."""
+    return set(line.strip()) in ({"="}, {"-"})
+
+
+def _is_delimiter_row(line: str) -> bool:
+    """Whether a line is a table's delimiter row: dashes, optional colons, pipes."""
+    cells = r"\s*:?-+:?\s*"
+    return bool(
+        re.match(rf"^\|?{cells}(?:\|{cells})+\|?\s*$", line) or re.match(rf"^\|{cells}\|\s*$", line)
+    )
 
 
 def _fenced(text: str, info: str = "") -> list[str]:
