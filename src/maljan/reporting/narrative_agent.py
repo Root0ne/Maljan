@@ -38,7 +38,7 @@ from maljan.pipeline.validation import (
     retry_with_feedback,
     schema_violations,
 )
-from maljan.reporting.models import DefensiveRecommendation, MalwareReport
+from maljan.reporting.models import DefensiveRecommendation, MalwareReport, confidence_text
 from maljan.utils.json_cleaner import safe_parse_json
 
 # ---------------------------------------------------------------------------
@@ -229,7 +229,7 @@ def build_prompt_text(report: MalwareReport) -> str:
             layers = ",".join(mapping.contributing_layers) or "-"
             lines.append(
                 f"  - {mapping.technique_id} {mapping.technique_name} "
-                f"(conf={mapping.confidence:.2f}, layers={layers}): "
+                f"(conf={confidence_text(mapping.confidence)}, layers={layers}): "
                 f"{_truncate(quote, 120)}"
             )
     lines.append("")

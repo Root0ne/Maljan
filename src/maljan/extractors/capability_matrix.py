@@ -107,8 +107,11 @@ def build_capability_matrix(
         (name, tactic_slug), tactic_domain = _resolve_technique_meta(tid)
         evidence = info["evidence"]
         # The highest number any source put on this technique. Taken once, here,
-        # rather than accumulated into the row as it was collected.
-        confidence = max((float(c) for c in info.get("confidences") or ()), default=0.0)
+        # rather than accumulated into the row as it was collected, and
+        # ``None`` when no source gave one: a technique the judge named with no
+        # number — every one it names alone under a verdict with no malware
+        # object to hang an edge on — is not a technique at confidence zero.
+        confidence = max((float(c) for c in info.get("confidences") or ()), default=None)
         layers = info.get("layers") or []
         valid = bool(info.get("valid", True))
 
@@ -117,7 +120,7 @@ def build_capability_matrix(
         # capability and the narrative agent would expand into prose. A
         # technique the judge named always has a source (the judge), so this
         # only catches a row nothing actually asserted.
-        if confidence <= 0.0 and not evidence and not layers:
+        if not confidence and not evidence and not layers:
             continue
 
         tactic_id, tactic_name = _resolve_tactic(tactic_slug, tactic_domain)
@@ -144,7 +147,7 @@ def build_capability_matrix(
                 technique_id=tid,
                 technique_name=name,
                 evidence=evidence[:6],
-                confidence=max(0.0, min(1.0, confidence)),
+                confidence=confidence,
                 contributing_layers=layers,
                 technique_id_valid=valid,
                 platforms=platforms,
@@ -167,15 +170,15 @@ def build_capability_matrix(
                 tactic=tactic_id,
                 tactic_name=tactic_name,
                 evidence_quotes=evidence[:8],
-                confidence=max(0.0, min(1.0, confidence)),
+                confidence=confidence,
                 contributing_layers=layers,
                 is_corroborated=len([lyr for lyr in layers if lyr != _JUDGE_SOURCE]) >= 2,
                 technique_id_valid=valid,
             )
         )
 
-    cells.sort(key=lambda c: c.confidence, reverse=True)
-    mappings.sort(key=lambda m: m.confidence, reverse=True)
+    cells.sort(key=lambda c: -1.0 if c.confidence is None else c.confidence, reverse=True)
+    mappings.sort(key=lambda m: -1.0 if m.confidence is None else m.confidence, reverse=True)
     logger.info("capability_matrix: %d cells, %d ttp mappings", len(cells), len(mappings))
     return cells, mappings
 
