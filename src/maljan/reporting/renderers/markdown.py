@@ -14,7 +14,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from maljan.analysis.run_summary import stage_duration_lines
+from maljan.analysis.run_summary import (
+    NOT_APPLICABLE,
+    NOT_APPLICABLE_SENTENCE,
+    stage_duration_lines,
+)
 from maljan.core.logger import logger
 from maljan.reporting.models import (
     DefensiveRecommendation,
@@ -1029,7 +1033,11 @@ class MarkdownRenderer:
             final_conf = negotiation.get("final_confidence")
             if rounds is not None:
                 lines.append(f"- Negotiation rounds: {rounds}")
-            if reason:
+            if reason == NOT_APPLICABLE:
+                # No agreement was measured, so no final confidence is stored
+                # and the one sentence says why.
+                lines.append(f"- {NOT_APPLICABLE_SENTENCE}")
+            elif reason:
                 lines.append(f"- Termination reason: `{reason}`")
             if final_conf is not None:
                 try:

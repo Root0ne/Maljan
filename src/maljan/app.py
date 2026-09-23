@@ -389,6 +389,7 @@ class MaljanApp:
             "confidence_history": [],
             "iteration_count": 0,
             "is_consensus": False,
+            "consensus_applicable": True,
             "final_decision": None,
             "judge_report": None,
             "stix_output": None,

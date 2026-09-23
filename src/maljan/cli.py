@@ -86,7 +86,11 @@ def analyze(
 
     typer.echo(f"\n--- VERDICT: {decision} ---")
     typer.echo(f"Negotiation rounds: {iterations}")
-    typer.echo(f"Consensus reached: {consensus}")
+    typer.echo(
+        "Consensus: not applicable (fewer than two analysts produced claims)"
+        if result.get("consensus_applicable") is False
+        else f"Consensus reached: {consensus}"
+    )
 
     # RunSummary — inline Markdown preview (first section only)
     run_summary_dict = result.get("run_summary")
@@ -126,9 +130,10 @@ def _print_run_summary_inline(run_summary_dict: dict) -> None:
     agent_stats = run_summary_dict.get("agent_stats", [])
 
     typer.echo("\n--- Analysis Summary ---")
+    final = neg.get("final_confidence")
+    shown = "not applicable" if final is None else f"{final:.3f}"
     typer.echo(
-        f"Termination: {neg.get('termination_reason', 'unknown')} | "
-        f"Final confidence: {neg.get('final_confidence', 0.0):.3f}"
+        f"Termination: {neg.get('termination_reason', 'unknown')} | Final confidence: {shown}"
     )
     if neg.get("sycophancy_events", 0):
         typer.echo(f"Sycophancy events: {neg['sycophancy_events']} (forced dissent applied)")
@@ -213,7 +218,11 @@ def _write_markdown_report(result: dict, report_path: str) -> None:
             termination_reason=n_data.get("termination_reason", "unknown"),
             sycophancy_events=n_data.get("sycophancy_events", 0),
             confidence_history=n_data.get("confidence_history", []),
-            final_confidence=n_data.get("final_confidence", 0.0),
+            # Absent when no agreement was measured; ``None`` then, not 0.0.
+            final_confidence=n_data.get(
+                "final_confidence",
+                None if n_data.get("termination_reason") == "not_applicable" else 0.0,
+            ),
         )
 
         agent_stats = [

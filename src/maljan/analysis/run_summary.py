@@ -40,6 +40,17 @@ from maljan.analysis.corroboration import (
 # ---------------------------------------------------------------------------
 
 
+# The termination reason of a debate that measured no agreement: fewer than
+# two analysts produced claims, or the stage did not run.
+NOT_APPLICABLE = "not_applicable"
+
+# The sentence every surface prints for it.
+NOT_APPLICABLE_SENTENCE = (
+    "Consensus: not applicable — fewer than two analysts produced claims, "
+    "so no agreement was measured."
+)
+
+
 @dataclass
 class NegotiationMetrics:
     """Statistics from the negotiation loop.
@@ -48,10 +59,13 @@ class NegotiationMetrics:
         rounds_completed:    Number of negotiation rounds actually executed.
         max_rounds:          Hard limit configured at startup.
         termination_reason:  Why the loop stopped (consensus / hard_limit /
-                             convergence / sycophancy).
+                             convergence / sycophancy / not_applicable).
         sycophancy_events:   Number of rounds where sycophancy was detected.
         confidence_history:  Per-round mediator confidence scores.
-        final_confidence:    Last recorded confidence value.
+        final_confidence:    Last recorded confidence value; ``None`` when
+                             consensus did not apply, because fewer than two
+                             analysts produced claims or the debate did not
+                             run. No agreement was measured, so none is stated.
     """
 
     rounds_completed: int
@@ -59,7 +73,11 @@ class NegotiationMetrics:
     termination_reason: str
     sycophancy_events: int
     confidence_history: list[float]
-    final_confidence: float
+    final_confidence: float | None
+
+    @property
+    def consensus_applicable(self) -> bool:
+        return self.termination_reason != NOT_APPLICABLE
 
     @property
     def converged_early(self) -> bool:
@@ -581,10 +599,15 @@ class RunSummary:
             f"| Rounds completed | {n.rounds_completed} / {n.max_rounds} |",
             f"| Termination reason | `{n.termination_reason}` |",
             f"| Sycophancy events | {n.sycophancy_events} |",
-            f"| Final confidence | {n.final_confidence:.3f} |",
-            f"| Converged early | {'yes' if n.converged_early else 'no'} |",
-            "",
         ]
+        if n.consensus_applicable and n.final_confidence is not None:
+            lines += [
+                f"| Final confidence | {n.final_confidence:.3f} |",
+                f"| Converged early | {'yes' if n.converged_early else 'no'} |",
+            ]
+        lines.append("")
+        if not n.consensus_applicable:
+            lines += [NOT_APPLICABLE_SENTENCE, ""]
 
         if n.confidence_history:
             history_str = " → ".join(f"{c:.2f}" for c in n.confidence_history)
@@ -790,8 +813,15 @@ class RunSummary:
                 "termination_reason": n.termination_reason,
                 "sycophancy_events": n.sycophancy_events,
                 "confidence_history": n.confidence_history,
-                "final_confidence": round(n.final_confidence, 4),
-                "converged_early": n.converged_early,
+                # Absent, not zero, when no agreement was measured.
+                **(
+                    {
+                        "final_confidence": round(n.final_confidence, 4),
+                        "converged_early": n.converged_early,
+                    }
+                    if n.consensus_applicable and n.final_confidence is not None
+                    else {}
+                ),
             },
             "agent_stats": [
                 {
@@ -1158,7 +1188,7 @@ class RunSummaryBuilder:
         """
         confidence_history: list[float] = state.get("confidence_history") or []
         iteration_count: int = state.get("iteration_count", 0)
-        is_consensus: bool = state.get("is_consensus", False)
+        is_consensus = bool(state.get("is_consensus", False))
         sycophancy_detected: bool = state.get("sycophancy_detected", False)
         discussion_history = state.get("discussion_history") or []
 
@@ -1171,7 +1201,10 @@ class RunSummaryBuilder:
         if sycophancy_detected and sycophancy_events == 0:
             sycophancy_events = 1
 
-        if is_consensus:
+        applicable = state.get("consensus_applicable", True) is not False
+        if not applicable:
+            termination_reason = NOT_APPLICABLE
+        elif is_consensus:
             termination_reason = "consensus"
         elif len(confidence_history) >= 3:
             recent = confidence_history[-3:]
@@ -1190,7 +1223,9 @@ class RunSummaryBuilder:
             termination_reason=termination_reason,
             sycophancy_events=sycophancy_events,
             confidence_history=confidence_history,
-            final_confidence=confidence_history[-1] if confidence_history else 0.0,
+            final_confidence=(
+                None if not applicable else confidence_history[-1] if confidence_history else 0.0
+            ),
         )
         return self
 

@@ -49,7 +49,11 @@ from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
 from maljan.pipeline.events import emit_judge_question, scrub
-from maljan.pipeline.mediation_models import MediatorVerdict
+from maljan.pipeline.mediation_models import (
+    MediatorVerdict,
+    analysts_with_claims,
+    consensus_applies,
+)
 from maljan.pipeline.state import AgentArgument
 from maljan.pipeline.validation import (
     ValidationTally,
@@ -723,7 +727,7 @@ class JudgeAgent(BudgetMeter):
         sample: Any = None,
         facts_block: str = "",
         run_state: str = "",
-    ) -> tuple[AgentArgument, bool]:
+    ) -> tuple[AgentArgument, bool | None]:
         """Find contradictions between expert reports and determine consensus.
 
         Accepts a generic dict of agent reports so any number of agents can
@@ -742,7 +746,10 @@ class JudgeAgent(BudgetMeter):
                 scores and explicit dissent signals.
 
         Returns:
-            Tuple of (AgentArgument with mediator findings, bool indicating consensus).
+            Tuple of (AgentArgument with mediator findings, bool indicating
+            consensus). The bool is ``None`` when fewer than two of the
+            reporting analysts produced claims: consensus does not apply, and
+            the argument carries no confidence.
         """
         self.logger.info("Mediating %d expert reports for contradictions...", len(reports))
         needs_tools = self._has_explicit_dissent(isr_reports)
@@ -863,6 +870,31 @@ class JudgeAgent(BudgetMeter):
                 reasoning_text = await self.execute_tool_loop(prompt_messages)
             else:
                 reasoning_text = str(response.content)
+
+        # Agreement among fewer than two analysts that said something measures
+        # nothing, whatever number the reasoning ended on: the mediator's words
+        # are kept, no agreement value is extracted, and ``None`` tells the
+        # caller consensus does not apply. ``isr_reports`` absent is a caller
+        # with no structured claims to count, which keeps the measured path.
+        if isr_reports is not None and not consensus_applies(reports, isr_reports):
+            claimants = analysts_with_claims(reports, isr_reports)
+            self.logger.info(
+                "Consensus not applicable: %d of %d analyst(s) produced claims.",
+                len(claimants),
+                len(reports),
+            )
+            return (
+                AgentArgument(
+                    agent_name="Mediator",
+                    finding=(
+                        f"{reasoning_text.strip()[:500]}\n\n"
+                        f"Consensus: not applicable — {len(claimants)} of {len(reports)} "
+                        "analyst(s) produced claims."
+                    ),
+                    confidence_score=None,
+                ),
+                None,
+            )
 
         # Now extract the final structured output from the detailed reasoning.
         # IMPORTANT: reasoning_text may contain curly braces from LLM output

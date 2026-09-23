@@ -17,7 +17,14 @@ class AgentArgument(BaseModel):
 
     agent_name: str = Field(..., description="Name of the agent submitting the argument")
     finding: str = Field(..., description="The main finding or rebuttal")
-    confidence_score: float = Field(0.0, description="Confidence of this specific argument (0-1)")
+    confidence_score: float | None = Field(
+        0.0,
+        description=(
+            "Confidence of this specific argument (0-1). ``None`` on a mediator "
+            "round where consensus did not apply: fewer than two analysts "
+            "produced claims, so there was no agreement to measure."
+        ),
+    )
     status: str = Field(
         default="complete",
         description=(
@@ -193,7 +200,12 @@ class AnalysisState(TypedDict):
 
     # Iteration tracking
     iteration_count: int
-    is_consensus: bool
+    # ``None`` when consensus did not apply (see ``consensus_applicable``).
+    is_consensus: bool | None
+    # ``False`` when the debate had fewer than two analysts that produced
+    # claims, or did not run: no agreement value is recorded. Absent means an
+    # agreement was measured, the reading of every state written before it.
+    consensus_applicable: bool
 
     # Final output
     final_decision: Literal["Malware", "Benign", "Suspicious"] | None

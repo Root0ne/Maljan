@@ -115,11 +115,14 @@ class TestNewStateFields:
         for key, isr in (mock_result.get("isr_reports") or {}).items():
             assert isr.agent_id == key
 
-    def test_confidence_history_populated(self, mock_result: dict) -> None:
-        """Confidence history should have at least one entry after pipeline run."""
+    def test_confidence_history_records_no_agreement_among_claimless_analysts(
+        self, mock_result: dict
+    ) -> None:
+        """The mock analysts file no claims, so no agreement value is recorded."""
         history = mock_result.get("confidence_history", [])
         assert isinstance(history, list)
-        assert len(history) >= 1
+        assert history == []
+        assert mock_result.get("consensus_applicable") is False
 
     def test_confidence_history_values_in_range(self, mock_result: dict) -> None:
         """All confidence values must be in [0.0, 1.0]."""

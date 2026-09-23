@@ -56,6 +56,7 @@ from maljan.pipeline.events import (
     summarize_claims,
 )
 from maljan.pipeline.evidence_summary import summarise
+from maljan.pipeline.mediation_models import consensus_applies
 from maljan.pipeline.outcome import (
     VERDICT_READ_FALLBACK,
     corrected_reasons,
@@ -2403,6 +2404,16 @@ def _debate_participants(
     return names
 
 
+# What a debate round writes when no agreement was measured: consensus does
+# not apply, ``is_consensus`` is neither true nor false, and the confidence
+# series gets nothing — never a 1.0 for agreement among nobody, never a 0.0.
+_NO_CONSENSUS_MEASURED: dict[str, Any] = {
+    "is_consensus": None,
+    "consensus_applicable": False,
+    "confidence_history": [],
+}
+
+
 def make_negotiation_node(
     container: ServiceContainer,
     *,
@@ -2421,26 +2432,27 @@ def make_negotiation_node(
             runs, skip_reason = stage_runs(stage, state)
             if not runs:
                 # A debate that does not run leaves the analysts' own ISRs
-                # standing and hands them straight on: ``is_consensus`` is set
-                # so the router's own branch takes the way out rather than
-                # looping a stage the operator asked to skip.
+                # standing and hands them straight on. No agreement was
+                # measured, so none is recorded; ``consensus_applicable`` is
+                # the router's way out rather than looping a stage the
+                # operator asked to skip.
                 if announces:
                     announce_skipped(container, stage, skip_reason)
                 return {
-                    "is_consensus": True,
+                    **_NO_CONSENSUS_MEASURED,
                     **stage_record(stage, ran=False, reason=skip_reason),
                 }
             if not _debate_participants(container, stage, state):
                 # Nothing upstream of it ran, so there is nothing to argue
                 # over. Announced as a skip before the start, because a debate
                 # that announces itself and then declines reads as one that
-                # failed. ``is_consensus`` sends the router straight on.
+                # failed. ``consensus_applicable`` sends the router straight on.
                 reason = "no analysis stage upstream of it ran"
                 logger.info("stage %s skipped: %s", stage.key, reason)
                 if announces:
                     announce_skipped(container, stage, reason)
                 return {
-                    "is_consensus": True,
+                    **_NO_CONSENSUS_MEASURED,
                     **stage_record(stage, ran=False, reason=reason),
                 }
             if announces and first_round:
@@ -2453,13 +2465,31 @@ def make_negotiation_node(
         active_reports = {name: revised.get(name) or original.get(name, "") for name in agent_names}
 
         current_isrs = list((state.get("isr_reports") or {}).values())
+        # Agreement among fewer than two analysts that produced claims measures
+        # nothing: the round is still held, and no agreement value is recorded.
+        applies = consensus_applies(agent_names, state.get("isr_reports") or {})
 
+        if container.is_mock and not applies:
+            return {
+                "iteration_count": iteration + 1,
+                **_NO_CONSENSUS_MEASURED,
+                "sycophancy_detected": False,
+                "discussion_history": [
+                    AgentArgument(
+                        agent_name="Mediator",
+                        finding="MOCK: fewer than two analysts produced claims.",
+                        confidence_score=None,
+                    )
+                ],
+                **_debate_record(stage, started),
+            }
         if container.is_mock:
             is_consensus = iteration >= 1
             mean_conf = 0.95 if is_consensus else 0.4
             return {
                 "iteration_count": iteration + 1,
                 "is_consensus": is_consensus,
+                "consensus_applicable": True,
                 "sycophancy_detected": False,
                 "confidence_history": [mean_conf],
                 "discussion_history": [
@@ -2558,6 +2588,9 @@ def make_negotiation_node(
             # report carried.
             _claimed = mean_claim_confidence(current_isrs)
             mean_conf = _claimed if _claimed is not None else argument.confidence_score
+            # The mediator counted the same claims and said consensus does not
+            # apply; nothing is appended to the confidence series.
+            measured = is_consensus is not None and applies
 
             emit_agent_message(
                 container.event_sink,
@@ -2593,9 +2626,16 @@ def make_negotiation_node(
 
             return {
                 "iteration_count": iteration + 1,
-                "is_consensus": is_consensus,
+                **(
+                    {
+                        "is_consensus": is_consensus,
+                        "consensus_applicable": True,
+                        "confidence_history": [mean_conf],
+                    }
+                    if measured
+                    else _NO_CONSENSUS_MEASURED
+                ),
                 "sycophancy_detected": syco,
-                "confidence_history": [mean_conf],
                 "discussion_history": [argument],
                 # Mediation is the only place a judge agent calls a tool, so
                 # this is where those calls have to leave the agent.
@@ -2633,14 +2673,23 @@ def make_negotiation_node(
             )
             return {
                 "iteration_count": iteration + 1,
-                "is_consensus": False,
+                # A failed round among analysts that produced claims is "no
+                # consensus"; among fewer than two there was none to fail at.
+                **(
+                    {
+                        "is_consensus": False,
+                        "consensus_applicable": True,
+                        "confidence_history": [0.0],
+                    }
+                    if applies
+                    else _NO_CONSENSUS_MEASURED
+                ),
                 "sycophancy_detected": syco,
-                "confidence_history": [0.0],
                 "discussion_history": [
                     AgentArgument(
                         agent_name="Mediator",
                         finding=f"[ERROR] Mediation {label}: {describe_exception(e)}",
-                        confidence_score=0.0,
+                        confidence_score=0.0 if applies else None,
                         # The structured signal. The "[ERROR] Mediation " prefix
                         # above stays for old stored state, but nothing new
                         # should have to parse prose to learn this.
@@ -3391,6 +3440,7 @@ def make_judge_node(
                     "confidence_history": state.get("confidence_history") or [],
                     "iteration_count": state.get("iteration_count", 0),
                     "is_consensus": state.get("is_consensus", False),
+                    "consensus_applicable": state.get("consensus_applicable", True),
                     "sycophancy_detected": state.get("sycophancy_detected", False),
                     "discussion_history": state.get("discussion_history") or [],
                 }

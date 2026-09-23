@@ -3230,6 +3230,26 @@ change landed on `main`.
   in `asserted_by` or `techniques_by_layer`; a report stored before this keeps
   the rows it was written with.
 
+- **No consensus among analysts who said nothing.** A run whose only analyst
+  timed out went to the mediator with nothing to compare, the mediator answered
+  "no analyst provided a substantive report … agreement_confidence: 1.0", and
+  the run recorded "Consensus reached (confidence=1.00)", a `consensus`
+  termination and a final confidence of 1.000. Agreement is now measured only
+  when at least two of the debate's analysts produced claims, on the model
+  path, the text fallback, the mock mediator, a failed mediation round and a
+  debate stage that did not run alike. Otherwise the mediator still speaks, but
+  no agreement value is extracted, the confidence series gets nothing, and the
+  router goes to the judge rather than asking the same analysts to revise.
+  **Upgrading:** on such a run the pipeline state and the stored
+  `negotiation_log` carry `is_consensus: null` and `consensus_applicable:
+  false`, a mediator argument's `confidence_score` (and the stored
+  `confidence`) is `null`, `run_summary.negotiation.termination_reason` is
+  `not_applicable` with **no** `final_confidence` or `converged_early` key, the
+  report's `negotiation_summary` has no `final_confidence`, and the negotiation
+  timeline's `reached_consensus` is `null`. A consumer must read an absent or
+  `null` value as "not measured", never as 0.0 or as no consensus. A mock run's
+  analysts file no claims, so a mock run now takes this path too.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**

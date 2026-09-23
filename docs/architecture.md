@@ -232,6 +232,15 @@ judge
 report  ->  END
 ```
 
+Agreement is measured only between analysts that produced claims. With fewer
+than two of them, or a debate stage that did not run, consensus is not
+applicable: the mediator still speaks and its words are kept, but no agreement
+value is extracted or recorded — `is_consensus` is `null` beside
+`consensus_applicable: false`, the confidence series gets nothing, the run
+summary's `negotiation.termination_reason` is `not_applicable` with no
+`final_confidence` and no `converged_early`, the report prints one sentence
+saying so, and the loop goes to the judge without a revision round.
+
 Sequential is the default because a single local model server has one slot, and
 fanning out three analysts onto it produces queue thrash rather than speed. Set
 `parallel_analysts` when each request gets its own slot, as with a hosted API.

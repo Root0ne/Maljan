@@ -567,7 +567,10 @@ class ReportService:
 
         return {
             "total_rounds": negotiation.get("iteration_count", 0),
+            # ``None`` when consensus did not apply: fewer than two analysts
+            # produced claims, so there was no agreement to reach or miss.
             "reached_consensus": negotiation.get("is_consensus", False),
+            "consensus_applicable": negotiation.get("consensus_applicable", True),
             "confidence_curve": confidence_history,
             "discussion_timeline": discussion,
             "agent_findings": [

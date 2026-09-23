@@ -384,7 +384,8 @@ class TestTheNegotiationNode:
             )
         )
 
-        assert update["is_consensus"] is False
+        # One analyst and no claims: no agreement to fail at, so none recorded.
+        assert update["is_consensus"] is None
         assert _ids(update) == ["ev_0001"]
 
 

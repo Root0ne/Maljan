@@ -179,6 +179,13 @@ class ConsensusRouter:
             )
             return "judge"
 
+        # Fewer than two analysts produced claims, or the debate did not run:
+        # there is no agreement to reach, and a revision round would ask the
+        # same analysts to argue with nobody.
+        if state.get("consensus_applicable") is False:
+            logger.info("Consensus not applicable at round %d. Proceeding to judge.", iteration)
+            return "judge"
+
         # 2. Sycophancy override: a "consensus" that comes with sycophancy
         # is treated as premature → force another revision.
         if syco and consensus and self._sycophancy_check:
