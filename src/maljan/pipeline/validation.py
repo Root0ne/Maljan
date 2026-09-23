@@ -1334,9 +1334,16 @@ def section_capability_violations(payload: Any, grounding: CapabilityGrounding) 
 
 CITATION_NOT_EVIDENCE_CODE = "report.citation_not_evidence"
 
-# A bracketed group in prose: not the index of an expression (``key[i]``) and
-# not the text of a markdown link, whose target follows in parentheses.
-_BRACKETED_RE = re.compile(r"(?<![\w\]])\[([^\[\]\n]{1,200})\](?!\()")
+# A bracketed group in prose, standing alone. Not the index of an expression
+# (``key[i]``), not the text of a markdown link (its target follows in
+# parentheses), and not part of a token: a layout written ``[len][payload]``, a
+# part name such as ``[Content_Types].xml``, a type accelerator such as
+# ``[System.Convert]::FromBase64String``.
+_BRACKETED_RE = re.compile(r"(?<![\w\]])\[([^\[\]\n]{1,200})\](?![(\[\w]|\.\w|::)")
+# Code, which the check does not read: a fenced block, then an inline span.
+_CODE_SPAN_RE = re.compile(r"```.*?```|`[^`\n]*`", re.DOTALL)
+# An IPv6 literal in brackets is the host of a URL or a socket address.
+_IPV6_RE = re.compile(r"[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7}", re.IGNORECASE)
 _EVIDENCE_ID_RE = re.compile(r"ev_\d{3,}", re.IGNORECASE)
 # An ATT&CK technique or an MBC behaviour in brackets is an identifier, the
 # way the report's own tables print one, not a claim about where a fact came
@@ -1374,8 +1381,16 @@ def _strings_of(value: Any, depth: int = 0) -> list[str]:
     return []
 
 
-def citation_violations(payload: Any, citable: Sequence[str]) -> list[Violation]:
+def citation_violations(
+    payload: Any, citable: Sequence[str], *, prose: Sequence[str] | None = None
+) -> list[Violation]:
     """Each bracketed citation item in ``payload``'s prose that is not an id it may cite.
+
+    ``prose`` names the fields that are prose — a section's ``body`` or
+    ``text``, the narrative's summary and paragraphs; only those are read, so a
+    record field (a C2 channel's packet layout, a command-line flag) is never
+    asked about its notation. ``None`` reads every string. Code spans, fenced
+    or inline, are not read either.
 
     ``citable`` is the evidence ids the run's ledger issued — never ids read out
     of the prompt's text, where a sample's own string can carry any. An item that is an
@@ -1387,7 +1402,14 @@ def citation_violations(payload: Any, citable: Sequence[str]) -> list[Violation]
     """
     if payload is None:
         return []
-    known = [str(i).strip().lower() for i in citable if str(i).strip()]
+    if prose is not None:
+        data = payload if isinstance(payload, dict) else getattr(payload, "__dict__", {}) or {}
+        payload = {key: data.get(key) for key in prose if key in data}
+    known = list(
+        dict.fromkeys(
+            str(i).strip().lower() for i in citable if _EVIDENCE_ID_RE.fullmatch(str(i).strip())
+        )
+    )
     allowed = set(known)
     offered = ", ".join(known[:_CITABLE_SHOWN])
     if len(known) > _CITABLE_SHOWN:
@@ -1402,7 +1424,7 @@ def citation_violations(payload: Any, citable: Sequence[str]) -> list[Violation]
     seen: set[str] = set()
     violations: list[Violation] = []
     for text in _strings_of(payload):
-        for group in _BRACKETED_RE.finditer(text):
+        for group in _BRACKETED_RE.finditer(_CODE_SPAN_RE.sub(" ", text)):
             for raw in re.split(r"[,;]", group.group(1)):
                 item = raw.strip()
                 if not item or item.lower() in seen:
@@ -1411,7 +1433,7 @@ def citation_violations(payload: Any, citable: Sequence[str]) -> list[Violation]
                     if item.lower() in allowed:
                         continue
                     why = f"[{safe_finding_value(item)}] is not an entry this answer was shown."
-                elif _IDENTIFIER_RE.fullmatch(item):
+                elif _IDENTIFIER_RE.fullmatch(item) or _IPV6_RE.fullmatch(item):
                     continue
                 else:
                     why = f"[{safe_finding_value(item)}] is cited, and it is not an evidence id."

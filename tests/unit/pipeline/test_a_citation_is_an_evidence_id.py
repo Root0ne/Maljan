@@ -252,3 +252,61 @@ class TestTheNarrative:
         assert [r["code"] for r in agent.validation_tally.unresolved] == [
             CITATION_NOT_EVIDENCE_CODE
         ]
+
+
+class TestOnlyProseIsAskedAboutItsBrackets:
+    """Technical notation is not a citation; a numbered reference in prose is."""
+
+    def _prose(self, text: str) -> list[Any]:
+        return citation_violations({"body": text}, CITABLE, prose=("body",))
+
+    def test_a_record_field_is_never_read(self) -> None:
+        channel = {
+            "packet_layout": "[4-byte length][RC4 payload]",
+            "beacon_format": "POST http://[2001:db8::1]:8080/live/",
+            "flag": "-p [port]",
+            "note": "[1]",
+        }
+        assert citation_violations(channel, CITABLE, prose=("body", "text")) == []
+
+    def test_the_composer_reads_no_record_section(self) -> None:
+        from maljan.reporting.composer import _PROSE_FIELDS, _C2Out, _CliFlagsOut
+        from maljan.reporting.models import EncryptionScheme, RansomNote
+
+        for schema in (_C2Out, _CliFlagsOut, EncryptionScheme, RansomNote):
+            assert _PROSE_FIELDS.get(schema, ()) == ()
+
+    def test_code_spans_are_not_read(self) -> None:
+        text = (
+            "It decodes with `[System.Convert]::FromBase64String` and loops "
+            "`for /f %i in ([list]) do`.\n```\nusage: loader -p [port]\n```"
+        )
+        assert self._prose(text) == []
+
+    def test_notation_that_is_part_of_a_token_is_not_a_citation(self) -> None:
+        text = (
+            "Frames are [4-byte length][RC4 payload]; it opens [Content_Types].xml, "
+            "calls [System.Convert]::FromBase64String and posts to http://[2001:db8::1]:8080/."
+        )
+        assert self._prose(text) == []
+
+    def test_a_link_is_not_a_citation(self) -> None:
+        assert self._prose("See [VirusTotal](https://www.virustotal.com/).") == []
+
+    def test_a_numbered_reference_in_prose_is_asked_about(self) -> None:
+        (found,) = self._prose("The loader beacons every ten minutes [1].")
+        assert "[1] is cited" in found.message
+
+    def test_a_range_of_ids_is_asked_about(self) -> None:
+        (found,) = self._prose("Seen in [ev_0004-ev_0006].")
+        assert "ev_0004-ev_0006" in found.message
+
+    def test_a_placeholder_written_in_prose_is_asked_about(self) -> None:
+        """Outside code it reads as a citation; inside a code span it is not read."""
+        assert len(self._prose("Run it as loader -p [port].")) == 1
+        assert self._prose("Run it as `loader -p [port]`.") == []
+
+    def test_what_is_offered_is_only_ever_an_evidence_id(self) -> None:
+        (found,) = citation_violations({"body": "[x]"}, ["ev_0001", "<b>not an id</b>"])
+        assert "ev_0001" in found.message
+        assert "not an id" not in found.message

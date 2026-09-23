@@ -118,6 +118,15 @@ _SYSTEM = (
 # recorded unresolved; anything else is a shape the report cannot print.
 _KEPT_AS_WRITTEN = frozenset({UNGROUNDED_CAPABILITY_CODE, CITATION_NOT_EVIDENCE_CODE})
 
+# The fields of each section that are prose, and so the only ones a citation
+# is looked for in. A section of records — C2 channels, flags, a cipher, a
+# ransom note — has none: its fields are notation, not sentences.
+_PROSE_FIELDS: dict[type[BaseModel], tuple[str, ...]] = {
+    _ProseOut: ("body",),
+    _IntroOut: ("text",),
+    Conclusion: ("text",),
+}
+
 # How many invented keys a degradation reason names. A model that invents
 # forty writes forty names into the report header otherwise, and the sentence
 # stops being readable long before that.
@@ -511,6 +520,7 @@ class ReportComposer:
         # bounds the damage here, unlike the narrative round, but paying it on
         # every one of eight sections is still eight timeouts nobody needs.
         citable = list(getattr(self, "_citable", None) or [])
+        prose = _PROSE_FIELDS.get(schema, ())
         try:
             if not structured_output_supported_for_llm(self.llm):
                 raise _StructuredOutputUnavailable
@@ -532,7 +542,7 @@ class ReportComposer:
                 # better for having come from the path that usually works.
                 found = [
                     *section_capability_violations(result.model_dump(), self._grounding),
-                    *citation_violations(result.model_dump(), citable),
+                    *citation_violations(result.model_dump(), citable, prose=prose),
                 ]
                 self.validation_tally.count(found)
                 self._record_ungrounded(section or schema.__name__, found)
@@ -609,7 +619,7 @@ class ReportComposer:
             return [
                 *schema_violations(schema, payload, code="composer.schema"),
                 *section_capability_violations(payload, self._grounding),
-                *citation_violations(payload, citable),
+                *citation_violations(payload, citable, prose=prose),
             ]
 
         payload, violations, retries = await retry_with_feedback(

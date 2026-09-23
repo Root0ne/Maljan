@@ -334,6 +334,10 @@ def build_prompt_text(report: MalwareReport) -> str:
 # ---------------------------------------------------------------------------
 
 
+# The narrative's prose fields: the only ones a citation is looked for in.
+NARRATIVE_PROSE = ("executive_summary", "capabilities_narrative")
+
+
 class NarrativeAgent:
     """One LLM round producing ``NarrativeOutput``. Async, no retry."""
 
@@ -463,7 +467,7 @@ class NarrativeAgent:
                 [
                     lambda p: schema_violations(NarrativeOutput, p, code="narrative.schema"),
                     lambda p: narrative_capability_violations(p, grounding),
-                    lambda p: citation_violations(p, citable),
+                    lambda p: citation_violations(p, citable, prose=NARRATIVE_PROSE),
                 ],
                 parse=_narrative_payload,
                 on_feedback=self.validation_tally.count,
@@ -531,7 +535,7 @@ class NarrativeAgent:
         """
         found = [
             *narrative_capability_violations(output.model_dump(), grounding),
-            *citation_violations(output.model_dump(), citable),
+            *citation_violations(output.model_dump(), citable, prose=NARRATIVE_PROSE),
         ]
         self.validation_tally.count(found)
         self._record_ungrounded(found)
