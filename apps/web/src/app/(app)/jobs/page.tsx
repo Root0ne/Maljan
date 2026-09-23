@@ -24,19 +24,13 @@ import {
   type StatusFilter,
 } from "@/lib/analyses";
 import { countLabel, formatDuration, timeAgo } from "@/lib/report-utils";
+import { statusTone } from "@/lib/status";
 import { verdictLabel, verdictTone } from "@/lib/verdict";
 import CopyButton from "@/components/ui/CopyButton";
 
 const COPY_CLASS =
-  "px-2 py-0.5 text-[11px] font-mono border border-border rounded text-text-secondary hover:text-text-primary hover:border-text-muted";
+  "inline-flex min-h-6 items-center px-2 py-0.5 text-[11px] font-mono border border-border rounded text-text-secondary hover:text-text-primary hover:border-text-muted";
 
-const STATUS_BADGE: Record<string, { class: string; dot: string }> = {
-  completed: { class: "text-status-green", dot: "bg-status-green" },
-  running: { class: "text-status-blue", dot: "bg-status-blue" },
-  pending: { class: "text-text-muted", dot: "bg-text-muted" },
-  failed: { class: "text-status-red", dot: "bg-status-red" },
-  cancelled: { class: "text-text-muted", dot: "bg-text-muted" },
-};
 
 function AnalysesList() {
   const router = useRouter();
@@ -214,7 +208,7 @@ function AnalysesList() {
                     <div className="flex items-center gap-2">
                       {f !== "all" && (
                         <span
-                          className={`w-1.5 h-1.5 rounded-full ${STATUS_BADGE[f]?.dot || "bg-text-muted"}`}
+                          className={`w-1.5 h-1.5 rounded-full ${statusTone(f).dot}`}
                         />
                       )}
                       <span className="capitalize">{f}</span>
@@ -256,7 +250,7 @@ function AnalysesList() {
               </div>
             ) : (
               filtered.map((row) => {
-                const badge = STATUS_BADGE[row.status] || STATUS_BADGE.pending;
+                const badge = statusTone(row.status);
                 const canCancel = row.status === "pending" || row.status === "running";
                 const duration = formatDuration(row.durationSeconds);
                 return (
@@ -327,7 +321,7 @@ function AnalysesList() {
                           Cancel
                         </button>
                       )}
-                      <div className={`flex items-center gap-1.5 ${badge.class}`}>
+                      <div className={`flex items-center gap-1.5 ${badge.text}`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
                         <span className="text-xs font-medium uppercase tracking-wider">
                           {row.status}

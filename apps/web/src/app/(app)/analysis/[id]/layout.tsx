@@ -34,6 +34,7 @@ import {
 } from "@/lib/runStore";
 import { useRun } from "@/lib/useRun";
 import { formatDateTime, formatDuration } from "@/lib/report-utils";
+import { statusTone } from "@/lib/status";
 import { VERDICT_TONE, verdictBucket } from "@/lib/verdict";
 import {
   assessedSeverity,
@@ -388,12 +389,7 @@ export default function AnalysisLayout({
                   </span>
                 )}
                 {job && (
-                  <span className={`text-xs px-2 py-0.5 rounded ${
-                    job.status === "completed" ? "text-status-green bg-status-green/10" :
-                    job.status === "running" ? "text-status-blue bg-status-blue/10" :
-                    job.status === "failed" ? "text-status-red bg-status-red/10" :
-                    "text-text-muted bg-bg-active"
-                  }`}>
+                  <span className={`text-xs px-2 py-0.5 rounded ${statusTone(job.status).text} ${statusTone(job.status).bg}`}>
                     {job.status.toUpperCase()}
                   </span>
                 )}

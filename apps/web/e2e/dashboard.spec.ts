@@ -84,7 +84,13 @@ test.describe("Dashboard", () => {
   }) => {
     const section = authenticatedPage.getByRole("region", { name: "Tools used" });
     await expect(section).toBeVisible();
-    await expect(section.getByText("Calls over the last 3 completed runs")).toBeVisible();
+    // The runs without a per-tool record are said, not counted as runs that
+    // called nothing.
+    await expect(
+      section.getByText(
+        "Calls over the last 3 completed runs · 2 older runs read carry no per-tool record and are not counted"
+      )
+    ).toBeVisible();
 
     const items = section.getByRole("listitem");
     await expect(items).toHaveCount(3);

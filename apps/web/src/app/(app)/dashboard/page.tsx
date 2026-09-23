@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import type { DashboardStatsDTO, SystemStatusDTO, ToolUsageDTO } from "@/lib/api";
 import { latestRunRows, type AnalysisRow } from "@/lib/analyses";
 import { formatDuration, timeAgo } from "@/lib/report-utils";
+import { statusTone } from "@/lib/status";
 import { verdictBucket, verdictLabel, verdictTone } from "@/lib/verdict";
 import { enrichmentWorkerNotice } from "./enrichmentNotice";
 import { toolBars } from "./toolBars";
@@ -42,14 +43,6 @@ const LATEST_RUNS = 5;
  * finished after it; a job whose report still falls outside them is drawn by
  * its status, never by a verdict it does not have. */
 const REPORTS_FOR_LATEST = LATEST_RUNS * 4;
-
-const STATUS_STYLES: Record<string, string> = {
-  completed: "text-status-green",
-  running: "text-status-blue",
-  pending: "text-text-muted",
-  failed: "text-status-red",
-  cancelled: "text-text-muted",
-};
 
 function StatCard({
   label,
@@ -292,21 +285,26 @@ export default function DashboardPage() {
                   </div>
                   {/* What the run concluded, once it concluded anything; until
                       then, where it is. A chip with nothing in it would say
-                      neither. The verdict is a word first and a colour second. */}
-                  {job.verdict ? (
-                    <span
-                      data-verdict-chip
-                      className={`shrink-0 text-[11px] font-medium px-2 py-0.5 rounded border bg-bg-elevated ${verdictTone(job.verdict).border} ${verdictTone(job.verdict).text}`}
-                    >
-                      {verdictLabel(job.verdict)}
-                    </span>
-                  ) : (
-                    <span
-                      className={`shrink-0 text-xs font-medium uppercase tracking-wider ${STATUS_STYLES[job.status] || "text-text-muted"}`}
-                    >
-                      {job.status}
-                    </span>
-                  )}
+                      neither. The verdict is a word first and a colour second.
+                      A run that has a report and did not complete keeps its
+                      status beside the chip: the verdict never hides it. */}
+                  <span className="flex shrink-0 items-center gap-2">
+                    {job.verdict && (
+                      <span
+                        data-verdict-chip
+                        className={`text-[11px] font-medium px-2 py-0.5 rounded border bg-bg-elevated ${verdictTone(job.verdict).border} ${verdictTone(job.verdict).text}`}
+                      >
+                        {verdictLabel(job.verdict)}
+                      </span>
+                    )}
+                    {(!job.verdict || job.status !== "completed") && (
+                      <span
+                        className={`text-xs font-medium uppercase tracking-wider ${statusTone(job.status).text}`}
+                      >
+                        {job.status}
+                      </span>
+                    )}
+                  </span>
                 </Link>
               ))
             )}
@@ -401,7 +399,11 @@ export default function DashboardPage() {
             >
               Tools used
             </h2>
-            <p className="text-xs text-text-muted">Calls over the last {bars.window}</p>
+            <p className="text-xs text-text-muted">
+              Calls over the last {bars.window}
+              {bars.unrecorded > 0 &&
+                ` · ${bars.unrecorded} older ${bars.unrecorded === 1 ? "run read carries" : "runs read carry"} no per-tool record and ${bars.unrecorded === 1 ? "is" : "are"} not counted`}
+            </p>
           </div>
           <ul className="p-4 space-y-2">
             {bars.rows.map((row) => (
