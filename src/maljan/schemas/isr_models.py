@@ -111,7 +111,11 @@ class Finding(BaseModel):
     technique_ids: list[str] = Field(
         default_factory=list, description="MITRE ATT&CK technique ids, e.g. ['T1055']."
     )
-    confidence: float = Field(0.0, ge=0.0, le=1.0, description="Analyst self-reported confidence.")
+    # ``None`` when the analyst put no number on the finding: a default of 0.0
+    # would read downstream as a confidence of zero somebody stated.
+    confidence: float | None = Field(
+        None, ge=0.0, le=1.0, description="Analyst self-reported confidence, if stated."
+    )
     evidence_ids: list[str] = Field(
         default_factory=list, description="Ledger entry ids supporting this finding."
     )

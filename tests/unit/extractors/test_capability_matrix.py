@@ -118,6 +118,20 @@ class TestItProjectsTheJudgeAndTheAnalysts:
         )
         assert cells[0].confidence_source == "the static analyst"
 
+    def test_a_finding_with_no_number_states_none(self) -> None:
+        """A finding written without a confidence adds no 0.0 and names no
+        producer; the confidence list and its producers stay in step."""
+        from maljan.schemas.isr_models import Finding
+
+        isr = AgentISR(
+            agent_id="static",
+            domain="static",
+            findings=[Finding(title="Queries the system", technique_ids=["T1082"])],
+        )
+        cells, _ = build_capability_matrix(stix_output=None, isr_reports={"static": isr})
+        assert cells[0].confidence_stated is False
+        assert cells[0].confidence_source == ""
+
     def test_a_cell_nobody_put_a_number_on_names_nobody(self) -> None:
         cells, _ = build_capability_matrix(
             stix_output=_bundle(techniques=["T1055"]), isr_reports=None

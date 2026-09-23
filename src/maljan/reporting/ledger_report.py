@@ -765,6 +765,11 @@ def _functions_examined(acc: _Sections, entry: LedgerEntry, _data: Any) -> None:
     acc.credit(section, entry)
 
 
+def _finding_confidence(value: Any) -> str:
+    """A finding's confidence as the analyst stated it, or that it stated none."""
+    return f"{float(value):.2f}" if isinstance(value, int | float) else "not given"
+
+
 def _reputation(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     """A reputation lookup, with the engine counts as rows of their own.
 
@@ -1005,7 +1010,7 @@ def _findings_section(
                     str(agent),
                     _text(getattr(finding, "title", "")),
                     _technique_cell(getattr(finding, "technique_ids", []) or [], published),
-                    f"{float(getattr(finding, 'confidence', 0.0) or 0.0):.2f}",
+                    _finding_confidence(getattr(finding, "confidence", None)),
                     _text(getattr(finding, "evidence_ids", []) or []),
                 ],
                 sets=(0, 4),

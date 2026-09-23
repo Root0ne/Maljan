@@ -401,7 +401,7 @@ def _collect_techniques(
             # so an id that arrived here and nowhere else is printed as claimed
             # and published nowhere; see ``FINDING_ONLY_REASON``.
             for finding in getattr(isr, "findings", None) or []:
-                confidence = float(getattr(finding, "confidence", 0.0) or 0.0)
+                stated = getattr(finding, "confidence", None)
                 title = str(getattr(finding, "title", "") or "")
                 layer = getattr(isr, "domain", None) or agent_name or "agent"
                 for raw in getattr(finding, "technique_ids", None) or []:
@@ -409,8 +409,11 @@ def _collect_techniques(
                     if not tid:
                         continue
                     row = _row(tid)
-                    row["confidences"].append(confidence)
-                    row["stated_by"].append(f"the {layer} analyst, on a finding")
+                    # A finding with no number adds none, and names no one
+                    # as its producer: the two lists stay index for index.
+                    if isinstance(stated, int | float):
+                        row["confidences"].append(float(stated))
+                        row["stated_by"].append(f"the {layer} analyst, on a finding")
                     if layer and str(layer) not in row["layers"]:
                         row["layers"].append(str(layer))
                     if title and title not in row["evidence"]:

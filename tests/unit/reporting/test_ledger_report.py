@@ -266,6 +266,17 @@ class TestAgentContributions:
         assert findings.rows[0][3] == "0.80"
         assert findings.evidence_ids == ["ev_0001"]
 
+    def test_a_finding_with_no_confidence_says_none_was_given(self) -> None:
+        isrs = {
+            "static": AgentISR(
+                agent_id="static",
+                domain="static",
+                findings=[Finding(title="Writes a file", evidence_ids=["ev_0001"])],
+            )
+        }
+        findings = _by_key(build_sections([], isrs))["findings"]
+        assert findings.rows[0][3] == "not given"
+
 
 class TestGroundingContract:
     def test_every_section_names_the_evidence_or_the_source_it_came_from(self) -> None:
