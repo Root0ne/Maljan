@@ -51,7 +51,6 @@ except ImportError:
 
 
 _MAX_YARA_STRINGS = 25
-_MAX_SIGMA_VALUES = 12
 _MAX_SURICATA_RULES = 12
 _SAFE_RULE_NAME_RE = re.compile(r"[^A-Za-z0-9_]+")
 
@@ -402,16 +401,15 @@ def _build_sigma(report: MalwareReport) -> DetectionRule | None:
     analyst's reading, not a value this run publishes. With no such source
     there is no Sigma draft.
     """
-    admitted = sigma_admits(report)
-    registry_targets = [
-        target for target in _collect_registry_targets(report) if _admitted_value(target, admitted)
-    ]
-    persistence_images = [
-        image
-        for mech in report.persistence
-        for image in _collect_persistence_images([mech])
-        if _admitted_value(mech.target, admitted) or _admitted_value(mech.payload, admitted)
-    ]
+    admitted = frozenset(_registry_form(item) for item in sigma_admits(report))
+    registry_targets = _collect_registry_targets(report, admitted)
+    persistence_images = _collect_persistence_images(
+        [
+            mech
+            for mech in report.persistence
+            if _admitted_value(mech.target, admitted) or _admitted_value(mech.payload, admitted)
+        ]
+    )
     signatures = _collect_signature_names(report)
 
     if not (registry_targets or persistence_images or signatures):
@@ -427,17 +425,17 @@ def _build_sigma(report: MalwareReport) -> DetectionRule | None:
 
     if registry_targets:
         selections["selection_registry"] = {
-            "TargetObject|contains": registry_targets[:_MAX_SIGMA_VALUES],
+            "TargetObject|contains": registry_targets,
         }
         sources.extend(f"registry:{p}" for p in registry_targets[:5])
     if persistence_images:
         selections["selection_persistence"] = {
-            "Image|endswith": persistence_images[:_MAX_SIGMA_VALUES],
+            "Image|endswith": persistence_images,
         }
         sources.extend(f"persistence:{p}" for p in persistence_images[:5])
     if signatures:
         selections["selection_sandbox"] = {
-            "Description|contains": signatures[:_MAX_SIGMA_VALUES],
+            "Description|contains": signatures,
         }
         sources.extend(f"sandbox:{s}" for s in signatures[:5])
 
@@ -502,30 +500,55 @@ def sigma_admits(report: MalwareReport) -> frozenset[str]:
     )
 
 
+# The spellings of a registry hive a run writes: a sandbox's short name, the
+# long name, the kernel path, and the placeholder of an unread hive.
+_HIVE_PREFIX_RE = re.compile(
+    r"^(?:\\?registry\\(?:machine|user(?:\\[^\\]+)?)"
+    r"|hkey_(?:local_machine|current_user|classes_root|current_config)"
+    r"|(?:hkey_users|hku)(?:\\s-1-[0-9-]+)?"
+    r"|hklm|hkcu|hkcr|hkcc|unknown)(?:\\|$)"
+)
+# The value name the IOC table writes after a key: ``<key> (<value name>)``.
+_VALUE_NAME_SUFFIX_RE = re.compile(r" \([^()]*\)$")
+
+
+def _registry_form(value: Any) -> str:
+    """One form of a value for comparison: lower case, no hive, no trailing value name.
+
+    A sandbox writes ``HKCU`` and a key, the IOC table writes the key and the
+    value name, an analyst may write ``HKEY_CURRENT_USER\\...``: the same
+    key, read the same way on both sides of the comparison. A value that is
+    not a registry path passes through lower-cased.
+    """
+    text = str(value or "").strip().lower().replace("/", "\\")
+    text = _VALUE_NAME_SUFFIX_RE.sub("", text)
+    return _HIVE_PREFIX_RE.sub("", text).strip("\\")
+
+
 def _admitted_value(value: Any, admitted: frozenset[str]) -> bool:
-    """Whether ``value`` — or the key it opens with, for a ``key (name)`` row — is admitted."""
-    text = str(value or "").strip().lower()
-    if not text:
-        return False
-    return any(text == item or item.startswith(text + " (") for item in admitted)
+    """Whether ``value`` is admitted, both sides read in :func:`_registry_form`."""
+    text = _registry_form(value)
+    return bool(text) and text in admitted
 
 
-def _collect_registry_targets(report: MalwareReport) -> list[str]:
+def _collect_registry_targets(report: MalwareReport, admitted: frozenset[str]) -> list[str]:
     """Registry paths worth a Sigma selection, from wherever the run recorded them.
 
     Registry writes reach the report two ways now: a sandbox view that lists
     them, and a persistence entry an analyst wrote down after reading the call
     itself. Both are the same fact, and a rule generated from only the first
     would be silent on every run where the analyst is the one who saw it.
+    Every admitted path is kept: admission is asked of each before anything
+    is collected, and no count cuts the list.
     """
     out: list[str] = []
     seen: set[str] = set()
 
     def _add(key: str) -> None:
-        lower = key.strip().lower()
-        if not lower or lower in seen or len(out) >= _MAX_SIGMA_VALUES:
+        form = _registry_form(key)
+        if not form or form in seen or form not in admitted:
             return
-        seen.add(lower)
+        seen.add(form)
         out.append(key.strip())
 
     if report.dynamic is not None:
@@ -558,8 +581,6 @@ def _collect_persistence_images(persistence: list[PersistenceMechanism]) -> list
             continue
         seen.add(image.lower())
         out.append(image)
-        if len(out) >= _MAX_SIGMA_VALUES:
-            break
     return out
 
 
@@ -571,7 +592,7 @@ def _collect_signature_names(report: MalwareReport) -> list[str]:
     sigs: list[SandboxSignature] = sorted(
         report.dynamic.sandbox_signatures, key=lambda s: s.severity, reverse=True
     )
-    for sig in sigs[:_MAX_SIGMA_VALUES]:
+    for sig in sigs:
         text = (sig.description or sig.name).strip()
         if not text or text.lower() in seen:
             continue

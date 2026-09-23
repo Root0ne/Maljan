@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+import yaml
 
 from maljan.reporting.builder import build_consolidated_iocs
 from maljan.reporting.detection_signatures import build_detection_rules
@@ -154,6 +155,75 @@ class TestSigma:
         rule = self._sigma(dynamic=dynamic)
 
         assert rule is not None and "CurrentVersion" in rule.body
+
+    def test_a_key_the_sandbox_wrote_without_its_hive_in_the_key_is_selected(self) -> None:
+        from maljan.reporting.models import DynamicBehavior, RegistryMod
+
+        dynamic = DynamicBehavior(
+            registry_mods=[
+                RegistryMod(
+                    hive="HKCU",
+                    key="Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                    value_name="example",
+                    operation="create",
+                )
+            ]
+        )
+
+        rule = self._sigma(dynamic=dynamic)
+
+        assert rule is not None
+        assert (
+            "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+            in yaml.safe_load(rule.body)["detection"]["selection_registry"]["TargetObject|contains"]
+        )
+
+    def test_every_admitted_key_is_selected(self) -> None:
+        from maljan.reporting.models import DynamicBehavior, RegistryMod
+
+        keys = [f"Software\\ExampleVendor\\Setting{i}" for i in range(30)]
+        dynamic = DynamicBehavior(
+            registry_mods=[RegistryMod(hive="HKLM", key=key, operation="modify") for key in keys]
+        )
+
+        rule = self._sigma(dynamic=dynamic)
+
+        assert rule is not None
+        selected = yaml.safe_load(rule.body)["detection"]["selection_registry"]
+        assert selected["TargetObject|contains"] == [f"HKLM\\{key}" for key in keys]
+
+    def test_an_analyst_s_long_hive_name_reads_as_the_sandbox_s_short_one(self) -> None:
+        from maljan.reporting.models import DynamicBehavior, PersistenceMechanism, RegistryMod
+
+        dynamic = DynamicBehavior(
+            registry_mods=[
+                RegistryMod(hive="HKCU", key="Software\\ExampleVendor\\Run", value_name="x")
+            ]
+        )
+        mech = PersistenceMechanism(
+            kind="registry_run", target="HKEY_CURRENT_USER\\Software\\ExampleVendor\\Run"
+        )
+
+        rule = self._sigma(dynamic=dynamic, persistence=[mech])
+
+        assert rule is not None
+        selected = yaml.safe_load(rule.body)["detection"]["selection_registry"]
+        assert selected["TargetObject|contains"] == ["HKCU\\Software\\ExampleVendor\\Run"]
+
+    @pytest.mark.parametrize(
+        "written",
+        [
+            "HKCU\\Software\\ExampleVendor\\Run",
+            "HKEY_CURRENT_USER\\Software\\ExampleVendor\\Run",
+            "HKU\\S-1-5-21-1004\\Software\\ExampleVendor\\Run",
+            "\\REGISTRY\\USER\\S-1-5-21-1004\\Software\\ExampleVendor\\Run",
+            "Software\\ExampleVendor\\Run (ExampleValue)",
+        ],
+    )
+    def test_every_spelling_of_a_key_reads_as_one(self, written: str) -> None:
+        from maljan.reporting.detection_signatures import _registry_form
+
+        assert _registry_form(written) == "software\\examplevendor\\run"
 
     def test_a_sandbox_signature_is_selected(self) -> None:
         from maljan.reporting.models import DynamicBehavior, SandboxSignature
