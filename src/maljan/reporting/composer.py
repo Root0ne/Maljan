@@ -380,7 +380,7 @@ class ReportComposer:
             validators=[lambda p: flow_voice_violations(p, sandbox_ids)],
         )
         if flow and isinstance(flow, _FlowOut) and flow.steps:
-            ta.execution_flow = flow.steps[:20]
+            ta.execution_flow = self._kept("execution_flow", flow.steps, 20)
             authored += 1
 
         # 3. Free-prose technical subsections (only when evidence exists).
@@ -407,7 +407,7 @@ class ReportComposer:
             validators=[lambda p: configuration_citation_violations(p, known_ids)],
         )
         if config and isinstance(config, _ConfigOut) and config.items:
-            ta.configuration = config.items[:30]
+            ta.configuration = self._kept("configuration", config.items, 30)
             authored += 1
 
         commands = await self._author(
@@ -418,7 +418,7 @@ class ReportComposer:
             "Extract the commands the sample accepts from its operator.",
         )
         if commands and isinstance(commands, _CommandsOut) and commands.commands:
-            ta.commands = commands.commands[:40]
+            ta.commands = self._kept("commands", commands.commands, 40)
             authored += 1
 
         enc = await self._author(
@@ -436,7 +436,7 @@ class ReportComposer:
             "cli_flags", report, isr_reports, _CliFlagsOut, "Extract command-line flags."
         )
         if cli and isinstance(cli, _CliFlagsOut) and cli.flags:
-            ta.cli_flags = cli.flags[:30]
+            ta.cli_flags = self._kept("cli_flags", cli.flags, 30)
             authored += 1
 
         note = await self._author(
@@ -451,7 +451,7 @@ class ReportComposer:
             "communications", report, isr_reports, _C2Out, "Describe the C2 channel(s)."
         )
         if c2 and isinstance(c2, _C2Out) and c2.channels:
-            report.c2_channels = c2.channels[:6]
+            report.c2_channels = self._kept("communications", c2.channels, 6)
             authored += 1
 
         if _has_content(ta):
@@ -667,6 +667,20 @@ class ReportComposer:
             return None
         self._record_ungrounded(section or schema.__name__, ungrounded)
         return schema.model_validate(payload)
+
+    def _kept[T](self, section: str, rows: list[T], limit: int) -> list[T]:
+        """The first ``limit`` of a model's list, and a record when that cut any.
+
+        A list the report prints is capped so one runaway answer cannot fill
+        it; a reader is told the cap applied rather than shown a page of the
+        answer as if it were the whole.
+        """
+        if len(rows) > limit:
+            self._note_degradation(
+                f"report section '{section}' was trimmed: the report keeps the first "
+                f"{limit} of the {len(rows)} items the report model wrote"
+            )
+        return list(rows[:limit])
 
     def _note_degradation(self, reason: str) -> None:
         """One sentence about what this report lost, once."""

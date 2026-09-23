@@ -608,3 +608,19 @@ class TestEachSectionIsShownAnExampleOfItsShape:
         human = str(llm.sent[0][-1].content)
         assert module._expected_object(module._FlowOut) in human
         assert module._EXAMPLES["execution_flow"] in human
+
+
+class TestAModelListIsCutOnlyWithARecord:
+    def test_a_list_past_its_cap_is_kept_to_the_cap_and_recorded(self) -> None:
+        comp = ReportComposer(llm=None, per_section_timeout=5)  # type: ignore[arg-type]
+        kept = comp._kept("execution_flow", list(range(25)), 20)
+        assert kept == list(range(20))
+        assert comp.degradations == [
+            "report section 'execution_flow' was trimmed: the report keeps the first 20 of "
+            "the 25 items the report model wrote"
+        ]
+
+    def test_a_list_within_its_cap_is_kept_whole_and_says_nothing(self) -> None:
+        comp = ReportComposer(llm=None, per_section_timeout=5)  # type: ignore[arg-type]
+        assert comp._kept("commands", [1, 2], 40) == [1, 2]
+        assert comp.degradations == []
