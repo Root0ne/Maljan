@@ -579,6 +579,27 @@ change landed on `main`.
   touches `docs/**` or `mkdocs.yml` and deploys it to GitHub Pages on a push to
   `main`; a `docs` dependency group keeps MkDocs Material out of the product's
   own dependencies.
+- **The dashboard answers at a glance.** Each of the latest runs carries its
+  verdict as a chip, in the shared verdict colours and in words; a run with no
+  verdict yet shows its status. A "Tools used" list draws the tools the
+  caller's last 20 completed runs called as flat bars with the counts printed,
+  from the new authenticated `GET /api/v1/dashboard/tools?limit=` (default 20,
+  at most 100), which sums each run's `run_summary.evidence.by_tool`. Its
+  `runs` counts only the runs whose report carries that per-tool record, and
+  `read` every completed run it looked at, so a report older than the record
+  is said on the dashboard rather than counted as a run that called nothing.
+- **Copy a row's SHA-256 and job id.** Every row of the analyses list copies
+  its sample's SHA-256 and its job id in one press each, with the confirmation
+  announced to a screen reader. The IDENTITY hash rows and the DETECTION rule
+  cards use the same control and now announce it too.
+- **Time per stage on the Summary.** Each stage that took time is listed with
+  its duration and a bar against the run's total elapsed, from the same rows
+  and formatter as the header's stage strip.
+- **A per-tool table for a tool server.** Settings → tool servers draws a
+  tested server's tools as a table with a search, "Select all" / "Select none"
+  over the rows shown, a live "enabled N of M" and, where the capability
+  manifest marks a tool unavailable, its reason and remedy on its own row. It
+  edits the existing per-server tick list; there is no new setting.
 
 ### Changed
 
@@ -1309,6 +1330,42 @@ change landed on `main`.
   reads `1837` where it read `1842` and five category shares move by one
   rounding place; no Linux rule's rate moves at all. No behaviour category was
   renamed or removed, so a consumer reading `category` alone is unaffected.
+- **One severity ladder in the console.** Severity order and colour live in
+  `apps/web/src/lib/severity.ts`, and the Summary, DETECTION, DYNAMIC and the
+  header's verdict-against-severity rule read it. A guard fails the unit suite
+  on a severity coloured, compared by its spelling (either way round or in a
+  `switch`) or sorted by its label anywhere else.
+- **DETECTION shows the rules a current run fired, with each Sigma rule's own
+  level.** DETECTION read only the old deterministic layers' claims, which no
+  current run writes, and turned their confidence — the rule's maturity status
+  as a number — into "High" or "Medium". It now reads the `yara_matches` and
+  `sigma_matches` report sections the rule tools build, shows each Sigma rule's
+  declared level labelled as the rule's level, and sorts and dots the rows by
+  it on the severity ladder. The two sections moved from STATIC to DETECTION;
+  STATIC links there. A run stored before those tools is still read from its
+  layer claims, which say "level not recorded", and their confidence is printed
+  as the number it is. `SigmaMatch` also carries the rule's `level` as a field;
+  its claim text is unchanged.
+- **DYNAMIC colours a signature's number only where its scale is known.** The
+  run's recorded sandbox provider says which scale the number is on: CAPEv2's
+  1 to 3 or Triage's 1 to 10 signature score, each drawn on the ladder by what
+  it means, printed in words beside the number ("High, 8/10"). An uploaded,
+  REST or unknown provider's number, and one outside its scale, is drawn in
+  one neutral tone as it came, beside the word "unrated".
+- **One colour per run status.** `apps/web/src/lib/status.ts` colours
+  completed, running, pending, failed and cancelled for the dashboard, the
+  analyses list, the search palette and the analysis header, and a stage's or
+  participant's running and done; the search palette's running job is blue like
+  everywhere else, not orange. A dashboard run that has a report but did not
+  complete shows its status beside the verdict chip.
+- **A tested tool server's unavailable tools are said on their own rows.** The
+  separate list above the Tools section is drawn only where the tool table is
+  not, and a tick list the table writes keeps the manifest's order rather than
+  the order the boxes were ticked in.
+- **The console's style guard covers charts.** `styleRules.test.ts` also fails
+  on an SVG gradient, on Tailwind's bare `transition` class, and on a colour
+  transition written as an arbitrary `transition-[…]` class, an inline style or
+  a stylesheet declaration.
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was

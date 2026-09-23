@@ -33,7 +33,7 @@ HttpOnly cookie scoped to `/api/v1/auth` and is never sent by hand. See
 | `/samples/{sample_id}/sandbox-reports` | Attach, list and delete sandbox reports produced elsewhere, for the `upload` sandbox provider. |
 | `/jobs` | Create an analysis job, list and read jobs, read a job's event history and its evidence ledger, cancel a job. |
 | `/reports` | Everything a finished analysis produces: the report itself, its renderings, its indicators, its signatures, its timeline, and post-hoc enrichment. |
-| `/dashboard` | Aggregate counts for the console's landing page. |
+| `/dashboard` | Aggregate counts for the console's landing page, and `GET /dashboard/tools?limit=` — the per-tool call counts of the caller's last `limit` completed runs (default 20, at most 100), read from each run's `run_summary.evidence.by_tool`. |
 | `/audit` | The audit trail and API-key management. Admin only. |
 | `/settings` | The settings catalog, values, patches, resets, export, import and the connection probes. Admin only. |
 | `/system` | Non-secret pipeline-mode flags for dashboards, and long-term-memory maintenance. |

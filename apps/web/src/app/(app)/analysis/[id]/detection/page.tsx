@@ -23,7 +23,7 @@ export default function DetectionTab() {
   const { report } = useReport();
   const mr = report?.malware_report;
   const generated = mr?.detection_signatures ?? [];
-  const matched = hasRuleMatches(report?.agent_findings);
+  const matched = hasRuleMatches(report?.agent_findings, mr?.sections);
   // A bundle with no objects in it is a bundle nobody wants to export.
   const stix = Object.keys(mr?.stix_bundle_extended ?? report?.stix_bundle ?? {}).length > 0;
 

@@ -2,6 +2,7 @@
 
 import { useReport } from "@/app/(app)/analysis/[id]/layout";
 import { rosterNames } from "@/lib/rosterNames";
+import { statusTone } from "@/lib/status";
 import type { AgentFindingStatus, JobRoster } from "@/types";
 
 /* Per-agent confidence tier. IMPORTANT: ``final_confidence`` is each agent's
@@ -42,10 +43,11 @@ const STATUS_STYLES: Record<
     bg: "bg-status-orange/10",
     text: "text-status-orange",
   },
+  // A failed analyst takes the run's own "failed" colour (`lib/status.ts`).
   failed: {
     label: "failed",
-    bg: "bg-status-red/10",
-    text: "text-status-red",
+    bg: statusTone("failed").bg,
+    text: statusTone("failed").text,
   },
   timeout: {
     label: "timed out",
