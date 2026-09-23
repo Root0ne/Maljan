@@ -47,6 +47,11 @@ describe("the drawn graph", () => {
     expect(html).toContain("uses · 0.90");
   });
 
+  it("marks what a saved picture leaves out and the plain look it keeps", () => {
+    expect(html).toContain('data-plain-style="fill: none; stroke: var(--border); stroke-width: 1.25"');
+    expect(count(html, /data-export="omit"/g)).toBe(1);
+  });
+
   it("paints with the console's tokens and no gradient", () => {
     expect(html).toContain("var(--status-red)");
     expect(html).not.toMatch(/Gradient/);

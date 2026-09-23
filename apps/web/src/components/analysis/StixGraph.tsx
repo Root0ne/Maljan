@@ -9,11 +9,13 @@ import {
   colourForType,
   formatConfidence,
   layoutGraph,
+  legendLayout,
   readStixGraph,
   resolveCssVars,
   shortLabel,
   type GraphEdge,
   type GraphNode,
+  type Layout,
   type Point,
   type StixGraph,
 } from "./stixGraph";
@@ -361,8 +363,8 @@ function GraphTable({
               </tr>
             </thead>
             <tbody>
-              {graph.notDrawn.map((o) => (
-                <tr key={o.id} className="border-b border-border-light">
+              {graph.notDrawn.map((o, i) => (
+                <tr key={`${o.id}#${i}`} className="border-b border-border-light">
                   <td className={`${td} break-words text-text-primary`}>{o.label}</td>
                   <td className={`${td} font-mono text-text-secondary`}>{o.type}</td>
                   <td className={`${td} text-text-secondary`}>{o.reason}</td>
@@ -376,18 +378,65 @@ function GraphTable({
   );
 }
 
-function exportMarkup(svg: SVGSVGElement, width: number, height: number): string {
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** The plain look of an element the selection or focus restyles. */
+const PLAIN_EDGE = "fill: none; stroke: var(--border); stroke-width: 1.25";
+const PLAIN_EDGE_LABEL = "fill: var(--text-secondary); stroke: var(--bg-surface); stroke-width: 3";
+
+/**
+ * The drawing as a standalone SVG: no selection or focus on it, the page's
+ * colours written in, and a legend above the graph, because a saved picture
+ * has no panel beside it to carry the key.
+ */
+function exportMarkup(svg: SVGSVGElement, layout: Layout, types: string[]): string {
   const clone = svg.cloneNode(true) as SVGSVGElement;
-  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-  clone.setAttribute("width", String(Math.ceil(width)));
-  clone.setAttribute("height", String(Math.ceil(height)));
-  clone.removeAttribute("class");
-  clone.removeAttribute("style");
-  const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  clone.querySelectorAll('[data-export="omit"]').forEach((el) => el.remove());
+  clone.querySelectorAll("[data-plain-style]").forEach((el) => {
+    el.setAttribute("style", el.getAttribute("data-plain-style") ?? "");
+    el.removeAttribute("data-plain-style");
+  });
+  clone.querySelectorAll("[tabindex], [role], [aria-label], [aria-pressed]").forEach((el) => {
+    for (const name of ["tabindex", "role", "aria-label", "aria-pressed", "class"]) {
+      el.removeAttribute(name);
+    }
+  });
+
+  const legend = legendLayout(types, layout.width);
+  const width = Math.ceil(layout.width);
+  const height = Math.ceil(layout.height + legend.height);
+  const body = document.createElementNS(SVG_NS, "g");
+  body.setAttribute("transform", `translate(0 ${legend.height})`);
+  for (const child of Array.from(clone.childNodes)) {
+    if (child.nodeName !== "defs") body.appendChild(child);
+  }
+  const key = document.createElementNS(SVG_NS, "g");
+  for (const item of legend.items) {
+    const swatch = document.createElementNS(SVG_NS, "circle");
+    swatch.setAttribute("cx", String(item.x + 5));
+    swatch.setAttribute("cy", String(item.y));
+    swatch.setAttribute("r", "5");
+    swatch.setAttribute("style", `fill: ${colourForType(item.type)}`);
+    const name = document.createElementNS(SVG_NS, "text");
+    name.setAttribute("x", String(item.x + 14));
+    name.setAttribute("y", String(item.y));
+    name.setAttribute("dominant-baseline", "middle");
+    name.setAttribute("font-size", "11");
+    name.setAttribute("style", "fill: var(--text-secondary)");
+    name.textContent = item.type;
+    key.append(swatch, name);
+  }
+  const bg = document.createElementNS(SVG_NS, "rect");
   bg.setAttribute("width", "100%");
   bg.setAttribute("height", "100%");
   bg.setAttribute("style", "fill: var(--bg-surface)");
-  clone.insertBefore(bg, clone.firstChild);
+  clone.append(bg, key, body);
+
+  clone.setAttribute("xmlns", SVG_NS);
+  clone.setAttribute("width", String(width));
+  clone.setAttribute("height", String(height));
+  clone.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  for (const name of ["class", "style", "role", "aria-label"]) clone.removeAttribute(name);
   const root = getComputedStyle(document.documentElement);
   return resolveCssVars(new XMLSerializer().serializeToString(clone), (name) =>
     root.getPropertyValue(name),
@@ -424,25 +473,23 @@ function GraphCanvas({
   const zoomBy = (factor: number) =>
     setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, currentScale() * factor)));
 
+  const types = graph.nodes.map((n) => n.type);
   const saveSvg = () => {
     if (!svgRef.current) return;
-    downloadBlob(
-      exportMarkup(svgRef.current, layout.width, layout.height),
-      "maljan-stix-graph.svg",
-      "image/svg+xml",
-    );
+    downloadBlob(exportMarkup(svgRef.current, layout, types), "maljan-stix-graph.svg", "image/svg+xml");
   };
 
   const savePng = () => {
     if (!svgRef.current) return;
-    const markup = exportMarkup(svgRef.current, layout.width, layout.height);
+    const markup = exportMarkup(svgRef.current, layout, types);
+    const size = legendLayout(types, layout.width).height;
     const url = URL.createObjectURL(new Blob([markup], { type: "image/svg+xml" }));
     const image = new Image();
     image.onload = () => {
       const scale = 2;
       const canvas = document.createElement("canvas");
       canvas.width = Math.ceil(layout.width * scale);
-      canvas.height = Math.ceil(layout.height * scale);
+      canvas.height = Math.ceil((layout.height + size) * scale);
       const ctx = canvas.getContext("2d");
       if (!ctx) {
         URL.revokeObjectURL(url);
@@ -544,10 +591,15 @@ function GraphCanvas({
               return (
                 <g key={e.key} onClick={() => onSelect({ kind: "edge", key: e.key })} className="cursor-pointer">
                   <title>{`${e.label}${e.confidence ? `, confidence ${formatConfidence(e.confidence)}` : ""}`}</title>
-                  <path d={geo.d} style={{ fill: "none", stroke: "transparent", strokeWidth: 10 }} />
+                  <path
+                    d={geo.d}
+                    data-export="omit"
+                    style={{ fill: "none", stroke: "transparent", strokeWidth: 10 }}
+                  />
                   <path
                     d={geo.d}
                     markerEnd="url(#stix-graph-arrow)"
+                    data-plain-style={PLAIN_EDGE}
                     style={{
                       fill: "none",
                       stroke: on ? "var(--accent)" : near ? "var(--text-secondary)" : "var(--border)",
@@ -562,6 +614,9 @@ function GraphCanvas({
                       dominantBaseline="middle"
                       fontSize={10}
                       paintOrder="stroke"
+                      data-plain-style={PLAIN_EDGE_LABEL}
+                      // Drawn only because of the selection: not in a saved picture.
+                      data-export={labelAll ? undefined : "omit"}
                       style={{
                         fill: on ? "var(--text-primary)" : "var(--text-secondary)",
                         stroke: "var(--bg-surface)",
@@ -597,6 +652,7 @@ function GraphCanvas({
                   <title>{`${n.type}: ${n.label}`}</title>
                   {(on || hasFocus) && (
                     <circle
+                      data-export="omit"
                       cx={p.x}
                       cy={p.y}
                       r={RADIUS + 4}

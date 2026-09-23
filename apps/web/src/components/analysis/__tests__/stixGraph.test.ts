@@ -7,6 +7,7 @@ import {
   formatConfidence,
   labelOf,
   layoutGraph,
+  legendLayout,
   readStixGraph,
   resolveCssVars,
   shortLabel,
@@ -165,6 +166,24 @@ describe("reading the bundle", () => {
     const sighting = graph.edges.filter((e) => e.type === "sighting");
     expect(sighting.map((e) => [e.source, e.label, e.target])).toEqual([[HASH, "sighting", where]]);
     expect(graph.nodes.map((n) => n.id)).toContain(where);
+  });
+
+  it("lists a second object under an id already read, with the reason", () => {
+    const again = { type: "malware", id: MALWARE, name: "other", is_family: true };
+    const edgeAgain = {
+      type: "relationship",
+      id: "relationship--c3d4e5f6-a7b8-9012-cdef-123456789012",
+      relationship_type: "uses",
+      source_ref: MALWARE,
+      target_ref: T1012,
+    };
+    const graph = readStixGraph(exportBundle([again, edgeAgain]));
+    const repeats = graph.notDrawn.filter((o) => o.reason.startsWith("repeats the id"));
+    expect(repeats.map((o) => o.object)).toEqual([again, edgeAgain]);
+    expect(graph.nodes.find((n) => n.id === MALWARE)?.label).toBe("sample.exe");
+    const accounted =
+      graph.nodes.length + new Set(graph.edges.map((e) => e.id)).size + graph.notDrawn.length;
+    expect(accounted).toBe(graph.objectCount);
   });
 
   it("reads nothing out of something that is not a bundle", () => {
@@ -331,6 +350,17 @@ describe("a large bundle", () => {
 });
 
 describe("the saved picture", () => {
+  it("carries a legend of the types drawn, wrapped to the picture's width", () => {
+    const wide = legendLayout(["malware", "indicator", "malware", "attack-pattern"], 2000);
+    expect(wide.items.map((i) => i.type)).toEqual(["attack-pattern", "indicator", "malware"]);
+    expect(new Set(wide.items.map((i) => i.y)).size).toBe(1);
+    const narrow = legendLayout(["malware", "indicator", "attack-pattern", "domain-name"], 200);
+    expect(new Set(narrow.items.map((i) => i.y)).size).toBeGreaterThan(1);
+    expect(narrow.height).toBeGreaterThan(wide.height);
+    for (const item of narrow.items) expect(item.x).toBeLessThan(200);
+    expect(legendLayout([], 500)).toEqual({ items: [], height: 0 });
+  });
+
   it("writes the page's colours into the markup and leaves an unknown token alone", () => {
     const tokens: Record<string, string> = { "--status-red": " #ff7b72", "--bg-surface": "#161b22" };
     const out = resolveCssVars(

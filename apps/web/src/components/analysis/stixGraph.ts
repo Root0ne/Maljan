@@ -199,11 +199,27 @@ function refs(value: unknown): string[] {
 
 /** Read the bundle into what the graph draws and what it lists beside it. */
 export function readStixGraph(bundle: unknown): StixGraph {
-  const objects = bundleObjects(bundle);
+  const all = bundleObjects(bundle);
   const byId = new Map<string, StixObject>();
-  for (const obj of objects) if (!byId.has(obj.id)) byId.set(obj.id, obj);
-
   const notDrawn: NotDrawn[] = [];
+  // One object per id: STIX ids are unique within a bundle, and a second
+  // object under an id already read is listed with the reason, never dropped.
+  const objects: StixObject[] = [];
+  for (const obj of all) {
+    if (byId.has(obj.id)) {
+      notDrawn.push({
+        id: obj.id,
+        type: obj.type,
+        label: EDGE_TYPES.has(obj.type) ? text(obj.relationship_type) || obj.type : labelOf(obj),
+        reason: "repeats the id of an earlier object in this bundle; the first one is drawn",
+        object: obj,
+      });
+      continue;
+    }
+    byId.set(obj.id, obj);
+    objects.push(obj);
+  }
+
   const edges: GraphEdge[] = [];
   const named = new Set<string>();
 
@@ -280,10 +296,8 @@ export function readStixGraph(bundle: unknown): StixGraph {
   }
 
   const nodes: GraphNode[] = [];
-  const seen = new Set<string>();
   for (const obj of objects) {
-    if (EDGE_TYPES.has(obj.type) || seen.has(obj.id)) continue;
-    seen.add(obj.id);
+    if (EDGE_TYPES.has(obj.type)) continue;
     if (CONTAINER_TYPES.has(obj.type) && !named.has(obj.id)) {
       notDrawn.push({
         id: obj.id,
@@ -303,7 +317,7 @@ export function readStixGraph(bundle: unknown): StixGraph {
     });
   }
 
-  return { nodes, edges, notDrawn, objectCount: objects.length };
+  return { nodes, edges, notDrawn, objectCount: all.length };
 }
 
 /* ── Colour ─────────────────────────────────────────────────────────────── */
@@ -484,4 +498,41 @@ export function resolveCssVars(markup: string, lookup: (name: string) => string)
 export function shortLabel(label: string, max = 28): string {
   const chars = Array.from(label);
   return chars.length <= max ? label : `${chars.slice(0, max - 1).join("")}…`;
+}
+
+/** One legend entry placed for the saved picture, which carries its own key. */
+export interface LegendItem {
+  type: string;
+  x: number;
+  y: number;
+}
+
+/**
+ * The saved picture's legend: one swatch and type name per STIX type drawn,
+ * sorted, wrapped into rows no wider than the picture. `height` is the band
+ * the legend takes above the graph.
+ */
+export function legendLayout(
+  types: string[],
+  width: number,
+  opts: { charWidth?: number; rowHeight?: number; margin?: number } = {},
+): { items: LegendItem[]; height: number } {
+  const charWidth = opts.charWidth ?? 6.6;
+  const rowHeight = opts.rowHeight ?? 18;
+  const margin = opts.margin ?? 16;
+  const sorted = [...new Set(types)].sort();
+  if (sorted.length === 0) return { items: [], height: 0 };
+  const items: LegendItem[] = [];
+  let x = margin;
+  let y = margin + rowHeight / 2;
+  for (const type of sorted) {
+    const w = 14 + type.length * charWidth + 18;
+    if (x > margin && x + w > width - margin) {
+      x = margin;
+      y += rowHeight;
+    }
+    items.push({ type, x, y });
+    x += w;
+  }
+  return { items, height: y + rowHeight / 2 + margin / 2 };
 }
