@@ -480,6 +480,36 @@ export function layoutGraph(
   };
 }
 
+export interface Box {
+  width: number;
+  height: number;
+}
+
+export interface FitTransform {
+  scale: number;
+  x: number;
+  y: number;
+}
+
+/**
+ * The transform "Fit" applies to the laid-out graph: shrink it, uniformly, to
+ * the largest size that still fits inside the visible canvas, but never past
+ * the size `layoutGraph` drew it at — a graph smaller than the canvas is
+ * centered there rather than pinned to a corner, so a small bundle no longer
+ * reads as a stray cluster in an otherwise empty canvas.
+ */
+export function fitTransform(layout: Box, box: Box): FitTransform {
+  if (layout.width <= 0 || layout.height <= 0 || box.width <= 0 || box.height <= 0) {
+    return { scale: 1, x: 0, y: 0 };
+  }
+  const scale = Math.min(1, box.width / layout.width, box.height / layout.height);
+  return {
+    scale,
+    x: (box.width - layout.width * scale) / 2,
+    y: (box.height - layout.height * scale) / 2,
+  };
+}
+
 /* ── Export ─────────────────────────────────────────────────────────────── */
 
 /**

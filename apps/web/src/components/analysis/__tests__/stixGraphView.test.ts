@@ -2,7 +2,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import StixGraphView from "../StixGraph";
+import StixGraphView, { Detail } from "../StixGraph";
+import { readStixGraph } from "../stixGraph";
 
 const MALWARE = "malware--1";
 const TECHNIQUE = "attack-pattern--2";
@@ -96,5 +97,57 @@ describe("the table view", () => {
     );
     expect(table).toContain("not stated");
     expect(table).not.toMatch(/0\.00|0\.50/);
+  });
+});
+
+describe("the detail pane", () => {
+  const HASH = "d41d8cd98f00b204e9800998ecf8427ea41d8cd98f00b204e9800998ecf8427";
+  const FILE = "file--6";
+  const DROPPED = {
+    type: "bundle",
+    id: "bundle--y",
+    objects: [
+      { type: "malware", id: MALWARE, name: "sample.exe", is_family: false },
+      { type: "file", id: FILE, hashes: { "SHA-256": HASH } },
+      {
+        type: "relationship",
+        id: "relationship--7",
+        relationship_type: "drops",
+        source_ref: MALWARE,
+        target_ref: FILE,
+      },
+    ],
+  };
+  const graph = readStixGraph(DROPPED);
+
+  it("wraps a long node label and its relationship buttons instead of letting a sha256 run past the pane", () => {
+    const html = renderToStaticMarkup(
+      createElement(Detail, { graph, selection: { kind: "node", id: FILE }, onSelect: () => {} }),
+    );
+    expect(html).toContain(HASH);
+    // break-words (overflow-wrap: break-word) does not stop an unbroken run
+    // like a hash from setting a flex/grid item's own preferred width, so the
+    // label and the relationship buttons that can carry one need break-all.
+    expect(html).toContain(`text-text-primary break-all">SHA-256 ${HASH}`);
+    expect(html).toMatch(/class="text-left text-xs text-accent-strong hover:underline break-all"/);
+  });
+
+  it("wraps the edge heading's source and target names", () => {
+    const html = renderToStaticMarkup(
+      createElement(Detail, { graph, selection: { kind: "edge", key: "relationship--7" }, onSelect: () => {} }),
+    );
+    expect(html).toContain(HASH);
+    expect(
+      (html.match(/class="text-accent-strong hover:underline text-left break-all"/g) ?? []).length,
+    ).toBe(2);
+  });
+
+  it("wraps the raw JSON block's long string values", () => {
+    const html = renderToStaticMarkup(
+      createElement(Detail, { graph, selection: { kind: "node", id: FILE }, onSelect: () => {} }),
+    );
+    const jsonBlock = html.slice(html.indexOf("<div class=\"p-3"));
+    expect(jsonBlock).toContain("font-mono text-[11px] leading-relaxed break-all overflow-x-auto");
+    expect(jsonBlock).toContain(HASH);
   });
 });
