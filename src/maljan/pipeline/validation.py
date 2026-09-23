@@ -1834,22 +1834,21 @@ def wrong_entry_citations(
 
     violations: list[Violation] = []
     for (cited, holders), values in wrong.items():
-        shown = ", ".join(repr(safe_finding_value(value)) for value in values[:_MAX_NAMED_IDS])
-        if len(values) > _MAX_NAMED_IDS:
-            shown += f" and {len(values) - _MAX_NAMED_IDS} more"
-        pronoun = "it" if len(values) == 1 else "them"
+        quoted = safe_finding_value(", ".join(repr(value) for value in values[:_MAX_NAMED_IDS]))
+        more = len(values) - _MAX_NAMED_IDS
+        named = safe_finding_value(", ".join(entries.named(i) for i in cited))
+        holding = safe_finding_value(", ".join(entries.named(i) for i in holders[:_MAX_NAMED_IDS]))
+        message = (
+            f"{quoted} is not in {named}, which the text cites for it; this run's evidence "
+            f"holds it in {holding}. Cite the entry that holds what the text quotes."
+            if len(values) == 1
+            else f"{quoted} are not in {named}, which the text cites for them; this run's "
+            f"evidence holds them in {holding}"
+            f"{' (with ' + safe_finding_value(more) + ' more)' if more > 0 else ''}. "
+            "Cite the entry that holds what the text quotes."
+        )
         violations.append(
-            Violation(
-                code=CITATION_WRONG_ENTRY_CODE,
-                message=(
-                    f"{shown} {'is' if len(values) == 1 else 'are'} not in "
-                    f"{', '.join(entries.named(i) for i in cited)}, which the text cites for "
-                    f"{pronoun}; this run's evidence holds {pronoun} in "
-                    f"{', '.join(entries.named(i) for i in holders[:_MAX_NAMED_IDS])}. "
-                    "Cite the entry that holds what the text quotes."
-                ),
-                path="citation",
-            )
+            Violation(code=CITATION_WRONG_ENTRY_CODE, message=message, path="citation")
         )
     return violations
 
