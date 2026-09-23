@@ -183,11 +183,18 @@ instead of turning it into an ordinary error. The heartbeat sets the flag
 before it cancels the pipeline task; a job task that is itself cancelled — by
 SIGTERM or arq's `job_timeout` — sets it, cancels the pipeline and waits for it
 at most `PIPELINE_STOP_GRACE` (10 s). The `cancelled` event says where the
-pipeline stopped (`stopped`). A synchronous model call already on the wire in a
-thread cannot be cancelled and is not waited on at exit either: after the
-shutdown hook the worker leaves any such thread after `EXIT_GRACE` (10 s), so
-SIGTERM ends it within 10 s, the job's teardown (`WORKER_TEARDOWN_TIMEOUT`,
-60 s) and 10 s more.
+pipeline stopped (`stopped`). The analysts' model calls — the tool loop, the
+salvage, the validation turn, the revision rounds, the view and tier turns —
+all go out as the model's own async call on the agent loop, so each is
+cancelled in flight. A thread still blocked in a call that cannot be — a
+provider with only a synchronous client — is not waited on at exit either:
+the shutdown hook arms a guard on the interpreter's own exit, which ends the
+process with status 1, naming the threads, if a non-daemon thread is still
+alive `EXIT_GRACE` (10 s) after the exit began, and does nothing otherwise.
+The shutdown hook's Redis and database closes are each held to the same
+grace. SIGTERM therefore ends the worker within 10 s for the pipeline, the
+job's teardown (`WORKER_TEARDOWN_TIMEOUT`, 60 s), 2 × 10 s for the closes and
+10 s at exit.
 
 ### What a request holds while it waits on somebody else
 

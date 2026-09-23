@@ -1744,8 +1744,26 @@ change landed on `main`.
   the agent loop is cancelled with it, and a check raises `JobCancelled`, which
   no `except Exception` reads as a failure. The worker sets it on an operator's
   cancel and on its own shutdown, waits for the pipeline at most 10 s, names in
-  the `cancelled` event where the pipeline stopped, and leaves any thread still
-  blocked in a synchronous call 10 s after its shutdown hook.
+  the `cancelled` event where the pipeline stopped. The revision rounds and
+  the view and tier turns now use the model's async call too, so they are
+  cancelled in flight like the tool loop. At the process's own exit a thread
+  still blocked in a call that cannot be cancelled is left after 10 s, named,
+  with status 1; nothing happens when nothing is blocked, and calling the
+  shutdown hook does not end the calling process.
+- **The validation turn keeps to the loop's time.** It was given the loop's
+  whole timeout again after the loop; it now gets what the loop left, and is
+  not asked, with a record, when that cannot hold one answer at the loop's
+  measured pace.
+- **Right or absent, everywhere a confidence is printed.** A packer match read
+  from `pe_info` carried a flat 0.50 printed under "Measured", capa technique
+  hits carried 0.6 and 0.70, a family the judge named without a number was
+  printed "low confidence, 0.00", a YARA rule with no authored confidence got
+  0.75 and one below 0.70 was raised to it, and the API catalogue clamped
+  authored numbers under 0.65. None of these is stated any more: the packer
+  table shows a confidence column only where a match states one, the family
+  prints "not assessed", the YARA rule keeps what its author wrote or none.
+- **A claim's evidence line is stored at the width the window allows one
+  answer**, instead of a fixed 200 characters.
 - **The time-cap salvage is sized to finish.** It re-sent the whole
   conversation to a slow model that had to read it all again, and ran into its
   hard cap on every PE sample of the benchmark's small model, still generating
@@ -4215,6 +4233,16 @@ analyst was not given a second loop; and the `cancelled` event can carry
 prose as its report; reports stored before this change keep what they
 recorded. A judge fallback whose answer stated its assessment whole now
 publishes that assessment's confidence, severity and family.
+
+Record shapes that change with this: `attribution.family_confidence` and the
+judge's `family.confidence` are `null` where nothing was stated (they were
+`0.0`), and the console's attribution tab prints "not assessed" for it;
+`static.packer_matches` rows from the pack carry no `confidence` and name the
+matched sections under `evidence`; capa's `technique_hits` and
+`api_technique_hits` rows carry no `confidence`; a YARA rule's `confidence` is
+`null` where its author wrote none; `overall_confidence` defaults to `null`;
+`run_summary.budget.<agent>.validation_not_asked` lists validation turns a
+loop's time could not hold. Reports stored before keep what they recorded.
 
 A stored STIX bundle keeps the shape it was stored with: `x_maljan_evidence_refs`
 appears only in exports rendered after this change, so the relationship graph
