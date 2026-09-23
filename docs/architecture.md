@@ -1065,6 +1065,50 @@ each class of external tool, so the choice is configuration rather than code.
 Every provider that can be reached over the network has a probe behind a Test
 button in the console; see [configuration.md](configuration.md).
 
+### When a provider fails
+
+**A model that fails as a provider.** An agent's entry under `llm.agents` may
+name an ordered list of models (`fallbacks`), held as one model object
+(`maljan.llm.fallback.FallbackChatModel`). Every turn starts at the first
+model; the next one is asked only when the one before failed *as a provider* —
+a refused or dropped connection, a timeout, an HTTP 5xx, 408 or 429, a model
+the server does not have, a refused credential, or a refusal the provider
+reports as an error. A turn a model *answered* is never moved: an answer the
+validation loop rejects goes back, with the feedback, to the model that wrote
+it, because asking another model would be the platform choosing a different
+answer (`tests/unit/test_no_silent_overrides.py` holds a case for exactly
+this). Every answer carries the model that gave it in `response_metadata`
+(`maljan_model`) and, when a fallback gave it, the reason in words
+(`maljan_fallback`); that is what the ledger entry, the conversation and the
+run summary read. Every model on the list passes the probe gate the first one
+does, and the context-window budget counts every model on every list — the
+smallest window governs.
+
+**What a run spent.** Every model call's usage, as the provider reported it —
+prompt and completion tokens, and the cost an OpenAI-compatible router reports
+where it reports one — is added to the run's `TokenLedger` under the agent that
+made the call and the model that answered. `run_summary.tokens` holds the sums
+for the run and per agent, and `run_summary.models` the per-agent model count
+and the fallbacks with their reasons. A call whose provider reported no usage
+is counted as *not reported*: its tokens are not estimated, and a figure the
+report prints as a count is always a count a provider gave. There is no price
+table; a cost appears only where the provider reported one.
+
+**A tool server that keeps failing.** Each tool server of a job has one guard
+(`maljan.providers.server_guard`), shared by every handle the job's registry
+opens for it. `core.mcp.breaker.failures_to_open` transport failures in a row —
+a timeout, a refused connection, the server's process gone — rest the server
+for `core.mcp.breaker.cooldown_seconds`. A call made while it rests is not
+sent; the platform answers it with a tool error in the structured shape
+(`maljan.tools.errors`, code `server_resting`) naming the server, that it is
+resting and when it will be tried again. After the cooldown one call is let
+through, and a success ends the rest. A tool that answers with its own error —
+a bad argument, a missing file — has answered, and never counts.
+`core.mcp.breaker.max_concurrent_calls` caps how many calls one server has in
+flight for one job, so parallel analysts queue rather than pile onto one slow
+sidecar. Each rest is published as `tool_server_rested` and kept in
+`run_summary.server_rests`.
+
 ## Memory
 
 Past analyses and family fingerprints are vectorised and stored in Qdrant, and
@@ -1119,6 +1163,12 @@ lookup — go through the same recorder under `agent="judge"`, so a verdict that
 leans on one can cite it. An agent's ask of another agent is an entry under
 `server="team"`, `tool="ask_<key>"`, and the calls the asked agent made are
 entries under its own key (see *Delegation*).
+
+Each entry names the model whose turn asked for the call (`model`, as
+`provider/model` with the endpoint as its scheme and host): an agent may fall
+back to another model mid-loop, so which model a call came from is a fact of
+the turn and not of the agent's settings. A row written before the column
+existed names none.
 
 A call that failed is an entry with `ok` false whichever way it failed: a
 tool that raised, and a tool that returned an error. The entry keeps the
@@ -1262,12 +1312,13 @@ and the console draws the running analysis from them.
 | `phase_change` | the worker | `phase` |
 | `stage_started` / `stage_skipped` / `stage_finished` | the stage nodes | `stage`, `kind`, and `agents` / `reason` / `ran`, `duration_ms` |
 | `agent_message` | every speaking node | `speaker`, `role`, `round`, `status`, `text`, `kind`, and optionally `stage`, `addressed_to`, `display_name`, `confidence`, `claims`, `dissent`, `report`, `report_truncated` |
-| `agent_message_delta` | the analyst loop, behind `core.events.stream_deltas` | `stage`, `agent`, `text_delta` |
+| `agent_message_delta` | the analyst loop, behind `core.events.stream_deltas` | `stage`, `agent`, `text_delta`, and `model` (the model that gave the turn), `fallback` (why another model gave it, when one did) and `tokens` (what the turn spent, when the provider reported it); a silent turn is published only when a fallback gave it |
 | `tool_call_started` | the evidence recorder | `stage`, `agent`, `tool`, `server`, `args_summary` |
 | `tool_call_finished` | the evidence recorder, as each entry is written | `stage`, `agent`, `tool`, `server`, `evidence_id`, `ok`, `duration_ms`, `summary` |
 | `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index`, `state`, `path` |
 | `judge_question` | the judge's ReAct loop | `stage`, `text`, `addressed_to` |
 | `budget_tick` / `stage_ended_at_cap` | the budget meter | see *The evidence ledger* |
+| `tool_server_rested` | a tool server's guard, when its breaker opens | `server`, `failures`, `cooldown_s`, `reason` |
 | `enrichment_complete` | the enrichment worker, after the run | `report_id`, `domains_enriched`, `ips_enriched`, `similar_samples` |
 | `completed` / `error` / `cancelled` | the worker | the outcome |
 

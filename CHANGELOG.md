@@ -573,6 +573,48 @@ change landed on `main`.
   beside `core.preprocessing.max_tool_output_chars`, with the source word
   itself, and says which setting would fix an unknown window.
 
+- **An agent may name models to fall back to, tried only when a provider
+  fails.** `llm.agents.<key>.fallbacks` is an ordered list of models, each
+  written like the entry's first one (provider, model, optional temperature and
+  — for `openai` and `ollama` — base URL). The next model answers a turn only
+  when the one before failed as a provider: a refused or dropped connection, a
+  timeout, HTTP 5xx, 408 or 429, a model the server does not have, a refused
+  credential, or a refusal the provider reports as an error. An answer the
+  validation loop rejects is still sent back to the model that wrote it, and a
+  guard case in `tests/unit/test_no_silent_overrides.py` proves it is never
+  asked of another model. Every turn records which model gave it: the ledger
+  entry of each call it asked for carries `model` (revision `20260928000000`),
+  `agent_message_delta` carries `model`, `fallback` (the reason in words) and
+  `tokens`, the conversation names a turn a fallback gave, and
+  `run_summary.models` counts turns per agent and model with every fallback's
+  reason. Each fallback passes the probe gate the first model does — the
+  `agent` probe asks every model on the list, the `llm` probe the ones its
+  provider serves, and the gate names a missing one as the model the agent
+  *falls back to* — and the context-window budget counts every model on every
+  list, the smallest window governing. The Agents page edits the list (add,
+  remove, move up and down).
+- **What a run spent, in tokens.** `run_summary.tokens` sums the usage every
+  provider reported — prompt and completion tokens, and the cost an
+  OpenAI-compatible router reports where it reports one — for the run and per
+  agent (`per_agent`), counts the calls whose provider reported nothing as
+  `unreported_calls`, and carries the `sentence` the report prints. The
+  report's run summary and the console's "What the run spent" gain that
+  tokens line. There is no price table.
+- **A tool server that keeps failing is rested, and says so.** Per job and per
+  server, `core.mcp.breaker.failures_to_open` (3) transport failures in a row —
+  a timeout, a refused connection, the server's process gone — rest the server
+  for `core.mcp.breaker.cooldown_seconds` (60). A call made while it rests is
+  answered by the platform with a structured tool error (`server_resting`)
+  naming the server, that it is resting and when it will be tried again; after
+  the cooldown one call is let through and a success ends the rest. A tool
+  that answers with its own error never counts.
+  `core.mcp.breaker.max_concurrent_calls` (4) caps how many calls one server
+  has in flight for one job. Each rest is published as `tool_server_rested`,
+  drawn in the conversation, and kept in `run_summary.server_rests`, which the
+  report and the console print. Every default's origin is written beside it
+  in `docs/configuration.md`; all three are judgements, because no recorded
+  live run had a tool server fail at the transport.
+
 ### Changed
 
 - **Staging is per job.** The sidecars' staging directory held every job the
@@ -1302,6 +1344,16 @@ change landed on `main`.
   reads `1837` where it read `1842` and five category shares move by one
   rounding place; no Linux rule's rate moves at all. No behaviour category was
   renamed or removed, so a consumer reading `category` alone is unaffected.
+- **A token count is what a provider reported, and nothing else.** A call
+  whose provider reported no usage used to be counted with a
+  four-characters-per-token estimate folded into the same sums, flagged only by
+  `run_summary.tokens.estimated_calls`. It is now counted as a call and as
+  `unreported_calls`, adds no tokens, and the report and the console say "not
+  reported" for it. `estimated_calls` is no longer written. A consumer reading
+  `run_summary.tokens` should read `unreported_calls` where it read
+  `estimated_calls`, and treat `input_tokens` / `output_tokens` as the reported
+  figures alone.
+
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was
@@ -3345,3 +3397,13 @@ The same applies to an export carrying the judgement-layer settings —
 and `core.preprocessing.category_inference_backend`. `core.analysis.sigma_rules_dir`
 is not dropped but moved: it becomes `MALJAN_SIGMA_RULES_DIR` in the `analysis`
 tool server's `env`, and the migration moves a stored value across for you.
+
+The evidence ledger gains a `model` column (revision `20260928000000`); run
+`make migrate` before starting a worker on this release. Rows written before it
+name no model, and read as such. `llm.agents` entries need no migration: an
+entry without `fallbacks` is the single-model form it always was. A stored run
+summary written before this release still carries `tokens.estimated_calls`, and
+the console says such a run's figures had estimates mixed in rather than
+printing them as a count. `core.mcp.breaker.*` are new settings with defaults;
+set `core.mcp.breaker.max_concurrent_calls` to `0` to drive every tool server
+uncapped as before.

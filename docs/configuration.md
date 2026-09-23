@@ -130,6 +130,25 @@ treatment a global one does — the llama.cpp sampler keys and the structured
 output the local servers handle badly are decided from the endpoint the agent
 will actually call.
 
+An entry may also name the models the agent falls back to, in order, under
+`fallbacks` — each one a provider, a model and, for `openai` and `ollama`, a
+base URL of its own, written exactly like the entry's first model. A fallback
+with no temperature takes the entry's. The Agents page edits the list under
+the model override (add, remove, move up and down). The next model is asked
+**only when the one before failed as a provider**: a refused or dropped
+connection, a timeout, an HTTP 5xx, 408 or 429, a model the server does not
+have, a refused credential, or a refusal the provider reports as an error.
+Never on what a model said: an answer the validation loop rejects is sent back
+to the model that wrote it. Every turn starts at the first model again, so a
+server that dropped one connection is not written off for the rest of the job.
+A model named twice in one list is refused on save. An entry without
+`fallbacks` is the single-model form every entry had before, unchanged.
+
+Which model answered is recorded on every turn — on the ledger entry of each
+call the turn asked for, in the conversation (a turn a fallback gave is named
+there with the reason), and per agent in `run_summary.models` — and each
+fallback is written into the run summary with the reason in words.
+
 ### Which dialect an OpenAI-compatible endpoint speaks
 
 `llm.openai.compat` says whether the endpoint behind `base_url` is llama.cpp or
@@ -255,7 +274,10 @@ one endpoint apiece, named rather than addressed, so a per-agent entry there
 differs only in its model — and each is still asked, because a key may be
 refused for one model and not another. The same pair named twice is one call
 and one row. The judge model is listed and never called, so it is not filed.
-The `agent` probe files the one pair its agent would use.
+The `agent` probe files the pairs its agent would use: its first model, and
+every model it falls back to, one after another — the agent passes only when
+every model on its list answered. The `llm` probe asks the fallbacks served by
+the selected provider along with the per-agent entries.
 
 Where a call goes is worked out in one place (`maljan.core.model_assignments`)
 for the probe and for the gate alike, and folded there the way a URL folds —
@@ -280,7 +302,8 @@ host, so a base URL that carries credentials does not reach the screen or the
 stored row.
 
 **Where the gate stands.** Submitting a job reads that record for every model
-the run can reach — the agents its team's stages name, and every agent those
+the run can reach — fallbacks included, each named in the refusal as the model
+the agent *falls back to* — the agents its team's stages name, and every agent those
 can ask through `ask_<key>`, and so on — and refuses with 422 when one of them
 has no passing row, naming the agent, the model, the endpoint and the probe's
 last message. The endpoint appears there as its label — scheme and host — and
@@ -599,7 +622,10 @@ answer fit, which switches the shortener, the summariser and the character cut
 off for the whole run.
 
 A run whose agents sit on different models takes the **smallest** of their
-windows, because one cap is handed to every tool server the job opens.
+windows, because one cap is handed to every tool server the job opens. The
+models an agent falls back to count as models it sits on: a fallback with a
+smaller window than the first model governs the cap, because the turn it
+answers reads the same conversation.
 
 Where to see what applied: the Settings page prints the detected window beside
 the field, with the source word itself, and `run_summary.truncation` records
@@ -1299,6 +1325,37 @@ somewhere the worker did not put it — a corpus directory an operator points th
 CLI at, or an HTTP sidecar on another host that is handed paths rather than
 uploads. `ruleset` is held to the rule corpora instead: the repository's `data`
 tree and whatever `MALJAN_YARA_RULES_DIR` and `MALJAN_SIGMA_RULES_DIR` name.
+
+### A tool server that keeps failing is rested
+
+Per job and per tool server, three settings under **Tool servers → Resilience**:
+
+| Setting | Default | Where the default came from |
+|---|---|---|
+| `core.mcp.breaker.failures_to_open` | 3 | The number of attempts the platform already gives a model call that drops its connection before calling it a failure. No recorded live run had a tool server fail at the transport, so it is a judgement, not a measurement. |
+| `core.mcp.breaker.cooldown_seconds` | 60 | A judgement: long enough for a sidecar being restarted to come back, short against the analysts' own loop budgets. |
+| `core.mcp.breaker.max_concurrent_calls` | 4 | A judgement: the shipped teams run their analysts one after another, and four lets one analyst's parallel tool calls through while bounding a team that fans out. `0` leaves the calls uncapped, as every server was before. |
+
+A transport failure is the server not answering at all: a timeout, a refused
+or dropped connection, the server's process gone. After that many in a row the
+server rests: a call is not sent, and the model is answered with a tool error
+in the structured shape —
+
+```json
+{"error": {"code": "server_resting",
+           "message": "tool server 'analysis' is resting after 3 transport failures in a row; it will be tried again in 60 s",
+           "remediation": "this server failed at the transport several times in a row and is not being called for now; use another tool, or call this one again after the time the message names"},
+ "tool": "pe_info"}
+```
+
+— which the ledger records as a failed call like any other. After the cooldown
+one call is let through; a success ends the rest and a transport failure
+starts another. A tool that answers with its own error (a bad argument, a file
+that is not there) has answered, and never counts. Each rest is published as a
+`tool_server_rested` event, drawn in the conversation, and kept in
+`run_summary.server_rests`, which the report and the console's "What the run
+spent" print. The call cap queues calls per event loop: a handle is opened per
+loop, and for a stdio server that is one child process per loop.
 
 ## Writing a tool server
 
