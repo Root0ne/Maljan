@@ -31,7 +31,8 @@ cannot build without it.
 Maljan reads two files, and neither is committed.
 
 **`docker/.env`** — variables Compose substitutes into
-[`docker/docker-compose.yml`](../docker/docker-compose.yml). Every one of them
+[`docker/docker-compose.yml`](https://github.com/Root0ne/Maljan/blob/dev/docker/docker-compose.yml).
+Every one of them
 is declared with `:?`, so Compose refuses to start while any is missing.
 
 ```bash
@@ -51,7 +52,8 @@ the worker started by hand. Copy it from the example and fill in the secrets.
 cp bootstrap.env.example bootstrap.env
 ```
 
-[`bootstrap.env.example`](../bootstrap.env.example) is the entire process
+[`bootstrap.env.example`](https://github.com/Root0ne/Maljan/blob/dev/bootstrap.env.example)
+is the entire process
 environment surface the API and the worker read. Every other application
 setting — LLM provider, sandbox, static analyst, tool servers, agents, rate
 limits, enrichment — lives in the settings store and is edited from the web

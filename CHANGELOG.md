@@ -572,6 +572,13 @@ change landed on `main`.
   to the stated fallback rather than to an error. The Settings page prints it
   beside `core.preprocessing.max_tool_output_chars`, with the source word
   itself, and says which setting would fix an unknown window.
+- **A documentation site, built from the same pages `docs/` already carries.**
+  `mkdocs.yml` at the repository root builds them with MkDocs Material — light
+  and dark palettes, built-in search, edit links against `dev` — with no page
+  written twice. `.github/workflows/docs.yml` builds it on a pull request that
+  touches `docs/**` or `mkdocs.yml` and deploys it to GitHub Pages on a push to
+  `main`; a `docs` dependency group keeps MkDocs Material out of the product's
+  own dependencies.
 - **The dashboard answers at a glance.** Each of the latest runs carries its
   verdict as a chip, in the shared verdict colours and in words; a run with no
   verdict yet shows its status. A "Tools used" list draws the tools the

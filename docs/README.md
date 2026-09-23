@@ -20,8 +20,9 @@ routers under `apps/api/app/api/v1/` and the compose stack in `docker/`.
 | [api.md](api.md) | Router groups, the evidence endpoint, the run-summary fields, the stage events on the WebSocket, authentication and pagination. |
 | [paper.md](paper.md) | Where the published evaluation, its harness and its fixtures live. |
 
-Images used by these documents and by the top-level [README.md](../README.md)
-live in [assets/](assets).
+Images used by these documents and by the top-level
+[README.md](https://github.com/Root0ne/Maljan/blob/dev/README.md) live in
+[assets/](assets).
 
 ## Historical design record
 
