@@ -1069,18 +1069,29 @@ button in the console; see [configuration.md](configuration.md).
 
 **A model that fails as a provider.** An agent's entry under `llm.agents` may
 name an ordered list of models (`fallbacks`), held as one model object
-(`maljan.llm.fallback.FallbackChatModel`). Every turn starts at the first
-model; the next one is asked only when the one before failed *as a provider* —
-a refused or dropped connection, a timeout, an HTTP 5xx, 408 or 429, a model
-the server does not have, a refused credential, or a refusal the provider
-reports as an error. A turn a model *answered* is never moved: an answer the
+(`maljan.llm.fallback.FallbackChatModel`). The next model is asked only when
+the one before failed *as a provider* — a refused or dropped connection, a
+timeout, an HTTP 5xx, 408 or 429, a model the server does not have, a refused
+credential, or a refusal the provider reports as an error. A timeout is real
+because every model on a list but the last has its own turn deadline,
+`core.llm.fallback_turn_share` of the agent's loop budget (a half by default),
+so a model that stops answering raises inside the list rather than being
+cancelled with the whole loop; and every provider's client has a request
+timeout (1800 s, `PROVIDER_REQUEST_TIMEOUT_SECONDS` — Ollama's had none). A 429
+or 503 that asks, in `Retry-After`, for at most thirty seconds is waited out on
+the same model once before the list moves on. The switch is **sticky for the
+loop**: the model that took over answers the rest of that loop, so a stalled
+first model costs one turn deadline rather than one per turn, and the next loop
+(the next stage, the next chunk) starts at the first model again. Only the
+explicit cause chain of an exception is read, and an HTTP status only from the
+provider SDKs' own exception types. A turn a model *answered* is never moved: an answer the
 validation loop rejects goes back, with the feedback, to the model that wrote
 it, because asking another model would be the platform choosing a different
 answer (`tests/unit/test_no_silent_overrides.py` holds a case for exactly
 this). Every answer carries the model that gave it in `response_metadata`
 (`maljan_model`) and, when a fallback gave it, the reason in words
-(`maljan_fallback`); that is what the ledger entry, the conversation and the
-run summary read. Every model on the list passes the probe gate the first one
+(`maljan_fallback`) — on the turn the list moved, once per switch; that is what
+the ledger entry, the `model_fallback` event and the run summary read. Every model on the list passes the probe gate the first one
 does, and the context-window budget counts every model on every list — the
 smallest window governs.
 
@@ -1094,15 +1105,24 @@ is counted as *not reported*: its tokens are not estimated, and a figure the
 report prints as a count is always a count a provider gave. There is no price
 table; a cost appears only where the provider reported one.
 
-**A tool server that keeps failing.** Each tool server of a job has one guard
-(`maljan.providers.server_guard`), shared by every handle the job's registry
-opens for it. `core.mcp.breaker.failures_to_open` transport failures in a row —
+**A tool server that keeps failing.** Each tool server the job's registry
+attaches — the built-in sidecars and every operator-configured server — has one
+guard (`maljan.providers.server_guard`), shared by every handle the registry
+opens for it. The Ghidra static provider and the CAPE sandbox provider build
+their own toolkits outside the registry and are not guarded; bringing them
+under it is a recorded follow-up. `core.mcp.breaker.failures_to_open` transport failures in a row —
 a timeout, a refused connection, the server's process gone — rest the server
 for `core.mcp.breaker.cooldown_seconds`. A call made while it rests is not
 sent; the platform answers it with a tool error in the structured shape
 (`maljan.tools.errors`, code `server_resting`) naming the server, that it is
-resting and when it will be tried again. After the cooldown one call is let
-through, and a success ends the rest. A tool that answers with its own error —
+resting and when it will be tried again. A timeout counts: every call is sent
+with a deadline — the larger of the tool's budget in the server's own
+`capabilities` manifest and `core.mcp.breaker.call_timeout_seconds` (derived by
+default from the longest tool budget configured, capa's), plus thirty seconds —
+and a call still waiting when its caller's own budget runs out counts too.
+After the cooldown one call is let through, and a success ends the rest; that
+call's own failure is the only one that starts another rest, and only while the
+rest it was let through for is still on. A tool that answers with its own error —
 a bad argument, a missing file — has answered, and never counts.
 `core.mcp.breaker.max_concurrent_calls` caps how many calls one server has in
 flight for one job, so parallel analysts queue rather than pile onto one slow
@@ -1312,7 +1332,8 @@ and the console draws the running analysis from them.
 | `phase_change` | the worker | `phase` |
 | `stage_started` / `stage_skipped` / `stage_finished` | the stage nodes | `stage`, `kind`, and `agents` / `reason` / `ran`, `duration_ms` |
 | `agent_message` | every speaking node | `speaker`, `role`, `round`, `status`, `text`, `kind`, and optionally `stage`, `addressed_to`, `display_name`, `confidence`, `claims`, `dissent`, `report`, `report_truncated` |
-| `agent_message_delta` | the analyst loop, behind `core.events.stream_deltas` | `stage`, `agent`, `text_delta`, and `model` (the model that gave the turn), `fallback` (why another model gave it, when one did) and `tokens` (what the turn spent, when the provider reported it); a silent turn is published only when a fallback gave it |
+| `agent_message_delta` | the analyst loop, behind `core.events.stream_deltas` | `stage`, `agent`, `text_delta`, and `model` (the model that gave the turn) and `tokens` (what the turn spent, when the provider reported it); a turn that only asked for tools is published with an empty `text_delta` when it carries tokens |
+| `model_fallback` | an agent, on the turn its model list moved on — published whether or not deltas stream | `stage`, `agent`, `model` (the model that answers from here), `reason` |
 | `tool_call_started` | the evidence recorder | `stage`, `agent`, `tool`, `server`, `args_summary` |
 | `tool_call_finished` | the evidence recorder, as each entry is written | `stage`, `agent`, `tool`, `server`, `evidence_id`, `ok`, `duration_ms`, `summary` |
 | `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index`, `state`, `path` |

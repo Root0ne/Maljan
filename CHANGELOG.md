@@ -584,10 +584,10 @@ change landed on `main`.
   guard case in `tests/unit/test_no_silent_overrides.py` proves it is never
   asked of another model. Every turn records which model gave it: the ledger
   entry of each call it asked for carries `model` (revision `20260928000000`),
-  `agent_message_delta` carries `model`, `fallback` (the reason in words) and
-  `tokens`, the conversation names a turn a fallback gave, and
-  `run_summary.models` counts turns per agent and model with every fallback's
-  reason. Each fallback passes the probe gate the first model does — the
+  `agent_message_delta` carries `model` and `tokens`, a new `model_fallback`
+  event names the switch with its reason in words (whether or not deltas
+  stream), and `run_summary.models` counts turns per agent and model with every
+  fallback's reason. Each fallback passes the probe gate the first model does — the
   `agent` probe asks every model on the list, the `llm` probe the ones its
   provider serves, and the gate names a missing one as the model the agent
   *falls back to* — and the context-window budget counts every model on every
@@ -1353,6 +1353,20 @@ change landed on `main`.
   `run_summary.tokens` should read `unreported_calls` where it read
   `estimated_calls`, and treat `input_tokens` / `output_tokens` as the reported
   figures alone.
+
+- **Every tool server is driven with at most four calls in flight per job.**
+  `core.mcp.breaker.max_concurrent_calls` (4) queues a job's fifth concurrent
+  call to one server until one of the four answers; set it to `0` to drive
+  every server uncapped as before.
+- **A model on a fallback list has a turn deadline, and every provider a
+  request timeout.** A model that is not the last on its agent's list is
+  treated as stalled after `core.llm.fallback_turn_share` (0.5) of the agent's
+  loop budget, and the list moves on; the model that answered then stays for
+  the rest of that loop. The Ollama client is now built with the same 1800 s
+  request timeout the OpenAI client always had, and Anthropic's is named rather
+  than left to its SDK. A tool call is sent with a deadline
+  (`core.mcp.breaker.call_timeout_seconds`, derived from capa's budget by
+  default) and a call that passes it is a transport failure the breaker counts.
 
 ### Fixed
 
@@ -3407,3 +3421,9 @@ the console says such a run's figures had estimates mixed in rather than
 printing them as a count. `core.mcp.breaker.*` are new settings with defaults;
 set `core.mcp.breaker.max_concurrent_calls` to `0` to drive every tool server
 uncapped as before.
+
+`core.llm.fallback_turn_share` and `core.mcp.breaker.call_timeout_seconds` are
+new settings with defaults. A tool server that legitimately takes longer than
+the longest tool budget configured for this deployment (capa's, 300 s by
+default) needs `core.mcp.breaker.call_timeout_seconds` set, or its tools to
+declare their budget in the server's `capabilities` manifest.
