@@ -918,7 +918,7 @@ reached over HTTP and off until an operator registers an agent token.
 
 | Server | Bound to | How | Offers |
 | :-- | :-- | :-- | :-- |
-| `analysis` | `static` | definition `tools` | Identity and hashes, strings and typed IOCs, PE/ELF/Mach-O/APK structure, archive and document inspection, payload carving, YARA, Sigma and capa. |
+| `analysis` | `static` | definition `tools` | Identity and hashes, strings and typed IOCs, PE/ELF/Mach-O/APK structure, archive and document inspection, payload carving, YARA, Sigma, capa and emulated string decoding (FLOSS). |
 | `knowledge` | every analyst and the judge | definition `tools` | ATT&CK lookup, validation and ranking, the API-behaviour catalog, the LOLBin table, family and prior-case retrieval. |
 | `network` | `network` | role binding | DNS, HTTP and packet views of a capture, plus the whole-capture summary. |
 | `threatintel` | `judge` | role binding | VirusTotal and AbuseIPDB reputation lookups over their REST APIs. |
@@ -997,10 +997,11 @@ string's digest is not the sample's.
 sample's path would otherwise have taken the carved payloads with it:
 `carve_payloads` writes each embedded payload under the staging directory and
 returns the paths, and with `path` gone there was nothing left to pass one to.
-`carved_path` is the qualified argument that gives that back, on the fourteen
+`carved_path` is the qualified argument that gives that back, on the fifteen
 analysis tools that read a file — `identify_file`, `hashes`, `signing_info`,
 `strings`, `iocs_from_file`, `pe_info`, `elf_info`, `macho_info`, `apk_info`,
-`carve_payloads`, `archive_list`, `document_info`, `yara_scan` and `capa`. It
+`carve_payloads`, `archive_list`, `document_info`, `yara_scan`, `capa` and
+`floss`. It
 is held to **the carved tree of the file this call is pinned to, and that file
 itself** — `<staging>/job-<id>/carved/<the sample's sha256>/`, which is exactly
 the key `carve_payloads` writes under and which the sidecar derives from the

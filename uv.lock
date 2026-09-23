@@ -322,6 +322,12 @@ wheels = [
 ]
 
 [[package]]
+name = "binary2strings"
+version = "0.1.13"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3e/27/6b4f5883936eba87d4e9c7177b6c413d71749ab691da43bf475c992df93a/binary2strings-0.1.13.tar.gz", hash = "sha256:c6395fc97c4d908b36e08f5a558a79d371a843a8b308e21a0e2b489591877620", size = 59217, upload-time = "2023-07-20T03:37:32.184Z" }
+
+[[package]]
 name = "brotli"
 version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -775,6 +781,28 @@ wheels = [
 ]
 
 [[package]]
+name = "flare-floss"
+version = "3.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "binary2strings" },
+    { name = "dncil" },
+    { name = "halo" },
+    { name = "networkx" },
+    { name = "pefile" },
+    { name = "pydantic" },
+    { name = "rich" },
+    { name = "tabulate" },
+    { name = "tqdm" },
+    { name = "viv-utils", extra = ["flirt"] },
+    { name = "vivisect" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ac/46/b39349a883cb45461e39eca577ad0d0f5a5a3a3e0f90deec5057f2b5bc6d/flare_floss-3.1.1.tar.gz", hash = "sha256:4f74458bc8263e6c61638c13b27bde3a3791425a555b037b79766413abd77b68", size = 15343712, upload-time = "2024-09-26T13:14:14.083Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d4/33/1f7502dc7e1e487d5337012245d6780559690f9668cc12612c05e93eab48/flare_floss-3.1.1-py3-none-any.whl", hash = "sha256:7b57fdc932af40ef81912342b1b89df35ce0bc925c94881dc16ba4c9d6106561", size = 15186846, upload-time = "2024-09-26T13:14:11.467Z" },
+]
+
+[[package]]
 name = "flatbuffers"
 version = "25.12.19"
 source = { registry = "https://pypi.org/simple" }
@@ -944,6 +972,19 @@ sdist = { url = "https://files.pythonhosted.org/packages/e7/85/7c366e69d84c17bb7
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7e/22/e85faf23bd72a92d1921e37d674ca56eb298a3c8be31fdecef0ff2b3aaac/h2-4.4.1-py3-none-any.whl", hash = "sha256:0e25f1462b23c9cb82d9eb02e28bc706dac2a68cb457c6a0d74d63c8a2a5d0e6", size = 62636, upload-time = "2026-08-03T11:44:59.164Z" },
 ]
+
+[[package]]
+name = "halo"
+version = "0.0.31"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama" },
+    { name = "log-symbols" },
+    { name = "six" },
+    { name = "spinners" },
+    { name = "termcolor" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ee/48/d53580d30b1fabf25d0d1fcc3f5b26d08d2ac75a1890ff6d262f9f027436/halo-0.0.31.tar.gz", hash = "sha256:7b67a3521ee91d53b7152d4ee3452811e1d2a6321975137762eb3d70063cc9d6", size = 11666, upload-time = "2020-11-10T02:36:48.335Z" }
 
 [[package]]
 name = "hf-xet"
@@ -1647,6 +1688,18 @@ wheels = [
 ]
 
 [[package]]
+name = "log-symbols"
+version = "0.0.14"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/45/87/e86645d758a4401c8c81914b6a88470634d1785c9ad09823fa4a1bd89250/log_symbols-0.0.14.tar.gz", hash = "sha256:cf0bbc6fe1a8e53f0d174a716bc625c4f87043cc21eb55dd8a740cfe22680556", size = 3211, upload-time = "2019-08-08T06:32:22.538Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/28/5d/d710c38be68b0fb54e645048fe359c3904cc3cb64b2de9d40e1712bf110c/log_symbols-0.0.14-py3-none-any.whl", hash = "sha256:4952106ff8b605ab7d5081dd2c7e6ca7374584eff7086f499c06edd1ce56dcca", size = 3081, upload-time = "2019-08-08T06:32:20.604Z" },
+]
+
+[[package]]
 name = "loguru"
 version = "0.7.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1758,6 +1811,9 @@ dependencies = [
 capa = [
     { name = "flare-capa" },
 ]
+floss = [
+    { name = "flare-floss" },
+]
 tools = [
     { name = "androguard" },
     { name = "macholib" },
@@ -1797,6 +1853,7 @@ requires-dist = [
     { name = "fastembed", specifier = ">=0.4.2" },
     { name = "filetype", specifier = ">=1.2.0" },
     { name = "flare-capa", marker = "extra == 'capa'", specifier = ">=9.0.0" },
+    { name = "flare-floss", marker = "extra == 'floss'", specifier = "==3.1.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jsonpath-rfc9535", specifier = ">=1.0.0" },
     { name = "langchain-anthropic", specifier = ">=0.3.15" },
@@ -1831,7 +1888,7 @@ requires-dist = [
     { name = "weasyprint", specifier = ">=62.0" },
     { name = "yara-python", marker = "extra == 'yara'", specifier = ">=4.5.4" },
 ]
-provides-extras = ["yara", "capa", "tools"]
+provides-extras = ["yara", "capa", "floss", "tools"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2218,11 +2275,11 @@ wheels = [
 
 [[package]]
 name = "networkx"
-version = "3.6.1"
+version = "3.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/6a/51/63fe664f3908c97be9d2e4f1158eb633317598cfa6e1fc14af5383f17512/networkx-3.6.1.tar.gz", hash = "sha256:26b7c357accc0c8cde558ad486283728b65b6a95d85ee1cd66bafab4c8168509", size = 2517025, upload-time = "2025-12-08T17:02:39.908Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fd/a1/47b974da1a73f063c158a1f4cc33ed0abf7c04f98a19050e80c533c31f0c/networkx-3.1.tar.gz", hash = "sha256:de346335408f84de0eada6ff9fafafff9bcda11f0a0dfaa931133debb146ab61", size = 2021691, upload-time = "2023-04-04T20:07:56.693Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9e/c9/b2622292ea83fbb4ec318f5b9ab867d0a28ab43c5717bb85b0a5f6b3b0a4/networkx-3.6.1-py3-none-any.whl", hash = "sha256:d47fbf302e7d9cbbb9e2555a0d267983d2aa476bac30e90dfbe5669bd57f3762", size = 2068504, upload-time = "2025-12-08T17:02:38.159Z" },
+    { url = "https://files.pythonhosted.org/packages/a8/05/9d4f9b78ead6b2661d6e8ea772e111fc4a9fbd866ad0c81906c11206b55e/networkx-3.1-py3-none-any.whl", hash = "sha256:4f33f68cb2afcf86f28a45f43efc27a9386b535d567d2127f8f61d51dec58d36", size = 2072251, upload-time = "2023-04-04T20:07:53.63Z" },
 ]
 
 [[package]]
@@ -3313,6 +3370,15 @@ wheels = [
 ]
 
 [[package]]
+name = "spinners"
+version = "0.0.24"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d3/91/bb331f0a43e04d950a710f402a0986a54147a35818df0e1658551c8d12e1/spinners-0.0.24.tar.gz", hash = "sha256:1eb6aeb4781d72ab42ed8a01dcf20f3002bf50740d7154d12fb8c9769bf9e27f", size = 5308, upload-time = "2020-02-19T21:42:32.326Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9f/8e/3310207a68118000ca27ac878b8386123628b335ecb3d4bec4743357f0d1/spinners-0.0.24-py3-none-any.whl", hash = "sha256:2fa30d0b72c9650ad12bbe031c9943b8d441e41b4f5602b0ec977a19f3290e98", size = 5499, upload-time = "2020-02-19T21:42:30.876Z" },
+]
+
+[[package]]
 name = "sqlalchemy"
 version = "2.0.52"
 source = { registry = "https://pypi.org/simple" }
@@ -3407,12 +3473,30 @@ wheels = [
 ]
 
 [[package]]
+name = "tabulate"
+version = "0.10.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/46/58/8c37dea7bbf769b20d58e7ace7e5edfe65b849442b00ffcdd56be88697c6/tabulate-0.10.0.tar.gz", hash = "sha256:e2cfde8f79420f6deeffdeda9aaec3b6bc5abce947655d17ac662b126e48a60d", size = 91754, upload-time = "2026-03-04T18:55:34.402Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/99/55/db07de81b5c630da5cbf5c7df646580ca26dfaefa593667fc6f2fe016d2e/tabulate-0.10.0-py3-none-any.whl", hash = "sha256:f0b0622e567335c8fabaaa659f1b33bcb6ddfe2e496071b743aa113f8774f2d3", size = 39814, upload-time = "2026-03-04T18:55:31.284Z" },
+]
+
+[[package]]
 name = "tenacity"
 version = "9.1.4"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/47/c6/ee486fd809e357697ee8a44d3d69222b344920433d3b6666ccd9b374630c/tenacity-9.1.4.tar.gz", hash = "sha256:adb31d4c263f2bd041081ab33b498309a57c77f9acf2db65aadf0898179cf93a", size = 49413, upload-time = "2026-02-07T10:45:33.841Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d7/c1/eb8f9debc45d3b7918a32ab756658a0904732f75e555402972246b0b8e71/tenacity-9.1.4-py3-none-any.whl", hash = "sha256:6095a360c919085f28c6527de529e76a06ad89b23659fa881ae0649b867a9d55", size = 28926, upload-time = "2026-02-07T10:45:32.24Z" },
+]
+
+[[package]]
+name = "termcolor"
+version = "3.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/46/79/cf31d7a93a8fdc6aa0fbb665be84426a8c5a557d9240b6239e9e11e35fc5/termcolor-3.3.0.tar.gz", hash = "sha256:348871ca648ec6a9a983a13ab626c0acce02f515b9e1983332b17af7979521c5", size = 14434, upload-time = "2025-12-29T12:55:21.882Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/33/d1/8bb87d21e9aeb323cc03034f5eaf2c8f69841e40e4853c2627edf8111ed3/termcolor-3.3.0-py3-none-any.whl", hash = "sha256:cf642efadaf0a8ebbbf4bc7a31cec2f9b5f21a9f726f4ccbb08192c9c26f43a5", size = 7734, upload-time = "2025-12-29T12:55:20.718Z" },
 ]
 
 [[package]]

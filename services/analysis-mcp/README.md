@@ -52,6 +52,27 @@ drops the reference really runs without these tools.
 | `sigma_match_sandbox` | `report`, `ruleset="default"` |
 | `capa` | `path`, `carved_path=""`, `timeout_s=300`, `backend="auto"` |
 
+### Decoded strings
+
+| tool | arguments |
+| --- | --- |
+| `floss` | `path`, `carved_path=""`, `min_len=4`, `kinds=null`, `limit=150`, `offset=0`, `pattern=null`, `timeout_s=600` |
+
+`floss` recovers the strings a PE only builds at run time — decoded, stack and
+tight strings — by emulating the sample's own decoding and string-building
+functions under vivisect. The sample is never executed: FLOSS runs as a child
+process (`python -m floss --json`) over the file, and the child is killed at
+`timeout_s`. Each row carries its `kind`, the `string`, the `function` that
+decoded or built it with `function_rva` (the same address relative to the
+image base FLOSS loaded at, which is what a disassembler agrees with), and for
+a decoded string the `called_at` call site and the `address` it was written
+to. `counts` gives how many of each kind FLOSS found and `meta` its version,
+image base and how many functions it discovered and emulated. The answer is
+paged like `strings` — `next_offset`, `total_matched`, `kinds` and `pattern`
+narrow it — and the result document is kept per file (path, size, mtime), so
+only the first call emulates. The tool concludes nothing from what it
+returns. A file without an `MZ` header is refused before FLOSS runs.
+
 ### Sample delivery
 
 | tool | arguments |
@@ -133,8 +154,8 @@ because it deleted files and stepped over directories, so every payload a run
 carved stayed on disk for the life of the host. A tree left empty by the sweep
 goes with the payloads it held; a symlink is never followed.
 
-`timeout_s` on `yara_scan` and `capa` is a request, not an instruction: the
-value the `capabilities` manifest declares (60 s and 300 s) is the ceiling, so
+`timeout_s` on `yara_scan`, `capa` and `floss` is a request, not an instruction: the
+value the `capabilities` manifest declares (60 s, 300 s and 600 s) is the ceiling, so
 a caller asking for more is given that. Asking for less is honoured.
 
 ### Capabilities
@@ -163,6 +184,15 @@ one tool, never the server:
 
 `pefile`, `pyelftools`, `yara-python`, `pySigma` and `flare-capa` come from the
 main dependency set; `flare-capa` needs `uv sync --extra capa`.
+
+`flare-floss` (Apache-2.0; its own new dependencies `binary2strings`, `halo`,
+`log-symbols`, `spinners`, `tabulate` and `termcolor` are MIT) is the `floss`
+tool's and comes with `uv sync --extra floss`, pinned at exactly 3.1.1 because
+the tool reads FLOSS's JSON result document field by field. Its `networkx<3.2`
+bound holds networkx at 3.1 for every extra in the one lockfile. Without it the
+manifest marks `floss` unavailable and a call answers
+`flare-floss is not installed`. `binary2strings` ships no Linux wheel and is
+built from source, so the host needs a C++ compiler for this extra.
 
 No tool raises. Anything unexpected comes back as `{"error": ..., "tool": ...}`
 so a model can route around it instead of retrying a failed transport call.

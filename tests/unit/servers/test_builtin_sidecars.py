@@ -61,6 +61,7 @@ def test_the_analysis_golden_carries_the_tools_the_static_analyst_needs() -> Non
         "yara_scan",
         "sigma_match",
         "capa",
+        "floss",
     } <= tools
 
 

@@ -579,6 +579,17 @@ change landed on `main`.
   touches `docs/**` or `mkdocs.yml` and deploys it to GitHub Pages on a push to
   `main`; a `docs` dependency group keeps MkDocs Material out of the product's
   own dependencies.
+- **An emulating string decoder on the analysis server.** `floss` recovers the
+  decoded, stack and tight strings of a PE by emulating the sample's own
+  decoding and string-building functions under vivisect (FLOSS, run as a child
+  process with a 600 s ceiling; the sample is never executed). Each row names
+  the function that decoded or built the string, as a virtual address and
+  relative to the image base, and a decoded string its call site. The answer is
+  paged like `strings`, with `kinds` and `pattern` filters, and only the first
+  call on a file emulates. On an encrypted-string loader it recovered 81
+  strings in 38 s — the mutex name, the install directory and file names, the
+  scheduled-task name, both C2 URLs, the User-Agent, the beacon format and the
+  command words that a plain `strings` pass cannot see.
 
 ### Changed
 
@@ -3352,3 +3363,12 @@ The same applies to an export carrying the judgement-layer settings —
 and `core.preprocessing.category_inference_backend`. `core.analysis.sigma_rules_dir`
 is not dropped but moved: it becomes `MALJAN_SIGMA_RULES_DIR` in the `analysis`
 tool server's `env`, and the migration moves a stored value across for you.
+
+`floss` needs the new `floss` extra: `uv sync --extra floss` (or
+`--all-extras`, which `make setup` already runs) pins `flare-floss` 3.1.1,
+Apache-2.0. Its `networkx<3.2` bound moves networkx from 3.6.1 to 3.1 in the
+lockfile, which the `capa` and `tools` extras share; nothing in the product's
+core dependencies moves. `binary2strings`, which FLOSS needs, ships no Linux
+wheel and is built from source, so a host installing this extra needs a C++
+compiler. The backend image does not install it; without it the capability
+manifest marks `floss` unavailable and the model is not offered the tool.

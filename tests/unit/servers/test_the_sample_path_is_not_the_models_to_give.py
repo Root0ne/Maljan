@@ -60,6 +60,7 @@ READS_A_FILE = frozenset(
         "document_info",
         "yara_scan",
         "capa",
+        "floss",
     }
 )
 CARVED = "carved_path"

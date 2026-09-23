@@ -685,6 +685,14 @@ with `uv sync --extra tools` (the backend image already does); without them
 `{"error": "<module> is not installed"}`. Nothing else changes, and the server
 starts either way.
 
+`floss`, the emulating string decoder, rests on `flare-floss` (Apache-2.0),
+pinned exactly in its own extra: `uv sync --extra floss`. The backend image
+does not install it, as it does not install capa. Without it the capability
+manifest marks `floss` unavailable with the reason and the model is not offered
+the tool; with it, the first call on a sample emulates for up to ten minutes
+(declared as the tool's `timeout_s`) and later pages of the answer come from
+the kept result.
+
 Five teams ship built in; they are listed under **Teams** below. `default` is
 the three analysts with their tools.
 `measurement` is the same three analysts with `exclude_servers: ["*"]`,
