@@ -118,6 +118,55 @@ class TestAMalwareVerdict:
         assert OBSERVED in body
 
 
+class TestSigma:
+    """A Sigma selection is held to the same rule: published, or watched by a sandbox."""
+
+    RUN_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+
+    def _sigma(self, **over: Any) -> Any:
+        return _rule(_report(**over), "sigma")
+
+    def test_an_analyst_persistence_target_the_table_does_not_publish_makes_no_draft(
+        self,
+    ) -> None:
+        from maljan.reporting.models import PersistenceMechanism
+
+        mech = PersistenceMechanism(
+            kind="registry_run", target=self.RUN_KEY, payload="C:\\Users\\Public\\example.exe"
+        )
+
+        assert self._sigma(persistence=[mech]) is None
+
+    def test_a_key_the_sandbox_watched_is_selected(self) -> None:
+        from maljan.reporting.models import DynamicBehavior, RegistryMod
+
+        dynamic = DynamicBehavior(
+            registry_mods=[
+                RegistryMod(
+                    hive="HKCU",
+                    key=self.RUN_KEY,
+                    value_name="example",
+                    operation="create",
+                )
+            ]
+        )
+
+        rule = self._sigma(dynamic=dynamic)
+
+        assert rule is not None and "CurrentVersion" in rule.body
+
+    def test_a_sandbox_signature_is_selected(self) -> None:
+        from maljan.reporting.models import DynamicBehavior, SandboxSignature
+
+        dynamic = DynamicBehavior(
+            sandbox_signatures=[SandboxSignature(name="AutoRun", description="Installs autorun")]
+        )
+
+        rule = self._sigma(dynamic=dynamic)
+
+        assert rule is not None and "Installs autorun" in rule.body
+
+
 class TestTheReader:
     @pytest.mark.parametrize(
         "text",

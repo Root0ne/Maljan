@@ -392,9 +392,26 @@ def _validate_yara(body: str) -> str | None:
 
 
 def _build_sigma(report: MalwareReport) -> DetectionRule | None:
-    """Build a Sigma YAML rule keyed by registry / persistence / sandbox sigs."""
-    registry_targets = _collect_registry_targets(report)
-    persistence_images = _collect_persistence_images(report.persistence)
+    """Build a Sigma YAML rule keyed by registry / persistence / sandbox sigs.
+
+    A Sigma selection is a value too, and it is held to the drafts' rule
+    (:func:`sigma_admits`): a registry key or an image path is selected on only
+    when the IOC table publishes it or a sandbox watched it, and the sandbox's
+    own signature names only when a sandbox recorded them. An analyst's
+    persistence target the table does not publish selects nothing: it is the
+    analyst's reading, not a value this run publishes. With no such source
+    there is no Sigma draft.
+    """
+    admitted = sigma_admits(report)
+    registry_targets = [
+        target for target in _collect_registry_targets(report) if _admitted_value(target, admitted)
+    ]
+    persistence_images = [
+        image
+        for mech in report.persistence
+        for image in _collect_persistence_images([mech])
+        if _admitted_value(mech.target, admitted) or _admitted_value(mech.payload, admitted)
+    ]
     signatures = _collect_signature_names(report)
 
     if not (registry_targets or persistence_images or signatures):
@@ -461,6 +478,36 @@ def _build_sigma(report: MalwareReport) -> DetectionRule | None:
         source_evidence=sources[:20],
         compile_error=compile_error,
     )
+
+
+def sigma_admits(report: MalwareReport) -> frozenset[str]:
+    """The values a Sigma selection may name: published rows and what a sandbox watched.
+
+    Folded to lower case. The rule, stated once: a value the IOC table
+    publishes (``yes``) is the run's published indicator, and a row a sandbox
+    recorded is the run's own observation of the sample, which is what a
+    Sigma rule over process and registry events describes. Nothing else — a
+    string sweep's row, an analyst's persistence target the table did not
+    publish — reaches a selection.
+    """
+    rows = list(getattr(report, "consolidated_iocs", None) or [])
+    if not rows:
+        from maljan.reporting.builder import build_consolidated_iocs
+
+        rows = build_consolidated_iocs(report)
+    return frozenset(
+        row.value.strip().lower()
+        for row in rows
+        if str(row.published or "") == "yes" or str(row.source or "") == "sandbox"
+    )
+
+
+def _admitted_value(value: Any, admitted: frozenset[str]) -> bool:
+    """Whether ``value`` — or the key it opens with, for a ``key (name)`` row — is admitted."""
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+    return any(text == item or item.startswith(text + " (") for item in admitted)
 
 
 def _collect_registry_targets(report: MalwareReport) -> list[str]:
