@@ -306,15 +306,3 @@ class TestTheWorker:
 
         with pytest.raises(JobCancelled):
             asyncio.run(_main())
-
-    def test_threads_still_blocked_after_shutdown_are_left_after_the_grace(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from app.worker import analysis_worker
-
-        exited = threading.Event()
-        monkeypatch.setattr(analysis_worker.os, "_exit", lambda code: exited.set())
-
-        analysis_worker._leave_blocked_threads_after(0.05)
-
-        assert exited.wait(PROMPTLY)

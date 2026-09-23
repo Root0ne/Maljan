@@ -926,7 +926,8 @@ CANCEL_POLL_SECONDS = 15.0
 # thread — before it leaves them. The grace a cancellation is given to be
 # delivered anywhere else (``base_agent.CANCEL_DELIVERY_GRACE``). SIGTERM ends
 # the worker within these two, the job's teardown (``WORKER_TEARDOWN_TIMEOUT``)
-# and the closing of its connections: 10 s + 60 s + 10 s as shipped.
+# and the closing of its two connections, each held to the same grace:
+# 10 s + 60 s + 2 × 10 s + 10 s as shipped.
 PIPELINE_STOP_GRACE = CANCEL_DELIVERY_GRACE
 EXIT_GRACE = CANCEL_DELIVERY_GRACE
 
@@ -953,35 +954,77 @@ async def await_the_pipeline(task: asyncio.Task[Any], cancellation: Cancellation
     return task.result()
 
 
-def _leave_blocked_threads_after(grace: float) -> None:
-    """End the process ``grace`` seconds from now if something still holds it open.
+# Whether this process has asked to be left by blocked threads at exit.
+_EXIT_GUARD_ARMED = False
 
-    A daemon thread, so a process whose threads all end first exits on its own
-    and this dies with it. What can hold it is a thread blocked in a call that
-    cannot be cancelled — a synchronous model request in flight — which the
-    interpreter joins at exit and which ends only at its provider's request
-    timeout. The shutdown is complete by the time this runs, so nothing is
-    lost by leaving them.
+
+def blocked_threads() -> list[str]:
+    """The non-daemon threads still alive besides the main thread and the caller."""
+    here = threading.current_thread()
+    return sorted(
+        thread.name
+        for thread in threading.enumerate()
+        if thread.is_alive()
+        and not thread.daemon
+        and thread is not threading.main_thread()
+        and thread is not here
+    )
+
+
+def _leave_blocked_threads_after(grace: float) -> None:
+    """From the interpreter's own exit: end the process after ``grace`` if a thread still holds it.
+
+    Runs when the interpreter begins shutting down, before it joins the
+    threads that are still alive — the one point at which the process is
+    certainly leaving. It starts a daemon thread and returns, so the joins go
+    ahead; a process whose threads all end within the grace exits on its own
+    and the daemon dies with it. What can hold it is a thread blocked in a call
+    that cannot be cancelled — a synchronous model request in flight — which
+    ends only at its provider's request timeout. Such threads are left, the
+    names logged, and the process ends with status 1 so a supervisor sees
+    that it did not end cleanly. Nothing is left when nothing is blocked.
     """
 
     def _leave() -> None:
         time.sleep(grace)
-        held = sorted(
-            thread.name
-            for thread in threading.enumerate()
-            if not thread.daemon and thread is not threading.main_thread()
-        )
+        held = blocked_threads()
+        if not held:
+            return
         logger.warning(
-            "Worker exit held %.0fs after shutdown by %d thread(s) blocked in calls that "
-            "cannot be cancelled (%s); leaving them.",
+            "Worker exit held %.0fs by %d thread(s) blocked in calls that cannot be "
+            "cancelled (%s); leaving them.",
             grace,
             len(held),
-            ", ".join(held) or "none named",
+            ", ".join(held),
             extra={"component": "worker.lifecycle"},
         )
-        os._exit(0)
+        os._exit(1)
 
     threading.Thread(target=_leave, name="worker-exit-guard", daemon=True).start()
+
+
+def arm_the_exit_guard(grace: float | None = None) -> None:
+    """Have the process's own exit leave threads still blocked after ``grace``. Once per process.
+
+    Registered on the hook the interpreter runs as it starts to shut down,
+    before it joins non-daemon threads (the one ``concurrent.futures`` uses to
+    join its executors, which is what a blocked model call holds). Arming does
+    nothing to the running process: a caller of ``shutdown`` that goes on
+    running — a test — is untouched, and at its own exit the guard acts only
+    if a thread is still blocked.
+    """
+    global _EXIT_GUARD_ARMED
+    if _EXIT_GUARD_ARMED:
+        return
+    wait = EXIT_GRACE if grace is None else float(grace)
+    register = getattr(threading, "_register_atexit", None)
+    if register is None:  # pragma: no cover - every supported interpreter has it
+        return
+    try:
+        register(lambda: _leave_blocked_threads_after(wait))
+    except RuntimeError:  # the interpreter is already shutting down
+        return
+    _EXIT_GUARD_ARMED = True
 
 
 # ── Job ownership ───────────────────────────────────────────────
@@ -2971,22 +3014,26 @@ async def shutdown(ctx: dict) -> None:
             with suppress(asyncio.CancelledError):
                 await task
 
+    # Each close is bounded: a connection that does not close would otherwise
+    # hold the shutdown open before the process ever reaches its exit.
     redis_conn: aioredis.Redis | None = ctx.get("redis")
     if redis_conn:
-        await redis_conn.aclose()
+        with suppress(TimeoutError):
+            await asyncio.wait_for(redis_conn.aclose(), timeout=EXIT_GRACE)
 
     db_session = ctx.get("db_session")
     if db_session:
         # Dispose the engine
         engine = db_session.kw.get("bind")
         if engine:
-            await engine.dispose()
+            with suppress(TimeoutError):
+                await asyncio.wait_for(engine.dispose(), timeout=EXIT_GRACE)
 
     logger.info(
         "Worker shutdown complete",
         extra={"component": "worker.lifecycle"},
     )
-    _leave_blocked_threads_after(EXIT_GRACE)
+    arm_the_exit_guard()
 
 
 # The enrichment task lives in a sibling module. Importing it at module
