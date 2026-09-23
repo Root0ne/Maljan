@@ -569,12 +569,30 @@ reference naming the label is rewired onto either. The map from each label to
 its published id travels with the verdict and is kept, with the judge's own
 bundle, in `analysis_reports.judge_stix_bundle`, served at
 `/reports/{id}/stix?source=judge` — the bundle every export decline row says an
-object "is unchanged in". Feedback names the judge's own positions and labels
+object "is unchanged in". That bundle is the judge's JSON as the judge wrote
+it (`"as_written": true`), not a dump of the platform's models, so it holds
+every property the judge wrote. A property the models for its type do not
+declare — an indicator's `valid_until` or `kill_chain_phases`, a
+relationship's `description`, a malware object's `aliases` — does not reach
+the export, and each object that carried one is a recorded
+`stix.property_not_carried` row naming the keys. The row is never fed back:
+nothing in the judge's answer is wrong, and the retry is not spent on it. A
+malware object's `sample_refs` is carried. Feedback names the judge's own positions and labels
 (`objects[3] 'indicator--2'`), not positions in the post-processed list, and a
 drop maps them back. Nothing is written into a judge object that the judge left
 out: an untyped indicator stays untyped, and a malware object without
 `is_family`, which STIX requires, is asked about (`stix.is_family_missing`),
 and an `is_family` the judge wrote is published as written.
+
+A judge malware object the export declines for a property the standard
+requires does not take the judge's relationships with it. The platform's own
+sample object stands in for it, and every relationship that named it moves
+onto that object unchanged — confidence, basis and credits as the judge wrote
+them — so the technique the judge numbered is used by the export's malware
+object and published at the judge's number, as the report publishes it. In a
+Malware export every indicator indicates the malware object: the judge's own
+`indicates` edges are carried, and an indicator with none is given a plain
+one.
 
 The export names its producer in STIX's own vocabulary: one `identity` for this
 platform, `identity_class: system`, under an id derived once
