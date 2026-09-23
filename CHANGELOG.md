@@ -1500,12 +1500,15 @@ change landed on `main`.
   returns — Ollama's `eval_count`/`eval_duration`, otherwise the output token
   count over the call's wall clock — and those two calls wait
   `max(configured, min(max_tokens / rate × 1.5, 1800 s))`
-  (`llm.generation_rate`). With no rate yet the configured value stands. The
-  OpenAI-compatible provider's `request_timeout` now reads the same 1,800 s
-  constant instead of its own literal. `run_summary.generation` records each
-  model's rate and source and each sized call's configured, derived and applied
-  seconds, and the report's Run Summary and the run summary's markdown print
-  them.
+  (`llm.generation_rate`), a composer section twice that for its one
+  validation retry. With no rate yet the configured value stands. Rates are
+  kept per model and server, and each answer of a model list counts against
+  the model that gave it. The 1,800 s ceiling is the providers' shared request
+  timeout. Each sized call starts its model list on its own wait, so a slow
+  primary is not declared stalled at a share of an older clock.
+  `run_summary.generation` records each model's rate and source and each sized
+  call's configured, derived and applied seconds, and the report's Run Summary
+  and the run summary's markdown print them.
   **Upgrading:** a slow model's verdict call and composer sections can now run
   up to 1,800 s each where they were cut at 600 s and 120 s, so a job on such a
   model can take longer before a section is dropped; a fast model's timeouts
@@ -1516,14 +1519,21 @@ change landed on `main`.
   Ollama model at its configured output cap.** The composer ran on the
   reporter's model, built with `judge_max_tokens` (8,192), so a section could
   generate nine times the 900 tokens its setting names; its model is now built
-  with `core.reporting.composer_section_max_tokens` as its output cap. And
-  `ChatOllama` drops a `max_tokens` it is handed, so on Ollama no cap reached
-  the server at all — not the judge's, the analysts' or a section's; the Ollama
-  provider now passes it as `num_predict`.
-  **Upgrading:** a composer section longer than `composer_section_max_tokens`
-  is now cut at that length by the model server, and on Ollama the judge's
-  answer at `judge_max_tokens` and an analyst's at `expert_max_tokens`; raise
-  the setting where a section or verdict needs more room.
+  with `core.reporting.composer_section_max_tokens` as its output cap, plus
+  `judge_max_tokens` of room for reasoning where the reporter's provider has
+  not been told to keep reasoning out (`disable_thinking`). And `ChatOllama`
+  drops a `max_tokens` it is handed, so on Ollama no cap reached the server at
+  all — not the judge's, the analysts' or a section's; the Ollama provider now
+  passes it as `num_predict`. A section the cap cut is recorded as cut at that
+  cap, the verdict call records whether it reached `judge_max_tokens`, and
+  Ollama's `done_reason: "length"` counts as a cut.
+  **Upgrading:** a model's reasoning counts against these caps — Ollama's
+  `num_predict` and llama.cpp's `n_predict` include the thinking channel. A
+  composer section longer than its cap is now cut by the model server, and on
+  Ollama the judge's answer at `judge_max_tokens` and an analyst's at
+  `expert_max_tokens`, reasoning included. With a reasoning model, set
+  `disable_thinking` or raise the cap where a section or verdict comes back
+  empty or cut.
 
 ### Fixed
 
@@ -3543,7 +3553,10 @@ change landed on `main`.
   `confidence`) is `null`, `run_summary.negotiation.termination_reason` is
   `not_applicable` with **no** `final_confidence` or `converged_early` key, the
   report's `negotiation_summary` has no `final_confidence`, and the negotiation
-  timeline's `reached_consensus` is `null`. A consumer must read an absent or
+  timeline's `reached_consensus` is `null`. The mediator's words are kept
+  whole in the argument's `finding`, and the platform's "not applicable"
+  sentence is in its own `note` field (stored as `note` beside each negotiation
+  entry). A consumer must read an absent or
   `null` value as "not measured", never as 0.0 or as no consensus. A mock run's
   analysts file no claims, so a mock run now takes this path too.
 
@@ -3552,15 +3565,23 @@ change landed on `main`.
   of 40 and was aborted ("exceeded the 1530s hard cap; aborting this analyst"),
   and everything it had gathered was lost with no final-answer turn. The soft
   timeout was reported as the hard cap and handled like it. The loop now times
-  its own model turns and ends its tool phase once the time left cannot hold
-  the longest turn it has seen plus a final-answer reserve — that turn × 1.5,
-  at least the salvage's 60 s floor — and the salvage writes the answer from
-  what was gathered. At that pace with one 240 s turn, the reserve is 360 s and
-  the tool phase ends with 600 s left. A turn longer than any measured that
-  still reaches the budget ends the phase there, with what was gathered kept,
-  rather than failing the analyst. The budget record, the
-  `stage_ended_at_cap` event and `run_summary.budget` say `time`, with a detail
-  naming the time left, the longest turn and the reserve.
+  its own turns — answer to answer, tools included — per answering model,
+  leaving out the turn a model list switched on, and ends its tool phase once
+  the time left cannot hold the longest turn plus a final-answer reserve: 1.5 ×
+  the larger of that turn and a 1,000-token answer at the model's measured
+  rate, at least the salvage's 60 s floor. The salvage writes the answer from
+  what was gathered. At that pace with one 240 s turn and 3.8 tokens a second,
+  the reserve is about 395 s and the tool phase ends once under 635 s are left.
+  The last turn's calls that never ran are taken off the transcript the final
+  answer is sent (hosted providers refuse an unanswered call), its text kept
+  and the record saying they did not run; a model list's deadline is held at
+  the reserve for that turn; the answer asked for after it gets only what that
+  turn left. A turn longer than any measured that still reaches the budget
+  ends the phase there, with what was gathered kept, rather than failing the
+  analyst; a budget that runs out with nothing gathered says so instead of
+  naming the hard cap. The budget record, the `stage_ended_at_cap` event and
+  `run_summary.budget` say `time`, with a detail naming the time left, the
+  answering model's longest turn and the reserve.
   **Upgrading:** an analyst on a slow model now stops calling tools before its
   budget and returns claims where it used to fail with a `TimeoutError`, so
   such a run makes fewer tool calls and has one more analyst reporting; the

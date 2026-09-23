@@ -744,18 +744,36 @@ wall clock (the client drops llama.cpp's `timings`, and the wall clock includes
 reading the prompt, so that rate is lower than the server's and the wait
 longer). The margin, 1.5, covers the prompt read and the spread between turns.
 The ceiling, 1,800 s, is the HTTP request timeout every provider's client is
-built with (`PROVIDER_REQUEST_TIMEOUT_SECONDS`), so no wait outlives the request
-carrying it; a configured value above it is kept. At 3.8 tokens a second the
-judge's budget needs 8,192 / 3.8 × 1.5 ≈ 3,234 s, so the verdict call is held at
-1,800 s and can receive about 6,840 tokens (3.8 × 1,800) where 600 s allowed
-about 2,280; a composer section gets 900 / 3.8 × 1.5 ≈ 355 s. A fast model's
-derived time falls under its configured one, which then stands. Until a model
-has answered once, and for a call with no output budget, the configured value
-stands. The section budget is also the section's real cap: the composer's model
-is built with `composer_section_max_tokens` as its output limit rather than the
-judge's, and on Ollama every output cap — this one, `judge_max_tokens`,
-`expert_max_tokens` — reaches the server as `num_predict`, which `ChatOllama`
-otherwise drops. `run_summary.generation` records
+built with (`PROVIDER_REQUEST_TIMEOUT_SECONDS`), so no derived wait outlives the
+request carrying it. A configured value above the ceiling is not lowered, but
+the request timeout still ends any single call at 1,800 s. At 3.8 tokens a
+second the judge's budget needs 8,192 / 3.8 × 1.5 ≈ 3,234 s, so the verdict
+call is held at 1,800 s and can receive about 6,840 tokens (3.8 × 1,800) where
+600 s allowed about 2,280. A composer section is its answer and the one retry
+its validation allows, so its wait holds two calls: 2 × 900 / 3.8 × 1.5 ≈ 710 s
+where the section's cap is 900. A fast model's derived time falls under its
+configured one, which then stands. Until a model has answered once, and for a
+call with no output budget, the configured value stands. Rates are kept per
+model and per server, so one tag served by a local and a remote Ollama is two
+paces. The verdict call and each section start their model list on that wait,
+so a slow primary is not declared stalled at a share of an older clock.
+
+The section budget is also the section's real cap, and a model's reasoning
+counts against it: Ollama's `num_predict` and llama.cpp's `n_predict` include
+the thinking channel. Where the reporter's provider has been told to keep
+reasoning out (`llm.ollama.disable_thinking` or `llm.openai.disable_thinking`),
+the composer's model is capped at `composer_section_max_tokens` alone. Where it
+has not, the cap is that budget plus `judge_max_tokens` — the reporter's own
+room — for the reasoning, and the wait is sized from that cap: the platform
+cannot tell a reasoning tag from its name, and sending `think: false` to a
+model that does not reason is an error on Ollama. A section the cap cut is
+recorded as cut at that cap, not as a schema failure. On Ollama every output
+cap — this one, `judge_max_tokens`, `expert_max_tokens` — now reaches the
+server as `num_predict`, which `ChatOllama` otherwise drops, so a thinking
+model's reasoning counts against the judge's and the analysts' caps too;
+`disable_thinking`, or a larger cap, is the remedy. The verdict call records
+whether it reached `judge_max_tokens`, Ollama's `done_reason: "length"`
+included. `run_summary.generation` records
 each model's rate, tokens, seconds, calls and source, and for each sized call
 the configured value, the budget, the rate, the derived and the applied
 seconds; the report's Run Summary prints the same numbers.

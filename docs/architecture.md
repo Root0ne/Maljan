@@ -1283,16 +1283,27 @@ pipeline panel rather than from a log line.
 The time cap ends a tool phase the way the step cap and a full window do: with
 the salvage writing the answer from what was gathered. It has to end early to
 do that, because the thirty seconds of grace past the budget are a fraction of
-one turn of a slow model. So the loop times its own model turns, and once the
-time left cannot hold the longest turn it has seen plus a reserve for the
-final answer — that turn × 1.5, the margin the per-call timeouts use, and at
-least the salvage's 60 s floor — it stops calling tools and salvages. On a
-model at about 100 s a turn with one 240 s turn, the reserve is 360 s and the
-tool phase ends with 600 s of a 1,500 s budget left. A turn longer than any
-measured can still reach the budget itself; the loop then keeps what it
-gathered instead of aborting the analyst, and the salvage gets what time is
-left. Either way the cap is recorded as `time`. The hard cap stays the hard
-cap.
+one turn of a slow model. So the loop times its own turns — from one model
+answer to the next, the tools it asked for included — per answering model, and
+leaves out the turn on which a model list switched, which holds the dead
+model's deadline and not the new model's pace. Once the time left cannot hold
+the longest turn plus a reserve for the final answer, it stops calling tools
+and salvages. The reserve is 1.5 (the margin the per-call timeouts use) times
+the larger of the longest turn and, where the model's generation rate is
+measured, a 1,000-token answer at that rate — the size of the slow run's own
+final-answer calls, 222 s and 158 s at 3.8 tokens a second — and at least the
+salvage's 60 s floor. On a model at about 100 s a turn with one 240 s turn and
+a measured 3.8 tokens a second, 1,000 / 3.8 ≈ 263 s is the larger, the reserve
+is about 395 s, and the tool phase ends once under 635 s of a 1,500 s budget
+are left. The turn the clock ended holds calls that never ran; they are taken
+off it, its text kept and the record saying so, because a hosted provider
+refuses a transcript with an unanswered call. A model list's turn deadline is
+held at the reserve for the final-answer turn, and the answer asked for after
+it gets only the time that turn left. A turn longer than any measured can
+still reach the budget itself; the loop then keeps what it gathered instead of
+aborting the analyst, and the salvage gets what time is left. Either way the
+cap is recorded as `time`; a budget that runs out with nothing gathered says
+so rather than naming the hard cap. The hard cap stays the hard cap.
 That stamp is what makes a report checkable: the model can cite the call it read
 a fact from, a report section lists the entries it was built from, and `GET
 /api/v1/jobs/{id}/evidence` serves those entries back.
