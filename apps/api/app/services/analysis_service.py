@@ -97,16 +97,27 @@ class AnalysisService:
         # only covered get_job / list_jobs), diverging from GET /jobs.
         job.sample = sample
 
+        # The row is committed before the worker is told about it. A worker
+        # that dequeues a job reads the row from its own session, and a row
+        # that exists only inside this request's open transaction is invisible
+        # to it: the worker then reads "Job not found", gives up, and the row
+        # it could not see stays ``pending`` for ever once this request commits.
+        await self.db.commit()
+
         # Enqueue to ARQ worker. Failure here is **propagated** as a 503 by the
         # route handler — silently returning a "failed" job would mislead the
-        # caller into believing the analysis was accepted.
+        # caller into believing the analysis was accepted. The row is already
+        # committed, so its failure is committed too: the rollback the route's
+        # error path triggers would otherwise leave it ``pending`` with no
+        # queued work behind it.
         try:
             arq = await self._get_arq_redis()
             await _enqueue_analysis(arq, job.id)
         except Exception as exc:
             job.status = "failed"
             job.error_message = f"Failed to enqueue job: {exc}"
-            await self.db.flush()
+            job.completed_at = datetime.now(UTC)
+            await self.db.commit()
             raise JobEnqueueError(str(exc)) from exc
 
         return job
