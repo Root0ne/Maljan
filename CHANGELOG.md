@@ -573,6 +573,26 @@ change landed on `main`.
   beside `core.preprocessing.max_tool_output_chars`, with the source word
   itself, and says which setting would fix an unknown window.
 
+- **Key findings, an execution flow, a configuration table and a command
+  table, written by the report model.** The narrative round answers three to
+  six key findings, each with the ledger entries it cites; the composer writes
+  the execution flow (each step marked *observed* or *assessed*), the
+  configuration it recovered with how each value was obtained, the commands
+  the sample accepts, prose for API and string resolution, command and control
+  and payloads, and C2 channels with their endpoints. Each is asked for as the
+  exact JSON object with an example and printed as written. New validation
+  codes, fed back once and recorded when they survive: `narrative.ungrounded_finding`,
+  `report.flow_voice`, `report.configuration_uncited`.
+- **`reporting.defang`.** `defang(value, kind)` writes network indicators the
+  way analysts exchange them (`hxxps://`, `[.]`, `[:]`, `[@]`) and leaves every
+  other kind unchanged; `ProseDefanger` applies it to exactly the run's own
+  indicators inside prose.
+- **`pe_info` reports export ordinals and addresses, the export directory's
+  name and the version resource's naming strings** (`export_rows`,
+  `export_name`, `version_info`). The report's identity gains `architecture`,
+  `is_dll`, `export_name` and `internal_name`, and the compile timestamp is
+  read from the header.
+
 ### Changed
 
 - **Staging is per job.** The sidecars' staging directory held every job the
@@ -1302,6 +1322,39 @@ change landed on `main`.
   reads `1837` where it read `1842` and five category shares move by one
   rounding place; no Linux rule's rate moves at all. No behaviour category was
   renamed or removed, so a consumer reading `category` alone is unaffected.
+- **The report reads as a vendor's malware analysis.** The Markdown, HTML and
+  PDF follow one numbered layout — key findings, sample overview, verdict and
+  assessment, execution flow, technical analysis by capability, observed
+  behaviour, static properties, ATT&CK, indicators, detection,
+  recommendations, attribution, limitations and four appendices — and every
+  H2 names its voice: Measured, Observed in sandbox, Assessed by the judge or
+  Written by the report model. A confidence prints as its number, a fixed word
+  for it and its producer. The title names the family and category when the
+  judge named a family. The tool failures and evidence counts move from the
+  header to §13; the header keeps one line pointing there. A reader or a
+  script that finds sections by their old headings (`## Sample
+  Identification`, `## Severity & Impact`, `## Executive Summary`, `##
+  Network IOCs`, `## Evidence`, `## Run Summary`, …) must look for the new
+  numbered ones.
+- **Network indicators in the Markdown, HTML and PDF are defanged by kind**,
+  in tables, in model prose and in the evidence appendix. The JSON report,
+  the STIX bundle, MISP and `/reports/{id}/iocs` stay live.
+- **`consolidated_iocs` stores live values with their kind, source, context
+  and the publish rule's answer** (`published`: `yes` or `no: <reason>`), and
+  the report prints it as its indicator section. A consumer that read the old
+  defanged `value` now reads the live one.
+- **With no narrative, the report writes no prose.** The fallback no longer
+  fills the executive summary, capability paragraphs and a recommendation from
+  a template; the report records `the report model wrote no summary: <why>`
+  among the degradation reasons and says it in §1. A mock run's summary and
+  recommendations are empty.
+- **The recommendation category is the model's own.** It was re-derived from
+  the action's wording and overwrote the model's answer.
+- **The console's SUMMARY tab draws the key findings and the technical
+  analysis**, labelled as the report model's; IDENTITY adds the header facts,
+  STATIC the export ordinals and addresses, ATTRIBUTION who named the family
+  and the entries cited.
+
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was
@@ -3312,6 +3365,15 @@ change landed on `main`.
   catalogue per domain. Nothing in the tree reads the old path; a deployment or
   a script of your own that reads it by name must be pointed at the new file,
   whose rows are keyed the same way and carry the same two keys.
+- **The severity score** (`severity.overall_score`), the rating read through
+  a fixed table and printed as a number out of ten nobody stated. A stored
+  report's score is ignored on load.
+- **The capability paragraphs and the conclusion as sections.** The narrative
+  round and the composer no longer write `capabilities_narrative` or
+  `conclusion`; a stored report prints its paragraphs under the technical
+  analysis and its sophistication rating beside the verdict.
+- **`reporting.builder.defang`**, replaced by `reporting.defang.defang(value, kind)`.
+
 ### Upgrading
 
 An existing `.env` deployment is not migrated automatically. Move the bootstrap
@@ -3345,3 +3407,14 @@ The same applies to an export carrying the judgement-layer settings —
 and `core.preprocessing.category_inference_backend`. `core.analysis.sigma_rules_dir`
 is not dropped but moved: it becomes `MALJAN_SIGMA_RULES_DIR` in the `analysis`
 tool server's `env`, and the migration moves a stored value across for you.
+
+Reports are not migrated. A report stored before the vendor layout renders in
+it with the sections it has: its score is ignored, its capability paragraphs
+print under the technical analysis, its conclusion's rating beside the verdict
+and its indicator table is rebuilt from its own blocks. A consumer reading
+`severity.overall_score`, `capabilities_narrative`, `conclusion` or the old
+defanged `consolidated_iocs[].value` must stop: the score is gone, the two
+prose fields are written by nothing, and the value is live. Scripts that parse
+the Markdown by heading must use the new numbered headings, and a pipeline
+that expected a summary on a mock run must expect `executive_summary` empty
+and read the degradation reason instead.

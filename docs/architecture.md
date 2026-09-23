@@ -1513,6 +1513,89 @@ is assembled from what the run gathered rather than recomputed beside it:
   dropped, and any section it lost outright (still off-schema after its retry,
   timed out, or failed), is added to the report's degradation reasons, which
   the header prints under **Notes** on a run that is not otherwise degraded.
+* **The rendered report reads as a vendor's malware analysis, in three
+  labelled voices.** The Markdown — and the HTML and PDF made from it —
+  follows one numbered layout: a title block naming the family and category
+  when the judge named a family, with the TLP, the report number and the date;
+  §1 key findings; §2 sample overview; §3 verdict and assessment, with the
+  judge's rationale quoted unedited; §4 execution flow; §5 technical analysis
+  by capability, each subsection's prose followed by the measured or observed
+  tables that prove it; §6 observed behaviour; §7 static properties with the
+  rule hits; §8 one ATT&CK table with procedure, source, confidence, status and
+  evidence columns, the import-table rules among its rows; §9 the indicators;
+  §10 detection; §11 recommendations; §12 attribution with the similarity
+  scores and the background; §13 limitations, where the tool failures, the
+  evidence bounds, every unresolved finding and the export decisions are said;
+  and four appendices — the evidence index with every ledger section, the run
+  summary, the references and the methodology. Every H2 ends with its voice:
+  *Measured*, *Observed in sandbox*, *Assessed by the judge* or *Written by the
+  report model*, and a section of several voices tags each subsection. A
+  confidence is printed as a number, a fixed word for it and its producer —
+  *moderate-to-high confidence, 0.86, stated by the judge* — the word a
+  deterministic reading of the number (≥ 0.90 high, 0.70 moderate-to-high, 0.50
+  moderate, 0.30 low, below that very low) and never printed alone. Model prose
+  ends with its citations, or with *no evidence cited* and one sentence saying
+  to check it; the renderer adds tags, citations and words around the model's
+  text and changes none of it. A section with nothing in it is left out, and an
+  absence is said only for what a tool looked at: "no persistence observed"
+  when a sandbox ran, with the failed and trimmed entries named when the
+  evidence was partial, and "this report does not record whether a sandbox
+  ran" for a stored report that cannot say. The numbering is fixed, so a
+  comment can cite §7 whichever sections a run filled.
+* **Network indicators are defanged for reading, by their kind.**
+  `reporting.defang.defang(value, kind)` writes `hxxp://`, `hxxps://` and
+  `fxp://` with the host's dots bracketed, `[.]` in names and IPv4 addresses,
+  `[:]` in IPv6 and `[@]` in mail addresses; a hash, a path, a registry key, a
+  mutex, a pipe, a user agent and a command come back unchanged, so
+  `update_data.dat` is never bracketed. The same rule reaches model prose and
+  the evidence dump through `ProseDefanger`, which touches exactly the values
+  the run's network block and IOC table hold, as whole tokens. The JSON report,
+  the STIX bundle, MISP and `/reports/{id}/iocs` carry every value live, and
+  the indicator section says so under its tables. A §7 string is printed as
+  the file's bytes are, and says it is not an observed endpoint.
+* **The IOC table is the one publish rule's answer, row by row.**
+  `build_consolidated_iocs` stores every indicator live with its kind, who
+  recorded it and `published`: `yes`, or `no:` and the half of
+  `indicator_publish_reason` that refused it (`stix_renderer.publish_answer`),
+  asked with the arguments `/iocs` and the export ask it with. The renderer
+  rebuilds the table on request from the stored report, the way `/iocs` does,
+  so an enrichment that ran later is reflected and a report stored before the
+  table carried kinds prints in the new shape. A row the export mints nothing
+  from says so rather than borrowing an answer.
+* **What the models write is asked for as the exact object, with an example,
+  and printed as written.** The narrative round answers `executive_summary`,
+  three to six `key_findings` (each `{text, evidence_ids}`) and the
+  recommendations; its capability paragraphs are no longer asked for. The
+  composer writes the background, the execution flow (`FlowStep{order,
+  action, voice, evidence_refs}`, `voice` *observed* or *assessed*), the prose
+  subsections for packing, API and string resolution, discovery, persistence,
+  evasion, command and control and payloads, the configuration
+  (`ConfigItem{key, value, how_obtained, evidence_refs}`), the commands
+  (`CommandRow{id, name, description, evidence_refs}`) and the C2 channels,
+  which now carry their endpoints and citations; the conclusion is no longer
+  asked for. Three checks are shown to the model once through the existing
+  retry-with-feedback and recorded unresolved when they survive, and none
+  drops what it is about: `narrative.ungrounded_finding` (a key finding cites
+  an id no ledger entry carries), `report.flow_voice` (a step marked observed
+  cites no sandbox entry) and `report.configuration_uncited` (a value said to
+  be decrypted or observed cites no entry). A field a model did not supply is
+  absent from the report. The recommendation's category is the model's own.
+* **When no summary was written, the report says why and writes none.** The
+  fallback that filled the summary, the capability paragraphs and a
+  recommendation from a template is gone: its sentences read as the report
+  model's. The reason is recorded once among the degradation reasons
+  (`the report model wrote no summary: …`), and §1 prints it and lists the
+  verdict's facts with the voice of each. `tests/unit/test_no_silent_overrides.py`
+  pins the one module each model-written field may be written from.
+* **The severity score is gone.** It was the rating read through a fixed
+  table and printed as a number out of ten nobody stated; `SeverityAssessment`
+  ignores it on a stored report. A stored conclusion's sophistication rating is
+  printed beside the verdict and its text, which restated the summary, is not;
+  stored capability paragraphs print under the technical analysis's lead-in.
+* `pe_info` reports each export's ordinal and address, the export directory's
+  name and the version resource's naming strings; the identity carries the
+  architecture, whether the image is a library, those names and the header's
+  timestamp, printed as a header value that can be forged.
 * `qa/fp_linter.py` runs last and reports; it changes nothing. Its findings land
   in `run_summary.fp_warnings`, including C6 (a section or TTP row with nothing
   citable behind it) and C7 (a technique id the validation loop could not get
@@ -1798,8 +1881,9 @@ ungrounded row without asking.
 `evidence_corpus_bytes_ceiling`, read off the corpus while the container still
 has one. The three are **absent** on a run that recorded none of them — a
 summary stored before they existed, a run resumed without its corpus — because
-zero would say the corpus held nothing. The report's Bounds Hit section and the
-console's "what the run spent" print them only where they tell a reader
+zero would say the corpus held nothing. The run summary's Bounds Hit section,
+the report's limitations section and the console's "what the run spent" print
+them only where they tell a reader
 something: a corpus that went partial, or one past half its ceiling. Otherwise
 the record carries them and both surfaces stay quiet.
 
