@@ -8,6 +8,36 @@ change landed on `main`.
 
 ### Added
 
+- **A team is checked before it is saved, and shown as the graph it is.** The
+  rules the settings model applies to a team are now problem lists
+  (`stage_list_problems`, `stage_member_problems`, `stage_condition_problem`,
+  `builtin_profile_changed` in `maljan.core.config`): the model raises the
+  first, and the new team lint (`maljan.core.team_lint`) reports all of them,
+  each on the stage it concerns, adding a named cycle and warnings that never
+  block apply — a stage the verdict does not wait for or that runs after it, a
+  condition false for every sample, a condition reading a stage the team lacks
+  or has not run yet, an enabled agent nothing uses. The apply path refuses
+  from the lint, so the preview and apply say the same sentences, and a test
+  holds every model refusal to a lint error word for word.
+  `POST /api/v1/settings/lint-teams` (admin) serves the findings and each
+  team's layout; the team editor calls it as a team is edited and draws the
+  stage graph beside it, findings marked on the stage and listed in words.
+  The layout is `maljan.core.team_layout`, which the architecture-page team
+  diagrams now use too; the triage pack's adoption of a root stage is one rule,
+  `pipeline.topology.adopted_roots`, read by the builder and the layout.
+  A team has no size limit, so every pass over one is linear in its stages
+  and edges and none recurses: loops are found by an iterative Tarjan pass,
+  rows by Kahn's method, and the model's debate checks in one pass each. The
+  lint route and the agent-map half of `PATCH /settings` run in a worker
+  thread. A `when` nested too deeply for Python's parser is refused as a
+  condition error instead of escaping as a server error.
+- **Changed:** apply's team refusals now carry the settings model's own
+  sentences — a member error and a condition error name their stage (and a
+  member error its team), a debate's hand-over error and the verdict-judge
+  error are the model's wording — and a stage's field error is keyed by the
+  stage key rather than its position, like every other stage error. A loop
+  is written out once, as a real dependency path, on its first-declared
+  stage; every other stage on it points to that stage.
 - **The STIX bundle as a relationship graph.** DETECTION's STIX section gains
   Graph and Table views beside the JSON, all three reading the bundle the
   `/reports/{id}/stix` export serves. Nodes are the bundle's objects, an

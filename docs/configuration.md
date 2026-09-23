@@ -991,6 +991,63 @@ pipeline → Teams) is an ordered list of stages. Each stage is:
 | `debate` | Round limit, consensus threshold and sycophancy check, for a debate stage. |
 | `builtin_tools` | `false` withholds every built-in server (`analysis`, `knowledge`, `network`, `threatintel`, `virustotal`) from this stage's agents. |
 
+### Checking a team before it is saved
+
+The team editor checks every team as it is edited. Once typing pauses, the
+console sends the staged teams, the staged agent map and the staged active
+team to `POST /api/v1/settings/lint-teams`, which stores nothing and answers
+with every finding and each team's layout. Beside each team the console draws
+the stage graph that layout describes — stages as boxes in run order,
+`depends_on` as arrows, a conditional stage dashed — and marks each stage that
+has a finding; the same findings are listed in words under the graph and on
+each stage card.
+
+An **error** is a team apply refuses, and the lint reports it in the words
+apply refuses it with: the lint reads its errors off the same functions the
+settings model raises from (`maljan.core.team_lint`), and the apply path
+refuses from the lint. A test holds the two together: every refusal the
+settings model makes about a team is a lint error, word for word. The errors:
+
+- a team with no stages;
+- a stage key declared twice, or a key that is not a slug;
+- a stage that depends on itself, on a stage that does not exist, or on a
+  stage declared after it — and, named as such, a loop of stages that depend
+  on each other;
+- an agent in two analysis stages; an analysis stage with no agent;
+- a triage stage that names an agent, or is keyed like a node the pipeline
+  names itself;
+- a debate with no analysis stage upstream of it, one that names an agent, or
+  one that hands over to more than one node;
+- a stage naming an agent that does not exist, is disabled (a built-in team
+  may keep a disabled member while it is not the active team), or has the
+  judge or reporter role in an analysis stage;
+- not exactly one verdict stage, or a verdict stage not run by the judge;
+- more than one report stage, a report stage not run by the reporter, or one
+  that is not last;
+- a `when` the condition grammar refuses, reported by the parser that runs it;
+- a field of the wrong type or value, in pydantic's own words;
+- a built-in team edited beyond its debate options, its built-in-tool switch
+  and its excluded servers;
+- a team key that is not a slug.
+
+A **warning** is a team that saves and runs and will not do what it looks
+like it does. A warning never blocks apply, and each is decided from the team
+as written, never from a guess about the sample:
+
+- a stage the verdict stage does not run after (the judge does not wait for
+  it), or one that runs after the verdict, other than the report;
+- a condition that names no field and is false, so the stage never runs;
+- a condition reading `stages.<key>` for a stage the team does not have, or
+  for a stage this one does not run after;
+- an enabled agent that no team names and no agent asks;
+- an agent reading the static provider's tools while the static provider is
+  `none` (the note apply already returns).
+
+The layout the graph uses is `maljan.core.team_layout`: a stage one row below
+the lowest stage it runs after, stages that share a row side by side in the
+order they are written. The team diagrams on the architecture page are drawn
+with the same layout.
+
 ### The teams that ship
 
 | Team | Stages | What it is for |

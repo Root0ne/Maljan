@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -404,8 +405,11 @@ class SettingsService:
             # Per-key messages, so the two composite editors can put each error
             # on the card that caused it — the same reason the server map has
             # its own validation module.
+            #
+            # In a worker thread: the team lint behind it is CPU work over
+            # whatever the PATCH holds, and the event loop has other requests.
             try:
-                changes.update(validate_agent_map(changes, current))
+                changes.update(await asyncio.to_thread(validate_agent_map, changes, current))
             except AgentMapError as exc:
                 raise SettingsValidationError(dict(exc.errors)) from exc
         merged = {**current}
