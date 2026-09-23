@@ -90,7 +90,16 @@ flow — each step carrying the model's own mark, *observed in sandbox* or
 the commands the sample accepts and its C2 channels. Both cards say *Written by
 the report model* beside their heading. A run whose report model wrote nothing
 says why, in the words the report records, rather than showing a template: the
-platform writes no prose of its own. A report stored before key findings
+platform writes no prose of its own, and that line is labelled *Measured*, not
+as the report model's. A step or a configuration item the validator kept a
+finding on shows it beside the row (`report.flow_voice`,
+`report.configuration_uncited`), as the exported report does, and a step marked
+observed in a run with no sandbox observation says so. The console is a reading
+surface, so the defanging rule applies to it: a C2 channel's endpoints are
+written `hxxp://`, `[.]` and `[:]`; the machine surfaces keep them live. The
+severity card's platform line reads *Platform (from the file format,
+measured)*, since the builder reads it from the format and the judge did not
+assess it. A report stored before key findings
 existed shows its summary and the capability paragraphs it carried. IDENTITY
 adds the header facts the format tool read — architecture, whether the image is
 a DLL, the export directory's name and the version resource's internal name —

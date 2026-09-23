@@ -574,7 +574,7 @@ change landed on `main`.
   itself, and says which setting would fix an unknown window.
 
 - **Key findings, an execution flow, a configuration table and a command
-  table, written by the report model.** The narrative round answers three to
+  table, written by the report model.** The narrative round answers two to
   six key findings, each with the ledger entries it cites; the composer writes
   the execution flow (each step marked *observed* or *assessed*), the
   configuration it recovered with how each value was obtained, the commands
@@ -3259,13 +3259,52 @@ change landed on `main`.
   technique's source is every producer that named it — the rules that asserted
   it, the analysts, the judge's verdict — and a confidence no producer stated
   (the 0.0 a judge-only or rule-only technique carried, now flagged
-  `confidence_stated: false`) prints "not assessed" or "rule match", never
+  `confidence_stated: false`) prints "not given" or "rule match", never
   "0.00, judge". Every identity hash `/iocs` publishes is in the indicator table.
 - **An empty sandbox answer is not an observation.** The report speaks in the
   sandbox's voice only over what a sandbox recorded; a sandbox whose tools
   answered with nothing — a mock with no fixture — gets one sentence in the
   run's own voice saying nothing shows the sample was executed, with the reason
   the run recorded. The report models are told the same in their prompts.
+  An execution-flow step marked observed may cite only a sandbox answer that
+  recorded something; one citing an empty answer is asked about, and the report
+  prints the `report.flow_voice` note beside any step marked observed in a run
+  with no observation.
+- **Every numbered section is printed.** A section or a §5, §10 or §12
+  subsection with nothing in the run prints one line in the platform's voice
+  saying whether nothing was found or nothing looked; the table subsections of
+  §6, §7 and §9 are unnumbered headings. A script that looked for `### 6.1
+  Process tree`, `### 7.5 Rule hits`, `### 9.1 File and host indicators` and
+  their siblings must look for the unnumbered titles.
+- **A degraded run's header is one reader sentence.** It is built from the
+  analysts' and the sandbox's states and points to §13, which now lists every
+  degradation reason verbatim with its remedy and each analyst's state; no
+  reason code or install command is on the first screen, and §3 does not claim
+  consensus among analysts that claimed nothing.
+- **Every printed number has an owner.** A technique's confidence prints with
+  its producer (new `CapabilityCell.confidence_source`), or "producer not
+  recorded" on a stored row; an unstated one prints "not given"; a packer,
+  function-hash, similarity or carved-payload field with no value prints "not
+  recorded"; a similar sample with no distance is counted, not listed; §2 states
+  the reputation lookup's engine count ("VirusTotal: 52 of 75 engines flag it as
+  malicious"), which `ledger_report` now lifts into rows.
+- **The measured proof sits beside the prose.** §5.1 and §5.2 print the capa
+  rules that support them with their evidence ids; in §8 a rule naming a
+  technique a row already holds is folded into that row, and a rule-only
+  technique is one row with the catalogue's tactic and name.
+- **Voices name who spoke.** The platform's no-summary fallback, the platform
+  read from the file format (now a §2 row) and a family named by the sandbox
+  are no longer tagged as a model's or the judge's, in the report and in the
+  console; the title names a family only when the judge cited evidence for it;
+  the report model's unresolved findings print under §1.
+- **A value cannot break a line or open a heading.** List items, steps and
+  headings are built by one helper each, prose cannot open a heading or a code
+  fence, and a guard test fails the build on a hand-built bullet. The HTML
+  anchors and contents are the section titles without the voice tag, a model's
+  private address is marked in §5.7, prose never leaves `http://` live before a
+  defanged host, and the console defangs a channel's endpoints.
+- **A model's list is cut only with a record**, and a missing parser degrades a
+  run only for a sample of the format it parses (no Mach-O note on a PE).
 
 ### Removed
 
