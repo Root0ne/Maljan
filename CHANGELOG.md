@@ -8,6 +8,29 @@ change landed on `main`.
 
 ### Added
 
+- **A team is checked before it is saved, and shown as the graph it is.** The
+  rules the settings model applies to a team are now problem lists
+  (`stage_list_problems`, `stage_member_problems`, `stage_condition_problem`,
+  `builtin_profile_changed` in `maljan.core.config`): the model raises the
+  first, and the new team lint (`maljan.core.team_lint`) reports all of them,
+  each on the stage it concerns, adding a named cycle and warnings that never
+  block apply — a stage the verdict does not wait for or that runs after it, a
+  condition false for every sample, a condition reading a stage the team lacks
+  or has not run yet, an enabled agent nothing uses. The apply path refuses
+  from the lint, so the preview and apply say the same sentences, and a test
+  holds every model refusal to a lint error word for word.
+  `POST /api/v1/settings/lint-teams` (admin) serves the findings and each
+  team's layout; the team editor calls it as a team is edited and draws the
+  stage graph beside it, findings marked on the stage and listed in words.
+  The layout is `maljan.core.team_layout`, which the architecture-page team
+  diagrams now use too; the triage pack's adoption of a root stage is one rule,
+  `pipeline.topology.adopted_roots`, read by the builder and the layout.
+- **Changed:** apply's team refusals now carry the settings model's own
+  sentences — a member error and a condition error name their stage (and a
+  member error its team), a debate's hand-over error and the verdict-judge
+  error are the model's wording — and a stage's field error is keyed by the
+  stage key rather than its position, like every other stage error.
+
 - **The live conversation of a run, sequenced, kept and resumable.** Six new
   event types beside `agent_message`: `tool_call_started` /
   `tool_call_finished` (the latter carrying the evidence-ledger id the result

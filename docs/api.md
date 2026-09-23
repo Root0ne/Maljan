@@ -152,7 +152,14 @@ carry configuration between instances, and `POST /settings/test/{probe}` (plus
 `POST /settings/validate-condition` checks one stage's `when` expression
 against the parser that will run it and answers `{"valid": …, "problems":
 […]}`; it stores nothing, and the console calls it as each condition box loses
-focus so a typo is answered next to the box rather than at apply time. See
+focus so a typo is answered next to the box rather than at apply time.
+`POST /settings/lint-teams` takes `{"profiles": …, "definitions": …,
+"profile": …}` — each optional, read from the store when left out — and
+answers `{"findings": […], "graphs": {…}}`: every team finding with its
+severity, code, message, team, stage, field and the dotted `path` a refusal
+would be keyed by, errors first, and each team laid out as nodes with a row
+and a column and edges between them. It stores nothing; its errors are the
+refusals `PATCH /settings` makes, in the same words. See
 [configuration.md](configuration.md).
 
 ## Conventions
