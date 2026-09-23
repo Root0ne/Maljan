@@ -8,6 +8,19 @@ change landed on `main`.
 
 ### Added
 
+- **The STIX bundle as a relationship graph.** DETECTION's STIX section gains
+  Graph and Table views beside the JSON, all three reading the bundle the
+  `/reports/{id}/stix` export serves. Nodes are the bundle's objects, an
+  unrelated one included; edges are its `relationship` and `sighting` objects
+  labelled with their own type, with a confidence only where the bundle
+  states one. Containers no relationship names and relationships to objects
+  the bundle does not hold are listed in the table with the reason rather
+  than drawn. Flat colour by STIX type from the console tokens, keyboard
+  focusable nodes, a table under the graph for screen readers, the object's
+  JSON and its evidence-ledger ids on selection, SVG and PNG export. A bundle
+  above 300 objects opens on the table. No new dependency: the layout is a
+  small deterministic force layout in `components/analysis/stixGraph.ts`.
+
 - **The live conversation of a run, sequenced, kept and resumable.** Six new
   event types beside `agent_message`: `tool_call_started` /
   `tool_call_finished` (the latter carrying the evidence-ledger id the result
