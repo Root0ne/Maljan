@@ -501,28 +501,46 @@ def sigma_admits(report: MalwareReport) -> frozenset[str]:
 
 
 # The spellings of a registry hive a run writes: a sandbox's short name, the
-# long name, the kernel path, and the placeholder of an unread hive.
+# long name, the kernel path (a user hive with its SID), and the placeholder
+# of an unread hive.
+_USER_SID = r"(?:\\(?:s-1-[0-9-]+(?:_classes)?|\.default))?"
 _HIVE_PREFIX_RE = re.compile(
-    r"^(?:\\?registry\\(?:machine|user(?:\\[^\\]+)?)"
+    r"^\\*(?:registry\\machine"
+    rf"|registry\\user{_USER_SID}"
     r"|hkey_(?:local_machine|current_user|classes_root|current_config)"
-    r"|(?:hkey_users|hku)(?:\\s-1-[0-9-]+)?"
-    r"|hklm|hkcu|hkcr|hkcc|unknown)(?:\\|$)"
+    rf"|(?:hkey_users|hku){_USER_SID}"
+    r"|hklm|hkcu|hkcr|hkcc|unknown)(?:\\|$)",
+    re.IGNORECASE,
 )
 # The value name the IOC table writes after a key: ``<key> (<value name>)``.
 _VALUE_NAME_SUFFIX_RE = re.compile(r" \([^()]*\)$")
 
 
+def _hiveless_key(value: Any) -> str:
+    """A registry path without its hive or a trailing value name, in the case written.
+
+    Hive prefixes are stripped until the text stops changing, so a key a
+    sandbox wrote in long form under a short-name prefix
+    (``HKCU\\HKEY_CURRENT_USER\\...``) reads as the key. A value that is not
+    a registry path passes through.
+    """
+    text = _VALUE_NAME_SUFFIX_RE.sub("", str(value or "").strip().replace("/", "\\"))
+    while True:
+        stripped = _HIVE_PREFIX_RE.sub("", text, count=1)
+        if stripped == text:
+            return text.strip("\\")
+        text = stripped
+
+
 def _registry_form(value: Any) -> str:
     """One form of a value for comparison: lower case, no hive, no trailing value name.
 
-    A sandbox writes ``HKCU`` and a key, the IOC table writes the key and the
-    value name, an analyst may write ``HKEY_CURRENT_USER\\...``: the same
-    key, read the same way on both sides of the comparison. A value that is
-    not a registry path passes through lower-cased.
+    A sandbox writes ``HKCU`` and a key, or the key in long or kernel form;
+    the IOC table writes the key and the value name; an analyst may write
+    ``HKEY_CURRENT_USER\\...``: the same key, read the same way on both sides
+    of the comparison.
     """
-    text = str(value or "").strip().lower().replace("/", "\\")
-    text = _VALUE_NAME_SUFFIX_RE.sub("", text)
-    return _HIVE_PREFIX_RE.sub("", text).strip("\\")
+    return _hiveless_key(value).lower()
 
 
 def _admitted_value(value: Any, admitted: frozenset[str]) -> bool:
@@ -549,7 +567,10 @@ def _collect_registry_targets(report: MalwareReport, admitted: frozenset[str]) -
         if not form or form in seen or form not in admitted:
             return
         seen.add(form)
-        out.append(key.strip())
+        # Without its hive: Sysmon logs a user hive as ``HKU\\<SID>\\...``, so
+        # a selection naming ``HKCU`` would match no event; the key with a
+        # leading separator matches every hive and SID it is written under.
+        out.append("\\" + _hiveless_key(key))
 
     if report.dynamic is not None:
         for reg in report.dynamic.registry_mods:
@@ -561,7 +582,12 @@ def _collect_registry_targets(report: MalwareReport, admitted: frozenset[str]) -
 
 
 def _registry_full_path(reg: RegistryMod) -> str:
-    return f"{reg.hive}\\{reg.key}" if reg.key and not reg.key.startswith(reg.hive) else reg.key
+    """The sandbox's key, with its hive prefixed only when the key names none."""
+    from maljan.reporting.ledger_projection import _hive_of
+
+    if not reg.key or _hive_of(reg.key) != "UNKNOWN":
+        return reg.key
+    return f"{reg.hive}\\{reg.key}"
 
 
 def _collect_persistence_images(persistence: list[PersistenceMechanism]) -> list[str]:

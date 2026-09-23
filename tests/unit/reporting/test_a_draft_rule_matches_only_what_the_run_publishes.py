@@ -174,7 +174,7 @@ class TestSigma:
 
         assert rule is not None
         assert (
-            "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+            "\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
             in yaml.safe_load(rule.body)["detection"]["selection_registry"]["TargetObject|contains"]
         )
 
@@ -190,7 +190,7 @@ class TestSigma:
 
         assert rule is not None
         selected = yaml.safe_load(rule.body)["detection"]["selection_registry"]
-        assert selected["TargetObject|contains"] == [f"HKLM\\{key}" for key in keys]
+        assert selected["TargetObject|contains"] == [f"\\{key}" for key in keys]
 
     def test_an_analyst_s_long_hive_name_reads_as_the_sandbox_s_short_one(self) -> None:
         from maljan.reporting.models import DynamicBehavior, PersistenceMechanism, RegistryMod
@@ -208,7 +208,7 @@ class TestSigma:
 
         assert rule is not None
         selected = yaml.safe_load(rule.body)["detection"]["selection_registry"]
-        assert selected["TargetObject|contains"] == ["HKCU\\Software\\ExampleVendor\\Run"]
+        assert selected["TargetObject|contains"] == ["\\Software\\ExampleVendor\\Run"]
 
     @pytest.mark.parametrize(
         "written",
@@ -217,6 +217,8 @@ class TestSigma:
             "HKEY_CURRENT_USER\\Software\\ExampleVendor\\Run",
             "HKU\\S-1-5-21-1004\\Software\\ExampleVendor\\Run",
             "\\REGISTRY\\USER\\S-1-5-21-1004\\Software\\ExampleVendor\\Run",
+            "\\REGISTRY\\USER\\Software\\ExampleVendor\\Run",
+            "HKCU\\HKEY_CURRENT_USER\\Software\\ExampleVendor\\Run",
             "Software\\ExampleVendor\\Run (ExampleValue)",
         ],
     )
@@ -224,6 +226,33 @@ class TestSigma:
         from maljan.reporting.detection_signatures import _registry_form
 
         assert _registry_form(written) == "software\\examplevendor\\run"
+
+    @pytest.mark.parametrize(
+        ("hive", "key"),
+        [
+            ("HKCU", "HKEY_CURRENT_USER\\Software\\ExampleVendor\\Run"),
+            ("HKLM", "\\REGISTRY\\MACHINE\\SOFTWARE\\ExampleVendor\\Run"),
+            ("HKU", "\\REGISTRY\\USER\\S-1-5-21-1004\\Software\\ExampleVendor\\Run"),
+            ("HKLM", "HKLM\\SOFTWARE\\ExampleVendor\\Run"),
+            ("HKCU", "Software\\ExampleVendor\\Run"),
+        ],
+    )
+    def test_a_key_the_sandbox_wrote_in_any_hive_form_is_selected_without_it(
+        self, hive: str, key: str
+    ) -> None:
+        from maljan.reporting.models import DynamicBehavior, RegistryMod
+
+        dynamic = DynamicBehavior(
+            registry_mods=[RegistryMod(hive=hive, key=key, value_name="x", operation="create")]
+        )
+
+        rule = self._sigma(dynamic=dynamic)
+
+        assert rule is not None
+        (selected,) = yaml.safe_load(rule.body)["detection"]["selection_registry"][
+            "TargetObject|contains"
+        ]
+        assert selected.lower() == "\\software\\examplevendor\\run"
 
     def test_a_sandbox_signature_is_selected(self) -> None:
         from maljan.reporting.models import DynamicBehavior, SandboxSignature
