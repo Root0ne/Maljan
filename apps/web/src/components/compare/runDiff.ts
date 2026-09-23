@@ -82,9 +82,44 @@ export function formatValue(value: DiffValue | undefined): string {
   return JSON.stringify(value);
 }
 
+/** Field names read better in words than as keys. */
+const FIELD_WORDS: Record<string, string> = { stated_by: "who stated it" };
+
 /** A field name as a reader reads it. */
 export function fieldLabel(name: string): string {
-  return name.replace(/_/g, " ");
+  return FIELD_WORDS[name] ?? name.replace(/_/g, " ");
+}
+
+/**
+ * The status word for a row. A changed row names what changed, so a row whose
+ * only change is who stated a value cannot be read as a change of the value.
+ */
+export function statusWord(row: DiffRow): string {
+  if (row.status !== "changed" || row.changes.length === 0) return STATUS_META[row.status].label;
+  return `Changed: ${row.changes.map((c) => fieldLabel(c.field)).join(", ")}`;
+}
+
+/**
+ * One side of a row as `name: value` lines. On a changed row every field is
+ * listed, and a field equal in both runs says so, so the value that did not
+ * change stays in view beside the one that did.
+ */
+export function sideLines(row: DiffRow, side: "a" | "b"): string[] {
+  const fields = row[side];
+  if (!fields) return [];
+  if (row.status !== "changed") return fieldLines(fields);
+  const changed = new Set(row.changes.map((c) => c.field));
+  return Object.entries(fields).map(([name, value]) =>
+    changed.has(name)
+      ? `${fieldLabel(name)}: ${formatValue(value)}`
+      : `${fieldLabel(name)}: ${formatValue(value)} (same in both)`,
+  );
+}
+
+/** What a printed section says when it holds fewer rows than the section has. */
+export function cappedNote(shown: number, total: number): string | null {
+  if (shown >= total) return null;
+  return `Showing ${shown} of ${total} rows; open the page and choose Show all to see the rest.`;
 }
 
 /** A side's fields as `name: value` lines, for a row that one run alone holds. */

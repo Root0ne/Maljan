@@ -476,7 +476,9 @@ icon, a mark and a word together (Changed `~`, Added in B `+`, Removed in B
 `−`, Only in A `A`, Only in B `B`, Unchanged `=`), so nothing depends on colour.
 "Only in A" and "Only in B" are rows the record does not key stably, such as
 a key finding reworded or a STIX report object, and are never paired by
-guess. A changed row lists the fields that differ with both values; the
+guess. A changed row's badge names what changed ("Changed: level", "Changed:
+who stated it") and the row lists every field, marking those equal in both
+runs "(same in both)", so the value that did not change stays in view; the
 evidence column links each run's cited ledger ids into that run's EVIDENCE
 tab, and shows none where the record holds no id for the row. Ids a record
 cites for a whole section, as the rule-match sections do, are listed under
@@ -488,7 +490,9 @@ Every control is a link, a button or a checkbox, so the keyboard reaches
 all of it, and the section list at the top jumps to each section. "Swap A and
 B" reverses the comparison. Print hides the navigation and prints dark text
 on white, a section at a time where it fits, with tables unclipped and run ids
-in full.
+in full. A section still capped at 200 rows prints "Showing 200 of N rows" and
+says to choose Show all first; the rows past the cap are not drawn, in print
+either, so a large bundle does not put every row in the page.
 
 ## Evidence
 

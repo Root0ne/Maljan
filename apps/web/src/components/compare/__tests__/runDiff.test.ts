@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { JobDTO } from "@/lib/api";
 import type { DiffRow, DiffSection, DiffStatus } from "@/types/runDiff";
 import {
+  cappedNote,
   countsSentence,
   differenceCount,
   fieldLines,
@@ -9,8 +10,10 @@ import {
   groupSections,
   isRunId,
   searchRuns,
+  sideLines,
   siblingRuns,
   STATUS_META,
+  statusWord,
   visibleRows,
 } from "../runDiff";
 
@@ -130,7 +133,7 @@ describe("values", () => {
 
   it("writes one side's fields as name and value", () => {
     expect(fieldLines({ stated_by: "judge", value: null })).toEqual([
-      "stated by: judge",
+      "who stated it: judge",
       "value: not recorded",
     ]);
     expect(fieldLines(null)).toEqual([]);
@@ -175,5 +178,39 @@ describe("choosing the other run", () => {
   it("recognises a whole run id typed in", () => {
     expect(isRunId(" 2f0b4c10-6f7e-5b6a-9d3b-1f6a5c7e8d90 ")).toBe(true);
     expect(isRunId("2f0b4c10")).toBe(false);
+  });
+});
+
+describe("a changed row", () => {
+  const onlyWho: DiffRow = {
+    ...row("severity", "changed"),
+    a: { value: "High", stated_by: null },
+    b: { value: "High", stated_by: "judge" },
+    changes: [{ field: "stated_by", a: null, b: "judge" }],
+  };
+
+  it("names what changed, so a change of who stated it is not read as a change of value", () => {
+    expect(statusWord(onlyWho)).toBe("Changed: who stated it");
+    expect(statusWord(row("x", "added"))).toBe("Added in B");
+  });
+
+  it("keeps the value that did not change in view on both sides", () => {
+    expect(sideLines(onlyWho, "a")).toEqual([
+      "value: High (same in both)",
+      "who stated it: not recorded",
+    ]);
+    expect(sideLines(onlyWho, "b")).toEqual([
+      "value: High (same in both)",
+      "who stated it: judge",
+    ]);
+  });
+});
+
+describe("a capped section on paper", () => {
+  it("says how many rows it holds of how many", () => {
+    expect(cappedNote(200, 350)).toBe(
+      "Showing 200 of 350 rows; open the page and choose Show all to see the rest.",
+    );
+    expect(cappedNote(12, 12)).toBeNull();
   });
 });

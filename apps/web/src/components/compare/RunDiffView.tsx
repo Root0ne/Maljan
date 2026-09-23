@@ -19,13 +19,13 @@ import Th from "@/components/ui/Th";
 import { formatDateTime } from "@/lib/report-utils";
 import type { DiffRow, DiffSection, DiffSide, DiffStatus, RunDiff } from "@/types/runDiff";
 import {
+  cappedNote,
   countsSentence,
   differenceCount,
-  fieldLabel,
-  fieldLines,
-  formatValue,
   groupSections,
+  sideLines,
   STATUS_META,
+  statusWord,
   visibleRows,
 } from "./runDiff";
 
@@ -43,7 +43,8 @@ const STATUS_ICON: Record<DiffStatus, LucideIcon> = {
 };
 
 /** A status as an icon, a printed mark and a word: readable without colour. */
-function StatusBadge({ status }: { status: DiffStatus }) {
+function StatusBadge({ row }: { row: DiffRow }) {
+  const status = row.status;
   const meta = STATUS_META[status];
   const Icon = STATUS_ICON[status];
   return (
@@ -54,7 +55,7 @@ function StatusBadge({ status }: { status: DiffStatus }) {
       <span aria-hidden="true" className="font-mono">
         {meta.mark}
       </span>
-      {meta.label}
+      {statusWord(row)}
     </span>
   );
 }
@@ -103,12 +104,8 @@ function SampleStatement({ diff }: { diff: RunDiff }) {
 
 /** One side of a row: the fields that differ on a changed row, every field otherwise. */
 function SideCell({ row, side }: { row: DiffRow; side: "a" | "b" }) {
-  const fields = row[side];
-  if (!fields) return <span className="text-text-muted">No such row</span>;
-  const lines =
-    row.status === "changed"
-      ? row.changes.map((c) => `${fieldLabel(c.field)}: ${formatValue(c[side])}`)
-      : fieldLines(fields);
+  if (!row[side]) return <span className="text-text-muted">No such row</span>;
+  const lines = sideLines(row, side);
   return (
     <ul className="space-y-0.5">
       {lines.map((line, i) => (
@@ -148,7 +145,7 @@ function SectionTable({
           {rows.map((row, i) => (
             <tr key={`${row.key}-${i}`} className="border-b border-border-light align-top break-inside-avoid">
               <td className="px-4 py-2">
-                <StatusBadge status={row.status} />
+                <StatusBadge row={row} />
               </td>
               <th scope="row" className="px-4 py-2 text-left font-normal text-text-primary break-words max-w-xs">
                 {row.label}
@@ -240,6 +237,11 @@ function SectionBlock({
       {rows.length > 0 ? (
         <>
           <SectionTable section={section} rows={rows} diff={diff} />
+          {cappedNote(rows.length, all.length) && (
+            <p className="hidden px-4 py-2 text-xs text-text-secondary print:block">
+              {cappedNote(rows.length, all.length)}
+            </p>
+          )}
           {all.length > rows.length && (
             <div className="px-4 py-2 print:hidden">
               <button
