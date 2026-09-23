@@ -3414,9 +3414,10 @@ change landed on `main`.
   and, under a Benign verdict, the judge was then asked about that word; it now
   stays untyped (the property is optional in STIX 2.1). A malware object with
   no `is_family` was published as `false`; the judge is now asked
-  (`stix.is_family_missing`). A relationship annotation outside the schema — a
-  confidence of `1.5` or `95`, a basis such as `static+dynamic+network` — used
-  to parse as a plain relationship and lose the whole annotation silently; it
+  (`stix.is_family_missing`), and a judge's `is_family: true` is published as
+  written — the renderer used to force it to `false`. A relationship annotation
+  outside the schema — a confidence of `1.5` or `95`, a basis such as
+  `static+dynamic+network` — used to parse as a plain relationship and lose the whole annotation silently; it
   is now kept as written and asked about (`stix.annotation_out_of_schema`), and
   no reader puts a number off the 0–1 scale on a technique.
 
@@ -3642,8 +3643,9 @@ counting corroborated techniques moves down. A technique's `confidence` in
 judge's malware, indicator and relationship ids are fresh per run: the
 documentation-copied ids some runs shared were stable by accident, and a
 consumer that merged on them sees new objects. An untyped judge indicator
-carries no `indicator_types`. Observed data carries `object_refs` to `process`
-and `file` objects instead of an `objects` dictionary. New codes in
+carries no `indicator_types`, and a judge malware object marked
+`is_family: true` keeps it. Observed data carries `object_refs` to `process` and
+`file` objects instead of an `objects` dictionary. New codes in
 `run_summary.validation` and the export's rows, for a consumer that partitions
 on them: `stix.unknown_observable_type`, `stix.unknown_object_path`,
 `stix.indicator_type_vocabulary`, `stix.credit_without_claim`,

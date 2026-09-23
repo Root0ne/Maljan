@@ -555,7 +555,8 @@ object "is unchanged in". Feedback names the judge's own positions and labels
 (`objects[3] 'indicator--2'`), not positions in the post-processed list, and a
 drop maps them back. Nothing is written into a judge object that the judge left
 out: an untyped indicator stays untyped, and a malware object without
-`is_family`, which STIX requires, is asked about (`stix.is_family_missing`).
+`is_family`, which STIX requires, is asked about (`stix.is_family_missing`),
+and an `is_family` the judge wrote is published as written.
 
 The export names its producer in STIX's own vocabulary: one `identity` for this
 platform, `identity_class: system`, under an id derived once

@@ -65,6 +65,10 @@ GUARDED = frozenset(
         "indicator_types",
         "created_by_ref",
         "relationship_type",
+        # Whether a malware object stands for the family or for this one
+        # sample. The renderer used to force a judge's ``true`` to ``false``;
+        # where an instance-level object is needed, the platform mints its own.
+        "is_family",
     }
 )
 
@@ -289,6 +293,11 @@ class TestTheScannerWouldActuallyCatchOne:
 
     def test_a_model_copy_of_a_reference_is_not_caught(self):
         assert offences("moved = edge.model_copy(update={'source_ref': new})\n", "probe.py") == []
+
+    def test_forcing_is_family_is_caught(self):
+        source = "if isinstance(obj, Malware) and obj.is_family:\n    obj.is_family = False\n"
+
+        assert offences(source, "probe.py") == ["probe.py:2: assignment to attribute 'is_family'"]
 
     def test_a_pattern_write_is_caught(self):
         assert offences("indicator.pattern = fixed\n", "probe.py") == [

@@ -998,19 +998,18 @@ class ExtendedSTIXRenderer:
 
     @staticmethod
     def _normalize_judge_timestamps(objects: list[Any]) -> None:
-        """Normalize the judge's LLM-emitted SDOs to authoritative values.
+        """Stamp the judge's SDOs with the time the platform published them.
 
-        The judge Bundle is emitted by the LLM, which copies STIX documentation
-        examples verbatim. Two fields are never authoritative and are fixed here:
+        ``created`` and ``modified`` are the platform's bookkeeping — when this
+        export made the object — and the prompt tells the judge to leave them
+        out; a model that writes them copies the documentation's
+        ``2023-01-01T00:00:00Z``. They are set to the render time, matching
+        every renderer-produced SDO.
 
-        * ``created``/``modified`` — land on the placeholder
-          ``2023-01-01T00:00:00Z`` epoch instead of the analysis
-          time; a downstream CTI consumer would trust that bogus date. Overwrite
-          with the render time (matching every renderer-produced SDO).
-        * ``is_family`` on Malware SDOs — the LLM often
-          copies ``is_family: true`` from the docs, but Maljan analyses a single
-          specimen, so this must be ``false``. STIX ``is_family=true`` asserts
-          the object represents a malware *family*, not one sample.
+        Nothing the judge states is touched. ``is_family`` used to be forced to
+        ``false`` here, on the reasoning that one sample is not a family; whether
+        the object stands for the family is the judge's statement, and it is
+        published as written.
 
         Object ids are left untouched so intra-bundle relationship refs stay
         valid.
@@ -1021,8 +1020,6 @@ class ExtendedSTIXRenderer:
                 obj.created = now
             if hasattr(obj, "modified"):
                 obj.modified = now
-            if isinstance(obj, Malware) and getattr(obj, "is_family", False):
-                obj.is_family = False
 
     @staticmethod
     def _find_malware_id(objects: list[Any]) -> str | None:
