@@ -201,6 +201,66 @@ def clear_shared_httpx_clients() -> None:
         logger.debug("openai provider: the shared httpx client cache was not cleared (%s).", exc)
 
 
+# One subclass per ``ChatOpenAI`` class seen, so every model built from it
+# shares the class and pydantic builds its schema once.
+_TIMED_CLASSES: dict[type, type] = {}
+
+
+def server_timings_of(response: Any) -> dict[str, Any] | None:
+    """The ``timings`` object llama.cpp and its forks add to an answer, or ``None``.
+
+    It is not part of OpenAI's schema, so the SDK keeps it as an extra field
+    of the parsed response and ``langchain-openai`` never copies it across.
+    """
+    if isinstance(response, dict):
+        timings = response.get("timings")
+    else:
+        timings = getattr(response, "timings", None)
+        if timings is None:
+            timings = (getattr(response, "model_extra", None) or {}).get("timings")
+    return dict(timings) if isinstance(timings, dict) else None
+
+
+def with_server_timings(chat_class: Any) -> Any:
+    """``chat_class`` with the server's ``timings`` carried into each answer.
+
+    llama.cpp reports, on every answer, how many prompt tokens it read and how
+    long that took (``timings.prompt_n``/``prompt_ms``) and the same for the
+    tokens it generated. ``langchain-openai`` builds the answer from the
+    fields OpenAI defines and drops the rest, so the job's measured rates had
+    no prompt reading rate on this provider and a generation rate taken from
+    the wall clock. The subclass copies the object into the generation's
+    metadata unchanged, where ``RateMeter`` reads it; a server that sends none
+    leaves the answer as it was. Anything that is not a chat model class is
+    returned as it is.
+    """
+    if not isinstance(chat_class, type) or not hasattr(chat_class, "_create_chat_result"):
+        return chat_class
+    cached = _TIMED_CLASSES.get(chat_class)
+    if cached is not None:
+        return cached
+
+    def _create_chat_result(self: Any, response: Any, generation_info: Any = None) -> Any:
+        result = chat_class._create_chat_result(self, response, generation_info)
+        timings = server_timings_of(response)
+        if timings is not None:
+            for generation in result.generations:
+                generation.generation_info = {
+                    **(generation.generation_info or {}),
+                    "timings": timings,
+                }
+                message = getattr(generation, "message", None)
+                metadata = getattr(message, "response_metadata", None)
+                if isinstance(metadata, dict):
+                    metadata.setdefault("timings", timings)
+        return result
+
+    timed = type(chat_class.__name__, (chat_class,), {"_create_chat_result": _create_chat_result})
+    timed.__module__ = __name__
+    _TIMED_CLASSES[chat_class] = timed
+    return timed
+
+
 @register_provider("openai")
 class OpenAIProvider:
     """Builds LangChain ChatOpenAI instances."""
@@ -283,7 +343,7 @@ class OpenAIProvider:
             if private is not None:
                 build_kwargs["http_async_client"] = private
 
-        built = ChatOpenAI(**build_kwargs)
+        built: BaseChatModel = with_server_timings(ChatOpenAI)(**build_kwargs)
         if not local:
             return built
         # The rebuild the self-heal needs, carried on the model rather than

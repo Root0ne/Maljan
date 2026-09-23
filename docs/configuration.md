@@ -756,11 +756,12 @@ it.
 So each of those calls waits
 `max(configured, min(max_tokens / measured rate × 1.5, 1800 s))`. The rate is
 the model's own for this job, read off every answer it has already given
-without a token of its own: Ollama's `eval_count` over `eval_duration`, and on
-an OpenAI-compatible endpoint the answer's output token count over the call's
-wall clock (the client drops llama.cpp's `timings`, and the wall clock includes
-reading the prompt, so that rate is lower than the server's and the wait
-longer). The margin, 1.5, covers the prompt read and the spread between turns.
+without a token of its own: Ollama's `eval_count` over `eval_duration`,
+llama.cpp's `timings.predicted_n` over `predicted_ms` (the openai provider
+carries the `timings` object the OpenAI-compatible client would drop into each
+answer), and on an endpoint that reports neither the answer's output token
+count over the call's wall clock (which includes reading the prompt, so that
+rate is lower than the server's and the wait longer). The margin, 1.5, covers the prompt read and the spread between turns.
 The ceiling, 1,800 s, is the HTTP request timeout every provider's client is
 built with (`PROVIDER_REQUEST_TIMEOUT_SECONDS`), so no derived wait outlives the
 request carrying it. A configured value above the ceiling is not lowered, but

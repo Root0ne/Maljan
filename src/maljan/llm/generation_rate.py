@@ -12,12 +12,13 @@ The rate costs nothing to learn: every answer already says how many tokens it
 generated and how long that took, and ``RateMeter`` reads it off each call as
 the call returns. Where the provider reports it, the generation time is the
 server's own — Ollama's ``eval_count`` and ``eval_duration``, llama.cpp's
-``timings``. The OpenAI-compatible client drops llama.cpp's ``timings`` before
-the answer reaches this code, so there the output token count is divided by the
-call's wall clock instead; that clock includes reading the prompt, so the rate
-comes out lower than the server's and the timeout longer, which is the safe
-side. Until a model has answered once, no rate is known and the configured
-value stands.
+``timings``, which the openai provider carries into the answer because the
+OpenAI-compatible client would drop it (``openai_provider.with_server_timings``).
+An endpoint that reports neither gives the output token count over the call's
+wall clock instead; that clock includes reading the prompt, so the rate comes
+out lower than the server's and the timeout longer, which is the safe side.
+Until a model has answered once, no rate is known and the configured value
+stands.
 
 The same answers say how fast the model read its prompt, and that is recorded
 beside the generation rate: Ollama's ``prompt_eval_count`` and
@@ -26,7 +27,7 @@ count only the tokens the server actually read — a prefix it had cached is not
 in them — so the rate is the reading speed itself. It is what a request that
 re-sends a whole conversation to a model that must read all of it again is
 sized from (``BaseAnalyst._force_final_synthesis``). Where the provider does
-not report it — the OpenAI-compatible client drops llama.cpp's ``timings`` — no
+not report it — a hosted OpenAI-compatible API sends no ``timings`` — no
 reading rate is known and nothing is sized from one.
 """
 
@@ -106,10 +107,10 @@ def measured_generation(message: Any, wall_seconds: float) -> tuple[int, float, 
                 return int(n), float(ms) / 1000.0, LLAMA_CPP_SOURCE
         usage = getattr(message, "usage_metadata", None) or {}
         out = int(usage.get("output_tokens") or 0) if isinstance(usage, dict) else 0
-        # The llama.cpp path lands here: its ``timings`` do not survive the
-        # OpenAI-compatible client. The wall clock includes reading the prompt,
-        # so this rate is lower than the server's and every timeout sized from
-        # it longer — the safe side, never a call cut short.
+        # An endpoint that reports no generation time lands here. The wall
+        # clock includes reading the prompt, so this rate is lower than the
+        # server's and every timeout sized from it longer — the safe side,
+        # never a call cut short.
         if out > 0 and wall_seconds > 0:
             return out, float(wall_seconds), WALL_CLOCK_SOURCE
     except (TypeError, ValueError):
