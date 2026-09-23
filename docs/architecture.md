@@ -589,10 +589,16 @@ requires does not take the judge's relationships with it. The platform's own
 sample object stands in for it, and every relationship that named it moves
 onto that object unchanged — confidence, basis and credits as the judge wrote
 them — so the technique the judge numbered is used by the export's malware
-object and published at the judge's number, as the report publishes it. In a
-Malware export every indicator indicates the malware object: the judge's own
-`indicates` edges are carried, and an indicator with none is given a plain
-one.
+object and published at the judge's number, as the report publishes it.
+
+An indicator indicates the malware object only by an edge somebody made: the
+judge's own `indicates` edges, and the sample's hash indicator, whose edge is a
+fact the platform owns. Every other indicator — the network and string rows the
+renderer mints, a judge indicator the judge related to nothing — is published
+related to nothing and listed in the report object's `object_refs`. In STIX
+`indicates` says the pattern detects the malware, and a Malware verdict does
+not say that of every value the run saw; the same reason types those rows
+`anomalous-activity`.
 
 The export names its producer in STIX's own vocabulary: one `identity` for this
 platform, `identity_class: system`, under an id derived once

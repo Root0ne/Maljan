@@ -3617,11 +3617,12 @@ change landed on `main`.
   and `indicates` edges with it, so the technique the judge numbered was
   published unrelated while the report published it at the judge's
   confidence, and the judge's indicators indicated nothing. The edges now move
-  onto the platform's sample object unchanged, the decline sentence says so,
-  every indicator in a Malware export indicates the malware object, and a test
-  checks over every Malware export shape that each technique is used by a
-  malware object and that the export and the report publish the same
-  techniques at the same numbers.
+  onto the platform's sample object unchanged and the decline sentence says
+  so. A test checks over every Malware export shape that each technique is
+  used by a malware object, that every `indicates` edge is the judge's own or
+  the sample hash's (any other indicator is related to nothing and listed in
+  the report's `object_refs`), and that the export and the report publish the
+  same techniques at the same numbers.
 
 - **What the export does not carry of the judge's bundle is recorded, and the
   judge's own record holds it.** The domain-object models ignore properties
@@ -3853,10 +3854,8 @@ defines; one carrying a property it does not define is set aside as
 `stix.unknown_object`, a file with neither `hashes` nor `name` is asked
 `stix.file_unidentified`, and a malware object kept without `is_family` or
 such a file is declined as `stix.unpublishable_object`, two more codes for a
-consumer that partitions on them. A Malware export now carries an `indicates`
-relationship from every indicator to the malware object, and the judge's
-relationships from a declined malware object name the platform's sample object
-instead. `stix.property_not_carried` is a new recorded row on the judge's
+consumer that partitions on them. The judge's relationships from a declined
+malware object name the platform's sample object instead. `stix.property_not_carried` is a new recorded row on the judge's
 findings (an export decision, never fed back). `judge_stix_bundle` records now
 carry `as_written`: `true` when the bundle is the judge's JSON as written (it
 may then carry properties the models do not declare, and the judge's own
