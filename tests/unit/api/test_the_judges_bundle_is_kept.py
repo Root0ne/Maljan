@@ -1,0 +1,126 @@
+"""The judge's own bundle is on the run's record, beside the export.
+
+Every export decline row ends "It is unchanged in the judge's own bundle", and
+nothing stored that bundle: the worker persisted the export, or the judge's
+bundle only when there was no export. Now the report keeps
+``judge_stix_bundle`` — the judge's bundle as the pipeline read it and the map
+from each label the judge wrote to the id it was published under — and
+``/reports/{id}/stix?source=judge`` serves it where the export is served.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import uuid
+from datetime import UTC, datetime
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.ext.compiler import compiles
+
+from app.services.report_service import ReportService
+from app.worker.analysis_worker import judge_bundle_record
+
+
+@compiles(postgresql.JSONB, "sqlite")
+def _jsonb_as_json(element, compiler, **kw):  # noqa: ANN001, ANN202
+    return "JSON"
+
+
+_API = Path(__file__).resolve().parents[3] / "apps" / "api"
+_REV = _API / "alembic" / "versions" / "20260928000000_judge_stix_bundle.py"
+
+
+def _judge_output() -> dict:
+    stamp = datetime(2026, 9, 22, 23, 30, tzinfo=UTC)
+    return {
+        "type": "bundle",
+        "id": "bundle--6b1d3c1e-6f0a-4d51-9f3a-0c9d2f1e4a01",
+        "objects": [
+            {
+                "type": "malware",
+                "id": "malware--0f1e2d3c-4b5a-4968-8776-655443332211",
+                "spec_version": "2.1",
+                "created": stamp,
+                "modified": stamp,
+                "name": "sample",
+                "is_family": False,
+            }
+        ],
+    }
+
+
+class TestTheRecord:
+    def test_it_holds_the_bundle_as_json_and_the_label_map(self) -> None:
+        record = judge_bundle_record(
+            {
+                "stix_output": _judge_output(),
+                "stix_labels": {"malware--1": "malware--0f1e2d3c-4b5a-4968-8776-655443332211"},
+            }
+        )
+
+        assert record is not None
+        (malware,) = record["bundle"]["objects"]
+        assert malware["created"].startswith("2026-09-22T23:30:00")
+        assert record["bundle"]["spec_version"] == "2.1"
+        assert record["labels"] == {"malware--1": malware["id"]}
+
+    def test_no_judge_bundle_is_no_record(self) -> None:
+        assert judge_bundle_record({"stix_output": {}}) is None
+        assert judge_bundle_record({}) is None
+
+
+class TestItIsServedBesideTheExport:
+    @pytest.mark.asyncio
+    async def test_source_judge_serves_the_judges_bundle(self) -> None:
+        report = MagicMock(stix_bundle={"type": "bundle", "id": "export"})
+        report.judge_stix_bundle = {"bundle": {"id": "judge"}, "labels": {}}
+        svc = ReportService(db=AsyncMock())
+        svc.get_report = AsyncMock(return_value=report)  # type: ignore[method-assign]
+        user = MagicMock(id=uuid.uuid4())
+
+        assert (await svc.get_stix_bundle(report.id, user))["id"] == "export"
+        judged = await svc.get_stix_bundle(report.id, user, source="judge")
+        assert judged["bundle"]["id"] == "judge"
+
+
+def _load():
+    spec = importlib.util.spec_from_file_location("judge_stix_bundle", _REV)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class TestTheMigration:
+    def test_it_chains_onto_the_head_and_nothing_else_does(self) -> None:
+        module = _load()
+
+        assert module.down_revision == "20260927000000"
+        for path in (_API / "alembic" / "versions").glob("*.py"):
+            if path != _REV:
+                assert (
+                    '"20260928000000"'
+                    not in path.read_text(encoding="utf-8")
+                    .split("down_revision", 1)[-1]
+                    .split("\n", 1)[0]
+                ), path
+
+    def test_it_adds_the_column_and_takes_it_back(self) -> None:
+        from alembic.operations import Operations
+        from alembic.runtime.migration import MigrationContext
+
+        module = _load()
+        engine = sa.create_engine("sqlite://")
+        with engine.connect() as conn:
+            conn.execute(sa.text("CREATE TABLE analysis_reports (id TEXT PRIMARY KEY)"))
+            with Operations.context(MigrationContext.configure(conn)):
+                module.upgrade()
+                columns = {c["name"] for c in sa.inspect(conn).get_columns("analysis_reports")}
+                assert "judge_stix_bundle" in columns
+                module.downgrade()
+            columns = {c["name"] for c in sa.inspect(conn).get_columns("analysis_reports")}
+            assert "judge_stix_bundle" not in columns

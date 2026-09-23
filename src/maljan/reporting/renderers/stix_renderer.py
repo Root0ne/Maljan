@@ -943,7 +943,8 @@ def _produced_by(objects: list[Any], producer: str) -> list[Any]:
     """Every object naming the identity that produced it, as a copy.
 
     A copy, because the judge's objects are the judge's own bundle's too, and
-    that bundle is stored as the run's record. An object that already names a
+    that bundle is kept as the run's record (``analysis_reports.judge_stix_bundle``,
+    served at ``/reports/{id}/stix?source=judge``). An object that already names a
     producer in this bundle keeps the one it names; one naming an identity the
     bundle does not hold names nothing, the way a relationship pointing at
     nothing does, and is given this one.

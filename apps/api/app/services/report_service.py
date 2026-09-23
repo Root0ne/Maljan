@@ -258,11 +258,20 @@ class ReportService:
         self,
         report_id: uuid.UUID,
         user: User,
+        source: str = "export",
     ) -> dict | None:
-        """Extract the STIX 2.1 bundle from a report."""
+        """Extract the STIX 2.1 bundle from a report.
+
+        ``source="judge"`` answers with the judge's own bundle and the map from
+        its labels to the published ids — the bundle every export decline row
+        says the object is unchanged in — or ``None`` for a report stored
+        before it was kept.
+        """
         report = await self.get_report(report_id, user)
         if not report:
             return None
+        if source == "judge":
+            return report.judge_stix_bundle
         return report.stix_bundle
 
     async def get_mitre_techniques(

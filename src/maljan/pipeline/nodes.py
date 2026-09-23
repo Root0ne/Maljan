@@ -3638,6 +3638,9 @@ def make_judge_node(
                     "final_decision": decision,
                     "judge_report": "Analyzed negotiation history and expert reports.",
                     "stix_output": stix_output,
+                    # The map from each label the judge wrote to the id it was
+                    # published under, kept with the judge's own bundle.
+                    "stix_labels": dict(verdict.labels),
                     # Set when the judge's answer was not the verdict it was
                     # asked for — text, or nothing at all. Written rather than
                     # left alone: the verdict stage runs once today, and a

@@ -6,7 +6,7 @@ Uses ReportService for business logic separation.
 import base64
 import secrets
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import HTMLResponse, PlainTextResponse
@@ -127,11 +127,16 @@ async def get_report_by_job_id(
 @router.get("/{report_id}/stix")
 async def get_stix_bundle(
     report_id: uuid.UUID,
+    source: Literal["export", "judge"] = "export",
     user: User = Depends(get_current_user),
     svc: ReportService = Depends(_get_service),
 ) -> dict:
-    """Get the STIX 2.1 threat intelligence bundle."""
-    bundle = await svc.get_stix_bundle(report_id, user)
+    """Get the STIX 2.1 threat intelligence bundle.
+
+    ``source=judge`` serves the judge's own bundle with its label map instead
+    of the export: the record the export's decline rows point at.
+    """
+    bundle = await svc.get_stix_bundle(report_id, user, source=source)
     if bundle is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
