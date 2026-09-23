@@ -111,33 +111,43 @@ class ServerGuard:
 
     # -- the breaker ---------------------------------------------------------
 
-    def refusal(self, tool: str) -> str | None:
-        """The authored answer for a call made while the server rests, or ``None`` to send it.
+    def admit(self, tool: str) -> tuple[str | None, bool]:
+        """``(refusal, trial)`` for one call: the authored answer when the server rests.
 
-        After the cooldown the first caller is let through as the trial and
-        every other caller is still refused until the trial has answered.
+        ``refusal`` is ``None`` when the call may be sent. ``trial`` is true
+        for the one call let through after the cooldown; the caller hands it
+        back to :meth:`failed` or :meth:`abandoned`, because only the trial's
+        own outcome decides whether the server rests again. Every other call
+        is refused until the trial has answered.
         """
         with self._lock:
             if self._reopen_at is None:
-                return None
+                return None, False
             left = self._reopen_at - self._clock()
             if left <= 0 and not self._trial_in_flight:
                 self._trial_in_flight = True
-                return None
+                return None, True
             failures = self._failures
         when = (
             f"it will be tried again in {max(1, round(left))} s"
             if left > 0
             else "it is being tried again by another call now"
         )
-        return _resting_answer(
-            tool,
-            f"tool server '{self.server}' is resting after {failures} transport failure"
-            f"{'' if failures == 1 else 's'} in a row; {when}",
+        return (
+            _resting_answer(
+                tool,
+                f"tool server '{self.server}' is resting after {failures} transport failure"
+                f"{'' if failures == 1 else 's'} in a row; {when}",
+            ),
+            False,
         )
 
+    def refusal(self, tool: str) -> str | None:
+        """:meth:`admit` for a caller that only needs the answer."""
+        return self.admit(tool)[0]
+
     def answered(self) -> None:
-        """The server answered — with its result or with its own error."""
+        """The server answered — with its result or with its own error — so it is up."""
         with self._lock:
             closing = self._reopen_at is not None
             self._failures = 0
@@ -146,25 +156,29 @@ class ServerGuard:
         if closing:
             logger.info("tool server '%s' answered again; its rest is over.", self.server)
 
-    def abandoned(self) -> None:
+    def abandoned(self, *, trial: bool = False) -> None:
         """A call ended without an answer either way — cancelled with its caller.
 
         Nothing was learned about the server, so nothing is counted; a trial
         cut short is simply no longer in flight, and the next caller becomes
         the trial instead of the server being refused for good.
         """
+        if not trial:
+            return
         with self._lock:
             self._trial_in_flight = False
 
-    def failed(self, reason: str) -> None:
-        """One transport failure; opens the breaker when it is the one that fills the run."""
+    def failed(self, reason: str, *, trial: bool = False) -> None:
+        """One transport failure; opens the breaker when it fills the run, or fails the trial.
+
+        A failure of a call sent before the rest began is counted and opens
+        nothing more: only the trial's own failure starts another rest.
+        """
         with self._lock:
             self._failures += 1
-            trial = self._trial_in_flight
-            self._trial_in_flight = False
-            if not trial and (
-                self._reopen_at is not None or self._failures < self.failures_to_open
-            ):
+            if trial:
+                self._trial_in_flight = False
+            elif self._reopen_at is not None or self._failures < self.failures_to_open:
                 return
             self._reopen_at = self._clock() + self.cooldown_seconds
             record = {

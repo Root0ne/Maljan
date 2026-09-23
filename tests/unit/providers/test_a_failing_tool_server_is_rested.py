@@ -121,8 +121,8 @@ class TestTheBreaker:
         for _ in range(3):
             guard.failed("x")
         clock.now += 61
-        assert guard.refusal("trial") is None
-        guard.failed("the server did not answer in time")
+        assert guard.admit("trial") == (None, True)
+        guard.failed("the server did not answer in time", trial=True)
         assert len(opened) == 2
         assert guard.refusal("next") is not None
 
@@ -131,8 +131,8 @@ class TestTheBreaker:
         for _ in range(3):
             guard.failed("x")
         clock.now += 61
-        assert guard.refusal("trial") is None
-        guard.abandoned()
+        assert guard.admit("trial") == (None, True)
+        guard.abandoned(trial=True)
         assert guard.refusal("next") is None
 
     def test_the_thresholds_come_from_settings(self) -> None:
@@ -243,6 +243,29 @@ class TestTheToolkitCallsThroughTheGuard:
         assert session.calls == 3
         assert opened == []
         assert answers[2] == '{"ok": true}'
+
+    def test_after_the_cooldown_the_trial_call_is_sent_and_a_success_ends_the_rest(self) -> None:
+        guard, clock, _opened = _guard()
+        session = _Session([anyio.ClosedResourceError()] * 3 + [_answer("back"), _answer("again")])
+        toolkit = MCPLangChainToolkit(guard=guard)
+        toolkit.session = session  # type: ignore[assignment]
+        self._run(toolkit, 3)
+        clock.now += 61
+        answers = self._run(toolkit, 2)
+        assert answers == ["back", "again"]
+        assert session.calls == 5
+
+    def test_a_call_that_failed_while_another_was_the_trial_does_not_rest_it_again(self) -> None:
+        guard, clock, opened = _guard()
+        for _ in range(3):
+            guard.failed("x")
+        clock.now += 61
+        refused, trial = guard.admit("trial")
+        assert refused is None and trial
+        guard.failed("a call sent before the rest began", trial=False)
+        assert len(opened) == 1
+        guard.answered()
+        assert guard.refusal("next") is None
 
     def test_without_a_guard_every_call_is_sent(self) -> None:
         session = _Session([anyio.ClosedResourceError()] * 5)

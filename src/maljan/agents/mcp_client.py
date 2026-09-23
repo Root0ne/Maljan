@@ -260,15 +260,22 @@ class MCPLangChainToolkit:
                 return await self._call(tool_name, args, narrowing)
             # Asked before waiting for a slot and again after it: a server
             # that is resting answers at once, and one that began resting
-            # while this call queued is not sent the call either.
-            refused = guard.refusal(tool_name)
+            # while this call queued is not sent the call either. The trial
+            # after a cooldown is admitted once and keeps its admission.
+            refused, trial = guard.admit(tool_name)
             if refused is not None:
                 return str(refused)
-            async with guard.slot():
-                refused = guard.refusal(tool_name)
-                if refused is not None:
-                    return str(refused)
-                return await self._call(tool_name, args, narrowing)
+            try:
+                async with guard.slot():
+                    if not trial:
+                        refused, trial = guard.admit(tool_name)
+                        if refused is not None:
+                            return str(refused)
+                    return await self._call(tool_name, args, narrowing, trial=trial)
+            except BaseException:
+                # Cancelled while it queued for a slot: the trial was never sent.
+                guard.abandoned(trial=trial)
+                raise
 
         # Compress description to reduce ReAct context bloat
         raw_desc = mcp_tool.description or f"Executes {mcp_tool.name} on the MCP server."
@@ -282,7 +289,14 @@ class MCPLangChainToolkit:
             args_schema=args_schema,
         )
 
-    async def _call(self, tool_name: str, args: dict[str, Any], narrowing: Sequence[str]) -> str:
+    async def _call(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        narrowing: Sequence[str],
+        *,
+        trial: bool = False,
+    ) -> str:
         """Send one call and tell the guard whether the transport carried it."""
         from maljan.providers.server_guard import transport_failure
 
@@ -313,7 +327,7 @@ class MCPLangChainToolkit:
                     # transport carried it, and that is all the breaker reads.
                     guard.answered()
                 else:
-                    guard.failed(reason)
+                    guard.failed(reason, trial=trial)
                 settled = True
             logger.warning("MCP tool '%s' raised %s: %s", tool_name, type(exc).__name__, exc)
             return (
@@ -322,7 +336,7 @@ class MCPLangChainToolkit:
             )
         finally:
             if guard is not None and not settled:
-                guard.abandoned()
+                guard.abandoned(trial=trial)
 
     def _tag_description(self, name: str, description: str) -> str:
         """Add a category tag and truncate to keep ReAct context lean."""
