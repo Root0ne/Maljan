@@ -56,6 +56,7 @@ from maljan.pipeline.events import (
     emit_stage_ended_at_cap,
     summarize_claims,
 )
+from maljan.pipeline.evidence_summary import collect as collect_technique_sources
 from maljan.pipeline.evidence_summary import summarise
 from maljan.pipeline.outcome import (
     VERDICT_READ_FALLBACK,
@@ -189,8 +190,12 @@ def _note_export_findings(report: Any, rows: Sequence[tuple[str, str]]) -> None:
     validation = dict(summary.get("validation") or {})
     unresolved = [dict(row) for row in validation.get("unresolved") or []]
     by_code = dict(validation.get("by_code") or {})
-    for code, message in rows:
-        unresolved.append({"agent": JUDGE_AGENT_KEY, "code": code, "message": message})
+    for row in rows:
+        code, message = row
+        # Who wrote the object down: the judge for its own objects, the source
+        # of a network-block row for one of those.
+        agent = str(getattr(row, "by", "") or JUDGE_AGENT_KEY)
+        unresolved.append({"agent": agent, "code": code, "message": message})
         by_code[code] = by_code.get(code, 0) + 1
     validation["unresolved"] = unresolved
     validation["by_code"] = dict(sorted(by_code.items()))
@@ -3365,6 +3370,13 @@ def make_judge_node(
                 ledger_ids=[entry.id for entry in _ledger],
                 facts_block=pack_text(state, container),
                 run_state=render_run_state(state),
+                # Who named which technique — the evidence summary as data —
+                # so a relationship crediting an agent with a technique it never
+                # named can be asked about.
+                technique_sources={
+                    tid: [source for source, _confidence in rows]
+                    for tid, rows in collect_technique_sources(isr_reports, _ledger).items()
+                },
             )
             # A verdict the judge never expressed as a bundle is the thinnest
             # answer this pipeline can produce — no severity, no reasoning the
@@ -3694,6 +3706,10 @@ def make_judge_node(
                     "final_decision": decision,
                     "judge_report": "Analyzed negotiation history and expert reports.",
                     "stix_output": stix_output,
+                    # The map from each label the judge wrote to the id it was
+                    # published under, kept with the judge's own bundle.
+                    "stix_labels": dict(verdict.labels),
+                    "stix_written": verdict.written,
                     # Set when the judge's answer was not the verdict it was
                     # asked for — text, or nothing at all. Written rather than
                     # left alone: the verdict stage runs once today, and a
@@ -4186,6 +4202,13 @@ def make_report_node(
                     # blanked: the second-source test reads the same record
                     # the judge's grounding check does.
                     corpus=container.get_evidence_corpus(),
+                    # Who named which technique, the record the judge's credit
+                    # question was asked against: a credit it kept that names
+                    # no source is left off the export's copy.
+                    technique_sources={
+                        tid: [source for source, _confidence in rows]
+                        for tid, rows in collect_technique_sources(isr_reports, _ledger).items()
+                    },
                 )
                 extended_dump = extended_bundle.model_dump(mode="json")
                 # What the judge said about a technique the checks rejected

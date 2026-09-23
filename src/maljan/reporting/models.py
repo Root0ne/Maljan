@@ -449,6 +449,11 @@ class PersistenceMechanism(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def confidence_text(value: float | None) -> str:
+    """A technique's confidence as a report prints it: "not given" when none was."""
+    return "not given" if value is None else f"{value:.2f}"
+
+
 class CapabilityCell(BaseModel):
     """One cell in the tactic×technique heatmap."""
 
@@ -459,7 +464,9 @@ class CapabilityCell(BaseModel):
     technique_id: str  # e.g. "T1055"
     technique_name: str
     evidence: list[str] = Field(default_factory=list)
-    confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
+    # The highest number a source put on the technique, or ``None`` when no
+    # source gave one — printed "not given", never as a confidence of zero.
+    confidence: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
     contributing_layers: list[str] = Field(default_factory=list)
     # ``False`` when the ATT&CK catalogue has no entry for this id and the
     # producer kept it after being told. The row stays — deleting an analyst's
@@ -491,7 +498,8 @@ class TTPMapping(BaseModel):
     tactic: str = ""
     tactic_name: str = ""
     evidence_quotes: list[str] = Field(default_factory=list)
-    confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
+    # See ``CapabilityCell.confidence``: ``None`` when no source gave a number.
+    confidence: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
     contributing_layers: list[str] = Field(default_factory=list)
     is_corroborated: bool = False
     # See ``CapabilityCell.technique_id_valid``.

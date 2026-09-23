@@ -199,6 +199,11 @@ class AnalysisState(TypedDict):
     final_decision: Literal["Malware", "Benign", "Suspicious"] | None
     judge_report: str | None
     stix_output: dict[str, Any] | None
+    # ``{the judge's label: the published id}`` for ``stix_output``.
+    stix_labels: dict[str, str] | None
+    # The judge's answer ``stix_output`` was read from, as the judge wrote it:
+    # what the report stores as the judge's own bundle.
+    stix_written: dict[str, Any] | None
 
     # Observability: serialized RunSummary dict, populated after verdict generation.
     run_summary: dict[str, Any] | None

@@ -12,7 +12,6 @@ and this is the only thing that covers it.
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
 
 from maljan.schemas.stix_models import (
     AttackPattern,
@@ -95,21 +94,25 @@ class TestConfidenceAnnotatedRelationship:
         r = _make_annotated(technique_id=None)
         assert r.x_maljan_technique_id is None
 
-    def test_confidence_default_is_half(self) -> None:
+    def test_a_confidence_nobody_stated_is_absent(self) -> None:
         r = ConfidenceAnnotatedRelationship(
             relationship_type="uses",
             source_ref="a",
             target_ref="b",
         )
-        assert r.x_maljan_confidence == pytest.approx(0.5)
+        assert r.x_maljan_confidence is None
+        assert "x_maljan_confidence" not in r.model_dump(mode="json")
+        assert r.is_high_confidence is False
+        assert r.confidence_label() == "NOT ASSESSED"
 
-    def test_evidence_basis_default_is_unknown(self) -> None:
+    def test_an_evidence_basis_nobody_stated_is_absent(self) -> None:
         r = ConfidenceAnnotatedRelationship(
             relationship_type="uses",
             source_ref="a",
             target_ref="b",
         )
-        assert r.x_maljan_evidence_basis == "unknown"
+        assert r.x_maljan_evidence_basis is None
+        assert "x_maljan_evidence_basis" not in r.model_dump(mode="json")
 
     def test_contributing_agents_default_is_empty(self) -> None:
         r = ConfidenceAnnotatedRelationship(
@@ -119,13 +122,12 @@ class TestConfidenceAnnotatedRelationship:
         )
         assert r.x_maljan_contributing_agents == []
 
-    def test_confidence_below_zero_rejected(self) -> None:
-        with pytest.raises(ValidationError):
-            _make_annotated(confidence=-0.1)
-
-    def test_confidence_above_one_rejected(self) -> None:
-        with pytest.raises(ValidationError):
-            _make_annotated(confidence=1.1)
+    def test_a_confidence_off_the_scale_is_kept_and_read_as_no_number(self) -> None:
+        for value in (-0.1, 1.1):
+            r = _make_annotated(confidence=value)
+            assert r.x_maljan_confidence == pytest.approx(value)
+            assert r.is_high_confidence is False
+            assert r.confidence_label() == "NOT ASSESSED"
 
     def test_confidence_zero_accepted(self) -> None:
         r = _make_annotated(confidence=0.0)
@@ -210,14 +212,14 @@ class TestEvidenceBasisVocab:
         )
         assert r.x_maljan_evidence_basis == basis
 
-    def test_invalid_basis_rejected(self) -> None:
-        with pytest.raises(ValidationError):
-            ConfidenceAnnotatedRelationship(
-                relationship_type="uses",
-                source_ref="a",
-                target_ref="b",
-                x_maljan_evidence_basis="memory",  # type: ignore[arg-type]
-            )
+    def test_a_basis_off_the_list_is_kept_as_written(self) -> None:
+        r = ConfidenceAnnotatedRelationship(
+            relationship_type="uses",
+            source_ref="a",
+            target_ref="b",
+            x_maljan_evidence_basis="memory",
+        )
+        assert r.x_maljan_evidence_basis == "memory"
 
 
 # ---------------------------------------------------------------------------

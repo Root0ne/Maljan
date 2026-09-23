@@ -118,7 +118,7 @@ dev = [
     # conformance check that counts families at two.
     "cairosvg>=2.9.0",
     "ruff>=0.15.9",
-    "stix2-validator>=3.3.1",
+    "stix2-validator==3.2.0",
 ]
 # The GitHub Pages site under docs/, built with MkDocs Material. Kept apart
 # from dev so the docs workflow installs it alone, with none of the runtime

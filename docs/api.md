@@ -112,6 +112,15 @@ copy to fall behind it. `POST /reports/{report_id}/enrich` queues
 threat-intelligence enrichment and answers 202 — the lookups run as their own
 job so they never delay a verdict.
 
+`stix` serves the exported bundle. `stix?source=judge` serves the judge's own
+bundle beside it, as `{"bundle": …, "labels": {…}}`: the bundle as the pipeline
+read it and the map from each id the judge wrote to the id it was published
+under. It is the bundle every export decline row says an object "is unchanged
+in". A report stored before it was kept answers `{"kept": false, "reason": …}`
+— the report exists and has none — and only a report that does not exist, or
+is not the caller's, answers 404. A kept record carries `"kept": true`, and a
+label the judge gave two objects maps to the list of ids it named.
+
 `iocs` is a feed another system acts on, and it answers accordingly. `kind`
 narrows to one of `hash`, `domain`, `ip`, `url`, `user_agent`, `ja3`, `ja3s`.
 `include` decides what is returned:
