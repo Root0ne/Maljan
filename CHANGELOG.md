@@ -3305,6 +3305,19 @@ change landed on `main`.
   defanged host, and the console defangs a channel's endpoints.
 - **A model's list is cut only with a record**, and a missing parser degrades a
   run only for a sample of the format it parses (no Mach-O note on a PE).
+- **The report models' contracts, prompts and instructions carry no evaluation
+  answer.** The narrative contract and its citation rule use the invented
+  class's technique ids, the composer's instructions are module data with a
+  neutral configuration checklist, and the leak test reads all of them.
+- **Model prose cannot open a setext heading or a table**: a line of `=` or `-`
+  and a table delimiter row are escaped like `#` and fences.
+- **`Finding.confidence` is `None` when the analyst gave none** (was 0.0); the
+  findings table prints "not given" and the matrix records no number for it.
+- The degraded header says an analyst was *skipped* when its record says so,
+  from the stage and agent records; an empty capability subsection names the
+  tools that ran over the file; PEB access is listed once; the unscored
+  similarity line reads "No similarity measure was recorded for these
+  samples."
 
 ### Removed
 

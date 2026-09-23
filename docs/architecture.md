@@ -1552,10 +1552,12 @@ is assembled from what the run gathered rather than recomputed beside it:
   text and changes none of it. Every numbered section, every §5 subsection and
   the §10 and §12 subsections are printed; one with nothing in the run prints
   one line in the platform's voice that says whether nothing was found or
-  nothing looked — "Not examined in this run: the sandbox recorded nothing for
-  this sample, no static tool recorded a persistence mechanism, and the report
-  model wrote nothing on it", "Not written in this run: the report model wrote
-  no execution flow" — and the table subsections of §6, §7 and §9 are unnumbered
+  nothing looked, naming what did look — "Nothing recorded in this run: the
+  tools that ran over the file (capa, yara_scan, …) recorded no discovery
+  command, and the sandbox recorded nothing for this sample; the report model
+  wrote nothing on it", "Not written in this run: the report model wrote no
+  execution flow"; "Not examined" only when no tool looked at the file at all
+  — and the table subsections of §6, §7 and §9 are unnumbered
   headings that appear only when they hold a table. An absence is said only for
   what a tool looked at: "no persistence observed" only when a sandbox recorded
   the host (a dynamic block whose registry and file operations it provides),
@@ -1564,11 +1566,13 @@ is assembled from what the run gathered rather than recomputed beside it:
   cannot say. The numbering is fixed, so a comment can cite §7 whichever
   sections a run filled.
 * **A degraded run's first screen is one sentence.** The header builds it from
-  the analysts' and the sandbox's states — "The static analyst failed, the
-  dynamic and network analysts produced no claims and the sandbox recorded
-  nothing for this sample; the verdict above is tentative. See §13 for what this
-  run could not examine." — and never prints a reason code or an operator's
-  install command. §13 lists every degradation reason verbatim, with its remedy
+  the stage and agent records — the failed-analyst list, each analyst's
+  recorded skip reason or no-data flag, its claim count — and the sandbox's
+  state: "The static analyst failed, the dynamic and network analysts were
+  skipped (no sandbox fixture for this sample) and the sandbox recorded nothing
+  for this sample; the verdict above is tentative. See §13 for what this run
+  could not examine." It never prints a reason code or an operator's install
+  command. §13 lists every degradation reason verbatim, with its remedy
   where the reason carries one, and prints each analyst's state under *What
   ran*. A run that is not degraded but recorded limitations points to §13 in
   one line. §3 does not claim consensus among analysts that claimed nothing.
@@ -1579,20 +1583,25 @@ is assembled from what the run gathered rather than recomputed beside it:
   confidence nobody stated prints "not given"; a packer match, a function-hash
   match, a similarity candidate or a carved payload with no value prints "not
   recorded", never 0; a similar sample the long-term memory returned without a
-  distance is counted and not listed. The sample's reputation lookup is one
+  distance is counted and not listed ("No similarity measure was recorded for
+  these samples."). A finding an analyst wrote without a number carries none
+  (`Finding.confidence` is `None`), and the matrix records neither a number nor
+  a producer for it. The sample's reputation lookup is one
   measured sentence in §2 ("VirusTotal: 52 of 75 engines flag it as
   malicious"), from the engine counts `ledger_report` lifts into rows.
 * **The proof sits beside the prose.** §5.1 and §5.2 print every capa rule the
   run recorded in the anti-analysis, obfuscation and encryption namespaces, and
   in the runtime-linking, PE-export, hashing and checksum namespaces (with the
-  PEB-access rule), with the capa section's evidence ids. In §8 a rule naming a
+  PEB-access rule), with the capa section's evidence ids; a rule that speaks to
+  resolution is printed there once, not in both. In §8 a rule naming a
   technique a row already holds is folded into that row's Procedure and
   Evidence; a technique only rules named is one row with the catalogue's tactic
   and name and the status "not published: a rule matched it and no producer
   claimed it".
 * **A list item, a step and a heading are built by one helper each.** `_item`,
   `_step` and the heading helpers flatten a value onto its line, and model prose
-  cannot open a heading or a code fence; fenced blocks use a fence longer than
+  cannot open a heading (ATX, or setext through a line of `=` or `-`), a code
+  fence or a table (a delimiter row is escaped); fenced blocks use a fence longer than
   any backtick run inside them. `test_a_list_item_is_never_assembled_by_hand`
   fails the build if a string literal elsewhere starts a bullet, a step or a
   heading, as the table guard does for rows.
@@ -1626,7 +1635,9 @@ is assembled from what the run gathered rather than recomputed beside it:
   from says so rather than borrowing an answer.
 * **What the models write is asked for as the exact object, with an example,
   and printed as written.** The narrative round answers `executive_summary`,
-  two to six `key_findings` (each `{text, evidence_ids}`) and the
+  `key_findings` (each `{text, evidence_ids}`) — the prompt asks for three to
+  six and the schema accepts two, so two good bullets are kept rather than the
+  round failing and taking the summary with it — and the
   recommendations; its capability paragraphs are no longer asked for. The
   composer writes the background, the execution flow (`FlowStep{order,
   action, voice, evidence_refs}`, `voice` *observed* or *assessed*), the prose
