@@ -182,6 +182,56 @@ test.describe("Analysis tabs", () => {
   /* C3 (dev audit 2026-09-06): nothing on the page said which analyst line-up
    * produced the report, so a narrow profile read as a full run — the
    * deterministic static layers appear either way. */
+  test("a run's Sigma section is drawn on DETECTION with its level and chips, and STATIC links there", async ({
+    sessionPage: page,
+  }) => {
+    const sigma = {
+      key: "sigma_matches",
+      title: "Sigma rule matches",
+      kind: "table" as const,
+      columns: ["Rule", "Level", "Technique", "Matched fields"],
+      rows: [["Run key persistence", "high", "T1547.001", "TargetObject=HKCU Run"]],
+      text: "",
+      items: [],
+      evidence_ids: ["ev_0001"],
+      source: "tool:sigma_match",
+    };
+    await page.route(`**/api/v1/reports/job/${JOB_ID}`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...REPORT,
+          malware_report: {
+            ...REPORT.malware_report!,
+            sections: [...(REPORT.malware_report!.sections ?? []), sigma],
+          },
+        }),
+      })
+    );
+
+    await page.goto(`/analysis/${JOB_ID}/detection`);
+    await expect(page.getByText("Run key persistence")).toBeVisible();
+    // The rule's own level, in words, on the ladder.
+    await expect(page.locator("[data-rule-level]").first()).toContainText("High");
+    // Each row still links to the ledger entry it came from.
+    await expect(
+      page.locator('[data-rule-provenance="sigma_matches"]').getByRole("link", { name: "ev_0001" })
+    ).toHaveAttribute(
+      "href",
+      `/analysis/${JOB_ID}/evidence?evidence=ev_0001`
+    );
+
+    await page.goto(`/analysis/${JOB_ID}/static`);
+    const moved = page.locator("[data-rules-moved]");
+    await expect(moved.getByRole("link", { name: "DETECTION" })).toHaveAttribute(
+      "href",
+      `/analysis/${JOB_ID}/detection`
+    );
+    // Drawn once, on DETECTION, and not repeated here.
+    await expect(page.getByRole("heading", { name: /Sigma rule matches/i })).toHaveCount(0);
+  });
+
   test("a non-default profile is named in the header, with its analysts", async ({
     sessionPage: page,
   }) => {

@@ -108,6 +108,14 @@ describe("what the panel draws", () => {
     expect(sigma[2]).toMatchObject({ level: null, recorded: true });
   });
 
+  it("keeps the section a kind was read from, so its rows cite their ledger entries", () => {
+    const read = ruleMatches([], [SIGMA_SECTION_ROWS, YARA_SECTION_ROWS]);
+    expect(read.sigmaSection?.evidence_ids).toEqual(["ev_0100"]);
+    expect(read.yaraSection?.key).toBe("yara_matches");
+    const old = ruleMatches([layer("sigma_layer", [SIGMA_CLAIM])], []);
+    expect(old.sigmaSection).toBeNull();
+  });
+
   it("marks an old run's claim rows as recording no level", () => {
     const { sigma } = ruleMatches([layer("sigma_layer", [SIGMA_CLAIM])], []);
     expect(sigma[0]).toMatchObject({ level: null, recorded: false });
@@ -179,7 +187,12 @@ describe("what the panel cannot draw", () => {
 
   it("answers for nothing at all", () => {
     expect(hasRuleMatches(null)).toBe(false);
-    expect(ruleMatches(undefined)).toEqual({ yara: [], sigma: [] });
+    expect(ruleMatches(undefined)).toEqual({
+      yara: [],
+      sigma: [],
+      yaraSection: null,
+      sigmaSection: null,
+    });
   });
 });
 

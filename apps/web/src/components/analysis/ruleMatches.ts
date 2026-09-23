@@ -207,6 +207,10 @@ export function orderByLevel(rows: readonly SigmaMatch[]): SigmaMatch[] {
 export interface RuleMatches {
   yara: YaraMatch[];
   sigma: SigmaMatch[];
+  /** The section each kind was read from, for its citations — the ledger
+   *  entries it was built from — or null when it came from old claims. */
+  yaraSection: EvidenceSection | null;
+  sigmaSection: EvidenceSection | null;
 }
 
 /**
@@ -228,6 +232,8 @@ export function ruleMatches(
     sigma: sigmaSection
       ? sigmaFromSection(sigmaSection)
       : findingsByName(findings, SIGMA_LAYER).map(parseSigma),
+    yaraSection,
+    sigmaSection,
   };
 }
 

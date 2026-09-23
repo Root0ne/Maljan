@@ -4,7 +4,27 @@ import { useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { useReport } from "@/app/(app)/analysis/[id]/layout";
 import { SEVERITY_LADDER, ladderDots, severityRung, severityTone, severityWord } from "@/lib/severity";
+import type { EvidenceSection } from "@/types/malware-report";
+import EvidenceChips from "./EvidenceChips";
 import { orderByLevel, ruleMatches } from "./ruleMatches";
+
+/**
+ * The ledger entries a kind's rows were built from, as the chips STATIC's
+ * section tables drew before these rows moved here — or, for a section that
+ * cites no entry, where it came from. Nothing for rows read from old claims,
+ * which cite their entry on the row itself.
+ */
+function Provenance({ section }: { section: EvidenceSection | null }) {
+  if (!section) return null;
+  return (
+    <span data-rule-provenance={section.key}>
+      <EvidenceChips
+        ids={section.evidence_ids}
+        source={section.evidence_ids.length === 0 ? section.source : undefined}
+      />
+    </span>
+  );
+}
 
 /** A stored claim row: the layer never recorded a level. */
 const NOT_RECORDED = "level not recorded";
@@ -49,7 +69,12 @@ export default function RulesTab() {
 
   /* One reading of the run's rule matches, shared with the tab rule that
    * decides whether this panel is reachable at all (`ruleMatches.ts`). */
-  const { yara: yaraMatches, sigma: unsortedSigma } = useMemo(
+  const {
+    yara: yaraMatches,
+    sigma: unsortedSigma,
+    yaraSection,
+    sigmaSection,
+  } = useMemo(
     () => ruleMatches(report?.agent_findings, report?.malware_report?.sections),
     [report?.agent_findings, report?.malware_report?.sections],
   );
@@ -91,10 +116,11 @@ export default function RulesTab() {
     <div>
       {yaraMatches.length > 0 && (
         <Section title={`YARA Matches (${yaraMatches.length})`} defaultOpen={true}>
-          <div className="bg-status-blue/10 px-4 py-2 border-b border-border">
+          <div className="flex flex-wrap items-center gap-2 bg-status-blue/10 px-4 py-2 border-b border-border">
             <span className="text-xs font-medium text-status-blue uppercase tracking-wider">
               YARA Rules
             </span>
+            <Provenance section={yaraSection} />
           </div>
           <div className="divide-y divide-border-light">
             {yaraMatches.map((rule, i) => (
@@ -147,9 +173,12 @@ export default function RulesTab() {
 
       {sigmaMatches.length > 0 && (
         <Section title={`Sigma Matches (${sigmaMatches.length})`} defaultOpen={true}>
-          <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-bg-elevated">
-            <span className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              Sigma Rules
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-border bg-bg-elevated">
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium text-text-primary uppercase tracking-wider">
+                Sigma Rules
+              </span>
+              <Provenance section={sigmaSection} />
             </span>
             <div className="flex items-center gap-3">
               {/* The ladder's rungs in its order, each some rule declared; a
