@@ -347,6 +347,38 @@ class TestTheExecutable:
             == tmp_path / ".local" / "share" / "maljan" / "tools" / "floss-3.1.1" / "floss"
         )
 
+    def test_an_environment_handed_in_is_read_instead_of_this_process_s(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The triage pack looks with the analysis server's environment."""
+        import hashlib
+
+        body = b"#!/bin/sh\n"
+        target = self._executable(tmp_path, body)
+        monkeypatch.setattr(tool, "FLOSS_BINARY_SHA256", hashlib.sha256(body).hexdigest())
+        monkeypatch.setenv("MALJAN_FLOSS_PATH", str(tmp_path / "absent"))
+
+        assert tool.find_floss({"MALJAN_FLOSS_PATH": str(target)}) == (target, "")
+        assert tool.floss_unavailable({"MALJAN_FLOSS_PATH": str(target)}) is None
+        assert tool.floss_unavailable() is not None
+
+    def test_the_search_path_handed_in_is_the_one_searched(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import hashlib
+
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        body = b"#!/bin/sh\n"
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        target = bin_dir / "floss"
+        target.write_bytes(body)
+        target.chmod(0o755)
+        monkeypatch.setattr(tool, "FLOSS_BINARY_SHA256", hashlib.sha256(body).hexdigest())
+
+        assert tool.find_floss({"PATH": str(bin_dir)}) == (target, "")
+        assert tool.find_floss({"PATH": str(tmp_path / "empty")})[0] is None
+
 
 class TestTheChild:
     @pytest.fixture(autouse=True)
@@ -378,6 +410,19 @@ class TestTheChild:
         assert seen["secret"] is None
         # The run's own directory goes with the run.
         assert list(scratch.iterdir()) == []
+
+    def test_a_scratch_directory_handed_in_holds_the_run(self, tmp_path: Path) -> None:
+        """The triage pack's run goes in the job directory it opened."""
+        import sys
+
+        opened = tmp_path / "job-dir" / "floss"
+        finished = tool._run(
+            [sys.executable, "-c", "import os; print(os.getcwd())"], 30, scratch=opened
+        )
+
+        assert Path(finished.stdout.strip()).parent == opened
+        assert list(opened.iterdir()) == []
+        assert not (tmp_path / "staging" / "floss").exists()
 
     def test_an_overrun_kills_the_whole_group(self, tmp_path: Path) -> None:
         import os

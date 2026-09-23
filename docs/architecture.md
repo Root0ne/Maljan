@@ -265,9 +265,18 @@ projections at summary level (processes, network, signatures, dropped
 files, channels) and `pcap_summary` when a capture was fetched; one reputation
 lookup on the sha256 (`get_file_report` on `virustotal` when it is enabled,
 else `check_hash` on `threatintel`), made through the tool server exactly as
-an agent's call is and recorded under that server; and `function_matches` when
+an agent's call is and recorded under that server; `function_matches` when
 a Qdrant function-hash store and a provider that hashes functions are both
-present.
+present; and, last, for a PE, `floss`: FLOSS's decoded, stack and tight
+strings, recovered by emulation (the sample is never executed) through the
+same `tools.emulated_strings` function the sidecar's `floss` tool serves — its
+pinned build, 600 s wall clock and 4 GiB address-space limit — with the
+`analysis` server's environment (so `MALJAN_FLOSS_PATH` there is honoured) and
+a directory inside the job's staging directory that the job's teardown
+removes. The entry keeps up to 200 rows. It is last so the ids issued before it
+are the ids they were before it existed. Without a build the entry says so,
+with the remedy, and is not a failure; a run stopped by its wall clock or its
+memory limit is a failed entry whose line says which.
 
 The pack states facts and draws no conclusion, and it never fails a job: a
 tool that raises or answers with an error is an entry with `ok=False` and a
@@ -287,7 +296,14 @@ line each — `[ev_0001] identity: pe windows, 4,486,656 bytes, …`,
 `[ev_0008] capa: 6 capabilities, ATT&CK T1027, T1055 (rule-asserted)`,
 `[ev_0017] reputation: VirusTotal 31/75 malicious, labels Filisto` — cut at
 `reporting.upstream_findings_max_chars` with a last line saying how many
-entries were left out and that their full output is a tool call away. Under
+entries were left out and that their full output is a tool call away. The
+decoded strings are one line: the counts, then each string quoted as
+`"string"@offset` (a decoded string's call site, a stack or tight string's
+routine, relative to the image base) grouped by the routine that produced it,
+at most 100 strings and 3,000 characters with each string cut at 120; a line
+that cut says so, with the reason and the `offset` of the rest, and a line
+that would not fit in what is left of the block is rendered shorter rather
+than dropped. On the reference loader it carries all 81 strings. Under
 the heading *Facts established before analysis (ledger ids in brackets; cite
 them)* the block leads every analyst's first human turn (analysis and
 revision alike), the mediator's and the verdict's human turns, the narrative

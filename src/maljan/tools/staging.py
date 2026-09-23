@@ -23,8 +23,9 @@ by an operator's value, and one written after it would overwrite theirs.
 
 Who creates what, and who removes it:
 
-* the sidecar creates ``<base>/<leaf>`` 0o700, on its first write, and nothing
-  else creates it — a job that stages nothing has no directory;
+* the sidecar creates ``<base>/<leaf>`` 0o700, on its first write, and the
+  worker creates it only for work of its own there — a sandbox capture, the
+  triage pack's FLOSS run — so a job that stages nothing has no directory;
 * the spawn composes the name and records it here, so the process that started
   the sidecars knows exactly which directories that job may have created;
 * the job's owner removes them on every way out of the run, beside the owner
@@ -220,6 +221,23 @@ def open_capture_dir(job_id: str) -> Path:
     note_job_directory(job_id, captures.parent)
     add_sample_root(captures)
     return captures
+
+
+def open_job_directory(job_id: str, child: str, environ: Mapping[str, str] | None = None) -> Path:
+    """``<base>/<job>/<child>``, created 0o700 level by level, recorded for the teardown.
+
+    For work the platform itself does in a job's staging directory, as
+    ``open_capture_dir`` is for a capture, and held to the same checks: every
+    level goes through ``private_dir``, and the job directory is recorded so
+    the job's teardown removes it with everything else the job staged. No
+    sample root is named, because nothing but the platform reads it.
+    """
+    job_dir = job_staging_dir(staging_base(environ), job_id)
+    target = job_dir / child
+    for directory in (job_dir.parent, job_dir, target):
+        private_dir(directory)
+    note_job_directory(job_id, job_dir)
+    return target
 
 
 def staging_root(environ: Mapping[str, str] | None = None) -> Path:

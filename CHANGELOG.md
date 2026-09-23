@@ -1491,6 +1491,24 @@ change landed on `main`.
   when there is one, and the reputation lookup move by +1. A stand-in run is now
   marked degraded with its reason, as a run with no report already was;
   `run_summary` has a `sandbox` key (`null` when a sandbox observed the run).
+- **A PE's decoded strings are in the triage pack.** A static analyst offered
+  `floss` among thirty-six tools never called it, so the configuration an
+  analyst recovers from an encrypted-string loader reached no model. The pack
+  now runs FLOSS once on every PE, last, through the function the sidecar's
+  tool serves (the pinned build, its wall clock and memory limit), with the
+  `analysis` server's environment and a directory in the job's staging
+  directory, and every agent reads one line of it: the counts, then up to 100
+  strings in 3,000 characters, each with the routine that produced it and its
+  offset from the image base, the bound and its reason stated when it cut.
+  Without a build the entry says so with the remedy and is not a failure; a run
+  stopped by its clock or its memory is a failed entry that says which. On the
+  reference loader the line carries all 81 strings and adds about 28 s to the
+  pack. The tool's description now says to call it when a PE's strings look
+  encrypted or are missing.
+  **Upgrading:** a PE's pack has one more entry, `floss`, after every other;
+  the pack's own ids do not move, and every id after the pack (the analysts',
+  the judge's) moves by +1 on a PE. A test suite that runs the pack sets
+  `MALJAN_FLOSS_PATH` to a missing file unless a test names a build.
 
 ### Fixed
 
@@ -3641,3 +3659,8 @@ image, run `scripts/install_floss.sh`, which does the same into
 the pinned build in `MALJAN_FLOSS_PATH` in the `analysis` server's `env`.
 Without it the capability manifest marks `floss` unavailable and the model is
 not offered the tool.
+
+The triage pack runs `floss` on every PE, so a worker host needs the pinned
+FLOSS build as the `analysis` server's host does; the backend image has it.
+Without it the pack's entry says the build is missing and names the remedy,
+and the run goes on.

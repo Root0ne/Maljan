@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import threading
 import time
@@ -74,6 +75,7 @@ from maljan.pipeline.triage_pack import (
     NOT_RUN_PREFIX,
     PIPELINE,
     CapaSettings,
+    FlossSettings,
     PackInputs,
     failure_reason,
     pack_block,
@@ -1088,6 +1090,26 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
     return step
 
 
+def _analysis_server_environ(container: ServiceContainer) -> dict[str, str]:
+    """This process's environment with the analysis server's own ``env`` map over it.
+
+    What the pack's FLOSS step reads ``MALJAN_FLOSS_PATH`` and the staging base
+    from, so an operator who named the build or the base in the server's
+    settings gets the same build and the same directory from the pack as from
+    the tool. Never raises: a server entry that cannot be read leaves this
+    process's environment.
+    """
+    environ = dict(os.environ)
+    try:
+        server = container.config.mcp.servers.get("analysis")
+        extra = dict(getattr(server, "env", None) or {})
+    except Exception as exc:  # noqa: BLE001 — an unreadable entry adds nothing
+        logger.debug("triage pack: the analysis server's env could not be read (%s).", exc)
+        return environ
+    environ.update({str(k): str(v) for k, v in extra.items()})
+    return environ
+
+
 def _knowledge_module() -> Any:
     """``maljan.tools.knowledge`` when it imports, else ``None``."""
     try:
@@ -1164,6 +1186,9 @@ def make_triage_node(
             sandbox_report=state.get("sandbox_report"),
             evidence_budget_bytes=int(getattr(cfg.reporting, "evidence_budget_bytes", 0) or 0),
             budget_s=float(cfg.triage.budget_seconds),
+            floss=FlossSettings(
+                environ=_analysis_server_environ(container), job_id=container.job_key()
+            ),
         )
 
         def _elapsed_ms() -> int:
