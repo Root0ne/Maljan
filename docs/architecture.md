@@ -604,9 +604,18 @@ decides.
    stays off: 5 questions over 105 rankings is a small enough yield that a run
    pays the turn only when an operator asks for it.
 4. **Corroboration** (exact). Per technique in the run, `asserted_by` — the
-   deterministic sources carrying their own ATT&CK ids: capa's `attck`
-   field, a Sigma rule's technique tags, a YARA TTP rule's
-   `meta.technique_id`, `lolbin_lookup` — and `claimed_by`, the agents.
+   deterministic sources that assert a technique from this sample: capa's
+   `attck` field, a Sigma rule's technique tags, a YARA TTP rule's
+   `meta.technique_id`, `lolbin_lookup` on one of its command lines, a
+   sandbox signature — and `claimed_by`, the agents. Those tools are the
+   whole list (`evidence_summary.ASSERTING_SOURCES`). A reference lookup is
+   never a source: `attck_lookup`, `attck_validate` and `resolve_technique`
+   say what an id is, and `similar_cases` and `family_lookup` return other
+   samples' techniques, so none of them adds a row or counts as an assertion.
+   An id any ledger entry of the run marks invalid (`valid: false` from
+   `attck_lookup`, a row under `invalid` from `attck_validate`) is never
+   counted as asserted, whichever rule named it. The judge's evidence block
+   reads the same rule.
    `api_capability` is not among the sources: the API catalogue associates a
    technique with an import set, and an import set is what a program can do
    rather than what it did, so its associations travel under `associated_by`,

@@ -3213,6 +3213,23 @@ change landed on `main`.
   `core.llm.ollama.keep_alive`, staged values included. The other providers'
   bodies are unchanged.
 
+- **A reference lookup is not an assertion.** The corroboration rows counted
+  any ledger tool that returned a technique id as a deterministic source, so an
+  analyst that looked up twenty ids with `attck_lookup`, and a `similar_cases`
+  call returning other samples' techniques, made a report print "29 asserted by
+  a deterministic source" where capa had asserted two — six of them ids the
+  lookup itself answered `valid: false`. Only capa, Sigma, YARA, `lolbin_lookup`
+  and a sandbox signature assert now (`evidence_summary.ASSERTING_SOURCES`); a
+  lookup adds no row and no count, and an id any ledger entry of the run marks
+  invalid is never counted as asserted. The report's TTP line, its
+  corroboration table, the run summary's per-source attribution and
+  `techniques_by_layer`, the judge's evidence block and the console's
+  Capabilities page all read the same rows.
+  **Upgrading:** `run_summary.corroboration` on a new run has fewer rows and
+  no `attck_lookup`, `similar_cases`, `resolve_technique` or other lookup name
+  in `asserted_by` or `techniques_by_layer`; a report stored before this keeps
+  the rows it was written with.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**
