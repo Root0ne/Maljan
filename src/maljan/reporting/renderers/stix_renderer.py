@@ -965,31 +965,6 @@ class ExtendedSTIXRenderer:
         for carried_indicator in carried:
             _queue(carried_indicator, _indicator_band(carried_indicator.pattern), "judge")
 
-        # 6.9) Every indicator this Malware export carries indicates its
-        #      malware object. The judge's own ``indicates`` edges are carried
-        #      as written; an indicator with none — the network and string rows
-        #      this renderer mints, a judge indicator the judge related to
-        #      nothing — is given a plain one, because the run concluded the
-        #      sample is malware and every indicator published beside that
-        #      verdict is evidence of it. An indicator published under any other
-        #      verdict indicates nothing: there is no malware object to point at.
-        if malware_id is not None and str(getattr(report, "verdict", "")) == "Malware":
-            indicating = {
-                str(getattr(obj, "source_ref", ""))
-                for obj in objects
-                if getattr(obj, "type", "") == "relationship"
-                and getattr(obj, "relationship_type", "") == "indicates"
-            }
-            for obj in list(objects):
-                if getattr(obj, "type", "") == "indicator" and obj.id not in indicating:
-                    objects.append(
-                        Relationship(
-                            relationship_type="indicates",
-                            source_ref=obj.id,
-                            target_ref=malware_id,
-                        )
-                    )
-
         # 7) ObservedData for the process tree roots.
         #    The processes and their images are objects of the bundle, named by
         #    ``object_refs``. The sandbox block carries no observation time, so

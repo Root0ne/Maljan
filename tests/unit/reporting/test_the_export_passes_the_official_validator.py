@@ -22,7 +22,10 @@ from typing import Any
 
 from stix2validator import ValidationOptions, validate_instance
 
-from maljan.agents.judge_postprocess import postprocess_judge_bundle
+from maljan.agents.judge_postprocess import (
+    lift_misplaced_extensions,
+    postprocess_judge_bundle,
+)
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import (
     DynamicBehavior,
@@ -63,8 +66,27 @@ def _report(verdict: str, judge: Bundle | None = None) -> MalwareReport:
     return report
 
 
+# The ids of every ``indicates`` edge a judge fixture wrote, as published: the
+# gate tells the judge's edges from any the platform mints by them.
+_JUDGE_INDICATES: set[str] = set()
+
+
 def _judge(answer: dict[str, Any]) -> Bundle:
-    return Bundle.model_validate(postprocess_judge_bundle(json.loads(json.dumps(answer))))
+    """The judge's answer read the way the pipeline reads it.
+
+    The per-object pass runs first, as in ``JudgeAgent._bundle_from_response``:
+    an object the bundle cannot hold is set aside here too, so a fixture never
+    reaches the renderer with something the real path would not.
+    """
+    data = json.loads(json.dumps(answer))
+    lift_misplaced_extensions(data)
+    bundle = Bundle.model_validate(postprocess_judge_bundle(data))
+    _JUDGE_INDICATES.update(
+        str(o.id)
+        for o in bundle.objects
+        if o.type == "relationship" and o.relationship_type == "indicates"
+    )
+    return bundle
 
 
 def _errors(bundle: Bundle) -> list[str]:
@@ -330,15 +352,37 @@ def _malware_exports() -> list[tuple[str, Bundle]]:
         ("judge observables", _judge_observables()),
         ("declined malware", _declined_malware_with_edges()[0]),
         ("platform only", ExtendedSTIXRenderer().render(_report("Malware"), None)),
+        ("judge indicator typed benign, related to nothing", _benign_typed_indicator()),
     ]
 
 
+def _benign_typed_indicator() -> Bundle:
+    """A judge indicator for a vendor update host, typed ``benign``, related to nothing."""
+    judge = _judge(
+        {
+            "type": "bundle",
+            "objects": [
+                {"type": "malware", "id": "malware--1", "name": "shell", "is_family": False},
+                {
+                    "type": "indicator",
+                    "id": "indicator--1",
+                    "name": "update host",
+                    "pattern": "[domain-name:value = 'update.microsoft.com']",
+                    "pattern_type": "stix",
+                    "indicator_types": ["benign"],
+                },
+            ],
+        }
+    )
+    return ExtendedSTIXRenderer().render(_report("Malware", judge), judge)
+
+
 class TestEveryMalwareExportHangsTogether:
-    """In a Malware export every technique is used by a malware object and every
-    indicator indicates one, and the export publishes the techniques the report
-    does. A declined judge malware object used to leave its technique unrelated
-    and its indicator indicating nothing, while the report still published the
-    technique at the judge's number."""
+    """In a Malware export every technique is used by a malware object, every
+    ``indicates`` edge is one somebody made, and the export publishes the
+    techniques the report does. A declined judge malware object used to leave
+    its technique unrelated and its indicator indicating nothing, while the
+    report still published the technique at the judge's number."""
 
     def test_every_attack_pattern_is_used_by_a_malware_object(self) -> None:
         for name, bundle in _malware_exports():
@@ -353,18 +397,49 @@ class TestEveryMalwareExportHangsTogether:
             patterns = {o.id for o in bundle.objects if o.type == "attack-pattern"}
             assert patterns <= used, name
 
-    def test_every_indicator_indicates_a_malware_object(self) -> None:
+    def test_every_indicator_is_related_by_its_maker_or_listed_unrelated(self) -> None:
+        """An indicator indicates the malware object only by an edge the judge
+        wrote or by the sample's own hash edge; any other is related to nothing
+        and listed in the report object's ``object_refs``. In STIX ``indicates``
+        says the pattern detects the malware, which a verdict does not say."""
         for name, bundle in _malware_exports():
             by_id = {o.id: o for o in bundle.objects}
-            indicating = {
-                o.source_ref
+            sample_hash = {
+                o.id
                 for o in bundle.objects
-                if o.type == "relationship"
-                and o.relationship_type == "indicates"
-                and getattr(by_id.get(o.target_ref), "type", "") == "malware"
+                if o.type == "indicator" and SHA256 in str(getattr(o, "pattern", ""))
             }
-            indicators = {o.id for o in bundle.objects if o.type == "indicator"}
-            assert indicators <= indicating, name
+            (report_object,) = [o for o in bundle.objects if o.type == "report"]
+            listed = set(report_object.object_refs)
+            indicating: set[str] = set()
+            for o in bundle.objects:
+                if o.type != "relationship" or o.relationship_type != "indicates":
+                    continue
+                assert getattr(by_id.get(o.target_ref), "type", "") == "malware", name
+                assert o.id in _JUDGE_INDICATES or o.source_ref in sample_hash, (
+                    f"{name}: an indicates edge nobody made from {o.source_ref}"
+                )
+                indicating.add(o.source_ref)
+            for o in bundle.objects:
+                if o.type == "indicator":
+                    assert o.id in indicating or o.id in listed, (name, o.id)
+
+    def test_a_benign_typed_judge_indicator_is_not_said_to_indicate_the_malware(self) -> None:
+        bundle = _benign_typed_indicator()
+
+        (indicator,) = [
+            o
+            for o in bundle.objects
+            if o.type == "indicator" and "update.microsoft.com" in o.pattern
+        ]
+        assert indicator.indicator_types == ["benign"]
+        assert not [
+            o
+            for o in bundle.objects
+            if o.type == "relationship" and indicator.id in (o.source_ref, o.target_ref)
+        ]
+        (report_object,) = [o for o in bundle.objects if o.type == "report"]
+        assert indicator.id in report_object.object_refs
 
     def test_the_export_and_the_report_publish_the_same_techniques_with_the_same_numbers(
         self,
