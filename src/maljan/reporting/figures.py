@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from html import escape
 
+from maljan.reporting.defang import defang
 from maljan.reporting.models import Figure, MalwareReport, ProcessNode
 
 # Kill-chain tactic order for the ATT&CK matrix / infection chain.
@@ -196,9 +197,10 @@ def build_network_graph(report: MalwareReport) -> Figure | None:
         return None
     endpoints: list[tuple[str, bool]] = []
     for d in net.domains[:8]:
-        endpoints.append((d.fqdn, bool(getattr(d, "is_suspicious", False))))
+        endpoints.append((defang(d.fqdn, "domain"), bool(getattr(d, "is_suspicious", False))))
     for ip in net.ips[:8]:
-        endpoints.append((f"{ip.address}:{ip.port}" if ip.port else ip.address, True))
+        address = defang(ip.address, "ip")
+        endpoints.append((f"{address}:{ip.port}" if ip.port else address, True))
     endpoints = endpoints[:12]
     if not endpoints:
         return None
@@ -210,15 +212,13 @@ def build_network_graph(report: MalwareReport) -> Figure | None:
         f'<circle cx="{cx}" cy="{cy}" r="26" fill="#ddf4ff" stroke="{_ACCENT}"/>',
         _text(cx - 20, cy + 4, "sample", fill=_ACCENT, size=11, weight="bold"),
     ]
-    from maljan.reporting.builder import defang
-
     for i, (label, suspicious) in enumerate(endpoints):
         y = 20 + i * row_h
         bx = 300
         parts.append(f'<line x1="{cx + 26}" y1="{cy}" x2="{bx}" y2="{y + 11}" stroke="{_LINE}"/>')
         col = _DANGER if suspicious else _MUTED
         parts.append(_rect(bx, y, 300, 22, fill="#fff", stroke=col))
-        parts.append(_text(bx + 8, y + 15, defang(label)[:44], fill=_INK, size=11))
+        parts.append(_text(bx + 8, y + 15, label[:44], fill=_INK, size=11))
     return Figure(
         id="fig-network",
         caption="Network endpoints (C2 / resolved)",
