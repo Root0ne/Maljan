@@ -8,6 +8,19 @@ change landed on `main`.
 
 ### Added
 
+- **The STIX bundle as a relationship graph.** DETECTION's STIX section gains
+  Graph and Table views beside the JSON, all three reading the bundle the
+  `/reports/{id}/stix` export serves. Nodes are the bundle's objects, an
+  unrelated one included; edges are its `relationship` and `sighting` objects
+  labelled with their own type, with a confidence only where the bundle
+  states one. Containers no relationship names and relationships to objects
+  the bundle does not hold are listed in the table with the reason rather
+  than drawn. Flat colour by STIX type from the console tokens, keyboard
+  focusable nodes, a table under the graph for screen readers, the object's
+  JSON and its evidence-ledger ids on selection, SVG and PNG export. A bundle
+  above 300 objects opens on the table. No new dependency: the layout is a
+  small deterministic force layout in `components/analysis/stixGraph.ts`.
+
 - **The live conversation of a run, sequenced, kept and resumable.** Six new
   event types beside `agent_message`: `tool_call_started` /
   `tool_call_finished` (the latter carrying the evidence-ledger id the result
@@ -683,6 +696,20 @@ change landed on `main`.
 
 ### Changed
 
+- **The STIX export cites the ledger.** An exported object now carries the
+  ledger entries the run's record ties to it, as `x_maljan_evidence_refs`
+  (`ev_` ids, each once, in ledger order): the sample's `uses` edge to a
+  technique carries the entries an analyst finding naming it cites and the
+  entries of the asserting tools whose structured output names it, and a
+  malware object minted from the family name carries the family's
+  `family_evidence_ids`. Nothing is inferred: no id is read out of a claim's
+  sentence, no object is matched by value, an id the ledger does not hold is
+  left out, and an object the record ties to nothing has no such property.
+  A run with no ledger entries exports no ids, and a family id the ledger
+  does not hold is recorded as `stix.evidence_ref_not_in_ledger`. The property
+  is the platform's: a judge object that writes it is read without it and
+  recorded as `stix.property_not_carried`, with no retry. The console's
+  relationship graph and its table read only this property.
 - **Staging is per job.** The sidecars' staging directory held every job the
   server process ever ran: `put_sample` uploads landed flat in it under
   sixteen hex characters and the original file name, every sample's carved tree
@@ -4066,6 +4093,10 @@ change landed on `main`.
 - **`reporting.builder.defang`**, replaced by `reporting.defang.defang(value, kind)`.
 
 ### Upgrading
+
+A stored STIX bundle keeps the shape it was stored with: `x_maljan_evidence_refs`
+appears only in exports rendered after this change, so the relationship graph
+of an older run shows no ledger ids until that run is analysed again.
 
 An existing `.env` deployment is not migrated automatically. Move the bootstrap
 variables into the process environment (or `docker/.env` and `bootstrap.env`),

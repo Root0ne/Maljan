@@ -6,103 +6,17 @@ import { api } from "@/lib/api";
 import { copyToClipboard, downloadBlob } from "@/lib/report-utils";
 import { getErrorMessage } from "@/lib/errors";
 import { useReport } from "@/app/(app)/analysis/[id]/layout";
+import JsonNode from "@/components/analysis/JsonTree";
+import StixGraphView from "@/components/analysis/StixGraph";
+import { GRAPH_FIRST_LIMIT, bundleObjects } from "@/components/analysis/stixGraph";
 
-function JsonNode({
-  data,
-  depth = 0,
-}: {
-  data: unknown;
-  depth?: number;
-}) {
-  const [collapsed, setCollapsed] = useState(depth > 2);
-  const indent = depth * 16;
+type View = "graph" | "table" | "json";
 
-  if (data === null) return <span className="text-text-muted">null</span>;
-  if (typeof data === "boolean")
-    return <span className="text-status-orange">{data.toString()}</span>;
-  if (typeof data === "number")
-    return <span className="text-status-green">{data}</span>;
-  if (typeof data === "string")
-    return <span className="text-status-blue">&quot;{data}&quot;</span>;
-
-  if (Array.isArray(data)) {
-    if (data.length === 0) return <span className="text-text-muted">[]</span>;
-    if (collapsed) {
-      return (
-        <span>
-          <button
-            onClick={() => setCollapsed(false)}
-            className="text-text-muted hover:text-text-primary"
-          >
-            [{data.length} items...]
-          </button>
-        </span>
-      );
-    }
-    return (
-      <span>
-        <button
-          onClick={() => setCollapsed(true)}
-          className="text-text-muted hover:text-text-primary"
-        >
-          [
-        </button>
-        {data.map((item, i) => (
-          <div key={i} style={{ paddingLeft: indent + 16 }}>
-            <JsonNode data={item} depth={depth + 1} />
-            {i < data.length - 1 && <span className="text-text-muted">,</span>}
-          </div>
-        ))}
-        <div style={{ paddingLeft: indent }}>
-          <span className="text-text-muted">]</span>
-        </div>
-      </span>
-    );
-  }
-
-  if (typeof data === "object") {
-    const entries = Object.entries(data as Record<string, unknown>);
-    if (entries.length === 0)
-      return <span className="text-text-muted">{"{}"}</span>;
-    if (collapsed) {
-      return (
-        <span>
-          <button
-            onClick={() => setCollapsed(false)}
-            className="text-text-muted hover:text-text-primary"
-          >
-            {"{"} {entries.length} keys... {"}"}
-          </button>
-        </span>
-      );
-    }
-    return (
-      <span>
-        <button
-          onClick={() => setCollapsed(true)}
-          className="text-text-muted hover:text-text-primary"
-        >
-          {"{"}
-        </button>
-        {entries.map(([key, val], i) => (
-          <div key={key} style={{ paddingLeft: indent + 16 }}>
-            <span className="text-status-purple">&quot;{key}&quot;</span>
-            <span className="text-text-muted">: </span>
-            <JsonNode data={val} depth={depth + 1} />
-            {i < entries.length - 1 && (
-              <span className="text-text-muted">,</span>
-            )}
-          </div>
-        ))}
-        <div style={{ paddingLeft: indent }}>
-          <span className="text-text-muted">{"}"}</span>
-        </div>
-      </span>
-    );
-  }
-
-  return <span className="text-text-muted">{String(data)}</span>;
-}
+const VIEWS: { key: View; label: string }[] = [
+  { key: "graph", label: "Graph" },
+  { key: "table", label: "Table" },
+  { key: "json", label: "JSON" },
+];
 
 export default function StixPanel() {
   const { report, job, loading } = useReport();
@@ -112,6 +26,9 @@ export default function StixPanel() {
   // button both used to fail silently.
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Nothing chosen yet means the view the bundle's size opens on, read on
+  // every render so a bundle that arrives after the stored copy decides it.
+  const [chosen, setChosen] = useState<View | null>(null);
 
   useEffect(() => {
     if (report?.id) {
@@ -143,12 +60,33 @@ export default function StixPanel() {
 
   const bundle = stixData ?? report?.stix_bundle ?? {};
   const raw = JSON.stringify(bundle, null, 2);
+  const objectCount = bundleObjects(bundle).length;
+  const large = objectCount > GRAPH_FIRST_LIMIT;
+  const view: View = chosen ?? (large ? "table" : "graph");
 
   return (
     <div className="bg-bg-surface border border-border rounded">
       {/* The heading used to be repeated here, directly under
           the parent DETECTION tab's "STIX 2.1 bundle (export)" heading. */}
-      <div className="flex items-center justify-end gap-2 px-4 py-3 border-b border-border">
+      <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-border">
+        <div role="group" aria-label="How the bundle is shown" className="flex gap-1">
+          {VIEWS.map((v) => (
+            <button
+              key={v.key}
+              type="button"
+              aria-pressed={view === v.key}
+              onClick={() => setChosen(v.key)}
+              className={`rounded border px-2.5 py-1 text-xs ${
+                view === v.key
+                  ? "border-accent text-accent"
+                  : "border-border text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+        <span className="flex-1" />
         <button
           onClick={async () => {
             if (await copyToClipboard(raw)) {
@@ -180,9 +118,39 @@ export default function StixPanel() {
           {actionError ?? fetchError}
         </div>
       )}
-      <div className="p-4 font-mono text-xs leading-relaxed overflow-x-auto">
-        <JsonNode data={bundle} />
-      </div>
+      {view === "json" ? (
+        <div className="p-4 font-mono text-xs leading-relaxed overflow-x-auto">
+          <JsonNode data={bundle} />
+        </div>
+      ) : (
+        <div className="p-4 space-y-3">
+          <p className="text-xs text-text-muted">
+            Every object and relationship in the exported bundle, and nothing
+            else: an edge is one of the bundle&apos;s relationship or sighting
+            objects, its confidence is printed only where the bundle states
+            one, and where a node sits is layout, not a finding. An object the
+            export declined is not in the bundle, so it is not here; the
+            run&apos;s validation findings name it.
+          </p>
+          {large && (
+            <p role="status" className="text-xs text-text-secondary">
+              This bundle holds {objectCount} objects, more than the{" "}
+              {GRAPH_FIRST_LIMIT} the graph draws on open, so it opens on the
+              table.{" "}
+              {view === "table" && (
+                <button
+                  type="button"
+                  onClick={() => setChosen("graph")}
+                  className="text-accent-strong hover:underline"
+                >
+                  Draw the graph
+                </button>
+              )}
+            </p>
+          )}
+          <StixGraphView bundle={bundle} showGraph={view === "graph"} />
+        </div>
+      )}
     </div>
   );
 }

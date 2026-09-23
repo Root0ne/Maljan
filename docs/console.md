@@ -21,7 +21,7 @@ The web console in `apps/web`. It talks to the API in `apps/api` over
   ├── PERSISTENCE       Autoruns, services, scheduled tasks
   ├── ATT&CK            The technique matrix for this sample
   ├── ATTRIBUTION       Family, campaign, and the evidence behind each
-  ├── DETECTION         Rule matches, generated rules, the STIX bundle
+  ├── DETECTION         Rule matches, generated rules, the STIX bundle and its graph
   ├── DEFENSE           Recommended mitigations and hunts
   └── EVIDENCE          The ledger: every tool call the run made
 /settings
@@ -407,6 +407,52 @@ components, whose icons sit inline with 11 px text and are sized to it. The
 rules are held by
 `apps/web/src/lib/__tests__/styleRules.test.ts`, which reads the tree rather
 than the built CSS.
+
+## The relationship graph
+
+DETECTION's STIX section shows the exported bundle three ways: Graph, Table
+and JSON. All three read the bundle `GET /api/v1/reports/{id}/stix` serves,
+the one the Download button saves, and nothing is assembled beside it.
+
+The graph draws the bundle and nothing else. A node is one of its objects
+(malware, attack-pattern, indicator, tool, infrastructure, file, domain-name,
+an address, a URL, a process and so on), an object no relationship names
+included. An edge is one of its `relationship` objects, labelled with its
+`relationship_type`, or a `sighting` drawn from what was sighted to each place
+and observation it names. An edge prints a confidence only where the bundle
+states one: `x_maljan_confidence` on its 0–1 scale, or the standard's
+`confidence` as `n/100`. A word, a value off its scale or nothing prints
+nothing, never a zero or a half. Colour says which STIX type a node is, from
+the console's own tokens and flat, and the legend says the same in words;
+nothing is coloured by severity and nothing is grouped. Where a node sits is
+a deterministic layout, the same for the same bundle, and says nothing about
+the object.
+
+A report, note, opinion, grouping, identity or marking that no relationship
+names is not drawn, and neither is a relationship whose end the bundle does
+not hold; the table lists both under "In the bundle, not drawn" with the
+reason, so the graph and the table account for every object. An object the
+export declined is not in the bundle and so not in the graph; the run's
+validation findings name it.
+
+Selecting a node or an edge by pointer, or a node with Enter or Space, shows
+its STIX JSON, its relationships, and the evidence-ledger ids it carries in
+`x_maljan_evidence_refs` as links into EVIDENCE; the Relationships table lists
+them too. Nodes take keyboard focus and edges do not: a selected node lists
+each of its relationships as a button, which is how the keyboard reaches an
+edge, and a bundle with hundreds of edges does not put hundreds of stops in
+the tab order. The export writes that property from the run's record:
+the sample's `uses` edge to a technique carries the entries that tie to it,
+and an object the record ties to nothing says it carries none. A bundle stored
+before the property existed has none anywhere. The table is in the page
+under the graph for a screen reader, and is the view itself under Table. A
+bundle of more than 300 objects opens on the table and says so, with the
+graph one click away; 300 lays out in tens of milliseconds and edge labels
+past 120 edges show only around the selected or focused node. Export SVG
+saves the drawing with the page's colours written in, a legend of the types
+above it and no selection or focus on it, and Export PNG saves the same at
+twice its size. A second object under an id the bundle already used is listed
+under "not drawn" with that reason.
 
 ## Evidence
 

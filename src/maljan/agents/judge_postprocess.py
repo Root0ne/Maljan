@@ -103,6 +103,11 @@ UNKNOWN_OBJECT_CODE = "stix.unknown_object"
 # is wrong with the judge's answer, and the retry is not spent on it.
 PROPERTY_NOT_CARRIED_CODE = "stix.property_not_carried"
 
+# Properties the platform's models declare because the export writes them from
+# the run's record, and which a judge object therefore never carries: the
+# judge's copy is recorded as not carried, like an undeclared key, and dropped.
+PLATFORM_ONLY_PROPERTIES: frozenset[str] = frozenset({"x_maljan_evidence_refs"})
+
 
 def _not_carried(obj: dict[str, Any]) -> list[str]:
     """The keys of a readable judge object that its model does not declare.
@@ -119,7 +124,8 @@ def _not_carried(obj: dict[str, Any]) -> list[str]:
     return [
         key
         for key in obj
-        if key not in model.model_fields and not (keeps_custom and key.startswith("x_"))
+        if key in PLATFORM_ONLY_PROPERTIES
+        or (key not in model.model_fields and not (keeps_custom and key.startswith("x_")))
     ]
 
 
@@ -210,8 +216,13 @@ def lift_misplaced_extensions(bundle_dict: dict[str, Any]) -> list[Violation]:
         if kind in BUNDLE_OBJECT_TYPES:
             problem = _object_problem(obj)
             if not problem:
-                kept.append(obj)
                 not_carried = _not_carried(obj)
+                # Dropped in place: callers key the judge's objects by identity
+                # (``JudgeAgent`` maps each back to its position), and the
+                # answer as the judge wrote it was copied before this runs.
+                for key in PLATFORM_ONLY_PROPERTIES & set(obj):
+                    del obj[key]
+                kept.append(obj)
                 if not_carried:
                     found.append(
                         Violation(

@@ -652,6 +652,40 @@ own bundle is not edited. The report object is typed `malware`. Every stored
 export before this carried `software` and `malware-analysis`, neither of them
 in its vocabulary, and an identity no object named.
 
+An exported object carries the ledger entries the run's record ties to it, as
+`x_maljan_evidence_refs`: `ev_` ids, each once, in ledger order. The sample's
+`uses` edge to a technique carries the entries an analyst finding naming that
+technique cites (`evidence_ids`) and the entries of the asserting tools (capa,
+Sigma, YARA, LOLBin, sandbox signatures) whose structured output names it
+(`pipeline/evidence_summary.technique_evidence`). A malware object the export
+mints from the family name carries the attribution's `family_evidence_ids`.
+Nothing else gets the property. An id in a claim's `evidence_ref` sentence
+stays in the sentence, and no object is matched by value.
+
+The tie from a finding is per finding, not per technique. A finding's
+`evidence_ids` belong to the finding as a whole, so a finding naming T1055 and
+T1082 and citing one entry ties that entry to both edges. The edge says a
+finding naming this technique cites the entry, not that the entry names the
+technique; an asserting tool's entry is the one tie that does.
+
+Every id the export writes is one the run's ledger holds, in the ledger's
+order: the report node hands the renderer the ledger's ids, and a run with no
+ledger entries exports none. A family id the ledger does not hold is left off
+the minted malware object and recorded as `stix.evidence_ref_not_in_ledger`
+beside the export's other decisions; the model is not asked again, because
+the verdict is final by then. The property is the platform's alone. A judge
+object that writes it is read without it and recorded as
+`stix.property_not_carried`, with no retry, and the renderer sets the property
+on every object from the record. The edge carries the ids and the
+attack-pattern does not, because the attack-pattern's id is the same in every
+export.
+
+The validator gate is no new error and no new warning kind. The property
+draws the validator's {401} best-practice note that a custom property should
+be declared through an extension definition, as every `x_maljan_` property
+does; moving all of them to an extension definition is a bundle-wide change of
+its own.
+
 A sandbox's process tree is exported as STIX 2.1 observables: one `process`
 per node (pid, command line, `child_refs`), the image each ran from as a
 `file` whose id is derived from its name, and an `observed-data` naming them
