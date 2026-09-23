@@ -25,6 +25,7 @@ from maljan.pipeline.validation import (
     CITATION_WRONG_ENTRY_CODE,
     KEPT_WITH_A_FINDING,
     EntryTexts,
+    decidable,
     quoted_values,
     wrong_entry_citations,
 )
@@ -207,6 +208,13 @@ class TestWhatCannotBeDecided:
         }
 
         assert wrong_entry_citations(payload, self._texts()) == []
+
+    def test_a_whole_digest_is_decidable(self) -> None:
+        assert decidable("ab" * 32) and decidable("0f" * 16) and decidable("12" * 20)
+
+    def test_a_word_spelled_with_hex_letters_is_decidable(self) -> None:
+        assert decidable("deadbeef") and decidable("added")
+        assert not decidable("0x1bb") and not decidable("1bb4") and not decidable("443")
 
     def test_a_number_gets_no_holding_note(self) -> None:
         assert self._texts().holding("443") == []

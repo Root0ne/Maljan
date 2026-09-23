@@ -22,7 +22,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -51,6 +51,7 @@ from maljan.extractors.network_extractor import (
 )
 from maljan.pipeline.events import safe_finding_value
 from maljan.reporting.models import (
+    EmulatedStrings,
     MalwareReport,
     NetworkDomain,
     NetworkIP,
@@ -1592,6 +1593,7 @@ def indicator_publish_reason(
     corroborated_by: str = "",
     recovered: str = "",
     verdict: Any = None,
+    also_plain: str = "",
 ) -> str | None:
     """Why this run may publish one indicator of ``kind``, or ``None``.
 
@@ -1610,15 +1612,18 @@ def indicator_publish_reason(
     whose source is by construction the string sweep.
 
     A network value the sample hid and only emulation recovered — a decoded,
-    stack or tight string in the run's FLOSS entry — is a source of its own
+    stack or tight string in the run's FLOSS entry that the static string sweep
+    did not also read as a plain string (``also_plain`` names the sweep's entry
+    when it did, and the value is then the sweep's) — is a source of its own
     (``recovered``: "recovered by emulation (decoded strings), ev_NNNN"). Hiding
     a host behind encoding is a deliberate act benign software rarely performs,
     where a plain string in a binary is routinely benign. It admits a domain,
     an address or a URL that passes every other question here — the host
     question, the address classes, the reputation half — and is not a
     well-known benign host or a denied URL host. It admits nothing under a
-    Benign ``verdict``: a Benign run publishes no malicious indicator, and the
-    refusal says so. A value only the string sweep read stays unpublished.
+    Benign ``verdict``, nor under one the judge did not state with a confidence:
+    a Benign run publishes no malicious indicator, and the refusal says so.
+    A value only the string sweep read stays unpublished.
     """
     if kind == "domain":
         if not host_is_public(value):
@@ -1683,8 +1688,14 @@ _EMULATED_KINDS = frozenset({"decoded", "stack", "tight"})
 
 
 def _emulation_admits(host: str, recovered: str, verdict: Any) -> str | None:
-    """``recovered`` when emulation may stand as this value's source, else ``None``."""
-    if not recovered or _is_benign_verdict(verdict) or is_well_known_benign_host(host):
+    """``recovered`` when emulation may stand as this value's source, else ``None``.
+
+    Never under a Benign verdict, nor under one the judge did not state with a
+    confidence (a fallback's default word), nor for a well-known benign host.
+    """
+    if not recovered or _is_benign_verdict(verdict) or verdict == UNSTATED_VERDICT:
+        return None
+    if is_well_known_benign_host(host):
         return None
     return recovered
 
@@ -1698,55 +1709,188 @@ def _field(obj: Any, name: str) -> Any:
     return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
 
 
-def emulation_record(report: Any) -> dict[str, str]:
-    """``{value: ledger id}`` for every string the run's FLOSS entry recovered by emulation.
+def _rows_of(structured: Any, key: str) -> list[Any]:
+    rows = structured.get(key) if isinstance(structured, dict) else None
+    return list(rows) if isinstance(rows, list) else []
 
-    Folded to lower case; a URL adds its host too. The id is the entry's own:
-    the pack's FLOSS entry where the section names it, else the first entry the
-    section cites. Read from the report's ``tool_floss_strings`` section, so a
-    stored report answers the same way a fresh one does.
+
+def _whole_listing(structured: Any, rows: list[Any]) -> bool:
+    """Whether a paged listing's answer is every row it matched, unfiltered."""
+    if not isinstance(structured, dict) or structured.get("pattern"):
+        return False
+    if structured.get("truncated") or int(structured.get("page_offset") or 0):
+        return False
+    matched = structured.get("total_matched", structured.get("total"))
+    try:
+        return int(matched if matched is not None else len(rows)) <= len(rows)
+    except (TypeError, ValueError):
+        return False
+
+
+def _hold_out_plain(
+    values: dict[str, str], plain_texts: list[tuple[str, str]]
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Split emulated values into those only emulation read and those a plain string holds."""
+    kept: dict[str, str] = {}
+    plain: dict[str, str] = {}
+    for value, entry in values.items():
+        holder = next((eid for eid, text in plain_texts if whole_value_in(value, text)), "")
+        if holder:
+            plain[value] = holder
+        else:
+            kept[value] = entry
+    return kept, plain
+
+
+def _add_emulated(values: dict[str, str], text: Any, entry: str) -> None:
+    value = str(text or "").strip().lower()
+    if not value:
+        return
+    values.setdefault(value.rstrip("."), entry)
+    host = url_host(value)
+    if host:
+        values.setdefault(host, entry)
+
+
+def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
+    """What emulation alone recovered in this run, read from every FLOSS entry the ledger holds.
+
+    A decoded, stack or tight string FLOSS returned, folded to lower case (a
+    URL adds its host), with the entry it came from — the pack's own entry
+    first, since it is issued first. A value the static string sweep also read
+    as a whole value (the ``strings`` entries, the ``iocs_from_file`` rows) is
+    held out: text the sample did not hide is not recovered by emulation,
+    whatever kind FLOSS gave it. ``partial`` says why the record may not be
+    the run's whole: no FLOSS entry listed every string it recovered, or no
+    ``strings`` entry listed every plain string, so a value past a page could
+    be missing from either side. Built at build time and stored on the report,
+    so no kept-row cap of a section decides a publish answer.
     """
+    values: dict[str, str] = {}
+    plain_texts: list[tuple[str, str]] = []
+    floss_whole = strings_whole = False
+    saw_floss = saw_strings = False
+    for entry in ledger or ():
+        tool = str(getattr(entry, "tool", "") or "").rsplit("__", 1)[-1]
+        entry_id = str(getattr(entry, "id", "") or getattr(entry, "entry_id", "") or "")
+        structured = getattr(entry, "structured", None)
+        if tool == "floss":
+            saw_floss = True
+            rows = _rows_of(structured, "strings")
+            floss_whole = floss_whole or _whole_listing(structured, rows)
+            for row in rows:
+                if isinstance(row, dict) and str(row.get("kind") or "").lower() in _EMULATED_KINDS:
+                    _add_emulated(values, row.get("string"), entry_id)
+        elif tool == "strings":
+            saw_strings = True
+            rows = _rows_of(structured, "strings")
+            strings_whole = strings_whole or _whole_listing(structured, rows)
+            plain_texts.extend(
+                (entry_id, str(row.get("text") or "").lower())
+                for row in rows
+                if isinstance(row, dict) and row.get("text")
+            )
+        elif tool == "iocs_from_file":
+            plain_texts.extend(
+                (entry_id, str(row.get("value") or "").lower())
+                for row in _rows_of(structured, "iocs")
+                if isinstance(row, dict) and row.get("value")
+            )
+    kept, plain = _hold_out_plain(values, plain_texts)
+    why: list[str] = []
+    if saw_floss and not floss_whole:
+        why.append("no FLOSS entry listed every string it recovered")
+    if kept and not (saw_strings and strings_whole):
+        why.append("no strings entry listed every plain string in the file")
+    return EmulatedStrings(values=kept, plain=plain, partial="; ".join(why))
+
+
+# Why a record read back from a stored report is partial: it holds only the
+# rows the report's sections kept.
+_FROM_KEPT_ROWS = "read from the kept rows of a report stored before the record existed"
+
+
+def emulation_record(report: Any) -> EmulatedStrings:
+    """The report's record of what emulation alone recovered.
+
+    The one built from the ledger at build time (``emulated_strings``), or, for
+    a report stored before it existed, one read from the report's kept section
+    rows — FLOSS's ``tool_floss_strings`` and the sweep's ``strings`` and
+    string rows — and marked partial, because a section keeps a bounded number
+    of rows.
+    """
+    stored = _field(report, "emulated_strings")
+    if stored:
+        return (
+            stored
+            if isinstance(stored, EmulatedStrings)
+            else EmulatedStrings.model_validate(stored)
+        )
     index = {
         str(_field(row, "id") or ""): str(_field(row, "agent") or "")
         for row in (_field(report, "evidence_index") or [])
     }
-    record: dict[str, str] = {}
+    values: dict[str, str] = {}
+    plain_texts: list[tuple[str, str]] = []
     for section in _field(report, "sections") or []:
-        if str(_field(section, "key") or "") != "tool_floss_strings":
-            continue
+        key = str(_field(section, "key") or "")
         columns = [str(c) for c in (_field(section, "columns") or [])]
-        if "kind" not in columns or "string" not in columns:
-            continue
         ids = [str(i) for i in (_field(section, "evidence_ids") or [])]
-        if not ids:
-            continue
-        entry = next((i for i in ids if index.get(i) == "pipeline"), ids[0])
-        at_kind, at_string = columns.index("kind"), columns.index("string")
-        for row in _field(section, "rows") or []:
-            if len(row) <= max(at_kind, at_string):
-                continue
-            if str(row[at_kind]).strip().lower() not in _EMULATED_KINDS:
-                continue
-            text = str(row[at_string] or "").strip().lower()
-            if not text:
-                continue
-            record.setdefault(text.rstrip("."), entry)
-            host = url_host(text)
-            if host:
-                record.setdefault(host, entry)
-    return record
+        rows = _field(section, "rows") or []
+        if key == "tool_floss_strings" and "kind" in columns and "string" in columns and ids:
+            entry = next((i for i in ids if index.get(i) == "pipeline"), ids[0])
+            at_kind, at_string = columns.index("kind"), columns.index("string")
+            for row in rows:
+                if len(row) > max(at_kind, at_string) and (
+                    str(row[at_kind]).strip().lower() in _EMULATED_KINDS
+                ):
+                    _add_emulated(values, row[at_string], entry)
+        elif key == "strings" and "Text" in columns:
+            at_text = columns.index("Text")
+            plain_texts.extend(
+                (ids[0] if ids else "", str(row[at_text]).lower())
+                for row in rows
+                if len(row) > at_text
+            )
+    static = _field(report, "static")
+    for row in _field(static, "interesting_strings") or [] if static is not None else []:
+        plain_texts.append(("", str(_field(row, "value") or "").lower()))
+    kept, plain = _hold_out_plain(values, plain_texts)
+    return EmulatedStrings(values=kept, plain=plain, partial=_FROM_KEPT_ROWS if values else "")
 
 
-def emulation_kwargs(report: Any, kind: str, value: str, record: Any = None) -> dict[str, Any]:
-    """The rule's ``recovered`` and ``verdict`` arguments for one value of one report."""
+# The verdict a record is asked under when the judge stated none with a
+# confidence: a fallback's default word is not a verdict anybody stated.
+UNSTATED_VERDICT = "unstated"
+
+
+def emulation_kwargs(
+    report: Any, kind: str, value: str, record: EmulatedStrings | None = None
+) -> dict[str, Any]:
+    """The rule's emulation arguments for one value of one report.
+
+    ``recovered`` (the reason, with the record's partiality where it has
+    any) and ``verdict`` for a value only emulation recovered; ``also_plain``
+    (the sweep's entry) for one the static sweep read too; nothing otherwise.
+    The verdict is read as stated only when the judge gave it a confidence.
+    """
     if kind not in ("domain", "ip", "url"):
         return {}
     found = emulation_record(report) if record is None else record
     key = str(value or "").strip().lower().rstrip(".")
-    entry = found.get(key)
+    if key in found.plain:
+        return {"also_plain": found.plain[key] or "the strings entry"}
+    entry = found.values.get(key)
     if not entry:
         return {}
-    return {"recovered": f"{RECOVERED_BY_EMULATION}, {entry}", "verdict": _field(report, "verdict")}
+    reason = f"{RECOVERED_BY_EMULATION}, {entry}"
+    if found.partial:
+        reason += f" (the record is partial: {found.partial})"
+    stated = _field(report, "overall_confidence") is not None
+    return {
+        "recovered": reason,
+        "verdict": _field(report, "verdict") if stated else UNSTATED_VERDICT,
+    }
 
 
 _WHOLE_DIGEST_RE = re.compile(r"^[0-9a-fA-F]+$")
@@ -1768,6 +1912,7 @@ def publish_answer(
     corroborating: str = "",
     recovered: str = "",
     verdict: Any = None,
+    also_plain: str = "",
 ) -> str:
     """The publish rule's answer for one row, as the report prints it.
 
@@ -1815,6 +1960,13 @@ def publish_answer(
         return "no: not a whole digest"
     if recovered and _is_benign_verdict(verdict):
         return f"no: {recovered}, but the verdict is Benign, which publishes no malicious indicator"
+    if recovered and verdict == UNSTATED_VERDICT:
+        return f"no: {recovered}, but the judge stated no verdict with a confidence"
+    if also_plain:
+        return (
+            f"no: seen only in the file's strings — also a plain string in the file "
+            f"({also_plain}), so not recovered by emulation"
+        )
     if recovered and is_well_known_benign_host(url_host(text) if kind == "url" else text):
         return f"no: {recovered}, but it is a well-known benign host"
     if kind == "command":

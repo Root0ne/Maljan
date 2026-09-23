@@ -1844,12 +1844,25 @@ class EntryTexts:
 # said to hold or lack: an answer may write it another way (``0x12c`` for
 # ``300``), and a reputation report or a strings dump holds almost every short
 # number inside some longer run. Such a value raises no question and no note.
-_ONLY_A_NUMBER_RE = re.compile(r"(?:0x)?[0-9a-f]+|[0-9][0-9.,:]*", re.IGNORECASE)
+# A number: ``0x``-prefixed hex, a hex run with a digit in it (a word spelled
+# only with a–f, ``added``, is a word), or digits with separators.
+_ONLY_A_NUMBER_RE = re.compile(
+    r"0x[0-9a-f]+|(?=[a-f]*[0-9])[0-9a-f]+|[0-9][0-9.,:]*", re.IGNORECASE
+)
+_WHOLE_DIGEST_RE = re.compile(
+    r"[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64}|[0-9a-f]{128}", re.IGNORECASE
+)
 
 
 def decidable(value: str) -> bool:
-    """Whether a text can be said to hold or to lack ``value``."""
+    """Whether a text can be said to hold or to lack ``value``.
+
+    A short number is not (``443`` sits in many entries by chance); a whole
+    digest is, whatever its letters.
+    """
     text = str(value or "").strip()
+    if _WHOLE_DIGEST_RE.fullmatch(text):
+        return True
     return len(text) >= 3 and _ONLY_A_NUMBER_RE.fullmatch(text) is None
 
 

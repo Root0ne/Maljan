@@ -133,7 +133,10 @@ class MalwareReportBuilder:
     def build_deterministic(self) -> MalwareReport:
         """Build a deterministic ``MalwareReport`` out of the evidence ledger."""
         from maljan.pipeline.evidence_summary import yara_rule_strings
-        from maljan.reporting.renderers.stix_renderer import exported_indicator_values
+        from maljan.reporting.renderers.stix_renderer import (
+            emulation_from_ledger,
+            exported_indicator_values,
+        )
 
         identity = identity_from_ledger(
             self.evidence_ledger,
@@ -196,6 +199,7 @@ class MalwareReportBuilder:
                 for value in exported_indicator_values(self.stix_output)
             ],
             rule_match_strings=yara_rule_strings(self.evidence_ledger),
+            emulated_strings=emulation_from_ledger(self.evidence_ledger),
             references=references,
         )
         # The sections the report is actually made of, and the index of the

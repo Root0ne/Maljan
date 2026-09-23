@@ -855,6 +855,22 @@ class C2Channel(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
+class EmulatedStrings(BaseModel):
+    """What emulation alone recovered in a run: network-shaped values and their entry.
+
+    ``values`` maps a recovered value (lower case; a URL adds its host) to the
+    FLOSS entry that recovered it, with every value the static string sweep
+    also read held out into ``plain`` (value to the sweep's entry). ``partial``
+    says why the record may not be the run's whole, or is empty.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    values: dict[str, str] = Field(default_factory=dict)
+    plain: dict[str, str] = Field(default_factory=dict)
+    partial: str = ""
+
+
 class JudgeIndicator(BaseModel):
     """One value a judge indicator names: its IOC kind, the value, a hash's algorithm."""
 
@@ -1089,6 +1105,10 @@ class MalwareReport(BaseModel):
     # scan answered. Read by the ATT&CK table's "rule match only" note and by
     # the capability grounding; empty on a report stored before it existed.
     rule_match_strings: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    # What emulation alone recovered, built from the ledger's FLOSS and strings
+    # entries at build time; ``None`` on a report stored before it existed,
+    # which is then read from its kept section rows and said to be partial.
+    emulated_strings: EmulatedStrings | None = None
     misp_attributes: list[dict[str, Any]] | None = None
 
     # --- References ---

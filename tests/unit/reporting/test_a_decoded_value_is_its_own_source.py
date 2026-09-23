@@ -6,8 +6,13 @@ the file's strings", beside VirusTotal's own family label. A value the static
 string sweep reads is routinely benign; a value hidden behind encoding rarely
 is. So a domain, an address or a URL the run's FLOSS entry holds as a decoded,
 stack or tight string is publishable when it passes every other question of the
-rule — never a well-known benign host, never on a Benign verdict — and the
-export, the IOC table and ``/iocs`` read that one decision.
+rule — never a well-known benign host, never on a Benign verdict, never on a
+verdict the judge did not state — and the export, the IOC table and ``/iocs``
+read that one decision. A value the static sweep also read as a plain string
+was not hidden, whatever kind FLOSS gave it, and stays the sweep's. The record
+is built from the ledger's own entries and stored on the report, so no row cap
+of a section decides it; a report stored before it existed is read from its
+kept rows and the reason says the record is partial.
 """
 
 from __future__ import annotations
@@ -29,10 +34,12 @@ from maljan.reporting.models import (
 from maljan.reporting.renderers.stix_renderer import (
     RECOVERED_BY_EMULATION,
     ExtendedSTIXRenderer,
+    emulation_from_ledger,
     emulation_kwargs,
     emulation_record,
     indicator_publish_reason,
 )
+from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.stix_models import Bundle
 
 C2 = "relay7.example.net"
@@ -51,8 +58,36 @@ def _floss(*strings: tuple[str, str]) -> EvidenceSection:
     )
 
 
+def _floss_entry(*strings: tuple[str, str], entry: str = "ev_0012", **page: Any) -> LedgerEntry:
+    rows = [{"kind": kind, "string": value, "encoding": "ASCII"} for kind, value in strings]
+    return LedgerEntry(
+        id=entry,
+        agent="pipeline",
+        tool="floss",
+        structured={"total": len(rows), "strings": rows, "truncated": False, **page},
+    )
+
+
+def _strings_entry(*texts: str, entry: str = "ev_0005", **page: Any) -> LedgerEntry:
+    rows = [{"enc": "ascii", "text": text, "offset": 16 * i} for i, text in enumerate(texts)]
+    return LedgerEntry(
+        id=entry,
+        agent="pipeline",
+        tool="strings",
+        structured={"total": len(rows), "strings": rows, "truncated": False, **page},
+    )
+
+
+def _ledger() -> list[LedgerEntry]:
+    return [
+        _strings_entry("plain.example.org", "GetProcAddress"),
+        _floss_entry(("decoded", C2_URL), ("decoded", BENIGN), ("static", "plain.example.org")),
+    ]
+
+
 def _report(verdict: str = "Malware", *, decoded: bool = True, **over: Any) -> MalwareReport:
     sections = [_floss(("decoded", C2_URL), ("decoded", BENIGN), ("static", "plain.example.org"))]
+    over.setdefault("emulated_strings", emulation_from_ledger(_ledger() if decoded else []))
     return MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
         verdict=verdict,
@@ -97,8 +132,53 @@ class TestTheRecord:
     def test_a_decoded_url_and_its_host_are_recorded_with_the_entry(self) -> None:
         record = emulation_record(_report())
 
-        assert record[C2_URL] == "ev_0012" and record[C2] == "ev_0012"
-        assert "plain.example.org" not in record
+        assert record.values[C2_URL] == "ev_0012" and record.values[C2] == "ev_0012"
+        assert "plain.example.org" not in record.values
+        assert record.partial == ""
+
+    def test_the_record_is_stored_on_the_report(self) -> None:
+        stored = MalwareReport.model_validate(_report().model_dump(mode="json"))
+
+        assert stored.emulated_strings == emulation_from_ledger(_ledger())
+
+    def test_a_record_past_a_row_cap_is_whole(self) -> None:
+        hosts = [f"relay{i}.example.net" for i in range(400)]
+        record = emulation_from_ledger(
+            [_strings_entry("x"), _floss_entry(*[("decoded", h) for h in hosts])]
+        )
+
+        assert set(hosts) <= set(record.values) and record.partial == ""
+
+    def test_a_paged_floss_entry_makes_the_record_partial(self) -> None:
+        record = emulation_from_ledger(
+            [
+                _strings_entry("x"),
+                _floss_entry(("decoded", C2), truncated=True, next_offset=1, total_matched=9),
+            ]
+        )
+
+        assert record.values == {C2: "ev_0012"}
+        assert record.partial == "no FLOSS entry listed every string it recovered"
+        assert emulation_kwargs(_report(emulated_strings=record), "domain", C2)["recovered"] == (
+            f"{RECOVERED_BY_EMULATION}, ev_0012 (the record is partial: {record.partial})"
+        )
+
+    def test_a_filtered_floss_entry_alone_makes_the_record_partial(self) -> None:
+        record = emulation_from_ledger(
+            [_strings_entry("x"), _floss_entry(("decoded", C2), pattern="example")]
+        )
+
+        assert record.partial == "no FLOSS entry listed every string it recovered"
+
+    def test_a_paged_strings_listing_makes_the_record_partial(self) -> None:
+        record = emulation_from_ledger(
+            [
+                _strings_entry("x", truncated=True, next_offset=1, total_matched=900),
+                _floss_entry(("decoded", C2)),
+            ]
+        )
+
+        assert record.partial == "no strings entry listed every plain string in the file"
 
     def test_the_reason_names_the_entry(self) -> None:
         kwargs = emulation_kwargs(_report(), "domain", C2)
@@ -157,3 +237,70 @@ class TestABenignVerdict:
         assert not _publishable(
             "domain", C2, "strings", None, emulation_kwargs(report, "domain", C2)
         )
+
+
+class TestAPlainStringTheSweepRead:
+    def test_a_decoded_row_of_a_swept_value_is_the_sweep_s(self) -> None:
+        swept = "ocsp.example.org"
+        ledger = [
+            _strings_entry(f"http://{swept}/", entry="ev_0005"),
+            _floss_entry(("decoded", swept)),
+        ]
+        report = _report(
+            emulated_strings=emulation_from_ledger(ledger),
+            network=NetworkIOCs(domains=[NetworkDomain(fqdn=swept, source="strings")]),
+        )
+
+        assert swept not in _exported(report)
+        assert _published(report, swept) == (
+            "no: seen only in the file's strings — also a plain string in the file "
+            "(ev_0005), so not recovered by emulation"
+        )
+        assert not _publishable(
+            "domain", swept, "strings", None, emulation_kwargs(report, "domain", swept)
+        )
+
+    def test_a_value_inside_a_longer_name_is_not_held_as_swept(self) -> None:
+        ledger = [_strings_entry(f"cdn-{C2}"), _floss_entry(("decoded", C2))]
+
+        assert emulation_from_ledger(ledger).values == {C2: "ev_0012"}
+
+
+class TestAVerdictNobodyStated:
+    def test_a_fallback_verdict_publishes_nothing_emulation_alone_read(self) -> None:
+        report = _report(overall_confidence=None)
+
+        assert C2 not in _exported(report)
+        assert _published(report, C2) == (
+            f"no: {RECOVERED_BY_EMULATION}, ev_0012, but the judge stated no verdict with a "
+            "confidence"
+        )
+
+
+class TestAReportStoredBeforeTheRecord:
+    def test_is_read_from_its_kept_rows_and_says_so(self) -> None:
+        report = _report(emulated_strings=None)
+
+        record = emulation_record(report)
+
+        assert record.values[C2] == "ev_0012"
+        assert record.partial.startswith("read from the kept rows of a report stored")
+        assert indicator_publish_reason(
+            "domain", C2, "strings", **emulation_kwargs(report, "domain", C2)
+        ) == (f"{RECOVERED_BY_EMULATION}, ev_0012 (the record is partial: {record.partial})")
+        assert _published(report, C2) == "yes"
+
+
+class TestAPublicSuffixName:
+    def test_a_benign_name_under_a_country_second_level_is_known(self) -> None:
+        from maljan.extractors import network_extractor
+
+        name = next(iter(network_extractor._BENIGN_DOMAINS))
+        assert network_extractor.is_well_known_benign_host(f"cdn.{name}")
+        assert not network_extractor.is_well_known_benign_host("example.co.uk")
+
+    def test_a_list_name_under_a_country_second_level_is_its_registered_name(self) -> None:
+        from maljan.extractors import network_extractor
+
+        assert not network_extractor.is_well_known_benign_host("microsoft.com.example.co.uk")
+        assert network_extractor.is_well_known_benign_host("8.8.8.8")

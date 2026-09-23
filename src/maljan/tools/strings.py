@@ -51,6 +51,14 @@ _IP_RE = re.compile(rb"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _VERSION_BEFORE_RE = re.compile(
     rb"(?:\b(?:file|product)?version\b|\bver\b)\s*[=:]?\s*[\"']?$|\bv$", re.IGNORECASE
 )
+# Room for the longest version word, its separator and a quote.
+_VERSION_LOOK_BACK = 48
+
+
+def _is_word_byte(byte: bytes) -> bool:
+    return byte.isalnum() or byte == b"_"
+
+
 _REG_RE = re.compile(rb"HK(?:LM|CU|CR|U|CC)[\\\\][A-Za-z0-9_\-\\\\ ./]+")
 # NB the single backslashes. This pattern used to read ``[A-Za-z]:\\\\`` and
 # ``[...\\\\ ]``, which in a raw bytes literal is an escaped backslash *pair* —
@@ -272,11 +280,15 @@ def _inside_a_longer_host(start: int, end: int, found: list[tuple[int, int, str]
 def _written_as_a_version(text: bytes, start: int) -> bool:
     """Whether the dotted numbers at ``start`` follow a version word.
 
-    Read against everything before them in the string rather than a window,
-    so a word boundary is decided by the byte that really precedes the word:
-    a window starting inside ``server`` would read ``ver`` as a word.
+    Read against a bounded look-back that starts at a word boundary: a word
+    the look-back would cut is dropped whole, so ``ver`` inside ``server``
+    is never read as a word, and a long string with many addresses costs
+    one short search per address.
     """
-    return _VERSION_BEFORE_RE.search(text[:start]) is not None
+    low = max(0, start - _VERSION_LOOK_BACK)
+    while 0 < low < start and _is_word_byte(text[low - 1 : low]):
+        low += 1
+    return _VERSION_BEFORE_RE.search(text, low, start) is not None
 
 
 def _is_meaningful_ip(ip: str) -> bool:

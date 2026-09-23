@@ -190,6 +190,8 @@ class TestTheReader:
             (b"c2server:91.200.10.4", "91.200.10.4"),
             (b"driver 185.23.44.10", "185.23.44.10"),
             (b"a_long_config_name_server=185.23.44.10", "185.23.44.10"),
+            (b"x" * 60 + b"server=185.23.44.10", "185.23.44.10"),
+            (b"an_example_setting_whose_name_ends_in_ver 185.23.44.10", "185.23.44.10"),
         ],
     )
     def test_a_word_that_ends_like_a_version_word_keeps_its_address(
@@ -202,6 +204,18 @@ class TestTheReader:
         ]
 
         assert found == [address]
+
+    def test_many_addresses_in_one_long_string_are_each_read(self) -> None:
+        words = (b"ver", b"server")
+        text = b" ".join(b"%s 185.%d.%d.7" % (words[i % 2], i // 200, i % 200) for i in range(2000))
+        found = [
+            row["value"]
+            for row in iter_string_iocs(b"\x00" + text + b"\x00")
+            if row["kind"] == "ip"
+        ]
+
+        expected = [f"185.{i // 200}.{i % 200}.7" for i in range(1, 2000, 2)]
+        assert found and found == expected[: len(found)]
 
     def test_an_address_is_still_one(self) -> None:
         found = [
