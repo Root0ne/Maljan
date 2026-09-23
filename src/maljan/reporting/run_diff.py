@@ -44,12 +44,19 @@ ONLY_IN_B = "only_in_b"
 
 STATUSES: tuple[str, ...] = (ADDED, REMOVED, CHANGED, UNCHANGED, ONLY_IN_A, ONLY_IN_B)
 
-# What a surplus row says. Rows under one key are paired as a multiset: n rows
-# under a key in both runs pair, identical rows first; the rows one run holds
-# beyond the other's count have nothing to pair with and are listed as added
-# or removed with this note.
+# What a row under a repeated key says when it is left unpaired. Rows under
+# one key pair as a multiset, identical rows first; a single row left on each
+# side pairs as changed; any other remainder is listed as removed and added
+# with this note, because the record states no correspondence between them.
 REPEATED_KEY_NOTE = (
-    "a repeat: this key appears more times in this run's record than in the other run's"
+    "a repeat: this key appears more than once, and the record states no correspondence "
+    "between this row and the other run's rows under it"
+)
+
+# What a verdict-section row says when only who stated it differs.
+READING_NOTE = (
+    "who stated the {what} differs because the verdict reading does; that difference is "
+    "counted once, on the Verdict row, and the {what} itself is compared here"
 )
 
 # What the indicator section says when the two runs store indicators in two
@@ -195,6 +202,12 @@ class _Item:
     label: str
     fields: dict[str, Any]
     evidence: list[str] = field(default_factory=list)
+    # Fields shown on the row but not compared, because they follow from a
+    # fact another row already compares; comparing them again would count one
+    # difference in the record twice.
+    derived: frozenset[str] = frozenset()
+    # Said on the row when a derived field differs between the two runs.
+    derived_note: str | None = None
 
 
 # ── Small readers ────────────────────────────────────────────────────────────
@@ -276,13 +289,26 @@ def _row(
     }
 
 
+def _compared(item: _Item) -> dict[str, Any]:
+    return {name: value for name, value in item.fields.items() if name not in item.derived}
+
+
 def _changes(a: _Item, b: _Item) -> list[dict[str, Any]]:
-    names = list(a.fields) + [name for name in b.fields if name not in a.fields]
+    fa, fb = _compared(a), _compared(b)
+    names = list(fa) + [name for name in fb if name not in fa]
     return [
-        {"field": name, "a": a.fields.get(name), "b": b.fields.get(name)}
+        {"field": name, "a": fa.get(name), "b": fb.get(name)}
         for name in names
-        if a.fields.get(name) != b.fields.get(name)
+        if fa.get(name) != fb.get(name)
     ]
+
+
+def _derived_note(a: _Item, b: _Item) -> str | None:
+    """The note a paired row carries when a field it does not compare differs."""
+    names = a.derived | b.derived
+    if any(a.fields.get(name) != b.fields.get(name) for name in names):
+        return a.derived_note or b.derived_note
+    return None
 
 
 def _pair_key(
@@ -290,10 +316,13 @@ def _pair_key(
 ) -> list[dict[str, Any]]:
     """The rows of one key, paired as a multiset.
 
-    Identical rows pair first, as unchanged; the rest pair in record order, as
-    changed; what one run holds beyond the other's count is a surplus, listed
-    as removed or added with the repeat note. A key the other run does not
-    hold at all takes the section's unmatched status.
+    Identical rows pair first, as unchanged. What is left pairs as changed
+    only when exactly one row is left on each side, which is ordinary one-to-one
+    pairing by key. Any other remainder has no correspondence the record
+    states — pairing it would follow the order the rows were stored in — so it
+    is listed as removed and added with the repeat note. A key the other run
+    does not hold at all takes the section's unmatched status. The answer does
+    not depend on the order of either run's rows.
     """
     if not occ_b:
         return [_row(unmatched_a, a, None) for a in occ_a]
@@ -301,23 +330,26 @@ def _pair_key(
         return [_row(unmatched_b, None, b) for b in occ_b]
     pool: dict[str, list[int]] = {}
     for index, b in enumerate(occ_b):
-        pool.setdefault(_fingerprint(b.fields), []).append(index)
+        pool.setdefault(_fingerprint(_compared(b)), []).append(index)
     used: set[int] = set()
     rows: list[dict[str, Any]] = []
     rest_a: list[_Item] = []
     for a in occ_a:
-        same = pool.get(_fingerprint(a.fields))
+        same = pool.get(_fingerprint(_compared(a)))
         if same:
             index = same.pop(0)
             used.add(index)
-            rows.append(_row(UNCHANGED, a, occ_b[index]))
+            b = occ_b[index]
+            rows.append(_row(UNCHANGED, a, b, note=_derived_note(a, b)))
         else:
             rest_a.append(a)
     rest_b = [b for index, b in enumerate(occ_b) if index not in used]
-    for a, b in zip(rest_a, rest_b, strict=False):
-        rows.append(_row(CHANGED, a, b, _changes(a, b)))
-    rows.extend(_row(REMOVED, a, None, note=REPEATED_KEY_NOTE) for a in rest_a[len(rest_b) :])
-    rows.extend(_row(ADDED, None, b, note=REPEATED_KEY_NOTE) for b in rest_b[len(rest_a) :])
+    if len(rest_a) == 1 and len(rest_b) == 1:
+        a, b = rest_a[0], rest_b[0]
+        rows.append(_row(CHANGED, a, b, _changes(a, b), note=_derived_note(a, b)))
+        return rows
+    rows.extend(_row(REMOVED, a, None, note=REPEATED_KEY_NOTE) for a in rest_a)
+    rows.extend(_row(ADDED, None, b, note=REPEATED_KEY_NOTE) for b in rest_b)
     return rows
 
 
@@ -407,6 +439,9 @@ def _verdict_items(run: RunRecord) -> list[_Item]:
         severity_fields["stated_by"] = "judge"
     attribution = _map(mr.get("attribution"))
     family = attribution.get("family")
+    # Who stated the confidence and the severity follows from the verdict
+    # reading, which the verdict row already compares. Shown, not compared.
+    from_reading = frozenset({"stated_by"})
     return [
         _Item("verdict", "Verdict", {"value": verdict, "reading": reading}),
         _Item(
@@ -418,8 +453,16 @@ def _verdict_items(run: RunRecord) -> list[_Item]:
                 # on a verdict it stated, and none otherwise.
                 "stated_by": "judge" if reading == "stated" and confidence is not None else None,
             },
+            derived=from_reading,
+            derived_note=READING_NOTE.format(what="confidence"),
         ),
-        _Item("severity", "Severity", severity_fields),
+        _Item(
+            "severity",
+            "Severity",
+            severity_fields,
+            derived=from_reading,
+            derived_note=READING_NOTE.format(what="severity"),
+        ),
         _Item(
             "family",
             "Family",

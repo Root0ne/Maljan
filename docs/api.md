@@ -179,7 +179,11 @@ A `stated_by` names who stated a value only where the record shows it. A
 confidence is the judge's when the verdict reading is `stated`. A family's is
 its `family_source`. A severity is the judge's only on a report that carries
 `verdict_reading`: a report stored before that carries a rating the builder
-computed, and its severity row has no `stated_by` at all.
+computed, and its severity row has no `stated_by` at all. Who stated the
+confidence and the severity follows from the verdict reading, which the
+Verdict row compares, so on those two rows `stated_by` is shown and not
+compared: a run pair that differs only in it counts that difference once, on
+the Verdict row, and the confidence and severity rows say so in a note.
 
 | Section | Paired by |
 | :-- | :-- |
@@ -208,10 +212,12 @@ shapes. They are listed by run and never paired by resemblance. Object ids
 are not a key: the platform mints some ids per run, so two runs of one sample
 carry different ids for the same content.
 
-Rows under one key pair as a multiset. When both runs hold a key n times the
-rows pair, identical rows first; the rows one run holds beyond the other's
-count are `added` or `removed` with a note that they are a repeat. A record
-compared with itself is unchanged in every row.
+Rows under one key pair as a multiset. Identical rows pair first, as
+`unchanged`. What is left pairs as `changed` only when exactly one row is left
+on each side; any other remainder is listed as `removed` and `added` with a
+note that the key repeats and the record states no correspondence between
+the rows. The answer does not depend on the order either run stored its rows
+in, and a record compared with itself is unchanged in every row.
 
 One case rule applies to indicator values and STIX keys alike: a value is
 compared without regard to case only where it is case-insensitive by

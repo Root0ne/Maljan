@@ -9,6 +9,8 @@ way a re-run or a new build would differ.
 from __future__ import annotations
 
 import copy
+import itertools
+import json
 from typing import Any
 
 import pytest
@@ -546,10 +548,30 @@ class TestSeverityAttribution:
         a = _record(old, None)
         b = _record(stored["document"], None, rid="2")
 
-        severity = _row(diff_runs(a, b), "verdict", "severity")
+        diff = diff_runs(a, b)
+
+        severity = _row(diff, "verdict", "severity")
         assert severity["a"] == {"value": "High"}
         assert "stated_by" not in severity["a"]
         assert severity["b"]["stated_by"] == "judge"
+        # The rating is the same in both, and who stated it follows from the
+        # verdict reading, which the Verdict row counts: one difference, once.
+        assert severity["status"] == UNCHANGED
+        assert severity["changes"] == []
+        assert "Verdict row" in severity["note"]
+        assert _row(diff, "verdict", "verdict")["status"] == CHANGED
+
+    def test_a_severity_that_changed_is_still_changed(self, stored) -> None:
+        old = stored_old_shape().model_dump(mode="json")
+        new = copy.deepcopy(stored["document"])
+        new["severity"]["rating"] = "Critical"
+
+        severity = _row(
+            diff_runs(_record(old, None), _record(new, None, rid="2")), "verdict", "severity"
+        )
+
+        assert severity["status"] == CHANGED
+        assert severity["changes"] == [{"field": "value", "a": "High", "b": "Critical"}]
 
 
 class TestIndicatorShapes:
@@ -626,3 +648,52 @@ class TestCaseRule:
         section = _section(diff_runs(a, b), "stix")
         assert section["counts"][UNCHANGED] == 0
         assert section["counts"][REMOVED] == section["counts"][ADDED] == 1
+
+
+def _sigma_run(rows: list[list[str]]) -> RunRecord:
+    section = {
+        "key": "sigma_matches",
+        "title": "Sigma rule matches",
+        "kind": "table",
+        "columns": ["Rule", "Level", "Technique", "Matched fields"],
+        "rows": rows,
+        "evidence_ids": [],
+    }
+    return RunRecord(report_id="r", job_id="j", malware_report={"sections": [section]})
+
+
+def _canonical_rows(diff: dict[str, Any], key: str) -> list[str]:
+    return sorted(json.dumps(r, sort_keys=True) for r in _section(diff, key)["rows"])
+
+
+class TestRepeatedKeysAreNotPairedByPosition:
+    A_ROWS = [["R", "high", "T1", "x"], ["R", "low", "T2", "y"]]
+    B_ROWS = [["R", "medium", "T1", "x"], ["R", "critical", "T9", "y"]]
+
+    def test_two_different_rows_left_on_each_side_are_listed_not_paired(self) -> None:
+        diff = diff_runs(_sigma_run(self.A_ROWS), _sigma_run(self.B_ROWS))
+
+        section = _section(diff, "detection")
+        assert section["counts"][CHANGED] == 0
+        assert section["counts"][REMOVED] == section["counts"][ADDED] == 2
+        assert all(r["note"] == REPEATED_KEY_NOTE for r in section["rows"])
+
+    def test_the_answer_does_not_depend_on_either_runs_row_order(self) -> None:
+        a_rows = [*self.A_ROWS, ["R", "high", "T1", "z"]]
+        b_rows = [*self.B_ROWS, ["R", "high", "T1", "z"]]
+        expected = _canonical_rows(diff_runs(_sigma_run(a_rows), _sigma_run(b_rows)), "detection")
+
+        for pa in itertools.permutations(a_rows):
+            for pb in itertools.permutations(b_rows):
+                diff = diff_runs(_sigma_run(list(pa)), _sigma_run(list(pb)))
+                assert _canonical_rows(diff, "detection") == expected
+
+    def test_one_row_left_on_each_side_pairs_as_changed(self) -> None:
+        a = _sigma_run([["R", "high", "T1", "x"], ["R", "low", "T2", "y"]])
+        b = _sigma_run([["R", "low", "T2", "y"], ["R", "critical", "T1", "x"]])
+
+        section = _section(diff_runs(a, b), "detection")
+
+        assert section["counts"][UNCHANGED] == 1
+        (changed,) = [r for r in section["rows"] if r["status"] == CHANGED]
+        assert changed["changes"] == [{"field": "level", "a": "high", "b": "critical"}]
