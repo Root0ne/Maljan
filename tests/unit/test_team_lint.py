@@ -248,10 +248,9 @@ class TestEveryRefusalIsAFinding:
         definitions = _definitions(network={"role": "network", "enabled": False})
         entry = Settings(_env_file=None).agents.profiles["default"].model_dump(mode="json")
         assert _errors("default", entry, definitions=definitions, active="mobile") == []
-        assert any(
-            "'network' is disabled" in m
-            for m in _errors("default", entry, definitions=definitions, active="default")
-        )
+        running = _errors("default", entry, definitions=definitions, active="default")
+        assert any("'network' is disabled" in m for m in running)
+        assert "'default' is built in; clone it to change it" not in running
 
 
 class TestWhatTheLintReports:

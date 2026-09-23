@@ -365,12 +365,13 @@ def lint_team(
     )
 
     if name in _builtin_profiles():
-        changed = True
-        if not any(f.severity == "error" for f in findings):
-            try:
-                changed = builtin_profile_changed(name, ProfileDefinition.model_validate(prepared))
-            except ValidationError:
-                changed = True
+        # A seed is a valid team, so a built-in the profile model refuses has
+        # been edited. One it accepts is compared field by field; a disabled
+        # member is a problem with the agent map, not an edit to the team.
+        try:
+            changed = builtin_profile_changed(name, ProfileDefinition.model_validate(prepared))
+        except ValidationError:
+            changed = True
         if changed:
             findings.append(TeamFinding("error", "builtin", builtin_profile_message(name), name))
 
