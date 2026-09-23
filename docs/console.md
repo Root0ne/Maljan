@@ -454,6 +454,37 @@ above it and no selection or focus on it, and Export PNG saves the same at
 twice its size. A second object under an id the bundle already used is listed
 under "not drawn" with that reason.
 
+## Comparing two runs
+
+A finished analysis offers "Compare with another run" under its header. The
+compare page first lists the other completed runs of the same sample, newest
+first, and then any completed run by run id, file name or SHA-256; a whole
+run id typed in can be compared even when it is not among the latest hundred.
+Choosing one opens `/compare?a=<job>&b=<job>`, which reads
+`GET /api/v1/reports/diff` and nothing else.
+
+The header shows both runs — file name, run id, when it was analysed, SHA-256
+— and says plainly whether they are the same file, different files, or not
+known because a digest is not recorded. Two different samples are allowed:
+a new build of a family is what the comparison is for. The page states what
+each run's record says and never which run is right.
+
+Sections follow in groups — Verdict, ATT&CK, Indicators, Findings, Detection,
+STIX, Run — each with its counts in words, the key its rows are paired by
+and any note about a record that holds nothing for it. A row's status is an
+icon, a mark and a word together (Changed `~`, Added in B `+`, Removed in B
+`−`, Only in A `A`, Only in B `B`, Unchanged `=`), so nothing depends on colour.
+"Only in A" and "Only in B" are rows the record does not key stably, such as
+a key finding reworded or a STIX report object, and are never paired by
+guess. A changed row lists the fields that differ with both values; the
+evidence column links each run's cited ledger ids into that run's EVIDENCE
+tab. Differences come first; "Show unchanged rows" lists the rest.
+
+Every control is a link, a button or a checkbox, so the keyboard reaches
+all of it, and the section list at the top jumps to each section. "Swap A and
+B" reverses the comparison. Print hides the navigation and prints dark text
+on white, a section at a time where it fits.
+
 ## Evidence
 
 The ledger is one surface. Every citation elsewhere — a report section, a

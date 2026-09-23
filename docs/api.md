@@ -140,6 +140,59 @@ observation of infrastructure, so it is withheld from the default feed and
 labelled in the wider ones rather than shipped looking like one the sandbox
 watched.
 
+#### What changed between two runs
+
+`GET /reports/diff?a=<id>&b=<id>` compares two stored runs; `by=job` names
+them by job id instead of report id. Both must be runs the caller may read,
+and one that is not answers 404 exactly as a single report read does. The
+two runs may be of different samples: the answer's `same_sample` is `true`,
+`false`, or `null` when either SHA-256 is not recorded, and
+`sample_statement` says which in a sentence. `GET /jobs?sample_id=<id>`
+lists one sample's runs, which is how a run finds the others to compare with.
+
+The diff is made on request from the two stored records — the report
+columns, the `MalwareReport` document, the run summary, the exported STIX
+bundle and the per-agent findings — and nothing else. It states what each
+record says; it does not say which run is right, does not merge them and
+writes into neither. The same function, `maljan.reporting.run_diff.diff_runs`,
+can be called on any two records; it is linear in their sizes and the route
+runs it off the event loop.
+
+The answer carries `a` and `b` (report id, job id, time, SHA-256, file name),
+`totals`, and `sections` in a fixed order. Each section has a `match_key`
+saying what its rows are paired by, `counts` per status, `recorded` saying
+whether each run's record holds the source the section reads, `notes`, and
+`rows`. A row has its `status`, both sides' fields as recorded (`a`, `b`, null
+where the run has no such row), `changes` naming each differing field with
+both values, and the evidence-ledger ids each run's record cites for it.
+
+| Section | Paired by |
+| :-- | :-- |
+| `verdict` | the field: verdict (with `verdict_reading`), confidence, severity, family (with `family_source` and its evidence ids), category |
+| `attack` | `ttp_mappings.technique_id`; the confidence source comes from the capability matrix |
+| `indicators` | `consolidated_iocs` kind and value (case-blind for domains, addresses, e-mail and hashes); a report without that table is read from its network block, which records no publish decision, and says so |
+| `key_findings` | exact text only |
+| `analysts` | `agent_findings.agent_name` |
+| `persistence` | kind and target |
+| `configuration` | the configuration key |
+| `commands` | the command id, or the name when it has none |
+| `c2_channels` | the channel name |
+| `capability_profile` | the behaviour category of `static.api_capabilities` |
+| `detection` | engine and rule name from the `yara_matches`, `sigma_matches` and `capa_capabilities` sections |
+| `stix` | STIX type and an identifying property: the ATT&CK id, an indicator's pattern, a name, a value, a file's SHA-256 or name, a registry key, a directory path; a relationship by its type and both ends' keys, a sighting by what it sights |
+| `run` | the fact: profile, analysts, models per agent, token figures, wall time, job duration, degraded |
+| `tools` | the tool name of `run_summary.evidence.by_tool` |
+| `degradation` | exact text only |
+
+A status is `added` or `removed` (present in B only or A only by key),
+`changed`, `unchanged`, or `only_in_a` / `only_in_b`. The last two are rows
+the record does not key stably — a key finding's prose, a degradation
+sentence, a STIX object with no identifying property such as a report, a
+note or a process, a relationship to one, or a second row under a key the
+same run already used. They are listed by run and never paired by
+resemblance. Object ids are not a key: the platform mints some ids per run,
+so two runs of one sample carry different ids for the same content.
+
 ### Settings
 
 `GET /settings/schema` returns the catalog: every entry with its type, bounds,

@@ -1,6 +1,7 @@
 import type { TranscriptRow } from "@/lib/conversation";
 import type { JobRoster } from "@/types/events";
 import type { EvidenceListResponse, EvidenceQuery } from "@/types/evidence";
+import type { RunDiff } from "@/types/runDiff";
 import type {
   EnrichTriggerResponse,
   MalwareReport,
@@ -743,12 +744,15 @@ class ApiClient {
   }
 
   /* ── Jobs ──────────────────────────────────────────── */
-  getJobs(page = 1, pageSize = 50, status?: string) {
+  /** One page of the caller's jobs; `sampleId` narrows it to one sample's
+   *  runs, which is how a run finds its siblings to compare with. */
+  getJobs(page = 1, pageSize = 50, status?: string, sampleId?: string) {
     const params = new URLSearchParams({
       page: String(page),
       page_size: String(pageSize),
     });
     if (status) params.set("status", status);
+    if (sampleId) params.set("sample_id", sampleId);
     return this.request<PaginatedResponse<JobDTO>>(
       `/api/v1/jobs?${params}`
     );
@@ -851,6 +855,13 @@ class ApiClient {
    * job id. */
   getReportByJobId(jobId: string) {
     return this.request<ReportDetailDTO>(`/api/v1/reports/job/${jobId}`);
+  }
+
+  /** What changed between two stored runs, both named by their job id.
+   *  404 when either run is not one the caller may read. */
+  getRunDiff(jobA: string, jobB: string) {
+    const params = new URLSearchParams({ a: jobA, b: jobB, by: "job" });
+    return this.request<RunDiff>(`/api/v1/reports/diff?${params}`);
   }
 
   getReportTimeline(reportId: string) {

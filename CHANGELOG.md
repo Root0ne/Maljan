@@ -8,6 +8,23 @@ change landed on `main`.
 
 ### Added
 
+- **What changed between two runs.** `GET /api/v1/reports/diff?a=&b=`
+  (`by=job` for job ids) compares two stored analyses section by section:
+  verdict, confidence, severity and family with who stated each; ATT&CK
+  techniques published; indicators by kind and value; key findings, analyst
+  findings, persistence, configuration, commands, C2 channels and the
+  capability profile; YARA, Sigma and capa rule matches; STIX objects by type
+  and an identifying property rather than by id; and run facts — profile,
+  models, token figures, wall time, tools called, degradation reasons. Each
+  section names the key its rows are paired by, and a row the record does not
+  key stably is listed as present in one run, never paired by guess. Changed
+  rows cite both runs' evidence-ledger ids. It is read only from the two
+  stored records, says whether the SHA-256 is the same, and answers 404 unless
+  the caller may read both runs. The console's analysis header gains "Compare
+  with another run", which offers the same sample's runs first and then any
+  run, and a printable compare page. `GET /jobs` takes `sample_id`. The one
+  implementation is `maljan.reporting.run_diff.diff_runs`.
+
 - **The STIX bundle as a relationship graph.** DETECTION's STIX section gains
   Graph and Table views beside the JSON, all three reading the bundle the
   `/reports/{id}/stix` export serves. Nodes are the bundle's objects, an

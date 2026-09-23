@@ -16,9 +16,13 @@ import { useParams } from "next/navigation";
 export default function EvidenceChips({
   ids,
   source,
+  jobId: jobIdProp,
   className = "",
 }: {
   ids: string[] | null | undefined;
+  /** The run the ids belong to, for a caller outside `analysis/[id]` — the
+   *  run diff cites two runs on one page. The route's id otherwise. */
+  jobId?: string;
   /** Where the section came from when it cites no entry — `tool`, `routing`,
    *  `agent` or `agent:<name>`. Printed as a plain chip: it is a provenance
    *  claim, not a citation, and nothing resolves it. */
@@ -26,7 +30,7 @@ export default function EvidenceChips({
   className?: string;
 }) {
   const params = useParams();
-  const jobId = typeof params?.id === "string" ? params.id : "";
+  const jobId = jobIdProp ?? (typeof params?.id === "string" ? params.id : "");
   const entries = (ids ?? []).filter((id) => typeof id === "string" && id.length > 0);
 
   if (entries.length === 0 && !source) return null;

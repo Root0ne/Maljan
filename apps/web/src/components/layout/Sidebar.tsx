@@ -43,7 +43,7 @@ export default function Sidebar() {
     <aside
       onMouseEnter={() => setExpanded(true)}
       onMouseLeave={() => setExpanded(false)}
-      className="fixed left-0 top-0 h-full z-40 flex flex-col border-r border-border bg-bg-surface transition-[width] duration-200"
+      className="fixed left-0 top-0 h-full z-40 flex flex-col border-r border-border bg-bg-surface transition-[width] duration-200 print:hidden"
       style={{ width: expanded ? "var(--sidebar-expanded)" : "var(--sidebar-width)" }}
     >
       {/* Logo */}
