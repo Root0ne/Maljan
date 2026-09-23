@@ -136,37 +136,52 @@ _ASSESSMENT_KEY = '"x_maljan_assessment"'
 def stated_assessment_in(text: str) -> Any | None:
     """The assessment an unreadable answer stated whole, read by the bundle's own readers.
 
-    The JSON object written under ``"x_maljan_assessment"``, parsed with the
-    same reader a whole answer is parsed with (``safe_parse_json``, which takes
-    the first balanced object) and validated as a ``JudgeAssessment``. It is
-    kept only when its verdict is one ``pipeline.outcome.normalise_verdict``
-    recognises; then its confidence, severity and family are the judge's own
-    statements. ``None`` when the object is absent, cut off, or states no
-    verdict that can be read. Nothing is inferred from prose.
+    The JSON object written under ``"x_maljan_assessment"``, validated as a
+    ``JudgeAssessment`` and kept only when its verdict is one
+    ``pipeline.outcome.normalise_verdict`` recognises; then its confidence,
+    severity and family are the judge's own statements. The last whole one
+    counts: an answer that drafted an assessment in reasoning spilled into its
+    text and then wrote the bundle's own is read for the bundle's. Each object
+    is read as written first (``json.loads`` of the first balanced object) and
+    only then through the repairing reader a whole answer goes through, which
+    rewrites comments and quotes. ``None`` when no occurrence is whole and
+    states a verdict that can be read. Nothing is inferred from prose.
     """
+    import json
+
     from maljan.pipeline.outcome import normalise_verdict
     from maljan.schemas.judgement import JudgeAssessment
-    from maljan.utils.json_cleaner import safe_parse_json
+    from maljan.utils.json_cleaner import extract_json, safe_parse_json
 
-    at = text.find(_ASSESSMENT_KEY)
-    if at < 0:
-        return None
+    at = text.rfind(_ASSESSMENT_KEY)
+    while at >= 0:
+        found = _assessment_at(text, at, json, extract_json, safe_parse_json)
+        if found is not None:
+            try:
+                assessment = JudgeAssessment.model_validate(found)
+            except Exception:  # noqa: BLE001 — one that does not validate states nothing
+                assessment = None
+            if assessment is not None and normalise_verdict(assessment.verdict) is not None:
+                return assessment
+        at = text.rfind(_ASSESSMENT_KEY, 0, at)
+    return None
+
+
+def _assessment_at(
+    text: str, at: int, json_module: Any, extract: Any, repairing: Any
+) -> dict[str, Any] | None:
+    """The object written after the assessment key at ``at``, or ``None``."""
     rest = text[at + len(_ASSESSMENT_KEY) :].lstrip()
     if not rest.startswith(":"):
         return None
     rest = rest[1:].lstrip()
     if not rest.startswith("{"):
         return None
-    value = safe_parse_json(rest)
-    if not isinstance(value, dict):
-        return None
     try:
-        assessment = JudgeAssessment.model_validate(value)
-    except Exception:  # noqa: BLE001 — an assessment that does not validate states nothing
-        return None
-    if normalise_verdict(assessment.verdict) is None:
-        return None
-    return assessment
+        value = json_module.loads(extract(rest))
+    except ValueError:
+        value = repairing(rest)
+    return value if isinstance(value, dict) else None
 
 
 # What is recorded when even the retry was not a bundle. The code lands in

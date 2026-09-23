@@ -1,7 +1,7 @@
 """A job that is cancelled stops: between nodes, before every model call, and in flight.
 
-The benchmark cancelled a job at 11:34:13 and the worker issued the judge's
-model call two seconds later, started the report stage eleven minutes after
+A benchmark job was cancelled and the worker issued the judge's model call
+two seconds later, started the report stage eleven minutes after
 that, held 16–19 connections open to the model server, ignored SIGTERM for
 three minutes and ended only on SIGKILL. The cancel reached the pipeline task
 as a ``CancelledError``, the bridge to the agent loop turned it into an

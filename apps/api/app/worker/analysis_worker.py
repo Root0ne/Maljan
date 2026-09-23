@@ -14,6 +14,7 @@ import json
 import os
 import platform
 import signal
+import sys
 import threading
 import time
 import traceback
@@ -1959,6 +1960,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             if not cancelled_by_user:
                 cancelled_by_user = await cancel_was_requested(redis_conn, job_id)
             if not cancelled_by_user:
+                # arq finishes a job it cancelled only on ``CancelledError``; a
+                # ``JobCancelled`` reaching it would leave the job unfinished in
+                # its bookkeeping, since it is no ``Exception`` either.
+                if not isinstance(sys.exc_info()[1], asyncio.CancelledError):
+                    raise asyncio.CancelledError from sys.exc_info()[1]
                 raise
             _stopped = app.container.cancellation.stopped_at
             logger.info(

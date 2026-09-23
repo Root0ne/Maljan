@@ -128,6 +128,36 @@ class TestTheAssessmentAnAnswerStatedWhole:
         assert stated_assessment_in(unreadable) is None
 
 
+class TestWhichAssessmentIsRead:
+    def test_the_last_whole_one_is_the_bundle_s(self) -> None:
+        draft = {**ASSESSMENT, "verdict": "Suspicious", "confidence": 0.4}
+        text = (
+            "Thinking: maybe "
+            + json.dumps({"x_maljan_assessment": draft})
+            + " but the evidence says otherwise.\n"
+            + _cut_bundle()
+        )
+
+        assessment = stated_assessment_in(text)
+
+        assert assessment is not None
+        assert (assessment.verdict, assessment.confidence) == ("Malware", 0.85)
+
+    def test_a_value_is_read_as_written_before_any_repair(self) -> None:
+        rationale = "see https://example.test/a//b and 'quoted' words"
+        written = {
+            **ASSESSMENT,
+            "severity": {"rating": "High", "rationale": rationale},
+        }
+        text = json.dumps({"type": "bundle", "x_maljan_assessment": written})[:-1]
+
+        assessment = stated_assessment_in(text)
+
+        assert assessment is not None
+        assert assessment.severity is not None
+        assert assessment.severity.rationale == rationale
+
+
 class TestTheRound:
     @pytest.mark.asyncio
     async def test_the_prompt_states_the_output_budget(self) -> None:

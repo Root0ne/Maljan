@@ -931,7 +931,11 @@ stage time, its loop budget less what the node has spent, holds one turn and a
 final answer at the pace its first loop measured, and the loop runs under that
 remainder rather than a fresh budget. It is the same ISR path as the first, so
 what it answers is parsed and validated like a first answer. When it does not
-fit, or ends empty too, the stage record's `agent_reasons` says so.
+fit, or ends empty too, the stage record's `agent_reasons` says so. The pace is
+the first loop's longest turn, and a second loop's first turn re-reads the
+framing and the pack cold, which on the slow run took 438–908 s: on such a
+model the measure can be short of what the second loop then needs, and the
+loop's own time cap and salvage are what hold it to the stage.
 
 ## Agents and teams
 
@@ -1309,8 +1313,9 @@ surrounding pair passed through exactly. The repair is recorded the way
 `carved_path`'s is: the ledger keeps the arguments as the model wrote them, and
 a structured answer carries `read_as` first, the value each argument was read
 as (a `threatintel` answer is prose and names the value it looked up). Each
-such tool's description says to give the argument the value itself, without
-quotes, and that the parameter's own name is not a value; it used to say "pass
+such tool's description says to give the argument the value itself, and that
+a value that is only the parameter's name is asked about, not run — so a
+search for that literal word cannot be made; it used to say "pass
 `pattern` as the raw text or pattern itself", and a static analyst sent
 `"pattern": "\"pattern\""` twice. A call whose argument is nothing but its own
 parameter's name — bare, quoted or in a placeholder bracket — is not run and

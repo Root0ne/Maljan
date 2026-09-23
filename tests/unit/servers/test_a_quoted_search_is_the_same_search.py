@@ -217,4 +217,4 @@ def test_the_published_description_says_unquoted(directory: str, tool: str, argu
     module = _load(directory)
     described = getattr(module, tool).__doc__ or ""
     assert f"``{argument}``" in described
-    assert "the value itself, written as it should be matched and with no" in described
+    assert "the value itself, as it should be matched" in described

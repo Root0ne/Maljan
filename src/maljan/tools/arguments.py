@@ -37,9 +37,9 @@ READ_AS_KEY = "read_as"
 # twice sent ``"pattern": "\"pattern\""``, the word itself in quotes. The value
 # is named as a value here, and the name is said not to be one.
 UNQUOTED_NOTE = (
-    "Give {names} the value itself, written as it should be matched and with no "
-    "quotes around it; the parameter's own name is not a value. One pair of quotes "
-    "around the whole value is read as not part of it, and {record}."
+    "Give {names} the value itself, as it should be matched; a value that is only "
+    "the parameter's name is asked about, not run. One pair of quotes around the "
+    "whole value is read as not part of it, and {record}."
 )
 _RECORDED_AS_KEY = "the answer's ``read_as`` says so when that happened"
 _RECORDED_IN_TEXT = "the answer names the value that was looked up"

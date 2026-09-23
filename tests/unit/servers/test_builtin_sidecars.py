@@ -162,7 +162,7 @@ def test_the_caveats_on_a_measured_number_reach_the_model_that_reads_them() -> N
     assert (
         served["api_capability"][len(in_process) :]
         .strip()
-        .startswith("Give ``api_names`` the value itself, written as it should be matched")
+        .startswith("Give ``api_names`` the value itself, as it should be matched")
     )
     # Line wrapping is not the subject; the sentences are.
     described = " ".join(served["api_capability"].split())
