@@ -17,6 +17,7 @@ from typing import Any
 from maljan.analysis.run_summary import (
     NOT_APPLICABLE,
     NOT_APPLICABLE_SENTENCE,
+    generation_lines,
     stage_duration_lines,
 )
 from maljan.core.logger import logger
@@ -1044,6 +1045,8 @@ class MarkdownRenderer:
                     lines.append(f"- Final confidence: {float(final_conf):.3f}")
                 except (TypeError, ValueError):
                     pass
+        for line in generation_lines(run_summary.get("generation")):
+            lines.append(f"- {line}")
         evidence = run_summary.get("evidence") or {}
         if evidence:
             lines.append(

@@ -616,6 +616,32 @@ largest cap the run used. A run that landed on `fallback` is the one to act on
 — set `core.llm.openai.context_size` to the window the server was started with,
 and the cap is derived from then on.
 
+### A call waits as long as its answer takes at the model's pace
+
+Two calls have an output budget of their own: the judge's verdict
+(`core.llm.judge_max_tokens`, 8,192 by default, under the judge definition's
+timeout — 600 s in the shipped team) and each composer section
+(`core.reporting.composer_section_max_tokens`, 900, under
+`core.reporting.composer_per_section_timeout`, 120 s). A timeout chosen for a
+fast model cuts a slow one off: at 3.8 tokens a second only about 2,280 of the
+judge's tokens fit in 600 s, and a full composer section needs about 237 s.
+
+So each of those calls waits
+`max(configured, min(max_tokens / measured rate × 1.5, 1800 s))`. The rate is
+the model's own for this job, read off every answer it has already given
+without a token of its own: Ollama's `eval_count` over `eval_duration`, and on
+an OpenAI-compatible endpoint the answer's output token count over the call's
+wall clock (the client drops llama.cpp's `timings`, and the wall clock includes
+reading the prompt, so that rate is lower than the server's and the wait
+longer). The margin, 1.5, covers the prompt read and the spread between turns.
+The ceiling, 1,800 s, is the HTTP request timeout every OpenAI-compatible model
+is built with, so no wait outlives the request carrying it; a configured value
+above it is kept. Until a model has answered once, and for a call with no
+output budget, the configured value stands. `run_summary.generation` records
+each model's rate, tokens, seconds, calls and source, and for each sized call
+the configured value, the budget, the rate, the derived and the applied
+seconds; the report's Run Summary prints the same numbers.
+
 ### The evidence budget
 
 `reporting.evidence_budget_bytes` (512 KiB by default) is how many bytes of

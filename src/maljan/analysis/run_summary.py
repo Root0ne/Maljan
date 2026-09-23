@@ -418,6 +418,47 @@ def stage_duration_lines(stages: Any) -> list[str]:
     return [f"**Per stage**: {spent}  "] if spent else []
 
 
+def generation_lines(generation: Any) -> list[str]:
+    """Each model's measured generation rate and each call timeout it produced.
+
+    One line per model and one per sized call, so a reader can check the
+    arithmetic: the budget, the rate, the margin, the ceiling, and what the
+    call was finally given. Nothing measured contributes nothing.
+    """
+    if not isinstance(generation, dict):
+        return []
+    lines: list[str] = []
+    for model, row in sorted((generation.get("models") or {}).items()):
+        if not isinstance(row, dict) or row.get("tokens_per_second") is None:
+            continue
+        sources = "; ".join(str(x) for x in row.get("sources") or []) or "unknown"
+        lines.append(
+            f"Generation rate of `{model}`: {float(row['tokens_per_second']):.2f} tokens/s "
+            f"({int(row.get('tokens') or 0)} tokens over {float(row.get('seconds') or 0.0):.1f}s "
+            f"in {int(row.get('calls') or 0)} call(s); from {sources})"
+        )
+    margin = generation.get("margin")
+    ceiling = generation.get("ceiling_s")
+    for call, row in sorted((generation.get("timeouts") or {}).items()):
+        if not isinstance(row, dict):
+            continue
+        configured = float(row.get("configured_s") or 0.0)
+        applied = float(row.get("applied_s") or 0.0)
+        if row.get("derived_s") is None:
+            lines.append(
+                f"Timeout of `{call}`: {applied:.0f}s, the configured value "
+                "(no rate measured for its model yet, or no output budget)"
+            )
+            continue
+        lines.append(
+            f"Timeout of `{call}`: {applied:.0f}s — the larger of {configured:.0f}s configured "
+            f"and {int(row.get('max_tokens') or 0)} tokens at "
+            f"{float(row.get('tokens_per_second') or 0.0):.2f} tokens/s × {margin} "
+            f"= {float(row['derived_s']):.0f}s, at most {float(ceiling or 0.0):.0f}s"
+        )
+    return lines
+
+
 def tool_latency_lines(latency: Any) -> list[str]:
     """What each agent's tool calls cost, and which single call cost the most.
 
@@ -538,6 +579,10 @@ class RunSummary:
     # a slow tool could not be told from a slow model. ``None`` on a run whose
     # ledger holds no timed call.
     tool_latency: dict[str, Any] | None = None
+    # Each model's measured generation rate and each per-call timeout it
+    # produced (``llm.generation_rate.GenerationRates.snapshot``). ``None`` on
+    # a run that measured no answer and sized no call.
+    generation: dict[str, Any] | None = None
     # ``dedupe`` is deliberately not a field here. What the report folded is
     # counted while the report's sections are built, which happens after this
     # object exists, so the report builder writes ``dedupe`` onto the summary
@@ -730,6 +775,10 @@ class RunSummary:
                 "",
             ]
 
+        generation = generation_lines(self.generation)
+        if generation:
+            lines += ["## Generation Rate", "", *(f"- {line}" for line in generation), ""]
+
         if self.truncation:
             trunc = self.truncation
             lines += [
@@ -871,6 +920,9 @@ class RunSummary:
                 "estimated_calls": self.tokens.estimated_calls,
             }
 
+        if self.generation:
+            result["generation"] = dict(self.generation)
+
         if self.truncation:
             t = self.truncation
             result["truncation"] = {
@@ -954,6 +1006,7 @@ class RunSummaryBuilder:
         self._failed_analysts: list[str] = []
         self._techniques_by_layer: dict[str, int] = {}
         self._tokens: TokenUsageMetrics | None = None
+        self._generation: dict[str, Any] | None = None
         self._truncation: TruncationMetrics | None = None
         self._profile: dict[str, Any] | None = None
         self._stages: list[dict[str, Any]] = []
@@ -1073,6 +1126,15 @@ class RunSummaryBuilder:
             llm_calls=int(snapshot.get("llm_calls", 0)),
             estimated_calls=int(snapshot.get("estimated_calls", 0)),
         )
+        return self
+
+    def set_generation(self, snapshot: dict[str, Any] | None) -> RunSummaryBuilder:
+        """Record the measured generation rates and the timeouts they produced.
+
+        A snapshot with no measured model and no sized call leaves it unset.
+        """
+        if isinstance(snapshot, dict) and (snapshot.get("models") or snapshot.get("timeouts")):
+            self._generation = dict(snapshot)
         return self
 
     def set_truncation(self, snapshot: dict[str, Any] | None) -> RunSummaryBuilder:
@@ -1325,6 +1387,7 @@ class RunSummaryBuilder:
             nudge=self._nudge,
             budget=self._budget,
             tool_latency=self._tool_latency,
+            generation=self._generation,
         )
 
 

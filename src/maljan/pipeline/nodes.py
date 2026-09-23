@@ -2943,6 +2943,16 @@ def _truncation_snapshot(container: ServiceContainer) -> dict[str, Any]:
     return ledger.snapshot()
 
 
+def _generation_snapshot(container: Any) -> dict[str, Any] | None:
+    """The measured generation rates and the timeouts sized from them, or ``None``."""
+    try:
+        snapshot = container.get_generation_rates().snapshot()
+    except Exception as exc:  # noqa: BLE001 — telemetry never breaks a verdict
+        logger.debug("the generation rate was not recorded on the run summary: %s", exc)
+        return None
+    return snapshot if isinstance(snapshot, dict) else None
+
+
 def make_judge_node(
     container: ServiceContainer,
     *,
@@ -3471,6 +3481,7 @@ def make_judge_node(
                         )
                     )
                     .set_token_usage(container.get_token_ledger().snapshot())
+                    .set_generation(_generation_snapshot(container))
                     .set_truncation(_truncation_snapshot(container))
                     .set_triage(_triage_facts)
                     .set_nudge(state.get("nudge_retry_modes") or {})
@@ -4297,6 +4308,20 @@ def make_report_node(
             if _closed_summary:
                 _closed_summary["elapsed_seconds"] = _elapsed
                 report.run_summary = _closed_summary
+        # The generation rates again, now that the composer has sized its
+        # sections from them: the judge's snapshot predates those timeouts.
+        _generation = _generation_snapshot(container)
+        if (
+            state.get("run_summary")
+            and _generation
+            and (_generation.get("models") or _generation.get("timeouts"))
+            and _generation != (state.get("run_summary") or {}).get("generation")
+        ):
+            _state_summary["generation"] = _generation
+            _rated_summary = dict(report.run_summary or {})
+            if _rated_summary:
+                _rated_summary["generation"] = _generation
+                report.run_summary = _rated_summary
         # The markdown is rendered once every field it reads is final: the
         # validation block, the corroboration's published marks, the stage
         # rollup and the elapsed time are all written above this line, and so

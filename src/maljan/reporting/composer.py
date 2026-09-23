@@ -219,11 +219,16 @@ class ReportComposer:
         section_max_tokens: int = 900,
         per_section_timeout: int = 120,
         token_ledger: Any | None = None,
+        generation_rates: Any | None = None,
     ) -> None:
         self.llm = llm
         self.section_max_tokens = section_max_tokens
         self.per_section_timeout = per_section_timeout
         self.token_ledger = token_ledger
+        # The job's measured generation rates (``llm.generation_rate``). A
+        # section's wait is sized from them so a slow model is given the time
+        # its ``section_max_tokens`` take; ``None`` keeps the configured wait.
+        self.generation_rates = generation_rates
         # What each section was told was wrong with its answer, by code, across
         # every section. The composer runs after the run summary is built, so
         # the report node reads this and folds it in.
@@ -368,16 +373,16 @@ class ReportComposer:
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=human),
         ]
+        timeout = self._section_timeout()
         try:
             return await asyncio.wait_for(
                 self._invoke(messages, schema, section=section),
-                timeout=float(self.per_section_timeout),
+                timeout=timeout,
             )
         except TimeoutError:
             logger.warning("ReportComposer: section '%s' timed out; skipping.", section)
             self._note_degradation(
-                f"report section '{section}' is missing: it did not answer within "
-                f"{int(self.per_section_timeout)}s"
+                f"report section '{section}' is missing: it did not answer within {int(timeout)}s"
             )
             return None
         except Exception as exc:  # noqa: BLE001
@@ -389,6 +394,23 @@ class ReportComposer:
                 f"report section '{section}' is missing: the round failed ({type(exc).__name__})"
             )
             return None
+
+    def _section_timeout(self) -> float:
+        """One section's wait: configured, or what its budget needs at the model's pace."""
+        configured = float(self.per_section_timeout)
+        rates = getattr(self, "generation_rates", None)
+        if rates is None:
+            return configured
+        from maljan.llm.generation_rate import model_name_of
+
+        return float(
+            rates.call_timeout(
+                "composer:section",
+                model_name_of(self.llm),
+                configured,
+                int(self.section_max_tokens or 0),
+            )
+        )
 
     async def _invoke(
         self, messages: list[BaseMessage], schema: type[BaseModel], *, section: str = ""

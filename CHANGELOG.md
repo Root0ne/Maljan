@@ -1309,6 +1309,26 @@ change landed on `main`.
   reads `1837` where it read `1842` and five category shares move by one
   rounding place; no Linux rule's rate moves at all. No behaviour category was
   renamed or removed, so a consumer reading `category` alone is unaffected.
+
+- **The judge's verdict call and each composer section wait as long as their
+  answer takes at the model's measured pace.** At 3.8 tokens a second a 600 s
+  verdict call could receive about 2,280 of `judge_max_tokens`' 8,192 and a
+  120 s section about 456 of its 900. Every model the container builds now
+  carries a meter that reads each answer's generation count and time as it
+  returns — Ollama's `eval_count`/`eval_duration`, otherwise the output token
+  count over the call's wall clock — and those two calls wait
+  `max(configured, min(max_tokens / rate × 1.5, 1800 s))`
+  (`llm.generation_rate`). With no rate yet the configured value stands. The
+  OpenAI-compatible provider's `request_timeout` now reads the same 1,800 s
+  constant instead of its own literal. `run_summary.generation` records each
+  model's rate and source and each sized call's configured, derived and applied
+  seconds, and the report's Run Summary and the run summary's markdown print
+  them.
+  **Upgrading:** a slow model's verdict call and composer sections can now run
+  up to 1,800 s each where they were cut at 600 s and 120 s, so a job on such a
+  model can take longer before a section is dropped; a fast model's timeouts
+  do not change. `run_summary.generation` is a new key, absent on a run that
+  measured no answer.
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was

@@ -44,6 +44,7 @@ from maljan.core.exceptions import ConfigurationError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger
 from maljan.core.truncation_ledger import TruncationLedger
+from maljan.llm.generation_rate import GenerationRates, attach_rate_meter
 from maljan.llm.registry import LLMProviderRegistry
 from maljan.loaders.file_loader import FileDataLoader
 from maljan.parsers.registry import ParserRegistry
@@ -355,6 +356,12 @@ class ServiceContainer:
         # judge add each call's usage; the judge node snapshots it into RunSummary.
         self._token_ledger = TokenLedger()
 
+        # Per-run generation rate of each model, read off every call's answer
+        # by a meter attached where the model is built. The judge and the
+        # composer size their per-call timeouts from it; the judge node and
+        # the report node snapshot it into RunSummary.
+        self._generation_rates = GenerationRates()
+
         # Per-run truncation ledger (pitfall P6). Same lifecycle as the token
         # ledger: written to at every bound, snapshotted by the judge node.
         # Truncation is designed into this pipeline and has never been counted.
@@ -440,6 +447,7 @@ class ServiceContainer:
             cached = self._expert_llm_cache.lookup(loop)
             if cached is None:
                 cached = self._llm_registry.build_model(role="expert", **self._expert_token_cap())
+                attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._expert_llm_cache.put(loop, "", cached)
             return cached
 
@@ -467,6 +475,7 @@ class ServiceContainer:
                 cached = self._llm_registry.build_model_for_agent(
                     "judge", fallback_role="judge", **extra
                 )
+                attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._judge_llm_cache.put(loop, "", cached)
             return cached
 
@@ -491,6 +500,7 @@ class ServiceContainer:
                 cached = self._llm_registry.build_model_for_agent(
                     REPORTER_AGENT_KEY, fallback_role="judge", **extra
                 )
+                attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._reporter_llm_cache.put(loop, "", cached)
             return cached
 
@@ -512,6 +522,7 @@ class ServiceContainer:
                     provider_override=self.config.preprocessing.summarizer_provider,
                     model_override=self.config.preprocessing.summarizer_model,
                 )
+                attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._summarizer_llm_cache.put(loop, "", cached)
             return cached
 
@@ -528,6 +539,7 @@ class ServiceContainer:
                 cached = self._llm_registry.build_model_for_agent(
                     agent_name, **self._expert_token_cap()
                 )
+                attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._agent_llm_cache.put(loop, agent_name, cached)
             return cached
 
@@ -660,6 +672,10 @@ class ServiceContainer:
     def get_token_ledger(self) -> TokenLedger:
         """Return the per-run LLM token/cost ledger (findings-log §4 Item 1)."""
         return self._token_ledger
+
+    def get_generation_rates(self) -> GenerationRates:
+        """Return the per-run measured generation rate of each model."""
+        return self._generation_rates
 
     def get_truncation_ledger(self) -> TruncationLedger:
         """Return the per-run truncation ledger (pitfall P6)."""
@@ -910,6 +926,7 @@ class ServiceContainer:
                 )
                 cached._job_id = self.job_key()
                 cached.token_ledger = getattr(self, "_token_ledger", None)
+                cached.generation_rates = getattr(self, "_generation_rates", None)
                 cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
                 cached.evidence_counter = getattr(self, "_evidence_counter", None)
                 cached.evidence_corpus = getattr(self, "_evidence_corpus", None)
@@ -1125,6 +1142,7 @@ class ServiceContainer:
                     section_max_tokens=rc.composer_section_max_tokens,
                     per_section_timeout=rc.composer_per_section_timeout,
                     token_ledger=getattr(self, "_token_ledger", None),
+                    generation_rates=getattr(self, "_generation_rates", None),
                 )
             return self._report_composer_cache
 

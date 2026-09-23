@@ -48,6 +48,7 @@ from maljan.core.config import get_settings
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
+from maljan.llm.generation_rate import GenerationRates, model_name_of
 from maljan.pipeline.events import emit_judge_question, scrub
 from maljan.pipeline.mediation_models import (
     MediatorVerdict,
@@ -346,6 +347,10 @@ class JudgeAgent(BudgetMeter):
         # Per-run token ledger (findings-log §4 Item 1); attached by the
         # container in get_judge_agent(). None when run standalone.
         self.token_ledger: TokenLedger | None = None
+        # The job's measured generation rates, attached by the container; the
+        # verdict call's timeout is sized from them. None when run standalone,
+        # and the configured timeout then stands.
+        self.generation_rates: GenerationRates | None = None
         # Which stage of the active team this judge is running as. Set by the
         # node before it works — the debate stage when it mediates, the verdict
         # stage when it rules — and read by the evidence recorder.
@@ -1030,7 +1035,10 @@ class JudgeAgent(BudgetMeter):
         # own ``timeout_seconds`` first, then the deprecated override map
         # (which ships 600 for the judge, so a local Qwen3.6-35B has headroom
         # for the verdict round), then the global ``react_agent_timeout``.
-        timeout = float(loop_limits("judge")[0])
+        # And then held to the model's measured pace: the verdict may take its
+        # whole ``judge_max_tokens``, which a slow model cannot generate inside
+        # a timeout chosen for a fast one (``llm.generation_rate``).
+        timeout = self._verdict_timeout(float(loop_limits("judge")[0]))
         self.logger.info("JudgeAgent invoking verdict LLM (timeout=%ds)...", timeout)
 
         # Reset per call, not once: a first call that timed out and left the
@@ -1571,6 +1579,19 @@ class JudgeAgent(BudgetMeter):
         negotiation = getattr(self._config, "negotiation", None)
         value = getattr(negotiation, "consensus_threshold", None)
         return float(value) if value is not None else CONSENSUS_THRESHOLD
+
+    def _verdict_timeout(self, configured: float) -> float:
+        """The verdict call's timeout: configured, or what its budget needs at the model's pace.
+
+        ``GenerationRates.call_timeout`` decides and records it; with no rates
+        attached, no rate measured yet or no ``judge_max_tokens``, the
+        configured value stands.
+        """
+        rates = getattr(self, "generation_rates", None)
+        if rates is None:
+            return configured
+        cap = int(getattr(get_settings().llm, "judge_max_tokens", 0) or 0)
+        return float(rates.call_timeout("judge:verdict", model_name_of(self.llm), configured, cap))
 
     def _supports_structured_output(self) -> bool:
         """Delegates to the registry — see ``structured_output_supported``.
