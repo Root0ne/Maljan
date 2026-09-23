@@ -288,3 +288,85 @@ class TestTheRunSummaryRecordsIt:
         builder = RunSummaryBuilder(start_time=0.0).set_generation(GenerationRates().snapshot())
 
         assert "generation" not in builder.build().to_dict()
+
+
+class _Failing(FakeMessagesListChatModel):
+    """A provider that refuses every call the way a dropped connection does."""
+
+    def _generate(self, *_a: Any, **_k: Any) -> Any:
+        raise ConnectionError("connection refused")
+
+    async def _agenerate(self, *_a: Any, **_k: Any) -> Any:
+        raise ConnectionError("connection refused")
+
+
+class TestAFallbackListIsMeasuredModelByModel:
+    def _list(self) -> Any:
+        from maljan.llm.fallback import FallbackChatModel
+
+        first = _Failing(responses=[_ollama_answer(1, 1.0)])
+        second = FakeMessagesListChatModel(responses=[_ollama_answer(38, 10.0)])
+        object.__setattr__(first, "model", "first-model")
+        object.__setattr__(second, "model", "second-model")
+        return FallbackChatModel(
+            models=[first, second], labels=["first-model", "second-model"], agent="judge"
+        )
+
+    def test_the_answer_counts_against_the_model_that_gave_it(self) -> None:
+        from maljan.llm.fallback import provider_failure
+
+        assert provider_failure(ConnectionError("connection refused")) is not None
+        model = self._list()
+        rates = GenerationRates()
+        attach_rate_meter(model, rates)
+
+        asyncio.run(model.ainvoke([HumanMessage(content="a")]))
+
+        assert rates.rate("second-model") == pytest.approx(3.8)
+        assert rates.rate("first-model") is None
+        assert set(rates.snapshot()["models"]) == {"second-model"}
+
+    def test_a_call_is_sized_for_the_model_that_now_answers(self) -> None:
+        from maljan.llm.generation_rate import model_name_of
+
+        model = self._list()
+        assert model_name_of(model) == "first-model"
+        asyncio.run(model.ainvoke([HumanMessage(content="a")]))
+
+        # The list sticks to the model that answered for the rest of the loop.
+        assert model_name_of(model) == "second-model"
+
+
+class TestTheSectionCapBoundsTheCall:
+    def test_the_composer_s_model_is_built_with_the_section_cap(self) -> None:
+        from unittest.mock import MagicMock
+
+        from maljan.core.config import REPORTER_AGENT_KEY, Settings
+        from maljan.core.container import ServiceContainer
+
+        settings = Settings(_env_file=None)  # type: ignore[call-arg]
+        settings.reporting.composer_enabled = True
+        settings.reporting.composer_section_max_tokens = 900
+        container = ServiceContainer(settings, mock=False)
+        registry = MagicMock()
+        registry.build_model_for_agent.return_value = FakeMessagesListChatModel(responses=[])
+        container._llm_registry = registry  # type: ignore[assignment]
+
+        composer = container.get_report_composer()
+
+        assert composer is not None
+        registry.build_model_for_agent.assert_called_once_with(
+            REPORTER_AGENT_KEY, fallback_role="judge", max_tokens=900
+        )
+        assert composer.section_max_tokens == 900
+
+    def test_an_ollama_model_takes_the_cap_as_num_predict(self) -> None:
+        from maljan.core.config import Settings
+        from maljan.llm.ollama_provider import OllamaProvider
+
+        built: Any = OllamaProvider(Settings(_env_file=None)).build_model(  # type: ignore[call-arg]
+            "qwen3.8:27b", 0.1, max_tokens=900
+        )
+
+        assert built.num_predict == 900
+        assert built._chat_params([])["options"]["num_predict"] == 900

@@ -1137,19 +1137,32 @@ class ServiceContainer:
 
         ``None`` in mock mode or when ``composer_enabled`` is
         off (callers then simply skip the professional spine). Runs on the
-        reporter's model like the NarrativeAgent, and pins it for the same
-        reason and under the same condition: the report node is the one
+        reporter's model like the NarrativeAgent, built with
+        ``composer_section_max_tokens`` as its output cap, and pins it for the
+        same reason and under the same condition: the report node is the one
         caller, on one loop.
         """
-        if self.is_mock or not self.config.reporting.composer_enabled:
+        registry = self._llm_registry
+        if self.is_mock or not self.config.reporting.composer_enabled or registry is None:
             return None
         with self._lock:
             if getattr(self, "_report_composer_cache", None) is None:
                 from maljan.reporting.composer import ReportComposer
 
                 rc = self.config.reporting
+                # The reporter's model, built with the section's own output cap
+                # rather than the judge's: ``composer_section_max_tokens`` is
+                # what a section may generate, and a wait sized from it over a
+                # call allowed ``judge_max_tokens`` would say something untrue.
+                # Held by the composer, which is dropped with the loop it ran on.
+                composer_llm = registry.build_model_for_agent(
+                    REPORTER_AGENT_KEY,
+                    fallback_role="judge",
+                    max_tokens=int(rc.composer_section_max_tokens),
+                )
+                attach_rate_meter(composer_llm, getattr(self, "_generation_rates", None))
                 self._report_composer_cache = ReportComposer(
-                    llm=self.get_reporter_llm(),
+                    llm=composer_llm,
                     section_max_tokens=rc.composer_section_max_tokens,
                     per_section_timeout=rc.composer_per_section_timeout,
                     token_ledger=getattr(self, "_token_ledger", None),

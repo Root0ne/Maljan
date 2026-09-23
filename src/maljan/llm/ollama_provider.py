@@ -36,6 +36,14 @@ class OllamaProvider:
         if self._config.llm.ollama.disable_thinking:
             kwargs.setdefault("reasoning", False)
 
+        # The output cap every other provider takes as ``max_tokens``. Ollama
+        # spells it ``num_predict``, and ``ChatOllama`` drops a ``max_tokens``
+        # it is handed without a word, so the judge's, the analysts' and a
+        # composer section's caps reached an Ollama model as no cap at all.
+        cap = kwargs.pop("max_tokens", None)
+        if isinstance(cap, int) and cap > 0:
+            kwargs.setdefault("num_predict", cap)
+
         # A request timeout, which the Ollama client has none of by default:
         # a server that stops answering otherwise holds the call until the
         # loop around it is cancelled. Caller-supplied client kwargs win.

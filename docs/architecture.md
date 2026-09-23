@@ -625,7 +625,9 @@ decides.
    `attck_lookup`, a row under `invalid` from `attck_validate`) is never
    counted as asserted, whichever rule named it. The judge's evidence block
    reads the same rule.
-   `api_capability` is not among the sources: the API catalogue associates a
+   The import rules (`api_capability`) are not among the sources either: by
+   the platform's own rule they are a reference association, not an
+   assertion. The API catalogue associates a
    technique with an import set, and an import set is what a program can do
    rather than what it did, so its associations travel under `associated_by`,
    shown in a Catalogue column for reference and counted for nothing. Each

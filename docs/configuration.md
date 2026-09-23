@@ -743,10 +743,19 @@ an OpenAI-compatible endpoint the answer's output token count over the call's
 wall clock (the client drops llama.cpp's `timings`, and the wall clock includes
 reading the prompt, so that rate is lower than the server's and the wait
 longer). The margin, 1.5, covers the prompt read and the spread between turns.
-The ceiling, 1,800 s, is the HTTP request timeout every OpenAI-compatible model
-is built with, so no wait outlives the request carrying it; a configured value
-above it is kept. Until a model has answered once, and for a call with no
-output budget, the configured value stands. `run_summary.generation` records
+The ceiling, 1,800 s, is the HTTP request timeout every provider's client is
+built with (`PROVIDER_REQUEST_TIMEOUT_SECONDS`), so no wait outlives the request
+carrying it; a configured value above it is kept. At 3.8 tokens a second the
+judge's budget needs 8,192 / 3.8 × 1.5 ≈ 3,234 s, so the verdict call is held at
+1,800 s and can receive about 6,840 tokens (3.8 × 1,800) where 600 s allowed
+about 2,280; a composer section gets 900 / 3.8 × 1.5 ≈ 355 s. A fast model's
+derived time falls under its configured one, which then stands. Until a model
+has answered once, and for a call with no output budget, the configured value
+stands. The section budget is also the section's real cap: the composer's model
+is built with `composer_section_max_tokens` as its output limit rather than the
+judge's, and on Ollama every output cap — this one, `judge_max_tokens`,
+`expert_max_tokens` — reaches the server as `num_predict`, which `ChatOllama`
+otherwise drops. `run_summary.generation` records
 each model's rate, tokens, seconds, calls and source, and for each sized call
 the configured value, the budget, the rate, the derived and the applied
 seconds; the report's Run Summary prints the same numbers.

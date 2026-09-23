@@ -1452,6 +1452,19 @@ change landed on `main`.
   do not change. `run_summary.generation` is a new key, absent on a run that
   measured no answer.
 
+- **A composer section is capped at `composer_section_max_tokens`, and an
+  Ollama model at its configured output cap.** The composer ran on the
+  reporter's model, built with `judge_max_tokens` (8,192), so a section could
+  generate nine times the 900 tokens its setting names; its model is now built
+  with `core.reporting.composer_section_max_tokens` as its output cap. And
+  `ChatOllama` drops a `max_tokens` it is handed, so on Ollama no cap reached
+  the server at all — not the judge's, the analysts' or a section's; the Ollama
+  provider now passes it as `num_predict`.
+  **Upgrading:** a composer section longer than `composer_section_max_tokens`
+  is now cut at that length by the model server, and on Ollama the judge's
+  answer at `judge_max_tokens` and an analyst's at `expert_max_tokens`; raise
+  the setting where a section or verdict needs more room.
+
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was
@@ -3444,8 +3457,9 @@ change landed on `main`.
   lookup itself answered `valid: false`. Only capa, Sigma, YARA, `lolbin_lookup`
   and a sandbox signature assert now (`evidence_summary.ASSERTING_SOURCES`); a
   lookup adds no row and no count, and an id any ledger entry of the run marks
-  invalid is never counted as asserted. The report's TTP line, its
-  corroboration table, the run summary's per-source attribution and
+  invalid is never counted as asserted. The import rules (`api_capability`)
+  stay a reference association and count for nothing, as before. The report's
+  TTP line, its corroboration table, the run summary's per-source attribution and
   `techniques_by_layer`, the judge's evidence block and the console's
   Capabilities page all read the same rows.
   **Upgrading:** `run_summary.corroboration` on a new run has fewer rows and
