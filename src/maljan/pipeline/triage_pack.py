@@ -43,6 +43,7 @@ import json
 import re
 import time
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -102,6 +103,35 @@ PIPELINE = "pipeline"
 # a run stops being an accident of the byte stream and starts being a token
 # a person would read.
 STRINGS_MIN_LEN = 6
+
+
+def available_memory_bytes() -> int | None:
+    """What the host reports it can still hand out (``MemAvailable``), or ``None``."""
+    try:
+        with open("/proc/meminfo", encoding="ascii") as meminfo:
+            for line in meminfo:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def floss_fits_beside_capa(available: int | None) -> bool:
+    """Whether FLOSS may run while capa does, for what the host has available now.
+
+    FLOSS runs under an address-space bound of its own
+    (``emulated_strings.FLOSS_ADDRESS_SPACE_BYTES``, 4 GiB; about 1.6 GB
+    resident measured on PuTTY), so running it beside capa adds at most that
+    much to the pack's peak. It does so only while the host has that bound
+    twice over available: FLOSS's worst case, and the same again left for capa
+    and everything else. Below that — a local model loaded beside the worker,
+    as on the benchmark host — the two run one after the other, which is the
+    peak the pack always had. A host that does not say is treated as one
+    without the room.
+    """
+    return available is not None and available >= 2 * emulated_strings.FLOSS_ADDRESS_SPACE_BYTES
+
 
 # The format tool for each routed file type. A type this table does not name
 # gets no format entry: the identity entry already says what the sample is,
@@ -392,6 +422,10 @@ class _Pack:
         self.yara_hits = 0
         self.capa_hits = 0
         self.reputation_malicious: int | None = None
+        # FLOSS, started beside the rest of the pack when it can be. Recorded
+        # in its own place at the end, so every id keeps its value.
+        self._floss: tuple[Future[tuple[Any, BaseException | None, float]], float] | None = None
+        self._floss_pool: ThreadPoolExecutor | None = None
 
     # -- recording --------------------------------------------------------
 
@@ -424,7 +458,9 @@ class _Pack:
         answer that shape. ``started`` is the clock a caller that already ran
         the work hands in, so the entry's duration is the work's.
         """
-        spent = self._over_budget()
+        # A step handed in with its own start clock began within the budget,
+        # and what it did is recorded whatever the clock says now.
+        spent = self._over_budget() if started is None else None
         if spent is not None:
             self._record_not_run(tool, args, spent)
             return None
@@ -516,14 +552,22 @@ class _Pack:
         )
         self.has_signature = _carries_signature(signing)
 
-        format_facts = self._format_facts(routed)
-        self._strings_and_iocs()
-        self._rules()
-        self._catalogue_lookups(format_facts, routed)
-        self._sandbox_summary()
-        self._reputation()
-        self._function_matches()
-        self._decoded_strings(routed)
+        # FLOSS reads the file and nothing the pack writes, so it can run
+        # while capa and the rest do: on PuTTY the two took 185 s and 132 s
+        # one after the other. Its entry is still written last.
+        self._start_decoded_strings(routed)
+        try:
+            format_facts = self._format_facts(routed)
+            self._strings_and_iocs()
+            self._rules()
+            self._catalogue_lookups(format_facts, routed)
+            self._sandbox_summary()
+            self._reputation()
+            self._function_matches()
+            self._decoded_strings(routed)
+        finally:
+            if self._floss_pool is not None:
+                self._floss_pool.shutdown(wait=False)
 
         # The recorder holds every entry in the order the ids were issued,
         # the reputation call's included, so it is the one list to publish.
@@ -717,6 +761,73 @@ class _Pack:
             return
         self.record("function_matches", args, lambda: value, started=started)
 
+    def _floss_args(self) -> dict[str, Any]:
+        timeout = max(1, int(self.inputs.floss.timeout_s))
+        return {
+            "path": self.inputs.sample_path,
+            "limit": DECODED_STRINGS_ROWS,
+            "timeout_s": timeout,
+        }
+
+    def _floss_call(self) -> Callable[[], dict[str, Any]]:
+        settings = self.inputs.floss
+        path = self.inputs.sample_path
+        timeout = max(1, int(settings.timeout_s))
+
+        def call() -> dict[str, Any]:
+            scratch = (
+                staging.open_job_directory(settings.job_id, "floss", settings.environ)
+                if settings.job_id
+                else None
+            )
+            return emulated_strings.floss(
+                path,
+                limit=DECODED_STRINGS_ROWS,
+                timeout_s=timeout,
+                environ=settings.environ,
+                scratch=scratch,
+            )
+
+        return call
+
+    def _start_decoded_strings(self, routed: str) -> None:
+        """Start FLOSS beside the rest of the pack when it will run and the host has room.
+
+        Only a run that ``_decoded_strings`` would start anyway: a routed PE,
+        an installed build, the budget not spent. The work runs on a thread of
+        its own and touches nothing the pack writes; its entry is recorded in
+        its usual place, with its own start clock.
+        """
+        if routed != "pe" or self._over_budget() is not None:
+            return
+        if emulated_strings.floss_unavailable(self.inputs.floss.environ):
+            return
+        available = available_memory_bytes()
+        if not floss_fits_beside_capa(available):
+            logger.info(
+                "triage pack: FLOSS runs after capa; %s available, and running beside it "
+                "needs twice its %d MiB bound.",
+                "no figure" if available is None else f"{available // (1024 * 1024)} MiB",
+                emulated_strings.FLOSS_ADDRESS_SPACE_BYTES // (1024 * 1024),
+            )
+            return
+        self._floss_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="triage-floss")
+        call = self._floss_call()
+
+        def timed() -> tuple[Any, BaseException | None, float]:
+            began = time.monotonic()
+            try:
+                return call(), None, time.monotonic() - began
+            except Exception as exc:  # noqa: BLE001 — handed to ``record`` like any failure
+                return None, exc, time.monotonic() - began
+
+        self._floss = (self._floss_pool.submit(timed), time.monotonic())
+        logger.info(
+            "triage pack: FLOSS started beside capa (%d MiB available, its bound %d MiB).",
+            (available or 0) // (1024 * 1024),
+            emulated_strings.FLOSS_ADDRESS_SPACE_BYTES // (1024 * 1024),
+        )
+
     def _decoded_strings(self, routed: str) -> None:
         """FLOSS over a PE, or the entry that says why it did not run.
 
@@ -724,14 +835,26 @@ class _Pack:
         entry that was never a call, with the remedy, and no degradation
         reason. A run that was made and stopped — its wall clock, its memory
         limit — is a failed entry like any tool's, which is how the pack line
-        comes to say which of the two it hit.
+        comes to say which of the two it hit. A run started beside the pack is
+        waited for here and recorded with its own clock.
         """
         if routed != "pe":
             return
+        args = self._floss_args()
+        if self._floss is not None:
+            running, _submitted = self._floss
+            value, error, took = running.result()
+
+            def outcome() -> Any:
+                if error is not None:
+                    raise error
+                return value
+
+            # The clock the entry is given is FLOSS's own run, not the time it
+            # then waited for the rest of the pack.
+            self.record("floss", args, outcome, started=time.monotonic() - took)
+            return
         settings = self.inputs.floss
-        path = self.inputs.sample_path
-        timeout = max(1, int(settings.timeout_s))
-        args = {"path": path, "limit": DECODED_STRINGS_ROWS, "timeout_s": timeout}
         spent = self._over_budget()
         if spent is not None:
             self._record_not_run("floss", args, spent)
@@ -752,21 +875,7 @@ class _Pack:
             logger.info("triage pack: %s", message)
             return
 
-        def call() -> dict[str, Any]:
-            scratch = (
-                staging.open_job_directory(settings.job_id, "floss", settings.environ)
-                if settings.job_id
-                else None
-            )
-            return emulated_strings.floss(
-                path,
-                limit=DECODED_STRINGS_ROWS,
-                timeout_s=timeout,
-                environ=settings.environ,
-                scratch=scratch,
-            )
-
-        self.record("floss", args, call)
+        self.record("floss", args, self._floss_call())
 
 
 def run_pack(
