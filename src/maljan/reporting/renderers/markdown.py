@@ -39,6 +39,7 @@ from urllib.parse import urlparse
 
 from maljan.analysis.run_summary import (
     NOT_APPLICABLE,
+    NOT_APPLICABLE_PHRASE,
     NOT_APPLICABLE_SENTENCE,
     bundle_loss_sentence,
     corpus_held_sentence,
@@ -479,12 +480,8 @@ class MarkdownRenderer:
             rounds = negotiation.get("rounds_completed")
             reason = str(negotiation.get("termination_reason") or "").strip()
             if reason == NOT_APPLICABLE:
-                # Fewer than two analysts produced claims: no agreement was
-                # measured, so none is stated.
-                said = (
-                    "not applicable; fewer than two analysts produced claims, "
-                    "so no agreement was measured"
-                )
+                # No agreement was measured, so none is stated.
+                said = NOT_APPLICABLE_PHRASE
             elif reason == "consensus" and ctx.no_analyst_claims:
                 # Agreement among analysts that claimed nothing is not agreement.
                 said = (

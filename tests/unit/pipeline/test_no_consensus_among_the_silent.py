@@ -235,6 +235,23 @@ class TestNoSurfacePrintsAnAgreement:
         assert "not_applicable" not in agreement[0]
         assert "consensus after" not in agreement[0]
 
+    def test_every_surface_names_no_cause_the_record_does_not_hold(self) -> None:
+        # ``not_applicable`` is recorded both when fewer than two analysts
+        # produced claims and when the debate stage did not run.
+        from maljan.analysis.run_summary import NOT_APPLICABLE_PHRASE, NOT_APPLICABLE_SENTENCE
+        from maljan.reporting.models import MalwareReport
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+        report = MalwareReport.model_validate(
+            {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": _summary().to_dict()}
+        )
+        text = MarkdownRenderer().render(report)
+        agreement = [line for line in text.splitlines() if "**Analyst agreement:**" in line]
+
+        assert NOT_APPLICABLE_PHRASE in agreement[0]
+        assert NOT_APPLICABLE_SENTENCE in text
+        assert "fewer than two" not in text
+
     def test_the_report_s_negotiation_block_does_not_borrow_the_verdict_s_confidence(
         self,
     ) -> None:
