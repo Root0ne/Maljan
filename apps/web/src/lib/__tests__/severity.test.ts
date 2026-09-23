@@ -92,13 +92,14 @@ describe("the severity ladder", () => {
     expect(signatureScore(2, "cape2")).toMatchObject({ rung: "Medium", label: "2/3" });
     expect(signatureScore(3, "cape2")).toMatchObject({ rung: "High", label: "3/3" });
     expect(signatureScore(3, "cape2").tone).toEqual(severityTone("High"));
+    expect(signatureScore(2, "cape2").text).toBe("Medium, 2/3");
   });
 
   it("reads a Triage signature on Triage's 1 to 10 scale", () => {
     expect(signatureScore(1, "triage").rung).toBe("Informational");
     expect(signatureScore(3, "triage").rung).toBe("Low");
     expect(signatureScore(6, "triage").rung).toBe("Medium");
-    expect(signatureScore(8, "triage")).toMatchObject({ rung: "High", label: "8/10" });
+    expect(signatureScore(8, "triage")).toMatchObject({ rung: "High", label: "8/10", text: "High, 8/10" });
     expect(signatureScore(10, "triage").rung).toBe("Critical");
   });
 
@@ -111,6 +112,7 @@ describe("the severity ladder", () => {
         rung: null,
         label: "8",
         scale: null,
+        text: "unrated, 8",
       });
     }
   });

@@ -181,7 +181,7 @@ export default function DynamicTab() {
                             : "The sandbox's own number; its scale is not recorded for this run"
                         }
                       >
-                        SEV {score.label}
+                        SEV {score.text}
                       </span>
                     );
                   })()}

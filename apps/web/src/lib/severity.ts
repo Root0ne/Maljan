@@ -174,6 +174,10 @@ export interface SignatureScore {
   label: string;
   /** The scale's name, or null when the provider's scale is not known. */
   scale: string | null;
+  /** What the badge prints: the rung in words beside the number — "High,
+   *  8/10" — or "unrated" beside a number whose scale is not known, so the
+   *  colour never carries the reading alone. */
+  text: string;
 }
 
 /**
@@ -189,8 +193,16 @@ export function signatureScore(score: number, provider: string | null | undefine
   const scale = SIGNATURE_SCALES[String(provider ?? "").trim().toLowerCase()];
   const whole = Number.isInteger(score);
   if (!scale || !whole || score < 1 || score > scale.max) {
-    return { tone: NEUTRAL_TONE, rung: null, label: String(score), scale: scale?.name ?? null };
+    const label = String(score);
+    return {
+      tone: NEUTRAL_TONE,
+      rung: null,
+      label,
+      scale: scale?.name ?? null,
+      text: `unrated, ${label}`,
+    };
   }
   const rung = scale.rungs[score - 1];
-  return { tone: TONES[rung], rung, label: `${score}/${scale.max}`, scale: scale.name };
+  const label = `${score}/${scale.max}`;
+  return { tone: TONES[rung], rung, label, scale: scale.name, text: `${rung}, ${label}` };
 }
