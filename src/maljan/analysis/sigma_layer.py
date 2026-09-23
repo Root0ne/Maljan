@@ -107,10 +107,8 @@ class SigmaMatch:
     def claim_text(self) -> str:
         """Description used as ISR ClaimEvidence.claim."""
         tech = self.technique_id if self.technique_id else "unmapped"
-        level = f", level={self.level}" if self.level else ""
         return (
-            f"Sigma rule detection: {self.rule_title} "
-            f"(technique {tech}, source={self.log_source}{level})"
+            f"Sigma rule detection: {self.rule_title} (technique {tech}, source={self.log_source})"
         )
 
 

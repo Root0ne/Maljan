@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentFinding } from "@/types";
+import type { EvidenceSection } from "@/types/malware-report";
 import { hasRuleMatches, orderByLevel, ruleMatches } from "../ruleMatches";
 
 function layer(name: string, claims: unknown[]): AgentFinding {
@@ -31,6 +32,34 @@ const SIGMA_CLAIM = {
   technique_id: "",
 };
 
+function section(key: string, columns: string[], rows: string[][]): EvidenceSection {
+  return {
+    key,
+    title: key,
+    kind: "table",
+    columns,
+    rows,
+    text: "",
+    items: [],
+    evidence_ids: ["ev_0100"],
+    source: "tool",
+  };
+}
+
+const SIGMA_SECTION_ROWS = section(
+  "sigma_matches",
+  ["Rule", "Level", "Technique", "Matched fields"],
+  [
+    ["Run key persistence", "high", "T1547.001", "TargetObject=HKCU\\Run\\x"],
+    ["Encoded PowerShell", "Medium", "T1059.001", "CommandLine=-enc"],
+    ["Untitled", "-", "-", "-"],
+  ],
+);
+
+const YARA_SECTION_ROWS = section("yara_matches", ["Rule", "Tags", "Where"], [
+  ["UPX_packed", "packer", "0x400"],
+]);
+
 describe("what the panel draws", () => {
   it("reads a YARA claim for its rule, its patterns and its citation", () => {
     const { yara } = ruleMatches([layer("yara_layer", [YARA_CLAIM])]);
@@ -54,46 +83,68 @@ describe("what the panel draws", () => {
     expect(sigma[0].level).toBeNull();
   });
 
-  it("reads the rule's own level from a claim the layer now writes", () => {
-    const { sigma } = ruleMatches([
-      layer("sigma_layer", [
-        {
-          ...SIGMA_CLAIM,
-          claim:
-            "Sigma rule detection: Suspicious DNS Z Flag Bit Set " +
-            "(technique T1095, source=generic, level=high)",
-        },
-      ]),
-    ]);
-    expect(sigma[0].source).toBe("generic");
-    expect(sigma[0].level).toBe("high");
-  });
-
   it("takes a level the claim object carries as a field", () => {
     const { sigma } = ruleMatches([layer("sigma_layer", [{ ...SIGMA_CLAIM, level: "Critical" }])]);
     expect(sigma[0].level).toBe("critical");
   });
 
-  it("orders recorded levels by the ladder and leaves unrecorded rows out of that sort", () => {
-    const claim = (name: string, level?: string) => ({
-      ...SIGMA_CLAIM,
-      claim: `Sigma rule detection: ${name} (technique T1095, source=generic${level ? `, level=${level}` : ""})`,
-    });
-    const { sigma } = ruleMatches([
-      layer("sigma_layer", [
-        claim("stored-a"),
-        claim("low-one", "low"),
-        claim("stored-b"),
-        claim("critical-one", "critical"),
-        claim("medium-one", "medium"),
-      ]),
+  it("reads a current run's Sigma section, with each rule's own level", () => {
+    // The stored shape of a new report: `sigma_matches`, built from the rule
+    // tool's ledger rows, beside the old layer's claims it takes over from.
+    const { sigma } = ruleMatches([layer("sigma_layer", [SIGMA_CLAIM])], [SIGMA_SECTION_ROWS]);
+    expect(sigma.map((r) => r.rule_name)).toEqual([
+      "Run key persistence",
+      "Encoded PowerShell",
+      "Untitled",
     ]);
+    expect(sigma[0]).toMatchObject({
+      level: "high",
+      technique_id: "T1547.001",
+      evidence: "TargetObject=HKCU\\Run\\x",
+      confidence: null,
+      recorded: true,
+    });
+    // A rule that declares no level is not one whose level went unrecorded.
+    expect(sigma[2]).toMatchObject({ level: null, recorded: true });
+  });
+
+  it("marks an old run's claim rows as recording no level", () => {
+    const { sigma } = ruleMatches([layer("sigma_layer", [SIGMA_CLAIM])], []);
+    expect(sigma[0]).toMatchObject({ level: null, recorded: false });
+  });
+
+  it("reads a current run's YARA section, and ignores an empty one", () => {
+    const { yara } = ruleMatches([layer("yara_layer", [YARA_CLAIM])], [YARA_SECTION_ROWS]);
+    expect(yara).toEqual([
+      {
+        rule_name: "UPX_packed",
+        pattern_count: 0,
+        technique_id: "",
+        evidence: "0x400",
+        tags: "packer",
+        confidence: null,
+      },
+    ]);
+    const empty = { ...YARA_SECTION_ROWS, rows: [] };
+    expect(ruleMatches([layer("yara_layer", [YARA_CLAIM])], [empty]).yara[0].rule_name).toBe(
+      "sandbox_evasion",
+    );
+    expect(hasRuleMatches([], [SIGMA_SECTION_ROWS])).toBe(true);
+  });
+
+  it("orders levels by the ladder and leaves rows without one out of that sort", () => {
+    const rows = [
+      ["no-level", "-", "", ""],
+      ["low-one", "low", "", ""],
+      ["critical-one", "critical", "", ""],
+      ["medium-one", "medium", "", ""],
+    ];
+    const { sigma } = ruleMatches([], [{ ...SIGMA_SECTION_ROWS, rows }]);
     expect(orderByLevel(sigma).map((r) => r.rule_name)).toEqual([
       "critical-one",
       "medium-one",
       "low-one",
-      "stored-a",
-      "stored-b",
+      "no-level",
     ]);
   });
 

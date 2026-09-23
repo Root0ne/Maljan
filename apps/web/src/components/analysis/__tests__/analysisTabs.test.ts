@@ -308,6 +308,24 @@ describe("a tab earned by the ledger rather than by a typed block", () => {
     expect(tabHasContent("/detection", strings)).toBe(false);
   });
 
+  it("offers DETECTION, and not STATIC, for a run whose only rows are the rule sections", () => {
+    const current = report({
+      malware_report: malwareReport({
+        sections: [
+          section({
+            key: "sigma_matches",
+            columns: ["Rule", "Level", "Technique", "Matched fields"],
+            rows: [["Run key persistence", "high", "T1547.001", "TargetObject=x"]],
+          }),
+        ],
+      }),
+    });
+    expect(tabHasContent("/detection", current)).toBe(true);
+    expect(tabHasContent("/static", { ...current, malware_report: { ...current.malware_report!, static: null } })).toBe(
+      false,
+    );
+  });
+
   it("reads no rule matches from findings that are not there", () => {
     expect(hasRuleMatches(null)).toBe(false);
   });

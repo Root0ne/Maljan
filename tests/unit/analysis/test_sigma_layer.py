@@ -160,7 +160,7 @@ class TestScanEvents:
         assert match.confidence == 0.88
         assert "TargetImage" in match.matched_fields
 
-    def test_a_match_carries_the_rules_own_level_into_its_claim(self, tmp_rules_dir: Path) -> None:
+    def test_a_match_carries_the_rules_own_level(self, tmp_rules_dir: Path) -> None:
         _write_rule(tmp_rules_dir, "rule.yml", VALID_RULE_CONTENT)
         layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
         events = [
@@ -172,7 +172,8 @@ class TestScanEvents:
         ]
         (match,) = layer.scan_events(events, log_source="sysmon")
         assert match.level == "high"
-        assert match.claim_text.endswith("source=sysmon, level=high)")
+        # The claim text keeps its format; the level is the field.
+        assert match.claim_text.endswith("source=sysmon)")
 
     def test_a_rule_that_declares_no_level_says_none(self, tmp_rules_dir: Path) -> None:
         _write_rule(
@@ -190,7 +191,6 @@ class TestScanEvents:
         ]
         (match,) = layer.scan_events(events, log_source="sysmon")
         assert match.level == ""
-        assert "level=" not in match.claim_text
 
     def test_scan_no_match_returns_empty(self, tmp_rules_dir: Path) -> None:
         _write_rule(tmp_rules_dir, "rule.yml", VALID_RULE_CONTENT)

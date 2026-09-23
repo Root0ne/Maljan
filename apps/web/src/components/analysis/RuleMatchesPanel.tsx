@@ -6,8 +6,15 @@ import { useReport } from "@/app/(app)/analysis/[id]/layout";
 import { SEVERITY_LADDER, ladderDots, severityRung, severityTone, severityWord } from "@/lib/severity";
 import { orderByLevel, ruleMatches } from "./ruleMatches";
 
-/** The legend's word for rows whose rule level was never recorded. */
+/** A stored claim row: the layer never recorded a level. */
 const NOT_RECORDED = "level not recorded";
+/** A current run's row whose rule declares no level. */
+const NO_LEVEL_DECLARED = "no level declared";
+
+/** What a row without a level says, by whether its source records levels. */
+function noLevel(recorded: boolean): string {
+  return recorded ? NO_LEVEL_DECLARED : NOT_RECORDED;
+}
 
 function Section({
   title,
@@ -43,8 +50,8 @@ export default function RulesTab() {
   /* One reading of the run's rule matches, shared with the tab rule that
    * decides whether this panel is reachable at all (`ruleMatches.ts`). */
   const { yara: yaraMatches, sigma: unsortedSigma } = useMemo(
-    () => ruleMatches(report?.agent_findings),
-    [report?.agent_findings],
+    () => ruleMatches(report?.agent_findings, report?.malware_report?.sections),
+    [report?.agent_findings, report?.malware_report?.sections],
   );
   /* By the rule's own level, highest rung first; a row whose level was not
    * recorded takes no part in that order and follows as recorded. */
@@ -56,7 +63,7 @@ export default function RulesTab() {
     () =>
       sigmaMatches.reduce(
         (acc, r) => {
-          const key = r.level === null ? NOT_RECORDED : severityWord(r.level);
+          const key = r.level === null ? noLevel(r.recorded) : severityWord(r.level);
           acc[key] = (acc[key] || 0) + 1;
           return acc;
         },
@@ -112,14 +119,26 @@ export default function RulesTab() {
                         <span className="text-text-secondary font-mono">{rule.technique_id}</span>
                       </>
                     )}
+                    {rule.tags && (
+                      <>
+                        <span className="text-text-muted">·</span>
+                        <span className="text-text-secondary">{rule.tags}</span>
+                      </>
+                    )}
                   </div>
                   {rule.evidence && (
-                    <p className="text-xs text-text-secondary mt-0.5 truncate">{rule.evidence}</p>
+                    <p className="text-xs text-text-secondary mt-0.5 truncate" title={rule.evidence}>
+                      {rule.evidence}
+                    </p>
                   )}
                 </div>
-                <span className="text-xs text-text-muted shrink-0">
-                  {Math.round(rule.confidence * 100)}%
-                </span>
+                {/* An old layer's confidence in the match; a current run's
+                    row carries none and shows none. */}
+                {rule.confidence !== null && (
+                  <span className="text-xs text-text-muted shrink-0 font-mono">
+                    confidence {rule.confidence.toFixed(2)}
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -136,7 +155,7 @@ export default function RulesTab() {
               {/* The ladder's rungs in its order, each some rule declared; a
                   rung at zero says nothing the rows below do not. */}
               <span className="text-xs text-text-muted">Rule level:</span>
-              {[...SEVERITY_LADDER, NOT_RECORDED]
+              {[...SEVERITY_LADDER, NO_LEVEL_DECLARED, NOT_RECORDED]
                 .filter((key) => levelCounts[key])
                 .map((key) => (
                   <span key={key} className="flex items-center gap-1 text-xs text-text-secondary">
@@ -168,7 +187,7 @@ export default function RulesTab() {
                       </div>
                     )}
                     {rule.level === null ? (
-                      <span className="text-xs text-text-muted">level not recorded</span>
+                      <span className="text-xs text-text-muted">{noLevel(rule.recorded)}</span>
                     ) : (
                       <span className={`text-xs ml-1 ${onLadder ? style.text : "text-text-secondary"}`}>
                         <span className="sr-only">Rule level </span>
@@ -193,11 +212,14 @@ export default function RulesTab() {
                       <p className="text-xs text-text-muted mt-1 truncate">{rule.evidence}</p>
                     )}
                   </div>
-                  {/* The layer's confidence in the match, from the rule's
-                      maturity status. A number, and never a severity. */}
-                  <span className="text-xs text-text-muted shrink-0 font-mono">
-                    confidence {rule.confidence.toFixed(2)}
-                  </span>
+                  {/* An old layer's confidence in the match, from the rule's
+                      maturity status: a number, never a severity. A current
+                      run's row carries none and shows none. */}
+                  {rule.confidence !== null && (
+                    <span className="text-xs text-text-muted shrink-0 font-mono">
+                      confidence {rule.confidence.toFixed(2)}
+                    </span>
+                  )}
                 </div>
               );
             })}
