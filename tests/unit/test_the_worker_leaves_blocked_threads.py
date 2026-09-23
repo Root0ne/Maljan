@@ -18,6 +18,8 @@ import sys
 import textwrap
 import time
 
+import pytest
+
 
 def _run(script: str) -> tuple[subprocess.CompletedProcess[str], float]:
     env = dict(os.environ)
@@ -79,3 +81,28 @@ def test_a_thread_still_blocked_at_exit_is_left_after_the_grace() -> None:
     assert done.returncode == 1
     assert took < 20, "the blocked thread's 30 s were not waited out"
     assert "model-call" in done.stdout + done.stderr
+
+
+def test_the_hook_the_guard_is_armed_on_exists_here() -> None:
+    """The guard needs the private hook that runs before the interpreter joins threads."""
+    import threading
+
+    assert callable(getattr(threading, "_register_atexit", None))
+
+
+def test_an_interpreter_without_the_hook_is_warned_about(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    from app.worker import analysis_worker as worker
+
+    warned: list[str] = []
+    monkeypatch.setattr(worker, "_EXIT_GUARD_ARMED", False)
+    monkeypatch.delattr(threading, "_register_atexit")
+    monkeypatch.setattr(worker.logger, "warning", lambda msg, *a, **k: warned.append(msg))
+
+    worker.arm_the_exit_guard(0.1)
+
+    assert warned and "not armed" in warned[0]
+    assert worker._EXIT_GUARD_ARMED is False

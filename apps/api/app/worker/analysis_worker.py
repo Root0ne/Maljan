@@ -1019,11 +1019,21 @@ def arm_the_exit_guard(grace: float | None = None) -> None:
         return
     wait = EXIT_GRACE if grace is None else float(grace)
     register = getattr(threading, "_register_atexit", None)
-    if register is None:  # pragma: no cover - every supported interpreter has it
+    if register is None:
+        logger.warning(
+            "Worker exit guard not armed: this interpreter has no threading._register_atexit, "
+            "so a thread blocked in a call that cannot be cancelled can hold the exit open.",
+            extra={"component": "worker.lifecycle"},
+        )
         return
     try:
         register(lambda: _leave_blocked_threads_after(wait))
-    except RuntimeError:  # the interpreter is already shutting down
+    except RuntimeError as exc:
+        logger.warning(
+            "Worker exit guard not armed (%s): the interpreter is already shutting down.",
+            exc,
+            extra={"component": "worker.lifecycle"},
+        )
         return
     _EXIT_GUARD_ARMED = True
 
