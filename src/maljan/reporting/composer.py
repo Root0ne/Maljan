@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import asyncio
 from types import UnionType
-from typing import Any, Union, get_args, get_origin
+from typing import Any, Literal, Union, get_args, get_origin
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
@@ -205,10 +205,16 @@ _PLACEHOLDER_BY_TYPE: dict[Any, str] = {
 
 
 def _field_placeholder(annotation: Any, depth: int = 0) -> str:
-    """The value one declared field is answered with, written as JSON."""
-    if depth > 2:
+    """The value one declared field is answered with, written as JSON.
+
+    A field with a closed vocabulary shows the vocabulary, so a mark such as a
+    step's ``voice`` is answered with one of its words rather than invented.
+    """
+    if depth > 3:
         return "null"
     origin = get_origin(annotation)
+    if origin is Literal:
+        return '"' + " or ".join(str(arg) for arg in get_args(annotation)) + '"'
     args = [arg for arg in get_args(annotation) if arg is not type(None)]
     if origin in (list, tuple) and args:
         return f"[{_field_placeholder(args[0], depth + 1)}]"
