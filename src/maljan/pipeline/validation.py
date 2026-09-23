@@ -46,6 +46,7 @@ from maljan.pipeline.events import (
 from maljan.schemas.evidence import entry_ids_in
 from maljan.schemas.judgement import BENIGN_VERDICT, SEVERITY_RATINGS, VERDICT_VALUES
 from maljan.schemas.stix_pattern import read_comparisons
+from maljan.utils.written_forms import written_forms
 
 # How many alternatives a suggestion list carries. Three is what fits in one
 # line of feedback; a longer list reads as a menu and the model picks from the
@@ -2749,20 +2750,28 @@ class Haystack:
         self.parts: tuple[str, ...] = tuple(part for part in parts if part)
 
     def __contains__(self, needle: str) -> bool:
-        return any(needle in part for part in self.parts)
+        # Every spelling the value takes in a tool's answer: the answers are
+        # JSON, so a quote in a value is stored ``\"`` and a backslash ``\\``,
+        # and the plain value a model writes back is in none of them as
+        # written. ``utils.written_forms`` names the spellings; the question
+        # asked of each is the one that was asked of the plain value.
+        forms = written_forms(needle)
+        return any(form in part for part in self.parts for form in forms)
 
     def __bool__(self) -> bool:
         return bool(self.parts)
 
     def holds_value(self, value: str) -> bool:
-        """Whether the evidence holds ``value`` as a value of its own."""
+        """Whether the evidence holds ``value`` as a value of its own, however spelt."""
         from maljan.agents._indicator_denylists import whole_value_in
 
-        return any(whole_value_in(value, part) for part in self.parts)
+        forms = written_forms(value)
+        return any(whole_value_in(form, part) for part in self.parts for form in forms)
 
     def holds_token(self, value: str) -> bool:
         """Whether ``value`` stands between two boundaries rather than inside a run."""
-        return any(_token_in(value, part) for part in self.parts)
+        forms = written_forms(value)
+        return any(_token_in(form, part) for part in self.parts for form in forms)
 
 
 def _token_in(lowered: str, part: str) -> bool:
