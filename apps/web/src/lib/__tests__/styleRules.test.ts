@@ -54,6 +54,13 @@ const RULES: Rule[] = [
   { what: "SVG gradient", pattern: /<(linear|radial)Gradient\b/g },
   { what: "colour transition", pattern: /\btransition-(colors|background|border)\b/g },
   {
+    // Tailwind's bare `transition` eases colour, background, border, fill and
+    // stroke by default, so it is a colour transition under another name. Read
+    // as a whole token inside a quoted class string.
+    what: "bare transition class",
+    pattern: /["'`](?:[^"'`\n]*\s)?transition(?:\s[^"'`\n]*)?["'`]/g,
+  },
+  {
     what: "colour transition by arbitrary property",
     pattern: /\btransition-\[[^\]]*(color|background|border|fill|stroke|shadow)[^\]]*\]/g,
   },
@@ -76,6 +83,15 @@ describe("the style rules", () => {
 
   it("reads the whole tree, so a pass means something", () => {
     expect(files.length).toBeGreaterThan(50);
+  });
+
+  it("catches the bare transition class and not the word or a moving transition", () => {
+    const rule = RULES.find((r) => r.what === "bare transition class")!;
+    const hits = (text: string) => [...text.matchAll(rule.pattern)].length;
+    expect(hits('className="transition duration-150 hover:bg-bg-hover"')).toBe(1);
+    expect(hits("className={`px-2 transition`}")).toBe(1);
+    expect(hits('className="transition-transform duration-200"')).toBe(0);
+    expect(hits("// a staged transition is ours")).toBe(0);
   });
 
   for (const rule of RULES) {
