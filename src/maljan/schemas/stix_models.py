@@ -326,14 +326,69 @@ class Identity(STIXObject):
 
 
 class ObservedData(STIXObject):
-    """STIX 2.1 Observed Data — a snapshot of sandbox observations."""
+    """STIX 2.1 Observed Data — a snapshot of sandbox observations.
+
+    The observables are objects of the bundle, named by ``object_refs``. The
+    2.0 form — an ``objects`` dictionary of embedded observables — is
+    deprecated in 2.1, and the one this used to carry held ``process`` entries
+    with no id and a ``name`` 2.1 does not define, which the OASIS validator
+    could not read at all. ``number_observed`` is how many times the snapshot
+    was seen: one sandbox run is one.
+    """
 
     type: Literal["observed-data"] = "observed-data"
     id: str = Field(default_factory=lambda: f"observed-data--{_generate_uuid()}")
     first_observed: datetime = Field(default_factory=get_utcnow)
     last_observed: datetime = Field(default_factory=get_utcnow)
     number_observed: int = 1
-    objects: dict[str, Any] = Field(default_factory=dict)
+    object_refs: list[str] = Field(default_factory=list)
+
+
+# The namespace STIX 2.1 derives Cyber-observable ids in (section 2.9).
+SCO_NAMESPACE = uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7")
+
+
+class _Observable(_SpecConformantModel):
+    """A STIX 2.1 Cyber-observable: an id and a type, no SDO bookkeeping."""
+
+    type: str
+    id: str
+    spec_version: Literal["2.1"] = "2.1"
+
+
+class File(_Observable):
+    """STIX 2.1 ``file`` observable, here the image a process ran from.
+
+    Its id is derived from its name, as the standard derives a file's id from
+    its identifying properties, so one image is one object in every export.
+    """
+
+    type: Literal["file"] = "file"
+    id: str = ""
+    name: str
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.id:
+            key = json_canonical({"name": self.name})
+            self.id = f"file--{uuid.uuid5(SCO_NAMESPACE, key)}"
+
+
+class Process(_Observable):
+    """STIX 2.1 ``process`` observable: a pid, its command line, its image and children."""
+
+    type: Literal["process"] = "process"
+    id: str = Field(default_factory=lambda: f"process--{_generate_uuid()}")
+    pid: int | None = None
+    command_line: str | None = None
+    image_ref: str | None = None
+    child_refs: list[str] = Field(default_factory=list)
+
+
+def json_canonical(value: Any) -> str:
+    """The canonical JSON a derived observable id is computed over."""
+    import json as _json
+
+    return _json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 class Note(STIXObject):
@@ -388,6 +443,8 @@ _BundleObject = (
     | ObservedData
     | Note
     | Report
+    | Process
+    | File
 )
 
 

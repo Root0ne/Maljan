@@ -58,11 +58,13 @@ from maljan.schemas.judgement import indicator_type_for
 from maljan.schemas.stix_models import (
     AttackPattern,
     Bundle,
+    File,
     Identity,
     Indicator,
     Malware,
     Note,
     ObservedData,
+    Process,
     Relationship,
     Report,
     get_utcnow,
@@ -806,16 +808,22 @@ class ExtendedSTIXRenderer:
             _queue(carried_indicator, _indicator_band(carried_indicator.pattern), "judge")
 
         # 7) ObservedData for the process tree roots.
+        #    The processes and their images are objects of the bundle, named by
+        #    ``object_refs``. The sandbox block carries no observation time, so
+        #    both ends are the time the report was built — the latest the
+        #    observation can have been — and one run is one observation.
         if report.dynamic is not None and report.dynamic.process_tree:
-            obs_objects = _processes_to_observed(report.dynamic.process_tree)
-            if obs_objects:
-                observed = ObservedData(
-                    first_observed=report.generated_at,
-                    last_observed=report.generated_at,
-                    number_observed=len(obs_objects),
-                    objects=obs_objects,
+            observables = _processes_to_observables(report.dynamic.process_tree)
+            if observables:
+                objects.extend(observables)
+                objects.append(
+                    ObservedData(
+                        first_observed=report.generated_at,
+                        last_observed=report.generated_at,
+                        number_observed=1,
+                        object_refs=[obs.id for obs in observables],
+                    )
                 )
-                objects.append(observed)
 
         # 8) Note wraps the executive summary; abstract is the verdict.
         #
@@ -1665,24 +1673,34 @@ def _host_reputation(report: Any, host: str) -> dict[str, Any] | None:
     return None
 
 
-def _processes_to_observed(roots: list[ProcessNode]) -> dict[str, dict[str, Any]]:
-    """Flatten the process tree to a STIX 2.1 ``observed-data`` objects dict."""
-    out: dict[str, dict[str, Any]] = {}
-    counter = 0
+def _processes_to_observables(roots: list[ProcessNode]) -> list[File | Process]:
+    """The process tree as STIX 2.1 observables: processes, their images, their children.
 
-    def _walk(node: ProcessNode) -> None:
-        nonlocal counter
-        entry: dict[str, Any] = {
-            "type": "process",
-            "pid": node.pid,
-            "name": node.name,
-        }
-        if node.command_line:
-            entry["command_line"] = node.command_line
-        out[str(counter)] = entry
-        counter += 1
-        for child in node.children:
-            _walk(child)
+    A process's name is the file it ran from — STIX 2.1 has no ``name`` on a
+    process — so it becomes a ``file`` observable the process names by
+    ``image_ref``, and one image run twice is one file. The tree is kept by
+    ``child_refs``.
+    """
+    out: list[File | Process] = []
+    images: dict[str, File] = {}
+
+    def _walk(node: ProcessNode) -> str:
+        children = [_walk(child) for child in node.children]
+        image_ref = None
+        if node.name:
+            image = images.get(node.name)
+            if image is None:
+                image = images[node.name] = File(name=node.name)
+                out.append(image)
+            image_ref = image.id
+        process = Process(
+            pid=node.pid,
+            command_line=node.command_line or None,
+            image_ref=image_ref,
+            child_refs=children,
+        )
+        out.append(process)
+        return process.id
 
     for root in roots[:20]:  # cap to keep ObservedData reasonable
         _walk(root)

@@ -553,6 +553,18 @@ own bundle is not edited. The report object is typed `malware`. Every stored
 export before this carried `software` and `malware-analysis`, neither of them
 in its vocabulary, and an identity no object named.
 
+A sandbox's process tree is exported as STIX 2.1 observables: one `process`
+per node (pid, command line, `child_refs`), the image each ran from as a
+`file` whose id is derived from its name, and an `observed-data` naming them
+by `object_refs` with `number_observed: 1` — one run is one observation. The
+2.0 form it replaced embedded unnamed processes carrying a `name` 2.1 does not
+define and put the process count in `number_observed`; the OASIS validator
+could not read it. `tests/unit/reporting/test_the_export_passes_the_official_validator.py`
+renders a rich Malware export, a sandbox export and a Benign export through
+the real path and fails on any error the validator reports (`stix2-validator`
+is pinned at 3.2.0, the last release that ships its schemas; 3.3.1 validates
+nothing).
+
 ### The technique check
 
 Four parts, all in `pipeline/validation.py` and `tools/knowledge.py`, none of
