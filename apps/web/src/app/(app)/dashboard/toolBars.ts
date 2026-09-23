@@ -29,8 +29,12 @@ export interface ToolBars {
   rows: ToolBar[];
   /** Tools past `TOOLS_SHOWN`, said as a count rather than dropped. */
   more: number;
-  /** "12 completed runs", the window the bars stand on. */
+  /** "12 completed runs", the runs the bars stand on: those that carry the
+   *  per-tool record. */
   window: string;
+  /** Runs read that carry no per-tool record, said rather than counted as
+   *  runs that called nothing. Zero when every run read has one. */
+  unrecorded: number;
 }
 
 /** The rows to draw, or null when there is nothing to draw at all. */
@@ -50,5 +54,6 @@ export function toolBars(usage: ToolUsageDTO | null | undefined): ToolBars | nul
     rows,
     more: tools.length - rows.length,
     window: countLabel(runs, "completed run"),
+    unrecorded: Math.max(0, (usage?.read ?? runs) - runs),
   };
 }

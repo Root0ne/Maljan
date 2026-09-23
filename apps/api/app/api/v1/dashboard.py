@@ -43,7 +43,9 @@ async def get_dashboard_tools(
 
     Returns:
         - limit: How many completed runs were asked for
-        - runs: How many completed runs were read (at most ``limit``)
+        - read: How many completed runs were read (at most ``limit``)
+        - runs: How many of those carry the per-tool record; a report older
+          than the record is not counted as a run that called nothing
         - tools: One row per tool, most calls first — ``tool``, ``calls``
           (summed across the runs) and ``runs`` (how many of them called it)
     """

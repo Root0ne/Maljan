@@ -218,6 +218,8 @@ export const MOCK_DASHBOARD_STATS = {
  *  latest completed runs. One name is long enough to be cut on screen. */
 export const MOCK_TOOL_USAGE = {
   limit: 20,
+  // Five runs read, two of them written before the per-tool record existed.
+  read: 5,
   runs: 3,
   tools: [
     { tool: "pe_info", calls: 9, runs: 3 },

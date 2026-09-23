@@ -163,7 +163,11 @@ export interface ToolUsageRowDTO {
 export interface ToolUsageDTO {
   /** How many completed runs were asked for. */
   limit: number;
-  /** How many were read, which is fewer while the account is new. */
+  /** How many completed runs were read, which is fewer while the account is
+   *  new. Absent from an API older than the field. */
+  read?: number;
+  /** How many of those carry the per-tool record. A report written before
+   *  the record existed is read but is not a run that called nothing. */
   runs: number;
   tools: ToolUsageRowDTO[];
 }

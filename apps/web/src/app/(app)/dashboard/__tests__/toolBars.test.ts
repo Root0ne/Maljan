@@ -23,6 +23,23 @@ describe("the tools-used bars", () => {
     expect(bars?.rows[1].spoken).toBe("sandbox_network: 10 calls in 1 of 12 runs");
   });
 
+  it("stand on the runs that carry the record and say how many read carry none", () => {
+    const bars = toolBars({
+      limit: 20,
+      read: 12,
+      runs: 3,
+      tools: [{ tool: "pe_info", calls: 9, runs: 3 }],
+    });
+    expect(bars?.window).toBe("3 completed runs");
+    expect(bars?.unrecorded).toBe(9);
+    expect(bars?.rows[0].spoken).toBe("pe_info: 9 calls in 3 of 3 runs");
+  });
+
+  it("say nothing about unrecorded runs to an API that does not report reads", () => {
+    const bars = toolBars({ limit: 20, runs: 3, tools: [{ tool: "pe_info", calls: 1, runs: 1 }] });
+    expect(bars?.unrecorded).toBe(0);
+  });
+
   it("keep a tool called once visible rather than drawing a zero-width bar", () => {
     const bars = toolBars({
       limit: 20,

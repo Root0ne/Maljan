@@ -32,6 +32,7 @@ def test_calls_are_summed_and_runs_counted_per_tool():
     )
     assert body == {
         "limit": 20,
+        "read": 3,
         "runs": 3,
         "tools": [
             {"tool": "pe_info", "calls": 5, "runs": 2},
@@ -46,10 +47,19 @@ def test_equal_counts_are_ordered_by_name_so_the_list_is_stable():
     assert [row["tool"] for row in body["tools"]] == ["alpha", "zeta"]
 
 
-def test_a_run_without_an_evidence_block_still_counts_as_a_run_read():
+def test_a_run_older_than_the_per_tool_record_is_read_but_not_a_run_of_the_denominator():
+    # None and a non-map are reports written before `by_tool` existed: they say
+    # nothing about which tools ran, so they are not runs that called none.
     body = tally_tool_usage([None, {"pe_info": 1}, "not a map"], 20)
-    assert body["runs"] == 3
+    assert body["read"] == 3
+    assert body["runs"] == 1
     assert body["tools"] == [{"tool": "pe_info", "calls": 1, "runs": 1}]
+
+
+def test_a_run_that_recorded_calling_nothing_stays_in_the_denominator():
+    body = tally_tool_usage([{}, {"pe_info": 2}], 20)
+    assert body["runs"] == 2
+    assert body["tools"] == [{"tool": "pe_info", "calls": 2, "runs": 1}]
 
 
 def test_a_count_that_is_not_a_positive_integer_is_left_out():
@@ -61,27 +71,32 @@ def test_a_count_that_is_not_a_positive_integer_is_left_out():
 
 
 def test_nothing_read_is_an_empty_list_not_an_error():
-    assert tally_tool_usage([], 20) == {"limit": 20, "runs": 0, "tools": []}
+    assert tally_tool_usage([], 20) == {"limit": 20, "read": 0, "runs": 0, "tools": []}
 
 
-def test_the_query_reads_only_the_callers_completed_runs_newest_first_and_bounded():
+def test_the_query_bounds_the_runs_first_and_opens_the_json_of_those_alone():
     user_id = uuid.uuid4()
     sql = str(
         tool_usage_query(user_id, 7).compile(
             dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
         )
     )
-    # One JSON path, not the whole summary. SQLAlchemy spells it as a
-    # subscript on a server that has them and as `->` on one that does not.
+    outer, _, inner = sql.partition("FROM analysis_reports JOIN (")
+    # The inner query picks the caller's newest completed runs by narrow
+    # columns and is where the limit is.
+    assert "run_summary" not in inner
+    assert f"analysis_jobs.created_by = '{user_id}'" in inner
+    assert "analysis_jobs.status = 'completed'" in inner
+    assert "ORDER BY analysis_reports.created_at DESC" in inner
+    assert "LIMIT 7" in inner
+    # The outer query opens one JSON path, for the joined rows only. SQLAlchemy
+    # spells it as a subscript on a server that has them and as `->` otherwise.
     assert (
-        "analysis_reports.run_summary['evidence']['by_tool']" in sql
-        or "analysis_reports.run_summary -> 'evidence' -> 'by_tool'" in sql
+        "analysis_reports.run_summary['evidence']['by_tool']" in outer
+        or "analysis_reports.run_summary -> 'evidence' -> 'by_tool'" in outer
     )
-    assert "SELECT analysis_reports.run_summary FROM" not in sql
-    assert f"analysis_jobs.created_by = '{user_id}'" in sql
-    assert "analysis_jobs.status = 'completed'" in sql
-    assert "ORDER BY analysis_reports.created_at DESC" in sql
-    assert "LIMIT 7" in sql
+    assert "LIMIT" not in outer
+    assert "ORDER BY newest.created_at DESC" in sql
 
 
 @pytest.fixture
@@ -94,11 +109,11 @@ def client() -> TestClient:
 
 
 def test_the_endpoint_answers_with_the_tally_for_the_default_window(client: TestClient):
-    usage = AsyncMock(return_value={"limit": TOOL_USAGE_RUNS, "runs": 0, "tools": []})
+    usage = AsyncMock(return_value={"limit": TOOL_USAGE_RUNS, "read": 0, "runs": 0, "tools": []})
     with patch("app.api.v1.dashboard.AnalysisService.get_tool_usage", usage):
         resp = client.get("/api/v1/dashboard/tools")
     assert resp.status_code == 200
-    assert resp.json() == {"limit": TOOL_USAGE_RUNS, "runs": 0, "tools": []}
+    assert resp.json() == {"limit": TOOL_USAGE_RUNS, "read": 0, "runs": 0, "tools": []}
     assert usage.await_args.args[1] == TOOL_USAGE_RUNS
 
 
