@@ -1,7 +1,8 @@
 """A text shortened where it is shown carries the mark of the cut.
 
-A claim's evidence is stored at a fixed width. It ended mid-sentence — "… This
-suggests", "… like PowerShell di" — and a report section, shown the claim,
+A claim's evidence is stored at the width the window allows one answer. It
+ended mid-sentence — "… This suggests", "… like PowerShell di" — and a report
+section, shown the claim,
 printed the fragment as its own finished sentence. Every place that shortens a
 model's words or a tool's answer before showing it now ends the cut with a
 mark, so a cut is never read as an ending.
@@ -10,8 +11,9 @@ mark, so a cut is never read as an ending.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from maljan.agents.base_agent import _EVIDENCE_REF_CHARS, evidence_ref_text
+from maljan.agents.base_agent import evidence_ref_text
 from maljan.pipeline.events import claims_to_payload
 from maljan.reporting.composer import _bundle_text
 from maljan.utils.marked_cut import CUT_MARK, marked_cut
@@ -41,9 +43,9 @@ class TestTheMark:
 
 class TestTheStoredEvidence:
     def test_a_cut_line_says_so(self) -> None:
-        assert len(LONG_EVIDENCE) > _EVIDENCE_REF_CHARS
-
-        stored = evidence_ref_text(LONG_EVIDENCE)
+        width = len(LONG_EVIDENCE) - 60
+        with patch("maljan.agents.base_agent.evidence_ref_width", return_value=width):
+            stored = evidence_ref_text(LONG_EVIDENCE)
 
         assert CUT_MARK in stored
         assert not stored.rstrip().endswith("This suggests")
