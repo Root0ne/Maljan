@@ -352,9 +352,16 @@ def parse_condition(expr: str) -> ast.Expression:
         raise ConditionError("an empty condition is always true and is not parsed")
     try:
         tree = ast.parse(text, mode="eval")
+        _check(tree)
     except SyntaxError as exc:
         raise ConditionError(f"cannot parse the condition: {exc.msg}") from exc
-    _check(tree)
+    except (RecursionError, MemoryError) as exc:
+        # Python's parser and the checker both descend the tree, and an
+        # expression nested thousands deep (``not not not …``) runs out of
+        # interpreter stack before either finishes. That is still operator
+        # text that cannot be a condition, and it is refused as one rather
+        # than escaping as a server error.
+        raise ConditionError("the condition is nested too deeply to parse") from exc
     return tree
 
 
@@ -433,5 +440,5 @@ def constant_truth(expr: str) -> bool | None:
         return None
     try:
         return bool(_resolve(tree, StageContext()))
-    except ConditionError:
+    except (ConditionError, RecursionError):
         return None

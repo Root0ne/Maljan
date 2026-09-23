@@ -96,35 +96,57 @@ def layout_team(stages: list[StageDefinition]) -> TeamLayout:
 
     A stage whose key repeats an earlier one is drawn once, at the first; the
     repeat is a save refusal the lint reports on it by name.
+
+    Rows are longest paths over the legal and implicit edges, found by Kahn's
+    method — each stage placed once its last predecessor is — so any team costs
+    its stages plus its edges. Those edges cannot form a loop: a legal edge
+    points at an earlier stage, and an implicit one leads from the triage root
+    to a root with no other dependency.
     """
     first, adopted = adopted_roots(stages)
     adopted_set = set(adopted)
-    row_of: dict[str, int] = {}
-    edges: list[TeamEdge] = []
     ordered: list[StageDefinition] = []
-
+    position: dict[str, int] = {}
     for stage in stages:
-        if stage.key in row_of:
-            continue
-        rows = [row_of[d] for d in stage.depends_on if d in row_of and d != stage.key]
-        for dependency in stage.depends_on:
-            if dependency == stage.key:
-                continue
-            if dependency in row_of:
-                edges.append(TeamEdge(dependency, stage.key))
-        if first is not None and stage.key in adopted_set and first in row_of:
-            rows.append(row_of[first])
-            edges.append(TeamEdge(first, stage.key, implicit=True))
-        row_of[stage.key] = (max(rows) + 1) if rows else 0
-        ordered.append(stage)
+        if stage.key not in position:
+            position[stage.key] = len(ordered)
+            ordered.append(stage)
 
-    # Dependencies on a stage written further down: drawn, marked, and left
-    # out of the rows above so a loop cannot make the layout recurse.
+    edges: list[TeamEdge] = []
+    predecessors: dict[str, list[str]] = {stage.key: [] for stage in ordered}
+    later: list[TeamEdge] = []
     for stage in ordered:
-        seen_before = {s.key for s in ordered[: ordered.index(stage)]}
-        for dependency in stage.depends_on:
-            if dependency in row_of and dependency not in seen_before and dependency != stage.key:
-                edges.append(TeamEdge(dependency, stage.key, legal=False))
+        for dependency in dict.fromkeys(stage.depends_on):
+            if dependency == stage.key or dependency not in position:
+                continue
+            if position[dependency] < position[stage.key]:
+                edges.append(TeamEdge(dependency, stage.key))
+                predecessors[stage.key].append(dependency)
+            else:
+                # Drawn and marked, and left out of the rows so a loop cannot
+                # stop a stage from ever being placed.
+                later.append(TeamEdge(dependency, stage.key, legal=False))
+        if first is not None and stage.key in adopted_set and first in position:
+            edges.append(TeamEdge(first, stage.key, implicit=True))
+            predecessors[stage.key].append(first)
+    edges.extend(later)
+
+    successors: dict[str, list[str]] = {stage.key: [] for stage in ordered}
+    waiting = {key: len(before) for key, before in predecessors.items()}
+    for key, before in predecessors.items():
+        for predecessor in before:
+            successors[predecessor].append(key)
+    row_of: dict[str, int] = {}
+    ready = [stage.key for stage in ordered if waiting[stage.key] == 0]
+    for key in ready:
+        row_of[key] = 0
+    while ready:
+        key = ready.pop()
+        for successor in successors[key]:
+            row_of[successor] = max(row_of.get(successor, 0), row_of[key] + 1)
+            waiting[successor] -= 1
+            if waiting[successor] == 0:
+                ready.append(successor)
 
     column_of: dict[str, int] = {}
     filled: dict[int, int] = {}

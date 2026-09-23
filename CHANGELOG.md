@@ -25,6 +25,12 @@ change landed on `main`.
   The layout is `maljan.core.team_layout`, which the architecture-page team
   diagrams now use too; the triage pack's adoption of a root stage is one rule,
   `pipeline.topology.adopted_roots`, read by the builder and the layout.
+  A team has no size limit, so every pass over one is linear in its stages
+  and edges and none recurses: loops are found by an iterative Tarjan pass,
+  rows by Kahn's method, and the model's debate checks in one pass each. The
+  lint route and the agent-map half of `PATCH /settings` run in a worker
+  thread. A `when` nested too deeply for Python's parser is refused as a
+  condition error instead of escaping as a server error.
 - **Changed:** apply's team refusals now carry the settings model's own
   sentences — a member error and a condition error name their stage (and a
   member error its team), a debate's hand-over error and the verdict-judge

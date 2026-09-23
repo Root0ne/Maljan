@@ -1336,6 +1336,40 @@ class TeamProblem:
     field: str | None = None
     code: str = ""
 
+    def __post_init__(self) -> None:
+        if self.code not in TEAM_RULE_CODES:
+            raise ValueError(f"team rule code {self.code!r} is not declared in TEAM_RULE_CODES")
+
+
+# Every code a team rule in this module reports. ``TeamProblem`` refuses one
+# that is not here, and the lint's parity test requires a refused team for
+# each, so a rule added to ``stage_list_problems`` or ``stage_member_problems``
+# cannot reach save without also being proven to reach the editor.
+TEAM_RULE_CODES: frozenset[str] = frozenset(
+    {
+        "no_stages",
+        "duplicate_key",
+        "self_dependency",
+        "dangling_dependency",
+        "later_dependency",
+        "agent_in_two_stages",
+        "no_agents",
+        "triage_agents",
+        "triage_key",
+        "debate_upstream",
+        "debate_handover",
+        "verdict_count",
+        "report_count",
+        "report_not_last",
+        "unknown_agent",
+        "agent_role",
+        "disabled_agent",
+        "verdict_judge",
+        "report_reporter",
+        "debate_agents",
+    }
+)
+
 
 # The stage that runs the deterministic tools before any analyst. One key
 # everywhere, because the migration that gives stored profiles the stage and
@@ -1640,12 +1674,13 @@ def _debate_handover_error(stages: list[StageDefinition], stage: StageDefinition
     uploaded and detonated and every job under that team fails; an operator
     has to be told while they are still editing.
     """
-    heads = 0
-    fed: list[str] = []
-    for candidate in stages:
-        if stage.key in candidate.depends_on:
-            heads += _entry_node_count(candidate)
-            fed.append(candidate.key)
+    return _handover_message(stage, [c for c in stages if stage.key in c.depends_on])
+
+
+def _handover_message(stage: StageDefinition, fed_by: list[StageDefinition]) -> str:
+    """The hand-over refusal for debate ``stage`` feeding ``fed_by``, or ``""``."""
+    heads = sum(_entry_node_count(candidate) for candidate in fed_by)
+    fed = [candidate.key for candidate in fed_by]
     if heads <= 1:
         return ""
     return (
@@ -1667,6 +1702,45 @@ def _upstream_of(stages: list[StageDefinition], key: str) -> set[str]:
         out.add(current)
         pending.extend(by_key[current].depends_on)
     return out
+
+
+def _dependents_by_key(stages: list[StageDefinition]) -> dict[str, list[StageDefinition]]:
+    """Each key's dependents in stage order, each listed once however often it names the key."""
+    out: dict[str, list[StageDefinition]] = {}
+    for candidate in stages:
+        for key in dict.fromkeys(candidate.depends_on):
+            out.setdefault(key, []).append(candidate)
+    return out
+
+
+def _keys_after_an_analysis(stages: list[StageDefinition]) -> set[str]:
+    """Every key with an analysis stage among what it transitively depends on.
+
+    ``_upstream_of`` asked once per stage, answered for all of them in one
+    breadth-first pass from the analysis stages along the reversed edges, so a
+    team of any size costs its stages plus its edges. The edges are read the
+    way ``_upstream_of`` reads them: a repeated key's dependencies are the
+    last declaration's, and a key counts as analysis if any stage keyed so is.
+    """
+    by_key = {s.key: s for s in stages}
+    reverse: dict[str, list[str]] = {}
+    for key, stage in by_key.items():
+        for dependency in stage.depends_on:
+            if dependency in by_key:
+                reverse.setdefault(dependency, []).append(key)
+    reached: set[str] = set()
+    pending = [
+        dependent
+        for key in {s.key for s in stages if s.kind == "analysis"}
+        for dependent in reverse.get(key, [])
+    ]
+    while pending:
+        current = pending.pop()
+        if current in reached:
+            continue
+        reached.add(current)
+        pending.extend(reverse.get(current, []))
+    return reached
 
 
 def stage_list_problems(stages: list[StageDefinition]) -> list[TeamProblem]:
@@ -1739,6 +1813,7 @@ def stage_list_problems(stages: list[StageDefinition]) -> list[TeamProblem]:
             else:
                 agent_owner[agent] = stage.key
 
+    after_analysis = _keys_after_an_analysis(stages)
     for stage in stages:
         if stage.kind == "analysis" and not stage.agents:
             problems.append(
@@ -1770,8 +1845,7 @@ def stage_list_problems(stages: list[StageDefinition]) -> list[TeamProblem]:
                 )
             )
         if stage.kind == "debate":
-            upstream = _upstream_of(stages, stage.key)
-            if not any(s.kind == "analysis" for s in stages if s.key in upstream):
+            if stage.key not in after_analysis:
                 problems.append(
                     TeamProblem(
                         f"stage {stage.key!r} debates nothing: it needs an analysis stage "
@@ -1782,10 +1856,11 @@ def stage_list_problems(stages: list[StageDefinition]) -> list[TeamProblem]:
                     )
                 )
 
+    dependents = _dependents_by_key(stages)
     for stage in stages:
         if stage.kind != "debate":
             continue
-        handover = _debate_handover_error(stages, stage)
+        handover = _handover_message(stage, dependents.get(stage.key, []))
         if handover:
             problems.append(TeamProblem(handover, stage.key, "depends_on", "debate_handover"))
 

@@ -61,7 +61,7 @@ Severity = Literal["error", "warning"]
 class TeamFinding:
     """One problem with a team, where it sits, and whether it blocks a save.
 
-    ``team`` is empty for a finding about the agent map rather than one team;
+    ``team`` is ``None`` for a finding about the agent map rather than one team;
     ``agent`` then names the agent it concerns. ``stage`` and ``field`` locate
     a stage finding on its card.
     """
@@ -69,7 +69,7 @@ class TeamFinding:
     severity: Severity
     code: str
     message: str
-    team: str = ""
+    team: str | None = None
     stage: str | None = None
     field: str | None = None
     agent: str | None = None
@@ -181,75 +181,157 @@ def _profile_field_errors(name: str, entry: dict[str, Any]) -> list[TeamFinding]
     return []
 
 
-def _cycles(stages: list[StageDefinition]) -> list[list[str]]:
-    """Every loop of two or more stages through ``depends_on``, each in stage order.
+def _dependency_edges(stages: list[StageDefinition]) -> dict[str, list[str]]:
+    """Each key's dependencies among the team's keys, itself left out, first declaration's."""
+    keys = {stage.key for stage in stages}
+    edges: dict[str, list[str]] = {}
+    for stage in stages:
+        if stage.key in edges:
+            continue
+        edges[stage.key] = [
+            d for d in dict.fromkeys(stage.depends_on) if d in keys and d != stage.key
+        ]
+    return edges
 
-    A stage that depends on itself is already refused in those words, so a
-    loop of one is left to that rule.
+
+def _strongly_connected(edges: dict[str, list[str]]) -> list[list[str]]:
+    """Every group of two or more keys that reach each other, by Tarjan's method.
+
+    Iterative, with an explicit stack of (key, position in its edge list), so
+    a chain of any length costs its keys plus its edges and never the
+    interpreter's recursion depth.
     """
-    order = {stage.key: i for i, stage in enumerate(stages)}
-    edges = {
-        stage.key: [d for d in stage.depends_on if d in order and d != stage.key]
-        for stage in stages
-    }
     index: dict[str, int] = {}
     low: dict[str, int] = {}
     on_stack: set[str] = set()
     stack: list[str] = []
     found: list[list[str]] = []
     counter = 0
-
-    def visit(key: str) -> None:
-        nonlocal counter
-        index[key] = low[key] = counter
+    for root in edges:
+        if root in index:
+            continue
+        work: list[tuple[str, int]] = [(root, 0)]
+        index[root] = low[root] = counter
         counter += 1
-        stack.append(key)
-        on_stack.add(key)
-        for nxt in edges.get(key, []):
-            if nxt not in index:
-                visit(nxt)
-                low[key] = min(low[key], low[nxt])
-            elif nxt in on_stack:
-                low[key] = min(low[key], index[nxt])
-        if low[key] == index[key]:
-            component: list[str] = []
-            while True:
-                top = stack.pop()
-                on_stack.discard(top)
-                component.append(top)
-                if top == key:
-                    break
-            if len(component) > 1:
-                found.append(sorted(component, key=order.__getitem__))
-
-    for stage in stages:
-        if stage.key not in index:
-            visit(stage.key)
+        stack.append(root)
+        on_stack.add(root)
+        while work:
+            key, position = work[-1]
+            targets = edges.get(key, [])
+            if position < len(targets):
+                work[-1] = (key, position + 1)
+                nxt = targets[position]
+                if nxt not in index:
+                    index[nxt] = low[nxt] = counter
+                    counter += 1
+                    stack.append(nxt)
+                    on_stack.add(nxt)
+                    work.append((nxt, 0))
+                elif nxt in on_stack:
+                    low[key] = min(low[key], index[nxt])
+                continue
+            work.pop()
+            if work:
+                parent = work[-1][0]
+                low[parent] = min(low[parent], low[key])
+            if low[key] == index[key]:
+                component: list[str] = []
+                while True:
+                    top = stack.pop()
+                    on_stack.discard(top)
+                    component.append(top)
+                    if top == key:
+                        break
+                if len(component) > 1:
+                    found.append(component)
     return found
 
 
-def _upstream(stages: list[StageDefinition]) -> dict[str, set[str]]:
-    """Every stage each stage runs after, the triage pack's adoption included."""
-    keys = {stage.key for stage in stages}
+def _cycles(stages: list[StageDefinition]) -> list[list[str]]:
+    """One real loop through ``depends_on`` in every tangle of stages, in dependency order.
+
+    Each group of stages that depend on each other yields one loop through it,
+    starting at the group's first-declared stage and following dependencies
+    inside the group until a stage repeats: a path an operator can walk on the
+    cards, not merely the list of stages involved. A stage that depends on
+    itself is already refused in those words, so a loop of one is left to
+    that rule. Linear in stages plus edges.
+    """
+    order: dict[str, int] = {}
+    for i, stage in enumerate(stages):
+        order.setdefault(stage.key, i)
+    edges = _dependency_edges(stages)
+    loops: list[list[str]] = []
+    for component in _strongly_connected(edges):
+        members = set(component)
+        start = min(component, key=order.__getitem__)
+        path: list[str] = []
+        position: dict[str, int] = {}
+        current = start
+        while current not in position:
+            position[current] = len(path)
+            path.append(current)
+            current = next(d for d in edges[current] if d in members)
+        loops.append(path[position[current] :])
+    loops.sort(key=lambda loop: order[loop[0]])
+    return loops
+
+
+def _graph(stages: list[StageDefinition]) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Dependencies and dependents per key, the triage pack's adoption included."""
+    edges = _dependency_edges(stages)
     first, adopted = adopted_roots(stages)
-    direct: dict[str, list[str]] = {
-        stage.key: [d for d in stage.depends_on if d in keys] for stage in stages
-    }
     if first is not None:
         for key in adopted:
-            direct[key] = [*direct.get(key, []), first]
-    out: dict[str, set[str]] = {}
-    for stage in stages:
-        seen: set[str] = set()
-        pending = list(direct.get(stage.key, []))
-        while pending:
-            current = pending.pop()
-            if current in seen:
-                continue
-            seen.add(current)
-            pending.extend(direct.get(current, []))
-        out[stage.key] = seen
-    return out
+            edges[key] = [*edges.get(key, []), first]
+    reverse: dict[str, list[str]] = {}
+    for key, targets in edges.items():
+        for target in targets:
+            reverse.setdefault(target, []).append(key)
+    return edges, reverse
+
+
+def _reach(start: str, edges: dict[str, list[str]]) -> set[str]:
+    """Every key reachable from ``start`` in one or more steps. Iterative."""
+    seen: set[str] = set()
+    pending = list(edges.get(start, []))
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        pending.extend(edges.get(current, []))
+    return seen
+
+
+def _read_upstream(
+    stages: list[StageDefinition], edges: dict[str, list[str]], bit: dict[str, int]
+) -> dict[str, int]:
+    """For each stage, which of the keys in ``bit`` it runs after, as a bit mask.
+
+    One pass in dependency order (Kahn's method over ``edges``, which the
+    caller has checked hold no loop): a stage's mask is its dependencies'
+    masks with each dependency's own bit added. Only keys some condition
+    reads get a bit, so the cost is the stages plus the edges, times the
+    number of distinct stages conditions read, over the machine word, and a
+    stage's answer to "has ``x`` run before me" is one bit test.
+    """
+    waiting = {stage.key: len(edges.get(stage.key, [])) for stage in stages}
+    dependents: dict[str, list[str]] = {}
+    for key, targets in edges.items():
+        for target in targets:
+            dependents.setdefault(target, []).append(key)
+    mask: dict[str, int] = {key: 0 for key in waiting}
+    ready = [key for key, count in waiting.items() if count == 0]
+    while ready:
+        key = ready.pop()
+        carried = mask[key] | bit.get(key, 0)
+        for dependent in dependents.get(key, []):
+            mask[dependent] |= carried
+            waiting[dependent] -= 1
+            if waiting[dependent] == 0:
+                ready.append(dependent)
+    return mask
 
 
 def _warnings(name: str, stages: list[StageDefinition]) -> list[TeamFinding]:
@@ -259,20 +341,27 @@ def _warnings(name: str, stages: list[StageDefinition]) -> list[TeamFinding]:
     sample may be false for every sample this deployment will ever see, and
     saying so would be a guess; one that reads a stage the team does not have
     always reads "did not run", and that is a fact about the team.
+
+    Nothing here holds a set per stage. The verdict warnings are two walks from
+    the verdict stage, one up and one down; a condition that reads another
+    stage is one walk from the stage that carries it, stopped when it arrives.
     """
     findings: list[TeamFinding] = []
     keys = [stage.key for stage in stages]
-    if len(set(keys)) != len(keys) or _cycles(stages):
+    known = set(keys)
+    if len(known) != len(keys) or _cycles(stages):
         return findings
-    upstream = _upstream(stages)
+    edges, reverse = _graph(stages)
 
     verdicts = [stage.key for stage in stages if stage.kind == "verdict"]
     if len(verdicts) == 1:
         verdict = verdicts[0]
+        before = _reach(verdict, edges)
+        after = _reach(verdict, reverse)
         for stage in stages:
             if stage.kind in ("verdict", "report"):
                 continue
-            if verdict in upstream[stage.key]:
+            if stage.key in after:
                 message = (
                     f"stage {stage.key!r} runs after the verdict stage {verdict!r}, so "
                     "nothing it finds reaches the verdict"
@@ -280,7 +369,7 @@ def _warnings(name: str, stages: list[StageDefinition]) -> list[TeamFinding]:
                 findings.append(
                     TeamFinding("warning", "after_verdict", message, name, stage.key, "depends_on")
                 )
-            elif stage.key not in upstream[verdict]:
+            elif stage.key not in before:
                 message = (
                     f"stage {stage.key!r} is not upstream of the verdict stage {verdict!r}: "
                     "the judge does not wait for it, so what it finds may not reach the verdict"
@@ -289,9 +378,16 @@ def _warnings(name: str, stages: list[StageDefinition]) -> list[TeamFinding]:
                     TeamFinding("warning", "unreachable", message, name, stage.key, "depends_on")
                 )
 
-    for stage in stages:
-        if not stage.when.strip() or stage_condition_problem(stage.key, stage.when):
-            continue
+    conditioned = [
+        stage
+        for stage in stages
+        if stage.when.strip() and not stage_condition_problem(stage.key, stage.when)
+    ]
+    references = {stage.key: stage_references(stage.when) for stage in conditioned}
+    wanted = {read for reads in references.values() for read in reads if read in known}
+    bit = {key: 1 << i for i, key in enumerate(sorted(wanted))}
+    before_me = _read_upstream(stages, edges, bit) if bit else {}
+    for stage in conditioned:
         if constant_truth(stage.when) is False:
             findings.append(
                 TeamFinding(
@@ -304,14 +400,14 @@ def _warnings(name: str, stages: list[StageDefinition]) -> list[TeamFinding]:
                     "when",
                 )
             )
-        for read in stage_references(stage.when):
-            if read not in keys:
+        for read in references[stage.key]:
+            if read not in known:
                 message = (
                     f"stage {stage.key!r}: the condition reads stages.{read}, and this team "
                     f"has no stage {read!r}; it always reads as a stage that did not run"
                 )
                 code = "condition_unknown_stage"
-            elif read not in upstream[stage.key]:
+            elif not before_me.get(stage.key, 0) & bit[read]:
                 message = (
                     f"stage {stage.key!r}: the condition reads stages.{read}, which this "
                     "stage does not run after; it may not have run when the condition is "
@@ -352,10 +448,31 @@ def lint_team(
     shape = stage_list_problems(stages)
     findings.extend(_error(name, problem) for problem in shape)
     for loop in _cycles(stages):
-        path = " → ".join([*loop, loop[0]])
-        message = f"stages {', '.join(repr(k) for k in loop)} depend on each other: {path}"
+        # The whole loop is written out once, on its first-declared stage; the
+        # other stages on it point there, so a loop of n stages is n findings
+        # of constant length rather than n copies of an n-stage path.
+        head = loop[0]
+        path = " → ".join([*loop, head])
+        findings.append(
+            TeamFinding(
+                "error",
+                "cycle",
+                f"stages depend on each other in a loop: {path}",
+                name,
+                head,
+                "depends_on",
+            )
+        )
         findings.extend(
-            TeamFinding("error", "cycle", message, name, key, "depends_on") for key in loop
+            TeamFinding(
+                "error",
+                "cycle",
+                f"stage {key!r} is on the loop of stages written out on stage {head!r}",
+                name,
+                key,
+                "depends_on",
+            )
+            for key in loop[1:]
         )
 
     exempt = name in BUILTIN_PROFILES and name != active

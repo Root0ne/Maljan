@@ -9,12 +9,14 @@ never changes the team it reads.
 from __future__ import annotations
 
 import copy
+import time
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
 from maljan.core.config import (
+    TEAM_RULE_CODES,
     AgentDefinition,
     AgentsConfig,
     Settings,
@@ -22,7 +24,7 @@ from maljan.core.config import (
     _builtin_definitions,
 )
 from maljan.core.team_layout import layout_team
-from maljan.core.team_lint import lint_team, lint_teams
+from maljan.core.team_lint import lint_team, lint_teams, team_stages
 
 TEAM = "mine"
 
@@ -81,10 +83,13 @@ def _warnings(entry: Any, **kwargs: Any) -> list[tuple[str, str | None]]:
     return [(f.code, f.stage) for f in lint_team(TEAM, entry, **kwargs) if f.severity == "warning"]
 
 
-# One defect per team, each one a rule the settings model refuses. Every rule
-# ``stage_list_problems``, ``stage_member_problems``, the condition check, the
-# built-in identity check and the field validation can raise has a row here;
-# ``test_the_corpus_reaches_every_rule`` fails when a new rule has none.
+# One defect per team, each one a rule the settings model refuses. Every code
+# in ``TEAM_RULE_CODES`` (which ``TeamProblem`` requires of every rule in
+# ``stage_list_problems`` and ``stage_member_problems``) has a row here, as do
+# the condition check, the built-in identity check and field validation.
+# ``test_the_corpus_reaches_every_rule`` fails when a declared code has none.
+# A refusal raised straight from a model validator, outside those functions,
+# is not covered by this and would reach the editor only through apply.
 CORPUS: dict[str, tuple[str, dict[str, Any], dict[str, Any]]] = {
     "no_stages": (TEAM, _team(), {}),
     "duplicate_key": (
@@ -165,32 +170,9 @@ CORPUS: dict[str, tuple[str, dict[str, Any], dict[str, Any]]] = {
     "team_key": ("Bad Team", _good(), {}),
 }
 
-CODES = {
-    "no_stages",
-    "duplicate_key",
-    "self_dependency",
-    "dangling_dependency",
-    "later_dependency",
-    "agent_in_two_stages",
-    "no_agents",
-    "triage_agents",
-    "triage_key",
-    "debate_upstream",
-    "debate_handover",
-    "verdict_count",
-    "report_count",
-    "report_not_last",
-    "condition",
-    "field",
-    "unknown_agent",
-    "agent_role",
-    "disabled_agent",
-    "verdict_judge",
-    "report_reporter",
-    "debate_agents",
-    "builtin",
-    "team_key",
-}
+# The model's own rule codes, declared beside the rules, and the ones the lint
+# reports in pydantic's or the model's words from outside those two functions.
+CODES = set(TEAM_RULE_CODES) | {"condition", "field", "builtin", "team_key"}
 
 
 def _model_refusal(name: str, entry: dict[str, Any], definitions: dict[str, Any]) -> list[str]:
@@ -455,3 +437,117 @@ class TestTheLayout:
             ("v", "a", False),
         ]
         assert [n.row for n in layout.nodes] == [0, 1]
+
+    def test_a_root_declared_above_the_triage_pack_is_still_drawn_after_it(self) -> None:
+        """The builder adopts every other root, wherever it is written."""
+        layout = layout_team(_stages(_analysis(), _triage(), _verdict(["a"])))
+        rows = {n.key: n.row for n in layout.nodes}
+        assert ("triage_pack", "a", True) in [
+            (e.source, e.target, e.implicit) for e in layout.edges
+        ]
+        assert rows["a"] > rows["triage_pack"]
+
+
+# How long a large team may take, on the slowest machine the suite runs on.
+# Measured at well under a second for 5,000 stages; a quadratic pass takes
+# tens of seconds at this size, which is what the bound is there to catch.
+LARGE = 5000
+BOUND_SECONDS = 10.0
+
+
+def _chain(n: int) -> dict[str, Any]:
+    """Triage, then ``n`` analysis stages each after the one before, then the verdict.
+
+    Every stage's condition reads the first stages of the chain, which is the
+    shape that makes a per-stage ancestor walk quadratic.
+    """
+    stages: list[dict[str, Any]] = [_triage()]
+    previous = "triage_pack"
+    for i in range(n):
+        stages.append(
+            _analysis(
+                f"s{i}",
+                [f"agent{i}"],
+                depends_on=[previous],
+                when="stages.triage_pack.ran" + (" and stages.s0.ran" if i else ""),
+            )
+        )
+        previous = f"s{i}"
+    stages.append(_verdict([previous]))
+    return _team(*stages)
+
+
+def _fan(n: int) -> dict[str, Any]:
+    """Triage, then ``n`` analysis stages side by side, all feeding the verdict."""
+    keys = [f"s{i}" for i in range(n)]
+    return _team(
+        _triage(),
+        *(_analysis(key, [f"agent{i}"], depends_on=["triage_pack"]) for i, key in enumerate(keys)),
+        _verdict(keys),
+    )
+
+
+def _timed(team: dict[str, Any]) -> tuple[list[Any], float]:
+    started = time.perf_counter()
+    findings = lint_team(TEAM, team, definitions=_definitions())
+    stages, _ = team_stages(TEAM, team)
+    layout_team(stages)
+    return findings, time.perf_counter() - started
+
+
+class TestALargeTeam:
+    """No size limit on a team, so every pass over one is linear in its size."""
+
+    def test_a_long_chain_is_linted_and_laid_out_in_bounded_time(self) -> None:
+        findings, took = _timed(_chain(LARGE))
+        assert took < BOUND_SECONDS
+        # Every agent is unknown; nothing else is wrong and no condition warns.
+        assert {f.code for f in findings} == {"unknown_agent"}
+
+    def test_a_wide_fan_out_is_linted_and_laid_out_in_bounded_time(self) -> None:
+        findings, took = _timed(_fan(LARGE))
+        assert took < BOUND_SECONDS
+        assert {f.code for f in findings} == {"unknown_agent"}
+
+    def test_a_large_loop_is_named_without_running_out_of_stack(self) -> None:
+        keys = [f"s{i}" for i in range(LARGE)]
+        team = _team(
+            *(
+                {
+                    "key": key,
+                    "kind": "analysis",
+                    "agents": ["static"] if i == 0 else [f"x{i}"],
+                    "depends_on": [keys[(i + 1) % LARGE]],
+                }
+                for i, key in enumerate(keys)
+            ),
+            _verdict(["s0"]),
+        )
+        findings, took = _timed(team)
+        assert took < BOUND_SECONDS
+        loop = [f for f in findings if f.code == "cycle"]
+        assert len(loop) == LARGE
+        assert loop[0].stage == "s0"
+        assert loop[0].message.startswith("stages depend on each other in a loop: s0 → s1 → s2")
+        assert loop[0].message.endswith(f"s{LARGE - 1} → s0")
+
+    def test_a_long_chain_of_later_dependencies_is_refused_on_save_as_it_was(self) -> None:
+        """The save path refuses what the model refuses, in the model's words, at any size."""
+        from app.services.agent_map import AGENT_PROFILES_KEY, AgentMapError, validate_agent_map
+
+        n = 1200
+        keys = [f"s{i}" for i in range(n)]
+        team = _team(
+            *(
+                _analysis(key, [f"agent{i}"], depends_on=keys[i + 1 : i + 2])
+                for i, key in enumerate(keys)
+            ),
+            _verdict(["s0"]),
+        )
+        with pytest.raises(AgentMapError) as exc:
+            validate_agent_map({AGENT_PROFILES_KEY: {TEAM: team}}, stored={})
+        first = (
+            "stage 's0' depends on 's1', which is declared after it; a stage may only "
+            "depend on an earlier stage"
+        )
+        assert exc.value.errors[f"{AGENT_PROFILES_KEY}.{TEAM}.stages.s0.depends_on"] == first
