@@ -1037,12 +1037,14 @@ class JudgeAgent(BudgetMeter):
             return (
                 AgentArgument(
                     agent_name="Mediator",
-                    finding=(
-                        f"{reasoning_text.strip()[:500]}\n\n"
+                    # The mediator's words whole, and the platform's own
+                    # sentence in a field of its own rather than inside them.
+                    finding=reasoning_text.strip(),
+                    confidence_score=None,
+                    note=(
                         f"Consensus: not applicable — {len(claimants)} of {len(reports)} "
                         "analyst(s) produced claims."
                     ),
-                    confidence_score=None,
                 ),
                 None,
             )
@@ -1192,6 +1194,14 @@ class JudgeAgent(BudgetMeter):
         # a timeout chosen for a fast one (``llm.generation_rate``).
         timeout = self._verdict_timeout(float(loop_limits("judge")[0]))
         self.logger.info("JudgeAgent invoking verdict LLM (timeout=%ds)...", timeout)
+        # A model list's turn deadline is a share of the clock it was last
+        # started on — mediation's, by now. The verdict call is its own clock,
+        # sized from the model's pace, so the list starts again on it; without
+        # this the primary was declared stalled long before the sized wait.
+        from maljan.llm.fallback import restart_models
+
+        restart_models(self.llm, loop_seconds=float(timeout), share=self._turn_share())
+        cap = int(getattr(get_settings().llm, "judge_max_tokens", 0) or 0) or None
 
         # Reset per call, not once: a first call that timed out and left the
         # flag set made every later parse return the fallback, and a fallback
@@ -1200,11 +1210,16 @@ class JudgeAgent(BudgetMeter):
         timed_out = False
 
         async def _ask(turns: list[Any]) -> Any:
-            return await retry_on_connection_error(
+            answer = await retry_on_connection_error(
                 lambda: self.llm.ainvoke(turns),
                 what="Judge verdict",
                 log=self.logger,
             )
+            # Whether the verdict reached its token cap, recorded like every
+            # other judge call: a cut bundle reads as malformed JSON, and the
+            # count is what says the cap, not the model, ended it.
+            record_judge_response(getattr(self, "truncation_ledger", None), answer, cap=cap)
+            return answer
 
         async def _run(turns: list[Any]) -> Any:
             nonlocal timed_out

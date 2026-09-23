@@ -130,6 +130,30 @@ def _drop_llm_caches_on_retirement(loop: object) -> None:
     clear_shared_httpx_clients()
 
 
+def composer_output_cap(config: Settings) -> int:
+    """What a composer section may generate, reasoning included.
+
+    Ollama's ``num_predict`` and llama.cpp's ``n_predict`` count the reasoning
+    channel with the answer, and a reasoning model left thinking spends its
+    budget there: a 900-token cap came back as an empty section. The platform
+    cannot tell a reasoning model from its tag; what it knows is whether it
+    asked the reporter's provider to keep reasoning out
+    (``llm.ollama.disable_thinking`` / ``llm.openai.disable_thinking``). Asked,
+    the cap is the section's own budget. Not asked, the cap leaves the room
+    the reporter already has for reasoning — ``judge_max_tokens`` — on top of
+    the section's budget, rather than asking the model not to reason: a
+    ``think: false`` a model does not understand is an error on Ollama, and
+    the setting that sends it is the operator's.
+    """
+    section = int(config.reporting.composer_section_max_tokens)
+    agent = config.llm.agents.get(REPORTER_AGENT_KEY)
+    provider = str(getattr(agent, "provider", "") or config.llm.provider)
+    block = getattr(config.llm, provider, None)
+    if provider not in ("ollama", "openai") or bool(getattr(block, "disable_thinking", False)):
+        return section
+    return section + max(0, int(config.llm.judge_max_tokens or 0))
+
+
 def _swap_healed_llm(replaced: object, healed: object) -> None:
     """Put the self-healed model where the one it replaced was cached.
 
@@ -1155,10 +1179,11 @@ class ServiceContainer:
                 # what a section may generate, and a wait sized from it over a
                 # call allowed ``judge_max_tokens`` would say something untrue.
                 # Held by the composer, which is dropped with the loop it ran on.
+                output_cap = composer_output_cap(self.config)
                 composer_llm = registry.build_model_for_agent(
                     REPORTER_AGENT_KEY,
                     fallback_role="judge",
-                    max_tokens=int(rc.composer_section_max_tokens),
+                    max_tokens=output_cap,
                 )
                 attach_rate_meter(composer_llm, getattr(self, "_generation_rates", None))
                 self._report_composer_cache = ReportComposer(
@@ -1167,6 +1192,7 @@ class ServiceContainer:
                     per_section_timeout=rc.composer_per_section_timeout,
                     token_ledger=getattr(self, "_token_ledger", None),
                     generation_rates=getattr(self, "_generation_rates", None),
+                    output_cap=output_cap,
                 )
                 self._report_composer_cache.event_sink = self.event_sink
             return self._report_composer_cache

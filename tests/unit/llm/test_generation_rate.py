@@ -239,7 +239,8 @@ class TestTheJudgeAndTheComposerAskForIt:
             generation_rates=_measured(),
         )
 
-        assert composer._section_timeout() == pytest.approx(900 / 3.8 * TIMEOUT_MARGIN)
+        # The answer and its one validation retry, each at the model's pace.
+        assert composer._section_timeout() == pytest.approx(2 * 900 / 3.8 * TIMEOUT_MARGIN)
 
     def test_a_composer_with_no_rates_keeps_the_configured_wait(self) -> None:
         from maljan.reporting.composer import ReportComposer
@@ -338,27 +339,50 @@ class TestAFallbackListIsMeasuredModelByModel:
 
 
 class TestTheSectionCapBoundsTheCall:
-    def test_the_composer_s_model_is_built_with_the_section_cap(self) -> None:
+    @staticmethod
+    def _composer(provider: str, thinking_off: bool) -> tuple[Any, Any]:
         from unittest.mock import MagicMock
 
-        from maljan.core.config import REPORTER_AGENT_KEY, Settings
+        from maljan.core.config import Settings
         from maljan.core.container import ServiceContainer
 
         settings = Settings(_env_file=None)  # type: ignore[call-arg]
+        settings.llm.provider = provider
+        getattr(settings.llm, provider).disable_thinking = thinking_off
         settings.reporting.composer_enabled = True
         settings.reporting.composer_section_max_tokens = 900
+        settings.llm.judge_max_tokens = 8192
         container = ServiceContainer(settings, mock=False)
         registry = MagicMock()
         registry.build_model_for_agent.return_value = FakeMessagesListChatModel(responses=[])
         container._llm_registry = registry  # type: ignore[assignment]
+        return container.get_report_composer(), registry
 
-        composer = container.get_report_composer()
+    @pytest.mark.parametrize("provider", ["ollama", "openai"])
+    def test_a_model_told_not_to_reason_is_capped_at_the_section_budget(
+        self, provider: str
+    ) -> None:
+        from maljan.core.config import REPORTER_AGENT_KEY
+
+        composer, registry = self._composer(provider, thinking_off=True)
 
         assert composer is not None
         registry.build_model_for_agent.assert_called_once_with(
             REPORTER_AGENT_KEY, fallback_role="judge", max_tokens=900
         )
+        assert composer.output_cap == 900
+
+    @pytest.mark.parametrize("provider", ["ollama", "openai"])
+    def test_a_model_left_reasoning_is_given_room_for_it(self, provider: str) -> None:
+        from maljan.core.config import REPORTER_AGENT_KEY
+
+        composer, registry = self._composer(provider, thinking_off=False)
+
+        registry.build_model_for_agent.assert_called_once_with(
+            REPORTER_AGENT_KEY, fallback_role="judge", max_tokens=900 + 8192
+        )
         assert composer.section_max_tokens == 900
+        assert composer.output_cap == 900 + 8192
 
     def test_an_ollama_model_takes_the_cap_as_num_predict(self) -> None:
         from maljan.core.config import Settings
@@ -370,3 +394,73 @@ class TestTheSectionCapBoundsTheCall:
 
         assert built.num_predict == 900
         assert built._chat_params([])["options"]["num_predict"] == 900
+
+
+class TestAComposerSectionOnItsOwnClock:
+    def test_the_list_starts_on_the_section_s_sized_wait(self) -> None:
+        from unittest.mock import patch
+
+        from maljan.reporting.composer import ReportComposer
+        from maljan.reporting.models import MalwareReport
+
+        composer = ReportComposer(
+            llm=_Named(),  # type: ignore[arg-type]
+            section_max_tokens=900,
+            per_section_timeout=120,
+            generation_rates=_measured(),
+        )
+        seen: list[dict[str, Any]] = []
+
+        async def _never(*_a: Any, **_k: Any) -> None:
+            return None
+
+        composer._invoke = _never  # type: ignore[method-assign]
+        with (
+            patch("maljan.llm.fallback.restart_models", lambda _m, **k: seen.append(k)),
+            patch("maljan.reporting.composer.is_empty", lambda _b: False),
+            patch("maljan.reporting.composer.bundle_for", lambda *_a, **_k: {}),
+            patch("maljan.reporting.composer._bundle_text", lambda *_a, **_k: ""),
+        ):
+            asyncio.run(
+                composer._author("conclusion", MalwareReport.model_construct(), {}, Any, "x")
+            )
+
+        assert seen and seen[0]["loop_seconds"] == pytest.approx(2 * 900 / 3.8 * TIMEOUT_MARGIN)
+
+    def test_a_section_the_cap_cut_says_so(self) -> None:
+        from maljan.reporting.composer import ReportComposer, _ProseOut
+
+        class _Cut:
+            model_name = "slow-model"
+
+            async def ainvoke(self, _messages: Any) -> Any:
+                return AIMessage(
+                    content='{"body": "The sample reads',
+                    response_metadata={"done_reason": "length"},
+                )
+
+        composer = ReportComposer(llm=_Cut(), section_max_tokens=900)  # type: ignore[arg-type]
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "maljan.reporting.composer.structured_output_supported_for_llm", lambda _l: False
+            )
+            result = asyncio.run(
+                composer._invoke([HumanMessage(content="x")], _ProseOut, section="conclusion")
+            )
+
+        assert result is None
+        assert any("reached the output cap of 900 tokens" in d for d in composer.degradations)
+
+
+def test_one_tag_on_two_servers_is_two_paces() -> None:
+    from langchain_ollama import ChatOllama
+
+    from maljan.llm.generation_rate import model_name_of
+    from tests.credential_shapes import password
+
+    local = ChatOllama(model="qwen3.8:27b", base_url="http://127.0.0.1:11434")
+    userinfo = "operator:" + password()
+    remote = ChatOllama(model="qwen3.8:27b", base_url=f"http://{userinfo}@gpu.example.org:11434/x")
+
+    assert model_name_of(local) == "qwen3.8:27b @ http://127.0.0.1:11434"
+    assert model_name_of(remote) == "qwen3.8:27b @ http://gpu.example.org:11434"

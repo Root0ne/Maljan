@@ -25,6 +25,15 @@ class AgentArgument(BaseModel):
             "produced claims, so there was no agreement to measure."
         ),
     )
+    note: str = Field(
+        default="",
+        description=(
+            "The platform's own sentence about this contribution, kept apart from "
+            "``finding`` so a model's words are never extended with the platform's. "
+            "Empty unless the platform has something to say — for the mediator, that "
+            "consensus did not apply."
+        ),
+    )
     status: str = Field(
         default="complete",
         description=(

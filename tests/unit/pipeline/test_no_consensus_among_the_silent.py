@@ -78,8 +78,10 @@ class TestTheMediatorRecordsNoAgreement:
         assert is_consensus is None
         assert argument.confidence_score is None
         assert "Confidence:" not in argument.finding
-        # The mediator's own words stay.
-        assert "No analyst provided a substantive report." in argument.finding
+        # The mediator's own words stay whole; the platform's sentence is apart.
+        assert argument.finding == SAID_BY_THE_MEDIATOR
+        assert "Consensus: not applicable" not in argument.finding
+        assert argument.note == "Consensus: not applicable — 0 of 2 analyst(s) produced claims."
 
     def test_one_analyst_produced_claims(self, structured: bool) -> None:
         argument, is_consensus = _mediate(

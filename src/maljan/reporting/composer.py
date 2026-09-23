@@ -209,6 +209,21 @@ def _bundle_text(section: str, bundle: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# The calls one section may take: its answer and the one retry the validation
+# loop gives an answer that breaks its schema.
+SECTION_ATTEMPTS = 2
+
+
+def _reached_the_cap(answer: Any, cap: int) -> bool:
+    """Whether the server stopped this answer at its output cap."""
+    from maljan.core.truncation_ledger import completion_tokens_of, hit_length_cap
+
+    if hit_length_cap(answer):
+        return True
+    produced = completion_tokens_of(answer)
+    return bool(cap > 0 and produced is not None and produced >= cap)
+
+
 class ReportComposer:
     """Authors the professional spine section-by-section. Async; per-section
     timeout + deterministic skip. Never raises to the caller."""
@@ -220,9 +235,15 @@ class ReportComposer:
         per_section_timeout: int = 120,
         token_ledger: Any | None = None,
         generation_rates: Any | None = None,
+        output_cap: int | None = None,
     ) -> None:
         self.llm = llm
         self.section_max_tokens = section_max_tokens
+        # What the model is allowed to generate for one section: the section's
+        # own budget, plus room for its reasoning when the model has not been
+        # asked to keep reasoning out (the container decides). The wait and the
+        # cut are both judged against this, because it is what the server caps.
+        self.output_cap = int(output_cap or section_max_tokens)
         self.per_section_timeout = per_section_timeout
         self.token_ledger = token_ledger
         # The job's event sink, set by the container, so a switch of the
@@ -377,6 +398,11 @@ class ReportComposer:
             HumanMessage(content=human),
         ]
         timeout = self._section_timeout()
+        # A model list's turn deadline is a share of the clock it was last
+        # started on; a section is its own clock, sized from the model's pace.
+        from maljan.llm.fallback import restart_models
+
+        restart_models(getattr(self, "llm", None), loop_seconds=timeout)
         try:
             return await asyncio.wait_for(
                 self._invoke(messages, schema, section=section),
@@ -399,21 +425,31 @@ class ReportComposer:
             return None
 
     def _section_timeout(self) -> float:
-        """One section's wait: configured, or what its budget needs at the model's pace."""
+        """One section's wait: configured, or what its calls need at the model's pace.
+
+        A section is its answer and, when the answer breaks its schema, the one
+        retry the validation loop allows: ``SECTION_ATTEMPTS`` calls. Where a
+        rate is measured the wait holds that many calls of the output cap at
+        the model's pace; where none is, the configured wait stands for the
+        whole section, as it always did.
+        """
         configured = float(self.per_section_timeout)
         rates = getattr(self, "generation_rates", None)
         if rates is None:
             return configured
         from maljan.llm.generation_rate import model_name_of
 
-        return float(
+        per_call = float(
             rates.call_timeout(
                 "composer:section",
                 model_name_of(self.llm),
                 configured,
-                int(self.section_max_tokens or 0),
+                int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0),
             )
         )
+        if per_call <= configured:
+            return configured
+        return per_call * SECTION_ATTEMPTS
 
     async def _invoke(
         self, messages: list[BaseMessage], schema: type[BaseModel], *, section: str = ""
@@ -447,11 +483,14 @@ class ReportComposer:
         # missing from a delivered report, and the model can usually fix it
         # when told which field broke which rule.
         declined = False
+        cut = False
 
         async def _run(turns: list[BaseMessage]) -> Any:
+            nonlocal cut
             raw = await retry_on_connection_error(
                 lambda: self.llm.ainvoke(turns), what="ReportComposer raw"
             )
+            cut = cut or _reached_the_cap(raw, int(getattr(self, "output_cap", 0) or 0))
             if self.token_ledger is not None:
                 try:
                     from maljan.core.token_ledger import record_response_usage
@@ -539,6 +578,15 @@ class ReportComposer:
                 "y" if retries == 1 else "ies",
                 "; ".join(f"{v.path}: {v.message}" for v in broken),
             )
+            if cut:
+                # The cap ended the answer, not the model: the schema only
+                # failed because the JSON was cut off. Said as what it was.
+                self._note_degradation(
+                    f"report section '{section or schema.__name__}' is missing: its answer "
+                    f"reached the output cap of {self.output_cap} tokens and was cut off "
+                    "(composer_section_max_tokens; a model's reasoning counts against it)"
+                )
+                return None
             self._note_degradation(
                 f"report section '{section or schema.__name__}' is missing: its answer did "
                 f"not fit the schema after {retries} retr{'y' if retries == 1 else 'ies'} "

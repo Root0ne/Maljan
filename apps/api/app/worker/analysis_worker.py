@@ -2031,6 +2031,13 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                             "argument": (
                                 arg.finding if hasattr(arg, "finding") else arg.get("finding", "")
                             ),
+                            # The platform's sentence about the round, apart
+                            # from the mediator's own words.
+                            "note": (
+                                getattr(arg, "note", "")
+                                if hasattr(arg, "finding")
+                                else arg.get("note", "")
+                            ),
                             # ``complete`` | ``failed`` | ``timeout``. Without
                             # it a mediation that never ran is indistinguishable
                             # from one where the agents calmly disagreed: both
