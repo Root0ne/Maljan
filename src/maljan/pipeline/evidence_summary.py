@@ -136,16 +136,20 @@ def technique_evidence(
     id is the evidence. Nothing is read out of text: a claim's
     ``evidence_ref`` is a sentence, and an id in it stays in the sentence.
 
-    Each list is deduplicated and in ledger order. When the ledger is given,
-    an id it does not hold is left out, because a reference nobody can follow
-    is not evidence. A technique nothing ties to an entry has no key.
+    Each list is deduplicated and in ledger order. An id the ledger does not
+    hold is left out, because a reference nobody can follow is not evidence,
+    and an empty ledger holds none: a run with no tool calls ties nothing. A
+    technique nothing ties to an entry has no key.
+
+    A finding's ``evidence_ids`` belong to the finding as a whole, so a
+    finding naming two techniques ties each of its entries to both. The tie
+    says the finding cites the entry, not that the entry names the technique.
     """
     order: dict[str, int] = {}
     for index, entry in enumerate(ledger or []):
         eid = _entry_id(entry)
         if eid and eid not in order:
             order[eid] = index
-    known = bool(order)
 
     found: dict[str, set[str]] = {}
 
@@ -154,7 +158,7 @@ def technique_evidence(
         eid = str(eid or "").strip()
         if not TECHNIQUE_ID_EXACT_RE.match(tid) or not EVIDENCE_ID_RE.match(eid):
             return
-        if known and eid not in order:
+        if eid not in order:
             return
         found.setdefault(tid, set()).add(eid)
 
@@ -173,10 +177,7 @@ def technique_evidence(
             if tid not in invalid:
                 add(tid, _entry_id(entry))
 
-    def in_ledger_order(eid: str) -> tuple[int, int]:
-        return (order.get(eid, len(order)), int(eid.split("_", 1)[1]))
-
-    return {tid: sorted(ids, key=in_ledger_order) for tid, ids in found.items()}
+    return {tid: sorted(ids, key=order.__getitem__) for tid, ids in found.items()}
 
 
 def _entry_id(entry: Any) -> str:

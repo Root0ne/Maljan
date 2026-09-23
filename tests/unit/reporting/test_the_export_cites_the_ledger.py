@@ -15,20 +15,32 @@ nothing.
 from __future__ import annotations
 
 import json
+import random
 from typing import Any
 
 from stix2validator import ValidationOptions, validate_instance
 
-from maljan.agents.judge_postprocess import lift_misplaced_extensions, postprocess_judge_bundle
+from maljan.agents.judge_postprocess import (
+    PROPERTY_NOT_CARRIED_CODE,
+    lift_misplaced_extensions,
+    postprocess_judge_bundle,
+)
 from maljan.pipeline.evidence_summary import technique_evidence
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from maljan.reporting.renderers.stix_renderer import (
+    EVIDENCE_REF_NOT_IN_LEDGER_CODE,
+    ExtendedSTIXRenderer,
+)
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence, Finding
 from maljan.schemas.stix_models import EVIDENCE_REFS_PROPERTY, Bundle, attack_pattern_id
 
 SHA256 = "36dabc40fa8983ce900a90b8156d2c754875fe1b5413a997843c4a0ef3908220"
+
+# The run's ledger in its order, for the export tests: out of numeric order on
+# purpose, so ledger order and id order can be told apart.
+LEDGER_IDS = ["ev_0001", "ev_0002", "ev_0004", "ev_0003", "ev_0007", "ev_0012"]
 
 
 def _entry(eid: str, tool: str = "pe_info", structured: Any = None, seq: int = 0) -> LedgerEntry:
@@ -101,6 +113,22 @@ class TestTheRecordReader:
 
         assert "T1082" not in technique_evidence({"static": isr}, _ledger())
 
+    def test_a_run_with_no_ledger_ties_nothing(self) -> None:
+        isr = _isr(findings=[Finding(title="a", technique_ids=["T1082"], evidence_ids=["ev_0003"])])
+
+        assert technique_evidence({"static": isr}, []) == {}
+        assert technique_evidence({"static": isr}, None) == {}
+
+    def test_a_finding_ties_its_entries_to_every_technique_it_names(self) -> None:
+        isr = _isr(
+            findings=[
+                Finding(title="a", technique_ids=["T1082", "T1012"], evidence_ids=["ev_0003"])
+            ]
+        )
+
+        ties = technique_evidence({"static": isr}, _ledger())
+        assert ties["T1082"] == ties["T1012"] == ["ev_0003"]
+
 
 def _report(verdict: str, judge: Bundle | None, **attribution: Any) -> MalwareReport:
     report = MalwareReportBuilder(
@@ -170,10 +198,22 @@ def _judge() -> Bundle:
     return Bundle.model_validate(postprocess_judge_bundle(data))
 
 
-def _render(ties: dict[str, list[str]] | None, judge: Bundle | None = None, **attribution: Any):
+def _render(
+    ties: dict[str, list[str]] | None,
+    judge: Bundle | None = None,
+    *,
+    ledger: list[str] | None = None,
+    renderer: ExtendedSTIXRenderer | None = None,
+    **attribution: Any,
+):
     judge = _judge() if judge is None else judge
     report = _report("Malware", judge, **attribution)
-    return ExtendedSTIXRenderer().render(report, judge, technique_evidence=ties)
+    return (renderer or ExtendedSTIXRenderer()).render(
+        report,
+        judge,
+        technique_evidence=ties,
+        ledger_ids=LEDGER_IDS if ledger is None else ledger,
+    )
 
 
 def _dumped(bundle: Bundle) -> list[dict[str, Any]]:
@@ -197,9 +237,9 @@ def _carrying(objects: list[dict[str, Any]]) -> list[str]:
 
 class TestTheExport:
     def test_the_sample_uses_edge_carries_the_techniques_entries_in_ledger_order(self) -> None:
-        objects = _dumped(_render({"T1055": ["ev_0012", "ev_0002", "ev_0012"]}))
+        objects = _dumped(_render({"T1055": ["ev_0012", "ev_0003", "ev_0004", "ev_0012"]}))
 
-        assert _uses(objects, "T1055")[EVIDENCE_REFS_PROPERTY] == ["ev_0002", "ev_0012"]
+        assert _uses(objects, "T1055")[EVIDENCE_REFS_PROPERTY] == ["ev_0004", "ev_0003", "ev_0012"]
 
     def test_only_what_the_record_ties_carries_the_property(self) -> None:
         objects = _dumped(_render({"T1055": ["ev_0002"]}))
@@ -238,6 +278,35 @@ class TestTheExport:
         assert malware["name"] == "Latrodectus"
         assert malware[EVIDENCE_REFS_PROPERTY] == ["ev_0004", "ev_0007"]
 
+    def test_a_family_id_the_ledger_does_not_hold_is_left_out_and_recorded(self) -> None:
+        renderer = ExtendedSTIXRenderer()
+        objects = _dumped(
+            _render(
+                None,
+                judge=Bundle(objects=[]),
+                renderer=renderer,
+                family="Latrodectus",
+                family_evidence_ids=["ev_0107", "ev_0007"],
+            )
+        )
+
+        (malware,) = [o for o in objects if o["type"] == "malware"]
+        assert malware[EVIDENCE_REFS_PROPERTY] == ["ev_0007"]
+        notes = [why for code, why in renderer.declined if code == EVIDENCE_REF_NOT_IN_LEDGER_CODE]
+        assert len(notes) == 1 and "ev_0107" in notes[0]
+
+    def test_a_run_with_no_ledger_exports_no_ids(self) -> None:
+        objects = _dumped(
+            _render(
+                {"T1055": ["ev_0002"]},
+                ledger=[],
+                family="Latrodectus",
+                family_evidence_ids=["ev_0007"],
+            )
+        )
+
+        assert _carrying(objects) == []
+
     def test_a_malware_object_named_from_anything_else_carries_none(self) -> None:
         objects = _dumped(_render(None, judge=Bundle(objects=[]), family=None))
 
@@ -248,6 +317,101 @@ class TestTheExport:
         objects = _dumped(_render(None, family="Latrodectus", family_evidence_ids=["ev_0007"]))
 
         assert _carrying(objects) == []
+
+
+class TestTheJudgesCopyIsNotCarried:
+    """The property is the platform's. A judge object that writes it is read
+    without it, with the record every undeclared key gets and no retry, and the
+    export's edge carries the record's ids instead."""
+
+    def _answer(self) -> dict[str, Any]:
+        return {
+            "type": "bundle",
+            "objects": [
+                {"type": "malware", "id": "malware--1", "name": "loader", "is_family": False},
+                {
+                    "type": "attack-pattern",
+                    "id": "attack-pattern--1",
+                    "name": "Process Injection",
+                    "external_references": [
+                        {"source_name": "mitre-attack", "external_id": "T1055"}
+                    ],
+                },
+                {
+                    "type": "relationship",
+                    "id": "relationship--1",
+                    "relationship_type": "uses",
+                    "source_ref": "malware--1",
+                    "target_ref": "attack-pattern--1",
+                    EVIDENCE_REFS_PROPERTY: ["ev_9999", "ev_0001"],
+                },
+            ],
+        }
+
+    def test_the_not_carried_record_is_written(self) -> None:
+        data = json.loads(json.dumps(self._answer()))
+        found = lift_misplaced_extensions(data)
+
+        rows = [v for v in found if v.code == PROPERTY_NOT_CARRIED_CODE]
+        assert len(rows) == 1 and EVIDENCE_REFS_PROPERTY in rows[0].message
+
+    def test_the_export_carries_the_records_ids_and_not_the_judges(self) -> None:
+        data = json.loads(json.dumps(self._answer()))
+        lift_misplaced_extensions(data)
+        judge = Bundle.model_validate(postprocess_judge_bundle(data))
+        assert all(getattr(o, EVIDENCE_REFS_PROPERTY, None) is None for o in judge.objects)
+
+        objects = _dumped(_render({"T1055": ["ev_0002"]}, judge=judge))
+        assert _uses(objects, "T1055")[EVIDENCE_REFS_PROPERTY] == ["ev_0002"]
+        assert "ev_9999" not in json.dumps(objects)
+
+    def test_a_judge_value_that_reaches_the_renderer_anyway_is_replaced(self) -> None:
+        judge = _judge()
+        smuggled = Bundle(
+            objects=[
+                o.model_copy(update={EVIDENCE_REFS_PROPERTY: ["ev_9999"]})
+                if o.type in ("relationship", "malware")
+                else o
+                for o in judge.objects
+            ]
+        )
+
+        objects = _dumped(_render(None, judge=smuggled))
+        assert _carrying(objects) == []
+
+
+def test_no_id_the_ledger_does_not_hold_reaches_the_export() -> None:
+    """Every source of ids, fed ids the ledger does not hold: none is exported."""
+    rng = random.Random(7)
+    ledger = [_entry(eid, seq=i) for i, eid in enumerate(LEDGER_IDS)]
+    for _round in range(40):
+        absent = [f"ev_{rng.randint(13, 9999):04d}" for _ in range(rng.randint(1, 6))]
+        present = rng.sample(LEDGER_IDS, rng.randint(0, 3))
+        mixed = absent + present
+        rng.shuffle(mixed)
+        isr = _isr(
+            findings=[
+                Finding(title="f", technique_ids=["T1055", "T1071"], evidence_ids=list(mixed))
+            ]
+        )
+        ties = technique_evidence({"static": isr}, ledger)
+        # The ties a caller could hand the renderer directly, unfiltered.
+        raw_ties = {"T1055": list(mixed), "T1071": list(absent)}
+        judge_answer = TestTheJudgesCopyIsNotCarried()._answer()
+        judge_answer["objects"][2][EVIDENCE_REFS_PROPERTY] = list(mixed)
+        judge_answer["objects"][0][EVIDENCE_REFS_PROPERTY] = list(absent)
+        data = json.loads(json.dumps(judge_answer))
+        lift_misplaced_extensions(data)
+        judge = Bundle.model_validate(postprocess_judge_bundle(data))
+        for bundle in (
+            _render(ties, judge=judge),
+            _render(raw_ties, judge=judge),
+            _render(raw_ties, judge=Bundle(objects=[]), family="F", family_evidence_ids=mixed),
+            _render(raw_ties, ledger=[], family="F", family_evidence_ids=mixed),
+        ):
+            exported = {eid for o in _dumped(bundle) for eid in o.get(EVIDENCE_REFS_PROPERTY, [])}
+            assert exported <= set(LEDGER_IDS), exported - set(LEDGER_IDS)
+            assert not exported & set(absent)
 
 
 def _report_of(bundle: Bundle) -> tuple[list[str], list[str]]:

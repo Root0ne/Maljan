@@ -55,6 +55,7 @@ describe("what an unresolved row says", () => {
   it("says the same for an artefact and for a digest the export refused", () => {
     expect(isExportDecision("stix.unpublishable_artefact")).toBe(true);
     expect(isExportDecision("stix.malformed_hash")).toBe(true);
+    expect(isExportDecision("stix.evidence_ref_not_in_ledger")).toBe(true);
   });
 
   it("says the same for a pattern over a type STIX does not have", () => {

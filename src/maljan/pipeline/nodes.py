@@ -4308,6 +4308,9 @@ def make_report_node(
                     # the ids a finding naming it cites, and the entries of the
                     # tools that asserted it. Written on the export's edges.
                     technique_evidence=technique_evidence(isr_reports, _ledger),
+                    # The run's ledger, in its order: the export writes no id
+                    # it does not hold.
+                    ledger_ids=[entry.id for entry in _ledger],
                 )
                 extended_dump = extended_bundle.model_dump(mode="json")
                 # What the judge said about a technique the checks rejected
