@@ -30,6 +30,9 @@ export interface EvidenceEntry {
    *  before the call ran; `args_raw` is what it wrote. */
   args_repaired?: boolean;
   args_raw?: string | null;
+  /** The model whose turn asked for this call, as `provider/model`. Absent
+   *  where nothing named it, including every row written before the column. */
+  model?: string | null;
   output: string;
   structured: unknown | null;
   /** True when the output was dropped to keep the agent inside its byte

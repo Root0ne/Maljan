@@ -21,6 +21,9 @@ export interface AnalysisRow {
   sampleId: string;
   /** The filename, else a hash prefix, else the sample id's prefix. */
   sample: string;
+  /** The sample's full SHA-256, when the job listing carried it. A row built
+   *  from a report alone has none, and offers nothing to copy. */
+  sha256: string | null;
   status: string;
   createdAt: string;
   durationSeconds: number | null;
@@ -70,6 +73,7 @@ export function analysisRows(
       id: job.id,
       sampleId: job.sample_id,
       sample: sampleLabel(job),
+      sha256: job.sample_sha256 || null,
       status: job.status,
       createdAt: job.created_at,
       durationSeconds: job.duration_seconds,
@@ -84,6 +88,7 @@ export function analysisRows(
       id: report.job_id,
       sampleId: "",
       sample: report.sample_filename || report.job_id.slice(0, 12),
+      sha256: null,
       status: "completed",
       createdAt: report.created_at,
       durationSeconds: null,
@@ -99,6 +104,23 @@ export function analysisRows(
    * cannot be read sorts as the oldest, which is where a row nothing can date
    * belongs on a list read newest first. */
   return rows.sort((a, b) => time(b.createdAt) - time(a.createdAt));
+}
+
+/**
+ * The dashboard's latest runs: exactly these jobs, each with its verdict.
+ *
+ * The same join as the full list, but the jobs are the whole answer: a report
+ * whose job is not one of the latest few is somebody else's row, so it is not
+ * appended the way the full list keeps it. A job whose report was not in the
+ * page of reports asked for keeps a null verdict and is drawn by its status,
+ * which is also what a run that has not finished looks like.
+ */
+export function latestRunRows(
+  jobs: JobDTO[] | null | undefined,
+  reports: ReportSummaryDTO[] | null | undefined,
+): AnalysisRow[] {
+  const wanted = new Set((jobs ?? []).map((job) => job.id));
+  return analysisRows(jobs, reports).filter((row) => wanted.has(row.id));
 }
 
 /** An ISO timestamp as a number, or 0 for one that cannot be read. */

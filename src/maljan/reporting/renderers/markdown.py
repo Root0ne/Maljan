@@ -40,7 +40,9 @@ from urllib.parse import urlparse
 from maljan.analysis.run_summary import (
     bundle_loss_sentence,
     corpus_held_sentence,
+    server_rest_sentence,
     stage_duration_lines,
+    tokens_sentence,
 )
 from maljan.core.logger import logger
 from maljan.reporting.defang import ProseDefanger, defang
@@ -340,7 +342,7 @@ class MarkdownRenderer:
         lines.append(
             _item(f"Family: {_one_line(family or 'none attributed')} _({_family_voice(report)})_")
         )
-        top = sorted(report.ttp_mappings, key=lambda m: -m.confidence)[:3]
+        top = sorted(report.ttp_mappings, key=lambda m: -(m.confidence or 0.0))[:3]
         if top:
             named = ", ".join(f"{m.technique_id} {m.technique_name}" for m in top)
             lines.append(_item(f"Top published techniques: {named} _({ASSESSED})_"))
@@ -898,6 +900,9 @@ class MarkdownRenderer:
                 [_heading(6, "Observed behaviour", MEASURED), "", ctx.sandbox_sentence()]
             )
         lines = [_heading(6, "Observed behaviour", OBSERVED), ""]
+        if ctx.sandbox_statement:
+            # A recorded fixture is an earlier detonation, not this run's.
+            lines.extend([f"_{ctx.sandbox_statement}_", ""])
         lines.append(_environment_line(report))
         lines.append("")
         if dyn is None:
@@ -1731,6 +1736,12 @@ class MarkdownRenderer:
         verdict = run_summary.get("final_decision")
         if verdict:
             lines.append(_item(f"Verdict: {verdict}"))
+        # Said whenever no live sandbox observed the run: a reader of the
+        # report's prose has to be able to tell a detonation that did nothing
+        # from none at all.
+        sandbox = run_summary.get("sandbox")
+        if isinstance(sandbox, dict) and sandbox.get("statement"):
+            lines.append(_item(f"Sandbox: {sandbox['statement']}"))
         negotiation = run_summary.get("negotiation") or {}
         if negotiation:
             rounds = negotiation.get("rounds_completed")
@@ -1748,6 +1759,18 @@ class MarkdownRenderer:
         ungrounded = run_summary.get("sections_without_evidence")
         if ungrounded:
             lines.append(_item(f"Report sections with no evidence: {ungrounded}"))
+        # What the models spent, as the providers reported it, and the turns a
+        # fallback model answered because the first one failed as a provider.
+        spent = tokens_sentence(run_summary.get("tokens"))
+        if spent:
+            lines.append(_item(spent))
+        for agent, block in sorted((run_summary.get("models") or {}).items()):
+            for row in (block or {}).get("fallbacks") or []:
+                if isinstance(row, dict):
+                    lines.append(_item(f"Model fallback ({agent}): {row.get('reason', '')}"))
+        for row in run_summary.get("server_rests") or []:
+            if isinstance(row, dict):
+                lines.append(_item(server_rest_sentence(row)))
         corroboration = run_summary.get("corroboration") or {}
         if corroboration:
             from maljan.analysis.corroboration import (
@@ -1917,9 +1940,13 @@ class _Context:
             for row in [*(net.domains if net else []), *(net.ips if net else [])]
             + list(net.urls if net else [])
         )
+        # The pack's status entry is a sentence about the sandbox, not a call
+        # to one, and is read as the statement it is.
         called = any(
-            str(row.tool or "").startswith(_SANDBOX_TOOLS) for row in report.evidence_index
+            str(row.tool or "").startswith(_SANDBOX_TOOLS) and row.tool != _SANDBOX_STATUS_TOOL
+            for row in report.evidence_index
         )
+        self.sandbox_statement = _sandbox_statement(report)
         self.sandbox_state = (
             "observed"
             if observed
@@ -2036,8 +2063,15 @@ class _Context:
         return _truncate(self._defang(str(text or "")), _CELL_LIMIT)
 
     def sandbox_sentence(self) -> str:
-        """What the run knows about a sandbox, as one sentence, in the run's own voice."""
+        """What the run knows about a sandbox, as one sentence, in the run's own voice.
+
+        The run's own statement, where the pack wrote one, is the sentence: it
+        says whether no sandbox ran or the report is a recorded fixture rather
+        than a live detonation.
+        """
         why = f" ({self.sandbox_reason})" if self.sandbox_reason else ""
+        if self.sandbox_statement:
+            return self.sandbox_statement + self.partial_sentence()
         if self.sandbox_state == "observed":
             return "A sandbox recorded the sample's behaviour." + self.partial_sentence()
         if self.sandbox_state == "empty":
@@ -2070,6 +2104,20 @@ _SANDBOX_STATES = {
     "not_called": "not called",
     "unknown": "not recorded",
 }
+
+
+# The pack entry that states what the run's sandbox report is
+# (``pipeline.sandbox_status.STATUS_TOOL``), spelled here as the report reads it.
+_SANDBOX_STATUS_TOOL = "sandbox_status"
+
+
+def _sandbox_statement(report: MalwareReport) -> str:
+    """The run's own sentence on its sandbox report, or ``""`` when it wrote none."""
+    sandbox = (report.run_summary or {}).get("sandbox")
+    if isinstance(sandbox, dict) and str(sandbox.get("statement") or "").strip():
+        return _one_line(sandbox["statement"]).strip()
+    section = next((s for s in report.sections if s.key == "sandbox_status"), None)
+    return _one_line(section.text).strip() if section is not None and section.text else ""
 
 
 def _sandbox_reason(report: MalwareReport) -> str:
@@ -2714,8 +2762,17 @@ def _tactic_key(cell: CapabilityCell) -> tuple[int, str]:
     return order, cell.technique_id
 
 
-def _stated(value: float, producer: str) -> str:
-    """A stated confidence with its producer, or that the producer is not recorded."""
+# The unresolved codes that are about one technique and print beside its row.
+_TECHNIQUE_FINDING_CODES = ("attck.", "stix.credit_without_claim")
+
+
+def _stated(value: float | None, producer: str) -> str:
+    """A stated confidence with its producer, or that the producer is not recorded.
+
+    ``None`` is a technique nobody put a number on: "not given".
+    """
+    if value is None:
+        return "not given"
     if producer:
         return confidence_phrase(value, producer)
     return f"{confidence_word(value)}, {float(value):.2f}, producer not recorded"
@@ -2741,9 +2798,9 @@ def _attack_row(
         str(x) for x in [*claimed, *cell.contributing_layers] if x not in asserted + rule_sources
     ]
     source = ", ".join(dict.fromkeys(named)) or "-"
-    unstated = cell.confidence_stated is False or (
-        cell.confidence_stated is None and cell.confidence == 0.0
-    )
+    # No number, or the 0.0 a row stored before ``None`` existed carried for
+    # one: no producer states a confidence of zero for a technique.
+    unstated = cell.confidence is None or (cell.confidence == 0.0 and not cell.confidence_source)
     ruled = bool(asserted or rules)
     if unstated:
         # No producer put a number on it; the number the matrix carries is not
@@ -2761,11 +2818,15 @@ def _attack_row(
         status = "published" + (
             ", corroborated" if mapping is not None and mapping.is_corroborated else ""
         )
+    # The platform's unresolved findings about this technique, beside its
+    # row: the ATT&CK checks, and the judge crediting a source that never
+    # named it.
+    names_it = re.compile(rf"(?<![\w.]){re.escape(cell.technique_id)}(?![\w.]\w)")
     notes = [
         str(r.get("code"))
         for r in ctx.unresolved
-        if str(r.get("code", "")).startswith("attck.")
-        and cell.technique_id in str(r.get("message") or "")
+        if str(r.get("code", "")).startswith(_TECHNIQUE_FINDING_CODES)
+        and names_it.search(str(r.get("message") or ""))
     ]
     if notes:
         status += "; unresolved: " + ", ".join(dict.fromkeys(notes))

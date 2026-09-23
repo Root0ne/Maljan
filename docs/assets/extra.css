@@ -1,0 +1,20 @@
+/*
+ * Flat colours everywhere: no gradient background, and no state change that
+ * eases from one colour to another. The theme ships a handful of each — a
+ * fade toward the page background on the tabbed-content scroll arrows and on
+ * the extended-tooltip preview, and timed colour and background transitions
+ * on links, tabs and buttons — and this file turns them off rather than
+ * leaving them for the day a feature that uses them gets turned on. A hover
+ * state is a state: it arrives when the pointer does.
+ */
+
+* {
+  transition: none !important;
+}
+
+.md-typeset .tabbed-control--prev,
+.md-typeset .tabbed-control--next,
+[role="dialog"] > .md-tooltip2__inner:before,
+[role="dialog"] > .md-tooltip2__inner:after {
+  background: var(--md-default-bg-color) !important;
+}

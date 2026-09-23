@@ -55,6 +55,7 @@ from maljan.pipeline.events import (
     emit_stage_ended_at_cap,
     summarize_claims,
 )
+from maljan.pipeline.evidence_summary import collect as collect_technique_sources
 from maljan.pipeline.evidence_summary import summarise
 from maljan.pipeline.outcome import (
     VERDICT_READ_FALLBACK,
@@ -66,6 +67,8 @@ from maljan.pipeline.outcome import (
     verdict_reading,
 )
 from maljan.pipeline.run_state import render_run_state
+from maljan.pipeline.sandbox_status import NOT_RUN as SANDBOX_NOT_RUN
+from maljan.pipeline.sandbox_status import sandbox_status
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
 from maljan.pipeline.triage_pack import (
@@ -114,6 +117,21 @@ if TYPE_CHECKING:
 # finite, which it was not. See the call site for the 30-minute silence this
 # bounds.
 _NARRATIVE_TIMEOUT_SECONDS = 600
+
+
+def _restart_reporter(llm: Any, seconds: Any, container: Any) -> None:
+    """Start the reporter's model list for one round, against that round's clock. Never raises."""
+    try:
+        from maljan.llm.fallback import restart_models
+
+        share = getattr(getattr(container.config, "llm", None), "fallback_turn_share", None)
+        restart_models(
+            llm,
+            loop_seconds=float(seconds) if isinstance(seconds, int | float) else None,
+            share=float(share) if isinstance(share, int | float) else None,
+        )
+    except Exception as exc:  # noqa: BLE001 — a restart never costs the report
+        logger.debug("report_node: the reporter's model list was not restarted (%s).", exc)
 
 
 # What the run summary calls a judge annotation whose technique did not
@@ -170,8 +188,12 @@ def _note_export_findings(report: Any, rows: Sequence[tuple[str, str]]) -> None:
     validation = dict(summary.get("validation") or {})
     unresolved = [dict(row) for row in validation.get("unresolved") or []]
     by_code = dict(validation.get("by_code") or {})
-    for code, message in rows:
-        unresolved.append({"agent": JUDGE_AGENT_KEY, "code": code, "message": message})
+    for row in rows:
+        code, message = row
+        # Who wrote the object down: the judge for its own objects, the source
+        # of a network-block row for one of those.
+        agent = str(getattr(row, "by", "") or JUDGE_AGENT_KEY)
+        unresolved.append({"agent": agent, "code": code, "message": message})
         by_code[code] = by_code.get(code, 0) + 1
     validation["unresolved"] = unresolved
     validation["by_code"] = dict(sorted(by_code.items()))
@@ -288,6 +310,23 @@ def _sandbox_report_is_synthetic(state: AnalysisState) -> bool:
     """
     report = state.get("sandbox_report")
     return isinstance(report, dict) and bool(report.get("synthetic"))
+
+
+def sandbox_degradation_reason(report: Any) -> str | None:
+    """The degradation reason a run whose sandbox never ran carries, or ``None``.
+
+    No report at all keeps the reason it always had. The mock sandbox's empty
+    stand-in is the same absence, said with its cause; a report with contents,
+    a recorded fixture included, carries none.
+    """
+    if not isinstance(report, dict) or not report:
+        return "no sandbox report (dynamic detonation unavailable) — static-only evidence"
+    if sandbox_status(report).status == SANDBOX_NOT_RUN:
+        return (
+            "no sandbox ran (the mock sandbox has no recorded report for this sample) "
+            "— static-only evidence"
+        )
+    return None
 
 
 def _sandbox_fed(role: str) -> bool:
@@ -2084,6 +2123,10 @@ def make_stage_agent_node(
 
             if isr.claims:
                 report = isr.to_text_summary()
+            elif getattr(agent, "ended_out_of_room", False) is True:
+                # A second loop over the same material meets the same full
+                # window. The analyst has no prose; why is on its budget record.
+                report = ""
             elif fallback_text:
                 report = agent.safe_analyze(fallback_text)
             else:
@@ -3229,10 +3272,9 @@ def make_judge_node(
             # confidence shipped for a verdict formed without any dynamic
             # evidence. Verified live: the only operator signal was a single
             # "Sandbox submission failed" line in the worker log.
-            if not state.get("sandbox_report"):
-                _degradation_reasons.append(
-                    "no sandbox report (dynamic detonation unavailable) — static-only evidence"
-                )
+            _no_sandbox = sandbox_degradation_reason(state.get("sandbox_report"))
+            if _no_sandbox:
+                _degradation_reasons.append(_no_sandbox)
             # A container we accept but cannot open. A .docm reaches here
             # legitimately — macro documents are among the commonest Windows
             # carriers, so rejecting them would be wrong — but the only analysis
@@ -3349,6 +3391,13 @@ def make_judge_node(
                 ledger_ids=[entry.id for entry in _ledger],
                 facts_block=pack_text(state, container),
                 run_state=render_run_state(state),
+                # Who named which technique — the evidence summary as data —
+                # so a relationship crediting an agent with a technique it never
+                # named can be asked about.
+                technique_sources={
+                    tid: [source for source, _confidence in rows]
+                    for tid, rows in collect_technique_sources(isr_reports, _ledger).items()
+                },
             )
             # A verdict the judge never expressed as a bundle is the thinnest
             # answer this pipeline can produce — no severity, no reasoning the
@@ -3467,8 +3516,10 @@ def make_judge_node(
                         )
                     )
                     .set_token_usage(container.get_token_ledger().snapshot())
+                    .set_server_rests(container.server_rests())
                     .set_truncation(_truncation_snapshot(container))
                     .set_triage(_triage_facts)
+                    .set_sandbox(state.get("sandbox_report"))
                     .set_nudge(state.get("nudge_retry_modes") or {})
                     .set_budget(state.get("budget_records") or {})
                     .set_tool_latency(state.get("evidence_ledger") or [])
@@ -3676,6 +3727,10 @@ def make_judge_node(
                     "final_decision": decision,
                     "judge_report": "Analyzed negotiation history and expert reports.",
                     "stix_output": stix_output,
+                    # The map from each label the judge wrote to the id it was
+                    # published under, kept with the judge's own bundle.
+                    "stix_labels": dict(verdict.labels),
+                    "stix_written": verdict.written,
                     # Set when the judge's answer was not the verdict it was
                     # asked for — text, or nothing at all. Written rather than
                     # left alone: the verdict stage runs once today, and a
@@ -4033,6 +4088,13 @@ def make_report_node(
             narrative_agent = None
             no_summary_because = f"the report model was unavailable ({type(exc).__name__})"
 
+        # The narrative round is the reporter's first loop: its model list
+        # starts at its first model again, with turn deadlines measured against
+        # the narrative's own 600 s clock.
+        _restart_reporter(
+            getattr(narrative_agent, "llm", None), _NARRATIVE_TIMEOUT_SECONDS, container
+        )
+
         if narrative_agent is not None:
             try:
                 # Bounded, like every ReportComposer section below it. This
@@ -4098,6 +4160,14 @@ def make_report_node(
             logger.warning("report_node: ReportComposer unavailable (%s); skipping spine.", exc)
             composer = None
         if composer is not None:
+            # The composer sections are its second: the list starts over, and
+            # each turn is measured against one section's clock. A slow
+            # narrative that moved the list does not decide the sections.
+            _restart_reporter(
+                getattr(composer, "llm", None),
+                getattr(container.config.reporting, "composer_per_section_timeout", None),
+                container,
+            )
             try:
                 await composer.compose(
                     report,
@@ -4166,6 +4236,13 @@ def make_report_node(
                     # blanked: the second-source test reads the same record
                     # the judge's grounding check does.
                     corpus=container.get_evidence_corpus(),
+                    # Who named which technique, the record the judge's credit
+                    # question was asked against: a credit it kept that names
+                    # no source is left off the export's copy.
+                    technique_sources={
+                        tid: [source for source, _confidence in rows]
+                        for tid, rows in collect_technique_sources(isr_reports, _ledger).items()
+                    },
                 )
                 extended_dump = extended_bundle.model_dump(mode="json")
                 # What the judge said about a technique the checks rejected
@@ -4306,6 +4383,21 @@ def make_report_node(
             if _closed_summary:
                 _closed_summary["elapsed_seconds"] = _elapsed
                 report.run_summary = _closed_summary
+        # What the run spent, closed here for the same reason: the narrative
+        # round and the composer sections are model calls the judge's snapshot
+        # was taken before, so the ledger is read again after the last model
+        # call of the run.
+        if state.get("run_summary"):
+            from maljan.analysis.run_summary import spend_blocks
+
+            _ledger_of = getattr(container, "get_token_ledger", None)
+            _spent = spend_blocks(_ledger_of().snapshot()) if callable(_ledger_of) else {}
+            if _spent:
+                _state_summary.update(_spent)
+                _with_spend = dict(report.run_summary or {})
+                if _with_spend:
+                    _with_spend.update(_spent)
+                    report.run_summary = _with_spend
         # The markdown is rendered once every field it reads is final: the
         # validation block, the corroboration's published marks, the stage
         # rollup and the elapsed time are all written above this line, and so

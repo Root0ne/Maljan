@@ -36,6 +36,7 @@ from maljan.agents._indicator_denylists import (
     malformed_hash_in,
     whole_value_in,
 )
+from maljan.analysis.technique_ids import attack_reference_id
 from maljan.core.logger import logger
 from maljan.extractors.network_extractor import (
     address_is_publishable,
@@ -56,18 +57,28 @@ from maljan.reporting.models import (
 )
 from maljan.schemas.judgement import indicator_type_for
 from maljan.schemas.stix_models import (
+    ATTACK_PATTERN_NAMESPACE,
     AttackPattern,
     Bundle,
+    File,
     Identity,
     Indicator,
     Malware,
     Note,
     ObservedData,
+    Process,
     Relationship,
     Report,
+    attack_pattern_id,
+    crediting_only,
     get_utcnow,
+    produced_by,
 )
-from maljan.schemas.stix_pattern import read_comparisons
+from maljan.schemas.stix_pattern import (
+    object_path_problems,
+    read_comparisons,
+    unknown_object_types,
+)
 
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
@@ -90,11 +101,26 @@ UNPUBLISHABLE_ENDPOINT_CODE = "stix.unpublishable_endpoint"
 # the same decision, and ``apps/web/src/lib/validationRows.ts`` holds the list
 # it reads them from.
 LEGACY_UNPUBLISHABLE_CODES = ("stix.unpublishable_url", "stix.unpublishable_domain")
+# A ``created_by_ref`` naming an identity the bundle does not hold, which the
+# export replaced with this platform's identity.
+UNPUBLISHABLE_PRODUCER_CODE = "stix.unpublishable_producer"
+# A judge credit naming an agent that did not name the technique, which the
+# judge was asked about (``stix.credit_without_claim``) and kept.
+UNPUBLISHABLE_CREDIT_CODE = "stix.unpublishable_credit"
+# A judge object without a property the standard requires of it — a malware
+# object with no ``is_family``, a file with neither ``hashes`` nor ``name`` —
+# that the judge was asked about and kept absent. Published, the bundle is one a
+# consumer may refuse; filled in, it says something the judge did not.
+UNPUBLISHABLE_OBJECT_CODE = "stix.unpublishable_object"
 # An indicator over something that is not an endpoint: a mailbox that is not
 # one, a file name that names a directory or a root.
 UNPUBLISHABLE_ARTEFACT_CODE = "stix.unpublishable_artefact"
 # A digest literal that is not a digest of the algorithm it is written under.
 MALFORMED_HASH_CODE = "stix.malformed_hash"
+# A pattern over an object type STIX does not have, which the judge was asked
+# about under ``stix.unknown_observable_type`` and kept. This row is the
+# export's decision rather than the judge's answer, so it has a code of its own.
+UNPUBLISHABLE_PATTERN_CODE = "stix.unpublishable_pattern"
 
 # The sources whose rows are worth a recorded decline. Something a sandbox
 # watched, an agent wrote down or the judge asserted is an observation, and a
@@ -151,9 +177,11 @@ _UNREADABLE_OPERATORS = ("matches", "like", "issubset", "issuperset")
 
 # The object paths whose value this export can ask a validity question about:
 # the four endpoints a consumer would act on, the mailbox and the file name. A
-# pattern over anything else is carried as the judge wrote it — there is no
-# true question to ask of it, and inventing one would decline an object for a
-# reason that is not so.
+# pattern over any other STIX type is carried as the judge wrote it — there is
+# no true question to ask of it, and inventing one would decline an object for
+# a reason that is not so. A pattern over a type STIX does not have is a
+# different case and is declined before this table is read: ``ipv-addr`` is
+# not an unasked path, it is an address the endpoint question never saw.
 _DIRECT_PATHS = {
     "url:value": "url",
     "domain-name:value": "domain-name",
@@ -265,6 +293,24 @@ def _within_the_indicator_cap(
     return [obj for obj in objects if getattr(obj, "type", "") != "indicator" or obj.id in kept]
 
 
+class Declined(tuple[str, str]):
+    """One thing the export left out: ``(code, sentence)``, and who wrote it down.
+
+    A pair, so every reader that unpacks ``code, why`` still does. ``by`` is the
+    producer of the object that was declined: the judge for the judge's own
+    objects, and for a row of the report's network block the source that
+    recorded it — a sandbox, an analyst. Those rows used to be filed under the
+    judge, which wrote none of them.
+    """
+
+    by: str
+
+    def __new__(cls, code: str, why: str, *, by: str | None = "judge") -> Declined:
+        row = super().__new__(cls, (code, why))
+        row.by = str(by or "judge")
+        return row
+
+
 def impossible_host_sentence(value: str, whose: str) -> str:
     """The recorded sentence for a URL no host could ever answer for."""
     return (
@@ -320,6 +366,90 @@ def malformed_hash_sentence(algorithm: str, value: str) -> str:
         f"the {named} indicator for {safe_finding_value(value)!r} is not in the exported "
         f"bundle: {named} is {length}, and a consumer matching on it will never match this "
         f"value. It is unchanged in the judge's own bundle."
+    )
+
+
+def unknown_observable_type_sentence(pattern: str, types: list[str]) -> str:
+    """The recorded sentence for a pattern over a type STIX does not have."""
+    named = ", ".join(repr(safe_finding_value(t)) for t in types)
+    return (
+        f"the indicator {safe_finding_value(pattern)!r} is not in the exported bundle: it "
+        f"compares {named}, which is not a STIX Cyber-observable type, so no consumer holds "
+        "an object it could match and this export could not ask whether it may carry the "
+        "value. It is unchanged in the judge's own bundle."
+    )
+
+
+def unknown_object_path_sentence(pattern: str, problems: list[str]) -> str:
+    """The recorded sentence for a pattern over a path its type does not have."""
+    return (
+        f"the indicator {safe_finding_value(pattern)!r} is not in the exported bundle: "
+        f"{safe_finding_value('; '.join(problems))}, so the pattern matches nothing a consumer "
+        "holds. It is unchanged in the judge's own bundle."
+    )
+
+
+def _without_unconfirmed_credit(obj: Any, credit: Any) -> tuple[Any, Declined]:
+    """A copy of a judge relationship carrying only the credits a source stands behind."""
+    from maljan.pipeline.validation import credited_agents
+
+    kept = [name for name in credited_agents(obj) if name not in credit.uncredited]
+    copy = crediting_only(obj, kept)
+    names = ", ".join(repr(safe_finding_value(n)) for n in credit.uncredited)
+    return copy, Declined(
+        UNPUBLISHABLE_CREDIT_CODE,
+        f"the credit to {names} for {safe_finding_value(credit.technique)} is not in the "
+        "exported bundle: no source by that name named the technique in this run, and the "
+        "judge kept the credit when asked. It is unchanged in the judge's own bundle.",
+    )
+
+
+def _missing_what_the_standard_requires(obj: Any) -> str:
+    """The recorded sentence for a judge object the standard refuses as written, or ``""``."""
+    kind = str(getattr(obj, "type", "") or "")
+    label = safe_finding_value(getattr(obj, "name", "") or getattr(obj, "id", ""))
+    if kind == "malware" and getattr(obj, "is_family", None) is None:
+        return (
+            f"the malware object {label!r} is not in the exported bundle: it does not say "
+            "is_family, which STIX requires, and the judge kept it absent when asked. The "
+            "export stands the platform's own sample object in for it, and the judge's "
+            "relationships that named it move onto that object unchanged. It is unchanged "
+            "in the judge's own bundle."
+        )
+    if kind == "file" and not getattr(obj, "hashes", None) and not getattr(obj, "name", None):
+        return (
+            f"the file {label!r} is not in the exported bundle: it has neither hashes nor "
+            "name, and STIX needs one of them to say which file it is. It is unchanged in the "
+            "judge's own bundle."
+        )
+    return ""
+
+
+def _names_any(obj: Any, ids: set[str]) -> bool:
+    """Whether a relationship names one of ``ids`` at either end."""
+    if not ids or getattr(obj, "type", "") != "relationship":
+        return False
+    return str(getattr(obj, "source_ref", "")) in ids or str(getattr(obj, "target_ref", "")) in ids
+
+
+def _onto(edge: Any, stood_in: set[str], stand_in: str) -> Any:
+    """A copy of a judge relationship naming the stand-in where it named a declined object."""
+    update = {
+        key: stand_in
+        for key in ("source_ref", "target_ref")
+        if str(getattr(edge, key, "")) in stood_in
+    }
+    return edge.model_copy(update=update)
+
+
+def replaced_producer_sentence(obj: Any, named: str) -> str:
+    """The recorded sentence for a producer the bundle does not hold, replaced."""
+    kind = safe_finding_value(getattr(obj, "type", "") or "object")
+    label = safe_finding_value(getattr(obj, "name", "") or getattr(obj, "id", ""))
+    return (
+        f"the {kind} {label!r} names {safe_finding_value(named)!r} as its producer, an "
+        "identity this bundle does not hold, so the export names this platform's identity "
+        "instead. It is unchanged in the judge's own bundle."
     )
 
 
@@ -465,6 +595,15 @@ def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
     every indicator the judge writes.
     """
     pattern = indicator.pattern or ""
+    unknown = unknown_object_types(pattern)
+    if unknown:
+        return (
+            UNPUBLISHABLE_PATTERN_CODE,
+            unknown_observable_type_sentence(pattern, unknown),
+        )
+    wrong_paths = object_path_problems(pattern)
+    if wrong_paths:
+        return (UNPUBLISHABLE_PATTERN_CODE, unknown_object_path_sentence(pattern, wrong_paths))
     malformed = malformed_hash_in(pattern)
     if malformed is not None:
         algorithm, literal = malformed
@@ -515,6 +654,7 @@ class ExtendedSTIXRenderer:
         *,
         ledger: Any | None = None,
         corpus: Any = None,
+        technique_sources: Any = None,
     ) -> Bundle:
         """Render the extended bundle.
 
@@ -560,12 +700,41 @@ class ExtendedSTIXRenderer:
         # report's own linter said so.
         linked: set[str] = set()
         carried: list[Indicator] = []
+        # The judge's malware objects the export declines for a property the
+        # standard requires, and the judge's relationships that name them. The
+        # platform's own sample object stands in for such an object, and the
+        # relationships move onto it unchanged — confidence, basis and credits
+        # as the judge wrote them — so the export's malware object uses what the
+        # judge said the sample uses and the judge's number is published.
+        stood_in: set[str] = set()
+        awaiting_stand_in: list[Any] = []
+        if base_bundle is not None and not benign:
+            stood_in = {
+                str(obj.id)
+                for obj in base_bundle.objects
+                if getattr(obj, "type", "") == "malware"
+                and _missing_what_the_standard_requires(obj)
+            }
         if base_bundle is not None:
             self._normalize_judge_timestamps(base_bundle.objects)
             remap = _technique_remap(report, base_bundle)
             gone = _rejected_pattern_ids(base_bundle, remap)
-            for obj in base_bundle.objects:
+            # A credit the judge was asked about and kept, naming an agent no
+            # source of that name stands behind. The judge's own bundle keeps
+            # it; the export's copy of the relationship does not carry it, so
+            # no surface prints an agent as having named a technique it never
+            # named.
+            from maljan.pipeline.validation import unconfirmed_credits
+
+            unconfirmed = {
+                credit.index: credit
+                for credit in unconfirmed_credits(base_bundle, technique_sources)
+            }
+            for position, obj in enumerate(base_bundle.objects):
                 kind = getattr(obj, "type", "")
+                if position in unconfirmed:
+                    obj, row = _without_unconfirmed_credit(obj, unconfirmed[position])
+                    self.declined.append(row)
                 if kind == "attack-pattern":
                     continue
                 if kind == "malware" and benign:
@@ -580,11 +749,21 @@ class ExtendedSTIXRenderer:
                         )
                     )
                     continue
+                incomplete = _missing_what_the_standard_requires(obj)
+                if incomplete:
+                    self.declined.append(Declined(UNPUBLISHABLE_OBJECT_CODE, incomplete))
+                    continue
                 if _points_at(obj, gone):
                     continue
                 moved, technique = _relinked(obj, remap)
                 if technique:
                     linked.add(technique)
+                if _names_any(moved, stood_in):
+                    # The judge's edge from a malware object the export
+                    # declined: it moves to the platform's stand-in, unchanged,
+                    # once that object exists (below).
+                    awaiting_stand_in.append(moved)
+                    continue
                 if isinstance(moved, Indicator):
                     declined = _judge_indicator_problem(moved)
                     if declined:
@@ -595,10 +774,14 @@ class ExtendedSTIXRenderer:
                 objects.append(moved)
             self.unlinked = _unlinked_techniques(base_bundle, gone)
 
-        # 2) Identity SDO for Maljan itself.
+        # 2) Identity SDO for Maljan itself. ``system`` is STIX's word for a
+        #    producer that is software; ``software`` is not in the vocabulary.
+        #    One id on every export, so a consumer holding several reads one
+        #    producer rather than one per run.
         identity = Identity(
+            id=PRODUCER_IDENTITY_ID,
             name="Maljan",
-            identity_class="software",
+            identity_class="system",
             description="Automated multi-agent malware analysis pipeline",
         )
         objects.append(identity)
@@ -618,6 +801,8 @@ class ExtendedSTIXRenderer:
             )
             objects.append(malware_obj)
             malware_id = malware_obj.id
+        if malware_id is not None:
+            objects.extend(_onto(edge, stood_in, malware_id) for edge in awaiting_stand_in)
 
         # 3.5) One attack-pattern per published technique, with a stable id and
         #      an ATT&CK reference, related to the malware object. The judge's
@@ -701,9 +886,10 @@ class ExtendedSTIXRenderer:
                 # forty of them a run buries the findings a reader can act on.
                 if _observed(url.source) and not host_is_public(url_host(url.url)):
                     self.declined.append(
-                        (
+                        Declined(
                             UNPUBLISHABLE_ENDPOINT_CODE,
                             impossible_host_sentence(url.url, "the report's network block"),
+                            by=url.source,
                         )
                     )
             for domain in report.network.domains[:40]:
@@ -717,9 +903,10 @@ class ExtendedSTIXRenderer:
                 # back by the corroboration rule, which is the rule working.
                 if _observed(domain.source) and not host_is_public(domain.fqdn):
                     self.declined.append(
-                        (
+                        Declined(
                             UNPUBLISHABLE_ENDPOINT_CODE,
                             unpublishable_domain_sentence(domain.fqdn),
+                            by=domain.source,
                         )
                     )
 
@@ -779,16 +966,22 @@ class ExtendedSTIXRenderer:
             _queue(carried_indicator, _indicator_band(carried_indicator.pattern), "judge")
 
         # 7) ObservedData for the process tree roots.
+        #    The processes and their images are objects of the bundle, named by
+        #    ``object_refs``. The sandbox block carries no observation time, so
+        #    both ends are the time the report was built — the latest the
+        #    observation can have been — and one run is one observation.
         if report.dynamic is not None and report.dynamic.process_tree:
-            obs_objects = _processes_to_observed(report.dynamic.process_tree)
-            if obs_objects:
-                observed = ObservedData(
-                    first_observed=report.generated_at,
-                    last_observed=report.generated_at,
-                    number_observed=len(obs_objects),
-                    objects=obs_objects,
+            observables = _processes_to_observables(report.dynamic.process_tree)
+            if observables:
+                objects.extend(observables)
+                objects.append(
+                    ObservedData(
+                        first_observed=report.generated_at,
+                        last_observed=report.generated_at,
+                        number_observed=1,
+                        object_refs=[obs.id for obs in observables],
+                    )
                 )
-                objects.append(observed)
 
         # 8) Note wraps the executive summary; abstract is the verdict.
         #
@@ -837,7 +1030,9 @@ class ExtendedSTIXRenderer:
                         )
                     ),
                     published=report.generated_at,
-                    report_types=["malware-analysis"],
+                    # A report type says what the report is about; the
+                    # object type ``malware-analysis`` is not one of them.
+                    report_types=["malware"],
                     object_refs=refs,
                 )
             )
@@ -859,34 +1054,31 @@ class ExtendedSTIXRenderer:
 
         objects = enforce_bundle_integrity(objects, ledger=ledger)
         capped = _within_the_indicator_cap(objects, order, ledger=ledger)
-        if capped is objects:
-            return Bundle(objects=objects)
-        # Only what the cap orphaned is left to sweep, and it is the cap's
-        # doing rather than a defect of anybody's bundle — so it is counted
-        # under a reason of its own. Counted it must be: the pass used to run
-        # here with no ledger at all, so this sweep's losses appeared in no
-        # total. The cap's own removals are counted beside them, under
-        # ``indicator_cap_removed``, so every object that left this bundle
-        # left under a name.
-        return Bundle(
-            objects=enforce_bundle_integrity(capped, ledger=ledger, dropped_as=CAP_ORPHAN_REASON)
-        )
+        if capped is not objects:
+            # Only what the cap orphaned is left to sweep, and it is the cap's
+            # doing rather than a defect of anybody's bundle — so it is counted
+            # under a reason of its own. Counted it must be: the pass used to
+            # run here with no ledger at all, so this sweep's losses appeared in
+            # no total. The cap's own removals are counted beside them, under
+            # ``indicator_cap_removed``, so every object that left this bundle
+            # left under a name.
+            objects = enforce_bundle_integrity(capped, ledger=ledger, dropped_as=CAP_ORPHAN_REASON)
+        return Bundle(objects=_produced_by(objects, identity.id, self.declined))
 
     @staticmethod
     def _normalize_judge_timestamps(objects: list[Any]) -> None:
-        """Normalize the judge's LLM-emitted SDOs to authoritative values.
+        """Stamp the judge's SDOs with the time the platform published them.
 
-        The judge Bundle is emitted by the LLM, which copies STIX documentation
-        examples verbatim. Two fields are never authoritative and are fixed here:
+        ``created`` and ``modified`` are the platform's bookkeeping — when this
+        export made the object — and the prompt tells the judge to leave them
+        out; a model that writes them copies the documentation's
+        ``2023-01-01T00:00:00Z``. They are set to the render time, matching
+        every renderer-produced SDO.
 
-        * ``created``/``modified`` — land on the placeholder
-          ``2023-01-01T00:00:00Z`` epoch instead of the analysis
-          time; a downstream CTI consumer would trust that bogus date. Overwrite
-          with the render time (matching every renderer-produced SDO).
-        * ``is_family`` on Malware SDOs — the LLM often
-          copies ``is_family: true`` from the docs, but Maljan analyses a single
-          specimen, so this must be ``false``. STIX ``is_family=true`` asserts
-          the object represents a malware *family*, not one sample.
+        Nothing the judge states is touched. ``is_family`` used to be forced to
+        ``false`` here, on the reasoning that one sample is not a family; whether
+        the object stands for the family is the judge's statement, and it is
+        published as written.
 
         Object ids are left untouched so intra-bundle relationship refs stay
         valid.
@@ -897,8 +1089,6 @@ class ExtendedSTIXRenderer:
                 obj.created = now
             if hasattr(obj, "modified"):
                 obj.modified = now
-            if isinstance(obj, Malware) and getattr(obj, "is_family", False):
-                obj.is_family = False
 
     @staticmethod
     def _find_malware_id(objects: list[Any]) -> str | None:
@@ -911,16 +1101,50 @@ class ExtendedSTIXRenderer:
         return None
 
 
-# The namespace the technique objects' ids are derived in. A UUIDv5 over the
-# technique id, so the same technique is the same object across exports of the
-# same run and across runs — and never a UUID copied out of the STIX
-# documentation, which is what the judge's own objects sometimes carried.
-_ATTACK_PATTERN_NAMESPACE = uuid.UUID("2f0b4c10-6f7e-5b6a-9d3b-1f6a5c7e8d90")
+def _produced_by(
+    objects: list[Any], producer: str, declined: list[tuple[str, str]] | None = None
+) -> list[Any]:
+    """Every object naming the identity that produced it, as a copy.
+
+    A copy, because the judge's objects are the judge's own bundle's too, and
+    that bundle is kept as the run's record (``analysis_reports.judge_stix_bundle``,
+    served at ``/reports/{id}/stix?source=judge``). An object that already names a
+    producer in this bundle keeps the one it names; one naming an identity the
+    bundle does not hold names nothing, the way a relationship pointing at
+    nothing does, and is given this one — recorded in ``declined``, because the
+    export then says something about the object that its writer did not.
+    """
+    present = {getattr(obj, "id", None) for obj in objects} - {None}
+    out: list[Any] = []
+    for obj in objects:
+        named = getattr(obj, "created_by_ref", None)
+        if getattr(obj, "id", None) == producer or named in present:
+            out.append(obj)
+            continue
+        if "created_by_ref" not in type(obj).model_fields:
+            out.append(obj)
+            continue
+        if named and declined is not None:
+            declined.append(
+                Declined(UNPUBLISHABLE_PRODUCER_CODE, replaced_producer_sentence(obj, str(named)))
+            )
+        out.append(produced_by(obj, producer))
+    return out
+
+
+# The namespace the technique objects' ids are derived in: one, in
+# ``schemas.stix_models``, for the export and for the judge's own bundle.
+_ATTACK_PATTERN_NAMESPACE = ATTACK_PATTERN_NAMESPACE
+
+# This platform's identity, the producer every exported object names. Derived
+# in the same namespace, so it is the same object in every export and a
+# consumer holding many of them holds one producer.
+PRODUCER_IDENTITY_ID = f"identity--{uuid.uuid5(_ATTACK_PATTERN_NAMESPACE, 'maljan')}"
 
 
 def _pattern_id_for(technique_id: str) -> str:
     """The published object id of one technique. Same id every time."""
-    return f"attack-pattern--{uuid.uuid5(_ATTACK_PATTERN_NAMESPACE, technique_id)}"
+    return attack_pattern_id(technique_id)
 
 
 def _published_ids(report: MalwareReport) -> dict[str, str]:
@@ -935,9 +1159,9 @@ def _published_ids(report: MalwareReport) -> dict[str, str]:
 
 def _declared_technique(obj: Any) -> str:
     """The ATT&CK id an attack-pattern declares, from its reference or its name."""
-    for ref in getattr(obj, "external_references", None) or []:
-        if isinstance(ref, dict) and str(ref.get("external_id") or "").strip():
-            return str(ref["external_id"]).strip().upper()
+    declared = attack_reference_id(obj)
+    if declared:
+        return declared
     name = str(getattr(obj, "name", "") or "").strip().upper()
     first = name.split()[0].rstrip(":") if name else ""
     return first if first.startswith("T") else ""
@@ -1660,24 +1884,34 @@ def _host_reputation(report: Any, host: str) -> dict[str, Any] | None:
     return None
 
 
-def _processes_to_observed(roots: list[ProcessNode]) -> dict[str, dict[str, Any]]:
-    """Flatten the process tree to a STIX 2.1 ``observed-data`` objects dict."""
-    out: dict[str, dict[str, Any]] = {}
-    counter = 0
+def _processes_to_observables(roots: list[ProcessNode]) -> list[File | Process]:
+    """The process tree as STIX 2.1 observables: processes, their images, their children.
 
-    def _walk(node: ProcessNode) -> None:
-        nonlocal counter
-        entry: dict[str, Any] = {
-            "type": "process",
-            "pid": node.pid,
-            "name": node.name,
-        }
-        if node.command_line:
-            entry["command_line"] = node.command_line
-        out[str(counter)] = entry
-        counter += 1
-        for child in node.children:
-            _walk(child)
+    A process's name is the file it ran from — STIX 2.1 has no ``name`` on a
+    process — so it becomes a ``file`` observable the process names by
+    ``image_ref``, and one image run twice is one file. The tree is kept by
+    ``child_refs``.
+    """
+    out: list[File | Process] = []
+    images: dict[str, File] = {}
+
+    def _walk(node: ProcessNode) -> str:
+        children = [_walk(child) for child in node.children]
+        image_ref = None
+        if node.name:
+            image = images.get(node.name)
+            if image is None:
+                image = images[node.name] = File(name=node.name)
+                out.append(image)
+            image_ref = image.id
+        process = Process(
+            pid=node.pid,
+            command_line=node.command_line or None,
+            image_ref=image_ref,
+            child_refs=children,
+        )
+        out.append(process)
+        return process.id
 
     for root in roots[:20]:  # cap to keep ObservedData reasonable
         _walk(root)

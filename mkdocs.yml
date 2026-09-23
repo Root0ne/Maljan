@@ -1,0 +1,71 @@
+site_name: Maljan
+site_description: Multi-Agent Malware Analysis Framework
+site_url: https://root0ne.github.io/Maljan/
+repo_name: Root0ne/Maljan
+repo_url: https://github.com/Root0ne/Maljan
+edit_uri: edit/dev/docs/
+
+docs_dir: docs
+
+nav:
+  - Overview: README.md
+  - Getting started: getting-started.md
+  - Architecture: architecture.md
+  - Configuration: configuration.md
+  - Console: console.md
+  - API: api.md
+  - Deployment: deployment.md
+  - Operations: operations.md
+  - Security: security.md
+  - Development: development.md
+  - Paper: paper.md
+
+theme:
+  name: material
+  language: en
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    # Flat, named Material swatches only — no custom gradients.
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.top
+    - navigation.footer
+    - navigation.indexes
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.action.edit
+    - content.code.copy
+
+extra_css:
+  - assets/extra.css
+
+plugins:
+  - search
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - tables
+  - fenced_code
+  - pymdownx.highlight
+  - pymdownx.superfences

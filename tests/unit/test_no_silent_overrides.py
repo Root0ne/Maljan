@@ -36,6 +36,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 SRC = Path(__file__).resolve().parents[2] / "src" / "maljan"
 
 # The names that carry a decision. ``verdict`` is the one the whole run is
@@ -43,7 +45,31 @@ SRC = Path(__file__).resolve().parents[2] / "src" / "maljan"
 # may write it, which is how a signed utility came to be published as malware
 # over a judge that had called it benign.
 GUARDED = frozenset(
-    {"technique_id", "confidence", "severity", "malware_category", "family", "verdict"}
+    {
+        "technique_id",
+        "confidence",
+        "severity",
+        "malware_category",
+        "family",
+        "verdict",
+        # What the judge writes into its STIX objects. The annotation on a
+        # relationship is the judge's own number, basis and credit; a pattern,
+        # its indicator types and a relationship's type are what the judge
+        # states about the sample; and the producer an object names is a
+        # statement too. The export may decline one with a record, through the
+        # copy helpers in ``schemas/stix_models``; nothing writes one.
+        "x_maljan_confidence",
+        "x_maljan_contributing_agents",
+        "x_maljan_evidence_basis",
+        "pattern",
+        "indicator_types",
+        "created_by_ref",
+        "relationship_type",
+        # Whether a malware object stands for the family or for this one
+        # sample. The renderer used to force a judge's ``true`` to ``false``;
+        # where an instance-level object is needed, the platform mints its own.
+        "is_family",
+    }
 )
 
 # Where a write to one of them is the answer rather than an override of one.
@@ -91,6 +117,45 @@ def _setattr_target(node: ast.Call) -> str | None:
     if isinstance(key, ast.Constant) and key.value in GUARDED:
         return str(key.value)
     return None
+
+
+def _model_copy_targets(node: ast.Call) -> list[str]:
+    """The guarded names a ``obj.model_copy(update={...})`` call writes.
+
+    A copy with a guarded key changed is a write like any other: the object it
+    returns stands in for the one that was said. A computed update (a name, a
+    comprehension) is not read — there is nothing to read — the same rule as a
+    computed key.
+    """
+    func = node.func
+    if getattr(func, "attr", "") != "model_copy":
+        return []
+    for keyword in node.keywords:
+        if keyword.arg != "update" or not isinstance(keyword.value, ast.Dict):
+            continue
+        return [
+            str(key.value)
+            for key, value in zip(keyword.value.keys, keyword.value.values, strict=True)
+            if isinstance(key, ast.Constant)
+            and key.value in GUARDED
+            and not _keeps_what_was_said(value, str(key.value))
+        ]
+    return []
+
+
+def _keeps_what_was_said(value: ast.expr, name: str) -> bool:
+    """``update={"technique_id": rec.technique_id or found}`` — a fill, not an override.
+
+    The object's own value wins whenever it has one, so nothing it said is
+    replaced; only an absence is filled, which is the "move a model's own
+    content to where the schema wants it" act. Anything else is a write.
+    """
+    return (
+        isinstance(value, ast.BoolOp)
+        and isinstance(value.op, ast.Or)
+        and isinstance(value.values[0], ast.Attribute)
+        and value.values[0].attr == name
+    )
 
 
 def _constructor_lines(tree: ast.AST) -> set[int]:
@@ -142,6 +207,8 @@ def offences(source: str, label: str) -> list[str]:
             attribute = _setattr_target(node)
             if attribute:
                 found.append(f"{label}:{node.lineno}: setattr(..., {attribute!r}, ...)")
+            for name in _model_copy_targets(node):
+                found.append(f"{label}:{node.lineno}: model_copy(update={{{name!r}: ...}})")
             continue
 
         for target in targets:
@@ -152,6 +219,47 @@ def offences(source: str, label: str) -> list[str]:
             found.append(f"{label}:{node.lineno}: assignment to {how} {name!r}")
 
     return found
+
+
+# The export's two guarded copies, which live in ``schemas/stix_models.py``.
+# The ``schemas/`` exemption is for a model constructing its own fields; these
+# two copy an object the judge wrote with one guarded field changed, so they are
+# named here with the reason each is allowed, and the test below holds them to
+# it rather than letting their placement pass them.
+EXPORT_DECLINE_COPIES: dict[str, str] = {
+    "produced_by": (
+        "names this platform's identity on the export's copy of an object that named no "
+        "producer the bundle holds; a replaced one is recorded as stix.unpublishable_producer"
+    ),
+    "crediting_only": (
+        "leaves off the export's copy a credit the judge kept after stix.credit_without_claim; "
+        "recorded as stix.unpublishable_credit, and the judge's own bundle keeps it"
+    ),
+}
+
+
+def _function_at(tree: ast.AST, line: int) -> str:
+    """The name of the innermost function holding ``line``, or ``""``."""
+    found = ""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            end = getattr(node, "end_lineno", node.lineno)
+            if node.lineno <= line <= end:
+                found = node.name
+    return found
+
+
+def test_the_stix_models_guarded_writes_are_the_named_export_copies_only():
+    """Scanned despite the ``schemas/`` exemption, and each write accounted for."""
+    path = SRC / "schemas" / "stix_models.py"
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    writers = {
+        _function_at(tree, int(found.split(":")[1]))
+        for found in offences(source, "schemas/stix_models.py")
+    }
+
+    assert writers == set(EXPORT_DECLINE_COPIES), writers
 
 
 def test_nothing_outside_schemas_tools_and_validation_overrides_a_decision():
@@ -211,6 +319,31 @@ class TestTheScannerWouldActuallyCatchOne:
 
     def test_a_computed_key_is_not_caught(self):
         assert offences("row[name] = value\n", "probe.py") == []
+
+    def test_a_model_copy_that_changes_a_decision_is_caught(self):
+        source = "moved = edge.model_copy(update={'x_maljan_confidence': 0.5})\n"
+
+        assert offences(source, "probe.py") == [
+            "probe.py:1: model_copy(update={'x_maljan_confidence': ...})"
+        ]
+
+    def test_a_model_copy_that_only_fills_an_absence_is_not_caught(self):
+        source = "row = rec.model_copy(update={'technique_id': rec.technique_id or found})\n"
+
+        assert offences(source, "probe.py") == []
+
+    def test_a_model_copy_of_a_reference_is_not_caught(self):
+        assert offences("moved = edge.model_copy(update={'source_ref': new})\n", "probe.py") == []
+
+    def test_forcing_is_family_is_caught(self):
+        source = "if isinstance(obj, Malware) and obj.is_family:\n    obj.is_family = False\n"
+
+        assert offences(source, "probe.py") == ["probe.py:2: assignment to attribute 'is_family'"]
+
+    def test_a_pattern_write_is_caught(self):
+        assert offences("indicator.pattern = fixed\n", "probe.py") == [
+            "probe.py:1: assignment to attribute 'pattern'"
+        ]
 
     def test_a_constructor_passthrough_is_exempt(self):
         source = "class A:\n    def __init__(self, severity):\n        self.severity = severity\n"
@@ -712,3 +845,106 @@ class TestTheProseScannerWouldCatchOne:
 
     def test_a_constructor_argument_is_not_a_write(self):
         assert prose_writes("MalwareReport(executive_summary='')\n", "p.py") == []
+
+
+class TestARejectedAnswerIsNeverAskedOfAnotherModel:
+    """An agent's fallback models answer for a provider, never for a validator.
+
+    The feedback turn a rejected answer gets goes to the model that wrote the
+    answer. Moving it to the next model on the agent's list would be the
+    platform picking the answer it liked better, which is the override every
+    other class here forbids — so the one thing that moves a turn is an
+    exception a provider raised, and a validator raises nothing.
+    """
+
+    @staticmethod
+    def _models() -> tuple[Any, list[Any]]:
+        from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+        from maljan.llm.fallback import FallbackChatModel
+
+        first = FakeListChatModel(responses=["T9999 is what it does", "T1055 is what it does"])
+        second = FakeListChatModel(responses=["the other model's answer"])
+        chain = FallbackChatModel(
+            models=[first, second], labels=["openai/first", "ollama/second"], agent="static"
+        )
+        return chain, [first, second]
+
+    def test_the_feedback_turn_goes_back_to_the_model_that_answered(self) -> None:
+        from langchain_core.messages import HumanMessage
+
+        from maljan.llm.fallback import turn_model
+        from maljan.pipeline.validation import Violation, retry_with_feedback_sync
+
+        chain, (first, second) = self._models()
+        asked: list[str] = []
+
+        def run(turns: list[Any]) -> Any:
+            answer = chain.invoke(turns)
+            asked.append(turn_model(answer)[0])
+            return answer
+
+        def unknown_id(answer: Any) -> list[Violation]:
+            text = str(answer.content)
+            return (
+                [Violation("technique.unknown", "T9999 is not in the catalogue")]
+                if "T9999" in text
+                else []
+            )
+
+        parsed, left, retries = retry_with_feedback_sync(
+            run,
+            [HumanMessage(content="what does it do")],
+            [unknown_id],
+            parse=lambda answer: answer,
+        )
+
+        assert retries == 1 and left == []
+        assert asked == ["openai/first", "openai/first"]
+        assert parsed.content == "T1055 is what it does"
+        assert second.i == 0, "the fallback model was asked for an answer the first one gave"
+
+    def test_a_content_error_the_first_model_raises_is_never_asked_of_the_next(self) -> None:
+        """The half of the rule an exception can break: content is not a provider failure.
+
+        A parse error and a validation error are about what the model wrote.
+        Moving the turn to the next model on either would be the platform
+        asking for an answer it liked better, so the error reaches the caller
+        — the loop that feeds it back — and the next model is never asked.
+        """
+        from langchain_core.exceptions import OutputParserException
+        from langchain_core.language_models.chat_models import BaseChatModel
+        from langchain_core.language_models.fake_chat_models import FakeListChatModel
+        from langchain_core.messages import HumanMessage
+        from pydantic import BaseModel, ValidationError
+
+        from maljan.llm.fallback import FallbackChatModel
+
+        class _Shape(BaseModel):
+            technique_id: int
+
+        try:
+            _Shape.model_validate({"technique_id": "not a number"})
+        except ValidationError as caught:
+            invalid = caught
+
+        for content_error in (OutputParserException("the answer did not parse"), invalid):
+
+            class _Refuses(BaseChatModel):
+                error: Any
+
+                @property
+                def _llm_type(self) -> str:
+                    return "refuses"
+
+                def _generate(self, *args: Any, **kwargs: Any) -> Any:
+                    raise self.error
+
+            second = FakeListChatModel(responses=["the other model's answer"])
+            chain = FallbackChatModel(
+                models=[_Refuses(error=content_error), second],
+                labels=["openai/first", "ollama/second"],
+            )
+            with pytest.raises(type(content_error)):
+                chain.invoke([HumanMessage(content="what does it do")])
+            assert second.i == 0, f"{type(content_error).__name__} was asked of another model"

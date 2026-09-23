@@ -478,6 +478,11 @@ class PersistenceMechanism(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def confidence_text(value: float | None) -> str:
+    """A technique's confidence as a report prints it: "not given" when none was."""
+    return "not given" if value is None else f"{value:.2f}"
+
+
 class CapabilityCell(BaseModel):
     """One cell in the tactic×technique heatmap."""
 
@@ -488,16 +493,11 @@ class CapabilityCell(BaseModel):
     technique_id: str  # e.g. "T1055"
     technique_name: str
     evidence: list[str] = Field(default_factory=list)
-    confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
-    # ``False`` when no source put a number on this technique — a judge
-    # attack-pattern with no relationship annotating it, a rule match — and
-    # ``confidence`` is the 0.0 the matrix carries for it. The report prints
-    # "not assessed" for it rather than a confidence of zero nobody stated.
-    # ``None`` on a row stored before the flag existed, where a 0.0 is read
-    # the same way: no producer states a confidence of zero for a technique.
-    confidence_stated: bool | None = None
-    # Who stated ``confidence``: "the judge", "the static analyst". Empty on a
-    # row with no stated number and on a row stored before it was recorded.
+    # The highest number a source put on the technique, or ``None`` when no
+    # source gave one — printed "not given", never as a confidence of zero.
+    confidence: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
+    # Who stated ``confidence``: "the judge", "the static analyst". Empty when
+    # no source gave a number and on a row stored before it was recorded.
     confidence_source: str = ""
     contributing_layers: list[str] = Field(default_factory=list)
     # ``False`` when the ATT&CK catalogue has no entry for this id and the
@@ -530,7 +530,8 @@ class TTPMapping(BaseModel):
     tactic: str = ""
     tactic_name: str = ""
     evidence_quotes: list[str] = Field(default_factory=list)
-    confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
+    # See ``CapabilityCell.confidence``: ``None`` when no source gave a number.
+    confidence: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
     contributing_layers: list[str] = Field(default_factory=list)
     is_corroborated: bool = False
     # See ``CapabilityCell.technique_id_valid``.

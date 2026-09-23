@@ -54,6 +54,9 @@ class _Container(_JudgeContainer):
     def server_degradation_reasons(self) -> list[str]:
         return []
 
+    def server_rests(self) -> list[dict]:
+        return []
+
     def active_profile(self) -> Any:
         return paper_profile(["static"])
 

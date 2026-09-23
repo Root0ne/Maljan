@@ -53,7 +53,7 @@ class _Session:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> _Result:
+    async def call_tool(self, name: str, arguments: dict[str, Any], **_: Any) -> _Result:
         self.calls.append((name, dict(arguments)))
         return _Result("ok")
 

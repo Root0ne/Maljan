@@ -60,7 +60,7 @@ class _Result:
 class _Session:
     """A server that answers one large document, on every call."""
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> _Result:
+    async def call_tool(self, name: str, arguments: dict[str, Any], **_: Any) -> _Result:
         rows = [{"offset": 100 + i, "enc": "ascii", "text": f"row number {i}"} for i in range(400)]
         return _Result(json.dumps({"read_path": "/staging/sample", "strings": rows}))
 

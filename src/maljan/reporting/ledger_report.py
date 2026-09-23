@@ -732,6 +732,21 @@ def _sandbox_section(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -
         acc.credit(section, entry)
 
 
+def _sandbox_status(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
+    """The pack's one sentence on what the sandbox report is, as its own section.
+
+    Written where no live sandbox observed the run — none ran, or the report is
+    a recorded fixture — and filed with the sandbox views, so the report and
+    the console's dynamic tab say it where a reader looks for the behaviour.
+    """
+    statement = _text(data.get("statement"))
+    if not statement:
+        return
+    section = acc.get("sandbox_status", "Sandbox", "text")
+    section.text = statement[:MAX_TEXT_CHARS]
+    acc.credit(section, entry)
+
+
 def _pcap(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
     summary = data.get("summary")
     if not summary:
@@ -814,6 +829,7 @@ _BUILDERS: dict[str, Any] = {
     "sandbox_mutexes": _sandbox_mutexes,
     "sandbox_services_and_tasks": _sandbox_services,
     "sandbox_report_section": _sandbox_section,
+    "sandbox_status": _sandbox_status,
     "pcap_summary": _pcap,
     "get_file_report": _reputation,
     "check_hash": _reputation,

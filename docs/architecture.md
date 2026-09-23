@@ -298,6 +298,17 @@ agent was shown the pack, the pack's ids are citable by every agent:
 empty when a pack is present — only a run with nothing citable at all (the
 measurement baseline) is exempt.
 
+The reputation line states the labels the answer carries. VirusTotal's own
+MCP server answers with `detections`, one result label per engine that
+detected the file, and no popular threat classification; the line counts those
+labels exactly as written and names them with how many engines gave each,
+most first and then in the answer's order, at most twenty, with the number of
+distinct labels left out — `VirusTotal 52/75 malicious, 52 detection labels,
+47 distinct (engines per label, most first, 20 shown): Gen:Variant.… ×4, …
+(+27 more distinct labels)`. Nothing is merged or normalised and no family is
+read out of them; an answer that does carry a popular classification still has
+its suggested label and names listed as `labels …`.
+
 **The run-state block.** `pipeline/run_state.py` derives a dozen lines from the
 state — the sample, the identity, hashes, signature and reputation lines out
 of the pack, which stages ran or were skipped and why, how many ledger entries
@@ -403,6 +414,19 @@ entirely on its first attempt in three runs of three and supplied it on the
 retry; a smaller model wrote it inside `objects[0]` in three of three, which
 costs no retry because a misplaced block is moved. Prompt text only: nothing in
 this pipeline writes a verdict.
+
+The STIX rules around it ask the judge for what the judge decides and agree
+with the checks that read its answer. An attack-pattern names its technique in
+`external_references`, and a behaviour with no id goes in `severity.rationale`
+— the prompt used to say *"Omit technique ID if unsure"*, which is exactly what
+`attck.missing_id` then asks about, and that code took the judge's one retry
+in ten of the twenty-four stored runs that retried. Ids are labels (see *The
+published ids are the platform's*), `created`, `modified`, `spec_version` and
+`valid_from` are left out because they are stamped after the answer — ids and
+stamps were about two fifths of what the judge wrote for its objects, output a
+small reply budget runs out on — and a relationship credits sources by the
+names the evidence summary gives them, which is what `stix.credit_without_claim`
+reads.
 
 The statement is read three ways, not two, and `pipeline.outcome.StatedVerdict`
 carries the difference: the judge wrote a word this pipeline knows, it wrote a
@@ -518,7 +542,83 @@ block is moved to the property it belongs to, unchanged, and recorded as
 there is nothing left for the judge to fix. A top-level block already present
 wins, and the inner copy is set aside. Any other item whose `type` is not one
 of `schemas/stix_models.BUNDLE_OBJECT_TYPES` is set aside under
-`stix.unknown_object` and fed back once. What is left is validated.
+`stix.unknown_object` and fed back once. So is an object of a type the bundle
+holds that cannot be read as written — a `file` or `process` carrying a
+property STIX 2.1 does not define for it, an observed-data carrying the
+deprecated `objects` dictionary, a value its model cannot hold — because each
+object is read on its own before the bundle is, and one object's failure used
+to cost the whole answer to the text fallback. The `file` and `process` models
+declare every property the standard defines, so what the judge wrote under a
+defined name is kept as written. What is left is validated.
+
+### The published ids are the platform's
+
+An id carries no decision: it only says which object a reference means. The
+prompt asks the judge for `<type>--<label>` ids unique in its bundle — a short
+label is enough — and `postprocess_judge_bundle` mints every published id: a
+random UUID under the object's own type (a technique-derived one for an
+attack-pattern) with every `*_ref` rewritten to match. The judge used to be
+asked for random UUIDs, which a model cannot produce; it copied
+documentation-shaped hex instead, one malware id reached fourteen stored runs
+of six samples, and its version digit is one no RFC 4122 UUID has, so the OASIS
+validator refused every object that carried or named it.
+
+A label two objects share is not resolved: `duplicate_label_violations` asks
+the judge (`stix.duplicate_label`), each object gets its own id, and no
+reference naming the label is rewired onto either. The map from each label to
+its published id travels with the verdict and is kept, with the judge's own
+bundle, in `analysis_reports.judge_stix_bundle`, served at
+`/reports/{id}/stix?source=judge` — the bundle every export decline row says an
+object "is unchanged in". That bundle is the judge's JSON as the judge wrote
+it (`"as_written": true`), not a dump of the platform's models, so it holds
+every property the judge wrote. A property the models for its type do not
+declare — an indicator's `valid_until` or `kill_chain_phases`, a
+relationship's `description`, a malware object's `aliases` — does not reach
+the export, and each object that carried one is a recorded
+`stix.property_not_carried` row naming the keys. The row is never fed back:
+nothing in the judge's answer is wrong, and the retry is not spent on it. A
+malware object's `sample_refs` is carried. Feedback names the judge's own positions and labels
+(`objects[3] 'indicator--2'`), not positions in the post-processed list, and a
+drop maps them back. Nothing is written into a judge object that the judge left
+out: an untyped indicator stays untyped, and a malware object without
+`is_family`, which STIX requires, is asked about (`stix.is_family_missing`),
+and an `is_family` the judge wrote is published as written.
+
+A judge malware object the export declines for a property the standard
+requires does not take the judge's relationships with it. The platform's own
+sample object stands in for it, and every relationship that named it moves
+onto that object unchanged — confidence, basis and credits as the judge wrote
+them — so the technique the judge numbered is used by the export's malware
+object and published at the judge's number, as the report publishes it.
+
+An indicator indicates the malware object only by an edge somebody made: the
+judge's own `indicates` edges, and the sample's hash indicator, whose edge is a
+fact the platform owns. Every other indicator — the network and string rows the
+renderer mints, a judge indicator the judge related to nothing — is published
+related to nothing and listed in the report object's `object_refs`. In STIX
+`indicates` says the pattern detects the malware, and a Malware verdict does
+not say that of every value the run saw; the same reason types those rows
+`anomalous-activity`.
+
+The export names its producer in STIX's own vocabulary: one `identity` for this
+platform, `identity_class: system`, under an id derived once
+(`stix_renderer.PRODUCER_IDENTITY_ID`) so every export carries the same one,
+and `created_by_ref` naming it on every other object — a copy, so the judge's
+own bundle is not edited. The report object is typed `malware`. Every stored
+export before this carried `software` and `malware-analysis`, neither of them
+in its vocabulary, and an identity no object named.
+
+A sandbox's process tree is exported as STIX 2.1 observables: one `process`
+per node (pid, command line, `child_refs`), the image each ran from as a
+`file` whose id is derived from its name, and an `observed-data` naming them
+by `object_refs` with `number_observed: 1` — one run is one observation. The
+2.0 form it replaced embedded unnamed processes carrying a `name` 2.1 does not
+define and put the process count in `number_observed`; the OASIS validator
+could not read it. `tests/unit/reporting/test_the_export_passes_the_official_validator.py`
+renders a rich Malware export, a sandbox export and a Benign export through
+the real path and fails on any error the validator reports (`stix2-validator`
+is pinned at 3.2.0, the last release that ships its schemas; 3.3.1 validates
+nothing).
 
 ### The technique check
 
@@ -918,7 +1018,7 @@ reached over HTTP and off until an operator registers an agent token.
 
 | Server | Bound to | How | Offers |
 | :-- | :-- | :-- | :-- |
-| `analysis` | `static` | definition `tools` | Identity and hashes, strings and typed IOCs, PE/ELF/Mach-O/APK structure, archive and document inspection, payload carving, YARA, Sigma and capa. |
+| `analysis` | `static` | definition `tools` | Identity and hashes, strings and typed IOCs, PE/ELF/Mach-O/APK structure, archive and document inspection, payload carving, YARA, Sigma, capa and emulated string decoding (FLOSS). |
 | `knowledge` | every analyst and the judge | definition `tools` | ATT&CK lookup, validation and ranking, the API-behaviour catalog, the LOLBin table, family and prior-case retrieval. |
 | `network` | `network` | role binding | DNS, HTTP and packet views of a capture, plus the whole-capture summary. |
 | `threatintel` | `judge` | role binding | VirusTotal and AbuseIPDB reputation lookups over their REST APIs. |
@@ -997,10 +1097,11 @@ string's digest is not the sample's.
 sample's path would otherwise have taken the carved payloads with it:
 `carve_payloads` writes each embedded payload under the staging directory and
 returns the paths, and with `path` gone there was nothing left to pass one to.
-`carved_path` is the qualified argument that gives that back, on the fourteen
+`carved_path` is the qualified argument that gives that back, on the fifteen
 analysis tools that read a file — `identify_file`, `hashes`, `signing_info`,
 `strings`, `iocs_from_file`, `pe_info`, `elf_info`, `macho_info`, `apk_info`,
-`carve_payloads`, `archive_list`, `document_info`, `yara_scan` and `capa`. It
+`carve_payloads`, `archive_list`, `document_info`, `yara_scan`, `capa` and
+`floss`. It
 is held to **the carved tree of the file this call is pinned to, and that file
 itself** — `<staging>/job-<id>/carved/<the sample's sha256>/`, which is exactly
 the key `carve_payloads` writes under and which the sidecar derives from the
@@ -1034,6 +1135,23 @@ sentence, because a reader that opened a FIFO with no writer would wait for one
 forever. Given, the file is read in place of the sample and the answer carries
 `read_path` saying which; left out, the sample is read.
 
+**A quoted search is the same search.** A model writes a search the way a
+person types one, between quotes, and a quoted needle matches nothing the bare
+one would. Every argument a sidecar tool searches for or looks up by is read
+without the pair of `"`, `'` or `` ` `` that encloses the whole value (the same
+character at both ends and nowhere between) — `pattern` on `strings` and
+`floss`; `text`, `technique_id`, `ids`, `api_names` and `query` on the
+knowledge lookups; `ip_address`, `domain` and `file_hash` on `threatintel` —
+by `maljan.tools.arguments`, with nothing else rewritten and a value without a
+surrounding pair passed through exactly. The repair is recorded the way
+`carved_path`'s is: the ledger keeps the arguments as the model wrote them, and
+a structured answer carries `read_as` first, the value each argument was read
+as (a `threatintel` answer is prose and names the value it looked up). Each
+such tool's description says the argument is the raw text or pattern,
+unquoted. Content arguments — the text `iocs_from_text` and `yara_scan` scan,
+the command lines `lolbin_lookup` matches — are left as they arrive, because a
+command line can begin and end with a quote that belongs to it.
+
 `pin_paths` needs no rule for it — a qualified name is not in
 `SAMPLE_ARG_NAMES`, which is what the naming rule was built for. A payload
 carved out of a carved payload nests under the sample's own tree rather than
@@ -1062,8 +1180,98 @@ each class of external tool, so the choice is configuration rather than code.
   each with the tools it is allowed to expose and the agents allowed to call
   it.
 
+**No sandbox observation where no sandbox ran.** `mock` executes nothing: it
+returns a recorded fixture for a sample it has one for (marked
+`recorded_fixture`), and an empty stand-in marked `synthetic` for any other.
+`pipeline.sandbox_status` reads the run's report once — no report or a
+stand-in is *not run*, a fixture is *recorded fixture*, anything else is
+*observed* — and every reader says the same thing. Where no sandbox ran, the
+triage pack writes one `sandbox_status` entry with the sentence that says so
+(`[ev_0010] sandbox: No sandbox ran for this sample: …`) and none of the
+sandbox views, `sigma_match_sandbox` or `lolbin_lookup`, so a stand-in's empty
+sections are never rendered as "0 processes"; the in-process sandbox tools
+answer the stand-in with the same sentence; the dynamic and network analysts
+are skipped; the run carries the degradation reason `no sandbox ran …` (or,
+with no report at all, the reason it always had); `run_summary.sandbox` holds
+`{status, statement}` and the report's run summary prints it; and the entry
+becomes the report's *Sandbox* section, which the console files on the dynamic
+tab. A recorded fixture is said to be one — the same entry, then the sandbox
+views as before. A live sandbox's report is read as it always was.
+
 Every provider that can be reached over the network has a probe behind a Test
 button in the console; see [configuration.md](configuration.md).
+
+### When a provider fails
+
+**A model that fails as a provider.** An agent's entry under `llm.agents` may
+name an ordered list of models (`fallbacks`), held as one model object
+(`maljan.llm.fallback.FallbackChatModel`). The next model is asked only when
+the one before failed *as a provider* — a refused or dropped connection, a
+timeout, an HTTP 5xx, 408 or 429, a model the server does not have, a refused
+credential, or a refusal the provider reports as an error. A timeout is real
+because every model on a list but the last has its own turn deadline:
+`core.llm.fallback_turn_share` (a half by default) of what is *left*, at that
+turn, of the budget the loop runs under — an ask's ceiling included, so an
+agent asked for help under a shorter clock gets a shorter deadline — never less
+than one second. Worked out per turn, so a model that stalls late in a loop is
+still replaced before the loop's clock cancels it. The reporter's list starts
+over twice per report stage, measured against the narrative round's 600 s and
+then against one composer section's `core.reporting.composer_per_section_timeout`. A model that stops answering raises
+inside the list rather than being cancelled with the whole loop (on the
+blocking path the abandoned call is left in a daemon thread, so it never holds
+up the process's exit); and every provider's client has a request
+timeout (1800 s, `PROVIDER_REQUEST_TIMEOUT_SECONDS` — Ollama's had none). A 429
+or 503 that asks, in `Retry-After` (seconds or an HTTP date), for at most thirty seconds is waited out on
+the same model once before the list moves on. The switch is **sticky for the
+loop**: the model that took over answers the rest of that loop, so a stalled
+first model costs one turn deadline rather than one per turn, and the next loop
+(the next stage, the next chunk) starts at the first model again. Only the
+explicit cause chain of an exception is read, and an HTTP status only from the
+provider SDKs' own exception types. A turn a model *answered* is never moved: an answer the
+validation loop rejects goes back, with the feedback, to the model that wrote
+it, because asking another model would be the platform choosing a different
+answer (`tests/unit/test_no_silent_overrides.py` holds a case for exactly
+this). Every answer carries the model that gave it in `response_metadata`
+(`maljan_model`) and, when a fallback gave it, the reason in words
+(`maljan_fallback`) — on the turn the list moved, once per switch; that is what
+the ledger entry, the `model_fallback` event and the run summary read. Every model on the list passes the probe gate the first one
+does, and the context-window budget counts every model on every list — the
+smallest window governs.
+
+**What a run spent.** Every model call's usage, as the provider reported it —
+prompt and completion tokens, and the cost an OpenAI-compatible router reports
+where it reports one — is added to the run's `TokenLedger` under the agent that
+made the call and the model that answered. `run_summary.tokens` holds the sums
+for the run and per agent, and `run_summary.models` the per-agent model count
+and the fallbacks with their reasons. A call whose provider reported no usage
+is counted as *not reported*: its tokens are not estimated, and a figure the
+report prints as a count is always a count a provider gave. There is no price
+table; a cost appears only where the provider reported one.
+
+**A tool server that keeps failing.** Each tool server the job's registry
+attaches — the built-in sidecars and every operator-configured server — has one
+guard (`maljan.providers.server_guard`), shared by every handle the registry
+opens for it. The Ghidra static provider and the CAPE sandbox provider build
+their own toolkits outside the registry and are not guarded; bringing them
+under it is a recorded follow-up. `core.mcp.breaker.failures_to_open` calls in a row the server
+did not answer — a timeout, a refused connection, the server's process gone, or
+a call that did not finish within its caller's budget — rest the server
+for `core.mcp.breaker.cooldown_seconds`. A call made while it rests is not
+sent; the platform answers it with a tool error in the structured shape
+(`maljan.tools.errors`, code `server_resting`) naming the server, that it is
+resting and when it will be tried again. A timeout counts: every call is sent
+with a deadline — the larger of the tool's budget in the server's own
+`capabilities` manifest and `core.mcp.breaker.call_timeout_seconds` (derived by
+default from the longest tool budget configured, capa's), plus thirty seconds —
+and a call still waiting when its caller's own budget runs out counts too.
+After the cooldown one call is let through, and a success ends the rest; that
+call's own failure is the only one that starts another rest, and only while the
+rest it was let through for is still on. A tool that answers with its own error —
+a bad argument, a missing file — has answered, and never counts.
+`core.mcp.breaker.max_concurrent_calls` caps how many calls one server has in
+flight for one job, so parallel analysts queue rather than pile onto one slow
+sidecar. Each rest is published as `tool_server_rested` and kept in
+`run_summary.server_rests`.
 
 ## Memory
 
@@ -1119,6 +1327,12 @@ lookup — go through the same recorder under `agent="judge"`, so a verdict that
 leans on one can cite it. An agent's ask of another agent is an entry under
 `server="team"`, `tool="ask_<key>"`, and the calls the asked agent made are
 entries under its own key (see *Delegation*).
+
+Each entry names the model whose turn asked for the call (`model`, as
+`provider/model` with the endpoint as its scheme and host): an agent may fall
+back to another model mid-loop, so which model a call came from is a fact of
+the turn and not of the agent's settings. A row written before the column
+existed names none.
 
 A call that failed is an entry with `ok` false whichever way it failed: a
 tool that raised, and a tool that returned an error. The entry keeps the
@@ -1262,12 +1476,14 @@ and the console draws the running analysis from them.
 | `phase_change` | the worker | `phase` |
 | `stage_started` / `stage_skipped` / `stage_finished` | the stage nodes | `stage`, `kind`, and `agents` / `reason` / `ran`, `duration_ms` |
 | `agent_message` | every speaking node | `speaker`, `role`, `round`, `status`, `text`, `kind`, and optionally `stage`, `addressed_to`, `display_name`, `confidence`, `claims`, `dissent`, `report`, `report_truncated` |
-| `agent_message_delta` | the analyst loop, behind `core.events.stream_deltas` | `stage`, `agent`, `text_delta` |
+| `agent_message_delta` | the analyst loop, behind `core.events.stream_deltas` | `stage`, `agent`, `text_delta`, and `model` (the model that gave the turn) and `tokens` (what the turn spent, when the provider reported it); a turn that only asked for tools is published with an empty `text_delta` when it carries tokens |
+| `model_fallback` | an agent, on the turn its model list moved on — published whether or not deltas stream | `stage`, `agent`, `model` (the model that answers from here), `reason` |
 | `tool_call_started` | the evidence recorder | `stage`, `agent`, `tool`, `server`, `args_summary` |
 | `tool_call_finished` | the evidence recorder, as each entry is written | `stage`, `agent`, `tool`, `server`, `evidence_id`, `ok`, `duration_ms`, `summary` |
 | `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index`, `state`, `path` |
 | `judge_question` | the judge's ReAct loop | `stage`, `text`, `addressed_to` |
 | `budget_tick` / `stage_ended_at_cap` | the budget meter | see *The evidence ledger* |
+| `tool_server_rested` | a tool server's guard, when its breaker opens | `server`, `failures`, `cooldown_s`, `reason` |
 | `enrichment_complete` | the enrichment worker, after the run | `report_id`, `domains_enriched`, `ips_enriched`, `similar_samples` |
 | `completed` / `error` / `cancelled` | the worker | the outcome |
 
@@ -1417,7 +1633,33 @@ is assembled from what the run gathered rather than recomputed beside it:
   arithmetic over constants chosen in the builder, by code that had read no
   evidence.
 * The capability matrix is a projection of the judge's technique list and the
-  analysts' claims, carrying each source's own confidence unadjusted. It is
+  analysts' claims, carrying each source's own confidence unadjusted. A judge
+  relationship's technique is the attack-pattern it points at
+  (`x_maljan_technique_id` wins where written, which the judge never does), so
+  the number the judge put on it is the judge's number; reading the property
+  alone published all twenty judge-only techniques in the stored runs at 0.0.
+  A relationship with no number adds none, and a number off the 0–1 scale is
+  no number (`stix.annotation_out_of_schema` asks about it; the annotation is
+  kept as written rather than lost to a plain relationship). A technique no
+  source numbered has `confidence: null` and is printed "not given" — the case
+  for every technique the judge names alone under a verdict with no malware
+  object to hang a numbered edge on. A technique's
+  `contributing_layers` are the judge and the analysts whose own claims name
+  it: the agents a judge relationship credits are its words about the
+  evidence, published on the relationship and not counted as sources, so one
+  analyst's claim the judge credits to two analysts is not corroborated. A
+  credit is still asked about when it names an agent that did not name the
+  technique: the judge node passes the evidence summary as data
+  (`evidence_summary.collect`), and `stix.credit_without_claim` tells the
+  judge which sources did name it, by the summary's names — a parent or
+  sub-technique counts. Nothing rewrites the credit in the judge's bundle; one
+  the judge keeps is left off the export's copy of the relationship and
+  recorded as `stix.unpublishable_credit`, so no surface prints it. The ELF run
+  credited `STATIC ANALYST` with T1490 and T1048.001, which no source named. A
+  bundle the pipeline built from the analysts' claims because the judge's
+  answer was not one credits those analysts, not the judge. A technique id is
+  read only from a reference filed under MITRE ATT&CK
+  (`analysis.technique_ids.attack_reference_id`). It is
   where an id the ATT&CK check rejected stays on the record, marked
   `technique_id_valid=False` and spelled as the producer wrote it. **Every id
   that reaches the report is collected into it**, from all three carriers: the
@@ -1690,14 +1932,16 @@ is assembled from what the run gathered rather than recomputed beside it:
 * **A technique's source is everyone who named it.** The ATT&CK table's Source
   column is the rules that asserted it (`capa (rule match)`), the analysts that
   claimed it and the capability matrix's own layers — the judge's verdict among
-  them, which the corroboration does not count. `CapabilityCell.confidence_stated`
-  is `false` when no producer put a number on the technique (a judge
-  attack-pattern with no relationship annotating it, a rule-only technique),
-  and the row then reads "rule match" or "not given" rather than a
-  confidence of zero; a stored cell without the flag reads a 0.0 the same way.
-  The matrix reads a judge relationship's confidence and agents from
-  `x_maljan_technique_id` only; a relationship that names its technique by
-  `target_ref` alone contributes neither.
+  them, which the corroboration does not count; the agents a judge
+  relationship credits are not sources. `CapabilityCell.confidence` is `None`
+  when no producer put a number on the technique (a judge attack-pattern or
+  relationship with no confidence, a rule-only technique), and the row then
+  reads "rule match" or "not given" rather than a confidence of zero; a stored
+  cell carrying 0.0 with no producer reads the same way. `confidence_source`
+  names the producer of the number and is appended in step with it, so a
+  relationship with no number never names the judge as the producer of an
+  analyst's. An unresolved `stix.credit_without_claim` about a technique prints
+  beside its row, as the `attck.*` findings do.
 * `qa/fp_linter.py` runs last and reports; it changes nothing. Its findings land
   in `run_summary.fp_warnings`, including C6 (a section or TTP row with nothing
   citable behind it) and C7 (a technique id the validation loop could not get
@@ -1957,6 +2201,26 @@ first and then matches a digest as a *whole token*, never as the prefix of a
 longer run of hexadecimal, because a truncated digest is not "present in the
 evidence" however the substring search answers. An algorithm the table does not
 name is left alone.
+
+Before any of that, the object type. A pattern compares a property of a STIX
+Cyber-observable (`schemas.stix_pattern.CYBER_OBSERVABLE_TYPES`) or of a custom
+`x-` type; one live export carried `[ipv-addr:value = '82.157.13.47']`, a type
+no consumer holds objects of, and because the endpoint table above lists only
+the paths it knows, the address was never asked the host question either — the
+same misspelling around `127.0.0.1` would have exported a loopback. The judge
+is asked `stix.unknown_observable_type`, with the type the value is named when
+the value or the spelling says (`82.157.13.47` is an `ipv4-addr`) and the list
+of types when neither does; nothing rewrites the pattern. An indicator that
+keeps the type is declined as `stix.unpublishable_pattern`. A type is read as
+written — STIX types are lower case, so `IPv4-Addr` is not one — and the path
+after it must be one the type defines (`SCO_PROPERTIES`, `SCO_EXTENSIONS`):
+`[file:extensions['pe'].pe_imphash = …]` names an extension a file does not
+have, is asked `stix.unknown_object_path` and, kept, is declined the same way.
+Its `indicator_types` is asked about under `stix.indicator_type_vocabulary` when a
+value is outside STIX's vocabulary — the same run typed the address `ip-addr`
+and a file name `file`, the kind of value where the vocabulary says what the
+value indicates — and, the vocabulary being open, what the judge keeps is
+published as written.
 
 **What the corpus is.** The grounding checks search what the run *saw*, not
 what its ledger kept. `reporting.evidence_budget_bytes` blanks an entry's

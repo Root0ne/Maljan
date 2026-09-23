@@ -399,10 +399,12 @@ def sandbox_entry_ids(report: MalwareReport) -> list[str]:
     only when it added a row, and the generic block's rows are read for a
     value that is not empty.
     """
+    # The pack's sandbox-status entry states what the sandbox report is; it
+    # records no behaviour and is never an observation to cite.
     sandbox = {
         row.id
         for row in report.evidence_index
-        if str(row.tool or "").startswith(SANDBOX_TOOL_PREFIXES)
+        if str(row.tool or "").startswith(SANDBOX_TOOL_PREFIXES) and row.tool != "sandbox_status"
     }
     holding: set[str] = set()
     for section in report.sections:

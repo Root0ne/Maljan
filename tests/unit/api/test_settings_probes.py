@@ -710,6 +710,28 @@ async def test_llm_probe_names_a_per_agent_model_the_server_does_not_have(monkey
 
 
 @pytest.mark.asyncio
+async def test_llm_probe_asks_every_model_an_agent_falls_back_to(monkeypatch):
+    _tags_transport(monkeypatch, ["qwen3:8b", "qwen3:4b"])
+    r = await probes.probe_llm(
+        {
+            "provider": "ollama",
+            "ollama_base_url": "http://ollama:11434",
+            "ollama_expert_model": "qwen3:8b",
+            "ollama_judge_model": "qwen3:8b",
+            "agents": {
+                "static": {
+                    "provider": "ollama",
+                    "model": "qwen3:4b",
+                    "fallbacks": [{"provider": "ollama", "model": "gemma3:nope"}],
+                }
+            },
+        }
+    )
+    assert r.ok is False
+    assert "static fallback 1=gemma3:nope" in r.detail
+
+
+@pytest.mark.asyncio
 async def test_llm_probe_accepts_per_agent_models_the_server_has(monkeypatch):
     _tags_transport(monkeypatch, ["qwen3:8b", "qwen3:4b"])
     r = await probes.probe_llm(

@@ -18,9 +18,18 @@ from maljan.schemas.sandbox_report import SandboxReport
 
 _CAPE_SHAPED = {"cape2", "mock"}
 
+# The mark a report the mock sandbox read from a fixture file carries. Such a
+# report is an observation of some earlier detonation, not of this run, and
+# every reader of it says so (``pipeline.sandbox_status``). The stand-in the
+# mock answers with when it has no fixture is marked ``synthetic`` instead.
+_RECORDED_FIXTURE = "recorded_fixture"
+
 
 def to_cape_shaped_dict(report: SandboxReport) -> dict[str, Any]:
     if report.source_format in _CAPE_SHAPED and report.raw:
+        if report.source_format == "mock" and not report.synthetic:
+            # A copy: the fixture's own dict is the provider's, not this run's.
+            return {**report.raw, _RECORDED_FIXTURE: True}
         return report.raw
 
     behavior: dict[str, Any] = {
@@ -100,6 +109,8 @@ def to_cape_shaped_dict(report: SandboxReport) -> dict[str, Any]:
     # ``android.permissions`` reads it, and one that does not is unaffected.
     if report.synthetic:
         rendered["synthetic"] = True
+    elif report.source_format == "mock":
+        rendered[_RECORDED_FIXTURE] = True
     if report.channels:
         rendered["channels"] = {name: list(rows) for name, rows in report.channels.items()}
     if report.network.pcap_local_path:

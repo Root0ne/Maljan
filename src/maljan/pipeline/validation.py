@@ -33,7 +33,7 @@ from pydantic import ValidationError
 from maljan.agents.run_evidence_corpus import CorpusState, both_searched
 from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
-from maljan.analysis.technique_ids import TECHNIQUE_ID_EXACT_RE
+from maljan.analysis.technique_ids import MITRE_ATTACK_SOURCES, TECHNIQUE_ID_EXACT_RE
 from maljan.core.logger import logger
 from maljan.pipeline.events import (
     VALIDATION_RESOLVED,
@@ -1549,6 +1549,322 @@ def indicator_type_contradicts_verdict(
     ]
 
 
+UNKNOWN_OBSERVABLE_TYPE_CODE = "stix.unknown_observable_type"
+IS_FAMILY_MISSING_CODE = "stix.is_family_missing"
+FILE_UNIDENTIFIED_CODE = "stix.file_unidentified"
+UNKNOWN_OBJECT_PATH_CODE = "stix.unknown_object_path"
+INDICATOR_TYPE_VOCABULARY_CODE = "stix.indicator_type_vocabulary"
+
+# STIX 2.1's indicator-type vocabulary. Open, so a value outside it is legal
+# and published as written; it is asked about because a value outside it is
+# almost always the kind of the value (``ip-addr``, ``file``) written where the
+# vocabulary says what the value indicates.
+INDICATOR_TYPES = (
+    "malicious-activity",
+    "anomalous-activity",
+    "benign",
+    "compromised",
+    "anonymization",
+    "attribution",
+    "unknown",
+)
+
+
+def unknown_observable_type_violations(obj: Any, *, path: str) -> list[Violation]:
+    """A judge indicator whose pattern names an object type STIX does not have.
+
+    Asked, never rewritten: the sentence says which type the value is when the
+    value or the spelling answers that, and lists the types when neither does.
+    An indicator that keeps the type is left out of the export, which records
+    why (``reporting.renderers.stix_renderer``).
+    """
+    from maljan.schemas.stix_pattern import (
+        CYBER_OBSERVABLE_TYPES,
+        is_observable_type,
+        object_path_problems,
+        observable_type_for,
+    )
+
+    pattern = str(getattr(obj, "pattern", "") or "")
+    named = str(getattr(obj, "name", "") or "").strip() or pattern
+    out: list[Violation] = []
+    seen: set[str] = set()
+    for comparison in read_comparisons(pattern):
+        written = comparison.written_type or comparison.object_type
+        if not written or written in seen or is_observable_type(written):
+            continue
+        seen.add(written)
+        meant = observable_type_for(written, comparison.literal)
+        if meant:
+            answer = (
+                f"{safe_finding_value(comparison.literal)!r} is an {meant}: write the "
+                f"comparison over {meant}:{comparison.prop}, or drop the indicator."
+            )
+        else:
+            answer = (
+                "The types a pattern can name are "
+                f"{', '.join(sorted(CYBER_OBSERVABLE_TYPES))}, or a custom type whose name "
+                "starts with x-: write the comparison over the one the value is, or drop "
+                "the indicator."
+            )
+        out.append(
+            Violation(
+                code=UNKNOWN_OBSERVABLE_TYPE_CODE,
+                message=(
+                    f"the indicator {safe_finding_value(named)!r} compares "
+                    f"{safe_finding_value(written)!r}, which is not a STIX Cyber-observable "
+                    "type, so no consumer holds an object this pattern could match. "
+                    f"{answer} An indicator that keeps it is not exported."
+                ),
+                path=path,
+            )
+        )
+    for problem in object_path_problems(pattern):
+        out.append(
+            Violation(
+                code=UNKNOWN_OBJECT_PATH_CODE,
+                message=(
+                    f"the indicator {safe_finding_value(named)!r} compares a path its type does "
+                    f"not have: {safe_finding_value(problem)}. A pattern over it matches nothing "
+                    "a consumer holds. Write the comparison over a property the type defines, "
+                    "or drop the indicator; an indicator that keeps it is not exported."
+                ),
+                path=path,
+            )
+        )
+    return out
+
+
+def indicator_type_vocabulary_violations(obj: Any, *, path: str) -> list[Violation]:
+    """A judge indicator typed with a word outside STIX's indicator-type vocabulary.
+
+    Asked once and published as answered: the vocabulary is open, and a value
+    the judge keeps is a legal one.
+    """
+    written = [str(t).strip() for t in (getattr(obj, "indicator_types", None) or [])]
+    outside = [t for t in written if t.lower() not in INDICATOR_TYPES]
+    if not outside:
+        return []
+    named = str(getattr(obj, "name", "") or "").strip() or str(getattr(obj, "pattern", ""))
+    return [
+        Violation(
+            code=INDICATOR_TYPE_VOCABULARY_CODE,
+            message=(
+                f"the indicator {safe_finding_value(named)!r} is typed "
+                f"{', '.join(repr(safe_finding_value(t)) for t in outside)}; indicator_types "
+                "says what the value indicates, not what kind of value it is, and STIX's "
+                f"vocabulary for it is {', '.join(INDICATOR_TYPES)}. Use one of those, or "
+                "keep the type — whichever you answer is what this run publishes."
+            ),
+            path=path,
+        )
+    ]
+
+
+ANNOTATION_OUT_OF_SCHEMA_CODE = "stix.annotation_out_of_schema"
+
+
+def annotation_out_of_schema_violations(
+    bundle: Any, origins: Sequence[tuple[int | None, str]] | None = None
+) -> list[Violation]:
+    """A relationship annotation the schema does not describe, asked about as written.
+
+    A confidence that is not a number from 0.0 to 1.0, a basis outside the
+    list, credited agents written as something other than a list of names.
+    The values are kept: a reader takes a confidence only when it is one
+    (``schemas.stix_models.stated_confidence``), and the judge is told what
+    the property holds.
+    """
+    from maljan.schemas.stix_models import EvidenceBasis, stated_confidence
+
+    bases = get_args(EvidenceBasis)
+    out: list[Violation] = []
+    for index, obj in enumerate(list(getattr(bundle, "objects", None) or [])):
+        where = _object_path(index, origins)
+        if str(getattr(obj, "type", "") or "") != "relationship":
+            continue
+        problems: list[str] = []
+        confidence = getattr(obj, "x_maljan_confidence", None)
+        if confidence is not None and stated_confidence(confidence) is None:
+            problems.append(
+                f"x_maljan_confidence is {safe_finding_value(confidence)!r}, and it is a number "
+                "from 0.0 to 1.0"
+            )
+        basis = getattr(obj, "x_maljan_evidence_basis", None)
+        if basis is not None and basis not in bases:
+            problems.append(
+                f"x_maljan_evidence_basis is {safe_finding_value(basis)!r}, and it is one of "
+                f"{', '.join(bases)}"
+            )
+        agents = getattr(obj, "x_maljan_contributing_agents", None)
+        if agents is not None and not isinstance(agents, list):
+            problems.append(
+                f"x_maljan_contributing_agents is {safe_finding_value(agents)!r}, and it is a "
+                "list of source names"
+            )
+        if problems:
+            out.append(
+                Violation(
+                    code=ANNOTATION_OUT_OF_SCHEMA_CODE,
+                    message=(
+                        f"the relationship at {where}: {'; '.join(problems)}. Write "
+                        "it that way, or leave the property out; a value you keep is published "
+                        "as written and read as no number."
+                    ),
+                    path=where,
+                )
+            )
+    return out
+
+
+CREDIT_WITHOUT_CLAIM_CODE = "stix.credit_without_claim"
+
+
+def credited_agents(obj: Any) -> list[str]:
+    """The names a relationship credits, whether written as a list or as one name."""
+    agents = getattr(obj, "x_maljan_contributing_agents", None)
+    if isinstance(agents, str):
+        return [agents] if agents.strip() else []
+    return [str(a) for a in (agents or []) if str(a).strip()]
+
+
+# The words a model adds to an agent's name when it writes one down. The
+# evidence summary names a source ``static`` and the judge credits
+# ``STATIC ANALYST``, ``static_analyst`` or ``Static-Analyst``: one source.
+_NAME_FILLER = frozenset({"analyst", "agent", "the"})
+
+
+def _source_key(name: Any) -> str:
+    """A source name reduced to what identifies it, for comparing two spellings."""
+    words = re.split(r"[^a-z0-9]+", str(name or "").lower())
+    return "".join(word for word in words if word and word not in _NAME_FILLER)
+
+
+def _same_source(credited: str, named: str) -> bool:
+    """Whether a credited name and a summary's source name are one source.
+
+    Equal once reduced, or one the start of the other with three characters at
+    least, so ``yara`` is the ``yara_scan`` tool and ``s`` is nobody.
+    """
+    if not credited or not named:
+        return False
+    if credited == named:
+        return True
+    short, long_ = sorted((credited, named), key=len)
+    return len(short) >= 3 and long_.startswith(short)
+
+
+def _related_ids(tid: str) -> set[str]:
+    """The id itself, and its parent when it is a sub-technique."""
+    return {tid, tid.split(".", 1)[0]}
+
+
+@dataclass(frozen=True)
+class UnconfirmedCredit:
+    """A relationship crediting agents with a technique none of them named."""
+
+    index: int
+    technique: str
+    uncredited: tuple[str, ...]
+    sources: tuple[str, ...]
+
+
+def unconfirmed_credits(
+    bundle: Any, technique_sources: Mapping[str, Sequence[str]] | None
+) -> list[UnconfirmedCredit]:
+    """Per relationship, the credited names no source of that name stands behind.
+
+    ``technique_sources`` is who named which technique in this run — the
+    evidence summary the judge was shown, as ``{technique id: [source]}``.
+    ``None`` answers nothing: with no record of the sources, no credit can be
+    weighed against one. A technique counts as named by a source that named it,
+    its parent technique or one of its sub-techniques: refining an analyst's
+    T1071 to T1071.004 is the judge's reading, not a misattribution. The same
+    answer serves the question the judge is asked and the export's decision
+    about a credit the judge kept.
+    """
+    if technique_sources is None:
+        return []
+    named_by: dict[str, list[str]] = {}
+    for raw_tid, sources in technique_sources.items():
+        tid = str(raw_tid or "").strip().upper()
+        for related in _related_ids(tid):
+            bucket = named_by.setdefault(related, [])
+            bucket.extend(str(s) for s in sources if str(s) not in bucket)
+    objects = list(getattr(bundle, "objects", None) or [])
+    technique_of: dict[str, str] = {}
+    for obj in objects:
+        if str(getattr(obj, "type", "") or "") == "attack-pattern":
+            declared = _attack_pattern_technique_id(obj)
+            if declared:
+                technique_of[str(getattr(obj, "id", "") or "")] = declared.upper()
+    out: list[UnconfirmedCredit] = []
+    for index, obj in enumerate(objects):
+        if str(getattr(obj, "type", "") or "") != "relationship":
+            continue
+        credited = credited_agents(obj)
+        if not credited:
+            continue
+        written = str(getattr(obj, "x_maljan_technique_id", "") or "").strip().upper()
+        tid = str(
+            written
+            or technique_of.get(str(getattr(obj, "target_ref", "") or ""))
+            or technique_of.get(str(getattr(obj, "source_ref", "") or ""))
+            or ""
+        )
+        if not tid:
+            continue
+        sources = list(
+            dict.fromkeys(s for related in _related_ids(tid) for s in named_by.get(related, []))
+        )
+        keys = [_source_key(s) for s in sources]
+        uncredited = tuple(
+            name for name in credited if not any(_same_source(_source_key(name), k) for k in keys)
+        )
+        if uncredited:
+            out.append(UnconfirmedCredit(index, tid, uncredited, tuple(sources)))
+    return out
+
+
+def credit_without_claim_violations(
+    bundle: Any,
+    technique_sources: Mapping[str, Sequence[str]] | None,
+    origins: Sequence[tuple[int | None, str]] | None = None,
+) -> list[Violation]:
+    """A judge relationship crediting an agent with a technique it never named.
+
+    Asked, and never rewritten in the judge's own bundle. A credit the judge
+    keeps is not published: the export leaves the names no source stands
+    behind off its copy of the relationship and records it
+    (``stix.unpublishable_credit``).
+    """
+    out: list[Violation] = []
+    for credit in unconfirmed_credits(bundle, technique_sources):
+        where = _object_path(credit.index, origins)
+        tid = safe_finding_value(credit.technique)
+        who = (
+            f"the sources that named {tid} are "
+            f"{', '.join(safe_finding_value(s) for s in credit.sources)}"
+            if credit.sources
+            else f"no source in this run named {tid}"
+        )
+        out.append(
+            Violation(
+                code=CREDIT_WITHOUT_CLAIM_CODE,
+                message=(
+                    f"the relationship at {where} credits "
+                    f"{', '.join(repr(safe_finding_value(n)) for n in credit.uncredited)} with "
+                    f"{tid}, and {who} — the evidence summary lists who named each technique. "
+                    "Credit only sources that named it, by the names the summary gives them, "
+                    "or leave x_maljan_contributing_agents empty. A credit you keep that names "
+                    "no source is not published."
+                ),
+                path=where,
+            )
+        )
+    return out
+
+
 def validate_verdict_bundle(
     bundle: Any,
     evidence_corpus: set[str] | None = None,
@@ -1558,8 +1874,15 @@ def validate_verdict_bundle(
     shortened_tools: Iterable[str] = (),
     searched: Iterable[str] = (),
     corpus_state: CorpusState | None = None,
+    technique_sources: Mapping[str, Sequence[str]] | None = None,
+    origins: Sequence[tuple[int | None, str]] | None = None,
 ) -> list[Violation]:
     """What is wrong with the judge's answer, in the judge's own terms.
+
+    ``technique_sources`` is who named which technique in this run, the
+    evidence summary as data; a relationship crediting an agent with a
+    technique that agent never named is asked about against it. ``None`` asks
+    nothing, which is what a caller with no such record passes.
 
     ``attck`` is the same knowledge module the analyst loop consults, and it is
     the same check: an id is unresolvable when the catalogue does not have it,
@@ -1626,6 +1949,7 @@ def validate_verdict_bundle(
         how_whole = both_searched(how_whole, NOTHING_SEARCHED)
     not_searched = partial_evidence_note(how_whole)
     for index, obj in enumerate(objects):
+        where = _object_path(index, origins)
         kind = str(getattr(obj, "type", "") or "")
         if kind == "indicator":
             pattern = str(getattr(obj, "pattern", "") or "")
@@ -1634,9 +1958,11 @@ def validate_verdict_bundle(
                     obj,
                     verdict=stated_verdict,
                     identity=identity,
-                    path=f"objects[{index}]",
+                    path=where,
                 )
             )
+            violations.extend(unknown_observable_type_violations(obj, path=where))
+            violations.extend(indicator_type_vocabulary_violations(obj, path=where))
             problem = _indicator_problem(pattern, haystack, runtime_paths, identity)
             if problem:
                 absent = _is_an_absence(problem)
@@ -1649,7 +1975,7 @@ def validate_verdict_bundle(
                             "tool in this run actually saw, and prefer zero indicators to an "
                             f"invented one.{caveat}"
                         ),
-                        path=f"objects[{index}]",
+                        path=where,
                         # Only an absence goes advisory, and only when the
                         # evidence searched was partial. A denylisted host or a
                         # malformed digest is refused on its own account and no
@@ -1657,6 +1983,33 @@ def validate_verdict_bundle(
                         advisory=absent and how_whole.partial,
                     )
                 )
+        elif kind == "file" and not getattr(obj, "hashes", None) and not getattr(obj, "name", None):
+            violations.append(
+                Violation(
+                    code=FILE_UNIDENTIFIED_CODE,
+                    message=(
+                        f"the file at {where} has neither hashes nor name, and STIX needs at "
+                        "least one of them to say which file it is. Give it the hashes or the "
+                        "name a tool in this run reported, or leave it out; a file kept with "
+                        "neither is not exported."
+                    ),
+                    path=where,
+                )
+            )
+        elif kind == "malware" and getattr(obj, "is_family", None) is None:
+            named = str(getattr(obj, "name", "") or "").strip()
+            violations.append(
+                Violation(
+                    code=IS_FAMILY_MISSING_CODE,
+                    message=(
+                        f"the malware object {safe_finding_value(named)!r} does not say "
+                        "is_family, which STIX requires: false when the object stands for "
+                        "this one sample, true when it stands for a family. Nothing is "
+                        "filled in for you."
+                    ),
+                    path=where,
+                )
+            )
         elif kind == "attack-pattern":
             tid = _attack_pattern_technique_id(obj)
             if not tid:
@@ -1679,7 +2032,7 @@ def validate_verdict_bundle(
                             "what was observed in the assessment: a behaviour with no "
                             "technique id is reported as a behaviour, not as a technique."
                         ),
-                        path=f"objects[{index}]",
+                        path=where,
                     )
                 )
                 continue
@@ -1691,7 +2044,7 @@ def validate_verdict_bundle(
                             f"the attack-pattern names {safe_finding_value(tid)}, which is "
                             "not shaped like a MITRE ATT&CK technique id (T#### or T####.###)."
                         ),
-                        path=f"objects[{index}]",
+                        path=where,
                     )
                 )
             elif attck is not None and not _technique_is_known(tid, attck):
@@ -1704,7 +2057,7 @@ def validate_verdict_bundle(
                             f"{_retired_note(tid, attck)}. Use a real technique id or "
                             "drop the attack-pattern."
                         ),
-                        path=f"objects[{index}]",
+                        path=where,
                     )
                 )
             elif attck is not None:
@@ -1714,7 +2067,7 @@ def validate_verdict_bundle(
                         Violation(
                             code=PLATFORM_MISMATCH_CODE,
                             message=mismatch,
-                            path=f"objects[{index}]",
+                            path=where,
                         )
                     )
 
@@ -1747,6 +2100,8 @@ def validate_verdict_bundle(
                 )
             )
 
+    violations.extend(annotation_out_of_schema_violations(bundle, origins))
+    violations.extend(credit_without_claim_violations(bundle, technique_sources, origins))
     return violations
 
 
@@ -2587,7 +2942,7 @@ def _url_host(raw_url: str) -> str | None:
 # Only these are read: an attack-pattern may legitimately carry a Sigma rule id
 # or a CVE first in its reference list, and holding the judge to the ATT&CK
 # vocabulary for one of those would burn the single retry on nothing.
-_MITRE_SOURCES = frozenset({"mitre-attack", "mitre attack"})
+_MITRE_SOURCES = MITRE_ATTACK_SOURCES
 
 
 def _attack_pattern_technique_id(obj: Any) -> str:
@@ -2605,7 +2960,12 @@ def _attack_pattern_technique_id(obj: Any) -> str:
     return first if first.startswith("T") else ""
 
 
-def drop_ungrounded_indicators(bundle: Any, violations: Sequence[Violation]) -> int:
+def drop_ungrounded_indicators(
+    bundle: Any,
+    violations: Sequence[Violation],
+    *,
+    origins: Sequence[tuple[int | None, str]] | None = None,
+) -> int:
     """Remove the indicators still ungrounded after the retry; return how many.
 
     An unresolved technique id can stay on a claim and be labelled; an
@@ -2633,6 +2993,13 @@ def drop_ungrounded_indicators(bundle: Any, violations: Sequence[Violation]) -> 
     }
     if not indices:
         return 0
+    if origins:
+        # The paths name the judge's own positions; the drop is over the
+        # checked bundle's.
+        written_at = {
+            written: here for here, (written, _label) in enumerate(origins) if written is not None
+        }
+        indices = {written_at[i] for i in indices if i in written_at}
     objects = list(getattr(bundle, "objects", None) or [])
     kept = [obj for index, obj in enumerate(objects) if index not in indices]
     dropped = len(objects) - len(kept)
@@ -2645,6 +3012,26 @@ def drop_ungrounded_indicators(bundle: Any, violations: Sequence[Violation]) -> 
 def _object_index(path: str) -> int | None:
     match = re.search(r"objects\[(\d+)\]", path or "")
     return int(match.group(1)) if match else None
+
+
+def _object_path(index: int, origins: Sequence[tuple[int | None, str]] | None) -> str:
+    """Where an object sits in the answer as the judge wrote it, and its label.
+
+    The bundle a check reads has lost what the post-processor set aside and
+    folded, so its own positions name other objects than the judge's list
+    holds at the same place. ``origins`` carries, per object checked, the
+    judge's position and the id the judge wrote; without it the checked
+    bundle's position is all there is.
+    """
+    if origins is not None and index < len(origins):
+        written, label = origins[index]
+        if written is not None:
+            return (
+                f"objects[{written}] {safe_finding_value(label)!r}"
+                if label
+                else f"objects[{written}]"
+            )
+    return f"objects[{index}]"
 
 
 # ---------------------------------------------------------------------------

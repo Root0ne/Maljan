@@ -183,7 +183,7 @@ class TestAnAbsenceIsClaimedOnlyWhereSomethingLooked:
 class TestNoNumberNobodyStated:
     def test_a_technique_with_no_stated_confidence_says_not_given(self) -> None:
         report = rich_report()
-        report.capability_matrix[1].confidence_stated = False
+        report.capability_matrix[1].confidence = None
         attack = _section(_render(report), "## 8. MITRE ATT&CK mapping")
         (row,) = [line for line in attack.splitlines() if "| T1547.001 |" in line]
         assert "| rule match |" in row or "| not given |" in row
@@ -433,3 +433,75 @@ class TestAnMbcIdIsNotAnAttackRow:
             "technique, not published)"
         ) in attack
         assert "B0001.019 B0001.019" not in attack
+
+
+class TestAnUnconfirmedCreditSitsBesideItsTechnique:
+    def test_the_finding_prints_on_the_row_it_names_and_no_other(self) -> None:
+        report = rich_report()
+        report.run_summary["validation"]["unresolved"].append(
+            {
+                "agent": "judge",
+                "code": "stix.credit_without_claim",
+                "message": (
+                    "the relationship at objects[3] credits 'dynamic' with T1055, and the "
+                    "sources that named T1055 are static — the evidence summary lists who "
+                    "named each technique."
+                ),
+            }
+        )
+        attack = _section(_render(report), "## 8. MITRE ATT&CK mapping")
+        (injection,) = [line for line in attack.splitlines() if "| T1055 |" in line]
+        (run_key,) = [line for line in attack.splitlines() if "| T1547.001 |" in line]
+        assert "unresolved: stix.credit_without_claim" in injection
+        assert "credit_without_claim" not in run_key
+
+    def test_a_parent_id_does_not_take_a_sub_technique_s_finding(self) -> None:
+        report = rich_report()
+        report.run_summary["validation"]["unresolved"].append(
+            {
+                "agent": "judge",
+                "code": "stix.credit_without_claim",
+                "message": "the relationship credits 'dynamic' with T1055.012",
+            }
+        )
+        attack = _section(_render(report), "## 8. MITRE ATT&CK mapping")
+        (injection,) = [line for line in attack.splitlines() if "| T1055 |" in line]
+        assert "credit_without_claim" not in injection
+
+
+class TestTheSandboxStatusIsAStatementNotAnObservation:
+    def _report(self) -> MalwareReport:
+        report = _degraded()
+        statement = (
+            "No sandbox ran for this sample: the mock sandbox has no recorded report for it "
+            "and answered with an empty stand-in, so nothing here was observed by executing "
+            "the sample."
+        )
+        report.evidence_index.append(
+            report.evidence_index[0].model_copy(update={"id": "ev_0009", "tool": "sandbox_status"})
+        )
+        report.sections.append(
+            EvidenceSection(
+                key="sandbox_status",
+                title="Sandbox",
+                kind="text",
+                text=statement,
+                evidence_ids=["ev_0009"],
+            )
+        )
+        report.run_summary["sandbox"] = {"status": "not run", "statement": statement}
+        return report
+
+    def test_it_is_no_sandbox_entry_an_observed_step_may_cite(self) -> None:
+        from maljan.reporting.evidence_bundles import sandbox_entry_ids
+
+        assert sandbox_entry_ids(self._report()) == []
+
+    def test_the_report_says_it_in_the_run_s_words(self) -> None:
+        markdown = _render(self._report())
+        observed = _section(markdown, "## 6. Observed behaviour")
+        assert "No sandbox ran for this sample: the mock sandbox has no recorded report" in (
+            observed
+        )
+        run = markdown.split("## Appendix B.", 1)[1]
+        assert "- Sandbox: No sandbox ran for this sample" in run

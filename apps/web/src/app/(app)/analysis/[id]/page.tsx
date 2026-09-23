@@ -8,11 +8,17 @@ import { api } from "@/lib/api";
 import {
   bundleLossSentence,
   corpusHeldSentence,
+  serverRestSentence,
+  tokensSentence,
   countLabel,
+  formatDuration,
   partialGroundingSentence,
   downloadBlob,
   downloadObject,
 } from "@/lib/report-utils";
+import { useRun } from "@/lib/useRun";
+import { rosterNames } from "@/lib/rosterNames";
+import { formatStageDuration, stageTiming } from "@/components/analysis/stageTimeline";
 import { getErrorMessage } from "@/lib/errors";
 import { ENRICH_BUTTON_LABEL, ENRICH_STATUS_MESSAGE } from "@/lib/enrichment";
 import { degradedBannerText } from "@/lib/degradedBanner";
@@ -25,7 +31,7 @@ import {
   keyFindings,
   noSummaryReason,
 } from "@/components/analysis/reportProse";
-import { SEVERITY_STYLES } from "@/types/malware-report";
+import { severityTone } from "@/lib/severity";
 import type { FpWarning, MalwareReport } from "@/types/malware-report";
 
 function countNetworkIOCs(mr: MalwareReport): {
@@ -133,9 +139,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
   const jobId = report?.job_id ?? job?.id ?? "";
   // A report whose judge assessed no severity says so. Falling back to
   // "Informational" would print a rating the run never established.
-  const sevStyle = mr.severity
-    ? (SEVERITY_STYLES[mr.severity.rating] ?? SEVERITY_STYLES.Informational)
-    : SEVERITY_STYLES.Informational;
+  const sevStyle = severityTone(mr.severity?.rating);
   const net = countNetworkIOCs(mr);
   const ttpCount = mr.ttp_mappings.length;
   const shortHash = mr.identity.hashes.sha256.slice(0, 12);
@@ -393,6 +397,8 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
         </div>
       )}
 
+      <StageTimingCard jobId={jobId} elapsedSeconds={job?.duration_seconds ?? null} />
+
       {/* Key findings and the summary, as the report model wrote them, or the
           reason none was written. The exported report's §1; the paragraphs a
           report stored before the technical analysis existed carried are kept
@@ -466,6 +472,77 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
   );
 }
 
+/**
+ * Where the run's time went, stage by stage.
+ *
+ * Read from the run store's stage rows — the ones the header strip draws — so
+ * the two can never print different durations for one stage. Only stages that
+ * took time get a row, and the card is absent for a run stored before stages
+ * were timed. The total elapsed is the job's, the same figure the header's
+ * Duration prints, and the gap between it and the stages is time spent outside
+ * any stage.
+ */
+function StageTimingCard({
+  jobId,
+  elapsedSeconds,
+}: {
+  jobId: string;
+  elapsedSeconds: number | null;
+}) {
+  const run = useRun(jobId || null);
+  const { stages, stagesMs } = stageTiming(run.stages, elapsedSeconds);
+  if (stages.length === 0) return null;
+  const names = rosterNames(run.roster);
+
+  return (
+    <section
+      aria-labelledby="stage-timing-heading"
+      className="bg-bg-surface border border-border rounded"
+    >
+      <div className="px-4 py-3 border-b border-border flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <h2
+          id="stage-timing-heading"
+          className="text-xs font-medium text-text-primary uppercase tracking-wider"
+        >
+          Time per stage
+        </h2>
+        {elapsedSeconds ? (
+          <p className="text-xs text-text-secondary">
+            <span className="text-text-muted">Total elapsed: </span>
+            <span className="font-mono">{formatDuration(elapsedSeconds)}</span>
+            <span className="text-text-muted"> · in stages: </span>
+            <span className="font-mono">{formatStageDuration(stagesMs)}</span>
+          </p>
+        ) : (
+          <p className="text-xs text-text-secondary">
+            <span className="text-text-muted">In stages: </span>
+            <span className="font-mono">{formatStageDuration(stagesMs)}</span>
+          </p>
+        )}
+      </div>
+      <ul className="p-4 space-y-2">
+        {stages.map((stage) => (
+          <li
+            key={stage.key}
+            className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] items-center gap-3 text-xs"
+          >
+            <span className="text-text-secondary truncate" title={names.stage(stage.key)}>
+              {names.stage(stage.key)}
+            </span>
+            <span aria-hidden="true" className="h-2 bg-bg-active rounded-sm">
+              <span
+                className="block h-2 bg-accent rounded-sm"
+                style={{ width: `${stage.share}%` }}
+              />
+            </span>
+            <span className="font-mono text-text-primary text-right">{stage.label}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /** One count, and the tab that holds what it counts. */
 function CountLink({
   label,
@@ -521,6 +598,11 @@ function RunRecord({
   const bundleLoss = bundleLossSentence(runSummary.truncation ?? null);
   const partialGrounding = partialGroundingSentence(runSummary.truncation ?? null);
   const corpusHeld = corpusHeldSentence(runSummary.truncation ?? null);
+  const spent = tokensSentence(runSummary.tokens ?? null);
+  const fallbacks = Object.entries(runSummary.models ?? {}).flatMap(([agent, block]) =>
+    (block?.fallbacks ?? []).map((row) => ({ agent, reason: row.reason })),
+  );
+  const rests = runSummary.server_rests ?? [];
   const configRows = Object.entries(config ?? {}).filter(
     ([key]) => !SHOWN_IN_THE_HEADER.has(key),
   );
@@ -564,6 +646,17 @@ function RunRecord({
                 ? `${countLabel(validation.retries, "correction turn")} were spent on producers that answered in the wrong shape.`
                 : "No producer needed a correction turn."}
             </li>
+            {spent && <li>{spent}</li>}
+            {fallbacks.map((row, i) => (
+              <li key={`fallback-${i}`} className="text-text-muted">
+                {row.agent} fell back to another model — {row.reason}.
+              </li>
+            ))}
+            {rests.map((row, i) => (
+              <li key={`rest-${i}`} className="text-status-orange">
+                {serverRestSentence(row)}
+              </li>
+            ))}
             {bundleLoss && <li className="text-text-muted">{bundleLoss}</li>}
             {partialGrounding && <li className="text-text-muted">{partialGrounding}</li>}
             {corpusHeld && <li className="text-text-muted">{corpusHeld}</li>}

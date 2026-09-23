@@ -172,7 +172,7 @@ export function tabHasContent(key: string, report: ReportDetailDTO | null): bool
       return (
         // Not "a layer carried a claim" but "the panel has a row", which is
         // the same reading the panel itself makes.
-        hasRuleMatches(report.agent_findings) ||
+        hasRuleMatches(report.agent_findings, sections) ||
         nonEmpty(mr?.detection_signatures) ||
         nonEmpty(mr?.stix_bundle_extended) ||
         nonEmpty(report.stix_bundle)

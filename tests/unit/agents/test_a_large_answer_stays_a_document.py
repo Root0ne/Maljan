@@ -665,6 +665,10 @@ class TestOverManyShapesAtOnce:
         for answer in self._documents():
             for limit in (200, 1000, 6000):
                 result = shorten_json_document(answer, limit)
+                if result.compacted:
+                    assert json.loads(result.text) == json.loads(answer)
+                    assert len(result.text) <= limit
+                    continue
                 if not result.shortened:
                     assert result.text == answer
                     continue
@@ -942,7 +946,7 @@ class TestAServersParameterNameIsUntrustedText:
             content = [type("C", (), {"text": _strings_answer(400)})()]
 
         class _Session:
-            async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+            async def call_tool(self, name: str, arguments: dict[str, Any], **_: Any) -> Any:
                 return _Result()
 
         toolkit = MCPLangChainToolkit(max_output_chars=limit)

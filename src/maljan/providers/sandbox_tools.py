@@ -11,8 +11,10 @@ what ``ToolRef(kind="sandbox")`` resolves to: a tool set built from the report
 the job already downloaded.
 
 A report the container does not have yields the same tools, each answering
-``{"error": "no sandbox report for this job"}``. The agent then knows the
-channel is empty rather than silently seeing tools that return nothing.
+``{"error": "no sandbox report for this job"}``, and the mock sandbox's empty
+stand-in yields tools answering the sentence that says no sandbox ran. The
+agent then knows the channel is empty rather than silently seeing tools that
+return nothing.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
+from maljan.pipeline.sandbox_status import NOT_RUN, sandbox_status
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -30,6 +33,23 @@ if TYPE_CHECKING:
 _ROW_LIMIT = 200
 
 _NO_REPORT = {"error": "no sandbox report for this job", "tool": "sandbox"}
+
+
+def _no_sandbox_ran(report: dict[str, Any]) -> bool:
+    """Whether ``report`` is one no sandbox produced: the mock's stand-in."""
+    return sandbox_status(report).status == NOT_RUN
+
+
+def _no_report(report: dict[str, Any] | None) -> dict[str, Any]:
+    """The answer every tool gives where no sandbox ran, saying which absence it is.
+
+    The mock sandbox's stand-in has well-formed empty sections, and a tool
+    that read them would answer "0 processes" about a detonation that never
+    happened.
+    """
+    if report is None:
+        return dict(_NO_REPORT)
+    return {"error": sandbox_status(report).statement, "tool": "sandbox"}
 
 
 def _report_of(container: Any) -> dict[str, Any] | None:
@@ -68,8 +88,8 @@ def sandbox_report_section(report: dict[str, Any] | None, section: str) -> dict[
     names are listed in the answer when the requested one is absent, so a model
     that guessed wrong can correct itself in one turn instead of guessing again.
     """
-    if report is None:
-        return dict(_NO_REPORT)
+    if report is None or _no_sandbox_ran(report):
+        return _no_report(report)
     key = str(section).strip()
     if key not in report:
         return {
@@ -90,8 +110,8 @@ def sandbox_processes(report: dict[str, Any] | None) -> dict[str, Any]:
     different questions and answering both at once makes the cheap one
     expensive.
     """
-    if report is None:
-        return dict(_NO_REPORT)
+    if report is None or _no_sandbox_ran(report):
+        return _no_report(report)
     processes = _behavior(report).get("processes")
     rows: list[dict[str, Any]] = []
     if isinstance(processes, list):
@@ -117,8 +137,8 @@ def sandbox_network(report: dict[str, Any] | None) -> dict[str, Any]:
     Per-kind bounds rather than one shared budget: a sample that made a
     thousand DNS lookups must not push its two HTTP requests out of the answer.
     """
-    if report is None:
-        return dict(_NO_REPORT)
+    if report is None or _no_sandbox_ran(report):
+        return _no_report(report)
     network = report.get("network")
     if not isinstance(network, dict):
         return {"dns": [], "hosts": [], "http": [], "tcp": [], "udp": []}
@@ -139,8 +159,8 @@ def sandbox_signatures(report: dict[str, Any] | None) -> dict[str, Any]:
     into the verdict. A CAPE signature firing is evidence the agent weighs
     alongside everything else it found.
     """
-    if report is None:
-        return dict(_NO_REPORT)
+    if report is None or _no_sandbox_ran(report):
+        return _no_report(report)
     signatures = report.get("signatures")
     rows: list[dict[str, Any]] = []
     if isinstance(signatures, list):
@@ -161,8 +181,8 @@ def sandbox_signatures(report: dict[str, Any] | None) -> dict[str, Any]:
 
 def sandbox_dropped_files(report: dict[str, Any] | None) -> dict[str, Any]:
     """Files the sample wrote, with the hashes the sandbox computed for them."""
-    if report is None:
-        return dict(_NO_REPORT)
+    if report is None or _no_sandbox_ran(report):
+        return _no_report(report)
     dropped = report.get("dropped")
     if not isinstance(dropped, list):
         dropped = report.get("dropped_files")
@@ -268,8 +288,8 @@ def sandbox_registry_ops(report: dict[str, Any] | None, limit: int = _ROW_LIMIT)
     call wins where both name the same key — an operation is worth more than
     the bare fact of access.
     """
-    if report is None:
-        return dict(_NO_REPORT)
+    if report is None or _no_sandbox_ran(report):
+        return _no_report(report)
     bound = max(0, int(limit))
     rows: dict[str, dict[str, Any]] = {}
     for key in _summary_list(report, "keys"):
@@ -333,8 +353,8 @@ def sandbox_api_calls(
     knowledge server's ``api_capability`` question, asked when the model
     decides the answer matters.
     """
-    if report is None:
-        return dict(_NO_REPORT)
+    if report is None or _no_sandbox_ran(report):
+        return _no_report(report)
 
     behavior = _behavior(report)
     names_by_pid = {
@@ -407,8 +427,8 @@ def sandbox_mutexes(report: dict[str, Any] | None) -> dict[str, Any]:
     builds, which is why it gets a tool of its own rather than a filter over
     the call stream.
     """
-    if report is None:
-        return dict(_NO_REPORT)
+    if report is None or _no_sandbox_ran(report):
+        return _no_report(report)
     names: list[str] = list(_summary_list(report, "mutexes"))
     for call in _calls(report):
         if str(call.get("api") or "").lower() not in _MUTEX_APIS:
@@ -426,8 +446,8 @@ def sandbox_services_and_tasks(report: dict[str, Any] | None) -> dict[str, Any]:
     sample arrange to happen again — and an agent that had to make three calls
     to ask it would routinely make one and miss the other two.
     """
-    if report is None:
-        return dict(_NO_REPORT)
+    if report is None or _no_sandbox_ran(report):
+        return _no_report(report)
     services: list[str] = [
         *_summary_list(report, "created_services"),
         *_summary_list(report, "started_services"),
@@ -457,8 +477,8 @@ def sandbox_channels(report: dict[str, Any] | None, name: str = "") -> dict[str,
     Called with no name it lists what exists, which is how an agent discovers a
     channel it did not know to ask for.
     """
-    if report is None:
-        return dict(_NO_REPORT)
+    if report is None or _no_sandbox_ran(report):
+        return _no_report(report)
     channels = report.get("channels")
     if not isinstance(channels, dict):
         return {"channels": [], "rows": []}

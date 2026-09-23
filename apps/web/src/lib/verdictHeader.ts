@@ -19,6 +19,7 @@
  * `Confidence 0.92.` in the summary paragraph two hundred pixels below.
  */
 
+import { atLeast, severityRank } from "./severity";
 import { verdictBucket, verdictLabel } from "./verdict";
 import type { VerdictBucket } from "./verdict";
 import type { VerdictReading } from "@/lib/api";
@@ -63,9 +64,10 @@ export function assessedSeverity(
  * Suspicious sits between the two by definition and can disagree with nothing;
  * an unknown verdict implies nothing, so it disagrees with nothing either.
  */
-const CONTRADICTS: Partial<Record<VerdictBucket, ReadonlySet<AssessedSeverity>>> = {
-  malicious: new Set<AssessedSeverity>(["Informational", NO_SEVERITY]),
-  benign: new Set<AssessedSeverity>(["High", "Critical"]),
+const CONTRADICTS: Partial<Record<VerdictBucket, (severity: AssessedSeverity) => boolean>> = {
+  // The bottom rung of the ladder, whatever it is called, or no rung at all.
+  malicious: (severity) => severity === NO_SEVERITY || severityRank(severity) === 0,
+  benign: (severity) => atLeast(severity, "High"),
 };
 
 /**
@@ -84,7 +86,7 @@ export function verdictSeverityConflict(
 ): boolean {
   if (severity === NO_REPORT) return false;
   const against = CONTRADICTS[verdictBucket(verdict)];
-  return against ? against.has(severity) : false;
+  return against ? against(severity) : false;
 }
 
 /**

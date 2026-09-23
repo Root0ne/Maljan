@@ -111,7 +111,8 @@ class TestTheJudgeAsksOnce:
             '{"type": "bundle", "objects": []}',
             (
                 '{"type": "bundle", "objects": [{"type": "malware", '
-                '"id": "malware--aaaaaaaa-0000-4000-8000-bbbbbbbbbbbb", "name": "loader"}], '
+                '"id": "malware--aaaaaaaa-0000-4000-8000-bbbbbbbbbbbb", "name": "loader", '
+                '"is_family": false}], '
                 '"x_maljan_assessment": {"verdict": "Malware", '
                 '"severity": {"rating": "High", "rationale": "it injects"}, '
                 '"malware_category": "loader", "confidence": 0.8}}'

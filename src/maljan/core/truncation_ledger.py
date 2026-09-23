@@ -98,6 +98,7 @@ def record_guardrail_outcome(
     shortened: bool = False,
     shortening_timed_out: bool = False,
     no_room: bool = False,
+    compacted: bool = False,
     limit: int = 0,
 ) -> None:
     """Record one tool-output guardrail decision on ``ledger``.
@@ -126,6 +127,7 @@ def record_guardrail_outcome(
             shortened=shortened,
             shortening_timed_out=shortening_timed_out,
             no_room=no_room,
+            compacted=compacted,
             limit=limit,
         )
     except Exception:  # noqa: BLE001 — telemetry must never break a tool call
@@ -226,6 +228,11 @@ class TruncationLedger:
         # Counted because it is the loudest thing the cap can do to a run, and
         # a reader seeing thin late evidence needs to know it happened.
         self.tool_output_no_room = 0
+        # A JSON answer over the cap only because of its whitespace, handed
+        # over whole and written without it. Not a shortening — every value is
+        # the tool's — and counted apart so a reader can see how many answers
+        # the cap would have cut for their layout alone.
+        self.tool_output_compacted = 0
         self.tool_output_chars_in = 0
         self.tool_output_chars_kept = 0
         # The caps that were actually in force, smallest and largest. With the
@@ -300,6 +307,7 @@ class TruncationLedger:
         shortened: bool = False,
         shortening_timed_out: bool = False,
         no_room: bool = False,
+        compacted: bool = False,
         limit: int = 0,
     ) -> None:
         """Record one guardrail decision.
@@ -331,6 +339,8 @@ class TruncationLedger:
                 self.tool_output_shortening_timeouts += 1
             if no_room:
                 self.tool_output_no_room += 1
+            if compacted:
+                self.tool_output_compacted += 1
 
     def note_context_window(self, snapshot: dict[str, object] | None) -> None:
         """Record the window the derived caps were worked out from.
@@ -466,6 +476,7 @@ class TruncationLedger:
                 "tool_output_shortened": self.tool_output_shortened,
                 "tool_output_shortening_timeouts": self.tool_output_shortening_timeouts,
                 "tool_output_no_room": self.tool_output_no_room,
+                "tool_output_compacted": self.tool_output_compacted,
                 "tool_output_chars_in": self.tool_output_chars_in,
                 "tool_output_chars_kept": self.tool_output_chars_kept,
                 "tool_output_chars_dropped": chars_dropped(

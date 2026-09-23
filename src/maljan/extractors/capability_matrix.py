@@ -42,8 +42,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from maljan.analysis.technique_ids import attack_reference_id
 from maljan.core.logger import logger
 from maljan.reporting.models import CapabilityCell, TTPMapping
+from maljan.schemas.stix_models import stated_confidence
 
 # Fallback MITRE ATT&CK Enterprise tactic catalogue (pre-v19 names). Used only
 # when the live bundle's tactic catalogue is unavailable. ``kill_chain_phases``
@@ -106,9 +108,14 @@ def build_capability_matrix(
         (name, tactic_slug), tactic_domain = _resolve_technique_meta(tid)
         evidence = info["evidence"]
         # The highest number any source put on this technique. Taken once, here,
-        # rather than accumulated into the row as it was collected.
-        confidence = max((float(c) for c in info.get("confidences") or ()), default=0.0)
-        # Who stated that number: the first source whose number it is.
+        # rather than accumulated into the row as it was collected, and
+        # ``None`` when no source gave one: a technique the judge named with no
+        # number — every one it names alone under a verdict with no malware
+        # object to hang an edge on — is not a technique at confidence zero.
+        confidence = max((float(c) for c in info.get("confidences") or ()), default=None)
+        # Who stated that number: the first source whose number it is. The two
+        # lists are appended together, so a source that stated no number is
+        # never named as the producer of someone else's.
         stated_by = next(
             (
                 who
@@ -127,7 +134,7 @@ def build_capability_matrix(
         # capability and the narrative agent would expand into prose. A
         # technique the judge named always has a source (the judge), so this
         # only catches a row nothing actually asserted.
-        if confidence <= 0.0 and not evidence and not layers:
+        if not confidence and not evidence and not layers:
             continue
 
         tactic_id, tactic_name = _resolve_tactic(tactic_slug, tactic_domain)
@@ -154,8 +161,7 @@ def build_capability_matrix(
                 technique_id=tid,
                 technique_name=name,
                 evidence=evidence[:6],
-                confidence=max(0.0, min(1.0, confidence)),
-                confidence_stated=bool(info.get("confidences")),
+                confidence=confidence,
                 confidence_source=stated_by,
                 contributing_layers=layers,
                 technique_id_valid=valid,
@@ -179,15 +185,15 @@ def build_capability_matrix(
                 tactic=tactic_id,
                 tactic_name=tactic_name,
                 evidence_quotes=evidence[:8],
-                confidence=max(0.0, min(1.0, confidence)),
+                confidence=confidence,
                 contributing_layers=layers,
                 is_corroborated=len([lyr for lyr in layers if lyr != _JUDGE_SOURCE]) >= 2,
                 technique_id_valid=valid,
             )
         )
 
-    cells.sort(key=lambda c: c.confidence, reverse=True)
-    mappings.sort(key=lambda m: m.confidence, reverse=True)
+    cells.sort(key=lambda c: -1.0 if c.confidence is None else c.confidence, reverse=True)
+    mappings.sort(key=lambda m: -1.0 if m.confidence is None else m.confidence, reverse=True)
     logger.info("capability_matrix: %d cells, %d ttp mappings", len(cells), len(mappings))
     return cells, mappings
 
@@ -333,12 +339,17 @@ def _collect_techniques(
         )
 
     # 1. The judge's bundle. An attack-pattern says the technique is in the
-    # verdict; the relationship annotations say how sure the judge was and which
-    # agents it credited. Its ids are checked against the catalogue here, the
+    # verdict; a relationship's annotation says how sure the judge was. Its ids
+    # are checked against the catalogue here, the
     # same way an analyst's were checked in the analyst's own loop.
     judge_ids = _judge_technique_ids(stix_output)
     judge_relationships = _judge_relationship_rows(stix_output)
-    unknown = _unknown_to_the_catalogue(judge_ids + [tid for tid, _c, _a in judge_relationships])
+    unknown = _unknown_to_the_catalogue(judge_ids + [tid for tid, _c in judge_relationships])
+    # A bundle this pipeline built because the judge's answer was not one names
+    # no technique of the judge's: its attack-patterns are the analysts'
+    # claims, carried over, and the analysts are credited below. Crediting the
+    # judge there named a source that said nothing.
+    judge_spoke = not (stix_output or {}).get("x_maljan_fallback_verdict")
     for tid in judge_ids:
         row = _row(tid)
         row["claimed"] = True
@@ -349,18 +360,23 @@ def _collect_techniques(
         # evidence and no source, and the zero-signal guard below drops it — so
         # a technique the verdict names would be missing from the report the
         # verdict is printed in, marked or not.
-        if _JUDGE_SOURCE not in row["layers"]:
+        if judge_spoke and _JUDGE_SOURCE not in row["layers"]:
             row["layers"].append(_JUDGE_SOURCE)
-    for tid, confidence, agents in judge_relationships:
+    for tid, confidence in judge_relationships:
         row = _row(tid)
         row["claimed"] = True
         if tid in unknown:
             row["valid"] = False
-        row["confidences"].append(confidence)
-        row["stated_by"].append("the judge")
-        for agent in agents:
-            if agent and agent not in row["layers"]:
-                row["layers"].append(str(agent))
+        if confidence is not None:
+            row["confidences"].append(confidence)
+            row["stated_by"].append("the judge")
+        # The relationship is the judge's statement, so the judge is its
+        # source. The agents it credits are the judge's words about the
+        # evidence and stay on the relationship as written; a layer is a source
+        # that named the technique itself, and one analyst's claim credited by
+        # the judge to two analysts is still one claim.
+        if judge_spoke and _JUDGE_SOURCE not in row["layers"]:
+            row["layers"].append(_JUDGE_SOURCE)
 
     # 2. ISR claims. The analysts carry the evidence quotes and the techniques
     # the judge did not name.
@@ -441,13 +457,11 @@ def _judge_technique_ids(stix_output: dict[str, Any] | None) -> list[str]:
     for obj in _judge_objects(stix_output):
         if obj.get("type") != "attack-pattern":
             continue
-        for ref in obj.get("external_references") or []:
-            external_id = ref.get("external_id") if isinstance(ref, dict) else None
-            if isinstance(external_id, str) and external_id.strip():
-                tid = external_id.strip().upper()
-                if tid not in found:
-                    found.append(tid)
-                break
+        # Only a reference filed under ATT&CK names a technique: a CAPEC
+        # reference listed first was read as technique ``CAPEC-…``.
+        tid = attack_reference_id(obj)
+        if tid and tid not in found:
+            found.append(tid)
     return found
 
 
@@ -465,8 +479,7 @@ def unmapped_behaviours(stix_output: dict[str, Any] | None) -> list[str]:
     for obj in _judge_objects(stix_output):
         if obj.get("type") != "attack-pattern":
             continue
-        refs = obj.get("external_references") or []
-        if any(isinstance(ref, dict) and str(ref.get("external_id") or "").strip() for ref in refs):
+        if attack_reference_id(obj):
             continue
         name = str(obj.get("name") or "").strip()
         if name and name.upper().split()[0].rstrip(":").startswith("T"):
@@ -480,21 +493,41 @@ def unmapped_behaviours(stix_output: dict[str, Any] | None) -> list[str]:
 
 def _judge_relationship_rows(
     stix_output: dict[str, Any] | None,
-) -> list[tuple[str, float, list[str]]]:
-    """``(technique_id, the judge's confidence, contributing agents)`` per relationship."""
-    rows: list[tuple[str, float, list[str]]] = []
-    for obj in _judge_objects(stix_output):
+) -> list[tuple[str, float | None]]:
+    """``(technique_id, the judge's confidence or None)`` per annotated relationship.
+
+    The technique is the attack-pattern the relationship points at. It used to
+    be read from ``x_maljan_technique_id`` alone, which the prompt never asks
+    for and no stored judge relationship carried, so every number the judge put
+    on a technique was dropped and a technique only the judge named was
+    published at 0.0. The property still wins where it is written. ``None``
+    where the judge wrote no number: an absent confidence is not a zero.
+    """
+    objects = _judge_objects(stix_output)
+    technique_of: dict[str, str] = {}
+    for obj in objects:
+        if obj.get("type") != "attack-pattern":
+            continue
+        declared = attack_reference_id(obj)
+        if declared:
+            technique_of[str(obj.get("id") or "")] = declared
+    rows: list[tuple[str, float | None]] = []
+    for obj in objects:
         if obj.get("type") != "relationship":
             continue
-        tid = obj.get("x_maljan_technique_id")
-        if not isinstance(tid, str) or not tid.strip():
+        written = obj.get("x_maljan_technique_id")
+        tid = (
+            written.strip().upper()
+            if isinstance(written, str) and written.strip()
+            else technique_of.get(str(obj.get("target_ref") or ""))
+            or technique_of.get(str(obj.get("source_ref") or ""))
+        )
+        if not tid:
             continue
-        try:
-            confidence = float(obj.get("x_maljan_confidence") or 0.0)
-        except (TypeError, ValueError):
-            confidence = 0.0
-        agents = [str(a) for a in obj.get("x_maljan_contributing_agents") or [] if a]
-        rows.append((tid.strip().upper(), confidence, agents))
+        # A number outside 0–1, or no number, is no number: the judge is asked
+        # about it (``stix.annotation_out_of_schema``) and nothing here puts it
+        # on the scale.
+        rows.append((tid, stated_confidence(obj.get("x_maljan_confidence"))))
     return rows
 
 

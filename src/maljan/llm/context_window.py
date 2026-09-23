@@ -128,6 +128,8 @@ __all__ = [
     "probe_window",
     "reply_reserve_tokens",
     "table_window",
+    "tool_definition_chars",
+    "window_full_error",
     "unknown_window",
     "window_for_settings",
     "window_from_llama_props",
@@ -1027,11 +1029,17 @@ def _remembered(key: tuple[str, str, str], fact: WindowFact | None) -> WindowFac
 # What a server says when a request did not fit the window it is serving. Every
 # OpenAI-compatible server and every vendor API words it differently; what they
 # share is naming the length. Matched loosely on purpose — a false positive
-# costs one re-probe and a false negative costs a stale window.
+# costs one re-probe and a false negative costs a stale window. That reasoning
+# holds for retiring a cached window and for nothing else: a tool loop deciding
+# whether a failure is a full window asks :func:`window_full_error`, which is
+# strict, because there a false positive would swallow an agent's failure.
 _OVERFLOW_SIGNATURES = (
     "context length",
     "context window",
     "context size",
+    # llama.cpp with context shift off, when prompt and reply together reach
+    # the window: the prompt fitted and the reply ran out of room.
+    "context shift",
     "maximum context",
     "n_ctx",
     "max_model_len",
@@ -1040,6 +1048,66 @@ _OVERFLOW_SIGNATURES = (
 )
 
 _OVERFLOW_RE = re.compile("|".join(re.escape(word) for word in _OVERFLOW_SIGNATURES))
+
+
+# The provider SDKs whose errors are a server's answer. Anything else raised
+# inside a loop — a ``ValueError`` that happens to mention ``n_ctx`` — is the
+# platform's own failure and is never read as a full window.
+_PROVIDER_PACKAGES = frozenset({"openai", "anthropic", "ollama", "google"})
+
+# The sentences servers say when the conversation itself has filled the
+# window: llama.cpp with context shift off (prompt and reply reached it) and
+# when the prompt alone exceeds it, OpenAI-compatible servers, and Anthropic.
+_WINDOW_FULL_SIGNATURES = (
+    "context shift is disabled",
+    "exceeds the available context size",
+    "maximum context length",
+    "context_length_exceeded",
+    "prompt is too long",
+)
+
+
+# The reply cap and the window, as a server that names ``max_tokens`` states
+# them: "'max_tokens' … is too large: 8192. This model's maximum context length
+# is 32768 tokens and your request has 24808 input tokens".
+_REPLY_CAP_RE = re.compile(r"too large:\s*(\d[\d,]*)")
+_WINDOW_RE = re.compile(r"maximum context length is\s*(\d[\d,]*)")
+
+
+def _number(written: str) -> int:
+    """A count as a server wrote it, with or without thousands separators."""
+    return int(written.replace(",", ""))
+
+
+def window_full_error(exc: BaseException) -> bool:
+    """Whether ``exc`` is a model server saying the conversation filled its window.
+
+    Strict where :func:`note_provider_error` is loose. Only an error a provider
+    SDK raised for a server's answer counts, and only a sentence that says the
+    request did not fit. A server that names the reply cap is read by its
+    numbers: a cap at least as large as the window is a configuration fault
+    that no conversation could avoid, and is not a full window; a cap that
+    fits the window on its own means the prompt grew until the two together
+    did not, which is. Named without numbers to read, it is taken as the
+    fault, because a false positive here swallows an agent's failure. Never
+    raises.
+    """
+    try:
+        package = type(exc).__module__.split(".", 1)[0]
+        if package not in _PROVIDER_PACKAGES:
+            return False
+        text = str(exc).lower()
+        if not any(signature in text for signature in _WINDOW_FULL_SIGNATURES):
+            return False
+        if "max_tokens" not in text:
+            return True
+        cap = _REPLY_CAP_RE.search(text)
+        window = _WINDOW_RE.search(text)
+        if cap is None or window is None:
+            return False
+        return _number(cap.group(1)) < _number(window.group(1))
+    except Exception:  # noqa: BLE001 — an error path never raises another error
+        return False
 
 
 def note_provider_error(message: object) -> bool:
@@ -1203,6 +1271,31 @@ def answering_for(agent: str) -> Iterator[None]:
         yield
     finally:
         _ANSWERING_FOR.reset(token)
+
+
+def tool_definition_chars(tools: Iterable[Any]) -> int:
+    """What the definitions of ``tools`` weigh in a request, in characters.
+
+    Every request a tool loop makes carries them beside the messages — the
+    name, the description and the argument schema of each tool, as the
+    provider sends them — and none of it is in the conversation a loop
+    measures. A static analyst with 35 tools spent over a quarter of a
+    32,768-token window's tool budget on them before its first message, and a
+    count that left them out said there was room until the server refused.
+
+    Measured as the OpenAI-compatible definition, which is what the providers
+    this platform uses send. A tool that cannot be described costs nothing
+    here rather than failing the loop.
+    """
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+
+    total = 0
+    for tool in tools:
+        try:
+            total += len(json.dumps(convert_to_openai_tool(tool), ensure_ascii=False))
+        except Exception as exc:  # noqa: BLE001 — a definition is never worth a lost loop
+            logger.debug("context window: a tool definition was not measured (%s)", exc)
+    return total
 
 
 class ContextBudget:

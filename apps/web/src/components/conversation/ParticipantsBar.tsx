@@ -16,6 +16,7 @@
 import { CornerDownRight } from "lucide-react";
 
 import type { Participant, ParticipantState } from "@/lib/conversation";
+import { progressTone } from "@/lib/status";
 import { agentColor, agentInitials } from "./agentIdentity";
 
 const STATE_LABEL: Record<ParticipantState, string> = {
@@ -24,10 +25,11 @@ const STATE_LABEL: Record<ParticipantState, string> = {
   done: "Done",
 };
 
+/* Working and done are the run's own colours (`lib/status.ts`). */
 const STATE_DOT: Record<ParticipantState, string> = {
   waiting: "bg-text-disabled",
-  working: "bg-status-blue animate-pulse",
-  done: "bg-status-green",
+  working: `${progressTone("working").dot} animate-pulse`,
+  done: progressTone("done").dot,
 };
 
 /** What this participant has done, in the fewest words that stay true. */

@@ -41,9 +41,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.schemas.judgement import JudgeAssessment
 
@@ -56,6 +56,18 @@ def _generate_uuid() -> str:
 def get_utcnow() -> datetime:
     """Helper to return aware UTC datetime for STIX timestamp defaults."""
     return datetime.now(UTC)
+
+
+# The namespace a technique's object id is derived in. A UUIDv5 over the
+# technique id, so one technique is one object across exports and across runs,
+# whichever bundle carries it — the judge's own or the export — and never a
+# UUID copied out of the STIX documentation.
+ATTACK_PATTERN_NAMESPACE = uuid.UUID("2f0b4c10-6f7e-5b6a-9d3b-1f6a5c7e8d90")
+
+
+def attack_pattern_id(technique_id: str) -> str:
+    """The object id of one ATT&CK technique. The same id every time."""
+    return f"attack-pattern--{uuid.uuid5(ATTACK_PATTERN_NAMESPACE, technique_id)}"
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +161,10 @@ class STIXObject(_SpecConformantModel):
     spec_version: Literal["2.1"] = "2.1"
     created: datetime = Field(default_factory=get_utcnow)
     modified: datetime = Field(default_factory=get_utcnow)
+    # The identity that produced the object. The export names this platform's
+    # own identity on every object it publishes; ``None`` keeps the property
+    # out of a bundle that has no identity to name.
+    created_by_ref: str | None = None
 
 
 class Indicator(STIXObject):
@@ -158,7 +174,10 @@ class Indicator(STIXObject):
     id: str = Field(default_factory=lambda: f"indicator--{_generate_uuid()}")
     name: str | None = None
     description: str | None = None
-    indicator_types: list[str] = Field(default_factory=lambda: ["malicious-activity"])
+    # Empty, and so absent from the dump, when nobody wrote one: STIX 2.1 makes
+    # the property optional, and the ``malicious-activity`` this defaulted to
+    # was published as the judge's word on an indicator it had left untyped.
+    indicator_types: list[str] = Field(default_factory=list)
     pattern: str
     pattern_type: str = "stix"
     valid_from: datetime = Field(default_factory=get_utcnow)
@@ -184,8 +203,14 @@ class Malware(STIXObject):
     id: str = Field(default_factory=lambda: f"malware--{_generate_uuid()}")
     name: str
     description: str | None = None
-    is_family: bool = False
+    # ``None`` when the judge did not say. STIX requires the property, so the
+    # judge is asked for it (``stix.is_family_missing``); the ``False`` this
+    # defaulted to was a statement nobody made.
+    is_family: bool | None = None
     malware_types: list[str] = Field(default_factory=list)
+    # The sample files this malware object stands for, as the judge related
+    # them: the ids of ``file`` objects in the same bundle.
+    sample_refs: list[str] = Field(default_factory=list)
     x_maljan_fallback_reasoning: str | None = None
     x_maljan_degraded_path: bool | None = None
     x_maljan_model_only_technique_ids: list[str] | None = None
@@ -230,31 +255,84 @@ class ConfidenceAnnotatedRelationship(STIXObject):
     source_ref: str
     target_ref: str
 
-    # Custom extension fields (STIX 2.1 custom property convention: x_ prefix)
-    x_maljan_confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
-    x_maljan_evidence_basis: EvidenceBasis = "unknown"
-    x_maljan_contributing_agents: list[str] = Field(default_factory=list)
+    # Custom extension fields (STIX 2.1 custom property convention: x_ prefix).
+    # ``None`` where nobody wrote one, which keeps the property out of the
+    # bundle. They defaulted to 0.5 and ``unknown``, so a relationship the
+    # judge wrote without a number — and the relationships the text fallback
+    # builds — were published carrying a confidence nobody had stated.
+    #
+    # Typed loosely on purpose. They were typed strictly (a number in 0–1, a
+    # basis from the list), and a relationship failing that type parsed as a
+    # plain ``Relationship`` instead — the whole annotation gone, nothing
+    # recorded. A value outside the schema is the judge's answer and is kept as
+    # written; ``pipeline.validation.annotation_out_of_schema_violations`` asks
+    # about it, and a reader takes a number only when it is one in 0–1
+    # (:func:`stated_confidence`).
+    x_maljan_confidence: float | str | None = None
+    x_maljan_evidence_basis: str | None = None
+    x_maljan_contributing_agents: list[str] | str = Field(default_factory=list)
     x_maljan_technique_id: str | None = None
 
     @property
     def is_high_confidence(self) -> bool:
-        """True if confidence >= 0.80 (two-sigma threshold)."""
-        return self.x_maljan_confidence >= 0.80
+        """True if confidence >= 0.80 (two-sigma threshold); a missing one is not."""
+        stated = stated_confidence(self.x_maljan_confidence)
+        return stated is not None and stated >= 0.80
 
     @property
     def is_multi_domain(self) -> bool:
         """True if evidence spans more than one analysis domain."""
-        return "+" in self.x_maljan_evidence_basis or self.x_maljan_evidence_basis == "all"
+        basis = self.x_maljan_evidence_basis or ""
+        return "+" in basis or basis == "all"
 
     def confidence_label(self) -> str:
         """Human-readable confidence tier label."""
-        if self.x_maljan_confidence >= 0.90:
+        stated = stated_confidence(self.x_maljan_confidence)
+        if stated is None:
+            return "NOT ASSESSED"
+        if stated >= 0.90:
             return "HIGH"
-        if self.x_maljan_confidence >= 0.70:
+        if stated >= 0.70:
             return "MEDIUM"
-        if self.x_maljan_confidence >= 0.50:
+        if stated >= 0.50:
             return "LOW"
         return "SPECULATIVE"
+
+
+def produced_by(obj: STIXObject, producer: str) -> STIXObject:
+    """A copy of ``obj`` naming ``producer`` as the identity that produced it.
+
+    A copy, so the bundle the object came from keeps what it said. The export
+    calls it for every object it publishes; which producer an object already
+    names, and whether that one is kept, is the renderer's decision.
+    """
+    return obj.model_copy(update={"created_by_ref": producer})
+
+
+def crediting_only(obj: Any, agents: list[str]) -> Any:
+    """A copy of a relationship crediting ``agents`` and no one else.
+
+    A copy, so the judge's own bundle keeps every name it wrote. The export
+    calls it for a credit the judge was asked about and kept, naming an agent
+    no source of that name stands behind, and records that it did.
+    """
+    return obj.model_copy(update={"x_maljan_contributing_agents": agents})
+
+
+def stated_confidence(value: Any) -> float | None:
+    """A confidence as a number in 0–1, or ``None`` when it is not one.
+
+    ``None`` for an absent value and for one outside the scale: ``95`` or
+    ``"high"`` is a statement the judge is asked about, not a number any reader
+    may put on a technique.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if 0.0 <= number <= 1.0 else None
 
 
 class AttackPattern(STIXObject):
@@ -283,14 +361,129 @@ class Identity(STIXObject):
 
 
 class ObservedData(STIXObject):
-    """STIX 2.1 Observed Data — a snapshot of sandbox observations."""
+    """STIX 2.1 Observed Data — a snapshot of sandbox observations.
+
+    The observables are objects of the bundle, named by ``object_refs``. The
+    2.0 form — an ``objects`` dictionary of embedded observables — is
+    deprecated in 2.1, and the one this used to carry held ``process`` entries
+    with no id and a ``name`` 2.1 does not define, which the OASIS validator
+    could not read at all. ``number_observed`` is how many times the snapshot
+    was seen: one sandbox run is one.
+    """
 
     type: Literal["observed-data"] = "observed-data"
     id: str = Field(default_factory=lambda: f"observed-data--{_generate_uuid()}")
     first_observed: datetime = Field(default_factory=get_utcnow)
     last_observed: datetime = Field(default_factory=get_utcnow)
     number_observed: int = 1
-    objects: dict[str, Any] = Field(default_factory=dict)
+    object_refs: list[str] = Field(default_factory=list)
+
+
+# The namespace STIX 2.1 derives Cyber-observable ids in (section 2.9).
+SCO_NAMESPACE = uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7")
+
+
+class _Observable(_SpecConformantModel):
+    """A STIX 2.1 Cyber-observable: an id, a type and the common SCO properties.
+
+    Every property the standard defines for the type is declared, optional as
+    the standard makes it, so nothing the judge wrote under a defined name is
+    lost at validation. A custom ``x_`` property is kept as written (``extra``
+    is allowed for that); a property the standard does not define for the type
+    never reaches this model — the post-processor sets such an object aside
+    with a recorded ``stix.unknown_object`` first, because keeping it would
+    publish an object the standard refuses and dropping it would be silent.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    type: str
+    id: str
+    spec_version: Literal["2.1"] = "2.1"
+    defanged: bool | None = None
+    object_marking_refs: list[str] = Field(default_factory=list)
+    granular_markings: list[dict[str, Any]] = Field(default_factory=list)
+    extensions: dict[str, Any] | None = None
+
+
+class File(_Observable):
+    """STIX 2.1 ``file`` observable, with every property the standard defines.
+
+    The standard needs at least one of ``hashes`` and ``name``; a file with
+    neither is a question the judge is asked (``stix.file_unidentified``), not
+    a parse failure. An id the platform derives for its own image objects is
+    derived from the name, as the standard derives a file's id from its
+    identifying properties, so one image is one object in every export.
+    """
+
+    type: Literal["file"] = "file"
+    id: str = ""
+    hashes: dict[str, str] | None = None
+    size: int | None = None
+    name: str | None = None
+    name_enc: str | None = None
+    magic_number_hex: str | None = None
+    mime_type: str | None = None
+    ctime: str | None = None
+    mtime: str | None = None
+    atime: str | None = None
+    parent_directory_ref: str | None = None
+    contains_refs: list[str] = Field(default_factory=list)
+    content_ref: str | None = None
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.id:
+            key = json_canonical({"name": self.name} if self.name else {"hashes": self.hashes})
+            self.id = f"file--{uuid.uuid5(SCO_NAMESPACE, key)}"
+
+
+class Process(_Observable):
+    """STIX 2.1 ``process`` observable, with every property the standard defines.
+
+    A process has no ``name`` in STIX 2.1: the image it ran from is a ``file``
+    it names by ``image_ref``.
+    """
+
+    type: Literal["process"] = "process"
+    id: str = Field(default_factory=lambda: f"process--{_generate_uuid()}")
+    is_hidden: bool | None = None
+    pid: int | None = None
+    created_time: str | None = None
+    cwd: str | None = None
+    command_line: str | None = None
+    environment_variables: dict[str, str] | None = None
+    opened_connection_refs: list[str] = Field(default_factory=list)
+    creator_user_ref: str | None = None
+    image_ref: str | None = None
+    parent_ref: str | None = None
+    child_refs: list[str] = Field(default_factory=list)
+
+
+def undefined_properties(obj: dict[str, Any]) -> list[str]:
+    """The properties a judge-written object carries that its type does not define.
+
+    Asked of the observables this bundle holds, whose models declare every
+    property the standard defines, and of observed-data for the one property
+    2.1 deprecated: ``objects``, the embedded dictionary the model no longer
+    reads. A custom ``x_`` property is the writer's own and is kept. Anything
+    listed here would be lost at validation, so the caller sets the object
+    aside with a record instead.
+    """
+    kind = str(obj.get("type") or "")
+    if kind == "observed-data":
+        return ["objects"] if "objects" in obj else []
+    models: dict[str, type[BaseModel]] = {"file": File, "process": Process}
+    model = models.get(kind)
+    if model is None:
+        return []
+    return [key for key in obj if key not in model.model_fields and not key.startswith("x_")]
+
+
+def json_canonical(value: Any) -> str:
+    """The canonical JSON a derived observable id is computed over."""
+    import json as _json
+
+    return _json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 class Note(STIXObject):
@@ -345,7 +538,26 @@ _BundleObject = (
     | ObservedData
     | Note
     | Report
+    | Process
+    | File
 )
+
+
+def bundle_model_for(kind: str) -> type[BaseModel] | None:
+    """The model a bundle object of ``kind`` is read with, the union's own choice.
+
+    For a caller that reads one object on its own before the whole bundle is
+    read, so one object's failure is that object's and not the bundle's. The
+    first member of the union declaring the type answers, which is the
+    annotated relationship for ``relationship``.
+    """
+    import typing
+
+    for member in typing.get_args(_BundleObject):
+        field = member.model_fields.get("type")
+        if field is not None and kind in typing.get_args(field.annotation):
+            return typing.cast(type[BaseModel], member)
+    return None
 
 
 class FallbackVerdict(_SpecConformantModel):
@@ -393,12 +605,16 @@ class Bundle(_SpecConformantModel):
     def mean_relationship_confidence(self) -> float | None:
         """Compute mean confidence across all annotated relationships.
 
-        Returns None if no annotated relationships exist.
+        Returns None if no relationship states a confidence.
         """
-        annotated = self.confidence_annotated_relationships()
-        if not annotated:
+        stated = [
+            number
+            for r in self.confidence_annotated_relationships()
+            if (number := stated_confidence(r.x_maljan_confidence)) is not None
+        ]
+        if not stated:
             return None
-        return sum(r.x_maljan_confidence for r in annotated) / len(annotated)
+        return sum(stated) / len(stated)
 
 
 def _bundle_object_types() -> frozenset[str]:

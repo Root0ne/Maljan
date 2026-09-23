@@ -10,6 +10,7 @@ pipeline, streaming progress events via Redis PubSub.
 
 import asyncio
 import gc
+import json
 import os
 import platform
 import signal
@@ -795,6 +796,7 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
         args=entry.get("args") or {},
         args_repaired=bool(entry.get("args_repaired", False)),
         args_raw=(str(entry["args_raw"]) if entry.get("args_raw") else None),
+        model=(str(entry["model"])[:300] if entry.get("model") else None),
         output=str(entry.get("output", "") or ""),
         structured=entry.get("structured"),
         # Why the output is empty, what the call was answered from, what it
@@ -2001,6 +2003,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 overall_confidence=_extract_confidence(pipeline_result),
                 malware_category=_extract_category(pipeline_result),
                 stix_bundle=stix_bundle_for_persist,
+                judge_stix_bundle=judge_bundle_record(pipeline_result),
                 mitre_techniques=_extract_mitre(pipeline_result),
                 # The agents' *final* prose. This used to persist only
                 # ``reports`` — the first-pass text — so the report an analyst
@@ -2497,6 +2500,43 @@ def _extract_category(result: dict) -> str | None:
         category = run_summary.get("malware_category")
         return str(category) if category is not None else None
     return None
+
+
+def judge_bundle_record(result: dict) -> dict | None:
+    """The judge's own bundle and its label map, as the report stores them.
+
+    The export's decline and not-carried rows say an object or a property "is
+    kept in the judge's own bundle"; this is that bundle, kept beside the
+    export rather than only when there is no export. It is the judge's JSON as
+    the judge wrote it (``as_written``), so a property the platform's models do
+    not declare is still in it. A run recorded without that answer keeps the
+    parsed bundle instead, and says so. ``None`` when the judge produced none.
+    """
+    bundle = result.get("stix_output")
+    if not isinstance(bundle, dict) or not bundle:
+        return None
+    labels = result.get("stix_labels")
+    kept_labels = dict(labels) if isinstance(labels, dict) else {}
+    written = result.get("stix_written")
+    if isinstance(written, dict) and written:
+        return {
+            "bundle": json.loads(json.dumps(written, default=str)),
+            "labels": kept_labels,
+            "as_written": True,
+        }
+    # The pipeline keeps the bundle as a Python dump, timestamps as datetimes;
+    # the column stores JSON, in STIX's own timestamp form.
+    from maljan.schemas.stix_models import Bundle
+
+    try:
+        as_json = Bundle.model_validate(bundle).model_dump(mode="json")
+    except Exception:  # noqa: BLE001 — a record kept in a weaker form, never a failed save
+        as_json = json.loads(json.dumps(bundle, default=str))
+    return {
+        "bundle": {"spec_version": "2.1", **as_json},
+        "labels": kept_labels,
+        "as_written": False,
+    }
 
 
 def _extract_mitre(result: dict) -> list | None:

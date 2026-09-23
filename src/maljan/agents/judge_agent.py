@@ -26,9 +26,10 @@ is returned alongside the bundle for the run summary to record.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -38,16 +39,31 @@ from langchain_core.prompts import ChatPromptTemplate
 from maljan.agents.base_agent import (
     BudgetMeter,
     LoopBudget,
+    _trim_for_synthesis,
     _turn_key,
+    counted_window_tokens,
+    is_the_graph_s_step_stop,
     loop_limits,
+    note_a_window_that_moved,
+    nudge_turns,
+    request_chars,
     retry_on_connection_error,
     run_on_agent_loop,
+    synthesis_budget_chars,
 )
-from maljan.agents.judge_postprocess import ASSESSMENT_RELOCATED_CODE
+from maljan.agents.judge_postprocess import (
+    ASSESSMENT_RELOCATED_CODE,
+    PROPERTY_NOT_CARRIED_CODE,
+)
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
-from maljan.core.token_ledger import TokenLedger, record_response_usage
+from maljan.core.token_ledger import TokenLedger
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
+from maljan.llm.context_window import (
+    ContextBudget,
+    tool_definition_chars,
+    window_full_error,
+)
 from maljan.pipeline.events import emit_judge_question, scrub
 from maljan.pipeline.mediation_models import MediatorVerdict
 from maljan.pipeline.state import AgentArgument
@@ -71,6 +87,10 @@ from maljan.schemas.stix_models import Bundle
 
 if TYPE_CHECKING:
     from maljan.memory.long_term_memory import MemoryStore
+
+# Rows the judge's parse settles itself, so the retry is never spent on them:
+# an assessment moved to its property, and a property the export does not carry.
+_SETTLED_CODES = frozenset({ASSESSMENT_RELOCATED_CODE, PROPERTY_NOT_CARRIED_CODE})
 
 # How many times the judge is asked again about a verdict answer that was
 # wrong. One: a second correction has never produced a better bundle than the
@@ -163,6 +183,13 @@ class JudgeVerdict(NamedTuple):
     # Every violation the judge was shown, by code — including the ones the
     # retry fixed, which nothing else in the run records.
     fed_back: dict[str, int] = {}
+    # ``{the judge's label: the published id}`` for the answer this verdict
+    # stands on, so the judge's own bundle and the export can be read together.
+    labels: dict[str, str | list[str]] = {}
+    # The judge's answer this verdict stands on, as it wrote it: parsed and
+    # otherwise untouched, the record the export's decline and not-carried
+    # rows point at. ``None`` when the verdict is not the judge's own bundle.
+    written: dict[str, Any] | None = None
 
 
 # The judge's system prompt. A module constant so that
@@ -173,19 +200,31 @@ JUDGE_VERDICT_SYSTEM = (
     "You are the Chief Malware Judge. Based on the expert reports below, "
     "provide a final verdict: Malware, Benign, or Suspicious.\n\n"
     "RULES:\n"
-    "- Map findings to MITRE ATT&CK using AttackPattern objects (valid IDs: T#### or T####.###).\n"
-    "- Omit technique ID if unsure.\n"
-    "- On every Relationship, set x_maljan_confidence (0.0-1.0), "
-    "x_maljan_evidence_basis (static|dynamic|network|all|unknown), "
-    "and x_maljan_contributing_agents list.\n"
-    "- ALL STIX object IDs MUST be ``<type>--<random uuid4>`` "
-    "(spec-compliant 8-4-4-4-12 hex). NEVER reuse example UUIDs from "
-    "the schema description. NEVER use ``<type>--T####`` (non-UUID).\n"
+    "- Map findings to MITRE ATT&CK with AttackPattern objects, each naming its "
+    "technique in external_references: "
+    '{"source_name": "mitre-attack", "external_id": "T####" or "T####.###"}. '
+    "A behaviour you cannot give a technique id is not an AttackPattern: say "
+    "what was observed in severity.rationale instead.\n"
+    "- Relate them as malware uses attack-pattern and indicator indicates "
+    "malware. On every Relationship set x_maljan_confidence (0.0-1.0) and "
+    "x_maljan_evidence_basis (static|dynamic|network|all|unknown), and list in "
+    "x_maljan_contributing_agents only the sources that named what it is about, "
+    "by the names the EVIDENCE SUMMARY gives them.\n"
+    "- Leave out created, modified, spec_version and valid_from: they are "
+    "stamped after you answer.\n"
+    "- Give every object an ``id`` of the form ``<type>--<label>``, unique in "
+    "this bundle, and name those ids in every ``*_ref``. A short label is "
+    "enough (``malware--1``): the published ids are assigned after you answer.\n"
     "- DO NOT emit Indicator objects whose pattern values are inferred, "
     "hypothetical, or example. Every Indicator's pattern value MUST "
     "appear verbatim in the deterministic evidence (static strings, "
     "sandbox observations, or network IOCs). When in doubt, emit zero "
     "Indicators — the deterministic renderer will fill them in.\n"
+    "- An Indicator's pattern compares a STIX Cyber-observable type (ipv4-addr, "
+    "ipv6-addr, domain-name, url, file, email-addr, mutex, windows-registry-key, "
+    "process, network-traffic), and its indicator_types say what the value "
+    "indicates: malicious-activity, anomalous-activity, benign, compromised, "
+    "anonymization, attribution or unknown.\n"
     "- You decide the verdict, the severity, the malware category and the "
     "family; nothing downstream computes them for you and nothing overrides "
     "what you say. ``x_maljan_assessment`` is a sibling of ``objects``, beside "
@@ -208,7 +247,8 @@ JUDGE_VERDICT_SYSTEM = (
     "ids it was read from; a family with no evidence ids is a guess, and the "
     "report will say so.\n"
     "- Write a STIX ``malware`` object only for a sample you conclude is "
-    "malware. The objects illustrate the verdict you stated; they are not a "
+    "malware, with is_family (false when it stands for this one sample). The "
+    "objects illustrate the verdict you stated; they are not a "
     "second way of stating one, and a malware object added as a container for "
     "a sample you call benign contradicts your own assessment.\n"
     "- Benign is a finding, not a default. It says the evidence was examined "
@@ -221,7 +261,7 @@ JUDGE_VERDICT_SYSTEM = (
     "``x_maljan_assessment`` sits beside ``objects`` rather than inside it:\n"
     "{\n"
     '  "type": "bundle",\n'
-    '  "id": "bundle--<uuid4>",\n'
+    '  "id": "bundle--1",\n'
     '  "x_maljan_assessment": {\n'
     '    "verdict": "Malware" | "Suspicious" | "Benign",\n'
     '    "confidence": 0.0-1.0,\n'
@@ -329,6 +369,9 @@ class JudgeAgent(BudgetMeter):
         bundle = judge.give_verdict(reports, history, attck_validator=validator)
     """
 
+    # With no entry of its own the judge runs on the judge model.
+    _model_role = "judge"
+
     def __init__(
         self,
         llm: BaseChatModel,
@@ -419,6 +462,17 @@ class JudgeAgent(BudgetMeter):
                 )
         except Exception as exc:  # noqa: BLE001 — a prompt hook never fails a loop
             self.logger.debug("judge question not published (%s).", exc)
+
+    def _context_budget(self) -> Any | None:
+        """The job's context budget, or None when the judge runs bare."""
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        try:
+            return container.get_context_budget()
+        except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
+            self.logger.debug("judge: the context budget is unavailable (%s).", exc)
+            return None
 
     def _server_registry(self) -> Any | None:
         """The job's tool-server registry, or None when this judge runs bare."""
@@ -517,6 +571,8 @@ class JudgeAgent(BudgetMeter):
         from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
         from langgraph.prebuilt import create_react_agent
 
+        from maljan.llm.fallback import restart_models
+
         messages_pre: list[BaseMessage] = []
         for role, content in prompt_messages:
             if role == "system":
@@ -530,6 +586,8 @@ class JudgeAgent(BudgetMeter):
             # same hard timeout used by the tools path so a stalled / queued
             # llama-server cannot freeze the judge node.
             no_tools_timeout = loop_limits("judge")[0]
+            # Sticky for this call only, with a deadline shorter than its clock.
+            restart_models(self.llm, loop_seconds=float(no_tools_timeout), share=self._turn_share())
             response = await asyncio.wait_for(
                 retry_on_connection_error(
                     lambda: self.llm.ainvoke(messages_pre),
@@ -538,7 +596,7 @@ class JudgeAgent(BudgetMeter):
                 ),
                 timeout=float(no_tools_timeout),
             )
-            record_response_usage(self.token_ledger, response, prompt_text=str(messages_pre))
+            self._record_usage(response)
             record_judge_response(
                 getattr(self, "truncation_ledger", None),
                 response,
@@ -572,6 +630,9 @@ class JudgeAgent(BudgetMeter):
 
         settings = get_settings()
         timeout = settings.react_agent_timeout
+        # Sticky for this loop only, with a turn deadline shorter than its clock;
+        # the judge's next loop starts at its first model.
+        restart_models(self.llm, loop_seconds=float(timeout), share=self._turn_share())
         max_steps = int(settings.react_agent_max_steps)
         # The judge is an agent by every other measure here — its ledger
         # entries carry its name, it binds servers by role, the console draws
@@ -583,6 +644,34 @@ class JudgeAgent(BudgetMeter):
         turns: list[Any] = []
 
         asked: set[str] = set()
+
+        # The job's context budget, and the judge's conversation in it under
+        # the judge's own name — the analysts' accounting, the same rule: its
+        # messages, the definitions of its tools, and the server's own count
+        # of the last request as a floor. Without it every judge answer was
+        # capped against whatever conversation happened to be live, which
+        # after the analysts had finished was none, so each reputation answer
+        # got the widest cap and nothing could say the room was gone.
+        room = self._context_budget()
+        recorded = record_tools(self.tools, recorder, context_budget=room)
+        definitions = tool_definition_chars(recorded)
+
+        def _note_the_conversation(conversation: list[Any]) -> None:
+            if not isinstance(room, ContextBudget):
+                return
+            try:
+                room.note_conversation(
+                    recorder.agent,
+                    request_chars(conversation, definitions, room.chars_per_token),
+                )
+            except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
+                self.logger.debug("judge: the conversation size was not recorded (%s).", exc)
+
+        def _out_of_room() -> bool:
+            try:
+                return isinstance(room, ContextBudget) and room.out_of_room(recorder.agent)
+            except Exception:  # noqa: BLE001 — a budget is never worth a lost loop
+                return False
 
         def _count_the_turns(state: Any) -> list[Any]:
             """Count the conversation before every model turn, and change nothing.
@@ -609,26 +698,48 @@ class JudgeAgent(BudgetMeter):
             # exactly that, one verdict call that ran past its wall clock.
             budget.note_turns(conversation)
             budget.own_steps += 1
+            _note_the_conversation(conversation)
             self._publish_questions(conversation, asked)
             return conversation
 
-        agent_executor = create_react_agent(
-            self.llm, record_tools(self.tools, recorder), prompt=_count_the_turns
-        )
+        agent_executor = create_react_agent(self.llm, recorded, prompt=_count_the_turns)
         self.logger.info(
             "JudgeAgent invoking ReAct (timeout=%ds, tools=%d)...",
             timeout,
             len(self.tools),
         )
-        try:
-            result = await asyncio.wait_for(
-                agent_executor.ainvoke(
-                    {"messages": messages},
-                    {"recursion_limit": max_steps},
-                ),
-                timeout=timeout,
+        # Streamed rather than awaited whole, for the analysts' reason: a loop
+        # that has run out of room is ended on the step it did, with the
+        # conversation as it stands, and a server that says the window is full
+        # leaves behind what was gathered rather than nothing.
+        latest: dict[str, Any] = {"messages": list(messages)}
+        ended: dict[str, bool] = {"no_room": False, "window_full": False}
+
+        async def _until_it_answers_or_runs_out() -> None:
+            stream: Any = agent_executor.astream(
+                {"messages": messages},
+                {"recursion_limit": max_steps},
+                stream_mode="values",
             )
-            _msgs = result.get("messages", []) or []
+            async with contextlib.aclosing(stream) as snapshots:
+                try:
+                    async for snapshot in snapshots:
+                        latest.update(snapshot)
+                        if _out_of_room():
+                            ended["no_room"] = True
+                            break
+                except Exception as exc:
+                    # Only a provider's own full-window answer, and only once
+                    # something was gathered; anything else fails the judge's
+                    # loop as it always did.
+                    if not (window_full_error(exc) and recorder.entries):
+                        raise
+                    ended["window_full"] = True
+                    note_a_window_that_moved(exc)
+
+        try:
+            await asyncio.wait_for(_until_it_answers_or_runs_out(), timeout=timeout)
+            _msgs = list(latest.get("messages") or [])
             turns = list(_msgs)
             msg_count = len(_msgs)
             self.logger.info("JudgeAgent ReAct loop completed: %d messages.", msg_count)
@@ -638,8 +749,30 @@ class JudgeAgent(BudgetMeter):
             # the no-tools fallback above did).
             for _m in _msgs:
                 if getattr(_m, "type", "") == "ai":
-                    record_response_usage(self.token_ledger, _m)
-            return str(_msgs[-1].content)
+                    self._record_usage(_m)
+            if ended["no_room"] or ended["window_full"]:
+                cap = "no_room"
+                why = (
+                    "the model server reported its context window full"
+                    if ended["window_full"]
+                    else "the conversation had no room left for a tool answer"
+                )
+                self.logger.warning(
+                    "JudgeAgent ReAct loop ended: %s; writing the reasoning from what it gathered.",
+                    why,
+                )
+                # What is left of the loop's own time, as the analysts'
+                # salvage gets: loop and salvage together stay inside it.
+                return await self._reasoning_from_what_was_gathered(
+                    _msgs, budget.seconds_left(), settings, counted_window_tokens(room)
+                )
+            # The graph's own sentence at its step limit is not the judge's
+            # reasoning, and what reads the reasoning next is a model. The
+            # judge wrote none; the budget record says why.
+            if _msgs and is_the_graph_s_step_stop(_msgs[-1]):
+                cap = "steps"
+                return ""
+            return str(_msgs[-1].content) if _msgs else ""
         except TimeoutError:
             self.logger.error("JudgeAgent ReAct timed out after %ds.", timeout)
             cap = "time"
@@ -648,13 +781,53 @@ class JudgeAgent(BudgetMeter):
             # In a ``finally`` for the reason the analysts' loop uses one: a
             # mediation that timed out still made the calls it made.
             self._evidence_entries.extend(recorder.entries)
-            self._record_budget(
-                budget,
-                turns,
-                cap,
-                detail=(f"the loop did not answer within {timeout}s" if cap else ""),
-            )
+            details = {
+                "time": f"the loop did not answer within {timeout}s",
+                "no_room": (
+                    "the model server reported its context window full"
+                    if ended["window_full"]
+                    else "the conversation had no room left for a tool answer"
+                ),
+            }
+            self._record_budget(budget, turns, cap, detail=details.get(cap or "", ""))
             self._budget_tick(budget, turns, final=True, ledger_entries=len(recorder.entries))
+            # The loop is over, so its size stops binding every later cap.
+            if isinstance(room, ContextBudget):
+                with contextlib.suppress(Exception):
+                    room.forget_conversation(recorder.agent)
+
+    async def _reasoning_from_what_was_gathered(
+        self, msgs: list[Any], timeout: float, settings: Any, window_tokens: int = 0
+    ) -> str:
+        """The judge's reasoning, asked for once from what its loop gathered.
+
+        The analysts' salvage, for the judge: the conversation trimmed to the
+        salvage budget, and one turn with no tools asking for the reasoning
+        the loop did not get to write. What comes back is the model's own; a
+        salvage that fails leaves the reasoning empty, which mediation reads
+        as no agreement.
+        """
+        if timeout < 1.0:
+            self.logger.warning("JudgeAgent reasoning salvage skipped: no time left.")
+            return ""
+        sendable, _dropped = nudge_turns(msgs)
+        trimmed = _trim_for_synthesis(
+            sendable, synthesis_budget_chars(settings, "judge", window_tokens)
+        )
+        directive = HumanMessage(
+            content=(
+                "Do NOT call any more tools. Using ONLY the tool output already in this "
+                "conversation, write your mediation reasoning now: the contradictions you "
+                "found and a single agreement_confidence score."
+            )
+        )
+        try:
+            response = await asyncio.wait_for(self.llm.ainvoke([*trimmed, directive]), timeout)
+        except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves no reasoning
+            self.logger.warning("JudgeAgent reasoning salvage failed (%s).", type(exc).__name__)
+            return ""
+        self._record_usage(response)
+        return str(getattr(response, "content", "") or "")
 
     def drain_evidence_entries(self) -> list[LedgerEntry]:
         """Every entry the judge's tool loops gathered, handing over ownership."""
@@ -886,8 +1059,14 @@ class JudgeAgent(BudgetMeter):
 
         # Structured output extraction with bounded retry; if every attempt
         # still fails, fall back to the regex-based extractor so the
-        # negotiation loop can keep running.
-        verdict = await self._extract_mediator_verdict(extract_prompt, reasoning_text)
+        # negotiation loop can keep running. A loop that wrote no reasoning has
+        # nothing for a model to extract from: it is read as no agreement,
+        # which is what the text fallback makes of an empty log.
+        verdict = (
+            await self._extract_mediator_verdict(extract_prompt, reasoning_text)
+            if reasoning_text.strip()
+            else self._fallback_mediate(reasoning_text)
+        )
 
         is_consensus = verdict.confidence >= self._consensus_threshold(consensus_threshold)
         log_msg = "Consensus reached" if is_consensus else "No consensus yet"
@@ -922,6 +1101,7 @@ class JudgeAgent(BudgetMeter):
         ledger_ids: Sequence[str] | None = None,
         facts_block: str = "",
         run_state: str = "",
+        technique_sources: Mapping[str, Sequence[str]] | None = None,
     ) -> JudgeVerdict:
         """The final decision: a STIX bundle plus the judge's own assessment.
 
@@ -931,7 +1111,10 @@ class JudgeAgent(BudgetMeter):
         the judge is the component that should be weighing them. ``facts_block``
         is the triage pack as every analyst saw it and ``run_state`` the run's
         state block; both lead the human turn so the verdict is drawn over the
-        same facts the analysts were given.
+        same facts the analysts were given. ``technique_sources`` is the
+        evidence summary as data, ``{technique id: [source]}``: a relationship
+        crediting an agent with a technique it never named is asked about
+        against it, and ``None`` asks nothing.
 
         The answer is validated (``pipeline.validation.validate_verdict_bundle``)
         and, when something is wrong, handed back once with the problems named.
@@ -1047,12 +1230,21 @@ class JudgeAgent(BudgetMeter):
         # cannot hold set aside. Refilled per parse, because the retry's answer
         # is a different answer and the previous one's findings are spent.
         shape: list[Violation] = []
+        # Where each parsed object sits in the answer as the judge wrote it,
+        # and the label it gave it: feedback names the judge's own positions,
+        # not the ones left after set-aside objects and folded duplicates.
+        where: list[tuple[int | None, str]] = []
+        labels: dict[str, str | list[str]] = {}
+        as_written: list[dict[str, Any]] = []
         tally = ValidationTally()
 
         def _parse(answer: Any) -> Bundle:
             nonlocal not_json, attempts
             attempts += 1
             shape.clear()
+            where.clear()
+            labels.clear()
+            as_written.clear()
             if timed_out:
                 not_json = False
                 return self._fallback_bundle_from_text(
@@ -1068,7 +1260,15 @@ class JudgeAgent(BudgetMeter):
                 if attempts <= _VERDICT_RETRIES:
                     # A retry is coming and this bundle would be thrown away.
                     return Bundle(objects=[])
-            parsed = self._bundle_from_response(answer, reports, isr_reports, record=shape)
+            parsed = self._bundle_from_response(
+                answer,
+                reports,
+                isr_reports,
+                record=shape,
+                origins=where,
+                labels=labels,
+                as_written=as_written,
+            )
             # The relocation is done and nothing is left to ask about, so it is
             # published as settled and counted where the round's other codes
             # are, rather than spending the one retry this round has.
@@ -1141,7 +1341,7 @@ class JudgeAgent(BudgetMeter):
                 # relocation is not among them: it is settled, announced in
                 # ``_parse``, and a retry for it would be a turn spent on a
                 # problem that no longer exists.
-                *(v for v in shape if v.code != ASSESSMENT_RELOCATED_CODE),
+                *(v for v in shape if v.code not in _SETTLED_CODES),
                 *validate_verdict_bundle(
                     bundle,
                     evidence_corpus,
@@ -1150,6 +1350,8 @@ class JudgeAgent(BudgetMeter):
                     shortened_tools=shortened_tools,
                     searched=searched,
                     corpus_state=corpus_state,
+                    technique_sources=technique_sources,
+                    origins=where,
                 ),
                 *assessment_violations(bundle),
                 *assessment_conflict_violations(bundle),
@@ -1194,6 +1396,14 @@ class JudgeAgent(BudgetMeter):
                 violations.append(
                     Violation(code=VERDICT_FALLBACK_CODE, message=VERDICT_FALLBACK_REASON)
                 )
+        # The judge's own answer, when the verdict stands on it: what the
+        # export does not carry of it is recorded beside the run's findings
+        # (never fed back — nothing in it is wrong), and the answer itself is
+        # kept as written.
+        written: dict[str, Any] | None = None
+        if not timed_out and bundle.x_maljan_fallback_verdict is None:
+            written = as_written[0] if as_written else None
+            violations.extend(v for v in shape if v.code == PROPERTY_NOT_CARRIED_CODE)
         # And the two verdict checks over the bundle that is actually going to
         # be reported, on every ending. One row each: a check the loop already
         # fed back and that survived is in ``violations`` already, and asking
@@ -1211,7 +1421,7 @@ class JudgeAgent(BudgetMeter):
             violations=[v for v in violations if v not in _from_the_loop],
             retry_index=retries,
         )
-        dropped = drop_ungrounded_indicators(bundle, violations)
+        dropped = drop_ungrounded_indicators(bundle, violations, origins=where)
         if dropped:
             self.logger.warning(
                 "Judge verdict: %d indicator(s) stayed ungrounded after the retry and were "
@@ -1219,7 +1429,12 @@ class JudgeAgent(BudgetMeter):
                 dropped,
             )
         return JudgeVerdict(
-            bundle=bundle, violations=violations, retries=retries, fed_back=dict(tally.by_code)
+            bundle=bundle,
+            violations=violations,
+            retries=retries,
+            fed_back=dict(tally.by_code),
+            labels=dict(labels),
+            written=written,
         )
 
     def _bundle_from_response(
@@ -1228,6 +1443,9 @@ class JudgeAgent(BudgetMeter):
         reports: dict[str, str],
         isr_reports: dict[str, AgentISR] | None,
         record: list[Violation] | None = None,
+        origins: list[tuple[int | None, str]] | None = None,
+        labels: dict[str, Any] | None = None,
+        as_written: list[dict[str, Any]] | None = None,
     ) -> Bundle:
         """The model's raw answer as a Bundle, or the text fallback.
 
@@ -1255,6 +1473,7 @@ class JudgeAgent(BudgetMeter):
             # attack-pattern with nothing saying why. ``pipeline.validation`` is
             # the single place that decides an id is wrong, and it says so.
             from maljan.agents.judge_postprocess import (
+                duplicate_label_violations,
                 lift_misplaced_extensions,
                 postprocess_judge_bundle,
             )
@@ -1262,11 +1481,33 @@ class JudgeAgent(BudgetMeter):
             # Before the schema, and before anything that walks the objects: an
             # item the Bundle cannot hold fails the whole model, and the judge's
             # other twenty-four objects are not the model's to lose.
+            if as_written is not None:
+                import copy
+
+                as_written.append(copy.deepcopy(data))
+            # Positions and labels as the judge wrote them, before anything is
+            # set aside or folded: the dicts are the same objects after both.
+            written = {
+                id(obj): (index, str(obj.get("id") or ""))
+                for index, obj in enumerate(data.get("objects") or [])
+                if isinstance(obj, dict)
+            }
             lifted = lift_misplaced_extensions(data)
             if record is not None:
                 record.extend(lifted)
-            data = postprocess_judge_bundle(data, ledger=getattr(self, "truncation_ledger", None))
-            return Bundle.model_validate(data)
+            if record is not None:
+                record.extend(
+                    duplicate_label_violations(
+                        data, {key: index for key, (index, _label) in written.items()}
+                    )
+                )
+            data = postprocess_judge_bundle(
+                data, ledger=getattr(self, "truncation_ledger", None), labels=labels
+            )
+            bundle = Bundle.model_validate(data)
+            if origins is not None:
+                origins[:] = [written.get(id(obj), (None, "")) for obj in data["objects"]]
+            return bundle
         except Exception as exc:  # noqa: BLE001 — a malformed bundle degrades to the fallback
             self.logger.warning(
                 "LLM did not return a valid Bundle: %s. Attempting text-based fallback.", exc
@@ -1415,11 +1656,19 @@ class JudgeAgent(BudgetMeter):
 
         _VALID_TID_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
         tids: set[str] = set()
+        # Who claimed each one, named the way the evidence summary names them.
+        # A relationship this pipeline builds names the agents whose claims it
+        # carries and nobody else.
+        claimed_by: dict[str, list[str]] = {}
         if isr_reports:
-            for isr in isr_reports.values():
+            for name, isr in isr_reports.items():
+                source = str(getattr(isr, "agent_id", "") or name)
                 for claim in isr.claims:
                     if claim.technique_id and _VALID_TID_RE.match(claim.technique_id):
                         tids.add(claim.technique_id)
+                        agents = claimed_by.setdefault(claim.technique_id, [])
+                        if source not in agents:
+                            agents.append(source)
         model_only = sorted(set(_VALID_TID_RE.findall(text)) - tids)
         if model_only:
             self.logger.warning(
@@ -1488,7 +1737,9 @@ class JudgeAgent(BudgetMeter):
                         {
                             "source_name": "mitre-attack",
                             "external_id": tid,
-                            "url": f"https://attack.mitre.org/techniques/{tid}",
+                            "url": (
+                                f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}/"
+                            ),
                         }
                     ],
                 }
@@ -1497,6 +1748,9 @@ class JudgeAgent(BudgetMeter):
                 # Nothing to relate the technique to, and a relationship with a
                 # dangling source is a defect the integrity pass would prune.
                 continue
+            # No confidence: the judge gave none, and the 0.5 this used to
+            # carry was published as the judge's own number on every technique
+            # of every fallback run.
             objects.append(
                 {
                     "type": "relationship",
@@ -1504,9 +1758,7 @@ class JudgeAgent(BudgetMeter):
                     "relationship_type": "uses",
                     "source_ref": malware_id,
                     "target_ref": attack_id,
-                    "x_maljan_confidence": 0.5,
-                    "x_maljan_evidence_basis": "unknown",
-                    "x_maljan_contributing_agents": [],
+                    "x_maljan_contributing_agents": claimed_by.get(tid, []),
                     "x_maljan_technique_id": tid,
                 }
             )
