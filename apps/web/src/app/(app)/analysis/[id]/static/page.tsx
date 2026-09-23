@@ -462,13 +462,39 @@ export default function StaticTab() {
               Exports ({staticData.exports.length})
             </h2>
           </div>
-          <div className="p-4 flex flex-wrap gap-1">
-            {staticData.exports.map((e) => (
-              <span key={e} className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-bg-active text-text-secondary">
-                {e}
-              </span>
-            ))}
-          </div>
+          {/* With the ordinal and the address when the format tool reported
+              them: several exports sharing one address is a fact the names
+              alone hide. */}
+          {(staticData.export_rows ?? []).length > 0 ? (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-text-muted">
+                  <th className="px-4 py-1.5 font-medium">Name</th>
+                  <th className="px-4 py-1.5 font-medium">Ordinal</th>
+                  <th className="px-4 py-1.5 font-medium">RVA</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(staticData.export_rows ?? []).map((row, i) => (
+                  <tr key={`${row.name}-${i}`} className="border-t border-border">
+                    <td className="px-4 py-1 font-mono text-text-secondary">
+                      {row.name || "(unnamed)"}
+                    </td>
+                    <td className="px-4 py-1 font-mono text-text-muted">{row.ordinal ?? "-"}</td>
+                    <td className="px-4 py-1 font-mono text-text-muted">{row.rva ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="p-4 flex flex-wrap gap-1">
+              {staticData.exports.map((e) => (
+                <span key={e} className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-bg-active text-text-secondary">
+                  {e}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
