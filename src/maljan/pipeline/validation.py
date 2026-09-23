@@ -1508,6 +1508,114 @@ def indicator_type_vocabulary_violations(obj: Any, *, path: str) -> list[Violati
     ]
 
 
+CREDIT_WITHOUT_CLAIM_CODE = "stix.credit_without_claim"
+
+# The words a model adds to an agent's name when it writes one down. The
+# evidence summary names a source ``static`` and the judge credits
+# ``STATIC ANALYST``, ``static_analyst`` or ``Static-Analyst``: one source.
+_NAME_FILLER = frozenset({"analyst", "agent", "the"})
+
+
+def _source_key(name: Any) -> str:
+    """A source name reduced to what identifies it, for comparing two spellings."""
+    words = re.split(r"[^a-z0-9]+", str(name or "").lower())
+    return "".join(word for word in words if word and word not in _NAME_FILLER)
+
+
+def _same_source(credited: str, named: str) -> bool:
+    """Whether a credited name and a summary's source name are one source.
+
+    Equal once reduced, or one the start of the other with three characters at
+    least, so ``yara`` is the ``yara_scan`` tool and ``s`` is nobody.
+    """
+    if not credited or not named:
+        return False
+    if credited == named:
+        return True
+    short, long_ = sorted((credited, named), key=len)
+    return len(short) >= 3 and long_.startswith(short)
+
+
+def _related_ids(tid: str) -> set[str]:
+    """The id itself, and its parent when it is a sub-technique."""
+    return {tid, tid.split(".", 1)[0]}
+
+
+def credit_without_claim_violations(
+    bundle: Any, technique_sources: Mapping[str, Sequence[str]] | None
+) -> list[Violation]:
+    """A judge relationship crediting an agent with a technique it never named.
+
+    ``technique_sources`` is who named which technique in this run — the
+    evidence summary the judge was shown, as ``{technique id: [source]}``.
+    ``None`` asks nothing: with no record of the sources, no credit can be
+    weighed against one. A technique counts as named by a source that named it,
+    its parent technique or one of its sub-techniques: refining an analyst's
+    T1071 to T1071.004 is the judge's reading, not a misattribution.
+    """
+    if technique_sources is None:
+        return []
+    named_by: dict[str, list[str]] = {}
+    for raw_tid, sources in technique_sources.items():
+        tid = str(raw_tid or "").strip().upper()
+        for related in _related_ids(tid):
+            bucket = named_by.setdefault(related, [])
+            bucket.extend(str(s) for s in sources if str(s) not in bucket)
+    objects = list(getattr(bundle, "objects", None) or [])
+    technique_of: dict[str, str] = {}
+    for obj in objects:
+        if str(getattr(obj, "type", "") or "") == "attack-pattern":
+            tid = _attack_pattern_technique_id(obj)
+            if tid:
+                technique_of[str(getattr(obj, "id", "") or "")] = tid.upper()
+    out: list[Violation] = []
+    for index, obj in enumerate(objects):
+        if str(getattr(obj, "type", "") or "") != "relationship":
+            continue
+        credited = [str(a) for a in (getattr(obj, "x_maljan_contributing_agents", None) or [])]
+        if not credited:
+            continue
+        written = str(getattr(obj, "x_maljan_technique_id", "") or "").strip().upper()
+        tid = str(
+            written
+            or technique_of.get(str(getattr(obj, "target_ref", "") or ""))
+            or technique_of.get(str(getattr(obj, "source_ref", "") or ""))
+            or ""
+        )
+        if not tid:
+            continue
+        sources = [s for related in _related_ids(tid) for s in named_by.get(related, [])]
+        sources = list(dict.fromkeys(sources))
+        keys = [_source_key(s) for s in sources]
+        uncredited = [
+            name for name in credited if not any(_same_source(_source_key(name), k) for k in keys)
+        ]
+        if not uncredited:
+            continue
+        who = (
+            f"the sources that named {safe_finding_value(tid)} are "
+            f"{', '.join(safe_finding_value(s) for s in sources)}"
+            if sources
+            else f"no source in this run named {safe_finding_value(tid)}"
+        )
+        out.append(
+            Violation(
+                code=CREDIT_WITHOUT_CLAIM_CODE,
+                message=(
+                    f"the relationship at objects[{index}] credits "
+                    f"{', '.join(repr(safe_finding_value(n)) for n in uncredited)} with "
+                    f"{safe_finding_value(tid)}, "
+                    f"and {who} — the evidence summary lists who named each technique. "
+                    "Credit only sources that named it, by the names the summary gives them, "
+                    "or leave x_maljan_contributing_agents empty; whichever you answer is "
+                    "published."
+                ),
+                path=f"objects[{index}]",
+            )
+        )
+    return out
+
+
 def validate_verdict_bundle(
     bundle: Any,
     evidence_corpus: set[str] | None = None,
@@ -1517,8 +1625,14 @@ def validate_verdict_bundle(
     shortened_tools: Iterable[str] = (),
     searched: Iterable[str] = (),
     corpus_state: CorpusState | None = None,
+    technique_sources: Mapping[str, Sequence[str]] | None = None,
 ) -> list[Violation]:
     """What is wrong with the judge's answer, in the judge's own terms.
+
+    ``technique_sources`` is who named which technique in this run, the
+    evidence summary as data; a relationship crediting an agent with a
+    technique that agent never named is asked about against it. ``None`` asks
+    nothing, which is what a caller with no such record passes.
 
     ``attck`` is the same knowledge module the analyst loop consults, and it is
     the same check: an id is unresolvable when the catalogue does not have it,
@@ -1708,6 +1822,7 @@ def validate_verdict_bundle(
                 )
             )
 
+    violations.extend(credit_without_claim_violations(bundle, technique_sources))
     return violations
 
 

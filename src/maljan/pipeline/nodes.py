@@ -55,6 +55,7 @@ from maljan.pipeline.events import (
     emit_stage_ended_at_cap,
     summarize_claims,
 )
+from maljan.pipeline.evidence_summary import collect as collect_technique_sources
 from maljan.pipeline.evidence_summary import summarise
 from maljan.pipeline.outcome import (
     VERDICT_READ_FALLBACK,
@@ -3303,6 +3304,13 @@ def make_judge_node(
                 ledger_ids=[entry.id for entry in _ledger],
                 facts_block=pack_text(state, container),
                 run_state=render_run_state(state),
+                # Who named which technique — the evidence summary as data —
+                # so a relationship crediting an agent with a technique it never
+                # named can be asked about.
+                technique_sources={
+                    tid: [source for source, _confidence in rows]
+                    for tid, rows in collect_technique_sources(isr_reports, _ledger).items()
+                },
             )
             # A verdict the judge never expressed as a bundle is the thinnest
             # answer this pipeline can produce — no severity, no reasoning the

@@ -3258,6 +3258,15 @@ change landed on `main`.
   than `0.5` / `unknown`, and the text fallback's edges name the agents whose
   claims they carry instead of stating a 0.5 the judge never gave.
 
+- **A judge relationship that credits an agent with a technique it never named
+  is asked about.** The ELF run published `malware uses T1490` and
+  `uses T1048.001` crediting `STATIC ANALYST`; the static analyst claimed
+  neither and no tool named either, and nothing asked. The judge node now
+  passes the evidence summary as data, and `stix.credit_without_claim` tells
+  the judge which sources did name the technique, by the names the summary
+  gives them (a parent or sub-technique counts). The credit is never
+  rewritten; what the judge answers is published.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**

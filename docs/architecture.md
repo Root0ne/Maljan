@@ -1446,7 +1446,13 @@ is assembled from what the run gathered rather than recomputed beside it:
   `contributing_layers` are the judge and the analysts whose own claims name
   it: the agents a judge relationship credits are its words about the
   evidence, published on the relationship and not counted as sources, so one
-  analyst's claim the judge credits to two analysts is not corroborated. It is
+  analyst's claim the judge credits to two analysts is not corroborated. A
+  credit is still asked about when it names an agent that did not name the
+  technique: the judge node passes the evidence summary as data
+  (`evidence_summary.collect`), and `stix.credit_without_claim` tells the
+  judge which sources did name it, by the summary's names — a parent or
+  sub-technique counts, and nothing rewrites the credit. The ELF run credited
+  `STATIC ANALYST` with T1490 and T1048.001, which no source named. It is
   where an id the ATT&CK check rejected stays on the record, marked
   `technique_id_valid=False` and spelled as the producer wrote it. **Every id
   that reaches the report is collected into it**, from all three carriers: the

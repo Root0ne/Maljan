@@ -28,7 +28,7 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -927,6 +927,7 @@ class JudgeAgent(BudgetMeter):
         ledger_ids: Sequence[str] | None = None,
         facts_block: str = "",
         run_state: str = "",
+        technique_sources: Mapping[str, Sequence[str]] | None = None,
     ) -> JudgeVerdict:
         """The final decision: a STIX bundle plus the judge's own assessment.
 
@@ -936,7 +937,10 @@ class JudgeAgent(BudgetMeter):
         the judge is the component that should be weighing them. ``facts_block``
         is the triage pack as every analyst saw it and ``run_state`` the run's
         state block; both lead the human turn so the verdict is drawn over the
-        same facts the analysts were given.
+        same facts the analysts were given. ``technique_sources`` is the
+        evidence summary as data, ``{technique id: [source]}``: a relationship
+        crediting an agent with a technique it never named is asked about
+        against it, and ``None`` asks nothing.
 
         The answer is validated (``pipeline.validation.validate_verdict_bundle``)
         and, when something is wrong, handed back once with the problems named.
@@ -1155,6 +1159,7 @@ class JudgeAgent(BudgetMeter):
                     shortened_tools=shortened_tools,
                     searched=searched,
                     corpus_state=corpus_state,
+                    technique_sources=technique_sources,
                 ),
                 *assessment_violations(bundle),
                 *assessment_conflict_violations(bundle),

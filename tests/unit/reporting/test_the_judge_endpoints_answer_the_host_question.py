@@ -437,6 +437,7 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
             "stix.indicator_type_contradicts_verdict",
             "stix.unknown_observable_type",
             "stix.indicator_type_vocabulary",
+            "stix.credit_without_claim",
         }
     )
 

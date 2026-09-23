@@ -225,6 +225,8 @@ CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
     ),
     # The field names of this repository's own schema.
     ("pipeline/validation.py", "_schema_message"): frozenset({"keys"}),
+    # The position of the relationship in the bundle, counted by this loop.
+    ("pipeline/validation.py", "credit_without_claim_violations"): frozenset({"index"}),
     # How many hexadecimal characters a digest of a named algorithm has, read
     # out of this codebase's own table.
     ("pipeline/validation.py", "_indicator_problem"): frozenset({"expected"}),
