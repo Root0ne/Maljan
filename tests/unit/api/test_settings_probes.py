@@ -1269,3 +1269,87 @@ async def test_another_provider_is_not_told_about_an_ollama_setting(monkeypatch)
     )
 
     assert probes.THINKING_SETTING not in said
+
+
+# ---------------------------------------------------------------------------
+# Ollama loads a model at the context size the first request names, and a
+# later request at another size reloads it. A probe that asked at the server's
+# default left the model loaded at 4,096 tokens, and the job's first call paid
+# a full reload at the configured window out of its analyst's time budget.
+# ---------------------------------------------------------------------------
+
+
+def _ollama_generate_bodies(monkeypatch) -> list[dict]:
+    bodies: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path.endswith("/api/generate"):
+            bodies.append(json.loads(req.content))
+            return httpx.Response(200, json={"response": "OK"})
+        return httpx.Response(200, json={"models": [{"name": "qwen3:8b"}]})
+
+    monkeypatch.setattr(
+        probes,
+        "_client",
+        lambda *_a, **_k: httpx.AsyncClient(transport=transport(handler), timeout=10),
+    )
+    return bodies
+
+
+@pytest.mark.asyncio
+async def test_the_ollama_probe_loads_the_model_at_the_window_the_job_uses(monkeypatch):
+    from maljan.core.config import OllamaConfig
+
+    bodies = _ollama_generate_bodies(monkeypatch)
+
+    result = await probes.run_probe(
+        "llm",
+        {
+            "core.llm.provider": "ollama",
+            "core.llm.ollama.expert_model": "qwen3:8b",
+            "core.llm.ollama.judge_model": "qwen3:8b",
+        },
+        {},
+    )
+
+    assert result.ok, result.detail
+    assert bodies, "the probe asked nothing"
+    default = OllamaConfig()
+    for body in bodies:
+        assert body["options"]["num_ctx"] == default.num_ctx
+        assert body["keep_alive"] == default.keep_alive
+
+
+@pytest.mark.asyncio
+async def test_the_ollama_probe_follows_a_staged_window_and_keep_alive(monkeypatch):
+    bodies = _ollama_generate_bodies(monkeypatch)
+
+    await probes.run_probe(
+        "llm",
+        {
+            "core.llm.provider": "ollama",
+            "core.llm.ollama.expert_model": "qwen3:8b",
+            "core.llm.ollama.judge_model": "qwen3:8b",
+            "core.llm.ollama.num_ctx": 16384,
+            "core.llm.ollama.keep_alive": "45m",
+        },
+        {"core.llm.ollama.num_ctx": 8192},
+    )
+
+    assert bodies
+    assert all(body["options"]["num_ctx"] == 16384 for body in bodies)
+    assert all(body["keep_alive"] == "45m" for body in bodies)
+
+
+def test_the_window_is_only_sent_to_ollama():
+    """The other providers take no such field; a hosted API refuses unknown ones."""
+    for provider, endpoint in (
+        ("openai", LOCAL_ENDPOINT),
+        ("anthropic", ""),
+        ("gemini", ""),
+    ):
+        _url, _headers, body = probes._completion_request(
+            provider, endpoint, "m", "k", num_ctx=16384, keep_alive="45m"
+        )
+        assert "num_ctx" not in json.dumps(body)
+        assert "keep_alive" not in body

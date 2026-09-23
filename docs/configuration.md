@@ -243,6 +243,13 @@ setting and what it does. A measured 12B reasoning model failed the probe in
 55 s at the default and passed in 243 ms with the setting on; with
 `llm.require_probe` on, every job is refused in between. See the low-memory
 option in [getting-started.md](getting-started.md).
+Ollama's body also carries `options.num_ctx` and `keep_alive` from
+`llm.ollama.num_ctx` and `llm.ollama.keep_alive`, the two fields a run sends
+with every call that decide which instance Ollama keeps loaded. Ollama loads a
+model at the context size the request names and reloads it when a later
+request names another, so a probe asked at the server's default (4,096) left
+the model at that size and the job's first call paid a full reload out of its
+analyst's time budget.
 The completion gets ninety seconds of its own, because a local server reloads a
 model it had unloaded and a large one is not a ten-second load.
 

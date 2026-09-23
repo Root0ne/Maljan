@@ -3204,6 +3204,15 @@ change landed on `main`.
   `run_summary.validation.unresolved`; a consumer that partitions on validation
   codes should know the name.
 
+- **The Ollama probe loads the model the way the job will.** The `llm` and
+  `agent` probes asked Ollama with no `num_ctx` and no `keep_alive`, so the
+  model was left loaded at the server's default 4,096-token context and the
+  job's first call reloaded it at `core.llm.ollama.num_ctx` (32,768 by default)
+  out of the first analyst's time budget. Both probes now send
+  `options.num_ctx` and `keep_alive` from `core.llm.ollama.num_ctx` and
+  `core.llm.ollama.keep_alive`, staged values included. The other providers'
+  bodies are unchanged.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**
