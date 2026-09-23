@@ -49,7 +49,44 @@ const RULES: Rule[] = [
     // in this tree spells a class that way.
     pattern: /\bclassName[^\n]*\b(from|via|to)-\[?(?:[a-z]+-)*[a-z0-9#(./]+/g,
   },
+  // A chart draws its own surface: an SVG gradient is a gradient that no
+  // class name spells, and a bar list or a pie is where one would be added.
+  { what: "SVG gradient", pattern: /<(linear|radial)Gradient\b/g },
   { what: "colour transition", pattern: /\btransition-(colors|background|border)\b/g },
+  {
+    // Tailwind's bare `transition` eases colour, background, border, fill and
+    // stroke by default, so it is a colour transition under another name.
+    // Two rules find it without reading prose. This one: the whole token in a
+    // string inside a `className` or `class` attribute, a ternary between the
+    // attribute's braces included, whatever else the string holds.
+    what: "bare transition class",
+    pattern:
+      /\bclass(?:Name)?\s*=\s*(?:\{[^}\n]*?)?["'`](?:[^"'`\n]*\s)?transition(?:\s[^"'`\n]*)?["'`]/g,
+  },
+  {
+    // And this one: the whole token in any string that reads as a class list
+    // — every token lower-case and made of the characters class names use,
+    // with at least one of them holding `-` or `:` — wherever the string sits:
+    // a constant of any name, a map of classes, a helper's argument. A
+    // sentence has capitals, punctuation or no hyphenated token, and passes.
+    what: "bare transition in a class string",
+    pattern:
+      /["'`](?=[^"'`\n]*[-:])(?:[a-z0-9!:_/[\].%#()-]+\s+)*transition(?:\s+[a-z0-9!:_/[\].%#()-]+)*\s*["'`]/g,
+  },
+  {
+    what: "colour transition by arbitrary property",
+    pattern: /\btransition-\[[^\]]*(color|background|border|fill|stroke|shadow)[^\]]*\]/g,
+  },
+  {
+    // `style={{ transition: "background 150ms" }}`: the same ease, written
+    // where no class list would show it.
+    what: "colour transition in an inline style",
+    pattern: /\btransition(Property)?\s*:\s*["'`][^"'`]*(color|background|border|fill|stroke|all)\b/g,
+  },
+  {
+    what: "colour transition in a stylesheet",
+    pattern: /(^|[;{\s])transition(-property)?\s*:[^;"'`]*\b(color|background|border|fill|stroke|all)\b/gm,
+  },
   { what: "transition of everything, which includes colour", pattern: /\btransition-all\b/g },
   { what: "backdrop blur", pattern: /\bbackdrop-blur\b/g },
 ];
@@ -59,6 +96,35 @@ describe("the style rules", () => {
 
   it("reads the whole tree, so a pass means something", () => {
     expect(files.length).toBeGreaterThan(50);
+  });
+
+  it("catches the bare transition class in every place a class list is written", () => {
+    const rules = RULES.filter((r) => r.what.startsWith("bare transition"));
+    const hits = (text: string) =>
+      rules.reduce((sum, rule) => sum + [...text.matchAll(rule.pattern)].length, 0);
+    // An attribute, alone and in a template.
+    expect(hits('<a className="transition" />')).toBeGreaterThan(0);
+    expect(hits("className={`px-2 transition`}")).toBeGreaterThan(0);
+    // A ternary inside the attribute's braces.
+    expect(hits('className={on ? "transition duration-150" : ""}')).toBeGreaterThan(0);
+    expect(hits('className={on ? "" : "transition"}')).toBeGreaterThan(0);
+    // A class-string constant, whatever its name.
+    expect(hits('const rowCls = "px-2 transition";')).toBeGreaterThan(0);
+    expect(hits('const BUTTON = "px-2 transition hover:text-text-primary";')).toBeGreaterThan(0);
+    // A map of classes.
+    expect(hits('{ hover: "transition hover:bg-bg-hover" }')).toBeGreaterThan(0);
+  });
+
+  it("leaves prose, and a transition that moves something, alone", () => {
+    const rules = RULES.filter((r) => r.what.startsWith("bare transition"));
+    const hits = (text: string) =>
+      rules.reduce((sum, rule) => sum + [...text.matchAll(rule.pattern)].length, 0);
+    expect(hits('className="transition-transform duration-200"')).toBe(0);
+    expect(hits('const rail = "transition-[width] duration-200";')).toBe(0);
+    expect(hits("// a staged transition is ours")).toBe(0);
+    expect(hits('<p>{"Skip the transition"}</p>')).toBe(0);
+    expect(hits('const note = "the transition is ours";')).toBe(0);
+    expect(hits('setError("A transition failed: retry.")')).toBe(0);
   });
 
   for (const rule of RULES) {

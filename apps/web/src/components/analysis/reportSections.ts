@@ -27,6 +27,7 @@ export type SectionTab =
   | "dynamic"
   | "network"
   | "persistence"
+  | "detection"
   | "other";
 
 /**
@@ -44,6 +45,9 @@ export const RENDERED_TABS: ReadonlySet<SectionTab> = new Set<SectionTab>([
   "dynamic",
   "network",
   "persistence",
+  // DETECTION draws its two sections as rule rows (`ruleMatches.ts`) rather
+  // than through `sectionsForTab`, and draws both whenever they have content.
+  "detection",
 ]);
 
 /** The heads a dotted key may carry, which is every tab but the fallback. */
@@ -53,14 +57,17 @@ const TABS = new Set<string>([
   "dynamic",
   "network",
   "persistence",
+  "detection",
 ]);
 
 /** The keys whose tab is not derivable from their shape. */
 const BY_KEY: Record<string, SectionTab> = {
   identity: "identity",
   strings: "static",
-  yara_matches: "static",
-  sigma_matches: "static",
+  // The rules that fired are DETECTION's, with each Sigma rule's own level on
+  // the severity ladder; STATIC links there rather than repeating the table.
+  yara_matches: "detection",
+  sigma_matches: "detection",
   capa_capabilities: "static",
   functions_examined: "static",
   packer_signatures: "static",

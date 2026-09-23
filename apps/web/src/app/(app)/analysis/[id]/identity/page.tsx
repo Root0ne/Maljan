@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
 import { useParams } from "next/navigation";
 
 import { useReport } from "../layout";
-import { copyToClipboard, formatBytes } from "@/lib/report-utils";
+import { formatBytes } from "@/lib/report-utils";
+import CopyButton from "@/components/ui/CopyButton";
 import Field from "@/components/ui/Field";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import ReputationSection from "@/components/analysis/ReputationSection";
@@ -227,7 +227,6 @@ const HASH_ROWS: { field: HashField; label: string }[] = [
 ];
 
 function HashRow({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false);
   return (
     <div className="flex items-center gap-3">
       <span className="text-[11px] text-text-muted uppercase tracking-wider w-20 shrink-0">
@@ -238,17 +237,7 @@ function HashRow({ label, value }: { label: string; value: string }) {
           <code className="flex-1 font-mono text-xs text-status-blue truncate" title={value}>
             {value}
           </code>
-          <button
-            onClick={async () => {
-              if (await copyToClipboard(value)) {
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-              }
-            }}
-            className="text-[11px] px-2 py-0.5 border border-border rounded text-text-secondary hover:text-text-primary hover:border-text-muted"
-          >
-            {copied ? "copied" : "copy"}
-          </button>
+          <CopyButton value={value} what={label} />
         </>
       ) : (
         <span className="text-xs text-text-muted">-</span>
