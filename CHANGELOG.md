@@ -3445,7 +3445,7 @@ change landed on `main`.
   Benign export and fails on any validator error.
 
 - **The judge's own bundle is kept, and the export says who did what.**
-  `analysis_reports.judge_stix_bundle` (migration `20260928000000`) holds the
+  `analysis_reports.judge_stix_bundle` (migration `20260929000000`) holds the
   judge's bundle and the map from each label it wrote to the published id,
   served at `/reports/{id}/stix?source=judge` — the bundle every decline row
   says an object "is unchanged in". A network-block row the export declines is
@@ -3651,5 +3651,5 @@ on them: `stix.unknown_observable_type`, `stix.unknown_object_path`,
 `stix.is_family_missing` (questions the judge is asked) and
 `stix.unpublishable_pattern`, `stix.unpublishable_credit`,
 `stix.unpublishable_producer` (the export's own decisions). Apply migration
-`20260928000000` for `analysis_reports.judge_stix_bundle`; a report stored
+`20260929000000` for `analysis_reports.judge_stix_bundle`; a report stored
 before it has none, and `/reports/{id}/stix?source=judge` answers 404 for it.

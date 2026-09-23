@@ -11,8 +11,8 @@ published under, as ``{"bundle": …, "labels": {…}}``.
 Nullable with no default: a report stored before this revision has no judge
 bundle on record, and ``NULL`` says exactly that.
 
-Revision ID: 20260928000000
-Revises: 20260927000000
+Revision ID: 20260929000000
+Revises: 20260928000000
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "20260928000000"
-down_revision = "20260927000000"
+revision = "20260929000000"
+down_revision = "20260928000000"
 branch_labels = None
 depends_on = None
 

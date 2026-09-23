@@ -31,7 +31,7 @@ def _jsonb_as_json(element, compiler, **kw):  # noqa: ANN001, ANN202
 
 
 _API = Path(__file__).resolve().parents[3] / "apps" / "api"
-_REV = _API / "alembic" / "versions" / "20260928000000_judge_stix_bundle.py"
+_REV = _API / "alembic" / "versions" / "20260929000000_judge_stix_bundle.py"
 
 
 def _judge_output() -> dict:
@@ -99,15 +99,32 @@ class TestTheMigration:
     def test_it_chains_onto_the_head_and_nothing_else_does(self) -> None:
         module = _load()
 
-        assert module.down_revision == "20260927000000"
+        assert module.down_revision == "20260928000000"
         for path in (_API / "alembic" / "versions").glob("*.py"):
             if path != _REV:
                 assert (
-                    '"20260928000000"'
+                    '"20260929000000"'
                     not in path.read_text(encoding="utf-8")
                     .split("down_revision", 1)[-1]
                     .split("\n", 1)[0]
                 ), path
+
+    def test_the_revisions_form_one_chain_with_one_head(self) -> None:
+        """Two revisions sharing an id, or two with the same parent, are what
+        alembic cannot load; this one arrived beside another branch's."""
+        revisions: dict[str, str | None] = {}
+        for path in (_API / "alembic" / "versions").glob("*.py"):
+            spec = importlib.util.spec_from_file_location(path.stem, path)
+            assert spec and spec.loader
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            assert module.revision not in revisions, f"{module.revision} is used twice"
+            revisions[module.revision] = module.down_revision
+        parents = [parent for parent in revisions.values() if parent is not None]
+
+        assert len(parents) == len(set(parents)), "two revisions share a parent"
+        heads = set(revisions) - set(parents)
+        assert heads == {"20260929000000"}
 
     def test_it_adds_the_column_and_takes_it_back(self) -> None:
         from alembic.operations import Operations
