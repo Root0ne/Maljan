@@ -110,9 +110,9 @@ def emit(sink: EventSink | None, event_type: str, data: dict[str, Any]) -> None:
 # — every ``BUDGET_TICK_EVERY`` steps and once more when its loop ends — and
 # ``stage_ended_at_cap`` says which cap, when a cap is what ended the work:
 # ``steps`` (the loop's own recursion limit), ``time``
-# (the wall-clock hard cap), ``repeats`` (the repeat guard) or
-# ``budget_seconds`` (the triage pack's budget). Both are telemetry; neither
-# changes what a model said.
+# (the wall-clock hard cap), ``repeats`` (the repeat guard), ``no_room`` (the
+# conversation had no room left for a tool answer) or ``budget_seconds`` (the
+# triage pack's budget). Both are telemetry; neither changes what a model said.
 BUDGET_TICK = "budget_tick"
 STAGE_ENDED_AT_CAP = "stage_ended_at_cap"
 # A tool server this job stopped calling for a while, after a run of calls it
@@ -122,7 +122,7 @@ TOOL_SERVER_RESTED = "tool_server_rested"
 # failed as a provider (``maljan.llm.fallback``). Once per switch.
 MODEL_FALLBACK = "model_fallback"
 BUDGET_TICK_EVERY = 5
-CAPS: tuple[str, ...] = ("steps", "time", "repeats", "budget_seconds")
+CAPS: tuple[str, ...] = ("steps", "time", "repeats", "no_room", "budget_seconds")
 
 
 def emit_budget_tick(
