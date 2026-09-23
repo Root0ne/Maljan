@@ -135,8 +135,9 @@ class AnalysisService:
         page: int = 1,
         page_size: int = 20,
         status_filter: str | None = None,
+        sample_id: uuid.UUID | None = None,
     ) -> dict[str, Any]:
-        """List jobs for a user with pagination and optional status filter."""
+        """List jobs for a user with pagination and optional status and sample filters."""
         query = select(AnalysisJob).where(AnalysisJob.created_by == user.id)
         count_query = (
             select(func.count()).select_from(AnalysisJob).where(AnalysisJob.created_by == user.id)
@@ -145,6 +146,9 @@ class AnalysisService:
         if status_filter:
             query = query.where(AnalysisJob.status == status_filter)
             count_query = count_query.where(AnalysisJob.status == status_filter)
+        if sample_id is not None:
+            query = query.where(AnalysisJob.sample_id == sample_id)
+            count_query = count_query.where(AnalysisJob.sample_id == sample_id)
 
         query = query.order_by(AnalysisJob.created_at.desc())
         query = query.offset((page - 1) * page_size).limit(page_size)

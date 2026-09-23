@@ -216,15 +216,19 @@ async def list_jobs(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status_filter: str | None = Query(None, alias="status"),
+    sample_id: uuid.UUID | None = Query(
+        None, description="Only the runs of this sample, which is how a run finds its siblings."
+    ),
     user: User = Depends(get_current_user),
     svc: AnalysisService = Depends(_get_service),
 ) -> dict:
-    """List analysis jobs with pagination and optional status filter."""
+    """List analysis jobs with pagination and optional status and sample filters."""
     result = await svc.list_jobs(
         user=user,
         page=page,
         page_size=page_size,
         status_filter=status_filter,
+        sample_id=sample_id,
     )
     logger.debug(
         f"Listed jobs: page={log_safe(page)} filter={log_safe(status_filter)} "

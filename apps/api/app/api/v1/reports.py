@@ -1,4 +1,4 @@
-"""Report endpoints — detail, STIX export, MITRE export, negotiation timeline.
+"""Report endpoints — detail, run diff, STIX export, MITRE export, negotiation timeline.
 
 Uses ReportService for business logic separation.
 """
@@ -94,6 +94,33 @@ async def _detail(svc: ReportService, report: Any) -> ReportDetailResponse:
             update={"transcript": [m.model_copy(update={"seq": None}) for m in detail.transcript]}
         )
     return detail
+
+
+# Declared before ``/{report_id}``: a path parameter typed as a UUID would
+# otherwise claim ``/diff`` and answer 422.
+@router.get("/diff")
+async def diff_reports(
+    a: uuid.UUID = Query(..., description="The run compared from."),
+    b: uuid.UUID = Query(..., description="The run compared to."),
+    by: Literal["report", "job"] = Query(
+        "report",
+        description="Whether `a` and `b` are report ids or job ids.",
+    ),
+    user: User = Depends(get_current_user),
+    svc: ReportService = Depends(_get_service),
+) -> dict:
+    """What changed between two stored analyses, section by section.
+
+    Read only from the two stored records: it states what each run's record
+    says and never judges, merges or writes into either. Each section names
+    the key its rows are paired by; a row the record does not key stably is
+    listed as present in one run rather than paired by guess. Both runs must
+    be readable by the caller; otherwise 404, exactly as a single report read.
+    """
+    diff = await svc.diff_reports(a, b, user, by=by)
+    if diff is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+    return diff
 
 
 @router.get("/{report_id}", response_model=ReportDetailResponse)
