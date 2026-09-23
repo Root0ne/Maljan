@@ -20,6 +20,31 @@ SIGMA_TAG_RE = re.compile(r"^attack\.(t\d{4}(?:\.\d{3})?)$", re.IGNORECASE)
 # A whole string that is one id, for a field an agent wrote as the id itself.
 TECHNIQUE_ID_EXACT_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
 
+# The ``source_name`` values an external reference to an ATT&CK technique is
+# filed under. A reference under any other source — CAPEC, a vendor's own
+# catalogue — carries an ``external_id`` that is not a technique.
+MITRE_ATTACK_SOURCES = frozenset(
+    {"mitre-attack", "mitre attack", "mitre-mobile-attack", "mitre-ics-attack"}
+)
+
+
+def attack_reference_id(obj: Any) -> str:
+    """The technique id an object's MITRE ATT&CK reference names, or ``""``.
+
+    Only a reference filed under an ATT&CK source counts; the first one found
+    answers. Works on a dict or on a model.
+    """
+    refs = obj.get("external_references") if isinstance(obj, dict) else None
+    if refs is None and not isinstance(obj, dict):
+        refs = getattr(obj, "external_references", None)
+    for ref in refs or []:
+        read = ref.get if isinstance(ref, dict) else lambda key, r=ref: getattr(r, key, "")
+        source = str(read("source_name") or "").strip().lower()
+        external = str(read("external_id") or "").strip()
+        if source in MITRE_ATTACK_SOURCES and external:
+            return external.upper()
+    return ""
+
 
 def technique_ids_in(value: Any) -> list[str]:
     """Every technique id written anywhere in ``value``, first seen first.

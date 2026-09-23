@@ -36,6 +36,7 @@ from maljan.agents._indicator_denylists import (
     malformed_hash_in,
     whole_value_in,
 )
+from maljan.analysis.technique_ids import attack_reference_id
 from maljan.core.logger import logger
 from maljan.extractors.network_extractor import (
     address_is_publishable,
@@ -56,6 +57,7 @@ from maljan.reporting.models import (
 )
 from maljan.schemas.judgement import indicator_type_for
 from maljan.schemas.stix_models import (
+    ATTACK_PATTERN_NAMESPACE,
     AttackPattern,
     Bundle,
     File,
@@ -67,9 +69,16 @@ from maljan.schemas.stix_models import (
     Process,
     Relationship,
     Report,
+    attack_pattern_id,
+    crediting_only,
     get_utcnow,
+    produced_by,
 )
-from maljan.schemas.stix_pattern import read_comparisons, unknown_object_types
+from maljan.schemas.stix_pattern import (
+    object_path_problems,
+    read_comparisons,
+    unknown_object_types,
+)
 
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
@@ -92,6 +101,12 @@ UNPUBLISHABLE_ENDPOINT_CODE = "stix.unpublishable_endpoint"
 # the same decision, and ``apps/web/src/lib/validationRows.ts`` holds the list
 # it reads them from.
 LEGACY_UNPUBLISHABLE_CODES = ("stix.unpublishable_url", "stix.unpublishable_domain")
+# A ``created_by_ref`` naming an identity the bundle does not hold, which the
+# export replaced with this platform's identity.
+UNPUBLISHABLE_PRODUCER_CODE = "stix.unpublishable_producer"
+# A judge credit naming an agent that did not name the technique, which the
+# judge was asked about (``stix.credit_without_claim``) and kept.
+UNPUBLISHABLE_CREDIT_CODE = "stix.unpublishable_credit"
 # An indicator over something that is not an endpoint: a mailbox that is not
 # one, a file name that names a directory or a root.
 UNPUBLISHABLE_ARTEFACT_CODE = "stix.unpublishable_artefact"
@@ -100,7 +115,7 @@ MALFORMED_HASH_CODE = "stix.malformed_hash"
 # A pattern over an object type STIX does not have, which the judge was asked
 # about under ``stix.unknown_observable_type`` and kept. This row is the
 # export's decision rather than the judge's answer, so it has a code of its own.
-UNPUBLISHABLE_OBSERVABLE_TYPE_CODE = "stix.unpublishable_observable_type"
+UNPUBLISHABLE_PATTERN_CODE = "stix.unpublishable_pattern"
 
 # The sources whose rows are worth a recorded decline. Something a sandbox
 # watched, an agent wrote down or the judge asserted is an observation, and a
@@ -273,6 +288,24 @@ def _within_the_indicator_cap(
     return [obj for obj in objects if getattr(obj, "type", "") != "indicator" or obj.id in kept]
 
 
+class Declined(tuple[str, str]):
+    """One thing the export left out: ``(code, sentence)``, and who wrote it down.
+
+    A pair, so every reader that unpacks ``code, why`` still does. ``by`` is the
+    producer of the object that was declined: the judge for the judge's own
+    objects, and for a row of the report's network block the source that
+    recorded it — a sandbox, an analyst. Those rows used to be filed under the
+    judge, which wrote none of them.
+    """
+
+    by: str
+
+    def __new__(cls, code: str, why: str, *, by: str | None = "judge") -> Declined:
+        row = super().__new__(cls, (code, why))
+        row.by = str(by or "judge")
+        return row
+
+
 def impossible_host_sentence(value: str, whose: str) -> str:
     """The recorded sentence for a URL no host could ever answer for."""
     return (
@@ -339,6 +372,41 @@ def unknown_observable_type_sentence(pattern: str, types: list[str]) -> str:
         f"compares {named}, which is not a STIX Cyber-observable type, so no consumer holds "
         "an object it could match and this export could not ask whether it may carry the "
         "value. It is unchanged in the judge's own bundle."
+    )
+
+
+def unknown_object_path_sentence(pattern: str, problems: list[str]) -> str:
+    """The recorded sentence for a pattern over a path its type does not have."""
+    return (
+        f"the indicator {safe_finding_value(pattern)!r} is not in the exported bundle: "
+        f"{safe_finding_value('; '.join(problems))}, so the pattern matches nothing a consumer "
+        "holds. It is unchanged in the judge's own bundle."
+    )
+
+
+def _without_unconfirmed_credit(obj: Any, credit: Any) -> tuple[Any, Declined]:
+    """A copy of a judge relationship carrying only the credits a source stands behind."""
+    from maljan.pipeline.validation import credited_agents
+
+    kept = [name for name in credited_agents(obj) if name not in credit.uncredited]
+    copy = crediting_only(obj, kept)
+    names = ", ".join(repr(safe_finding_value(n)) for n in credit.uncredited)
+    return copy, Declined(
+        UNPUBLISHABLE_CREDIT_CODE,
+        f"the credit to {names} for {safe_finding_value(credit.technique)} is not in the "
+        "exported bundle: no source by that name named the technique in this run, and the "
+        "judge kept the credit when asked. It is unchanged in the judge's own bundle.",
+    )
+
+
+def replaced_producer_sentence(obj: Any, named: str) -> str:
+    """The recorded sentence for a producer the bundle does not hold, replaced."""
+    kind = safe_finding_value(getattr(obj, "type", "") or "object")
+    label = safe_finding_value(getattr(obj, "name", "") or getattr(obj, "id", ""))
+    return (
+        f"the {kind} {label!r} names {safe_finding_value(named)!r} as its producer, an "
+        "identity this bundle does not hold, so the export names this platform's identity "
+        "instead. It is unchanged in the judge's own bundle."
     )
 
 
@@ -487,9 +555,12 @@ def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
     unknown = unknown_object_types(pattern)
     if unknown:
         return (
-            UNPUBLISHABLE_OBSERVABLE_TYPE_CODE,
+            UNPUBLISHABLE_PATTERN_CODE,
             unknown_observable_type_sentence(pattern, unknown),
         )
+    wrong_paths = object_path_problems(pattern)
+    if wrong_paths:
+        return (UNPUBLISHABLE_PATTERN_CODE, unknown_object_path_sentence(pattern, wrong_paths))
     malformed = malformed_hash_in(pattern)
     if malformed is not None:
         algorithm, literal = malformed
@@ -540,6 +611,7 @@ class ExtendedSTIXRenderer:
         *,
         ledger: Any | None = None,
         corpus: Any = None,
+        technique_sources: Any = None,
     ) -> Bundle:
         """Render the extended bundle.
 
@@ -589,8 +661,22 @@ class ExtendedSTIXRenderer:
             self._normalize_judge_timestamps(base_bundle.objects)
             remap = _technique_remap(report, base_bundle)
             gone = _rejected_pattern_ids(base_bundle, remap)
-            for obj in base_bundle.objects:
+            # A credit the judge was asked about and kept, naming an agent no
+            # source of that name stands behind. The judge's own bundle keeps
+            # it; the export's copy of the relationship does not carry it, so
+            # no surface prints an agent as having named a technique it never
+            # named.
+            from maljan.pipeline.validation import unconfirmed_credits
+
+            unconfirmed = {
+                credit.index: credit
+                for credit in unconfirmed_credits(base_bundle, technique_sources)
+            }
+            for position, obj in enumerate(base_bundle.objects):
                 kind = getattr(obj, "type", "")
+                if position in unconfirmed:
+                    obj, row = _without_unconfirmed_credit(obj, unconfirmed[position])
+                    self.declined.append(row)
                 if kind == "attack-pattern":
                     continue
                 if kind == "malware" and benign:
@@ -730,9 +816,10 @@ class ExtendedSTIXRenderer:
                 # forty of them a run buries the findings a reader can act on.
                 if _observed(url.source) and not host_is_public(url_host(url.url)):
                     self.declined.append(
-                        (
+                        Declined(
                             UNPUBLISHABLE_ENDPOINT_CODE,
                             impossible_host_sentence(url.url, "the report's network block"),
+                            by=url.source,
                         )
                     )
             for domain in report.network.domains[:40]:
@@ -746,9 +833,10 @@ class ExtendedSTIXRenderer:
                 # back by the corroboration rule, which is the rule working.
                 if _observed(domain.source) and not host_is_public(domain.fqdn):
                     self.declined.append(
-                        (
+                        Declined(
                             UNPUBLISHABLE_ENDPOINT_CODE,
                             unpublishable_domain_sentence(domain.fqdn),
+                            by=domain.source,
                         )
                     )
 
@@ -906,7 +994,7 @@ class ExtendedSTIXRenderer:
             # ``indicator_cap_removed``, so every object that left this bundle
             # left under a name.
             objects = enforce_bundle_integrity(capped, ledger=ledger, dropped_as=CAP_ORPHAN_REASON)
-        return Bundle(objects=_produced_by(objects, identity.id))
+        return Bundle(objects=_produced_by(objects, identity.id, self.declined))
 
     @staticmethod
     def _normalize_judge_timestamps(objects: list[Any]) -> None:
@@ -947,7 +1035,9 @@ class ExtendedSTIXRenderer:
         return None
 
 
-def _produced_by(objects: list[Any], producer: str) -> list[Any]:
+def _produced_by(
+    objects: list[Any], producer: str, declined: list[tuple[str, str]] | None = None
+) -> list[Any]:
     """Every object naming the identity that produced it, as a copy.
 
     A copy, because the judge's objects are the judge's own bundle's too, and
@@ -955,7 +1045,8 @@ def _produced_by(objects: list[Any], producer: str) -> list[Any]:
     served at ``/reports/{id}/stix?source=judge``). An object that already names a
     producer in this bundle keeps the one it names; one naming an identity the
     bundle does not hold names nothing, the way a relationship pointing at
-    nothing does, and is given this one.
+    nothing does, and is given this one — recorded in ``declined``, because the
+    export then says something about the object that its writer did not.
     """
     present = {getattr(obj, "id", None) for obj in objects} - {None}
     out: list[Any] = []
@@ -964,18 +1055,20 @@ def _produced_by(objects: list[Any], producer: str) -> list[Any]:
         if getattr(obj, "id", None) == producer or named in present:
             out.append(obj)
             continue
-        if not hasattr(obj, "model_copy") or "created_by_ref" not in type(obj).model_fields:
+        if "created_by_ref" not in type(obj).model_fields:
             out.append(obj)
             continue
-        out.append(obj.model_copy(update={"created_by_ref": producer}))
+        if named and declined is not None:
+            declined.append(
+                Declined(UNPUBLISHABLE_PRODUCER_CODE, replaced_producer_sentence(obj, str(named)))
+            )
+        out.append(produced_by(obj, producer))
     return out
 
 
-# The namespace the technique objects' ids are derived in. A UUIDv5 over the
-# technique id, so the same technique is the same object across exports of the
-# same run and across runs — and never a UUID copied out of the STIX
-# documentation, which is what the judge's own objects sometimes carried.
-_ATTACK_PATTERN_NAMESPACE = uuid.UUID("2f0b4c10-6f7e-5b6a-9d3b-1f6a5c7e8d90")
+# The namespace the technique objects' ids are derived in: one, in
+# ``schemas.stix_models``, for the export and for the judge's own bundle.
+_ATTACK_PATTERN_NAMESPACE = ATTACK_PATTERN_NAMESPACE
 
 # This platform's identity, the producer every exported object names. Derived
 # in the same namespace, so it is the same object in every export and a
@@ -985,7 +1078,7 @@ PRODUCER_IDENTITY_ID = f"identity--{uuid.uuid5(_ATTACK_PATTERN_NAMESPACE, 'malja
 
 def _pattern_id_for(technique_id: str) -> str:
     """The published object id of one technique. Same id every time."""
-    return f"attack-pattern--{uuid.uuid5(_ATTACK_PATTERN_NAMESPACE, technique_id)}"
+    return attack_pattern_id(technique_id)
 
 
 def _published_ids(report: MalwareReport) -> dict[str, str]:
@@ -1000,9 +1093,9 @@ def _published_ids(report: MalwareReport) -> dict[str, str]:
 
 def _declared_technique(obj: Any) -> str:
     """The ATT&CK id an attack-pattern declares, from its reference or its name."""
-    for ref in getattr(obj, "external_references", None) or []:
-        if isinstance(ref, dict) and str(ref.get("external_id") or "").strip():
-            return str(ref["external_id"]).strip().upper()
+    declared = attack_reference_id(obj)
+    if declared:
+        return declared
     name = str(getattr(obj, "name", "") or "").strip().upper()
     first = name.split()[0].rstrip(":") if name else ""
     return first if first.startswith("T") else ""

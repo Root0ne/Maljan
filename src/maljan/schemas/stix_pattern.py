@@ -79,6 +79,10 @@ class Comparison:
     operator: str
     literal: str
     readable: bool
+    # The type as the pattern writes it. ``object_type`` is folded to lower
+    # case for the questions that read it; STIX types are lower case, and a
+    # capitalised one is a type the grammar refuses.
+    written_type: str = ""
 
     @property
     def path(self) -> str:
@@ -98,6 +102,7 @@ def read_comparisons(pattern: str) -> list[Comparison]:
     found: list[Comparison] = []
     outside = 0
     object_type = ""
+    written_type = ""
     prop = ""
     operator = ""
     observation_closed = False
@@ -118,6 +123,7 @@ def read_comparisons(pattern: str) -> list[Comparison]:
         paths = list(_OBJECT_PATH_RE.finditer(before))
         if paths:
             object_type = paths[-1].group(1).lower()
+            written_type = paths[-1].group(1)
             prop = paths[-1].group(2).lower()
             operator = before[paths[-1].end() :].strip().lower()
             observation_closed = False
@@ -131,6 +137,7 @@ def read_comparisons(pattern: str) -> list[Comparison]:
         found.append(
             Comparison(
                 object_type=object_type,
+                written_type=written_type,
                 prop=prop,
                 operator=operator,
                 literal=literal,
@@ -205,8 +212,12 @@ CYBER_OBSERVABLE_TYPES: frozenset[str] = frozenset(
 
 
 def is_observable_type(object_type: str) -> bool:
-    """Whether a pattern may name this type: a STIX one, or a custom ``x-`` one."""
-    name = str(object_type or "").strip().lower()
+    """Whether a pattern may name this type: a STIX one, or a custom ``x-`` one.
+
+    As written: STIX types are lower case, and ``IPv4-Addr`` is a type the
+    grammar refuses, however plainly it means ``ipv4-addr``.
+    """
+    name = str(object_type or "").strip()
     return name in CYBER_OBSERVABLE_TYPES or name.startswith("x-")
 
 
@@ -219,9 +230,187 @@ def unknown_object_types(pattern: str) -> list[str]:
     """
     found: list[str] = []
     for comparison in read_comparisons(pattern):
-        name = comparison.object_type
+        name = comparison.written_type or comparison.object_type
         if name and not is_observable_type(name) and name not in found:
             found.append(name)
+    return found
+
+
+# The top-level properties each Cyber-observable type defines (STIX 2.1,
+# section 6), which is as deep as this reader asks. A step past a reference or
+# into an extension is the referenced object's or the extension's business,
+# and a custom ``x_`` property is the producer's own.
+SCO_PROPERTIES: dict[str, frozenset[str]] = {
+    "artifact": frozenset(
+        {"mime_type", "payload_bin", "url", "hashes", "encryption_algorithm", "decryption_key"}
+    ),
+    "autonomous-system": frozenset({"number", "name", "rir"}),
+    "directory": frozenset({"path", "path_enc", "ctime", "mtime", "atime", "contains_refs"}),
+    "domain-name": frozenset({"value", "resolves_to_refs"}),
+    "email-addr": frozenset({"value", "display_name", "belongs_to_ref"}),
+    "email-message": frozenset(
+        {
+            "is_multipart",
+            "date",
+            "content_type",
+            "from_ref",
+            "sender_ref",
+            "to_refs",
+            "cc_refs",
+            "bcc_refs",
+            "message_id",
+            "subject",
+            "received_lines",
+            "additional_header_fields",
+            "body",
+            "body_multipart",
+            "raw_email_ref",
+        }
+    ),
+    "file": frozenset(
+        {
+            "hashes",
+            "size",
+            "name",
+            "name_enc",
+            "magic_number_hex",
+            "mime_type",
+            "ctime",
+            "mtime",
+            "atime",
+            "parent_directory_ref",
+            "contains_refs",
+            "content_ref",
+        }
+    ),
+    "ipv4-addr": frozenset({"value", "resolves_to_refs", "belongs_to_refs"}),
+    "ipv6-addr": frozenset({"value", "resolves_to_refs", "belongs_to_refs"}),
+    "mac-addr": frozenset({"value"}),
+    "mutex": frozenset({"name"}),
+    "network-traffic": frozenset(
+        {
+            "start",
+            "end",
+            "is_active",
+            "src_ref",
+            "dst_ref",
+            "src_port",
+            "dst_port",
+            "protocols",
+            "src_byte_count",
+            "dst_byte_count",
+            "src_packets",
+            "dst_packets",
+            "ipfix",
+            "src_payload_ref",
+            "dst_payload_ref",
+            "encapsulates_refs",
+            "encapsulated_by_ref",
+        }
+    ),
+    "process": frozenset(
+        {
+            "is_hidden",
+            "pid",
+            "created_time",
+            "cwd",
+            "command_line",
+            "environment_variables",
+            "opened_connection_refs",
+            "creator_user_ref",
+            "image_ref",
+            "parent_ref",
+            "child_refs",
+        }
+    ),
+    "software": frozenset({"name", "cpe", "swid", "languages", "vendor", "version"}),
+    "url": frozenset({"value"}),
+    "user-account": frozenset(
+        {
+            "user_id",
+            "credential",
+            "account_login",
+            "account_type",
+            "display_name",
+            "is_service_account",
+            "is_privileged",
+            "can_escalate_privs",
+            "is_disabled",
+            "account_created",
+            "account_expires",
+            "credential_last_changed",
+            "account_first_login",
+            "account_last_login",
+        }
+    ),
+    "windows-registry-key": frozenset(
+        {"key", "values", "modified_time", "creator_user_ref", "number_of_subkeys"}
+    ),
+    "x509-certificate": frozenset(
+        {
+            "is_self_signed",
+            "hashes",
+            "version",
+            "serial_number",
+            "signature_algorithm",
+            "issuer",
+            "validity_not_before",
+            "validity_not_after",
+            "subject",
+            "subject_public_key_algorithm",
+            "subject_public_key_modulus",
+            "subject_public_key_exponent",
+            "x509_v3_extensions",
+        }
+    ),
+}
+
+# The predefined extensions each type has; any type may carry a custom ``x-``
+# one or one an extension definition names.
+SCO_EXTENSIONS: dict[str, frozenset[str]] = {
+    "file": frozenset(
+        {"archive-ext", "ntfs-ext", "pdf-ext", "raster-image-ext", "windows-pebinary-ext"}
+    ),
+    "network-traffic": frozenset({"http-request-ext", "icmp-ext", "socket-ext", "tcp-ext"}),
+    "process": frozenset({"windows-process-ext", "windows-service-ext"}),
+    "user-account": frozenset({"unix-account-ext"}),
+}
+
+_FIRST_STEP_RE = re.compile(r"^([a-z0-9_]+)")
+_EXTENSION_KEY_RE = re.compile(r"^extensions(?:\.'((?:\\.|[^'\\])*)'|\['((?:\\.|[^'\\])*)'\])")
+
+
+def object_path_problems(pattern: str) -> list[str]:
+    """What is wrong with the object paths ``pattern`` compares, one sentence each.
+
+    Asked only of a STIX type written as STIX writes it: a property the type
+    does not define, or an extension it does not have. Each problem is named
+    once. A type STIX does not have is :func:`unknown_object_types`' answer.
+    """
+    found: list[str] = []
+    for comparison in read_comparisons(pattern):
+        kind = comparison.written_type or comparison.object_type
+        properties = SCO_PROPERTIES.get(kind)
+        if properties is None:
+            continue
+        step = _FIRST_STEP_RE.match(comparison.prop)
+        name = step.group(1) if step else comparison.prop
+        if name == "extensions":
+            key_match = _EXTENSION_KEY_RE.match(comparison.prop)
+            key = (key_match.group(1) or key_match.group(2) or "") if key_match else ""
+            allowed = SCO_EXTENSIONS.get(kind, frozenset())
+            if key and (
+                key in allowed or key.startswith("x-") or key.startswith("extension-definition--")
+            ):
+                continue
+            listed = ", ".join(sorted(allowed)) if allowed else "no predefined extension"
+            problem = f"{kind} has no extension {key!r} (it has {listed})"
+        elif name in properties or name.startswith("x_"):
+            continue
+        else:
+            problem = f"{kind} has no property {name!r}"
+        if problem not in found:
+            found.append(problem)
     return found
 
 

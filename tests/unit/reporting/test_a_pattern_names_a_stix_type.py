@@ -22,18 +22,23 @@ from __future__ import annotations
 
 from maljan.pipeline.validation import (
     INDICATOR_TYPE_VOCABULARY_CODE,
+    UNKNOWN_OBJECT_PATH_CODE,
     UNKNOWN_OBSERVABLE_TYPE_CODE,
     validate_verdict_bundle,
 )
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import MalwareReport
 from maljan.reporting.renderers.stix_renderer import (
-    UNPUBLISHABLE_OBSERVABLE_TYPE_CODE,
+    UNPUBLISHABLE_PATTERN_CODE,
     ExtendedSTIXRenderer,
 )
 from maljan.schemas.judgement import JudgeAssessment
 from maljan.schemas.stix_models import Bundle, Indicator, Malware
-from maljan.schemas.stix_pattern import observable_type_for, unknown_object_types
+from maljan.schemas.stix_pattern import (
+    object_path_problems,
+    observable_type_for,
+    unknown_object_types,
+)
 
 ADDRESS = "82.157.13.47"
 
@@ -84,7 +89,6 @@ class TestTheReader:
     def test_every_stix_type_and_a_custom_one_are_known(self) -> None:
         for pattern in (
             f"[ipv4-addr:value = '{ADDRESS}']",
-            "[URL:value = 'http://example.org/a']",
             "[x-acme-thing:value = 'a']",
             "[file:hashes.'SHA-256' = 'aa'] OR [windows-registry-key:key = 'k']",
         ):
@@ -142,7 +146,7 @@ class TestTheExport:
         patterns = [o.pattern for o in exported.objects if isinstance(o, Indicator)]
         assert not [p for p in patterns if "ipv-addr" in p]
         codes = [code for code, _sentence in renderer.declined]
-        assert codes == [UNPUBLISHABLE_OBSERVABLE_TYPE_CODE]
+        assert codes == [UNPUBLISHABLE_PATTERN_CODE]
         assert "'ipv-addr'" in renderer.declined[0][1]
         # The judge's own bundle still says what the judge wrote.
         assert base.objects[1].pattern == f"[ipv-addr:value = '{ADDRESS}']"
@@ -171,3 +175,52 @@ class TestThePromptNamesBoth:
         assert "STIX Cyber-observable type (ipv4-addr" in JUDGE_VERDICT_SYSTEM
         for word in INDICATOR_TYPES:
             assert word in JUDGE_VERDICT_SYSTEM, word
+
+
+class TestTheObjectPathIsAsked:
+    """The object path a pattern compares must be one its type has.
+
+    ``[file:extensions['pe'].pe_imphash = 'abc']`` was carried to the export —
+    ``pe`` is not an extension a file has, so the pattern is one the standard's
+    grammar refuses. And ``[IPv4-Addr:value = '8.8.8.8']`` passed the type
+    question because the reader folded case, although STIX types are written
+    in lower case and the grammar refuses the capitalised one.
+    """
+
+    def test_a_property_the_type_does_not_have_is_named(self) -> None:
+        problems = object_path_problems("[file:colour = 'red']")
+
+        assert len(problems) == 1
+        assert "'colour'" in problems[0]
+
+    def test_an_extension_the_type_does_not_have_is_named(self) -> None:
+        (problem,) = object_path_problems("[file:extensions['pe'].pe_imphash = 'abc']")
+
+        assert "'pe'" in problem
+        assert "windows-pebinary-ext" in problem
+
+    def test_a_capitalised_type_is_not_a_stix_type(self) -> None:
+        assert unknown_object_types("[IPv4-Addr:value = '8.8.8.8']") == ["IPv4-Addr"]
+
+    def test_paths_the_types_have_raise_nothing(self) -> None:
+        for pattern in (
+            "[file:hashes.'SHA-256' = 'aa']",
+            "[file:extensions.'windows-pebinary-ext'.imphash = 'aa']",
+            "[network-traffic:dst_ref.value = '82.157.13.47']",
+            "[domain-name:resolves_to_refs[*].value = '1.2.3.4']",
+            "[process:x_acme_label = 'a']",
+            "[x-acme-thing:anything = 'a']",
+        ):
+            assert object_path_problems(pattern) == [], pattern
+
+    def test_the_judge_is_asked_and_the_export_declines_it(self) -> None:
+        indicator = _indicator("[file:extensions['pe'].pe_imphash = 'b15607f10222dbea']")
+        codes = [v.code for v in _violations(_bundle(indicator))]
+        renderer = ExtendedSTIXRenderer()
+        exported = renderer.render(_report(), _bundle(indicator))
+
+        assert UNKNOWN_OBJECT_PATH_CODE in codes
+        assert not [
+            o for o in exported.objects if isinstance(o, Indicator) and "pe_imphash" in o.pattern
+        ]
+        assert [code for code, _why in renderer.declined] == [UNPUBLISHABLE_PATTERN_CODE]

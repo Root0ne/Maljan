@@ -1842,7 +1842,7 @@ same misspelling around `127.0.0.1` would have exported a loopback. The judge
 is asked `stix.unknown_observable_type`, with the type the value is named when
 the value or the spelling says (`82.157.13.47` is an `ipv4-addr`) and the list
 of types when neither does; nothing rewrites the pattern. An indicator that
-keeps the type is declined as `stix.unpublishable_observable_type`. Its
+keeps the type is declined as `stix.unpublishable_pattern`. Its
 `indicator_types` is asked about under `stix.indicator_type_vocabulary` when a
 value is outside STIX's vocabulary — the same run typed the address `ip-addr`
 and a file name `file`, the kind of value where the vocabulary says what the

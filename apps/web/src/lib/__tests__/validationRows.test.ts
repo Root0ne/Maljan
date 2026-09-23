@@ -58,9 +58,13 @@ describe("what an unresolved row says", () => {
   });
 
   it("says the same for a pattern over a type STIX does not have", () => {
-    expect(isExportDecision("stix.unpublishable_observable_type")).toBe(true);
+    expect(isExportDecision("stix.unpublishable_pattern")).toBe(true);
     // The question the judge was asked is the judge's row, not the export's.
     expect(isExportDecision("stix.unknown_observable_type")).toBe(false);
+  });
+
+  it("says the same for a producer the export named in place of one it could not hold", () => {
+    expect(isExportDecision("stix.unpublishable_producer")).toBe(true);
   });
 
   it("says the same for an annotation that went with a rejected technique", () => {

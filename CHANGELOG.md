@@ -3251,7 +3251,7 @@ change landed on `main`.
   `127.0.0.1` would have published a loopback. The judge is now asked
   `stix.unknown_observable_type`, with the type the value is named where the
   value or the spelling says; the pattern is never rewritten, and one it keeps
-  is declined from the export as `stix.unpublishable_observable_type`, which the
+  is declined from the export as `stix.unpublishable_pattern`, which the
   console draws as the export's decision. `indicator_types` outside STIX's
   vocabulary (`ip-addr`, `file` — the kind of value where the vocabulary says
   what it indicates) is asked about under `stix.indicator_type_vocabulary` and

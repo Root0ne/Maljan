@@ -38,16 +38,13 @@ import re
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from maljan.analysis.technique_ids import attack_reference_id
 from maljan.core.logger import logger
 from maljan.core.truncation_ledger import EXPORT_PASS, JUDGE_PASS
 from maljan.reporting.dedupe import pattern_fingerprint
 
 if TYPE_CHECKING:
     from maljan.pipeline.validation import Violation
-
-# UUID5 namespace for ATT&CK technique IDs — same value on every run so a
-# downstream consumer can dedupe ``attack-pattern--<uuid5>`` across reports.
-_MITRE_NS = uuid.UUID("6ba7b815-9dad-11d1-80b4-00c04fd430c8")
 
 # Curated technique ID → (display name, URL) map. Extend over time; the
 # back-fill is best-effort and falls back to a deterministic URL when the
@@ -358,7 +355,9 @@ def _mint_id(obj: dict[str, Any], old_id: str) -> str:
             suffix if re.match(r"^T\d{4}(?:\.\d{3})?$", suffix) else None
         )
         if tid:
-            return f"attack-pattern--{uuid.uuid5(_MITRE_NS, tid)}"
+            from maljan.schemas.stix_models import attack_pattern_id
+
+            return attack_pattern_id(tid)
     return f"{stix_type}--{uuid.uuid4()}"
 
 
@@ -382,11 +381,9 @@ def _attack_pattern_technique_id(obj: dict[str, Any]) -> str | None:
     2. ``name`` matching ``^T####(\.###)?$``.
     3. ``x_maljan_technique_id`` (Maljan custom field).
     """
-    for ref in obj.get("external_references") or []:
-        if isinstance(ref, dict) and isinstance(ref.get("external_id"), str):
-            tid = str(ref["external_id"]).strip()
-            if re.match(r"^T\d{4}(?:\.\d{3})?$", tid):
-                return tid
+    declared = attack_reference_id(obj)
+    if re.match(r"^T\d{4}(?:\.\d{3})?$", declared):
+        return declared
     name = obj.get("name", "")
     if isinstance(name, str) and re.match(r"^T\d{4}(?:\.\d{3})?$", name.strip()):
         return name.strip()
@@ -432,10 +429,9 @@ def _oset(o: Any, key: str, value: Any) -> None:
 
 def _technique_id_poly(o: Any) -> str | None:
     """Technique ID from an attack-pattern (dict or pydantic), via refs or name."""
-    for ref in _oget(o, "external_references", []) or []:
-        ext = ref.get("external_id") if isinstance(ref, dict) else getattr(ref, "external_id", None)
-        if isinstance(ext, str) and re.match(r"^T\d{4}(?:\.\d{3})?$", ext.strip()):
-            return ext.strip()
+    declared = attack_reference_id(o)
+    if re.match(r"^T\d{4}(?:\.\d{3})?$", declared):
+        return declared
     name = _oget(o, "name", "") or ""
     if isinstance(name, str) and re.match(r"^T\d{4}(?:\.\d{3})?$", name.strip()):
         return name.strip()

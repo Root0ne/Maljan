@@ -58,6 +58,18 @@ def get_utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+# The namespace a technique's object id is derived in. A UUIDv5 over the
+# technique id, so one technique is one object across exports and across runs,
+# whichever bundle carries it — the judge's own or the export — and never a
+# UUID copied out of the STIX documentation.
+ATTACK_PATTERN_NAMESPACE = uuid.UUID("2f0b4c10-6f7e-5b6a-9d3b-1f6a5c7e8d90")
+
+
+def attack_pattern_id(technique_id: str) -> str:
+    """The object id of one ATT&CK technique. The same id every time."""
+    return f"attack-pattern--{uuid.uuid5(ATTACK_PATTERN_NAMESPACE, technique_id)}"
+
+
 # ---------------------------------------------------------------------------
 # Evidence basis controlled vocabulary
 # ---------------------------------------------------------------------------
@@ -282,6 +294,26 @@ class ConfidenceAnnotatedRelationship(STIXObject):
         if stated >= 0.50:
             return "LOW"
         return "SPECULATIVE"
+
+
+def produced_by(obj: STIXObject, producer: str) -> STIXObject:
+    """A copy of ``obj`` naming ``producer`` as the identity that produced it.
+
+    A copy, so the bundle the object came from keeps what it said. The export
+    calls it for every object it publishes; which producer an object already
+    names, and whether that one is kept, is the renderer's decision.
+    """
+    return obj.model_copy(update={"created_by_ref": producer})
+
+
+def crediting_only(obj: Any, agents: list[str]) -> Any:
+    """A copy of a relationship crediting ``agents`` and no one else.
+
+    A copy, so the judge's own bundle keeps every name it wrote. The export
+    calls it for a credit the judge was asked about and kept, naming an agent
+    no source of that name stands behind, and records that it did.
+    """
+    return obj.model_copy(update={"x_maljan_contributing_agents": agents})
 
 
 def stated_confidence(value: Any) -> float | None:

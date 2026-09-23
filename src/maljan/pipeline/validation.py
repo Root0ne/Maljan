@@ -33,7 +33,7 @@ from pydantic import ValidationError
 from maljan.agents.run_evidence_corpus import CorpusState, both_searched
 from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
-from maljan.analysis.technique_ids import TECHNIQUE_ID_EXACT_RE
+from maljan.analysis.technique_ids import MITRE_ATTACK_SOURCES, TECHNIQUE_ID_EXACT_RE
 from maljan.core.logger import logger
 from maljan.pipeline.events import (
     VALIDATION_RESOLVED,
@@ -1415,6 +1415,7 @@ def indicator_type_contradicts_verdict(
 
 UNKNOWN_OBSERVABLE_TYPE_CODE = "stix.unknown_observable_type"
 IS_FAMILY_MISSING_CODE = "stix.is_family_missing"
+UNKNOWN_OBJECT_PATH_CODE = "stix.unknown_object_path"
 INDICATOR_TYPE_VOCABULARY_CODE = "stix.indicator_type_vocabulary"
 
 # STIX 2.1's indicator-type vocabulary. Open, so a value outside it is legal
@@ -1443,6 +1444,7 @@ def unknown_observable_type_violations(obj: Any, *, path: str) -> list[Violation
     from maljan.schemas.stix_pattern import (
         CYBER_OBSERVABLE_TYPES,
         is_observable_type,
+        object_path_problems,
         observable_type_for,
     )
 
@@ -1451,7 +1453,7 @@ def unknown_observable_type_violations(obj: Any, *, path: str) -> list[Violation
     out: list[Violation] = []
     seen: set[str] = set()
     for comparison in read_comparisons(pattern):
-        written = comparison.object_type
+        written = comparison.written_type or comparison.object_type
         if not written or written in seen or is_observable_type(written):
             continue
         seen.add(written)
@@ -1476,6 +1478,19 @@ def unknown_observable_type_violations(obj: Any, *, path: str) -> list[Violation
                     f"{safe_finding_value(written)!r}, which is not a STIX Cyber-observable "
                     "type, so no consumer holds an object this pattern could match. "
                     f"{answer} An indicator that keeps it is not exported."
+                ),
+                path=path,
+            )
+        )
+    for problem in object_path_problems(pattern):
+        out.append(
+            Violation(
+                code=UNKNOWN_OBJECT_PATH_CODE,
+                message=(
+                    f"the indicator {safe_finding_value(named)!r} compares a path its type does "
+                    f"not have: {safe_finding_value(problem)}. A pattern over it matches nothing "
+                    "a consumer holds. Write the comparison over a property the type defines, "
+                    "or drop the indicator; an indicator that keeps it is not exported."
                 ),
                 path=path,
             )
@@ -1607,19 +1622,29 @@ def _related_ids(tid: str) -> set[str]:
     return {tid, tid.split(".", 1)[0]}
 
 
-def credit_without_claim_violations(
-    bundle: Any,
-    technique_sources: Mapping[str, Sequence[str]] | None,
-    origins: Sequence[tuple[int | None, str]] | None = None,
-) -> list[Violation]:
-    """A judge relationship crediting an agent with a technique it never named.
+@dataclass(frozen=True)
+class UnconfirmedCredit:
+    """A relationship crediting agents with a technique none of them named."""
+
+    index: int
+    technique: str
+    uncredited: tuple[str, ...]
+    sources: tuple[str, ...]
+
+
+def unconfirmed_credits(
+    bundle: Any, technique_sources: Mapping[str, Sequence[str]] | None
+) -> list[UnconfirmedCredit]:
+    """Per relationship, the credited names no source of that name stands behind.
 
     ``technique_sources`` is who named which technique in this run — the
     evidence summary the judge was shown, as ``{technique id: [source]}``.
-    ``None`` asks nothing: with no record of the sources, no credit can be
+    ``None`` answers nothing: with no record of the sources, no credit can be
     weighed against one. A technique counts as named by a source that named it,
     its parent technique or one of its sub-techniques: refining an analyst's
-    T1071 to T1071.004 is the judge's reading, not a misattribution.
+    T1071 to T1071.004 is the judge's reading, not a misattribution. The same
+    answer serves the question the judge is asked and the export's decision
+    about a credit the judge kept.
     """
     if technique_sources is None:
         return []
@@ -1633,14 +1658,13 @@ def credit_without_claim_violations(
     technique_of: dict[str, str] = {}
     for obj in objects:
         if str(getattr(obj, "type", "") or "") == "attack-pattern":
-            tid = _attack_pattern_technique_id(obj)
-            if tid:
-                technique_of[str(getattr(obj, "id", "") or "")] = tid.upper()
-    out: list[Violation] = []
+            declared = _attack_pattern_technique_id(obj)
+            if declared:
+                technique_of[str(getattr(obj, "id", "") or "")] = declared.upper()
+    out: list[UnconfirmedCredit] = []
     for index, obj in enumerate(objects):
         if str(getattr(obj, "type", "") or "") != "relationship":
             continue
-        where = _object_path(index, origins)
         credited = credited_agents(obj)
         if not credited:
             continue
@@ -1653,31 +1677,50 @@ def credit_without_claim_violations(
         )
         if not tid:
             continue
-        sources = [s for related in _related_ids(tid) for s in named_by.get(related, [])]
-        sources = list(dict.fromkeys(sources))
+        sources = list(
+            dict.fromkeys(s for related in _related_ids(tid) for s in named_by.get(related, []))
+        )
         keys = [_source_key(s) for s in sources]
-        uncredited = [
+        uncredited = tuple(
             name for name in credited if not any(_same_source(_source_key(name), k) for k in keys)
-        ]
-        if not uncredited:
-            continue
+        )
+        if uncredited:
+            out.append(UnconfirmedCredit(index, tid, uncredited, tuple(sources)))
+    return out
+
+
+def credit_without_claim_violations(
+    bundle: Any,
+    technique_sources: Mapping[str, Sequence[str]] | None,
+    origins: Sequence[tuple[int | None, str]] | None = None,
+) -> list[Violation]:
+    """A judge relationship crediting an agent with a technique it never named.
+
+    Asked, and never rewritten in the judge's own bundle. A credit the judge
+    keeps is not published: the export leaves the names no source stands
+    behind off its copy of the relationship and records it
+    (``stix.unpublishable_credit``).
+    """
+    out: list[Violation] = []
+    for credit in unconfirmed_credits(bundle, technique_sources):
+        where = _object_path(credit.index, origins)
+        tid = safe_finding_value(credit.technique)
         who = (
-            f"the sources that named {safe_finding_value(tid)} are "
-            f"{', '.join(safe_finding_value(s) for s in sources)}"
-            if sources
-            else f"no source in this run named {safe_finding_value(tid)}"
+            f"the sources that named {tid} are "
+            f"{', '.join(safe_finding_value(s) for s in credit.sources)}"
+            if credit.sources
+            else f"no source in this run named {tid}"
         )
         out.append(
             Violation(
                 code=CREDIT_WITHOUT_CLAIM_CODE,
                 message=(
                     f"the relationship at {where} credits "
-                    f"{', '.join(repr(safe_finding_value(n)) for n in uncredited)} with "
-                    f"{safe_finding_value(tid)}, "
-                    f"and {who} — the evidence summary lists who named each technique. "
+                    f"{', '.join(repr(safe_finding_value(n)) for n in credit.uncredited)} with "
+                    f"{tid}, and {who} — the evidence summary lists who named each technique. "
                     "Credit only sources that named it, by the names the summary gives them, "
-                    "or leave x_maljan_contributing_agents empty; whichever you answer is "
-                    "published."
+                    "or leave x_maljan_contributing_agents empty. A credit you keep that names "
+                    "no source is not published."
                 ),
                 path=where,
             )
@@ -2749,7 +2792,7 @@ def _url_host(raw_url: str) -> str | None:
 # Only these are read: an attack-pattern may legitimately carry a Sigma rule id
 # or a CVE first in its reference list, and holding the judge to the ATT&CK
 # vocabulary for one of those would burn the single retry on nothing.
-_MITRE_SOURCES = frozenset({"mitre-attack", "mitre attack"})
+_MITRE_SOURCES = MITRE_ATTACK_SOURCES
 
 
 def _attack_pattern_technique_id(obj: Any) -> str:

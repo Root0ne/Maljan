@@ -43,7 +43,27 @@ SRC = Path(__file__).resolve().parents[2] / "src" / "maljan"
 # may write it, which is how a signed utility came to be published as malware
 # over a judge that had called it benign.
 GUARDED = frozenset(
-    {"technique_id", "confidence", "severity", "malware_category", "family", "verdict"}
+    {
+        "technique_id",
+        "confidence",
+        "severity",
+        "malware_category",
+        "family",
+        "verdict",
+        # What the judge writes into its STIX objects. The annotation on a
+        # relationship is the judge's own number, basis and credit; a pattern,
+        # its indicator types and a relationship's type are what the judge
+        # states about the sample; and the producer an object names is a
+        # statement too. The export may decline one with a record, through the
+        # copy helpers in ``schemas/stix_models``; nothing writes one.
+        "x_maljan_confidence",
+        "x_maljan_contributing_agents",
+        "x_maljan_evidence_basis",
+        "pattern",
+        "indicator_types",
+        "created_by_ref",
+        "relationship_type",
+    }
 )
 
 # Where a write to one of them is the answer rather than an override of one.
@@ -91,6 +111,45 @@ def _setattr_target(node: ast.Call) -> str | None:
     if isinstance(key, ast.Constant) and key.value in GUARDED:
         return str(key.value)
     return None
+
+
+def _model_copy_targets(node: ast.Call) -> list[str]:
+    """The guarded names a ``obj.model_copy(update={...})`` call writes.
+
+    A copy with a guarded key changed is a write like any other: the object it
+    returns stands in for the one that was said. A computed update (a name, a
+    comprehension) is not read — there is nothing to read — the same rule as a
+    computed key.
+    """
+    func = node.func
+    if getattr(func, "attr", "") != "model_copy":
+        return []
+    for keyword in node.keywords:
+        if keyword.arg != "update" or not isinstance(keyword.value, ast.Dict):
+            continue
+        return [
+            str(key.value)
+            for key, value in zip(keyword.value.keys, keyword.value.values, strict=True)
+            if isinstance(key, ast.Constant)
+            and key.value in GUARDED
+            and not _keeps_what_was_said(value, str(key.value))
+        ]
+    return []
+
+
+def _keeps_what_was_said(value: ast.expr, name: str) -> bool:
+    """``update={"technique_id": rec.technique_id or found}`` — a fill, not an override.
+
+    The object's own value wins whenever it has one, so nothing it said is
+    replaced; only an absence is filled, which is the "move a model's own
+    content to where the schema wants it" act. Anything else is a write.
+    """
+    return (
+        isinstance(value, ast.BoolOp)
+        and isinstance(value.op, ast.Or)
+        and isinstance(value.values[0], ast.Attribute)
+        and value.values[0].attr == name
+    )
 
 
 def _constructor_lines(tree: ast.AST) -> set[int]:
@@ -142,6 +201,8 @@ def offences(source: str, label: str) -> list[str]:
             attribute = _setattr_target(node)
             if attribute:
                 found.append(f"{label}:{node.lineno}: setattr(..., {attribute!r}, ...)")
+            for name in _model_copy_targets(node):
+                found.append(f"{label}:{node.lineno}: model_copy(update={{{name!r}: ...}})")
             continue
 
         for target in targets:
@@ -211,6 +272,26 @@ class TestTheScannerWouldActuallyCatchOne:
 
     def test_a_computed_key_is_not_caught(self):
         assert offences("row[name] = value\n", "probe.py") == []
+
+    def test_a_model_copy_that_changes_a_decision_is_caught(self):
+        source = "moved = edge.model_copy(update={'x_maljan_confidence': 0.5})\n"
+
+        assert offences(source, "probe.py") == [
+            "probe.py:1: model_copy(update={'x_maljan_confidence': ...})"
+        ]
+
+    def test_a_model_copy_that_only_fills_an_absence_is_not_caught(self):
+        source = "row = rec.model_copy(update={'technique_id': rec.technique_id or found})\n"
+
+        assert offences(source, "probe.py") == []
+
+    def test_a_model_copy_of_a_reference_is_not_caught(self):
+        assert offences("moved = edge.model_copy(update={'source_ref': new})\n", "probe.py") == []
+
+    def test_a_pattern_write_is_caught(self):
+        assert offences("indicator.pattern = fixed\n", "probe.py") == [
+            "probe.py:1: assignment to attribute 'pattern'"
+        ]
 
     def test_a_constructor_passthrough_is_exempt(self):
         source = "class A:\n    def __init__(self, severity):\n        self.severity = severity\n"

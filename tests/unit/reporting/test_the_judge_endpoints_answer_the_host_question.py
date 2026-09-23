@@ -31,6 +31,7 @@ from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import MalwareReport, NetworkIOCs
 from maljan.reporting.renderers.stix_renderer import (
     UNPUBLISHABLE_ENDPOINT_CODE,
+    UNPUBLISHABLE_PATTERN_CODE,
     ExtendedSTIXRenderer,
 )
 from maljan.schemas.stix_models import Bundle
@@ -265,12 +266,17 @@ class TestAPatternIsNotOneComparison:
         assert exported == [pattern]
         assert declined == []
 
-    def test_the_object_type_is_read_whatever_case_it_is_written_in(self) -> None:
-        """Case carries no meaning in a STIX object path, and a judge shouts."""
+    def test_a_capitalised_object_type_never_reaches_the_export(self) -> None:
+        """STIX types are lower case and the grammar refuses a capitalised one.
+
+        A judge that shouts wrote a type no consumer matches, so the indicator
+        is declined for that — before the endpoint is asked anything — and it
+        still never reaches the export.
+        """
         exported, declined = _render(f"[DOMAIN-NAME:value = '{RESERVED}']")
 
         assert exported == []
-        assert [code for code, _why in declined] == [UNPUBLISHABLE_ENDPOINT_CODE]
+        assert [code for code, _why in declined] == [UNPUBLISHABLE_PATTERN_CODE]
 
     def test_a_comparison_with_no_endpoint_in_it_says_that_is_why(self) -> None:
         """A regular expression is not an endpoint, and saying it is not a name
@@ -355,7 +361,7 @@ class TestAPatternIsNotOneComparison:
 
     def test_a_hash_under_a_quoted_algorithm_is_not_read_as_a_file_name(self) -> None:
         """The key inside the object path is the reader's business, not a heuristic."""
-        pattern = "[file:extensions['pe'].pe_imphash = '" + "f" * 32 + "']"
+        pattern = "[file:extensions.'windows-pebinary-ext'.imphash = '" + "f" * 32 + "']"
 
         exported, declined = _render(pattern)
 
@@ -441,6 +447,7 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
             "stix.is_family_missing",
             "stix.annotation_out_of_schema",
             "stix.duplicate_label",
+            "stix.unknown_object_path",
         }
     )
 
