@@ -127,6 +127,7 @@ class LLMProviderRegistry:
         temp = temperature if temperature is not None else default_temp
 
         logger.info(f"Building {provider_name}/{model_name} (role={role}, temp={temp})")
+        _cap_for_provider(kwargs, provider_name)
         provider = provider_cls(config=self._config)
         return provider.build_model(model=model_name, temperature=temp, **kwargs)  # type: ignore[no-any-return]
 
@@ -239,6 +240,7 @@ class LLMProviderRegistry:
             agent_base_url or "(global)",
         )
 
+        _cap_for_provider(kwargs, str(choice.provider))
         provider = provider_cls(config=self._config)
         # Only forwarded when the agent actually overrides the endpoint: the
         # providers resolve a missing kwarg to the global value themselves, and
@@ -250,6 +252,18 @@ class LLMProviderRegistry:
             temperature=temp,
             **kwargs,
         )
+
+
+def _cap_for_provider(kwargs: dict[str, Any], provider: str) -> None:
+    """Resolve a per-provider output cap in place.
+
+    ``max_tokens_for`` is a caller's cap that depends on which provider a model
+    of the list runs on — a model's reasoning counts against the cap on some
+    providers and not others — so each model of a list gets its own.
+    """
+    cap_for = kwargs.pop("max_tokens_for", None)
+    if callable(cap_for):
+        kwargs["max_tokens"] = int(cap_for(provider))
 
 
 def structured_output_supported(config: Any | None = None, llm: Any | None = None) -> bool:

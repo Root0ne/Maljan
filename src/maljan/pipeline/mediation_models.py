@@ -8,7 +8,36 @@ Using structured output instead of regex-based parsing eliminates fragile
 string extraction and makes consensus detection deterministic.
 """
 
+from collections.abc import Iterable, Mapping
+from typing import Any
+
 from pydantic import BaseModel, Field
+
+# Agreement is a relation between analysts that said something. Below two of
+# them there is nothing for it to measure, so no agreement value is recorded.
+MIN_ANALYSTS_FOR_CONSENSUS = 2
+
+
+def analysts_with_claims(names: Iterable[str], isr_reports: Mapping[str, Any] | None) -> list[str]:
+    """The debate's participants whose report carries at least one claim.
+
+    An ISR is found under its participant's name or its own ``agent_id``, the
+    two keys the pipeline files it under.
+    """
+    by_id = {
+        str(getattr(isr, "agent_id", "") or key): isr for key, isr in (isr_reports or {}).items()
+    }
+    found: list[str] = []
+    for name in names:
+        isr = (isr_reports or {}).get(name) or by_id.get(name)
+        if isr is not None and list(getattr(isr, "claims", None) or []):
+            found.append(name)
+    return found
+
+
+def consensus_applies(names: Iterable[str], isr_reports: Mapping[str, Any] | None) -> bool:
+    """Whether enough participants produced claims for agreement to mean anything."""
+    return len(analysts_with_claims(names, isr_reports)) >= MIN_ANALYSTS_FOR_CONSENSUS
 
 
 class MediatorVerdict(BaseModel):

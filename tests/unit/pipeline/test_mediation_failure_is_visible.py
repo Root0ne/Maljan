@@ -121,7 +121,10 @@ class TestTheNodeStampsIt:
 
         argument = result["discussion_history"][0]
         assert argument.status == "failed"
-        assert result["is_consensus"] is False
+        # One analyst and no claims: consensus does not apply, so the failed
+        # round records neither a disagreement nor a zero.
+        assert result["is_consensus"] is None
+        assert result["confidence_history"] == []
         # And the live transcript says so too, naming the class of the
         # failure. The exception's own words stay in the log above, where an
         # operator reads them; this line is fanned out to every browser and

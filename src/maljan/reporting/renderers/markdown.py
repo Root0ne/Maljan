@@ -15,6 +15,9 @@ from collections.abc import Callable
 from typing import Any
 
 from maljan.analysis.run_summary import (
+    NOT_APPLICABLE,
+    NOT_APPLICABLE_SENTENCE,
+    generation_lines,
     server_rest_sentence,
     stage_duration_lines,
     tokens_sentence,
@@ -1040,13 +1043,19 @@ class MarkdownRenderer:
             final_conf = negotiation.get("final_confidence")
             if rounds is not None:
                 lines.append(f"- Negotiation rounds: {rounds}")
-            if reason:
+            if reason == NOT_APPLICABLE:
+                # No agreement was measured, so no final confidence is stored
+                # and the one sentence says why.
+                lines.append(f"- {NOT_APPLICABLE_SENTENCE}")
+            elif reason:
                 lines.append(f"- Termination reason: `{reason}`")
             if final_conf is not None:
                 try:
                     lines.append(f"- Final confidence: {float(final_conf):.3f}")
                 except (TypeError, ValueError):
                     pass
+        for line in generation_lines(run_summary.get("generation")):
+            lines.append(f"- {line}")
         evidence = run_summary.get("evidence") or {}
         if evidence:
             lines.append(

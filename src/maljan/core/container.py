@@ -44,6 +44,7 @@ from maljan.core.exceptions import ConfigurationError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger
 from maljan.core.truncation_ledger import TruncationLedger
+from maljan.llm.generation_rate import GenerationRates, attach_rate_meter
 from maljan.llm.registry import LLMProviderRegistry
 from maljan.loaders.file_loader import FileDataLoader
 from maljan.parsers.registry import ParserRegistry
@@ -127,6 +128,34 @@ def _drop_llm_caches_on_retirement(loop: object) -> None:
     # loop, and the rebuild cleared nothing. Models this provider builds now
     # own their pools, and this clears any that were built elsewhere.
     clear_shared_httpx_clients()
+
+
+def composer_output_cap(config: Settings, provider: str | None = None) -> int:
+    """What a composer section may generate, reasoning included.
+
+    Ollama's ``num_predict`` and llama.cpp's ``n_predict`` count the reasoning
+    channel with the answer, and a reasoning model left thinking spends its
+    budget there: a 900-token cap came back as an empty section. The platform
+    cannot tell a reasoning model from its tag; what it knows is whether it
+    asked the reporter's provider to keep reasoning out
+    (``llm.ollama.disable_thinking`` / ``llm.openai.disable_thinking``). Asked,
+    the cap is the section's own budget. Not asked, the cap leaves the room
+    the reporter already has for reasoning — ``judge_max_tokens`` — on top of
+    the section's budget, rather than asking the model not to reason: a
+    ``think: false`` a model does not understand is an error on Ollama, and
+    the setting that sends it is the operator's.
+
+    Decided per provider: each model of the reporter's list is capped by its
+    own provider's switch. With no provider named, the reporter's first.
+    """
+    section = int(config.reporting.composer_section_max_tokens)
+    if provider is None:
+        agent = config.llm.agents.get(REPORTER_AGENT_KEY)
+        provider = str(getattr(agent, "provider", "") or config.llm.provider)
+    block = getattr(config.llm, provider, None)
+    if provider not in ("ollama", "openai") or bool(getattr(block, "disable_thinking", False)):
+        return section
+    return section + max(0, int(config.llm.judge_max_tokens or 0))
 
 
 def _swap_healed_llm(replaced: object, healed: object) -> None:
@@ -355,6 +384,12 @@ class ServiceContainer:
         # judge add each call's usage; the judge node snapshots it into RunSummary.
         self._token_ledger = TokenLedger()
 
+        # Per-run generation rate of each model, read off every call's answer
+        # by a meter attached where the model is built. The judge and the
+        # composer size their per-call timeouts from it; the judge node and
+        # the report node snapshot it into RunSummary.
+        self._generation_rates = GenerationRates()
+
         # Per-run truncation ledger (pitfall P6). Same lifecycle as the token
         # ledger: written to at every bound, snapshotted by the judge node.
         # Truncation is designed into this pipeline and has never been counted.
@@ -440,6 +475,7 @@ class ServiceContainer:
             cached = self._expert_llm_cache.lookup(loop)
             if cached is None:
                 cached = self._llm_registry.build_model(role="expert", **self._expert_token_cap())
+                attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._expert_llm_cache.put(loop, "", cached)
             return cached
 
@@ -467,6 +503,7 @@ class ServiceContainer:
                 cached = self._llm_registry.build_model_for_agent(
                     "judge", fallback_role="judge", **extra
                 )
+                attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._judge_llm_cache.put(loop, "", cached)
             return cached
 
@@ -491,6 +528,7 @@ class ServiceContainer:
                 cached = self._llm_registry.build_model_for_agent(
                     REPORTER_AGENT_KEY, fallback_role="judge", **extra
                 )
+                attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._reporter_llm_cache.put(loop, "", cached)
             return cached
 
@@ -512,6 +550,7 @@ class ServiceContainer:
                     provider_override=self.config.preprocessing.summarizer_provider,
                     model_override=self.config.preprocessing.summarizer_model,
                 )
+                attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._summarizer_llm_cache.put(loop, "", cached)
             return cached
 
@@ -528,6 +567,7 @@ class ServiceContainer:
                 cached = self._llm_registry.build_model_for_agent(
                     agent_name, **self._expert_token_cap()
                 )
+                attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._agent_llm_cache.put(loop, agent_name, cached)
             return cached
 
@@ -670,6 +710,10 @@ class ServiceContainer:
     def get_token_ledger(self) -> TokenLedger:
         """Return the per-run LLM token/cost ledger (findings-log §4 Item 1)."""
         return self._token_ledger
+
+    def get_generation_rates(self) -> GenerationRates:
+        """Return the per-run measured generation rate of each model."""
+        return self._generation_rates
 
     def get_truncation_ledger(self) -> TruncationLedger:
         """Return the per-run truncation ledger (pitfall P6)."""
@@ -920,6 +964,7 @@ class ServiceContainer:
                 )
                 cached._job_id = self.job_key()
                 cached.token_ledger = getattr(self, "_token_ledger", None)
+                cached.generation_rates = getattr(self, "_generation_rates", None)
                 cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
                 cached.evidence_counter = getattr(self, "_evidence_counter", None)
                 cached.evidence_corpus = getattr(self, "_evidence_corpus", None)
@@ -1120,22 +1165,48 @@ class ServiceContainer:
 
         ``None`` in mock mode or when ``composer_enabled`` is
         off (callers then simply skip the professional spine). Runs on the
-        reporter's model like the NarrativeAgent, and pins it for the same
-        reason and under the same condition: the report node is the one
+        reporter's model like the NarrativeAgent, built with
+        ``composer_section_max_tokens`` as its output cap, and pins it for the
+        same reason and under the same condition: the report node is the one
         caller, on one loop.
         """
-        if self.is_mock or not self.config.reporting.composer_enabled:
+        registry = self._llm_registry
+        if self.is_mock or not self.config.reporting.composer_enabled or registry is None:
             return None
         with self._lock:
             if getattr(self, "_report_composer_cache", None) is None:
                 from maljan.reporting.composer import ReportComposer
 
                 rc = self.config.reporting
+                # The reporter's model, built with the section's own output cap
+                # rather than the judge's: ``composer_section_max_tokens`` is
+                # what a section may generate, and a wait sized from it over a
+                # call allowed ``judge_max_tokens`` would say something untrue.
+                # Held by the composer, which is dropped with the loop it ran on.
+                from maljan.core.model_assignments import assignment_chain_for
+
+                config = self.config
+                caps = {
+                    a.label: composer_output_cap(config, a.provider)
+                    for a in assignment_chain_for(config, REPORTER_AGENT_KEY, role="judge")
+                }
+                # The wait is sized for the most a model of the list may write.
+                output_cap = max(caps.values(), default=composer_output_cap(config))
+                composer_llm = registry.build_model_for_agent(
+                    REPORTER_AGENT_KEY,
+                    fallback_role="judge",
+                    max_tokens_for=lambda provider: composer_output_cap(config, provider),
+                )
+                attach_rate_meter(composer_llm, getattr(self, "_generation_rates", None))
                 self._report_composer_cache = ReportComposer(
-                    llm=self.get_reporter_llm(),
+                    llm=composer_llm,
                     section_max_tokens=rc.composer_section_max_tokens,
                     per_section_timeout=rc.composer_per_section_timeout,
                     token_ledger=getattr(self, "_token_ledger", None),
+                    generation_rates=getattr(self, "_generation_rates", None),
+                    output_cap=output_cap,
+                    caps_by_model=caps,
+                    turn_share=float(config.llm.fallback_turn_share),
                 )
                 self._report_composer_cache.event_sink = self.event_sink
             return self._report_composer_cache

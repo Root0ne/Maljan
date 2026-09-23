@@ -31,6 +31,23 @@ MAX_TECHNIQUES = 25
 # How many sources are listed per technique before the rest are counted.
 MAX_SOURCES_PER_TECHNIQUE = 6
 
+# The tools whose technique id is a statement about this sample, and the name a
+# corroboration row gives each: a capa rule, a Sigma rule or a YARA TTP rule
+# that fired on it, the LOLBin table matching one of its command lines, a
+# sandbox signature raised while it ran. Nothing else asserts. ``attck_lookup``,
+# ``attck_validate`` and ``resolve_technique`` answer what an id is, not what
+# the sample does; ``similar_cases`` and ``family_lookup`` return techniques of
+# other samples; ``api_capability`` is the catalogue's association, read apart
+# by ``catalogue_associations``. A tool this table does not name is not a source.
+ASSERTING_SOURCES: dict[str, str] = {
+    "capa": "capa",
+    "sigma_match": "sigma",
+    "sigma_match_sandbox": "sigma",
+    "yara_scan": "yara",
+    "lolbin_lookup": "lolbin",
+    "sandbox_signatures": "sandbox",
+}
+
 
 def summarise(isrs: dict[str, Any] | None, ledger: Sequence[Any] | None = None) -> str:
     """The evidence summary block, or "" when nothing named a technique."""
@@ -91,18 +108,45 @@ def collect(
             for raw in getattr(finding, "technique_ids", None) or []:
                 add(str(raw).strip().upper(), source, confidence)
 
+    invalid = invalid_technique_ids(ledger)
     for entry in ledger or []:
-        tool = str(getattr(entry, "tool", "") or "tool")
-        # The API catalogue associates a technique with an import set; it did
-        # not observe the technique, and BitBlt plus CreateCompatibleDC reads
-        # as screen capture on any GUI program. Associations are read by
-        # ``catalogue_associations`` and shown apart; they never assert.
-        if tool == "api_capability":
+        tool = _base_tool_name(getattr(entry, "tool", ""))
+        if tool not in ASSERTING_SOURCES:
             continue
         for tid in _technique_ids(getattr(entry, "structured", None)):
-            add(tid, tool, None)
+            if tid not in invalid:
+                add(tid, tool, None)
 
     return rows
+
+
+def invalid_technique_ids(ledger: Sequence[Any] | None) -> set[str]:
+    """Every id a ledger entry of this run answered as not a technique.
+
+    ``attck_lookup`` says ``valid: false`` beside the id, ``attck_validate``
+    lists the id under ``invalid``. An id any source marks invalid is never
+    counted as asserted, whichever rule named it.
+    """
+    found: set[str] = set()
+    for entry in ledger or []:
+        structured = getattr(entry, "structured", None)
+        if not isinstance(structured, dict):
+            continue
+        if structured.get("valid") is False:
+            tid = str(structured.get("technique_id") or "").strip().upper()
+            if tid:
+                found.add(tid)
+        for row in structured.get("invalid") or []:
+            if isinstance(row, dict):
+                tid = str(row.get("id") or "").strip().upper()
+                if tid:
+                    found.add(tid)
+    return found
+
+
+def _base_tool_name(tool: Any) -> str:
+    """The tool's own name, without the ``<server>__`` a name collision adds."""
+    return str(tool or "").rsplit("__", 1)[-1]
 
 
 def catalogue_associations(ledger: Sequence[Any] | None) -> dict[str, list[str]]:
