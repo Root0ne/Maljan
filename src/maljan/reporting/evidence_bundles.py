@@ -486,7 +486,13 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
         }
         if static.packer_matches:
             facts["packer_matches"] = [
-                f"{m.get('name')} ({float(m.get('confidence') or 0.0):.2f}, {m.get('method')})"
+                f"{m.get('name')} ("
+                + (
+                    f"{float(m['confidence']):.2f}, "
+                    if isinstance(m.get("confidence"), int | float)
+                    else ""
+                )
+                + f"{m.get('method')})"
                 for m in static.packer_matches[:5]
             ]
         elif static.packer_hint:

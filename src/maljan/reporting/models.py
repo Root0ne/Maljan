@@ -553,7 +553,8 @@ class FamilyAttribution(BaseModel):
     model_config = _PERMISSIVE_CONFIG
 
     family: str | None = None
-    family_confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
+    # The judge's number for the family, or ``None`` when nobody stated one.
+    family_confidence: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
     # D11 grounding flag — True when the family was named by at least one
     # supporting source (sandbox CTI ``family[]``, sandbox signature, or
     # an ISR claim). False means the value came from the LLM/heuristic
@@ -991,7 +992,7 @@ class MalwareReport(BaseModel):
     # 0.0 for the same reason ``severity`` is not defaulted to "Informational":
     # a confidence of zero is an assessment, and printing one for a report that
     # has none says the run was certain it knew nothing.
-    overall_confidence: Annotated[float | None, Field(ge=0.0, le=1.0)] = 0.0
+    overall_confidence: Annotated[float | None, Field(ge=0.0, le=1.0)] = None
     malware_category: str | None = None
     # ``None`` when the judge assessed no severity. It is not defaulted to
     # "Informational": an unassessed report and a report assessed as harmless

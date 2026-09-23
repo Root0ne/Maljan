@@ -82,7 +82,8 @@ def test_capa_results_become_capabilities_techniques_and_a_table(monkeypatch, tm
     by_id = {hit["technique_id"]: hit for hit in bundle.technique_hits}
     assert by_id["T1027"]["name"] == "encrypt data using RC4"
     assert by_id["T1027"]["matched_apis"] == ["data-manipulation/encryption/rc4"]
-    assert all(hit["confidence"] > 0 for hit in bundle.technique_hits)
+    # capa states that a rule matched, not a probability: no number is added.
+    assert all("confidence" not in hit for hit in bundle.technique_hits)
     assert all(hit["source"] == "capa" for hit in bundle.technique_hits)
     assert "encrypt data using RC4" in bundle.technical_evidence["capa"]
 

@@ -1020,3 +1020,112 @@ class TestNoClaimCarriesAConfidenceNobodyStated:
         assert not found, "A claim carries the confidence its analyst stated:\n  " + "\n  ".join(
             found
         )
+
+
+def _is_number(node: ast.expr) -> bool:
+    return (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, int | float)
+        and not isinstance(node.value, bool)
+    )
+
+
+def constant_confidences(source: str, label: str) -> list[str]:
+    """Every place ``source`` writes a confidence as a number of its own.
+
+    The forms the platform used to put a number nobody stated on a finding: a
+    ``"confidence": 0.5`` row (a packer match, a capa hit), ``.get("confidence",
+    0.75)`` (a rule its author left unrated), ``max(authored, 0.70)`` or
+    ``min(authored, 0.65)`` over an authored value, and a confidence field or
+    attribute whose default is a number rather than ``None``. A clamp to the
+    range itself (``max(0.0, min(1.0, x))``) states no number and is allowed.
+    """
+    found: list[str] = []
+    for node in ast.walk(ast.parse(source, filename=label)):
+        where = f"{label}:{getattr(node, 'lineno', 0)}"
+        if isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values, strict=True):
+                if (
+                    isinstance(key, ast.Constant)
+                    and key.value == "confidence"
+                    and _is_number(value)
+                ):
+                    found.append(f"{where}: 'confidence': {ast.unparse(value)}")
+        elif isinstance(node, ast.Call):
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+            text = ast.unparse(node)
+            if (
+                name == "get"
+                and len(node.args) == 2  # noqa: PLR2004 — the key and its default
+                and isinstance(node.args[0], ast.Constant)
+                and node.args[0].value == "confidence"
+                and _is_number(node.args[1])
+                and node.args[1].value != 0
+            ):
+                found.append(f"{where}: {text}")
+            elif (
+                name in {"max", "min"}
+                and "confidence" in text.lower()
+                and any(_is_number(arg) and arg.value not in (0, 1) for arg in node.args)
+            ):
+                found.append(f"{where}: {text}")
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and "confidence" in node.target.id
+            and node.value is not None
+        ):
+            value = node.value
+            default = (
+                value.args[0]
+                if isinstance(value, ast.Call)
+                and getattr(value.func, "id", "") == "Field"
+                and value.args
+                else value
+            )
+            if _is_number(default):
+                found.append(f"{where}: {node.target.id} defaults to {ast.unparse(default)}")
+    return found
+
+
+class TestNoConfidenceIsAConstantOfThePlatforms:
+    """No layer, the schemas included, writes a confidence nobody stated."""
+
+    def test_nothing_under_src_writes_one(self) -> None:
+        found = [
+            row
+            for path in sorted(SRC.rglob("*.py"))
+            for row in constant_confidences(path.read_text(encoding="utf-8"), _relative(path))
+        ]
+
+        assert not found, "A confidence nobody stated, written by the platform:\n  " + (
+            "\n  ".join(found)
+        )
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "row = {'name': name, 'confidence': 0.5}\n",
+            "hit = {'technique_id': tid, 'confidence': 0.6}\n",
+            "c = data.get('confidence', 0.75)\n",
+            "c = max(float(data.get('confidence')), 0.70)\n",
+            "conf_max = min(confidence_max, 0.65)\n",
+            "class M:\n    family_confidence: float = 0.0\n",
+            "class M:\n    confidence: float = Field(0.0, ge=0.0)\n",
+        ],
+    )
+    def test_each_form_is_caught(self, source: str) -> None:
+        assert constant_confidences(source, "probe.py")
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "c = max(0.0, min(1.0, float(stated)))\n",
+            "row = {'confidence': stated}\n",
+            "class M:\n    confidence: float | None = None\n",
+            "c = data.get('confidence')\n",
+        ],
+    )
+    def test_what_states_no_number_is_not(self, source: str) -> None:
+        assert constant_confidences(source, "probe.py") == []

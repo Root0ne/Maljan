@@ -88,7 +88,7 @@ class MalwareReportBuilder:
         run_summary: dict[str, Any] | None,
         discussion_history: list[dict[str, Any]] | None,
         final_decision: str,
-        overall_confidence: float | None = 0.0,
+        overall_confidence: float | None = None,
         judge_assessment: Any | None = None,
         malware_category: str | None = None,
         degraded_mode: bool = False,

@@ -209,7 +209,8 @@ class TestNoNumberNobodyStated:
         report.attribution.function_hash_matches = [{"shared_functions": 3}]
         report.attribution.family_rag_candidates = [{"malware_category": "loader"}]
         markdown = _render(report)
-        assert "| not recorded | packer | not recorded | section_name |" in markdown
+        # No match states a confidence, so there is no confidence column.
+        assert "| not recorded | packer | section_name |" in markdown
         assert "| `overlay+0x10` (-) | not recorded |" in markdown
         assert "| not recorded | not recorded | 3 |" in markdown
         assert "0.00" not in _section(markdown, "## 12. Attribution and related activity")

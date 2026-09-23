@@ -39,7 +39,11 @@ export default function AttributionTab() {
     );
   }
 
-  const familyConfidencePct = Math.round(attribution.family_confidence * 100);
+  // Null when the judge put no number on the family: "not assessed", never 0%.
+  const familyConfidencePct =
+    attribution.family_confidence == null
+      ? null
+      : Math.round(attribution.family_confidence * 100);
   const malwareCategory = report?.malware_report?.malware_category;
   const similars = (attribution.similar_samples as SimilarSample[]) ?? [];
   // Absent on every report written before these fields existed, hence the fallbacks.
@@ -86,7 +90,9 @@ export default function AttributionTab() {
             label="Family Confidence"
             value={
               attribution.family && !familyUngrounded
-                ? `${familyConfidencePct}%`
+                ? familyConfidencePct == null
+                  ? "not assessed"
+                  : `${familyConfidencePct}%`
                 : "-"
             }
           />

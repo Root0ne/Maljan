@@ -60,17 +60,11 @@ _BACKEND_NAMES: dict[str, str] = {
     "binja": "BACKEND_BINJA",
 }
 
-# The confidence a fired capa rule reports for the technique it names. The
-# other producer of ``api_technique_hits`` is the API-to-ATT&CK map, whose rows
-# start around 0.38-0.5 (data/api_attck_map_v1.json) and rise with the number
-# of distinct imports corroborating the technique, because a resolved import
-# merely *being present* is weak evidence on its own. A fired capa rule is not
-# that: capa requires the matching code pattern — an instruction sequence, a
-# string, an API call in the right context — to be there, which is the same bar
-# a YARA rule clears. So this matches the YARA corpus's own floor rather than
-# the map's low-and-rising scheme: the corroboration the map earns through
-# extra imports, a capa match already has by construction.
-_CAPA_TECHNIQUE_CONFIDENCE: float = 0.70
+# A fired capa rule's technique hit carries no confidence. capa says the
+# rule's pattern is present — an instruction sequence, a string, an API call in
+# the right context — which is a presence and not a probability; the 0.70 each
+# hit used to carry was this platform's number, read by the analysts as if capa
+# had stated it.
 
 
 class _CapaWorker(Protocol):
@@ -316,7 +310,6 @@ class CapaYaraStaticProvider(StaticProvider):
                     {
                         "technique_id": tid,
                         "name": str(name),
-                        "confidence": _CAPA_TECHNIQUE_CONFIDENCE,
                         "matched_apis": [namespace] if namespace else [],
                         "source": "capa",
                     }
