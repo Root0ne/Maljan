@@ -23,6 +23,16 @@ from maljan.core.config import Settings
 from maljan.core.exceptions import LLMError
 from maljan.core.logger import logger
 
+# The request timeout every provider's HTTP client is built with, unless the
+# caller names one. It has to outlast the longest agent loop budget (the
+# static analyst's per-chunk 1500 s plus its 30 s hard-cap grace, on a
+# cold-cache local 35B), because a request cut shorter than its loop truncates
+# an answer that was still decoding. A model on a fallback list is cut much
+# sooner, by its own turn deadline (``llm.fallback_turn_share``); this is the
+# ceiling under everything else, and every provider has one — the Ollama
+# client used to have none at all.
+PROVIDER_REQUEST_TIMEOUT_SECONDS = 1800
+
 # Module-level registry dict: provider_name -> class
 _PROVIDER_REGISTRY: dict[str, type] = {}
 
@@ -178,7 +188,7 @@ class LLMProviderRegistry:
         if not fallbacks:
             return primary
         from maljan.core.model_assignments import assignment_chain_for
-        from maljan.llm.fallback import FallbackChatModel
+        from maljan.llm.fallback import FallbackChatModel, turn_share_seconds
 
         # Each fallback is built now rather than on the turn that needs it:
         # a fallback that cannot be built — an unknown provider, a missing
@@ -197,7 +207,12 @@ class LLMProviderRegistry:
             )
         labels = [a.label for a in assignment_chain_for(self._config, agent_name.lower())]
         logger.info("Agent '%s' falls back through: %s.", agent_name, " -> ".join(labels))
-        return FallbackChatModel(models=models, labels=labels, agent=agent_name)
+        return FallbackChatModel(
+            models=models,
+            labels=labels,
+            agent=agent_name,
+            turn_deadline=turn_share_seconds(self._config, agent_name.lower()),
+        )
 
     def _build_choice(
         self,
@@ -259,7 +274,15 @@ def structured_output_supported(config: Any | None = None, llm: Any | None = Non
 
     Never raises, and refuses when it cannot tell: knowing nothing about the
     endpoint is not a reason to gamble half an hour of a job on it.
+
+    **A fallback list** is asked model by model, each by what its own model
+    object says: any of them may answer a turn, so the list supports
+    structured output only when every one does, and a local server anywhere
+    in it takes the path a bare local server takes.
     """
+    inner = getattr(llm, "models", None) if llm is not None else None
+    if isinstance(inner, list) and getattr(llm, "_llm_type", "") == "maljan-fallback":
+        return bool(inner) and all(structured_output_supported(None, model) for model in inner)
     try:
         # A per-agent endpoint is as local as a global one, and the model
         # object is the only place it survives: ChatOpenAI keeps it as

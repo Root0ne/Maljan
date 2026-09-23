@@ -110,6 +110,7 @@ def test_the_mcp_group_exposes_the_server_registry_and_the_breaker():
     deliberate decision."""
     paths = {e.path for e in cat.core_catalog()}
     assert sorted(p for p in paths if p.startswith("mcp.")) == [
+        "mcp.breaker.call_timeout_seconds",
         "mcp.breaker.cooldown_seconds",
         "mcp.breaker.failures_to_open",
         "mcp.breaker.max_concurrent_calls",

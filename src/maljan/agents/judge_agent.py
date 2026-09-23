@@ -520,6 +520,11 @@ class JudgeAgent(BudgetMeter):
         from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
         from langgraph.prebuilt import create_react_agent
 
+        from maljan.llm.fallback import restart_models
+
+        # Sticky for this loop only; the judge's next loop starts at its first model.
+        restart_models(self.llm)
+
         messages_pre: list[BaseMessage] = []
         for role, content in prompt_messages:
             if role == "system":

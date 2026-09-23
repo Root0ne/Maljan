@@ -1893,14 +1893,47 @@ class BudgetMeter:
 
         return model_label_for(config, name, role=self._model_role)
 
-    def _record_usage(self, response: Any) -> None:
-        """One model answer onto the run's ledger, under this agent and the model that gave it."""
+    def _record_usage(self, response: Any, *, announce: bool = True) -> None:
+        """One model answer onto the run's ledger, under this agent and the model that gave it.
+
+        ``announce`` publishes the switch when this answer is the one a
+        fallback gave; the tool loop announces its turns as they happen and
+        records them afterwards, so it passes ``False`` here.
+        """
         record_response_usage(
             getattr(self, "token_ledger", None),
             response,
             agent=str(getattr(self, "name", "") or ""),
             model=self._model_label(),
         )
+        if announce:
+            self._announce_fallback(response)
+
+    def _announce_fallback(self, message: Any) -> None:
+        """Publish ``model_fallback`` when ``message`` is the turn its model list moved on.
+
+        Published whatever ``core.events.stream_deltas`` says: the switch is a
+        fact about the run a reader of the conversation has to see, not part
+        of the text being streamed. Once per switch, because a list that moved
+        stays moved for the loop and only the turn that moved it carries the
+        reason. Never raises.
+        """
+        try:
+            from maljan.llm.fallback import turn_model
+            from maljan.pipeline.events import emit_model_fallback, scrub
+
+            model, reason = turn_model(message)
+            if not reason:
+                return
+            emit_model_fallback(
+                self._event_sink(),
+                stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+                agent=str(getattr(self, "name", "") or ""),
+                model=model,
+                reason=scrub(reason),
+            )
+        except Exception as exc:  # noqa: BLE001 — an announcement never costs a turn
+            logger.debug("model fallback not announced (%s).", exc)
 
     def _event_sink(self) -> Any:
         """The job's event sink, or ``None`` for an agent outside a job."""
@@ -1940,14 +1973,13 @@ class BudgetMeter:
                 if marker in already:
                     continue
                 already.add(marker)
-                model, fallback = turn_model(message, default_model)
+                model, _reason = turn_model(message, default_model)
                 emit_agent_message_delta(
                     sink,
                     stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
                     agent=str(self.name),
                     text_delta=scrub(str(getattr(message, "content", "") or "")),
                     model=model,
-                    fallback=scrub(fallback),
                     tokens=turn_usage(message),
                 )
         except Exception as exc:  # noqa: BLE001 — a delta never costs a turn
@@ -2633,6 +2665,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+        from maljan.llm.fallback import restart_models
+
+        # A model list that moved on in an earlier loop starts this one at its
+        # first model again: the switch is sticky for a loop, not for the job.
+        restart_models(self.llm)
+
         # Build BaseMessages directly so literal `{...}` substrings in the
         # report content (e.g. JSON like {"programs": [...]}) are not parsed
         # as ChatPromptTemplate f-string variables.
@@ -2737,8 +2775,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             it sees is the message with the call in ``tool_calls`` where the
             arguments could be closed off, and untouched where they could not.
             """
-            # The calls this turn asks for are this turn's model's.
+            # The calls this turn asks for are this turn's model's, and a turn
+            # a fallback gave is said in the conversation as it happens.
             recorder.note_turn(answer)
+            self._announce_fallback(answer)
             try:
                 repaired = repair_invalid_tool_calls(answer, repairs)
             except Exception as exc:  # noqa: BLE001 — a repair never costs a loop
@@ -2949,7 +2989,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # ``usage_metadata``) so the ledger reflects real LLM spend.
         for _m in msgs:
             if getattr(_m, "type", "") == "ai":
-                self._record_usage(_m)
+                self._record_usage(_m, announce=False)
         elapsed = _time.monotonic() - _t0
         # A loop that overran is a slow model or a slow tool, and the loop's
         # own elapsed time cannot tell them apart. Every ledger entry carries

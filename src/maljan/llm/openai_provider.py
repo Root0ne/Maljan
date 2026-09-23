@@ -271,7 +271,9 @@ class OpenAIProvider:
         # headroom on a cold-cache local 35B. ``max_retries=0`` keeps a single
         # attempt regardless of size — the daemon-thread cap in
         # ``execute_tool_loop`` is the only retry policy we want.
-        build_kwargs.setdefault("request_timeout", 1800)
+        from maljan.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
+
+        build_kwargs.setdefault("request_timeout", PROVIDER_REQUEST_TIMEOUT_SECONDS)
         build_kwargs.setdefault("max_retries", 0)
 
         # This model's own connection pool, so two models for two event loops

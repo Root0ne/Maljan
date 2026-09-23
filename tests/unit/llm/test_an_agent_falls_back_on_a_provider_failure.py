@@ -8,6 +8,7 @@ turn it answered: what a model said is not a reason to ask another one.
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
 
 import httpx
@@ -24,8 +25,11 @@ from maljan.llm.fallback import (
     FALLBACK_KEY,
     MODEL_KEY,
     FallbackChatModel,
+    ModelStalled,
     provider_failure,
+    restart_models,
     turn_model,
+    turn_share_seconds,
 )
 
 
@@ -148,15 +152,27 @@ class TestTheListIsWalkedOnlyOnAProviderFailure:
             chain.invoke([HumanMessage(content="go")])
         assert [m.calls for m in models] == [1, 1]
 
-    def test_every_turn_starts_at_the_first_model(self) -> None:
+    def test_the_model_that_took_over_stays_for_the_rest_of_the_loop(self) -> None:
+        chain, (first, second) = _chain(
+            [APIConnectionError(request=_request()), "first is back"], ["second says"]
+        )
+        switched = chain.invoke([HumanMessage(content="one")])
+        again = chain.invoke([HumanMessage(content="two")])
+        assert again.content == "second says"
+        assert first.calls == 1 and second.calls == 2
+        assert FALLBACK_KEY in switched.response_metadata
+        assert FALLBACK_KEY not in again.response_metadata, "the switch is recorded once"
+        assert again.response_metadata[MODEL_KEY] == "openai/model-1"
+
+    def test_the_next_loop_starts_at_the_first_model_again(self) -> None:
         chain, (first, second) = _chain(
             [APIConnectionError(request=_request()), "first is back"], ["second says"]
         )
         chain.invoke([HumanMessage(content="one")])
+        restart_models(chain)
         again = chain.invoke([HumanMessage(content="two")])
         assert again.content == "first is back"
         assert again.response_metadata[MODEL_KEY] == "openai/model-0"
-        assert second.calls == 1
 
     def test_tools_are_bound_on_the_model_that_answers(self) -> None:
         chain, (first, second) = _chain([_status(502)], ["called"])
@@ -305,3 +321,128 @@ class TestTheRegistryBuildsTheList:
         registry = reg.LLMProviderRegistry.__new__(reg.LLMProviderRegistry)
         registry._config = settings
         assert isinstance(registry.build_model_for_agent("static"), _Scripted)
+
+
+class _Stalling(_Scripted):
+    """A model that stops answering: it sleeps well past any deadline."""
+
+    def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kw: Any):
+        self.calls += 1
+        time.sleep(2)
+        return self._next()
+
+    async def _agenerate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kw: Any):
+        self.calls += 1
+        await asyncio.sleep(30)
+        return self._next()
+
+
+class TestAStallReachesTheFallback:
+    def _chain(self) -> tuple[FallbackChatModel, _Scripted]:
+        second = _Scripted(script=["second says"], bound=[])
+        chain = FallbackChatModel(
+            models=[_Stalling(script=["never"], bound=[]), second],
+            labels=["openai/stalls", "ollama/answers"],
+            agent="static",
+            turn_deadline=0.2,
+        )
+        return chain, second
+
+    def test_a_model_that_stops_answering_is_a_provider_failure_inside_the_list(self) -> None:
+        chain, second = self._chain()
+        answer = asyncio.run(chain.ainvoke([HumanMessage(content="go")]))
+        assert answer.content == "second says"
+        assert "openai/stalls did not answer within its" in answer.response_metadata[FALLBACK_KEY]
+        assert provider_failure(ModelStalled("x did not answer")) == "x did not answer"
+
+    def test_the_blocking_path_is_bounded_the_same_way(self) -> None:
+        chain, second = self._chain()
+        started = time.monotonic()
+        answer = chain.invoke([HumanMessage(content="go")])
+        assert answer.content == "second says"
+        assert time.monotonic() - started < 1.5
+
+    def test_the_last_model_has_no_deadline_of_its_own(self) -> None:
+        chain, _second = self._chain()
+        assert chain._deadline(0) == 0.2
+        assert chain._deadline(1) is None
+
+    def test_the_deadline_is_a_share_of_the_agent_loop_budget(self) -> None:
+        settings = Settings()
+        settings.react_agent_timeout = 180
+        assert turn_share_seconds(settings, "an_agent_with_no_budget") == 90.0
+        settings.llm.fallback_turn_share = 0.25
+        assert turn_share_seconds(settings, "an_agent_with_no_budget") == 45.0
+        settings.react_agent_timeout_overrides = {"strings": 600}
+        assert turn_share_seconds(settings, "strings") == 150.0, "the agent's own budget first"
+
+
+class TestAShortRetryAfterIsWaitedOutOnTheSameModel:
+    def test_a_429_asking_for_a_moment_is_asked_again_before_the_list_moves(self) -> None:
+        response = httpx.Response(429, request=_request(), headers={"retry-after": "0.01"})
+        limited = APIStatusError("slow down", response=response, body=None)
+        chain, (first, second) = _chain([limited, "first says"], ["second says"])
+        answer = chain.invoke([HumanMessage(content="go")])
+        assert answer.content == "first says"
+        assert first.calls == 2 and second.calls == 0
+
+    def test_a_long_retry_after_moves_on(self) -> None:
+        response = httpx.Response(429, request=_request(), headers={"retry-after": "120"})
+        limited = APIStatusError("slow down", response=response, body=None)
+        chain, (_first, second) = _chain([limited], ["second says"])
+        assert chain.invoke([HumanMessage(content="go")]).content == "second says"
+
+
+class TestOnlyTheProviderSaysItFailed:
+    def test_an_error_raised_while_handling_a_provider_failure_is_that_error(self) -> None:
+        from langchain_core.exceptions import OutputParserException
+
+        try:
+            try:
+                raise APITimeoutError(request=_request())
+            except APITimeoutError:
+                raise OutputParserException("the answer did not parse") from None
+        except OutputParserException as exc:
+            assert provider_failure(exc) is None
+
+    def test_an_integer_code_on_something_that_is_not_a_provider_says_nothing(self) -> None:
+        class _Local(Exception):
+            code = 404
+
+        assert provider_failure(_Local("not found locally")) is None
+
+
+class TestAWrappedLocalServerIsNotSentStructuredOutput:
+    def _models(self) -> tuple[Any, Any]:
+        from langchain_openai import ChatOpenAI
+
+        key = "sk-" + "x" * 20
+        local = ChatOpenAI(model="qwen", api_key=key, base_url="http://127.0.0.1:9/v1")
+        hosted = ChatOpenAI(model="gpt", api_key=key)
+        return local, hosted
+
+    def test_either_order_answers_as_the_local_server_would(self) -> None:
+        from maljan.llm.registry import structured_output_supported
+
+        settings = Settings()
+        settings.llm.provider = "anthropic"
+        local, hosted = self._models()
+        assert structured_output_supported(settings, local) is False
+        for models in ([local, hosted], [hosted, local]):
+            chain = FallbackChatModel(models=models, labels=["a", "b"], agent="judge")
+            assert structured_output_supported(settings, chain) is False
+
+    def test_a_list_of_hosted_models_keeps_structured_output(self) -> None:
+        from maljan.llm.registry import structured_output_supported
+
+        _local, hosted = self._models()
+        chain = FallbackChatModel(models=[hosted, hosted], labels=["a", "b"], agent="judge")
+        assert structured_output_supported(None, chain) is True
+
+
+def test_an_ollama_model_is_built_with_a_request_timeout() -> None:
+    from maljan.llm.ollama_provider import OllamaProvider
+    from maljan.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
+
+    model = OllamaProvider(Settings()).build_model("gemma", 0.1)
+    assert model.client_kwargs["timeout"] == PROVIDER_REQUEST_TIMEOUT_SECONDS

@@ -325,6 +325,13 @@ class LLMConfig(BaseModel):
     frontier: FrontierConfig = Field(default_factory=FrontierConfig)
     # Per-agent overrides: {"static": AgentLLMConfig(...), "dynamic": ...}
     agents: dict[str, AgentLLMConfig] = Field(default_factory=dict)
+    # How much of an agent's loop budget one model on its fallback list may
+    # spend on a turn before it is treated as stalled and the next model is
+    # asked (``maljan.llm.fallback``). A share of the loop rather than a fixed
+    # number of seconds, because the loop budget is what would otherwise
+    # cancel the stall first: at a half, a first model that stops answering
+    # leaves the other half of the loop to the model that stays for it.
+    fallback_turn_share: Annotated[float, Field(gt=0.0, lt=1.0)] = 0.5
 
     # Whether a job is refused when an agent names a model no probe has
     # reached. A model name is the one part of a definition nothing validates
@@ -980,11 +987,19 @@ class MCPBreakerConfig(BaseModel):
     ``max_concurrent_calls`` is how many calls one server may have in flight
     for one job at once, so parallel analysts queue rather than pile onto one
     slow sidecar. ``0`` leaves the calls uncapped.
+
+    ``call_timeout_seconds`` is how long a call may go unanswered before it is
+    a timeout — a transport failure the breaker counts.
     """
 
     failures_to_open: Annotated[int, Field(ge=1)] = 3
     cooldown_seconds: Annotated[float, Field(ge=0.0)] = 60.0
     max_concurrent_calls: Annotated[int, Field(ge=0)] = 4
+    # The budget every tool call gets at least before it counts as a server
+    # that did not answer (a tool whose server declares a longer budget gets
+    # that, and thirty seconds of grace are added either way). Zero derives
+    # it from the longest tool budget the deployment configures — capa's.
+    call_timeout_seconds: Annotated[float, Field(ge=0.0)] = 0.0
 
 
 class MCPConfig(BaseModel):

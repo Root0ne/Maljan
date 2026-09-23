@@ -212,6 +212,19 @@ ANNOTATIONS: dict[str, Annotation] = {
         "probe": "llm",
         "advanced": True,
     },
+    "llm.fallback_turn_share": {
+        "title": "Turn deadline for a model on a fallback list (share of the loop)",
+        "description": (
+            "How much of an agent's loop budget one model on its fallback list may spend "
+            "on a turn before it is treated as stalled and the next model is asked; the "
+            "model that answers then stays for the rest of that loop. A share of the "
+            "loop, because the loop budget is what would otherwise cancel a stalled model "
+            "before any timeout inside it: the default of a half leaves the other half of "
+            "the loop to the model that took over. The last model on a list has no "
+            "deadline of its own and is bounded by the loop, as a lone model is."
+        ),
+        "advanced": True,
+    },
     "llm.anthropic.api_key": {
         "title": "Anthropic API key",
         "description": (
@@ -1657,6 +1670,22 @@ ANNOTATIONS.update(
                 "through and a success ends the rest. The default is a judgement: long "
                 "enough for a sidecar being restarted to come back, short against the "
                 "analysts' own loop budgets. Zero tries the server again on the next call."
+            ),
+            "subgroup": "Resilience",
+            "advanced": True,
+        },
+        "mcp.breaker.call_timeout_seconds": {
+            "title": "How long a tool call may go unanswered (seconds)",
+            "description": (
+                "The budget every tool call gets at least before it counts as a server that "
+                "did not answer — a transport failure the breaker counts. A tool whose server "
+                "declares a longer budget in its capabilities manifest gets that one, and "
+                "thirty seconds of grace are added either way, so a tool that gives up at its "
+                "own budget answers with its own timeout error first. Zero, the default, "
+                "derives it from the longest tool budget this deployment configures: "
+                "core.static.capa.timeout_seconds (300, and 900 on a slow host, still fits). "
+                "A call cut short by its caller's own budget while it waited on the server "
+                "counts as unanswered too."
             ),
             "subgroup": "Resilience",
             "advanced": True,

@@ -118,6 +118,9 @@ STAGE_ENDED_AT_CAP = "stage_ended_at_cap"
 # A tool server this job stopped calling for a while, after a run of
 # transport failures (``maljan.providers.server_guard``).
 TOOL_SERVER_RESTED = "tool_server_rested"
+# An agent's model list moved on to its next model because the one before it
+# failed as a provider (``maljan.llm.fallback``). Once per switch.
+MODEL_FALLBACK = "model_fallback"
 BUDGET_TICK_EVERY = 5
 CAPS: tuple[str, ...] = ("steps", "time", "repeats", "budget_seconds")
 
@@ -161,6 +164,17 @@ def emit_stage_ended_at_cap(
     if detail:
         payload["detail"] = str(detail)
     emit(sink, STAGE_ENDED_AT_CAP, payload)
+
+
+def emit_model_fallback(
+    sink: EventSink | None, *, stage: str, agent: str, model: str, reason: str
+) -> None:
+    """An agent's model list moved on: which model now answers, and why, once per switch."""
+    emit(
+        sink,
+        MODEL_FALLBACK,
+        {"stage": str(stage), "agent": str(agent), "model": str(model), "reason": str(reason)},
+    )
 
 
 def emit_tool_server_rested(sink: EventSink | None, record: dict[str, Any]) -> None:
@@ -1000,7 +1014,6 @@ def emit_agent_message_delta(
     agent: str,
     text_delta: str,
     model: str = "",
-    fallback: str = "",
     tokens: dict[str, Any] | None = None,
 ) -> None:
     """Part of what an agent is saying, before it has finished saying it.
@@ -1012,13 +1025,14 @@ def emit_agent_message_delta(
     ``agent_message`` that closes the turn.
 
     It is also the one event per model turn, so it says which model gave the
-    turn (``model``), why another model gave it when the first one failed as
-    a provider (``fallback``, in words), and what the turn spent as the
-    provider reported it (``tokens``; absent where the provider reported
-    nothing). A turn that said nothing is still announced when a fallback
-    answered it, because a reader has to see that the model changed.
+    turn (``model``) and what the turn spent as the provider reported it
+    (``tokens``; absent where the provider reported nothing). A turn that said
+    nothing — one that only asked for tools — is still published when it
+    carries tokens, so a reader sees what every turn spent. The turn a
+    fallback model gave is announced by ``model_fallback``, which is
+    published whether or not deltas are.
     """
-    if not text_delta and not fallback:
+    if not text_delta and not tokens:
         return
     payload: dict[str, Any] = {
         "stage": str(stage),
@@ -1027,8 +1041,6 @@ def emit_agent_message_delta(
     }
     if model:
         payload["model"] = str(model)
-    if fallback:
-        payload["fallback"] = str(fallback)
     if tokens:
         payload["tokens"] = dict(tokens)
     emit(sink, AGENT_MESSAGE_DELTA, payload)

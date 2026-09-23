@@ -36,6 +36,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 SRC = Path(__file__).resolve().parents[2] / "src" / "maljan"
 
 # The names that carry a decision. ``verdict`` is the one the whole run is
@@ -631,3 +633,48 @@ class TestARejectedAnswerIsNeverAskedOfAnotherModel:
         assert asked == ["openai/first", "openai/first"]
         assert parsed.content == "T1055 is what it does"
         assert second.i == 0, "the fallback model was asked for an answer the first one gave"
+
+    def test_a_content_error_the_first_model_raises_is_never_asked_of_the_next(self) -> None:
+        """The half of the rule an exception can break: content is not a provider failure.
+
+        A parse error and a validation error are about what the model wrote.
+        Moving the turn to the next model on either would be the platform
+        asking for an answer it liked better, so the error reaches the caller
+        — the loop that feeds it back — and the next model is never asked.
+        """
+        from langchain_core.exceptions import OutputParserException
+        from langchain_core.language_models.chat_models import BaseChatModel
+        from langchain_core.language_models.fake_chat_models import FakeListChatModel
+        from langchain_core.messages import HumanMessage
+        from pydantic import BaseModel, ValidationError
+
+        from maljan.llm.fallback import FallbackChatModel
+
+        class _Shape(BaseModel):
+            technique_id: int
+
+        try:
+            _Shape.model_validate({"technique_id": "not a number"})
+        except ValidationError as caught:
+            invalid = caught
+
+        for content_error in (OutputParserException("the answer did not parse"), invalid):
+
+            class _Refuses(BaseChatModel):
+                error: Any
+
+                @property
+                def _llm_type(self) -> str:
+                    return "refuses"
+
+                def _generate(self, *args: Any, **kwargs: Any) -> Any:
+                    raise self.error
+
+            second = FakeListChatModel(responses=["the other model's answer"])
+            chain = FallbackChatModel(
+                models=[_Refuses(error=content_error), second],
+                labels=["openai/first", "ollama/second"],
+            )
+            with pytest.raises(type(content_error)):
+                chain.invoke([HumanMessage(content="what does it do")])
+            assert second.i == 0, f"{type(content_error).__name__} was asked of another model"
