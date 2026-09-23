@@ -82,6 +82,11 @@ class TestWhatIsFilledInIsNotAsked:
             malware_category="reverse_shell",
             evidence_ledger=[],
         ).build_deterministic()
+        # A sandbox reached the address: the second source the one publish rule
+        # asks of the judge's value.
+        from maljan.reporting.models import NetworkIOCs, NetworkIP
+
+        report.network = NetworkIOCs(ips=[NetworkIP(address="82.157.13.47", source="sandbox")])
 
         exported = ExtendedSTIXRenderer().render(report, bundle).model_dump(mode="json")
 
