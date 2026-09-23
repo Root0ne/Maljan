@@ -789,14 +789,28 @@ change landed on `main`.
   domain, address or URL the run's FLOSS entry holds as a decoded, stack or
   tight string is publishable when it passes every other check of the rule
   and is not a well-known benign host, with the reason "recovered by emulation
-  (decoded strings), ev_NNNN"; never under a Benign verdict, and a value only
-  the static string sweep read stays unpublished. The export, the IOC table
-  and `/iocs` read it through the one rule.
+  (decoded strings), ev_NNNN"; never under a Benign verdict or a verdict the
+  judge did not state with a confidence, and a value the static string sweep
+  read — alone, or as a whole value in its plain strings beside a decoded row —
+  stays the sweep's. The record is built from the ledger at build time and
+  stored on the report (`emulated_strings`), and says when it is partial. A
+  benign host is read by its registered name (`*.co.uk`), and a public
+  resolver's address is benign. The export, the IOC table and `/iocs` read it
+  through the one rule.
 - **A draft detection rule matches only what the run publishes.** YARA
   strings and Suricata alerts are drawn from the IOC table's published rows,
   and a Sigma selection from published rows and what a sandbox recorded; the
   drafts are generated after the export. Import names are no longer YARA
-  strings. A Benign verdict gets no draft, and §10.2 says why.
+  strings. A Benign verdict gets no draft, and §10.2 says why. A registry key
+  is compared without its hive or value name on both sides, and the
+  twelve-value cap on each Sigma selection is gone.
+- **Every analyst claim reaches its composer section.** The fixed claim cuts
+  (ten per prompt; twelve, eight and fourteen in three bundles) are gone; the
+  claims share the window's room with the tool answers.
+- **A citation check asks about a whole digest and a word spelled with hex
+  letters**; only `0x` hex, a hex run with a digit, or a bare number is
+  undecidable. The version-word check before an address reads a bounded
+  look-back.
 - **A technique only a rule match stands behind is marked** in the ATT&CK
   table ("rule match only (yara `rule`, N string(s)), no analyst claim") and
   grounds no capability word. The publish rule is unchanged.
@@ -4259,6 +4273,11 @@ has about eleven sections. Set `composer_section_max_tokens` to bound it.
 longer exported: an export may carry fewer judge indicators than before, each
 decline recorded as `stix.indicator_not_published`. A report stored before
 `judge_indicators` existed shows no judge rows.
+
+A report now stores `emulated_strings`. A report stored before it existed
+reads its emulation record from its kept section rows, and a value published
+from it says "(the record is partial: …)"; re-render it from a new run for a
+whole record. A Sigma draft may carry more than twelve values in a selection.
 
 Draft detection rules are no longer generated for a Benign verdict, and a
 YARA draft no longer carries import names as strings; a Suricata draft alerts

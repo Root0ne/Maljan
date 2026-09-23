@@ -444,10 +444,11 @@ Two producers use it:
   analyst claim, the entries whose text holds the values the claim quotes. A
   section shown only a claim once called it unsupported while a strings entry
   held the claimed value word for word and the report published the technique.
-  A section's tool answers share what the reporter model's context window
-  leaves after the section's output budget and the rest of its prompt,
-  evenly; a full window shows a sentence in place of an answer, and the run
-  summary's budget line says how they are sized. A text the platform shortens
+  A section's analyst claims and tool answers share what the reporter
+  model's context window leaves after the section's output budget and the rest
+  of its prompt, evenly; no count cuts a section's claims. A full window shows
+  a sentence in place of a claim or an answer, and the run summary's budget
+  line says how they are sized. A text the platform shortens
   before showing it — a claim's stored evidence, a tool answer cut to its
   share, a procedure quote in the ATT&CK table, a claim in the live transcript
   — ends in `…` (`utils.marked_cut`), so a cut is never read, or copied, as a
@@ -2065,13 +2066,25 @@ is assembled from what the run gathered rather than recomputed beside it:
   emulation (decoded strings), ev_NNNN", the FLOSS entry's own id. Hiding a
   host behind encoding is a deliberate act benign software rarely performs,
   while a plain string in a binary is routinely benign, so a value only the
-  static string sweep read stays unpublished. Under a Benign verdict it
-  publishes nothing, and the table's refusal says so. The export, the IOC
-  table and `/iocs` read it through the one rule (`emulation_record` reads the
-  report's `tool_floss_strings` section, so a stored report answers the same
-  way). Replayed on the benchmark's stored runs, the two C2 names the sample
-  decrypted now publish on both models' runs, and nothing new publishes on the
-  benign control.
+  static string sweep read stays unpublished — and so does a value FLOSS
+  gives a decoded kind that the sweep also read as a whole value in the
+  file's plain strings (a `strings` or `iocs_from_file` entry): text the
+  sample did not hide is not recovered by emulation, and the refusal names
+  the sweep's entry. Under a Benign verdict it publishes nothing, nor under a
+  verdict the judge did not state with a confidence (a fallback's default
+  word), and the table's refusal says so. A well-known benign host is read by
+  its registered name (`*.co.uk` included), and a public resolver's address
+  is one too. The record (`emulated_strings` on the report) is built at build
+  time from every FLOSS, `strings` and `iocs_from_file` entry on the ledger,
+  so no kept-row cap of a section decides an answer; it says why it is partial
+  when no FLOSS entry listed every string it recovered, or no `strings` entry
+  listed every plain string, and the reason carries that. A report stored
+  before the record existed is read from its kept `tool_floss_strings` and
+  `strings` rows, and the reason says the record is partial. The export, the
+  IOC table and `/iocs` read it through the one rule. Replayed on the
+  benchmark's stored runs, the two C2 names the sample decrypted publish on
+  both models' runs (the static sweep's complete listing does not hold them),
+  and nothing new publishes on the benign control.
 * **Draft detection rules match only what the run publishes.** The YARA,
   Sigma and Suricata drafts (`reporting.detection_signatures`) are generated
   after the export. A YARA string or a Suricata alert matches on the IOC
@@ -2079,7 +2092,11 @@ is assembled from what the run gathered rather than recomputed beside it:
   YARA strings, since an import is not an indicator. A Sigma selection names a
   registry key or an image path only when the table publishes it or a sandbox
   recorded it, and the sandbox's own signature names (`sigma_admits`); an
-  analyst's persistence target the table does not publish selects nothing. A
+  analyst's persistence target the table does not publish selects nothing.
+  A registry key is compared in one form on both sides — without its hive
+  (`HKCU`, `HKEY_CURRENT_USER`, `HKU\<SID>`, `\REGISTRY\USER\<SID>`) and
+  without the table's trailing value name — admission is asked of every value
+  before anything is collected, and no count cuts a selection. A
   Benign verdict publishes no malicious indicator, so it gets no draft, and
   §10.2 says so. A signed benign tool once got twenty `trojan-activity` alerts
   for certificate hosts and a "C2 IP" rule for a version number.
