@@ -83,9 +83,10 @@ class TestTheFirstScreenSaysWhatADegradedRunMeans:
     def test_one_reader_sentence_built_from_what_ran(self) -> None:
         head = _head(_render(_degraded()))
         assert (
-            "> **[DEGRADED RUN]** The static analyst failed, the dynamic and network analysts "
-            "produced no claims and the sandbox recorded nothing for this sample; the verdict "
-            "above is tentative. See §13 for what this run could not examine."
+            "> **[DEGRADED RUN]** The static analyst failed, the dynamic analyst was skipped "
+            "(no sandbox fixture for this sample), the network analyst produced no claims and "
+            "the sandbox recorded nothing for this sample; the verdict above is tentative. See "
+            "§13 for what this run could not examine."
         ) in head
 
     def test_no_code_and_no_install_command_on_the_first_screen(self) -> None:
@@ -132,8 +133,8 @@ class TestEveryNumberedSectionIsPrinted:
         subsections = re.findall(r"^### (5\.\d) ", technical, re.MULTILINE)
         assert subsections == [f"5.{n}" for n in range(1, 10)]
         assert (
-            "Not examined in this run: the sandbox recorded nothing for this sample, no static "
-            "tool recorded a persistence mechanism, and the report model wrote nothing on it."
+            "Not examined in this run: the sandbox recorded nothing for this sample, no tool "
+            "looked at the file, and the report model wrote nothing on it."
         ) in technical
 
     def test_the_table_subsections_of_6_7_and_9_are_unnumbered(self) -> None:
@@ -293,7 +294,8 @@ class TestTheMeasuredProofSitsBesideTheProse:
         technical = _section(_render(self._capa()), "## 5. Technical analysis")
         packing = technical.split("### 5.1", 1)[1].split("### 5.2", 1)[0]
         assert "| encrypt data using RC4 PRGA |" in packing
-        assert "| PEB access |" in packing
+        # PEB access speaks to API resolution and is printed there, once.
+        assert "PEB access" not in packing
         assert "hash data with CRC32" not in packing
 
     def test_a_capa_row_in_section_8_carries_its_evidence(self) -> None:
@@ -324,3 +326,37 @@ class TestMinorLeaks:
         technical = _section(_render(report), "## 5. Technical analysis")
         assert "`svc44`" in technical
         assert "`cmd 11`" in technical
+
+
+class TestWhatLookedIsNamed:
+    def test_the_skipped_analysts_are_said_to_be_skipped(self) -> None:
+        report = _degraded()
+        report.run_summary["agent_stats"] = [
+            {"agent_id": "static", "claim_count": 0, "no_data": False},
+            {"agent_id": "dynamic", "claim_count": 0, "no_data": True},
+            {"agent_id": "network", "claim_count": 0, "no_data": True},
+        ]
+        head = _head(_render(report))
+        assert "the dynamic and network analysts were skipped" in head
+        assert "produced no claims" not in head
+
+    def test_an_absence_names_the_tools_that_looked(self) -> None:
+        report = _degraded()
+        report.evidence_index.append(
+            report.evidence_index[0].model_copy(update={"id": "ev_0002", "tool": "capa"})
+        )
+        technical = _section(_render(report), "## 5. Technical analysis")
+        assert (
+            "Nothing recorded in this run: the tools that ran over the file (capa) recorded no "
+            "discovery command, and the sandbox recorded nothing for this sample; the report "
+            "model wrote nothing on it."
+        ) in technical
+
+    def test_a_similarity_without_a_measure_is_said_plainly(self) -> None:
+        report = rich_report()
+        report.attribution.similar_samples = [{"sample_id": "a" * 64}, {"sample_id": "b" * 64}]
+        similarity = _section(_render(report), "## 12. Attribution and related activity")
+        assert (
+            "2 previously analysed samples were returned by the long-term memory and are not "
+            "listed. No similarity measure was recorded for these samples."
+        ) in similarity

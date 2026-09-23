@@ -146,6 +146,9 @@ _TACTIC_ORDER: tuple[str, ...] = (
     "TA0040",
 )
 
+# The tools an absence line names first, as the ones that looked for behaviour.
+_ANALYSIS_TOOLS = ("capa", "yara_scan", "lolbin_lookup", "api_capability", "strings")
+
 # What a sandbox signature or a rule has to name to be printed beside the
 # anti-analysis prose and the API-resolution prose respectively.
 _EVASION_WORDS = ("anti", "evas", "debug", "sandbox", "virtual", "vm")
@@ -690,7 +693,7 @@ class MarkdownRenderer:
                 [ta.persistence_detail] if ta else [],
                 measured,
                 ctx,
-                absent=ctx.absence("a persistence mechanism", sandbox=True),
+                absent=ctx.absence("persistence mechanism", sandbox=True),
             )
         )
 
@@ -712,7 +715,7 @@ class MarkdownRenderer:
                 [ta.discovery] if ta else [],
                 measured,
                 ctx,
-                absent=ctx.absence("a discovery command", sandbox=True),
+                absent=ctx.absence("discovery command", sandbox=True),
             )
         )
 
@@ -811,7 +814,7 @@ class MarkdownRenderer:
                 prose,
                 measured,
                 ctx,
-                absent=ctx.absence("a command-and-control channel", sandbox=True),
+                absent=ctx.absence("command-and-control channel", sandbox=True),
             )
         )
 
@@ -856,7 +859,7 @@ class MarkdownRenderer:
                 [ta.payloads] if ta else [],
                 measured,
                 ctx,
-                absent=ctx.absence("a carved payload or a dropped file", sandbox=True),
+                absent=ctx.absence("carved payload or dropped file", sandbox=True),
             )
         )
 
@@ -1520,9 +1523,9 @@ class MarkdownRenderer:
         if unscored:
             similarity.append(
                 f"{unscored} previously analysed sample{'s were' if unscored != 1 else ' was'} "
-                "returned by the long-term memory without a distance and "
-                f"{'are' if unscored != 1 else 'is'} not listed: a similarity with no measure "
-                "is not a measurement."
+                f"returned by the long-term memory and {'are' if unscored != 1 else 'is'} not "
+                "listed. No similarity measure was recorded for "
+                f"{'these samples' if unscored != 1 else 'this sample'}."
             )
         blocks.append(
             "\n".join(
@@ -1920,12 +1923,26 @@ class _Context:
         self.sandbox_watched_persistence = dyn is not None and not blind.intersection(
             {"registry", "files", "file", "file_operations", "filesystem"}
         )
-        self.failed_analysts, self.silent_analysts = _analyst_states(report)
+        self.analysts = _AnalystStates(report)
         team = _team(report)
-        self.no_analyst_claims = bool(team) and set(team) <= (
-            set(self.failed_analysts) | set(self.silent_analysts)
-        )
+        self.no_analyst_claims = bool(team) and set(team) <= self.analysts.idle
         self._tools = {row.id: row for row in report.evidence_index}
+        # The tools that looked at the file itself, in the order they ran: not
+        # a sandbox's, and not a lookup about the sample elsewhere.
+        self.file_tools = sorted(
+            dict.fromkeys(
+                str(row.tool)
+                for row in report.evidence_index
+                if row.tool
+                and "sandbox" not in str(row.tool)
+                and not str(row.tool).startswith(_SANDBOX_TOOLS)
+                and str(row.tool) not in _REPUTATION_TOOLS
+            ),
+            # The analysis tools first, the identity and parsing tools after.
+            key=lambda tool: (
+                _ANALYSIS_TOOLS.index(tool) if tool in _ANALYSIS_TOOLS else len(_ANALYSIS_TOOLS)
+            ),
+        )
         self.iocs = _indicator_rows(report)
         indicators = [
             (row.value, row.kind or "") for row in self.iocs if row.kind in _NETWORK_KINDS
@@ -1956,16 +1973,26 @@ class _Context:
         return "this report records no sandbox observation"
 
     def absence(self, what: str, *, sandbox: bool) -> str:
-        """The one line a capability subsection prints when nothing speaks in it."""
-        if sandbox and not self.sandbox_observed:
-            return (
-                f"Not examined in this run: {self.no_sandbox_clause()}, no static tool "
-                f"recorded {what}, and the report model wrote nothing on it."
+        """The one line a capability subsection prints when nothing speaks in it.
+
+        It names what looked: the tools that ran over the file, and the
+        sandbox's state where the capability is one a sandbox would see. "Not
+        examined" is said only when nothing looked at all.
+        """
+        tools = self.file_tools
+        named = ", ".join(tools[:6]) + (f" and {len(tools) - 6} more" if len(tools) > 6 else "")
+        blind = sandbox and not self.sandbox_observed
+        if not tools:
+            said = (
+                f"{self.no_sandbox_clause()}, no tool looked at the file"
+                if blind
+                else ("no tool looked at the file")
             )
-        return (
-            f"Nothing recorded in this run: no tool recorded {what}, and the report model "
-            "wrote nothing on it."
-        )
+            return f"Not examined in this run: {said}, and the report model wrote nothing on it."
+        said = f"the tools that ran over the file ({named}) recorded no {what}"
+        if blind:
+            said += f", and {self.no_sandbox_clause()}"
+        return f"Nothing recorded in this run: {said}; the report model wrote nothing on it."
 
     @classmethod
     def of(cls, report: MalwareReport) -> _Context:
@@ -2055,28 +2082,81 @@ def _named_in(rows: list[dict[str, Any]], code: str, pattern: str) -> set[str]:
     return found
 
 
-def _analyst_states(report: MalwareReport) -> tuple[list[str], list[str]]:
-    """``(failed, silent)``: the analysts that failed and those that claimed nothing.
+class _AnalystStates:
+    """What each analyst of the run did, from the stage and agent records.
 
-    Read from the run's own record: its failed-analyst list and the two
+    ``failed``: the run's failed-analyst list. ``skipped``: an analyst the
+    analysis stage records a reason for, or whose own record says it had no
+    data, with that reason. ``silent``: an analyst that ran and claimed
+    nothing. A report stored before those records falls back to the two
     reasons the pipeline writes, ``analyst failures:`` and ``analysts produced
-    no claims:``. An analyst that failed is not also counted as silent.
+    no claims:``.
     """
-    summary = report.run_summary or {}
-    failed = [str(a) for a in summary.get("failed_analysts") or [] if a]
-    silent: list[str] = []
-    for reason in report.degradation_reasons:
-        for prefix, into in (
-            ("analyst failures:", failed),
-            ("analysts produced no claims:", silent),
-        ):
-            if reason.startswith(prefix):
-                into.extend(
-                    name.strip() for name in reason[len(prefix) :].split(",") if name.strip()
-                )
-    failed = list(dict.fromkeys(failed))
-    silent = [name for name in dict.fromkeys(silent) if name not in failed]
-    return failed, silent
+
+    def __init__(self, report: MalwareReport) -> None:
+        summary = report.run_summary or {}
+        failed = [str(a) for a in summary.get("failed_analysts") or [] if a]
+        failed += _named_after(report.degradation_reasons, "analyst failures:")
+        self.failed = list(dict.fromkeys(failed))
+        skipped: dict[str, str] = {}
+        for stage in summary.get("stages") or []:
+            if not isinstance(stage, dict):
+                continue
+            for agent, reason in (stage.get("agent_reasons") or {}).items():
+                if str(agent) not in self.failed:
+                    skipped.setdefault(str(agent), _one_line(reason))
+        stats = [row for row in summary.get("agent_stats") or [] if isinstance(row, dict)]
+        for row in stats:
+            agent = str(row.get("agent_id") or row.get("domain") or "")
+            if agent and row.get("no_data") and agent not in self.failed:
+                skipped.setdefault(agent, "")
+        self.skipped = skipped
+        if stats:
+            silent = [
+                str(row.get("agent_id") or row.get("domain") or "")
+                for row in stats
+                if not row.get("claim_count")
+            ]
+        else:
+            silent = _named_after(report.degradation_reasons, "analysts produced no claims:")
+        self.silent = [
+            name
+            for name in dict.fromkeys(silent)
+            if name and name not in self.failed and name not in skipped
+        ]
+
+    @property
+    def idle(self) -> set[str]:
+        """Every analyst that produced no claim, whatever the cause."""
+        return set(self.failed) | set(self.skipped) | set(self.silent)
+
+    def clauses(self) -> list[str]:
+        """``the static analyst failed``, ``the dynamic analyst was skipped (why)``, …"""
+        out: list[str] = []
+        if self.failed:
+            many = len(self.failed) > 1
+            out.append(f"the {_joined(self.failed)} analyst{'s' if many else ''} failed")
+        if self.skipped:
+            names = list(self.skipped)
+            many = len(names) > 1
+            reasons = {why for why in self.skipped.values() if why}
+            why = f" ({next(iter(reasons))})" if len(reasons) == 1 else ""
+            out.append(f"the {_joined(names)} analyst{'s were' if many else ' was'} skipped{why}")
+        if self.silent:
+            many = len(self.silent) > 1
+            out.append(
+                f"the {_joined(self.silent)} analyst{'s' if many else ''} produced no claims"
+            )
+        return out
+
+
+def _named_after(reasons: list[str], prefix: str) -> list[str]:
+    """The comma-separated names a reason of the given prefix lists."""
+    names: list[str] = []
+    for reason in reasons:
+        if reason.startswith(prefix):
+            names.extend(name.strip() for name in reason[len(prefix) :].split(",") if name.strip())
+    return names
 
 
 def _team(report: MalwareReport) -> list[str]:
@@ -2101,18 +2181,11 @@ def _joined(names: list[str]) -> str:
 def _degraded_sentence(report: MalwareReport, ctx: _Context) -> str:
     """The header's one sentence about a degraded run, built from what ran.
 
-    Built from the analysts' states and the sandbox's, never from the reason
-    strings: those are the operator's, carry codes and install commands, and
-    are listed whole in §13.
+    Built from the stage and agent records and the sandbox's state, not from
+    the degradation reasons: those are the operator's, carry codes and install
+    commands, and are listed whole in §13.
     """
-    parts: list[str] = []
-    failed, silent = ctx.failed_analysts, ctx.silent_analysts
-    if failed:
-        parts.append(f"the {_joined(failed)} analyst{'s' if len(failed) > 1 else ''} failed")
-    if silent:
-        parts.append(
-            f"the {_joined(silent)} analyst{'s' if len(silent) > 1 else ''} produced no claims"
-        )
+    parts = ctx.analysts.clauses()
     if not ctx.sandbox_observed and ctx.sandbox_state in ("empty", "not_called"):
         parts.append(ctx.no_sandbox_clause())
     if not parts:
@@ -2775,7 +2848,8 @@ def _capa_rules(report: MalwareReport) -> list[tuple[dict[str, str], list[str]]]
 
 def _is_evasion_rule(rule: dict[str, str]) -> bool:
     namespace = rule["namespace"].lower()
-    if namespace.startswith("anti-analysis/obfuscation/string"):
+    # A rule that speaks to API or string resolution is printed there, once.
+    if _is_resolution_rule(rule):
         return False
     return namespace.startswith(_EVASION_NAMESPACES) or (
         not namespace and _names_any(rule["mbc"], _EVASION_BEHAVIOURS)
