@@ -146,6 +146,8 @@ class TestTheRunSummaryRecordsTheProfileThatRan:
             "nudge",
             "budget",
             "tool_latency",
+            "models",
+            "server_rests",
             "sandbox",
         }
 

@@ -23,6 +23,16 @@ from maljan.core.config import Settings
 from maljan.core.exceptions import LLMError
 from maljan.core.logger import logger
 
+# The request timeout every provider's HTTP client is built with, unless the
+# caller names one. It has to outlast the longest agent loop budget (the
+# static analyst's per-chunk 1500 s plus its 30 s hard-cap grace, on a
+# cold-cache local 35B), because a request cut shorter than its loop truncates
+# an answer that was still decoding. A model on a fallback list is cut much
+# sooner, by its own turn deadline (``llm.fallback_turn_share``); this is the
+# ceiling under everything else, and every provider has one — the Ollama
+# client used to have none at all.
+PROVIDER_REQUEST_TIMEOUT_SECONDS = 1800
+
 # Module-level registry dict: provider_name -> class
 _PROVIDER_REGISTRY: dict[str, type] = {}
 
@@ -173,19 +183,62 @@ class LLMProviderRegistry:
             )
             return self.build_model(role=fallback_role, **kwargs)
 
-        temp = agent_cfg.temperature if agent_cfg.temperature is not None else 0.1
-        agent_base_url = getattr(agent_cfg, "base_url", None)
+        fallbacks = list(getattr(agent_cfg, "fallbacks", None) or [])
+        primary = self._build_choice(agent_name, agent_cfg, None, **kwargs)
+        if not fallbacks:
+            return primary
+        from maljan.core.model_assignments import assignment_chain_for
+        from maljan.llm.fallback import FallbackChatModel, turn_share_seconds
+
+        # Each fallback is built now rather than on the turn that needs it:
+        # a fallback that cannot be built — an unknown provider, a missing
+        # key — is a configuration mistake, and the job should say so before
+        # it starts rather than on the one turn it was meant to rescue.
+        models: list[Any] = [primary]
+        for choice in fallbacks:
+            if choice.provider not in _PROVIDER_REGISTRY:
+                available = ", ".join(_PROVIDER_REGISTRY.keys()) or "(none)"
+                raise LLMError(
+                    f"Agent '{agent_name}' falls back to unknown provider "
+                    f"'{choice.provider}' (available: {available})."
+                )
+            models.append(
+                self._build_choice(agent_name, choice, agent_cfg.temperature, **dict(kwargs))
+            )
+        labels = [a.label for a in assignment_chain_for(self._config, agent_name.lower())]
+        logger.info("Agent '%s' falls back through: %s.", agent_name, " -> ".join(labels))
+        return FallbackChatModel(
+            models=models,
+            labels=labels,
+            agent=agent_name,
+            turn_deadline=turn_share_seconds(self._config, agent_name.lower()),
+        )
+
+    def _build_choice(
+        self,
+        agent_name: str,
+        choice: Any,
+        inherited_temperature: float | None,
+        **kwargs: Any,
+    ) -> BaseChatModel:
+        """One model of an agent's list, at its own endpoint and temperature."""
+        provider_cls = _PROVIDER_REGISTRY[choice.provider]
+        if choice.temperature is not None:
+            temp = choice.temperature
+        elif inherited_temperature is not None:
+            temp = inherited_temperature
+        else:
+            temp = 0.1
+        agent_base_url = getattr(choice, "base_url", None)
         logger.info(
             "Building dedicated LLM for agent '%s': %s/%s (temp=%.2f, base_url=%s)",
             agent_name,
-            agent_cfg.provider,
-            agent_cfg.model,
+            choice.provider,
+            choice.model,
             temp,
             agent_base_url or "(global)",
         )
 
-        # Build a temporary Settings-like config targeting the agent's provider
-        # by patching _config at the provider level — clean duck-typing approach
         provider = provider_cls(config=self._config)
         # Only forwarded when the agent actually overrides the endpoint: the
         # providers resolve a missing kwarg to the global value themselves, and
@@ -193,7 +246,7 @@ class LLMProviderRegistry:
         if agent_base_url:
             kwargs["base_url"] = agent_base_url
         return provider.build_model(  # type: ignore[no-any-return]
-            model=agent_cfg.model,
+            model=choice.model,
             temperature=temp,
             **kwargs,
         )
@@ -221,7 +274,15 @@ def structured_output_supported(config: Any | None = None, llm: Any | None = Non
 
     Never raises, and refuses when it cannot tell: knowing nothing about the
     endpoint is not a reason to gamble half an hour of a job on it.
+
+    **A fallback list** is asked model by model, each by what its own model
+    object says: any of them may answer a turn, so the list supports
+    structured output only when every one does, and a local server anywhere
+    in it takes the path a bare local server takes.
     """
+    inner = getattr(llm, "models", None) if llm is not None else None
+    if isinstance(inner, list) and getattr(llm, "_llm_type", "") == "maljan-fallback":
+        return bool(inner) and all(structured_output_supported(None, model) for model in inner)
     try:
         # A per-agent endpoint is as local as a global one, and the model
         # object is the only place it survives: ChatOpenAI keeps it as

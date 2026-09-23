@@ -51,6 +51,12 @@ export type WSEventType =
    * work when a cap did. See maljan/pipeline/events.py. */
   | "budget_tick"
   | "stage_ended_at_cap"
+  /* A tool server this job stopped calling for a while after a run of
+   * calls it did not answer. See maljan/providers/server_guard.py. */
+  | "tool_server_rested"
+  /* An agent's model list moved on to its next model because the one before
+   * failed as a provider; once per switch, whether or not deltas stream. */
+  | "model_fallback"
   | "completed"
   | "enrichment_complete"
   | "error"
@@ -117,7 +123,31 @@ export interface AgentMessageEventData {
 export interface AgentMessageDeltaEventData {
   stage: string;
   agent: string;
+  /** Empty on a turn that only asked for tools, published for its tokens. */
   text_delta: string;
+  /** The model that gave this turn, as `provider/model`. */
+  model?: string;
+  /** What the turn spent as the provider reported it; absent where it
+   *  reported nothing. */
+  tokens?: { input_tokens: number; output_tokens: number; cost?: number };
+  seq?: number;
+}
+
+export interface ModelFallbackEventData {
+  stage: string;
+  agent: string;
+  /** The model that answers from here on, as `provider/model`. */
+  model: string;
+  /** Why, in words: the failure of each model before it. */
+  reason: string;
+  seq?: number;
+}
+
+export interface ToolServerRestedEventData {
+  server: string;
+  failures: number;
+  cooldown_s: number;
+  reason: string;
   seq?: number;
 }
 

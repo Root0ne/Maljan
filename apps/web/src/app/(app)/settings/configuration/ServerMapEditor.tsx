@@ -16,6 +16,8 @@ import {
 } from "./envAllow";
 import { deepEqual, mapKeyError, putEntry, removeEntry } from "./mapEditorHelpers";
 import SecretField, { type SecretStatus } from "./SecretField";
+import ToolTable from "./ToolTable";
+import { capabilityCells } from "./toolTableRows";
 
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
@@ -336,6 +338,7 @@ export function ServerDetail({
   const unavailable =
     result && result !== "running" ? unavailableTools(result) : [];
   const allowed = server.tools;
+  const tableShown = has("tools") && !!manifest && manifest.length > 0;
   const detailError = Object.entries(errors).find(
     ([k]) => k === `${entryKey}.${serverKey}` || k.startsWith(`${entryKey}.${serverKey}.`)
   )?.[1];
@@ -367,8 +370,10 @@ export function ServerDetail({
         </p>
       )}
       {/* What the server cannot do on its host, said before any run: each
-          tool the manifest marks unavailable, with the reason and the remedy. */}
-      {unavailable.length > 0 && (
+          tool the manifest marks unavailable, with the reason and the remedy.
+          Where the tool table is drawn the reason is on the tool's own row,
+          and saying it here as well would be the same line twice. */}
+      {unavailable.length > 0 && !tableShown && (
         <ul className="text-[11px] text-text-secondary space-y-0.5" aria-label="unavailable tools">
           {unavailable.map((cell) => (
             <li key={cell.name}>
@@ -570,39 +575,13 @@ export function ServerDetail({
           {!showHeader && status}
 
           {manifest && manifest.length > 0 ? (
-            <div className="mt-2">
-              <p className="text-xs text-text-muted">
-                Tools the model may call ({allowed === null ? "all" : allowed.length} of{" "}
-                {manifest.length})
-              </p>
-              <div className="flex gap-3 flex-wrap mt-1">
-                {manifest.map((tool) => (
-                  <label
-                    key={tool}
-                    className="text-xs text-text-secondary flex items-center gap-1"
-                  >
-                    <input
-                      type="checkbox"
-                      aria-label={`${serverKey} tool ${tool}`}
-                      checked={allowed === null || allowed.includes(tool)}
-                      onChange={(e) => {
-                        // `null` means "every tool", which only the built-ins
-                        // start with. The first tick turns that into an
-                        // explicit list, so a later server-side change to the
-                        // manifest cannot silently widen what the model sees.
-                        const base = allowed === null ? manifest : allowed;
-                        put(serverKey, {
-                          tools: e.target.checked
-                            ? [...base, tool]
-                            : base.filter((t) => t !== tool),
-                        });
-                      }}
-                    />
-                    {tool}
-                  </label>
-                ))}
-              </div>
-            </div>
+            <ToolTable
+              serverKey={serverKey}
+              manifest={manifest}
+              allowed={allowed}
+              cells={capabilityCells(result && result !== "running" ? result : null)}
+              onChange={(tools) => put(serverKey, { tools })}
+            />
           ) : (
             <div className="mt-2 flex items-center gap-2">
               <p className="text-xs text-text-muted">

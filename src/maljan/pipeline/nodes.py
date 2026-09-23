@@ -118,6 +118,21 @@ if TYPE_CHECKING:
 _NARRATIVE_TIMEOUT_SECONDS = 600
 
 
+def _restart_reporter(llm: Any, seconds: Any, container: Any) -> None:
+    """Start the reporter's model list for one round, against that round's clock. Never raises."""
+    try:
+        from maljan.llm.fallback import restart_models
+
+        share = getattr(getattr(container.config, "llm", None), "fallback_turn_share", None)
+        restart_models(
+            llm,
+            loop_seconds=float(seconds) if isinstance(seconds, int | float) else None,
+            share=float(share) if isinstance(share, int | float) else None,
+        )
+    except Exception as exc:  # noqa: BLE001 — a restart never costs the report
+        logger.debug("report_node: the reporter's model list was not restarted (%s).", exc)
+
+
 # What the run summary calls a judge annotation whose technique did not
 # survive validation. Its own code: the technique's own rejection is recorded
 # under its own, and this row says what that rejection cost the export.
@@ -3439,6 +3454,7 @@ def make_judge_node(
                         )
                     )
                     .set_token_usage(container.get_token_ledger().snapshot())
+                    .set_server_rests(container.server_rests())
                     .set_truncation(_truncation_snapshot(container))
                     .set_triage(_triage_facts)
                     .set_sandbox(state.get("sandbox_report"))
@@ -4002,6 +4018,13 @@ def make_report_node(
             logger.warning("report_node: NarrativeAgent unavailable (%s); using fallback.", exc)
             narrative_agent = None
 
+        # The narrative round is the reporter's first loop: its model list
+        # starts at its first model again, with turn deadlines measured against
+        # the narrative's own 600 s clock.
+        _restart_reporter(
+            getattr(narrative_agent, "llm", None), _NARRATIVE_TIMEOUT_SECONDS, container
+        )
+
         if narrative_agent is not None:
             try:
                 # Bounded, like every ReportComposer section below it. This
@@ -4058,6 +4081,14 @@ def make_report_node(
             logger.warning("report_node: ReportComposer unavailable (%s); skipping spine.", exc)
             composer = None
         if composer is not None:
+            # The composer sections are its second: the list starts over, and
+            # each turn is measured against one section's clock. A slow
+            # narrative that moved the list does not decide the sections.
+            _restart_reporter(
+                getattr(composer, "llm", None),
+                getattr(container.config.reporting, "composer_per_section_timeout", None),
+                container,
+            )
             try:
                 await composer.compose(
                     report,
@@ -4266,6 +4297,21 @@ def make_report_node(
             if _closed_summary:
                 _closed_summary["elapsed_seconds"] = _elapsed
                 report.run_summary = _closed_summary
+        # What the run spent, closed here for the same reason: the narrative
+        # round and the composer sections are model calls the judge's snapshot
+        # was taken before, so the ledger is read again after the last model
+        # call of the run.
+        if state.get("run_summary"):
+            from maljan.analysis.run_summary import spend_blocks
+
+            _ledger_of = getattr(container, "get_token_ledger", None)
+            _spent = spend_blocks(_ledger_of().snapshot()) if callable(_ledger_of) else {}
+            if _spent:
+                _state_summary.update(_spent)
+                _with_spend = dict(report.run_summary or {})
+                if _with_spend:
+                    _with_spend.update(_spent)
+                    report.run_summary = _with_spend
         # The markdown is rendered once every field it reads is final: the
         # validation block, the corroboration's published marks, the stage
         # rollup and the elapsed time are all written above this line, and so

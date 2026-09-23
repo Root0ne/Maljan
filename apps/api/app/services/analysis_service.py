@@ -23,6 +23,11 @@ from app.models.user import User
 
 logger = get_logger("service.analysis")
 
+# How many completed runs the dashboard's "Tools used" list reads by default,
+# and the most a caller may ask it to read.
+TOOL_USAGE_RUNS = 20
+TOOL_USAGE_MAX_RUNS = 100
+
 
 class JobEnqueueError(RuntimeError):
     """Raised when ARQ enqueue fails so the route can return 503."""
@@ -269,6 +274,79 @@ class AnalysisService:
             "verdict_distribution": verdict_counts,
             "avg_duration_seconds": round(float(avg_duration), 1) if avg_duration else None,
         }
+
+    async def get_tool_usage(self, user: User, limit: int = TOOL_USAGE_RUNS) -> dict[str, Any]:
+        """Which tools the caller's latest completed runs called, and how often.
+
+        Read from each run's ``run_summary.evidence.by_tool``, the per-tool
+        ledger count the report was built with, so the dashboard's bars and the
+        Summary tab's evidence counts come from one record. Only the last
+        ``limit`` completed runs are read, and only their JSON is opened: the
+        question is what recent runs leaned on, and a whole-history scan of a
+        JSON column on every landing page load is a cost it does not need.
+        """
+        rows = await self.db.execute(tool_usage_query(user.id, limit))
+        return tally_tool_usage([row[0] for row in rows.all()], limit)
+
+
+def tool_usage_query(user_id: uuid.UUID, limit: int) -> Any:
+    """The per-tool counts of one user's latest ``limit`` completed runs.
+
+    Two steps, so the database does the bounded part first. The inner query
+    picks the ids of the newest ``limit`` completed runs the caller owns,
+    reading only narrow columns; the outer one extracts the JSON path for
+    those rows alone. With the path in a single flat select, the server is
+    free to detoast ``run_summary`` — which carries the settings snapshot and
+    every failure row — for every completed run of the user before the sort
+    and the limit throw most of them away.
+    """
+    from app.models.report import AnalysisReport
+
+    newest = (
+        select(AnalysisReport.id.label("id"), AnalysisReport.created_at.label("created_at"))
+        .join(AnalysisJob, AnalysisReport.job_id == AnalysisJob.id)
+        .where(AnalysisJob.created_by == user_id, AnalysisJob.status == "completed")
+        .order_by(AnalysisReport.created_at.desc())
+        .limit(limit)
+        .subquery("newest")
+    )
+    return (
+        select(AnalysisReport.run_summary["evidence"]["by_tool"])
+        .join(newest, AnalysisReport.id == newest.c.id)
+        .order_by(newest.c.created_at.desc())
+    )
+
+
+def tally_tool_usage(by_tool_rows: list[Any], limit: int) -> dict[str, Any]:
+    """Per-tool call counts summed across runs, and how many runs used each.
+
+    ``runs`` counts only the runs whose report carries the per-tool record —
+    a map, even an empty one for a run that called nothing. A report written
+    before that record existed says nothing about which tools ran, so it is
+    not a run that called none of them and it stays out of the denominator;
+    ``read`` is every completed run looked at, so the console can say how many
+    of them had no record. A count that is not a positive integer is not a
+    call and is left out rather than coerced.
+    """
+    calls: dict[str, int] = {}
+    used_in: dict[str, int] = {}
+    recorded = 0
+    for by_tool in by_tool_rows:
+        if not isinstance(by_tool, dict):
+            continue
+        recorded += 1
+        for tool, count in by_tool.items():
+            if not isinstance(tool, str) or not tool:
+                continue
+            if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+                continue
+            calls[tool] = calls.get(tool, 0) + count
+            used_in[tool] = used_in.get(tool, 0) + 1
+    tools = [
+        {"tool": tool, "calls": calls[tool], "runs": used_in[tool]}
+        for tool in sorted(calls, key=lambda name: (-calls[name], name))
+    ]
+    return {"limit": limit, "read": len(by_tool_rows), "runs": recorded, "tools": tools}
 
 
 async def _enqueue_analysis(arq: Any, job_id: uuid.UUID) -> Any:

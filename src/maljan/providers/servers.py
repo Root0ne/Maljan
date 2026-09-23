@@ -274,6 +274,11 @@ class ServerHandle:
         # from its ``capabilities`` tool when it offers one; ``None`` for a
         # server that does not, or whose answer could not be read.
         self.capabilities: ServerCapabilities | None = None
+        # The job's breaker and call cap for this server, set by the registry
+        # that owns the handle (``maljan.providers.server_guard``). A handle
+        # built outside a registry — a probe, a test — has none and sends
+        # every call as it always did.
+        self.guard: Any = None
         _LIVE_HANDLES.add(self)
         _register_retirement_hook()
 
@@ -413,6 +418,7 @@ class ServerHandle:
                 max_output_chars=max_output_chars,
                 truncation_ledger=truncation_ledger,
                 context_budget=context_budget,
+                guard=self.guard,
             )
         # An http/sse transport has no child of ours to reap.
         self._launch_argv = ()
@@ -426,6 +432,7 @@ class ServerHandle:
             max_output_chars=max_output_chars,
             truncation_ledger=truncation_ledger,
             context_budget=context_budget,
+            guard=self.guard,
         )
 
     def open(
@@ -900,6 +907,10 @@ class ServerHandle:
     def _keep_capabilities(self, payload: Any) -> None:
         parsed = ServerCapabilities.from_payload(self.name, payload)
         self.capabilities = parsed
+        # The budgets the server declares for its own tools set how long the
+        # guard lets one of their calls run before it counts as unanswered.
+        if parsed is not None and self.guard is not None:
+            self.guard.declare(parsed.tools)
         if parsed is None:
             logger.warning("mcp server '%s': capabilities answer was not a manifest.", self.name)
             return
@@ -1080,10 +1091,31 @@ class ServerRegistry:
         *,
         truncation_ledger: Any | None = None,
         context_budget: Any | None = None,
+        event_sink: Any | None = None,
     ) -> None:
+        from maljan.providers.server_guard import guard_from_settings
+
         self._handles = {
             name: ServerHandle(name, config) for name, config in cfg.mcp.servers.items()
         }
+        # Every rest this job gave a server, in the order the breakers opened;
+        # the judge node reads it into the run summary. Written from whichever
+        # loop's call tripped the breaker, so appended under the lock.
+        self.rests: list[dict[str, Any]] = []
+        self._event_sink = event_sink
+        # Weakly: a guard lives on the handle and the handle may outlive the
+        # registry (``_LIVE_HANDLES``), and a guard holding its registry
+        # would keep a finished job's whole registry, and every handle in
+        # it, alive with it.
+        rested = weakref.WeakMethod(self._rested)
+
+        def _on_open(record: dict[str, Any]) -> None:
+            method = rested()
+            if method is not None:
+                method(record)
+
+        for name, handle in self._handles.items():
+            handle.guard = guard_from_settings(name, cfg, on_open=_on_open)
         # The job's own bound-hit ledger and the job's own tool-output limit,
         # put on every toolkit this registry opens. Both used to be left to the
         # caller: every attach but the static provider's passed neither, so the
@@ -1110,6 +1142,14 @@ class ServerRegistry:
         # ``degradation_reasons`` so the run summary says which server was
         # missing, rather than the report simply being thinner than the last.
         self.degradation_reasons: list[str] = []
+
+    def _rested(self, record: dict[str, Any]) -> None:
+        """Keep one breaker opening for the run summary and announce it."""
+        from maljan.pipeline.events import emit_tool_server_rested
+
+        with self._lock:
+            self.rests.append(dict(record))
+        emit_tool_server_rested(self._event_sink, record)
 
     def _attach(self, context: dict[str, Any]) -> dict[str, Any]:
         """The attach context, with this job's ledger, limit and budget in it.
@@ -1171,6 +1211,9 @@ class ServerRegistry:
             replica = self._loop_handles.get(key)
             if replica is None or replica._owner_loop not in (None, loop):
                 replica = ServerHandle(handle.name, handle.config)
+                # The same server to the job: a rest one loop's calls earned
+                # is a rest for every loop's.
+                replica.guard = handle.guard
                 self._loop_handles[key] = replica
                 logger.info(
                     "mcp server '%s' is attached on another loop; the caller gets "

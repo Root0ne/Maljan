@@ -115,18 +115,94 @@ class ValidationMetrics:
 
 @dataclass
 class TokenUsageMetrics:
-    """Per-run LLM token usage (findings-log §4 Item 1, MARD-style cost).
+    """What the run's model calls spent, in the providers' own figures.
 
-    ``estimated_calls`` counts invocations where the provider omitted
-    ``usage_metadata`` and a character-based estimate was used instead, so a
-    reader can gauge how much of the figure is exact vs approximate.
+    ``unreported_calls`` counts the calls whose provider reported no usage.
+    Their tokens are not in the sums and are not estimated: a sum is what the
+    providers reported, and the calls that reported nothing are said to have
+    reported nothing. ``cost`` is present only where a provider reported one,
+    over ``cost_calls`` calls; there is no price table. ``per_agent`` holds
+    the same figures for each agent, and the models that answered it.
     """
 
     input_tokens: int
     output_tokens: int
     total_tokens: int
     llm_calls: int
-    estimated_calls: int
+    unreported_calls: int = 0
+    cost: float | None = None
+    cost_calls: int = 0
+    per_agent: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+def tokens_sentence(tokens: dict[str, Any] | None) -> str | None:
+    """One sentence saying what the run's model calls spent, or ``None`` with no calls.
+
+    The report and the console print the same words. Tokens a provider did
+    not report are said to be not reported, never estimated; a cost appears
+    only where a provider reported one, with how many calls it covers.
+    """
+    if not isinstance(tokens, dict):
+        return None
+    calls = int(tokens.get("llm_calls") or 0)
+    if calls <= 0:
+        return None
+    noun = "call" if calls == 1 else "calls"
+    # A summary stored before this release folded a character estimate into
+    # its sums for every call whose provider reported nothing, and said so
+    # only in ``estimated_calls``. Those sums are not counts, so none is shown.
+    if int(tokens.get("estimated_calls") or 0) > 0:
+        return (
+            f"Tokens: this run was recorded with estimates mixed into its {calls} model "
+            f"{noun}, so no count is shown."
+        )
+    unreported = int(tokens.get("unreported_calls") or 0)
+    reported = calls - unreported
+    if reported <= 0:
+        return f"Tokens: not reported by the provider for any of {calls} model {noun}."
+    text = (
+        f"Tokens: {int(tokens.get('input_tokens') or 0):,} in and "
+        f"{int(tokens.get('output_tokens') or 0):,} out over {calls} model {noun}"
+    )
+    if unreported:
+        text += f"; not reported for {unreported} of them"
+    cost = tokens.get("cost")
+    cost_calls = int(tokens.get("cost_calls") or 0)
+    if isinstance(cost, int | float) and cost_calls:
+        # The only usage block that carries ``cost`` is an OpenAI-compatible
+        # router's, which reports it in US dollars.
+        text += (
+            f"; a cost of {float(cost):.4f} USD as the provider reported it for "
+            f"{cost_calls} {'call' if cost_calls == 1 else 'calls'}"
+        )
+    return text + "."
+
+
+def spend_blocks(snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    """``tokens`` and ``models`` as the run summary stores them, from a ledger snapshot.
+
+    For a node that closes the summary after the judge built it: the report
+    stage's own model calls — the narrative round and every composer section —
+    happen after the judge's snapshot, and a run total without them is short.
+    Empty when the snapshot holds no call.
+    """
+    if not isinstance(snapshot, dict) or not snapshot.get("llm_calls"):
+        return {}
+    summary = RunSummaryBuilder(start_time=time.time()).set_token_usage(snapshot).build()
+    stored = summary.to_dict()
+    return {"tokens": stored["tokens"], "models": stored["models"]}
+
+
+def server_rest_sentence(row: dict[str, Any]) -> str:
+    """One rested tool server, in the words the report and the console print."""
+    failures = int(row.get("failures") or 0)
+    noun = "call" if failures == 1 else "calls"
+    reason = str(row.get("reason") or "").strip()
+    return (
+        f"Tool server {row.get('server', '')!s} was rested for "
+        f"{float(row.get('cooldown_s') or 0):.0f} s after {failures} {noun} in a row it did not "
+        "answer" + (f" (the last: {reason})" if reason else "") + "."
+    )
 
 
 @dataclass
@@ -520,6 +596,15 @@ class RunSummary:
     # a slow tool could not be told from a slow model. ``None`` on a run whose
     # ledger holds no timed call.
     tool_latency: dict[str, Any] | None = None
+    # Which model answered each agent's turns: ``{agent: {turns: {model:
+    # count}, fallbacks: [{model, reason}]}}``. A fallback row is a turn
+    # another model answered because the one before it failed as a provider,
+    # with that failure in words. ``None`` on a run that recorded no turn.
+    models: dict[str, Any] | None = None
+    # The tool servers this run rested after a run of calls they did not answer:
+    # ``[{server, failures, cooldown_s, reason}]`` in the order they opened.
+    # ``None`` when no server was rested.
+    server_rests: list[dict[str, Any]] | None = None
     # What the run's sandbox report is, when it is not a live sandbox's:
     # ``{status, statement}`` from ``pipeline.sandbox_status`` — no sandbox
     # ran, or the report is a recorded fixture. ``None`` when a sandbox
@@ -695,23 +780,46 @@ class RunSummary:
         else:
             lines += ["## Validation", "", "*Validation did not run.*", ""]
 
-        # Token / cost usage (findings-log §4 Item 1).
+        # What the model calls spent, in the providers' own figures.
         if self.tokens:
             tok = self.tokens
-            est = ""
-            if tok.estimated_calls:
-                est = f" ({tok.estimated_calls}/{tok.llm_calls} estimated)"
-            lines += [
-                "## Token Usage",
-                "",
-                "| Metric | Value |",
-                "|---|---|",
-                f"| LLM calls | {tok.llm_calls}{est} |",
-                f"| Input tokens | {tok.input_tokens} |",
-                f"| Output tokens | {tok.output_tokens} |",
-                f"| Total tokens | {tok.total_tokens} |",
-                "",
-            ]
+            lines += ["## Token Usage", "", self._tokens_dict()["sentence"], ""]
+            if tok.per_agent:
+                lines += [
+                    "| Agent | Calls | Input | Output | Not reported | Models |",
+                    "|---|---|---|---|---|---|",
+                ]
+                for agent, spent in sorted(tok.per_agent.items()):
+                    turns: dict[str, Any] = dict(spent.get("models") or {})
+                    answered = ", ".join(f"{name} ×{count}" for name, count in turns.items())
+                    # Nothing reported is said, not printed as a zero count.
+                    silent = int(spent.get("unreported_calls", 0) or 0) >= int(
+                        spent.get("llm_calls", 0) or 0
+                    )
+                    inp = "not reported" if silent else spent.get("input_tokens", 0)
+                    out = "not reported" if silent else spent.get("output_tokens", 0)
+                    lines.append(
+                        f"| {agent} | {spent.get('llm_calls', 0)} | {inp} | {out} | "
+                        f"{spent.get('unreported_calls', 0)} | {answered or '—'} |"
+                    )
+                lines.append("")
+
+        fallbacks = [
+            (agent, row)
+            for agent, block in sorted((self.models or {}).items())
+            for row in (block.get("fallbacks") or [])
+        ]
+        if fallbacks:
+            lines += ["## Model Fallbacks", ""]
+            for agent, row in fallbacks:
+                lines.append(f"- `{agent}`: {row.get('reason', '')}")
+            lines.append("")
+
+        if self.server_rests:
+            lines += ["## Tool Servers Rested", ""]
+            for row in self.server_rests:
+                lines.append(f"- {server_rest_sentence(row)}")
+            lines.append("")
 
         if self.truncation:
             trunc = self.truncation
@@ -780,6 +888,25 @@ class RunSummary:
 
         return "\n".join(lines)
 
+    def _tokens_dict(self) -> dict[str, Any]:
+        """``tokens`` as it is stored, the sentence the report prints included."""
+        tok = self.tokens
+        if tok is None:
+            return {}
+        out: dict[str, Any] = {
+            "input_tokens": tok.input_tokens,
+            "output_tokens": tok.output_tokens,
+            "total_tokens": tok.total_tokens,
+            "llm_calls": tok.llm_calls,
+            "unreported_calls": tok.unreported_calls,
+            "per_agent": {agent: dict(row) for agent, row in sorted(tok.per_agent.items())},
+        }
+        if tok.cost is not None and tok.cost_calls:
+            out["cost"] = round(tok.cost, 6)
+            out["cost_calls"] = tok.cost_calls
+        out["sentence"] = tokens_sentence(out) or ""
+        return out
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-compatible dict."""
         n = self.negotiation
@@ -840,13 +967,9 @@ class RunSummary:
             }
 
         if self.tokens:
-            result["tokens"] = {
-                "input_tokens": self.tokens.input_tokens,
-                "output_tokens": self.tokens.output_tokens,
-                "total_tokens": self.tokens.total_tokens,
-                "llm_calls": self.tokens.llm_calls,
-                "estimated_calls": self.tokens.estimated_calls,
-            }
+            result["tokens"] = self._tokens_dict()
+        result["models"] = dict(self.models) if self.models else None
+        result["server_rests"] = [dict(row) for row in self.server_rests or []] or None
 
         if self.truncation:
             t = self.truncation
@@ -939,6 +1062,8 @@ class RunSummaryBuilder:
         self._nudge: dict[str, Any] | None = None
         self._budget: dict[str, Any] | None = None
         self._tool_latency: dict[str, Any] | None = None
+        self._models: dict[str, Any] | None = None
+        self._server_rests: list[dict[str, Any]] | None = None
 
     def set_budget(self, records: dict[str, list[dict[str, Any]]] | None) -> RunSummaryBuilder:
         """What each agent spent, summed over its loops, and the caps that ended them.
@@ -1048,21 +1173,46 @@ class RunSummaryBuilder:
         self._degradation_reasons = list(reasons or [])
         return self
 
-    def set_token_usage(self, snapshot: dict[str, int] | None) -> RunSummaryBuilder:
-        """Record per-run LLM token usage from a ``TokenLedger.snapshot()``.
+    def set_token_usage(self, snapshot: dict[str, Any] | None) -> RunSummaryBuilder:
+        """What the run spent and which models answered, from a ``TokenLedger.snapshot()``.
 
-        Findings-log §4 Item 1. A None / empty snapshot leaves ``tokens`` unset
-        (mock runs and zero-call runs render no Token Usage section).
+        A None / empty snapshot leaves ``tokens`` and ``models`` unset (mock
+        runs and zero-call runs render no Token Usage section). The per-agent
+        model counts and the fallbacks come out of the same snapshot, because
+        the call that is counted is the call whose model is named.
         """
         if not snapshot or not snapshot.get("llm_calls"):
             return self
+        raw_agents = snapshot.get("agents")
+        agents: dict[str, Any] = raw_agents if isinstance(raw_agents, dict) else {}
+        cost = snapshot.get("cost")
         self._tokens = TokenUsageMetrics(
             input_tokens=int(snapshot.get("input_tokens", 0)),
             output_tokens=int(snapshot.get("output_tokens", 0)),
             total_tokens=int(snapshot.get("total_tokens", 0)),
             llm_calls=int(snapshot.get("llm_calls", 0)),
-            estimated_calls=int(snapshot.get("estimated_calls", 0)),
+            unreported_calls=int(snapshot.get("unreported_calls", 0)),
+            cost=float(cost) if isinstance(cost, int | float) else None,
+            cost_calls=int(snapshot.get("cost_calls", 0) or 0),
+            per_agent={str(name): dict(row) for name, row in agents.items()},
         )
+        models: dict[str, Any] = {}
+        for name, row in agents.items():
+            turns = dict(row.get("models") or {})
+            if turns:
+                models[str(name)] = {"turns": turns, "fallbacks": []}
+        for row in snapshot.get("fallbacks") or []:
+            agent = str(row.get("agent") or "")
+            block = models.setdefault(agent, {"turns": {}, "fallbacks": []})
+            block["fallbacks"].append(
+                {"model": str(row.get("model") or ""), "reason": str(row.get("reason") or "")}
+            )
+        self._models = models or None
+        return self
+
+    def set_server_rests(self, rows: list[dict[str, Any]] | None) -> RunSummaryBuilder:
+        """The tool servers this run rested, in the order their breakers opened."""
+        self._server_rests = [dict(row) for row in rows or [] if isinstance(row, dict)] or None
         return self
 
     def set_truncation(self, snapshot: dict[str, Any] | None) -> RunSummaryBuilder:
@@ -1299,6 +1449,8 @@ class RunSummaryBuilder:
             elapsed_seconds=time.time() - self._start_time,
             corroboration=self._corroboration,
             tokens=self._tokens,
+            models=self._models,
+            server_rests=self._server_rests,
             truncation=self._truncation,
             degraded_mode=self._degraded_mode,
             degradation_reasons=self._degradation_reasons,
