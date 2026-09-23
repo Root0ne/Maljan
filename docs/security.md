@@ -155,4 +155,4 @@ Use GitHub's private vulnerability reporting at
 public issue for an unfixed vulnerability. Include the version or commit, the
 configuration that reproduces it, and the impact you observed. Response
 targets, scope and supported versions are in the repository's
-[SECURITY.md](../SECURITY.md).
+[SECURITY.md](https://github.com/Root0ne/Maljan/blob/dev/SECURITY.md).

@@ -6,7 +6,8 @@ see [configuration.md](configuration.md).
 
 ## The compose stack
 
-[`docker/docker-compose.yml`](../docker/docker-compose.yml) is the production
+[`docker/docker-compose.yml`](https://github.com/Root0ne/Maljan/blob/dev/docker/docker-compose.yml)
+is the production
 shape. `docker/docker-compose.dev.yml` is an overlay that swaps the frontend to
 `next dev` and supervises the worker so source edits take effect; `make dev-up`
 applies both.
