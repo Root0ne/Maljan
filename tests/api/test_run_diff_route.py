@@ -67,8 +67,10 @@ def test_two_readable_runs_answer_with_the_diff(client: TestClient) -> None:
         resp = client.get(_url(rows[0].id, rows[1].id))
 
     assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/json")
     body = resp.json()
     assert body["a"]["report_id"] == str(rows[0].id)
+    assert all("section_evidence" in s for s in body["sections"])
     assert body["same_sample"] is True
     verdict = next(s for s in body["sections"] if s["key"] == "verdict")
     assert verdict["counts"]["changed"] == 1

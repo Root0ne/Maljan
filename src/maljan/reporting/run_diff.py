@@ -23,11 +23,12 @@ a dictionary and the other side is looked up in it.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
-
-from maljan.schemas.evidence import ENTRY_ID_RE
 
 # ── Row statuses ─────────────────────────────────────────────────────────────
 
@@ -43,9 +44,22 @@ ONLY_IN_B = "only_in_b"
 
 STATUSES: tuple[str, ...] = (ADDED, REMOVED, CHANGED, UNCHANGED, ONLY_IN_A, ONLY_IN_B)
 
-# What a row repeated inside one run says. The first row of a key is paired;
-# a second row with the same key in the same run has nothing to pair with.
-REPEATED_KEY_NOTE = "this key appears more than once in this run's record; only the first is paired"
+# What a surplus row says. Rows under one key are paired as a multiset: n rows
+# under a key in both runs pair, identical rows first; the rows one run holds
+# beyond the other's count have nothing to pair with and are listed as added
+# or removed with this note.
+REPEATED_KEY_NOTE = (
+    "a repeat: this key appears more times in this run's record than in the other run's"
+)
+
+# What the indicator section says when the two runs store indicators in two
+# shapes. Neither is translated into the other: a type label is not a kind,
+# and turning a defanged value back into a live one is a guess.
+INDICATOR_SHAPE_NOTE = (
+    "The two runs store indicators differently: run {side}'s table has no kind column (a "
+    "report stored before it existed, whose network values may be stored defanged). Rows of "
+    "different shapes are not paired; each is listed by run."
+)
 
 # The rule-match sections the report builds from the rule tools' ledger rows,
 # the engine each belongs to, and the columns compared on a pair. ``Where`` and
@@ -57,14 +71,30 @@ DETECTION_SECTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
     "capa_capabilities": ("capa", ("Namespace", "ATT&CK")),
 }
 
-# Indicator kinds whose value is compared without regard to case. A URL's path
-# is case-sensitive and a registry path or a mutex name is the sample's own
-# spelling, so those are compared as written.
-_CASELESS_INDICATOR_KINDS = frozenset(
-    {"domain", "email", "hash", "ip", "ipv4", "ipv6", "sha256", "sha1", "md5", "sha512"}
+# The one case rule, applied to indicator values and STIX keys alike: a value
+# is compared without regard to case only where it is case-insensitive by
+# definition. A domain name (DNS), an IP address and a hash or a MAC address
+# (hexadecimal) and a Windows registry key are; an e-mail address is in its
+# domain part only. Everything else — a URL, a path, a mutex name, a malware
+# or tool name — is compared as written.
+CASELESS_KINDS = frozenset(
+    {"domain", "ip", "ipv4", "ipv6", "hash", "md5", "sha1", "sha256", "sha512", "mac", "registry"}
 )
 
-# STIX types keyed by their ``name``, compared without regard to case.
+# The indicator kind each keyed STIX observable type is read as.
+_STIX_VALUE_KINDS = {
+    "domain-name": "domain",
+    "ipv4-addr": "ip",
+    "ipv6-addr": "ip",
+    "email-addr": "email",
+    "mac-addr": "mac",
+    "url": "url",
+}
+
+# A ledger entry id, the whole of a structured id item and nothing else.
+_ENTRY_ID = re.compile(r"ev_\d{3,}", re.IGNORECASE)
+
+# STIX types keyed by their ``name``, compared as written.
 _STIX_NAMED_TYPES = frozenset(
     {
         "malware",
@@ -81,10 +111,6 @@ _STIX_NAMED_TYPES = frozenset(
         "malware-analysis",
     }
 )
-# STIX observables keyed by ``value``.
-_STIX_VALUE_TYPES = frozenset(
-    {"domain-name", "ipv4-addr", "ipv6-addr", "url", "email-addr", "mac-addr"}
-)
 # Objects whose id the standard itself fixes, so the id is the key.
 _STIX_ID_KEYED_TYPES = frozenset({"marking-definition", "extension-definition"})
 
@@ -92,6 +118,7 @@ _STIX_ID_KEYED_TYPES = frozenset({"marking-definition", "extension-definition"})
 # listed: they are equal by construction. Timestamps and ids differ on every
 # run and are not a change in what the record says.
 _STIX_COMPARED = (
+    "name",
     "confidence",
     "x_maljan_confidence",
     "labels",
@@ -108,7 +135,11 @@ _STIX_COMPARED = (
 MATCH_KEYS: dict[str, str] = {
     "verdict": "the field name",
     "attack": "the technique id (ttp_mappings.technique_id)",
-    "indicators": "the indicator kind and value (consolidated_iocs.kind or .type, and .value)",
+    "indicators": (
+        "the indicator kind and value (consolidated_iocs.kind and .value); a row stored "
+        "without a kind is keyed by its type and value as stored and pairs only with rows "
+        "of the same shape"
+    ),
     "key_findings": "the exact text of the finding; nothing is paired by resemblance",
     "analysts": "the agent name (agent_findings.agent_name)",
     "persistence": "the mechanism kind and target (persistence.kind, .target)",
@@ -123,7 +154,8 @@ MATCH_KEYS: dict[str, str] = {
         "the value for an address or a URL, the SHA-256 or the name for a file, the key "
         "for a registry key, the path for a directory; a relationship by its type and the "
         "keys of both ends, a sighting by the key of what it sights. Any other object, "
-        "and a relationship to one, has no stable key and is listed by run"
+        "and a relationship to one, has no stable key: it pairs only with an identical "
+        "object, id included, and is otherwise listed by run"
     ),
     "run": "the fact name",
     "tools": "the tool name (run_summary.evidence.by_tool)",
@@ -180,14 +212,23 @@ def _text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-def _evidence(*sources: Any) -> list[str]:
-    """The ledger entry ids written anywhere in ``sources``, in order, once each."""
+def _ids(*sources: Any) -> list[str]:
+    """Ledger entry ids from structured id fields, in order, once each.
+
+    Only a field that *is* an id is read: a list of ids, or a citation string
+    in the ``[ev_0002]`` / ``ev_0002, ev_0005`` convention. Each item must be an
+    entry id and nothing else. An id written inside a sentence, a quote, a note
+    or a sample's own command line is not a citation of this row, and a field
+    holding anything but ids yields none.
+    """
     seen: dict[str, None] = {}
 
     def visit(value: Any) -> None:
         if isinstance(value, str):
-            for found in ENTRY_ID_RE.findall(value):
-                seen.setdefault(found.lower(), None)
+            for part in value.strip().strip("[]").split(","):
+                token = part.strip().strip("[]").strip()
+                if _ENTRY_ID.fullmatch(token):
+                    seen.setdefault(token.lower(), None)
         elif isinstance(value, list | tuple):
             for item in value:
                 visit(item)
@@ -195,6 +236,20 @@ def _evidence(*sources: Any) -> list[str]:
     for source in sources:
         visit(source)
     return list(seen)
+
+
+def canonical_value(kind: str, value: str) -> str:
+    """``value`` as compared under the one case rule (see ``CASELESS_KINDS``)."""
+    if kind in CASELESS_KINDS:
+        return value.lower()
+    if kind == "email":
+        local, at, domain = value.rpartition("@")
+        return f"{local}@{domain.lower()}" if at else value
+    return value
+
+
+def _fingerprint(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, default=str)
 
 
 def _row(
@@ -221,15 +276,49 @@ def _row(
     }
 
 
-def _index(items: Iterable[_Item]) -> tuple[dict[str, _Item], list[_Item]]:
-    first: dict[str, _Item] = {}
-    repeated: list[_Item] = []
-    for item in items:
-        if item.key in first:
-            repeated.append(item)
+def _changes(a: _Item, b: _Item) -> list[dict[str, Any]]:
+    names = list(a.fields) + [name for name in b.fields if name not in a.fields]
+    return [
+        {"field": name, "a": a.fields.get(name), "b": b.fields.get(name)}
+        for name in names
+        if a.fields.get(name) != b.fields.get(name)
+    ]
+
+
+def _pair_key(
+    occ_a: list[_Item], occ_b: list[_Item], unmatched_a: str, unmatched_b: str
+) -> list[dict[str, Any]]:
+    """The rows of one key, paired as a multiset.
+
+    Identical rows pair first, as unchanged; the rest pair in record order, as
+    changed; what one run holds beyond the other's count is a surplus, listed
+    as removed or added with the repeat note. A key the other run does not
+    hold at all takes the section's unmatched status.
+    """
+    if not occ_b:
+        return [_row(unmatched_a, a, None) for a in occ_a]
+    if not occ_a:
+        return [_row(unmatched_b, None, b) for b in occ_b]
+    pool: dict[str, list[int]] = {}
+    for index, b in enumerate(occ_b):
+        pool.setdefault(_fingerprint(b.fields), []).append(index)
+    used: set[int] = set()
+    rows: list[dict[str, Any]] = []
+    rest_a: list[_Item] = []
+    for a in occ_a:
+        same = pool.get(_fingerprint(a.fields))
+        if same:
+            index = same.pop(0)
+            used.add(index)
+            rows.append(_row(UNCHANGED, a, occ_b[index]))
         else:
-            first[item.key] = item
-    return first, repeated
+            rest_a.append(a)
+    rest_b = [b for index, b in enumerate(occ_b) if index not in used]
+    for a, b in zip(rest_a, rest_b, strict=False):
+        rows.append(_row(CHANGED, a, b, _changes(a, b)))
+    rows.extend(_row(REMOVED, a, None, note=REPEATED_KEY_NOTE) for a in rest_a[len(rest_b) :])
+    rows.extend(_row(ADDED, None, b, note=REPEATED_KEY_NOTE) for b in rest_b[len(rest_a) :])
+    return rows
 
 
 def _pair(
@@ -239,27 +328,19 @@ def _pair(
     unmatched_a: str = REMOVED,
     unmatched_b: str = ADDED,
 ) -> list[dict[str, Any]]:
-    """Rows paired by key: one dictionary per side, one lookup per row."""
-    index_a, repeated_a = _index(items_a)
-    index_b, repeated_b = _index(items_b)
+    """Rows paired by key: one dictionary per side, one lookup per key."""
+    groups_a: dict[str, list[_Item]] = {}
+    for item in items_a:
+        groups_a.setdefault(item.key, []).append(item)
+    groups_b: dict[str, list[_Item]] = {}
+    for item in items_b:
+        groups_b.setdefault(item.key, []).append(item)
     rows: list[dict[str, Any]] = []
-    for key, a in index_a.items():
-        b = index_b.get(key)
-        if b is None:
-            rows.append(_row(unmatched_a, a, None))
-            continue
-        names = list(a.fields) + [name for name in b.fields if name not in a.fields]
-        changes = [
-            {"field": name, "a": a.fields.get(name), "b": b.fields.get(name)}
-            for name in names
-            if a.fields.get(name) != b.fields.get(name)
-        ]
-        rows.append(_row(CHANGED if changes else UNCHANGED, a, b, changes))
-    for key, b in index_b.items():
-        if key not in index_a:
-            rows.append(_row(unmatched_b, None, b))
-    rows.extend(_row(ONLY_IN_A, item, None, note=REPEATED_KEY_NOTE) for item in repeated_a)
-    rows.extend(_row(ONLY_IN_B, None, item, note=REPEATED_KEY_NOTE) for item in repeated_b)
+    for key, occ_a in groups_a.items():
+        rows.extend(_pair_key(occ_a, groups_b.get(key, []), unmatched_a, unmatched_b))
+    for key, occ_b in groups_b.items():
+        if key not in groups_a:
+            rows.extend(_pair_key([], occ_b, unmatched_a, unmatched_b))
     return rows
 
 
@@ -272,6 +353,7 @@ def _section(
     keyed: bool = True,
     recorded: tuple[bool, bool] = (True, True),
     notes: Iterable[str] = (),
+    evidence: tuple[list[str], list[str]] = ([], []),
 ) -> dict[str, Any]:
     counts = dict.fromkeys(STATUSES, 0)
     for row in rows:
@@ -293,6 +375,9 @@ def _section(
         "counts": counts,
         "rows": rows,
         "notes": out_notes,
+        # Ids the record cites for the section as a whole rather than for one
+        # row: the rule-match and capability-profile sections carry them.
+        "section_evidence": {"a": list(evidence[0]), "b": list(evidence[1])},
     }
 
 
@@ -312,6 +397,14 @@ def _verdict_items(run: RunRecord) -> list[_Item]:
     else:
         verdict, confidence = mr.get("verdict"), mr.get("overall_confidence")
     severity = _map(mr.get("severity")).get("rating") if mr.get("severity") else None
+    # Severity is the judge's own rating only in a report built after the
+    # builder stopped computing one; a report stored before carries a rating
+    # no model stated. ``verdict_reading`` arrived after that change, so a
+    # record holding it shows who stated the severity. A record without it
+    # cannot show it, and the field is left out.
+    severity_fields: dict[str, Any] = {"value": severity}
+    if severity is not None and reading is not None:
+        severity_fields["stated_by"] = "judge"
     attribution = _map(mr.get("attribution"))
     family = attribution.get("family")
     return [
@@ -326,11 +419,7 @@ def _verdict_items(run: RunRecord) -> list[_Item]:
                 "stated_by": "judge" if reading == "stated" and confidence is not None else None,
             },
         ),
-        _Item(
-            "severity",
-            "Severity",
-            {"value": severity, "stated_by": "judge" if severity is not None else None},
-        ),
+        _Item("severity", "Severity", severity_fields),
         _Item(
             "family",
             "Family",
@@ -339,7 +428,7 @@ def _verdict_items(run: RunRecord) -> list[_Item]:
                 "stated_by": attribution.get("family_source"),
                 "grounded": attribution.get("family_grounded") if family else None,
             },
-            _evidence(_list(attribution.get("family_evidence_ids"))),
+            _ids(_list(attribution.get("family_evidence_ids"))),
         ),
         _Item(
             "category",
@@ -376,44 +465,47 @@ def _attack_items(run: RunRecord) -> list[_Item]:
                     "corroborated": row.get("is_corroborated"),
                     "id_valid": row.get("technique_id_valid", True),
                 },
-                _evidence(_list(cell.get("evidence")), _list(row.get("evidence_quotes"))),
+                # The mapping's evidence is quoted prose, with no id field; the
+                # technique's ledger ids are on its STIX objects.
             )
         )
     return items
 
 
-def _indicator_key(kind: str, value: str) -> str:
-    return f"{kind}|{value.lower() if kind in _CASELESS_INDICATOR_KINDS else value}"
+def _indicator_items(run: RunRecord) -> tuple[list[_Item], list[_Item], bool, str | None]:
+    """Rows keyed by kind, rows stored without one, whether any were recorded, and a note.
 
-
-def _indicator_items(run: RunRecord) -> tuple[list[_Item], bool, str | None]:
-    """The indicator rows, whether the run recorded any, and a note on the source read."""
+    The consolidated table has no evidence-id field, so no indicator row cites one.
+    """
     mr = _map(run.malware_report)
     consolidated = _list(mr.get("consolidated_iocs"))
-    items: list[_Item] = []
+    by_kind: list[_Item] = []
+    by_type: list[_Item] = []
     if consolidated:
         for raw in consolidated:
             row = _map(raw)
             value = _text(row.get("value"))
-            kind = (_text(row.get("kind")) or _text(row.get("type"))).lower()
-            if not value or not kind:
+            kind = _text(row.get("kind")).lower()
+            type_label = _text(row.get("type"))
+            fields = {
+                "type": type_label or None,
+                "published": row.get("published"),
+                "source": row.get("source"),
+            }
+            if not value:
                 continue
-            items.append(
-                _Item(
-                    _indicator_key(kind, value),
-                    f"{kind}: {value}",
-                    {
-                        "type": _text(row.get("type")) or None,
-                        "published": row.get("published"),
-                        "source": row.get("source"),
-                    },
-                    _evidence(row.get("context"), row.get("description")),
+            if kind:
+                key = f"{kind}|{canonical_value(kind, value)}"
+                by_kind.append(_Item(key, f"{kind}: {value}", fields))
+            elif type_label:
+                # As stored: the type label and the value, defanged or not.
+                by_type.append(
+                    _Item(f"type:{type_label}|{value}", f"{type_label}: {value}", fields)
                 )
-            )
-        return items, True, None
+        return by_kind, by_type, True, None
     network = mr.get("network")
     if not isinstance(network, Mapping):
-        return items, False, None
+        return by_kind, by_type, False, None
     for kind, collection, attr in (
         ("domain", "domains", "fqdn"),
         ("ip", "ips", "address"),
@@ -423,19 +515,46 @@ def _indicator_items(run: RunRecord) -> tuple[list[_Item], bool, str | None]:
             row = _map(raw)
             value = _text(row.get(attr))
             if value:
-                items.append(
+                by_kind.append(
                     _Item(
-                        _indicator_key(kind, value),
+                        f"{kind}|{canonical_value(kind, value)}",
                         f"{kind}: {value}",
                         {"type": kind, "published": None, "source": row.get("source")},
                     )
                 )
     return (
-        items,
+        by_kind,
+        by_type,
         True,
         "holds no consolidated indicator table; its network block is read instead, "
         "which records no publish decision",
     )
+
+
+def _indicator_rows(
+    a: tuple[list[_Item], list[_Item]], b: tuple[list[_Item], list[_Item]]
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Indicator rows, paired only between rows of the same key shape.
+
+    A shape both runs hold is paired. A shape one run holds while the other run
+    holds only the other shape is listed by run: the two tables say the same
+    things in two vocabularies, and nothing here translates one into the other.
+    A run with no indicators at all has nothing to translate, and the other
+    run's rows are added or removed as usual.
+    """
+    rows: list[dict[str, Any]] = []
+    notes: list[str] = []
+    a_has = len(a[0]) + len(a[1]) > 0
+    b_has = len(b[0]) + len(b[1]) > 0
+    for shape, (items_a, items_b) in enumerate(zip(a, b, strict=True)):
+        if items_a and items_b or not (a_has and b_has):
+            rows.extend(_pair(items_a, items_b))
+            continue
+        rows.extend(_row(ONLY_IN_A, item, None) for item in items_a)
+        rows.extend(_row(ONLY_IN_B, None, item) for item in items_b)
+        if shape == 1 and (items_a or items_b):
+            notes.append(INDICATOR_SHAPE_NOTE.format(side="A" if items_a else "B"))
+    return rows, notes
 
 
 def _key_finding_items(run: RunRecord) -> list[_Item]:
@@ -444,9 +563,7 @@ def _key_finding_items(run: RunRecord) -> list[_Item]:
         row = _map(raw)
         text = _text(row.get("text"))
         if text:
-            items.append(
-                _Item(text, text, {"text": text}, _evidence(_list(row.get("evidence_ids"))))
-            )
+            items.append(_Item(text, text, {"text": text}, _ids(_list(row.get("evidence_ids")))))
     return items
 
 
@@ -473,7 +590,7 @@ def _analyst_items(run: RunRecord) -> list[_Item]:
                     "claims": len(claims),
                     "revision_rounds": row.get("revision_rounds"),
                 },
-                _evidence(refs),
+                _ids(refs),
             )
         )
     return items
@@ -491,7 +608,7 @@ def _persistence_items(run: RunRecord) -> list[_Item]:
                 f"{kind}|{target}",
                 f"{kind}: {target}",
                 {"technique_id": row.get("technique_id"), "payload": row.get("payload") or None},
-                _evidence(row.get("evidence_ref")),
+                _ids(row.get("evidence_ref")),
             )
         )
     return items
@@ -512,7 +629,7 @@ def _configuration_items(run: RunRecord) -> list[_Item]:
                     key,
                     key,
                     {"value": row.get("value"), "how_obtained": row.get("how_obtained")},
-                    _evidence(_list(row.get("evidence_refs"))),
+                    _ids(_list(row.get("evidence_refs"))),
                 )
             )
     return items
@@ -530,7 +647,7 @@ def _command_items(run: RunRecord) -> list[_Item]:
                 f"id:{cid}" if cid else f"name:{name}",
                 f"{cid} {name}".strip(),
                 {"id": cid or None, "name": name or None},
-                _evidence(_list(row.get("evidence_refs"))),
+                _ids(_list(row.get("evidence_refs"))),
             )
         )
     return items
@@ -552,7 +669,7 @@ def _c2_items(run: RunRecord) -> list[_Item]:
                     "encryption": row.get("encryption"),
                     "endpoints": sorted(_text(e) for e in _list(row.get("endpoints")) if _text(e)),
                 },
-                _evidence(row.get("evidence_ref"), _list(row.get("evidence_refs"))),
+                _ids(row.get("evidence_ref"), _list(row.get("evidence_refs"))),
             )
         )
     return items
@@ -560,15 +677,26 @@ def _c2_items(run: RunRecord) -> list[_Item]:
 
 def _capability_items(run: RunRecord) -> list[_Item]:
     static = _map(_map(run.malware_report).get("static"))
-    evidence = _evidence(_list(static.get("api_capabilities_evidence_ids")))
     return [
-        _Item(str(category), str(category), {"count": count}, evidence)
+        _Item(str(category), str(category), {"count": count})
         for category, count in _map(static.get("api_capabilities")).items()
     ]
 
 
-def _detection_items(run: RunRecord) -> tuple[list[_Item], bool]:
+def _capability_evidence(run: RunRecord) -> list[str]:
+    """The ids the profile as a whole was counted from; no one category's own."""
+    static = _map(_map(run.malware_report).get("static"))
+    return _ids(_list(static.get("api_capabilities_evidence_ids")))
+
+
+def _detection_items(run: RunRecord) -> tuple[list[_Item], bool, list[str]]:
+    """Rule-match rows, whether any rule section was recorded, and the sections' ids.
+
+    A rule section cites its ledger entries as a whole, not per rule, so the
+    ids are the section's and no row carries them.
+    """
     items: list[_Item] = []
+    evidence: list[str] = []
     recorded = False
     for raw in _list(_map(run.malware_report).get("sections")):
         section = _map(raw)
@@ -585,7 +713,7 @@ def _detection_items(run: RunRecord) -> tuple[list[_Item], bool]:
         positions = {
             name: columns.index(name.lower()) for name in compared if name.lower() in columns
         }
-        evidence = _evidence(_list(section.get("evidence_ids")))
+        evidence.extend(i for i in _ids(_list(section.get("evidence_ids"))) if i not in evidence)
         for row in _list(section.get("rows")):
             cells = _list(row)
             rule = _text(cells[rule_at]) if rule_at < len(cells) else ""
@@ -595,8 +723,8 @@ def _detection_items(run: RunRecord) -> tuple[list[_Item], bool]:
                 name.lower(): (_text(cells[pos]) if pos < len(cells) else "") or None
                 for name, pos in positions.items()
             }
-            items.append(_Item(f"{engine}|{rule}", f"{engine}: {rule}", fields, evidence))
-    return items, recorded
+            items.append(_Item(f"{engine}|{rule}", f"{engine}: {rule}", fields))
+    return items, recorded, evidence
 
 
 def _stix_object_key(obj: Mapping[str, Any]) -> str | None:
@@ -608,28 +736,26 @@ def _stix_object_key(obj: Mapping[str, Any]) -> str | None:
             if _text(ref.get("source_name")) == "mitre-attack" and _text(ref.get("external_id")):
                 return f"{kind}|{_text(ref.get('external_id')).upper()}"
         name = _text(obj.get("name"))
-        return f"{kind}|name:{name.lower()}" if name else None
+        return f"{kind}|name:{name}" if name else None
     if kind == "indicator":
         pattern = _text(obj.get("pattern"))
         return f"{kind}|{pattern}" if pattern else None
     if kind in _STIX_NAMED_TYPES:
         name = _text(obj.get("name"))
-        return f"{kind}|{name.lower()}" if name else None
-    if kind in _STIX_VALUE_TYPES:
+        return f"{kind}|{name}" if name else None
+    if kind in _STIX_VALUE_KINDS:
         value = _text(obj.get("value"))
-        if not value:
-            return None
-        return f"{kind}|{value if kind == 'url' else value.lower()}"
+        return f"{kind}|{canonical_value(_STIX_VALUE_KINDS[kind], value)}" if value else None
     if kind == "file":
         hashes = _map(obj.get("hashes"))
         digest = _text(hashes.get("SHA-256") or hashes.get("sha256"))
         if digest:
-            return f"{kind}|sha256:{digest.lower()}"
+            return f"{kind}|sha256:{canonical_value('hash', digest)}"
         name = _text(obj.get("name"))
         return f"{kind}|name:{name}" if name else None
     if kind == "windows-registry-key":
         key = _text(obj.get("key"))
-        return f"{kind}|{key.lower()}" if key else None
+        return f"{kind}|{canonical_value('registry', key)}" if key else None
     if kind == "directory":
         path = _text(obj.get("path"))
         return f"{kind}|{path}" if path else None
@@ -674,7 +800,7 @@ def _stix_items(run: RunRecord) -> tuple[list[_Item], list[_Item], bool]:
         kind = _text(obj.get("type"))
         oid = _text(obj.get("id"))
         fields = {name: obj[name] for name in _STIX_COMPARED if name in obj}
-        evidence = _evidence(_list(obj.get("x_maljan_evidence_refs")))
+        evidence = _ids(_list(obj.get("x_maljan_evidence_refs")))
         if kind == "relationship":
             src, tgt = _text(obj.get("source_ref")), _text(obj.get("target_ref"))
             rtype = _text(obj.get("relationship_type"))
@@ -690,7 +816,13 @@ def _stix_items(run: RunRecord) -> tuple[list[_Item], list[_Item], bool]:
             key = keys.get(oid)
             label = _stix_label(obj)
         if key is None:
-            unkeyed.append(_Item(f"{kind}|{oid}", label, {"type": kind, **fields}, evidence))
+            # No stable key: the object pairs only with an identical one, id
+            # included — which two runs never mint, and one record compared
+            # with itself always holds.
+            digest = hashlib.sha256(_fingerprint(obj).encode()).hexdigest()[:16]
+            unkeyed.append(
+                _Item(f"exact:{kind}|{digest}", label, {"type": kind, **fields}, evidence)
+            )
         else:
             keyed.append(_Item(key, label, {"type": kind, **fields}, evidence))
     return keyed, unkeyed, True
@@ -838,17 +970,18 @@ def diff_runs(a: RunRecord, b: RunRecord) -> dict[str, Any]:
         )
     )
 
-    ind_a, rec_a, note_a = _indicator_items(a)
-    ind_b, rec_b, note_b = _indicator_items(b)
+    kind_a, type_a, rec_a, note_a = _indicator_items(a)
+    kind_b, type_b, rec_b, note_b = _indicator_items(b)
+    ind_rows, shape_notes = _indicator_rows((kind_a, type_a), (kind_b, type_b))
     ind_notes = [f"Run {side} {note}." for side, note in (("A", note_a), ("B", note_b)) if note]
     sections.append(
         _section(
             "indicators",
             "Indicators",
             "Indicators",
-            _pair(ind_a, ind_b),
+            ind_rows,
             recorded=(rec_a, rec_b),
-            notes=ind_notes,
+            notes=[*ind_notes, *shape_notes],
         )
     )
 
@@ -873,12 +1006,23 @@ def diff_runs(a: RunRecord, b: RunRecord) -> dict[str, Any]:
         ("configuration", "Recovered configuration", _configuration_items),
         ("commands", "Commands", _command_items),
         ("c2_channels", "Command-and-control channels", _c2_items),
-        ("capability_profile", "Capability profile", _capability_items),
     ):
         sections.append(_diff(key, "Findings", title, read, a, b, recorded=reports))
+    sections.append(
+        _diff(
+            "capability_profile",
+            "Findings",
+            "Capability profile",
+            _capability_items,
+            a,
+            b,
+            recorded=reports,
+            evidence=(_capability_evidence(a), _capability_evidence(b)),
+        )
+    )
 
-    det_a, det_rec_a = _detection_items(a)
-    det_b, det_rec_b = _detection_items(b)
+    det_a, det_rec_a, det_ev_a = _detection_items(a)
+    det_b, det_rec_b, det_ev_b = _detection_items(b)
     sections.append(
         _section(
             "detection",
@@ -886,14 +1030,14 @@ def diff_runs(a: RunRecord, b: RunRecord) -> dict[str, Any]:
             "Detection rule matches",
             _pair(det_a, det_b),
             recorded=(det_rec_a, det_rec_b),
+            evidence=(det_ev_a, det_ev_b),
         )
     )
 
     keyed_a, unkeyed_a, stix_a = _stix_items(a)
     keyed_b, unkeyed_b, stix_b = _stix_items(b)
     stix_rows = _pair(keyed_a, keyed_b)
-    stix_rows.extend(_row(ONLY_IN_A, item, None) for item in unkeyed_a)
-    stix_rows.extend(_row(ONLY_IN_B, None, item) for item in unkeyed_b)
+    stix_rows.extend(_pair(unkeyed_a, unkeyed_b, unmatched_a=ONLY_IN_A, unmatched_b=ONLY_IN_B))
     sections.append(_section("stix", "STIX", "STIX objects", stix_rows, recorded=(stix_a, stix_b)))
 
     sections.append(_diff("run", "Run", "Run facts", _run_fact_items, a, b))

@@ -196,7 +196,8 @@ class TestAttack:
         assert changed["changes"] == [{"field": "confidence", "a": 0.92, "b": 0.5}]
         # The capability cell's own record of who stated the number.
         assert changed["a"]["confidence_source"] == "the judge"
-        assert changed["evidence"]["a"] and changed["evidence"]["b"]
+        # The quotes hold ids in their prose; prose is not an id field.
+        assert changed["evidence"] == {"a": [], "b": []}
 
     def test_the_technique_id_is_the_key_whatever_its_case(self, stored) -> None:
         def edit(doc: dict[str, Any]) -> None:
@@ -286,14 +287,15 @@ class TestFindings:
         assert {c["field"] for c in row["changes"]} == {"status", "confidence", "claims"}
         assert row["evidence"] == {"a": ["ev_0003"], "b": []}
 
-    def test_a_key_repeated_inside_one_run_is_not_paired_twice(self, stored) -> None:
+    def test_a_key_repeated_more_times_in_one_run_is_a_surplus_that_says_so(self, stored) -> None:
         def edit(doc: dict[str, Any]) -> None:
             doc["persistence"].append(copy.deepcopy(doc["persistence"][0]))
 
         diff = _pair(stored, edit)
 
-        (repeated,) = _rows(diff, "persistence", ONLY_IN_B)
+        (repeated,) = _rows(diff, "persistence", ADDED)
         assert repeated["note"] == REPEATED_KEY_NOTE
+        assert _section(diff, "persistence")["counts"][UNCHANGED] == 4
 
 
 class TestDetection:
@@ -312,7 +314,9 @@ class TestDetection:
         changed = _row(diff, "detection", f"sigma|{rule}")
         assert changed["changes"][0]["field"] == "level"
         assert changed["changes"][0]["b"] == "critical"
-        assert changed["evidence"]["a"]
+        # A rule section cites its entries as a whole: on the section, not the row.
+        assert changed["evidence"] == {"a": [], "b": []}
+        assert _section(diff, "detection")["section_evidence"]["a"]
         assert [r["key"].split("|")[0] for r in _rows(diff, "detection", REMOVED)] == ["yara"]
 
 
@@ -449,3 +453,176 @@ def test_a_run_with_no_report_document_is_compared_from_its_columns() -> None:
     assert _row(diff, "verdict", "verdict")["status"] == CHANGED
     assert _section(diff, "attack")["recorded"] == {"a": False, "b": False}
     assert diff["same_sample"] is None
+
+
+def _self(stored: dict[str, Any], document: dict[str, Any] | None = None) -> dict[str, Any]:
+    """One record compared with itself."""
+    record = _record(document or stored["document"], stored["bundle"])
+    return diff_runs(record, record)
+
+
+class TestARecordComparedWithItself:
+    def test_every_row_of_every_section_is_unchanged(self, stored) -> None:
+        diff = _self(stored)
+
+        for section in diff["sections"]:
+            statuses = {row["status"] for row in section["rows"]}
+            assert statuses <= {UNCHANGED}, (section["key"], statuses)
+        assert diff["totals"][UNCHANGED] == sum(diff["totals"].values())
+
+    def test_a_rule_that_matched_twice_is_unchanged_against_itself(self, stored) -> None:
+        document = copy.deepcopy(stored["document"])
+        yara = next(s for s in document["sections"] if s["key"] == "yara_matches")
+        yara["rows"].append(list(yara["rows"][0]))
+
+        diff = _self(stored, document)
+
+        assert {r["status"] for r in _section(diff, "detection")["rows"]} == {UNCHANGED}
+
+    def test_a_second_match_of_one_rule_in_one_run_only_is_added_as_a_repeat(self, stored) -> None:
+        def edit(doc: dict[str, Any]) -> None:
+            yara = next(s for s in doc["sections"] if s["key"] == "yara_matches")
+            yara["rows"].append(list(yara["rows"][0]))
+
+        diff = _pair(stored, edit)
+
+        (surplus,) = _rows(diff, "detection", ADDED)
+        assert surplus["note"] == REPEATED_KEY_NOTE
+        assert _section(diff, "detection")["counts"][ONLY_IN_B] == 0
+
+
+class TestEvidenceComesOnlyFromIdFields:
+    def test_an_id_inside_a_quote_or_a_sample_string_yields_no_chip(self, stored) -> None:
+        def edit(doc: dict[str, Any]) -> None:
+            doc["ttp_mappings"][0]["evidence_quotes"] = ["Unlike ev_0004 this shows no injection"]
+            doc["capability_matrix"][0]["evidence"] = ["Unlike ev_0004 this shows no injection"]
+            doc["consolidated_iocs"].append(
+                {
+                    "type": "Scheduled task",
+                    "kind": "scheduled_task",
+                    "value": "Updater",
+                    "description": "schtasks /tn ev_20231",
+                    "context": "schtasks /create /tn ev_20231 /tr evil.exe",
+                    "published": "yes",
+                    "source": "persistence",
+                }
+            )
+
+        diff = _pair(stored, edit)
+
+        for key in ("attack", "indicators"):
+            for row in _section(diff, key)["rows"]:
+                assert row["evidence"] == {"a": [], "b": []}, (key, row["key"])
+        task = _row(diff, "indicators", "scheduled_task|Updater")
+        assert task["status"] == ADDED
+        assert "ev_20231" not in str(task["evidence"])
+
+    def test_a_citation_field_holding_prose_cites_nothing(self, stored) -> None:
+        def finding(ref: str) -> list[dict[str, Any]]:
+            return [
+                {
+                    "agent_name": "static",
+                    "status": "complete",
+                    "final_confidence": 0.5,
+                    "claims": [{"claim": "x", "evidence_ref": ref}],
+                }
+            ]
+
+        a = _record(stored["document"], None, findings=finding("see ev_0002 for the header"))
+        b = _record(stored["document"], None, rid="2", findings=finding("[ev_0002, ev_0005]"))
+
+        row = _row(diff_runs(a, b), "analysts", "static")
+        assert row["evidence"] == {"a": [], "b": ["ev_0002", "ev_0005"]}
+
+
+class TestSeverityAttribution:
+    def test_a_report_that_carries_the_reading_names_the_judge(self, stored) -> None:
+        diff = _self(stored)
+
+        assert _row(diff, "verdict", "severity")["a"] == {"value": "High", "stated_by": "judge"}
+
+    def test_a_report_stored_before_the_judge_owned_severity_names_no_one(self, stored) -> None:
+        old = stored_old_shape().model_dump(mode="json")
+        a = _record(old, None)
+        b = _record(stored["document"], None, rid="2")
+
+        severity = _row(diff_runs(a, b), "verdict", "severity")
+        assert severity["a"] == {"value": "High"}
+        assert "stated_by" not in severity["a"]
+        assert severity["b"]["stated_by"] == "judge"
+
+
+class TestIndicatorShapes:
+    def test_rows_stored_without_a_kind_are_never_paired_with_rows_that_have_one(
+        self, stored
+    ) -> None:
+        old = stored_old_shape().model_dump(mode="json")
+        new = copy.deepcopy(stored["document"])
+        new["consolidated_iocs"].append(
+            {"type": "Domain", "kind": "domain", "value": "old-c2.example.org", "published": "yes"}
+        )
+        a = _record(old, None)
+        b = _record(new, None, rid="2")
+
+        section = _section(diff_runs(a, b), "indicators")
+
+        assert section["counts"][ADDED] == section["counts"][REMOVED] == 0
+        assert section["counts"][UNCHANGED] == section["counts"][CHANGED] == 0
+        assert section["counts"][ONLY_IN_A] == 2
+        assert any("store indicators differently" in n and "run A" in n for n in section["notes"])
+
+    def test_two_old_shaped_tables_pair_by_type_and_stored_value(self) -> None:
+        old = stored_old_shape().model_dump(mode="json")
+        record = _record(old, None)
+
+        section = _section(diff_runs(record, _record(old, None, rid="2")), "indicators")
+
+        assert section["counts"][UNCHANGED] == 2
+        assert not section["notes"]
+
+
+class TestCaseRule:
+    def _indicators(self, *rows: dict[str, Any]) -> RunRecord:
+        return RunRecord(
+            report_id="r", job_id="j", malware_report={"consolidated_iocs": list(rows)}
+        )
+
+    def test_case_is_ignored_only_where_the_value_is_caseless_by_definition(self) -> None:
+        a = self._indicators(
+            {"kind": "registry", "type": "Registry Key", "value": r"HKCU\\Software\\Run"},
+            {"kind": "mutex", "type": "Mutex", "value": "Global\\Lock"},
+            {"kind": "email", "type": "E-mail", "value": "Ops@Example.COM"},
+            {"kind": "url", "type": "URL", "value": "http://h.tld/Path"},
+        )
+        b = self._indicators(
+            {"kind": "registry", "type": "Registry Key", "value": r"hkcu\\software\\run"},
+            {"kind": "mutex", "type": "Mutex", "value": "global\\lock"},
+            {"kind": "email", "type": "E-mail", "value": "Ops@example.com"},
+            {"kind": "url", "type": "URL", "value": "http://h.tld/path"},
+        )
+
+        section = _section(diff_runs(a, b), "indicators")
+
+        unchanged = {r["key"].split("|")[0] for r in section["rows"] if r["status"] == UNCHANGED}
+        assert unchanged == {"registry", "email"}
+        assert section["counts"][ADDED] == section["counts"][REMOVED] == 2
+
+    def test_a_registry_key_follows_the_same_rule_in_the_stix_section(self) -> None:
+        def bundle(key: str) -> dict[str, Any]:
+            return {"objects": [{"type": "windows-registry-key", "id": "k--1", "key": key}]}
+
+        a = RunRecord(report_id="r", job_id="j", stix_bundle=bundle(r"HKCU\\Run"))
+        b = RunRecord(report_id="r", job_id="j", stix_bundle=bundle(r"hkcu\\run"))
+
+        assert _section(diff_runs(a, b), "stix")["counts"][UNCHANGED] == 1
+
+    def test_a_change_of_case_in_a_stix_name_is_a_difference(self) -> None:
+        def bundle(name: str) -> dict[str, Any]:
+            return {"objects": [{"type": "malware", "id": "m--1", "name": name, "is_family": True}]}
+
+        a = RunRecord(report_id="r", job_id="j", stix_bundle=bundle("Emotet"))
+        b = RunRecord(report_id="r", job_id="j", stix_bundle=bundle("EMOTET"))
+
+        section = _section(diff_runs(a, b), "stix")
+        assert section["counts"][UNCHANGED] == 0
+        assert section["counts"][REMOVED] == section["counts"][ADDED] == 1

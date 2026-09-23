@@ -3,7 +3,9 @@
 Uses ReportService for business logic separation.
 """
 
+import asyncio
 import base64
+import json
 import secrets
 import uuid
 from typing import Any, Literal
@@ -108,7 +110,7 @@ async def diff_reports(
     ),
     user: User = Depends(get_current_user),
     svc: ReportService = Depends(_get_service),
-) -> dict:
+) -> Response:
     """What changed between two stored analyses, section by section.
 
     Read only from the two stored records: it states what each run's record
@@ -120,7 +122,10 @@ async def diff_reports(
     diff = await svc.diff_reports(a, b, user, by=by)
     if diff is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
-    return diff
+    # Encoded on a worker thread like the diff itself: the answer lists every
+    # row of both records, and walking it on the loop would stall the worker.
+    body = await asyncio.to_thread(json.dumps, diff, ensure_ascii=False)
+    return Response(content=body.encode("utf-8"), media_type="application/json")
 
 
 @router.get("/{report_id}", response_model=ReportDetailResponse)
