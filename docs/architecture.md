@@ -1281,9 +1281,12 @@ under the call itself, from the ledger entry.
 
 The tool loop also meters itself. `budget_tick` events carry an agent's steps
 against its cap and seconds against its limit every five steps and at the end
-of each loop; `stage_ended_at_cap` says which cap ended the work when one did
+of each loop, with its prompt characters and `tool_definition_chars`, what the
+loop's tool definitions weigh with every request (the context budget counts
+them beside the conversation); `stage_ended_at_cap` says which cap ended the work when one did
 (`steps`, `time`, `repeats`, or the triage pack's `budget_seconds`); and
-`run_summary.budget` sums the spend per agent, with the caps it hit, so a
+`run_summary.budget` sums the spend per agent, with the caps it hit and the
+largest `tool_definition_chars` of its loops, so a
 reader learns that an analyst ran out of steps from the summary and the
 pipeline panel rather than from a log line.
 That stamp is what makes a report checkable: the model can cite the call it read

@@ -654,6 +654,12 @@ change landed on `main`.
   strings in 38 s — the mutex name, the install directory and file names, the
   scheduled-task name, both C2 URLs, the User-Agent, the beacon format and the
   command words that a plain `strings` pass cannot see.
+- **The tool-definition size is on the record.** The context budget counted
+  every tool definition with every request and never wrote the figure down,
+  so a run whose answer cap shrank could not show how much of that was the
+  definitions. Each loop's budget record, every `budget_tick` and each agent's
+  `run_summary.budget` row now carry `tool_definition_chars` (the largest of an
+  agent's loops in the summary), for the analysts and the judge alike.
 
 ### Changed
 

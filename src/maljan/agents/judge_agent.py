@@ -405,6 +405,9 @@ class JudgeAgent(BudgetMeter):
         # mediator's answers are the expert model's whatever an entry for the
         # judge says.
         self._runs_on: str = "judge"
+        # What the tool definitions of the current loop weigh with each
+        # request, for the budget record and the ticks; none before a loop.
+        self._tool_definition_chars: int = 0
 
     def _model_label(self) -> str:
         """The label of the model this instance calls first, or ``""`` outside a job."""
@@ -645,6 +648,8 @@ class JudgeAgent(BudgetMeter):
         room = self._context_budget()
         recorded = record_tools(self.tools, recorder, context_budget=room)
         definitions = tool_definition_chars(recorded)
+        # On the budget record and the ticks, as the analysts' loop puts it.
+        self._tool_definition_chars = definitions
 
         def _note_the_conversation(conversation: list[Any]) -> None:
             if not isinstance(room, ContextBudget):

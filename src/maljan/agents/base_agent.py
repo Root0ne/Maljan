@@ -2089,6 +2089,7 @@ class BudgetMeter:
                 prompt_chars=sum(_message_chars(m) for m in messages),
                 ledger_entries=ledger_entries,
                 final=final,
+                tool_definition_chars=self._definitions_sent(),
             )
         except Exception as exc:  # noqa: BLE001 — the meter never costs a turn
             self.logger.debug("%s: budget tick skipped (%s).", self.name, exc)
@@ -2107,6 +2108,7 @@ class BudgetMeter:
             "elapsed_s": round(time.monotonic() - ledger.started, 1),
             "timeout_s": round(ledger.timeout, 1),
             "delegated_steps": ledger.delegated_steps,
+            "tool_definition_chars": self._definitions_sent(),
             "cap": cap,
         }
         self._note_budget(record)
@@ -2114,6 +2116,13 @@ class BudgetMeter:
             emit_stage_ended_at_cap(
                 self._event_sink(), stage=stage, agent=str(self.name), cap=cap, detail=detail
             )
+
+    def _definitions_sent(self) -> int:
+        """What this agent's tool definitions weigh with each request of its loop, or 0."""
+        try:
+            return max(0, int(getattr(self, "_tool_definition_chars", 0) or 0))
+        except (TypeError, ValueError):
+            return 0
 
     def _note_budget(self, record: dict[str, Any]) -> None:
         """Keep one loop's record, on this instance rather than on the class.

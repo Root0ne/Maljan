@@ -1523,10 +1523,12 @@ and `GET /api/v1/jobs/{id}/evidence` serves them.
 
 **The budget meter** needs nothing from a server. The tool loop emits
 `budget_tick` every five steps and once more when it ends (steps used against
-the cap, seconds against the limit, prompt characters, ledger entries so far)
+the cap, seconds against the limit, prompt characters, the characters of the
+tool definitions sent with every request, ledger entries so far)
 and `stage_ended_at_cap` when a cap ended the work — `steps`, `time`,
 `repeats` or, for the triage pack, `budget_seconds`; `run_summary.budget` sums
-the spend per agent with the caps it hit, and the console's pipeline panel
+the spend per agent with the caps it hit and keeps the largest
+`tool_definition_chars` of its loops, and the console's pipeline panel
 says beside the step which cap ended it.
 
 ## Export and import
