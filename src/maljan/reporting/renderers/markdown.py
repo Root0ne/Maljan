@@ -338,30 +338,31 @@ class MarkdownRenderer:
         lines.append(_divider(2))
         lines.append(_row("File name (as submitted)", f"`{ident.file_name or 'unknown'}`"))
         lines.append(_row("Size", f"{ident.file_size_bytes:,} bytes"))
+        header = _header_facts(report)
         kind = ident.file_type
-        if ident.architecture:
-            kind += f", {ident.architecture}"
-        if ident.is_dll is not None:
-            kind += ", DLL" if ident.is_dll else ", executable"
+        if header["architecture"]:
+            kind += f", {header['architecture']}"
+        if header["is_dll"] is not None:
+            kind += ", DLL" if header["is_dll"] else ", executable"
         lines.append(_row("Type", kind))
         name = (ident.file_name or "").lower()
-        if ident.is_dll and name.endswith(".exe"):
+        if header["is_dll"] and name.endswith(".exe"):
             lines.append(_row("Name and type", "a DLL submitted under an .exe name"))
         if ident.mime_type:
             lines.append(_row("MIME", ident.mime_type))
         if ident.magic_bytes:
             lines.append(_row("Magic bytes", f"`{ident.magic_bytes}`"))
-        if ident.compile_timestamp:
+        if header["compile_timestamp"]:
             lines.append(
                 _row(
                     "Compile timestamp",
-                    f"{ident.compile_timestamp.isoformat()} (header value; can be forged)",
+                    f"{header['compile_timestamp']} (header value; can be forged)",
                 )
             )
         if ident.language_or_compiler:
             lines.append(_row("Compiler / language", ident.language_or_compiler))
-        if ident.export_name:
-            lines.append(_row("Export directory name", f"`{ident.export_name}`"))
+        if header["export_name"]:
+            lines.append(_row("Export directory name", f"`{header['export_name']}`"))
         if ident.internal_name:
             lines.append(_row("Internal name", f"`{ident.internal_name}`"))
         signing = ident.signing
@@ -504,7 +505,9 @@ class MarkdownRenderer:
             entropies = ", ".join(
                 f"`{_one_line(sec.name)}` {sec.entropy:.2f}"
                 + (" [HIGH]" if sec.entropy > 7.0 else "")
-                for sec in static.sections
+                for sec in _distinct(
+                    static.sections, lambda s: (s.name, s.virtual_address, s.raw_offset)
+                )
             )
             measured.append(f"_{MEASURED}:_ section entropy {entropies}.")
         if static is not None and static.packer_matches:
@@ -550,9 +553,10 @@ class MarkdownRenderer:
         # 5.2 API and string resolution.
         measured = []
         if static is not None and static.imports:
-            libraries = {row.dll.lower() for row in static.imports if row.dll}
+            imports = _distinct(static.imports, lambda r: (r.dll, r.function))
+            libraries = {row.dll.lower() for row in imports if row.dll}
             measured.append(
-                f"_{MEASURED}:_ {len(static.imports)} static imports from "
+                f"_{MEASURED}:_ {len(imports)} static imports from "
                 f"{len(libraries)} librar{'y' if len(libraries) == 1 else 'ies'}."
             )
         resolving = [
@@ -610,7 +614,7 @@ class MarkdownRenderer:
                         mech.evidence_ref or "-",
                     )
                 )
-        elif ctx.sandbox_ran:
+        elif ctx.sandbox_observed:
             measured.append(f"_{OBSERVED}:_ no persistence observed." + ctx.partial_sentence())
         blocks.append(
             _subsection("5.4", "Persistence", [ta.persistence_detail] if ta else [], measured, ctx)
@@ -763,20 +767,22 @@ class MarkdownRenderer:
 
     def _section_observed(self, report: MalwareReport, ctx: _Context) -> str:
         dyn = report.dynamic
-        lines = [_heading(6, "Observed behaviour", OBSERVED), ""]
-        if dyn is None and not ctx.sandbox_ran:
-            reason = next(
-                (r for r in report.degradation_reasons if "sandbox" in r.lower()),
-                "no sandbox tool was called in this run"
-                if ctx.sandbox_known
-                else "this report does not record whether a sandbox ran",
+        # The sandbox's voice is used only over what a sandbox recorded. A
+        # sandbox answer with nothing in it — a mock with no fixture, a call
+        # that returned empty lists — is not an execution, and the section
+        # says what the run knows about the sandbox in the run's own voice.
+        if not ctx.sandbox_observed:
+            return "\n".join(
+                [_heading(6, "Observed behaviour", MEASURED), "", ctx.sandbox_sentence()]
             )
-            lines.append(f"Not run in a sandbox: {reason}.")
-            return "\n".join(lines)
+        lines = [_heading(6, "Observed behaviour", OBSERVED), ""]
         lines.append(_environment_line(report))
         lines.append("")
         if dyn is None:
-            lines.append("The sandbox recorded no behaviour." + ctx.partial_sentence())
+            lines.append(
+                "The sandbox recorded network activity only; it is in §5.7 and §9."
+                + ctx.partial_sentence()
+            )
             return "\n".join(lines)
         if dyn.unavailable:
             names = ", ".join(f"`{name}`" for name in dyn.unavailable)
@@ -876,7 +882,9 @@ class MarkdownRenderer:
             lines.extend(["### 7.1 Sections", ""])
             lines.append(_row("Name", "VA", "VSize", "Raw offset", "Raw size", "Entropy", "Flags"))
             lines.append(_divider(7))
-            for sec in static.sections:
+            for sec in _distinct(
+                static.sections, lambda s: (s.name, s.virtual_address, s.raw_offset)
+            ):
                 flag = "[HIGH ENTROPY]" if sec.entropy > 7.0 else ""
                 if sec.is_suspicious and not flag:
                     flag = "[SUSPICIOUS]"
@@ -896,7 +904,7 @@ class MarkdownRenderer:
         if static.imports or static.api_capabilities:
             lines.extend(["### 7.2 Imports", ""])
             by_dll: dict[str, list[str]] = {}
-            for row in static.imports:
+            for row in _distinct(static.imports, lambda r: (r.dll, r.function)):
                 by_dll.setdefault(row.dll or "?", []).append(row.function)
             if by_dll:
                 lines.append(_row("Library", "Functions"))
@@ -939,15 +947,19 @@ class MarkdownRenderer:
             lines.append(_row("Name", "Ordinal", "RVA"))
             lines.append(_divider(3))
             if static.export_rows:
-                for exp in static.export_rows[:60]:
+                for exp in _distinct(static.export_rows, lambda e: (e.name, e.ordinal, e.rva))[:60]:
                     lines.append(
                         _row(f"`{exp.name or '(unnamed)'}`", exp.ordinal or "-", exp.rva or "-")
                     )
-                rvas = [exp.rva for exp in static.export_rows if exp.rva]
+                rvas = [
+                    exp.rva
+                    for exp in _distinct(static.export_rows, lambda e: (e.name, e.ordinal, e.rva))
+                    if exp.rva
+                ]
                 if len(rvas) > 1 and len(set(rvas)) == 1:
                     lines.extend(["", f"All {len(rvas)} exports share one address, {rvas[0]}."])
             else:
-                for name in static.exports[:60]:
+                for name in list(dict.fromkeys(static.exports))[:60]:
                     lines.append(_row(f"`{name}`", "-", "-"))
             lines.append("")
 
@@ -1057,7 +1069,7 @@ class MarkdownRenderer:
         # technique: a stated order, so a capa-heavy binary cannot push the
         # knowledge table's rows off the end of the audit trail.
         ordered = sorted(
-            hits,
+            _distinct(hits, _rule_hit_key),
             key=lambda h: (
                 str(h.get("source") or ""),
                 str(h.get("technique_id") or ""),
@@ -1070,10 +1082,11 @@ class MarkdownRenderer:
             lines.extend(
                 [
                     "",
-                    "_Rows whose source is `pipeline:` are rules that fired over the import "
-                    "table — no sandbox, no model. Their Procedure cell ends with how much "
-                    "ordinary software the same rule fires on, over the corpus it names; it "
-                    "says nothing about how likely this sample is to be benign, and `not "
+                    "_Rows whose source is `pipeline:` are rules that fired over the binary "
+                    "— capa's over its code, the knowledge table's over its imports — with no "
+                    "sandbox and no model. Their Procedure cell ends with the rule's base "
+                    "rate: how much ordinary software it fires on, over the corpus it names. "
+                    "It says nothing about how likely this sample is to be benign, and `not "
                     "measured` means the rule has no measurement, not that it never fires._",
                 ]
             )
@@ -1280,17 +1293,24 @@ class MarkdownRenderer:
         if attr.similar_samples:
             similarity.extend(
                 [
-                    "Nearest previously analysed samples (behavioural distance):",
+                    "Nearest previously analysed samples (behavioural distance, lower is "
+                    "closer; not a family verdict):",
                     "",
-                    _row("SHA-256", "Distance", "Source"),
-                    _divider(3),
+                    _row("Sample", "Category", "Distance", "Source"),
+                    _divider(4),
                 ]
             )
             for sample in attr.similar_samples[:10]:
                 dist = sample.get("distance")
-                dist_str = f"{dist:.3f}" if isinstance(dist, int | float) else "-"
+                dist_str = f"{dist:.3f}" if isinstance(dist, int | float) else "not recorded"
+                named = sample.get("sha256") or sample.get("sample_id") or "not recorded"
                 similarity.append(
-                    _row(f"`{sample.get('sha256', '?')}`", dist_str, sample.get("source") or "-")
+                    _row(
+                        f"`{named}`",
+                        sample.get("malware_category") or "-",
+                        dist_str,
+                        sample.get("source") or "-",
+                    )
                 )
         if similarity:
             blocks.append(
@@ -1322,16 +1342,7 @@ class MarkdownRenderer:
                 why = f": {row['reason']}" if row.get("reason") and not row.get("ran") else ""
                 lines.append(f"- `{row.get('key', '?')}` {state}{why}")
             lines.append("")
-        lines.append(
-            "Sandbox: "
-            + (
-                "a sandbox ran in this run." + ctx.partial_sentence()
-                if ctx.sandbox_ran
-                else "no sandbox tool was called in this run."
-                if ctx.sandbox_known
-                else "this report does not record whether a sandbox ran."
-            )
-        )
+        lines.append(ctx.sandbox_sentence())
         lines.append("")
 
         evidence = summary.get("evidence") or {}
@@ -1555,10 +1566,7 @@ class MarkdownRenderer:
         servers = sorted({row.server for row in report.evidence_index if row.server})
         if servers:
             lines.append(f"- Tool servers called: {', '.join(servers)}")
-        sandbox = (
-            "called" if ctx.sandbox_ran else "not called" if ctx.sandbox_known else "not recorded"
-        )
-        lines.append(f"- Sandbox: {sandbox}")
+        lines.append(f"- Sandbox: {_SANDBOX_STATES[ctx.sandbox_state]}")
         lines.append(f"- Report generated: {report.generated_at.isoformat()}")
         if report.version_history:
             lines.extend(["", _row("Version", "Date", "Authors", "Description"), _divider(4)])
@@ -1625,18 +1633,28 @@ class _Context:
             )
         }
         net = report.network
-        self.sandbox_ran = (
-            any(str(row.tool or "").startswith(_SANDBOX_TOOLS) for row in report.evidence_index)
-            or report.dynamic is not None
-            or any(
-                getattr(row, "source", None) == "sandbox"
-                for row in [*(net.domains if net else []), *(net.ips if net else [])]
-                + list(net.urls if net else [])
-            )
+        # What the run knows about a sandbox, in four answers: it recorded
+        # something; its tools were called and returned nothing; none was
+        # called; or the report does not say (stored without its index).
+        observed = report.dynamic is not None or any(
+            getattr(row, "source", None) == "sandbox"
+            for row in [*(net.domains if net else []), *(net.ips if net else [])]
+            + list(net.urls if net else [])
         )
-        # Whether the report can say a sandbox did *not* run. A report stored
-        # without its evidence index cannot, and says it does not know.
-        self.sandbox_known = self.sandbox_ran or bool(report.evidence_index)
+        called = any(
+            str(row.tool or "").startswith(_SANDBOX_TOOLS) for row in report.evidence_index
+        )
+        self.sandbox_state = (
+            "observed"
+            if observed
+            else "empty"
+            if called
+            else "not_called"
+            if report.evidence_index
+            else "unknown"
+        )
+        self.sandbox_observed = observed
+        self.sandbox_reason = _sandbox_reason(report)
         self.iocs = _indicator_rows(report)
         indicators = [
             (row.value, row.kind or "") for row in self.iocs if row.kind in _NETWORK_KINDS
@@ -1666,6 +1684,20 @@ class _Context:
         """A model-written table cell: defanged like prose, cut like every cell."""
         return _truncate(self.prose(str(text or "")), _CELL_LIMIT)
 
+    def sandbox_sentence(self) -> str:
+        """What the run knows about a sandbox, as one sentence, in the run's own voice."""
+        why = f" ({self.sandbox_reason})" if self.sandbox_reason else ""
+        if self.sandbox_state == "observed":
+            return "A sandbox recorded the sample's behaviour." + self.partial_sentence()
+        if self.sandbox_state == "empty":
+            return (
+                "No sandbox observation: the sandbox tools returned nothing for this sample, "
+                f"and nothing in this run shows it was executed{why}."
+            )
+        if self.sandbox_state == "not_called":
+            return f"Not run in a sandbox: {self.sandbox_reason or 'no sandbox tool was called'}."
+        return "No sandbox observation is recorded in this report."
+
     def partial_sentence(self) -> str:
         """What made the evidence partial, as a sentence, or ``""``."""
         evidence = (self.report.run_summary or {}).get("evidence") or {}
@@ -1678,6 +1710,29 @@ class _Context:
         if trimmed:
             parts.append(f"{trimmed} of {entries} ledger entries were trimmed")
         return f" The evidence is partial: {' and '.join(parts)}." if parts else ""
+
+
+# How the methodology appendix names each sandbox state.
+_SANDBOX_STATES = {
+    "observed": "recorded the sample's behaviour",
+    "empty": "called, returned no observation",
+    "not_called": "not called",
+    "unknown": "not recorded",
+}
+
+
+def _sandbox_reason(report: MalwareReport) -> str:
+    """Why the run had no sandbox observation, in the words the run recorded, or ``""``."""
+    for stage in (report.run_summary or {}).get("stages") or []:
+        if not isinstance(stage, dict):
+            continue
+        for reason in (stage.get("agent_reasons") or {}).values():
+            if "sandbox" in str(reason).lower():
+                return _one_line(reason)
+    for reason in report.degradation_reasons:
+        if "sandbox" in reason.lower():
+            return _one_line(reason)
+    return ""
 
 
 def _named_in(rows: list[dict[str, Any]], code: str, pattern: str) -> set[str]:
@@ -2003,8 +2058,23 @@ def _attack_row(
     row = corroboration.get(cell.technique_id)
     asserted = list(row.get("asserted_by") or []) if isinstance(row, dict) else []
     claimed = list(row.get("claimed_by") or []) if isinstance(row, dict) else []
-    source = ", ".join([*asserted, *claimed]) or ", ".join(cell.contributing_layers) or "-"
-    confidence = "rule match" if asserted and not claimed else confidence_phrase(cell.confidence)
+    # Every producer that named the technique, each once: the rules that
+    # asserted it, the analysts that claimed it, and the matrix's own layers —
+    # the judge's verdict among them — which the corroboration does not count.
+    named = [f"{source} (rule match)" for source in asserted]
+    named += [str(x) for x in [*claimed, *cell.contributing_layers] if x not in asserted]
+    source = ", ".join(dict.fromkeys(named)) or "-"
+    unstated = cell.confidence_stated is False or (
+        cell.confidence_stated is None and cell.confidence == 0.0
+    )
+    if unstated:
+        # No producer put a number on it; the 0.0 the matrix carries is not
+        # an assessment of anything.
+        confidence = "rule match" if asserted else "not assessed"
+    elif asserted and not claimed and set(cell.contributing_layers) <= set(asserted):
+        confidence = "rule match"
+    else:
+        confidence = confidence_phrase(cell.confidence)
     if not cell.technique_id_valid:
         status = f"unverified id ({UNVERIFIED_TECHNIQUE_MARKER})"
     elif cell.not_published:
@@ -2043,10 +2113,13 @@ def _import_rule_row(hit: dict[str, Any], mappings: dict[str, Any]) -> str:
     newline would otherwise reshape a table a human reads to make a call.
     """
     tid = str(hit.get("technique_id") or "?")
-    apis = ", ".join(f"`{a}`" for a in (hit.get("matched_apis") or [])[:6]) or "-"
+    matched = ", ".join(f"`{a}`" for a in (hit.get("matched_apis") or [])[:6]) or "-"
     rule = str(hit.get("rule") or "").strip()
-    procedure = (f"rule {rule} over " if rule else "") + f"imports {apis}; fires on "
-    procedure += str(hit.get("benign_rate") or "not measured")
+    # capa names the namespace a rule lives in; the knowledge table names the
+    # imports its rule matched.
+    where = f"namespace {matched}" if hit.get("source") == "capa" else f"imports {matched}"
+    procedure = (f"rule {rule}, " if rule else "") + where
+    procedure += f"; base rate {hit.get('benign_rate') or 'not measured'}"
     status = "published" if tid in mappings else "rule match, not published"
     return _row(
         "-",
@@ -2058,6 +2131,71 @@ def _import_rule_row(hit: dict[str, Any], mappings: dict[str, Any]) -> str:
         status,
         hit.get("evidence_id") or "-",
     )
+
+
+def _rule_hit_key(hit: dict[str, Any]) -> tuple[Any, ...]:
+    """What makes two rule hits the same hit: one rule, one technique, one source."""
+    return (
+        hit.get("technique_id"),
+        hit.get("name"),
+        hit.get("rule"),
+        hit.get("source"),
+        tuple(hit.get("matched_apis") or ()),
+    )
+
+
+def _distinct[T](rows: list[T], key: Callable[[T], Any]) -> list[T]:
+    """``rows`` with each key printed once, at its first occurrence.
+
+    A report stored before the projection folded repeated tool calls carries
+    one binary's section table twice; one table is printed.
+    """
+    seen: set[Any] = set()
+    out: list[T] = []
+    for row in rows:
+        marker = key(row)
+        if marker not in seen:
+            seen.add(marker)
+            out.append(row)
+    return out
+
+
+def _header_facts(report: MalwareReport) -> dict[str, Any]:
+    """The header facts the identity carries, or the stored ``pe_header`` section's.
+
+    A report stored before the identity carried them has the same measurement
+    in its format tool's section — the machine, the timestamp and the library
+    flag — and that section is read rather than the fact left out.
+    """
+    from datetime import UTC, datetime
+
+    from maljan.reporting.ledger_projection import pe_architecture
+
+    ident = report.identity
+    facts: dict[str, Any] = {
+        "architecture": ident.architecture,
+        "is_dll": ident.is_dll,
+        "compile_timestamp": ident.compile_timestamp.isoformat()
+        if ident.compile_timestamp
+        else None,
+        "export_name": ident.export_name,
+    }
+    header = next((s for s in report.sections if s.key == "pe_header"), None)
+    rows = {
+        str(r[0]).strip().lower(): str(r[1]).strip()
+        for r in (header.rows if header else [])
+        if len(r) >= 2
+    }
+    if facts["architecture"] is None and rows.get("machine", "").isdigit():
+        facts["architecture"] = pe_architecture(int(rows["machine"]))
+    if facts["is_dll"] is None and rows.get("is dll") in ("yes", "no", "true", "false"):
+        facts["is_dll"] = rows["is dll"] in ("yes", "true")
+    stamp = rows.get("timestamp", "")
+    if facts["compile_timestamp"] is None and stamp.isdigit() and int(stamp) > 0:
+        facts["compile_timestamp"] = datetime.fromtimestamp(int(stamp), tz=UTC).isoformat()
+    if facts["export_name"] is None and rows.get("export name"):
+        facts["export_name"] = rows["export name"]
+    return facts
 
 
 def _spawned(roots: list[ProcessNode]) -> list[ProcessNode]:

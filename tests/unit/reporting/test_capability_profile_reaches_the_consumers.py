@@ -75,7 +75,7 @@ class TestTheMarkdownReport:
         ]
         assert (
             "| rule allocating or writing memory in another process and starting a thread "
-            "in it over imports " in row
+            "in it, imports " in row
         )
         # Nothing claimed T1055 in this run, so the rule's row is not a
         # published technique; it says so rather than borrowing the status.

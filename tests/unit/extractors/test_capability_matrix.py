@@ -53,6 +53,9 @@ class TestSignalQuality:
         # The judge read the analysts, not the sample, so it corroborates
         # nothing on its own.
         assert mappings[0].is_corroborated is False
+        # And it put no number on it: the 0.0 the cell carries is not a
+        # confidence anybody stated, and the report prints "not assessed".
+        assert cells[0].confidence_stated is False
 
     def test_a_technique_nothing_asserted_is_dropped(self) -> None:
         cells, mappings = build_capability_matrix(stix_output=None, isr_reports=None)
@@ -85,6 +88,7 @@ class TestItProjectsTheJudgeAndTheAnalysts:
         cells, mappings = build_capability_matrix(stix_output=bundle, isr_reports=None)
 
         assert [c.confidence for c in cells] == [0.77]
+        assert cells[0].confidence_stated is True
         assert cells[0].contributing_layers == ["judge", "static", "dynamic"]
         assert mappings[0].is_corroborated is True
 

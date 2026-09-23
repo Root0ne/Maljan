@@ -590,9 +590,17 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         return publish_answer(kind, value, "strings", corroborating=corroborating)
 
     h = report.identity.hashes
-    # The sample's own identity, established by the router: every export
-    # carries it.
-    for label, digest in (("SHA-256", h.sha256), ("SHA-1", h.sha1), ("MD5", h.md5)):
+    # The sample's own identity, established by the router: `/iocs` serves
+    # every one of these as published, and so does this table.
+    for label, digest in (
+        ("SHA-256", h.sha256),
+        ("SHA-1", h.sha1),
+        ("MD5", h.md5),
+        ("SHA-512", h.sha512),
+        ("imphash", h.imphash),
+        ("ssdeep", h.ssdeep),
+        ("TLSH", h.tlsh),
+    ):
         _add(label, "hash", digest or "", "identity", "the sample", published="yes")
 
     static = report.static

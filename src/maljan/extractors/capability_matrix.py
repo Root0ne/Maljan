@@ -144,6 +144,7 @@ def build_capability_matrix(
                 technique_name=name,
                 evidence=evidence[:6],
                 confidence=max(0.0, min(1.0, confidence)),
+                confidence_stated=bool(info.get("confidences")),
                 contributing_layers=layers,
                 technique_id_valid=valid,
                 platforms=platforms,

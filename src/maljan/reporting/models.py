@@ -489,6 +489,13 @@ class CapabilityCell(BaseModel):
     technique_name: str
     evidence: list[str] = Field(default_factory=list)
     confidence: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
+    # ``False`` when no source put a number on this technique — a judge
+    # attack-pattern with no relationship annotating it, a rule match — and
+    # ``confidence`` is the 0.0 the matrix carries for it. The report prints
+    # "not assessed" for it rather than a confidence of zero nobody stated.
+    # ``None`` on a row stored before the flag existed, where a 0.0 is read
+    # the same way: no producer states a confidence of zero for a technique.
+    confidence_stated: bool | None = None
     contributing_layers: list[str] = Field(default_factory=list)
     # ``False`` when the ATT&CK catalogue has no entry for this id and the
     # producer kept it after being told. The row stays — deleting an analyst's

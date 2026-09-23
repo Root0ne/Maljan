@@ -184,7 +184,7 @@ def identity_from_ledger(
 
 
 # The PE ``Machine`` values a reader recognises, by the name they go by.
-_PE_MACHINES: dict[int, str] = {
+PE_MACHINES: dict[int, str] = {
     0x14C: "x86",
     0x8664: "x86-64",
     0x1C0: "ARM",
@@ -192,6 +192,11 @@ _PE_MACHINES: dict[int, str] = {
     0xAA64: "ARM64",
     0x200: "IA-64",
 }
+
+
+def pe_architecture(machine: int) -> str:
+    """The architecture a PE ``Machine`` value names, or the value itself."""
+    return PE_MACHINES.get(machine, f"machine 0x{machine:x}")
 
 
 def _header_facts(ledger: list[LedgerEntry]) -> dict[str, Any]:
@@ -206,7 +211,7 @@ def _header_facts(ledger: list[LedgerEntry]) -> dict[str, Any]:
     for _entry, data in _payloads(ledger, "pe_info"):
         machine = data.get("machine")
         if isinstance(machine, int) and machine and not isinstance(machine, bool):
-            out.setdefault("architecture", _PE_MACHINES.get(machine, f"machine 0x{machine:x}"))
+            out.setdefault("architecture", pe_architecture(machine))
         if isinstance(data.get("is_dll"), bool):
             out.setdefault("is_dll", data["is_dll"])
         if data.get("export_name"):
@@ -432,7 +437,38 @@ def static_from_ledger(
 
     if not seen:
         return None
+    # One binary read twice — the triage pack's pe_info and the analyst's own —
+    # is one section table, one import table and one export list. Merging each
+    # call's rows printed every section and export twice.
+    static.sections = _once(static.sections, lambda s: (s.name, s.virtual_address, s.raw_offset))
+    static.imports = _once(static.imports, lambda row: (row.dll, row.function))
+    static.exports = list(dict.fromkeys(static.exports))
+    static.export_rows = _once(static.export_rows, lambda row: (row.name, row.ordinal, row.rva))
+    # capa run twice over one file fires the same rules twice.
+    static.api_technique_hits = _once(
+        static.api_technique_hits,
+        lambda hit: (
+            hit.get("technique_id"),
+            hit.get("name"),
+            hit.get("rule"),
+            hit.get("source"),
+            tuple(hit.get("matched_apis") or ()),
+        ),
+    )
     return static
+
+
+def _once[T](rows: list[T], key: Any) -> list[T]:
+    """``rows`` with each key kept at its first occurrence, in order."""
+    seen: set[Any] = set()
+    out: list[T] = []
+    for row in rows:
+        marker = key(row)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        out.append(row)
+    return out
 
 
 def _string_kind(value: Any) -> str:

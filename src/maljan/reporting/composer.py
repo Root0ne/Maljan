@@ -132,7 +132,9 @@ _SYSTEM = (
     "'we assess'). Present tense for what the sample does, past tense for what the "
     "run did. No second person.\n"
     "8. Delivery, actors and campaigns this run did not see are context, not "
-    "findings: say where they come from, and never write them as observed.\n"
+    "findings: say where they come from, and never write them as observed. A "
+    "sandbox answer with nothing in it is not an execution: write 'observed' only "
+    "for what a sandbox entry records.\n"
     "9. Output MUST be the JSON object shown in the request, with its keys."
 )
 

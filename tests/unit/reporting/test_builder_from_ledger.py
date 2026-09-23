@@ -404,6 +404,22 @@ class TestTheHeaderFactsAreStatedAsTheToolReadThem:
         assert "All 2 exports share one address, 0x3ce4." in markdown
         assert "| Type | unknown, x86-64, DLL |" in markdown
 
+    def test_one_binary_read_twice_is_one_table(self) -> None:
+        """The triage pack and the analyst both call pe_info on the one file."""
+        counter = EvidenceCounter()
+        info = self._pe_info(
+            sections=[{"name": ".text", "virtual_address": 4096, "raw_offset": 1024}],
+            imports=[{"dll": "KERNEL32.dll", "function": "CreateMutexW"}],
+        )
+        report = _build([entry("pe_info", info, counter), entry("pe_info", info, counter)])
+        assert report.static is not None
+        assert [s.name for s in report.static.sections] == [".text"]
+        assert [(r.dll, r.function) for r in report.static.imports] == [
+            ("KERNEL32.dll", "CreateMutexW")
+        ]
+        assert report.static.exports == ["extra", "run"]
+        assert len(report.static.export_rows) == 2
+
     def test_a_run_whose_format_tool_said_nothing_states_nothing(self) -> None:
         ident = _build([]).identity
         assert (ident.architecture, ident.is_dll, ident.export_name, ident.internal_name) == (
