@@ -3141,6 +3141,7 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         if not self.tools:
             plain = LoopBudget(int(max_steps), float(timeout))
+            self._last_loop_deadline = plain.started + float(timeout)
             try:
                 answer = self._invoke_llm_with_timeout(prebuilt, timeout)
             except TimeoutError:
@@ -3198,6 +3199,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The loop's budget, readable by an ask made from inside it and
         # charged by the delegation when the callee returns.
         budget = LoopBudget(int(max_steps), float(timeout))
+        # When this loop's time runs out: the validation turn that follows it
+        # is held to what is left, not given a fresh budget.
+        self._last_loop_deadline = budget.started + float(timeout)
         self.loop_budget = budget
 
         # The run-state block is regenerated on every model turn with the
@@ -4142,19 +4146,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         On the last record, which is the loop the salvage belongs to: it is
         written before the salvage starts. Never raises.
         """
-        try:
-            row = {
-                key: round(value, 1) if isinstance(value, float) else value
-                for key, value in record.items()
-            }
-            with self._the_meter_s_lock():
-                records = list(getattr(self, "_budget_records", None) or [])
-                if not records:
-                    return
-                records[-1] = {**records[-1], "salvage": row}
-                self._budget_records = records
-        except Exception as exc:  # noqa: BLE001 — a record never costs a salvage
-            self.logger.debug("%s: the salvage was not recorded (%s).", self.name, exc)
+        row = {
+            key: round(value, 1) if isinstance(value, float) else value
+            for key, value in record.items()
+        }
+        self._note_on_last_loop("salvage", row)
 
     def _invoke_llm_with_timeout(self, messages: list, timeout: float) -> str:
         """Run ``self.llm.invoke(messages)`` with a hard wall-clock timeout.
@@ -4340,6 +4336,37 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return self._analyze_isr_guarded(data)
             finally:
                 self._budget_ceiling = before
+
+    def seconds_an_answer_needs(self) -> float:
+        """One answer at the pace this agent's last loop measured: the loop's final-answer reserve.
+
+        ``TurnPace.reserve``: the longest turn, or a 1,000-token answer at the
+        measured rate where that is longer, times the margin, and at least the
+        salvage's minimum. A loop that measured nothing needs that minimum.
+        """
+        pace = getattr(self, "_last_pace", None)
+        if not isinstance(pace, TurnPace):
+            return float(_SYNTHESIS_MIN_SECONDS)
+        return pace.reserve()
+
+    def _seconds_the_last_loop_left(self, fallback: float) -> float:
+        """What is left of the last loop's time, or ``fallback`` when no loop has run."""
+        deadline = getattr(self, "_last_loop_deadline", None)
+        if not isinstance(deadline, int | float):
+            return float(fallback)
+        return float(deadline) - time.monotonic()
+
+    def _note_on_last_loop(self, key: str, value: Any) -> None:
+        """Put one fact on the last loop's budget record. Never raises."""
+        try:
+            with self._the_meter_s_lock():
+                records = list(getattr(self, "_budget_records", None) or [])
+                if not records:
+                    return
+                records[-1] = {**records[-1], key: value}
+                self._budget_records = records
+        except Exception as exc:  # noqa: BLE001 — a record never costs an answer
+            self.logger.debug("%s: %s was not recorded (%s).", self.name, key, exc)
 
     def seconds_a_loop_needs(self) -> float:
         """One turn and the final answer after it, at the pace this agent's last loop measured.
@@ -4855,10 +4882,29 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.validation_findings.extend(parse_violations(isr))
 
         try:
-            if not _validator(isr):
-                return isr
+            initial = _validator(isr)
         except Exception as exc:  # noqa: BLE001
             self.logger.warning("Validation skipped (%s).", exc)
+            return isr
+        if not initial:
+            return isr
+
+        # The turn gets what the loop it follows left, and is not asked at all
+        # when that cannot hold an answer at this model's pace: a question after
+        # a loop that ended at its time cap used to be handed the whole budget
+        # again, and after a second loop the whole of what that loop was given.
+        timeout, _steps = loop_limits(self.name, getattr(self, "_budget_ceiling", None))
+        left = self._seconds_the_last_loop_left(float(timeout))
+        needs = self.seconds_an_answer_needs()
+        if left < needs:
+            detail = (
+                f"not asked: {max(0.0, left):.0f}s of the loop's time were left, and an answer "
+                f"needs {needs:.0f}s at the pace this agent's loop measured"
+            )
+            self.logger.warning("%s: validation turn %s.", self.name, detail)
+            mark_invalid_technique_ids(isr, initial)
+            self.validation_findings.extend(initial)
+            self._note_on_last_loop("validation", detail)
             return isr
 
         from langchain_core.messages import HumanMessage, SystemMessage
@@ -4878,13 +4924,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             run_state=str(getattr(self, "run_state_block", "") or ""),
         )
 
-        timeout, _steps = loop_limits(self.name, getattr(self, "_budget_ceiling", None))
         first: list[Any] = [_PriorAnswer(isr)]
 
         def _run(turns: list[Any]) -> Any:
             if first:
                 return first.pop()
-            return self._invoke_llm_with_timeout(turns, timeout)
+            return self._invoke_llm_with_timeout(turns, left)
 
         def _parse(answer: Any) -> AgentISR:
             if isinstance(answer, _PriorAnswer):
@@ -5236,6 +5281,9 @@ class BaseAnalyst(BudgetMeter, ABC):
     # second loop meets the same full window.
     ended_out_of_room: bool = False
     _budget_ceiling: BudgetCeiling | None = None
+    # When the last loop's time ran out, on the monotonic clock; ``None``
+    # before any loop.
+    _last_loop_deadline: float | None = None
     steps_spent: int = 0
     current_round: int = 0
     # The lock included: ``delegation.ask`` takes it on the callee, and a

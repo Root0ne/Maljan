@@ -1201,6 +1201,16 @@ class RunSummaryBuilder:
                 ),
                 "caps": caps,
                 **({"salvages": salvages} if salvages else {}),
+                # A validation turn a loop's time could not hold, and why.
+                **(
+                    {"validation_not_asked": skipped}
+                    if (
+                        skipped := [
+                            str(row["validation"]) for row in loops if row.get("validation")
+                        ]
+                    )
+                    else {}
+                ),
             }
         self._budget = out or None
         return self

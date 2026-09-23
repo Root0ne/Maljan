@@ -919,6 +919,11 @@ and the run's degradation reasons naming it ("analyst answers kept as prose,
 …"). A CLAIM block that states no confidence, or one that is not a number, is
 not a claim either: it is counted and asked about
 (`isr.claim_without_confidence`), where the parsers used to write 0.5.
+Every validation turn after a loop gets what that loop left of its time, not
+a fresh budget, and is not asked when that cannot hold one answer at the pace
+the loop measured (its final-answer reserve); what it would have asked is then
+recorded as unresolved and `run_summary.budget.<agent>.validation_not_asked`
+says why.
 
 An analyst whose loop ended with nothing at all — no claim and no prose — is
 given a second loop over the same material only when what is left of its
