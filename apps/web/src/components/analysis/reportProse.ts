@@ -12,6 +12,7 @@ import type {
   CommandRow,
   ConfigItem,
   FlowStep,
+  HostIdentifier,
   KeyFinding,
   MalwareReport,
 } from "@/types/malware-report";
@@ -48,6 +49,10 @@ export function flowMark(step: FlowStep): string {
 
 export function configuration(mr: MalwareReport | null | undefined): ConfigItem[] {
   return mr?.technical_analysis?.configuration ?? [];
+}
+
+export function hostIdentifiers(mr: MalwareReport | null | undefined): HostIdentifier[] {
+  return mr?.technical_analysis?.host_identifiers ?? [];
 }
 
 export function commands(mr: MalwareReport | null | undefined): CommandRow[] {
@@ -87,6 +92,16 @@ export function configFindings(mr: MalwareReport | null | undefined): Set<number
   const out = new Set<number>();
   for (const message of unresolvedOf(mr, "report.configuration_uncited")) {
     const match = /configuration item (\d+)/.exec(message);
+    if (match) out.add(Number(match[1]));
+  }
+  return out;
+}
+
+/** The 1-based identifiers a kept `report.identifier_uncited` finding names. */
+export function identifierFindings(mr: MalwareReport | null | undefined): Set<number> {
+  const out = new Set<number>();
+  for (const message of unresolvedOf(mr, "report.identifier_uncited")) {
+    const match = /identifier (\d+)/.exec(message);
     if (match) out.add(Number(match[1]));
   }
   return out;
@@ -142,6 +157,7 @@ export function hasTechnicalAnalysis(mr: MalwareReport | null | undefined): bool
   return (
     executionFlow(mr).length > 0 ||
     configuration(mr).length > 0 ||
+    hostIdentifiers(mr).length > 0 ||
     commands(mr).length > 0 ||
     c2Channels(mr).length > 0
   );

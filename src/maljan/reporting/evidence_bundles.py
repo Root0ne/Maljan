@@ -90,6 +90,7 @@ _SECTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     ),
     "commands": ("decompile_function", "analyze_function_complete", "analyze_api_call_chains"),
     "payloads": ("list_segments", "decompile_function", "extract_iocs_with_context"),
+    "host_identifiers": ("list_strings", "extract_iocs_with_context"),
 }
 
 # Keyword hints to pull the relevant ISR claims into a technical section.
@@ -147,6 +148,20 @@ _SECTION_CLAIM_KEYWORDS: dict[str, tuple[str, ...]] = {
         "decrypt",
     ),
     "commands": ("command", "handler", "opcode", "instruction", "dispatch", "switch", "task id"),
+    "host_identifiers": (
+        "mutex",
+        "path",
+        "folder",
+        "directory",
+        "registry",
+        "file name",
+        "task",
+        "pipe",
+        "service",
+        "user agent",
+        "user-agent",
+        "marker",
+    ),
     "payloads": ("payload", "drop", "carve", "embedded", "stage", "download", "inject", "overlay"),
 }
 
@@ -440,6 +455,22 @@ def _process_lines(node: Any, depth: int) -> list[str]:
     return out
 
 
+# The tools whose answers are the sample's own strings, read or decoded.
+_STRING_TOOLS = frozenset({"strings", "floss", "iocs_from_file", "list_strings"})
+
+# The string-sweep kinds a responder searches a host for.
+_HOST_STRING_KINDS = frozenset({"path", "registry", "mutex", "command"})
+
+
+def _string_entries(report: MalwareReport) -> list[str]:
+    """``ev_0012 (floss)`` for every answered entry whose output is the sample's strings."""
+    return [
+        f"{row.id} ({row.tool})"
+        for row in report.evidence_index
+        if str(row.tool or "") in _STRING_TOOLS and row.ok
+    ]
+
+
 def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     """Deterministic measurements for one technical-spine section.
 
@@ -455,6 +486,21 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
             "urls": [u.url for u in (net.urls if net else [])][:10],
             "domains": [d.fqdn for d in (net.domains if net else [])][:10],
             "user_agents": (net.user_agents if net else [])[:3],
+            "string_entries": _string_entries(report),
+        }
+    if section == "host_identifiers":
+        static = report.static
+        return {
+            # The entries whose answers are the sample's own strings. The
+            # strings themselves are in those entries and in the triage pack
+            # every section leads with; the section reads them there and
+            # decides what a responder should search for.
+            "string_entries": _string_entries(report),
+            "host_kind_strings": [
+                f"{row.kind}: {row.value}"
+                for row in (static.interesting_strings if static else [])
+                if row.kind in _HOST_STRING_KINDS
+            ][:20],
         }
     if section == "commands":
         # Nothing measured says what an operator can ask for; the section runs

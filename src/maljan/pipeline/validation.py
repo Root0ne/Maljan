@@ -1479,6 +1479,7 @@ UNGROUNDED_FINDING_CODE = "narrative.ungrounded_finding"
 FLOW_VOICE_CODE = "report.flow_voice"
 UNCITED_CONFIGURATION_CODE = "report.configuration_uncited"
 CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
+UNCITED_IDENTIFIER_CODE = "report.identifier_uncited"
 
 # The codes a report round's answer is kept with. A broken shape leaves nothing
 # to print; each of these leaves a printable answer with a finding beside it.
@@ -1490,6 +1491,7 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         UNCITED_CONFIGURATION_CODE,
         CITATION_NOT_EVIDENCE_CODE,
         CITATION_WRONG_ENTRY_CODE,
+        UNCITED_IDENTIFIER_CODE,
     }
 )
 
@@ -1605,6 +1607,36 @@ def configuration_citation_violations(payload: Any, known_ids: Iterable[str]) ->
                     "the value was read from, or mark how it was obtained as inferred."
                 ),
                 path=f"items.{index}.evidence_refs",
+            )
+        )
+    return out
+
+
+def identifier_citation_violations(payload: Any, known_ids: Iterable[str]) -> list[Violation]:
+    """Host identifiers that cite no entry of this run's evidence.
+
+    An identifier is a value the report model says it read, and the entry it
+    was read in is what lets a reader check it. One with no entry the run
+    issued is asked about once; the model decides whether to cite the entry or
+    leave the identifier out. With no ledger to compare against, only an empty
+    citation list is judged.
+    """
+    known = {str(value).strip().lower() for value in known_ids}
+    out: list[Violation] = []
+    for index, row in enumerate(_rows_of(payload, "identifiers")):
+        cited = [value.lower() for value in _cited(row, "evidence_refs")]
+        if cited and (not known or any(value in known for value in cited)):
+            continue
+        out.append(
+            Violation(
+                code=UNCITED_IDENTIFIER_CODE,
+                message=(
+                    f"identifier {safe_finding_value(index + 1)} "
+                    f"({safe_finding_value(row.get('value'))}) cites no entry in this run's "
+                    "evidence. Cite the ev_ id of the entry the value was read in, or leave "
+                    "the identifier out."
+                ),
+                path=f"identifiers.{index}.evidence_refs",
             )
         )
     return out

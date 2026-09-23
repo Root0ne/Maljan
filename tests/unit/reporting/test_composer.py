@@ -565,6 +565,7 @@ class TestEachSectionIsShownAnExampleOfItsShape:
             "prose": module._ProseOut,
             "execution_flow": module._FlowOut,
             "configuration": module._ConfigOut,
+            "host_identifiers": module._HostIdentifiersOut,
             "commands": module._CommandsOut,
             "communications": module._C2Out,
         }

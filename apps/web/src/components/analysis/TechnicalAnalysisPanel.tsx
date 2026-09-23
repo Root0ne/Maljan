@@ -13,13 +13,16 @@ import {
   flowMark,
   flowNote,
   hasTechnicalAnalysis,
+  hostIdentifiers,
+  identifierFindings,
 } from "./reportProse";
 import type { MalwareReport } from "@/types/malware-report";
 
 /**
  * The report model's technical analysis: the execution flow, the
- * configuration it recovered, the commands the sample accepts and its C2
- * channels — the exported report's §4, §5.3, §5.6 and §5.7, in that order.
+ * configuration it recovered, the host identifiers it read, the commands the
+ * sample accepts and its C2 channels — the exported report's §4, §5.3, the
+ * model's table in §9, §5.6 and §5.7, in that order.
  *
  * Every block is labelled with its voice. The words are the report model's and
  * are printed as written; a step's mark (observed or assessed) is the model's
@@ -34,6 +37,8 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
   const cmds = commands(report);
   const channels = c2Channels(report);
   const uncitedConfig = configFindings(report);
+  const identifiers = hostIdentifiers(report);
+  const uncitedIdentifiers = identifierFindings(report);
 
   return (
     <div className="bg-bg-surface border border-border rounded">
@@ -101,6 +106,48 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
                 ))}
               </tbody>
             </table>
+          </section>
+        )}
+
+        {identifiers.length > 0 && (
+          <section>
+            <h3 className="text-[11px] uppercase tracking-wider text-text-muted mb-1.5">
+              Host identifiers
+            </h3>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-text-muted">
+                  <th className="py-1 pr-3 font-medium">Kind</th>
+                  <th className="py-1 pr-3 font-medium">Value</th>
+                  <th className="py-1 pr-3 font-medium">Purpose</th>
+                  <th className="py-1 font-medium">Evidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                {identifiers.map((item, i) => (
+                  <tr key={`${item.value}-${i}`} className="border-t border-border align-top">
+                    <td className="py-1 pr-3 text-text-primary">{item.kind}</td>
+                    <td className="py-1 pr-3 font-mono break-all text-text-secondary">
+                      {item.value}
+                    </td>
+                    <td className="py-1 pr-3 text-text-muted">{item.purpose || "-"}</td>
+                    <td className="py-1">
+                      <Cited ids={item.evidence_refs} />
+                      <Unresolved
+                        note={
+                          uncitedIdentifiers.has(i + 1)
+                            ? "unresolved: report.identifier_uncited"
+                            : ""
+                        }
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-1 text-[10px] italic text-text-muted">
+              Read out of this run&apos;s evidence by the report model; not published.
+            </p>
           </section>
         )}
 

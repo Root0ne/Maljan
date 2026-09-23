@@ -42,6 +42,7 @@ from maljan.pipeline.validation import (
     citation_violations,
     configuration_citation_violations,
     flow_voice_violations,
+    identifier_citation_violations,
     keep_known_keys,
     pack_line_ids,
     quoted_values,
@@ -58,6 +59,7 @@ from maljan.reporting.models import (
     ConfigItem,
     EncryptionScheme,
     FlowStep,
+    HostIdentifier,
     MalwareReport,
     RansomNote,
     TechnicalAnalysis,
@@ -103,6 +105,11 @@ class _FlowOut(BaseModel):
 class _ConfigOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
     items: list[ConfigItem] = Field(default_factory=list)
+
+
+class _HostIdentifiersOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    identifiers: list[HostIdentifier] = Field(default_factory=list)
 
 
 class _CommandsOut(BaseModel):
@@ -173,6 +180,12 @@ _INSTRUCTIONS: dict[str, str] = {
         "Extract the sample's configuration: its network endpoints, identifiers, keys, "
         "version, timing values and install path."
     ),
+    "host_identifiers": (
+        "List the identifiers a responder could search a host for — names, file and folder "
+        "paths, registry keys, strings the sample writes or checks — that you read in this "
+        "run's evidence. Write each value as the entry you read it in records it, say what "
+        "the sample uses it for where the evidence says, and cite that entry."
+    ),
     "commands": "Extract the commands the sample accepts from its operator.",
     "encryption_scheme": "Extract the encryption scheme.",
     "cli_flags": "Extract command-line flags.",
@@ -220,6 +233,13 @@ _EXAMPLES: dict[str, str] = {
         '"how_obtained": "static-string", "evidence_refs": ["ev_0015"]}, '
         '{"key": "Skipped folders", "value": "Windows, Program Files", '
         '"how_obtained": "inferred", "evidence_refs": []}]}'
+    ),
+    "host_identifiers": (
+        '{"identifiers": ['
+        '{"kind": "Note file name", "value": "RESTORE_FILES.example.txt", '
+        '"purpose": "Written to every folder it encrypts", "evidence_refs": ["ev_0014"]}, '
+        '{"kind": "Registry value", "value": "HKCU\\\\Software\\\\ExampleLocker\\\\state", '
+        '"purpose": "Marks a finished encryption pass", "evidence_refs": ["ev_0017"]}]}'
     ),
     "commands": (
         '{"commands": ['
@@ -282,6 +302,66 @@ def _expected_object(schema: type[BaseModel], depth: int = 0) -> str:
     return "{" + body + "}"
 
 
+def section_contract(section: str, schema: type[BaseModel]) -> str:
+    """Everything a section is told about the shape of its answer, as one text.
+
+    The exact object, how an unsupported field and a value are written, how
+    an item of a list is written, and the example. Module-level, so the test
+    that holds every word a report model is shown to the invented sample class
+    reads the contracts as well as the instructions.
+    """
+    contract = (
+        "Answer with exactly this JSON object, these keys and no others:\n"
+        f"{_expected_object(schema)}\n"
+        "A field the evidence does not support is left empty or null; the keys stay. "
+        'A value shown as "..." is written as a JSON string, a number included.'
+    )
+    if _has_record_lists(schema):
+        # The line above is about the object. An item of a list is a record,
+        # and a record the evidence gives no value for is not a record with
+        # nulls in it: a configuration section whose items carried
+        # ``"value": null`` failed its schema twice and was dropped.
+        contract += (
+            "\nAn item of a list is written only when the evidence gives it a value; an "
+            "item the evidence cannot fill is left out of the list, never written with "
+            "null in its fields."
+        )
+    example = _example_for(section, schema)
+    if example:
+        contract += (
+            "\nFor example (the shape only; write what this run's evidence supports):\n" + example
+        )
+    return contract
+
+
+# Every section the composer asks for, with the object it answers with, in the
+# order it asks. Read by the prompt-leak test, which holds every contract to
+# the invented sample class.
+SECTION_SCHEMAS: dict[str, type[BaseModel]] = {
+    "introduction": _IntroOut,
+    "execution_flow": _FlowOut,
+    "prose": _ProseOut,
+    "configuration": _ConfigOut,
+    "host_identifiers": _HostIdentifiersOut,
+    "commands": _CommandsOut,
+    "encryption_scheme": EncryptionScheme,
+    "cli_flags": _CliFlagsOut,
+    "ransom_note": RansomNote,
+    "communications": _C2Out,
+}
+
+
+def _has_record_lists(schema: type[BaseModel]) -> bool:
+    """Whether the object the section answers with holds a list of records."""
+    for field in (getattr(schema, "model_fields", {}) or {}).values():
+        args = [arg for arg in get_args(field.annotation) if arg is not type(None)]
+        if get_origin(field.annotation) in (list, tuple) and any(
+            isinstance(arg, type) and hasattr(arg, "model_fields") for arg in args
+        ):
+            return True
+    return False
+
+
 def _example_for(section: str, schema: type[BaseModel]) -> str:
     """The example answer shown for one section, or ``""`` for the shapes that have none."""
     if schema is _ProseOut:
@@ -337,6 +417,15 @@ def _bundle_text(section: str, bundle: dict[str, Any], entries: EntryTexts | Non
     return "\n".join(lines)
 
 
+# The headings of what the platform adds to a section's prompt beside the
+# model-facing text above: module data, so the prompt-leak test reads them.
+PUBLISHED_TECHNIQUES_HEADING = (
+    "TECHNIQUES THIS REPORT PUBLISHES (its ATT&CK table; the name beside each id is the "
+    "catalogue's):"
+)
+WHERE_QUOTED_LEAD = "the run's evidence: "
+
+
 def _where_quoted(line: str, entries: EntryTexts | None) -> str:
     """Which of the run's entries hold the values a claim quotes, as a note after it.
 
@@ -354,7 +443,7 @@ def _where_quoted(line: str, entries: EntryTexts | None) -> str:
         if holders:
             where = ", ".join(entries.named(entry_id) for entry_id in holders[:4])
             notes.append(f"`{value}` is in {where}")
-    return f" (the run's evidence: {'; '.join(notes)})" if notes else ""
+    return f" ({WHERE_QUOTED_LEAD}{'; '.join(notes)})" if notes else ""
 
 
 def _published_techniques(report: MalwareReport) -> str:
@@ -366,13 +455,7 @@ def _published_techniques(report: MalwareReport) -> str:
     ]
     if not rows:
         return ""
-    return "\n".join(
-        [
-            "TECHNIQUES THIS REPORT PUBLISHES (its ATT&CK table; the name beside each id "
-            "is the catalogue's):",
-            *rows,
-        ]
-    )
+    return "\n".join([PUBLISHED_TECHNIQUES_HEADING, *rows])
 
 
 # The calls one section may take: its answer and the one retry the validation
@@ -553,6 +636,18 @@ class ReportComposer:
             ta.configuration = self._kept("configuration", config.items, 30)
             authored += 1
 
+        identifiers = await self._author(
+            "host_identifiers",
+            report,
+            isr_reports,
+            _HostIdentifiersOut,
+            _INSTRUCTIONS["host_identifiers"],
+            validators=[lambda p: identifier_citation_violations(p, known_ids)],
+        )
+        if identifiers and isinstance(identifiers, _HostIdentifiersOut) and identifiers.identifiers:
+            ta.host_identifiers = self._kept("host_identifiers", identifiers.identifiers, 40)
+            authored += 1
+
         commands = await self._author(
             "commands",
             report,
@@ -639,17 +734,7 @@ class ReportComposer:
         # object is in the prompt because the manual parse is the primary path
         # on a local server — ``with_structured_output`` is skipped there — and
         # on that path nothing had ever shown the model a key name.
-        contract = (
-            "Answer with exactly this JSON object, these keys and no others:\n"
-            f"{_expected_object(schema)}\n"
-            "A field the evidence does not support is left empty or null; the keys stay."
-        )
-        example = _example_for(section, schema)
-        if example:
-            contract += (
-                "\nFor example (the shape only; write what this run's evidence supports):\n"
-                + example
-            )
+        contract = section_contract(section, schema)
         entries = getattr(self, "_entries", None)
         human = "\n\n".join([*head, instruction, contract, _bundle_text(section, bundle, entries)])
         messages = [

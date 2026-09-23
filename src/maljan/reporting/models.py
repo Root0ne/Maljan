@@ -780,6 +780,23 @@ class ConfigItem(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
+class HostIdentifier(BaseModel):
+    """One identifier the report model read that a responder can look for on a host.
+
+    What it is in a responder's words, the value as the entry it was read in
+    records it, what the sample uses it for where the evidence says, and the
+    entries it was read in. Model-written and printed as written; the platform
+    copies no string into it.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    kind: str
+    value: str
+    purpose: str = ""
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
 class CommandRow(BaseModel):
     """One command the sample accepts from its operator."""
 
@@ -801,6 +818,9 @@ class TechnicalAnalysis(BaseModel):
     # model supplied none.
     execution_flow: list[FlowStep] = Field(default_factory=list)
     configuration: list[ConfigItem] = Field(default_factory=list)
+    # The identifiers a responder searches a host for — names, paths, keys,
+    # strings — as the report model read them, each citing its entry.
+    host_identifiers: list[HostIdentifier] = Field(default_factory=list)
     commands: list[CommandRow] = Field(default_factory=list)
     command_and_control: TechnicalSubsection | None = None
     payloads: TechnicalSubsection | None = None
