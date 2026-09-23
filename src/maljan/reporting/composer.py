@@ -35,6 +35,7 @@ from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
     KEPT_WITH_A_FINDING,
     CapabilityGrounding,
+    EntryTexts,
     ValidationTally,
     Validator,
     Violation,
@@ -43,9 +44,11 @@ from maljan.pipeline.validation import (
     flow_voice_violations,
     keep_known_keys,
     pack_line_ids,
+    quoted_values,
     retry_with_feedback,
     schema_violations,
     section_capability_violations,
+    wrong_entry_citations,
 )
 from maljan.reporting.evidence_bundles import bundle_for, is_empty, sandbox_entry_ids
 from maljan.reporting.models import (
@@ -286,7 +289,7 @@ def _example_for(section: str, schema: type[BaseModel]) -> str:
     return _EXAMPLES.get(section, "")
 
 
-def _bundle_text(section: str, bundle: dict[str, Any]) -> str:
+def _bundle_text(section: str, bundle: dict[str, Any], entries: EntryTexts | None = None) -> str:
     """Render an evidence bundle into a compact prompt body.
 
     The heading used to be the bare line ``SECTION: <name>``, which is a key
@@ -321,7 +324,8 @@ def _bundle_text(section: str, bundle: dict[str, Any]) -> str:
     if claims:
         lines.append("ANALYST CLAIMS (claim — evidence):")
         for c in claims[:10]:
-            lines.append(f"- {c.get('claim', '')} — {c.get('evidence_ref', '')}")
+            line = f"- {c.get('claim', '')} — {c.get('evidence_ref', '')}"
+            lines.append(line + _where_quoted(line, entries))
         lines.append("")
     tools = bundle.get("tool_outputs") or []
     if tools:
@@ -331,6 +335,44 @@ def _bundle_text(section: str, bundle: dict[str, Any]) -> str:
             lines.append(f"- {t.get('tool', '')}{sym}: {t.get('output', '')[:1200]}")
         lines.append("")
     return "\n".join(lines)
+
+
+def _where_quoted(line: str, entries: EntryTexts | None) -> str:
+    """Which of the run's entries hold the values a claim quotes, as a note after it.
+
+    A claim is another model's words and is shown as written. What the
+    platform adds is a fact it can state: the entries whose text holds each
+    value the claim quotes. A section shown only the claim and the facts of
+    its own bundle once called a claim unsupported that an entry it was never
+    shown carried word for word. A value no entry holds gets no note.
+    """
+    if entries is None:
+        return ""
+    notes: list[str] = []
+    for value in quoted_values(line):
+        holders = entries.holding(value)
+        if holders:
+            where = ", ".join(entries.named(entry_id) for entry_id in holders[:4])
+            notes.append(f"`{value}` is in {where}")
+    return f" (the run's evidence: {'; '.join(notes)})" if notes else ""
+
+
+def _published_techniques(report: MalwareReport) -> str:
+    """The techniques the report publishes, one line each, for every section's prompt."""
+    rows = [
+        f"- {m.technique_id} {m.technique_name}".rstrip()
+        for m in (getattr(report, "ttp_mappings", None) or [])
+        if getattr(m, "technique_id", "")
+    ]
+    if not rows:
+        return ""
+    return "\n".join(
+        [
+            "TECHNIQUES THIS REPORT PUBLISHES (its ATT&CK table; the name beside each id "
+            "is the catalogue's):",
+            *rows,
+        ]
+    )
 
 
 # The calls one section may take: its answer and the one retry the validation
@@ -401,6 +443,9 @@ class ReportComposer:
         # ``compose`` call.
         self._facts_block = ""
         self._run_state = ""
+        # Each ledger entry's text, set per ``compose`` call; ``None`` judges
+        # no citation against an entry and annotates no claim.
+        self._entries: EntryTexts | None = None
         # What this report lost or had trimmed, in the words the report's own
         # degradation reasons are written in. A section dropped after its
         # retries used to leave the report with no conclusion and nothing
@@ -415,6 +460,7 @@ class ReportComposer:
         facts_block: str = "",
         run_state: str = "",
         citable_ids: Sequence[str] | None = None,
+        evidence: EntryTexts | None = None,
     ) -> None:
         """Fill report.intro_background / technical_analysis / c2_channels.
 
@@ -424,6 +470,13 @@ class ReportComposer:
         block; every section's prompt leads with the two, so no section is
         written without the facts the run established or without knowing
         which stages ran.
+
+        ``evidence`` is each ledger entry's text as the run holds it. With it,
+        a value a section quotes under a citation is looked for in the entry
+        cited (``wrong_entry_citations``), and a value an analyst's claim
+        quotes is shown with the entries that hold it, so a section is never
+        left to call a claim unsupported that an entry it was not shown
+        supports.
         """
         ta = report.technical_analysis or TechnicalAnalysis()
         authored = 0
@@ -433,6 +486,7 @@ class ReportComposer:
         # handed none, the pack's own line ids — never ids read out of prompt
         # text, where a sample's decoded string can carry any.
         self._citable = list(citable_ids) if citable_ids is not None else pack_line_ids(facts_block)
+        self._entries = evidence
         # What this run established, read once and asked of every section, so
         # a conclusion cannot be the first place "command-and-control" appears.
         self._grounding = CapabilityGrounding.from_report(report, isr_reports)
@@ -570,6 +624,11 @@ class ReportComposer:
         facts = str(getattr(self, "_facts_block", "") or "")
         if facts:
             head.append(facts)
+        # What the report already publishes, so a section cannot call a
+        # technique unsupported that the report's own ATT&CK table carries.
+        published = _published_techniques(report)
+        if published:
+            head.append(published)
         # The two standing blocks lead, then the instruction, then the exact
         # object the answer has to be, then the section's own bundle. The
         # object is in the prompt because the manual parse is the primary path
@@ -586,7 +645,8 @@ class ReportComposer:
                 "\nFor example (the shape only; write what this run's evidence supports):\n"
                 + example
             )
-        human = "\n\n".join([*head, instruction, contract, _bundle_text(section, bundle)])
+        entries = getattr(self, "_entries", None)
+        human = "\n\n".join([*head, instruction, contract, _bundle_text(section, bundle, entries)])
         messages = [
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=human),
@@ -682,6 +742,7 @@ class ReportComposer:
         # every one of eight sections is still eight timeouts nobody needs.
         citable = list(getattr(self, "_citable", None) or [])
         prose = _PROSE_FIELDS.get(schema, ())
+        entries = getattr(self, "_entries", None)
         try:
             if not structured_output_supported_for_llm(self.llm):
                 raise _StructuredOutputUnavailable
@@ -705,6 +766,7 @@ class ReportComposer:
                 found = [
                     *section_capability_violations(answer, self._grounding),
                     *citation_violations(answer, citable, prose=prose),
+                    *wrong_entry_citations(answer, entries, prose=prose),
                 ]
                 for extra in validators or []:
                     found.extend(extra(answer))
@@ -784,6 +846,7 @@ class ReportComposer:
                 *schema_violations(schema, payload, code="composer.schema"),
                 *section_capability_violations(payload, self._grounding),
                 *citation_violations(payload, citable, prose=prose),
+                *wrong_entry_citations(payload, entries, prose=prose),
             ]
             for extra in validators or []:
                 found.extend(extra(payload))

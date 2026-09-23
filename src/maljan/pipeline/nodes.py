@@ -401,6 +401,27 @@ def _what_the_run_saw(container: Any, ledger: Any) -> tuple[list[str], CorpusSta
     return [e.output for e in entries if e.output], both_searched(corpus_state, stored)
 
 
+def _report_entry_texts(container: Any, ledger: Any) -> Any:
+    """Each ledger entry's text for the report rounds, or ``None`` when none can be read.
+
+    The run's corpus first, which holds every answer as the model received it,
+    and the stored output where the corpus kept nothing. Never raises: without
+    it the rounds judge no citation against an entry, which is what they did
+    before.
+    """
+    try:
+        from maljan.pipeline.validation import EntryTexts
+
+        try:
+            corpus = container.get_evidence_corpus()
+        except Exception:  # noqa: BLE001 — the stored outputs are the fallback
+            corpus = None
+        return EntryTexts.from_ledger(list(ledger or []), corpus)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("report_node: entry texts not read (%s).", exc)
+        return None
+
+
 def _violations_from_rows(rows: Any) -> list[Violation]:
     """Rebuild the violations an analyst node put on the state channel."""
     out: list[Violation] = []
@@ -4172,6 +4193,11 @@ def make_report_node(
         # answers. They run after the judge built the run summary, so the
         # summary's ``validation`` block is amended here rather than there.
         _report_tally = ValidationTally()
+        # Each ledger entry's text as the run holds it, read once for both
+        # report rounds: a value their prose quotes is looked for in the entry
+        # it cites, and the composer is shown which entries hold what the
+        # analysts' claims quote.
+        _entry_texts = _report_entry_texts(container, _ledger)
 
         narrative_dict: dict[str, Any] | None = None
         # Why no summary was written, when none is: said where the summary
@@ -4207,6 +4233,7 @@ def make_report_node(
                         facts_block=pack_text(state, container),
                         run_state=render_run_state(state),
                         citable_ids=ledger_ids(state),
+                        evidence=_entry_texts,
                     ),
                     timeout=_NARRATIVE_TIMEOUT_SECONDS,
                 )
@@ -4272,6 +4299,7 @@ def make_report_node(
                     facts_block=pack_text(state, container),
                     run_state=render_run_state(state),
                     citable_ids=ledger_ids(state),
+                    evidence=_entry_texts,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(

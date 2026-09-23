@@ -1478,6 +1478,7 @@ def citation_violations(
 UNGROUNDED_FINDING_CODE = "narrative.ungrounded_finding"
 FLOW_VOICE_CODE = "report.flow_voice"
 UNCITED_CONFIGURATION_CODE = "report.configuration_uncited"
+CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
 
 # The codes a report round's answer is kept with. A broken shape leaves nothing
 # to print; each of these leaves a printable answer with a finding beside it.
@@ -1488,6 +1489,7 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         FLOW_VOICE_CODE,
         UNCITED_CONFIGURATION_CODE,
         CITATION_NOT_EVIDENCE_CODE,
+        CITATION_WRONG_ENTRY_CODE,
     }
 )
 
@@ -1606,6 +1608,218 @@ def configuration_citation_violations(payload: Any, known_ids: Iterable[str]) ->
             )
         )
     return out
+
+
+# What a sentence states verbatim: a span in backticks, in double quotes, in
+# typographic quotes, or in single quotes that stand apart from the words
+# around them (an apostrophe inside a word opens nothing). A span of any length
+# is matched, so its closing mark is consumed with it; only a value of three
+# characters or more is kept (``quoted_values``), so a format specifier or a
+# one-letter value, which half the run's answers carry, is never the thing a
+# citation is judged by.
+_QUOTED_SPAN_RE = re.compile(
+    r"`([^`\n]{1,300})`"
+    r'|"([^"\n]{1,300})"'
+    r"|“([^”\n]{1,300})”"
+    r"|(?<![\w'])'([^'\n]{1,300})'(?![\w'])"
+)
+# Where one sentence ends and the next begins, for reading which citation a
+# quoted value sits under. A new line always ends one.
+_SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z(`\"“'])|\n+")
+# The fields of a record whose whole value is a value the sample carries, read
+# as written rather than for quotes inside it.
+_VERBATIM_FIELDS = frozenset({"value", "endpoints"})
+# The fields a record cites its entries in.
+_CITING_FIELDS = ("evidence_refs", "evidence_ids", "evidence_ref")
+
+
+@dataclass(frozen=True)
+class EntryTexts:
+    """Each ledger entry's text as this run holds it, lower-cased, and the tool behind it.
+
+    The text a check reads for "is this value in that entry": the answer as
+    the model received it where the run's corpus kept it, and the stored
+    output where it did not. Read-only, built once per report.
+    """
+
+    texts: Mapping[str, str] = field(default_factory=dict)
+    tools: Mapping[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def from_ledger(cls, ledger: Iterable[Any], corpus: Any = None) -> EntryTexts:
+        """One text per entry: the corpus's copy first, the stored output after it."""
+        texts: dict[str, str] = {}
+        tools: dict[str, str] = {}
+        for entry in ledger or ():
+            written = str(getattr(entry, "id", "") or "").strip()
+            entry_id = written.lower()
+            if not entry_id:
+                continue
+            text = ""
+            if corpus is not None:
+                try:
+                    text = str(corpus.text_for(written) or "")
+                except Exception:  # noqa: BLE001 — a missing copy falls back to the stored one
+                    text = ""
+            text = text or str(getattr(entry, "output", "") or "").lower()
+            if text:
+                texts[entry_id] = text
+                tools[entry_id] = str(getattr(entry, "tool", "") or "")
+        return cls(texts=texts, tools=tools)
+
+    def holds(self, entry_id: str, value: str) -> bool:
+        """Whether this entry's text holds ``value``, however the text spells it."""
+        text = self.texts.get(str(entry_id).strip().lower(), "")
+        return bool(text) and any(form in text for form in written_forms(value.lower()))
+
+    def holding(self, value: str) -> list[str]:
+        """Every entry whose text holds ``value``, in ledger order."""
+        return [entry_id for entry_id in self.texts if self.holds(entry_id, value)]
+
+    def named(self, entry_id: str) -> str:
+        """``ev_0012 (floss)``: an id with the tool that answered it."""
+        tool = self.tools.get(entry_id, "")
+        return f"{entry_id} ({tool})" if tool else entry_id
+
+
+def quoted_values(text: str) -> list[str]:
+    """What ``text`` states verbatim, in the order written, once each."""
+    found: list[str] = []
+    for match in _QUOTED_SPAN_RE.finditer(str(text or "")):
+        value = next(group for group in match.groups() if group is not None).strip()
+        if len(value) >= 3 and value not in found:
+            found.append(value)
+    return found
+
+
+def _ids_in(value: Any) -> list[str]:
+    """The evidence ids a citing field carries, lower-cased, in order."""
+    items = value if isinstance(value, list | tuple) else [value]
+    ids: list[str] = []
+    for item in items:
+        for found in _EVIDENCE_ID_RE.findall(str(item or "")):
+            if found.lower() not in ids:
+                ids.append(found.lower())
+    return ids
+
+
+def _sentences_with_citations(text: str) -> list[tuple[str, list[str]]]:
+    """Each sentence of ``text`` with the evidence ids it cites in brackets."""
+    out: list[tuple[str, list[str]]] = []
+    for sentence in _SENTENCE_END_RE.split(str(text or "")):
+        cited: list[str] = []
+        for group in _cited_groups(_CODE_SPAN_RE.sub(" ", sentence)):
+            for raw in re.split(r"[,;]", group):
+                item = raw.strip().lower()
+                if _EVIDENCE_ID_RE.fullmatch(item) and item not in cited:
+                    cited.append(item)
+        if cited:
+            out.append((sentence, cited))
+    return out
+
+
+def wrong_entry_citations(
+    payload: Any, entries: EntryTexts | None, *, prose: Sequence[str] = ()
+) -> list[Violation]:
+    """Values a text quotes that the entry it cites does not hold, and another entry does.
+
+    Decided only where it can be: a value the text states verbatim — in quotes
+    or backticks, or the whole of a record's value — is looked for in the text
+    of each entry cited for it. Found in one of them, the citation stands.
+    Found in none of them but in another entry of the run, the citation points
+    a reader at the wrong answer, and the model is asked once, with the entry
+    that holds it offered. Found nowhere, nothing is said: a value the run's
+    texts do not spell as the sentence does is a paraphrase or a composition
+    this check cannot judge. The id is never rewritten.
+
+    ``prose`` names the fields that are running text, read sentence by
+    sentence under the brackets each sentence carries. Every other string is
+    read under its own brackets when it has any, and otherwise under the
+    citations of the record it belongs to (``evidence_refs``,
+    ``evidence_ids``, ``evidence_ref``); a string with neither is not judged.
+    """
+    if payload is None or entries is None or not entries.texts:
+        return []
+    data = payload if isinstance(payload, dict) else getattr(payload, "__dict__", {}) or {}
+    wrong: dict[tuple[tuple[str, ...], tuple[str, ...]], list[str]] = {}
+
+    def _ask(value: str, cited: Sequence[str]) -> None:
+        value = str(value or "").strip()
+        known = [entry_id for entry_id in cited if entry_id in entries.texts]
+        if len(value) < 3 or not known:
+            return
+        if any(entries.holds(entry_id, value) for entry_id in known):
+            return
+        holders = entries.holding(value)
+        if not holders:
+            return
+        values = wrong.setdefault((tuple(known), tuple(holders)), [])
+        if value not in values:
+            values.append(value)
+
+    def _read_prose(text: Any) -> None:
+        for sentence, cited in _sentences_with_citations(str(text or "")):
+            for value in quoted_values(sentence):
+                _ask(value, cited)
+
+    def _walk(node: Any, depth: int = 0) -> None:
+        if depth > 4:
+            return
+        if isinstance(node, list | tuple):
+            for item in node:
+                _walk(item, depth + 1)
+            return
+        if not isinstance(node, dict):
+            return
+        refs: list[str] = []
+        for key in _CITING_FIELDS:
+            refs.extend(ref for ref in _ids_in(node.get(key)) if ref not in refs)
+        for key, value in node.items():
+            if key in _CITING_FIELDS:
+                continue
+            if isinstance(value, str):
+                if _sentences_with_citations(value):
+                    _read_prose(value)
+                elif refs:
+                    if key in _VERBATIM_FIELDS:
+                        _ask(value, refs)
+                    for quoted in quoted_values(value):
+                        _ask(quoted, refs)
+            elif key in _VERBATIM_FIELDS and isinstance(value, list | tuple) and refs:
+                for item in value:
+                    if isinstance(item, str):
+                        _ask(item, refs)
+            else:
+                _walk(value, depth + 1)
+
+    for key in prose:
+        if isinstance(data.get(key), str):
+            _read_prose(data.get(key))
+    _walk({key: value for key, value in data.items() if key not in prose})
+    for key in prose:
+        if not isinstance(data.get(key), str):
+            _walk(data.get(key))
+
+    violations: list[Violation] = []
+    for (cited, holders), values in wrong.items():
+        shown = ", ".join(repr(safe_finding_value(value)) for value in values[:_MAX_NAMED_IDS])
+        if len(values) > _MAX_NAMED_IDS:
+            shown += f" and {len(values) - _MAX_NAMED_IDS} more"
+        pronoun = "it" if len(values) == 1 else "them"
+        violations.append(
+            Violation(
+                code=CITATION_WRONG_ENTRY_CODE,
+                message=(
+                    f"{shown} {'is' if len(values) == 1 else 'are'} not in "
+                    f"{', '.join(entries.named(i) for i in cited)}, which the text cites for "
+                    f"{pronoun}; this run's evidence holds {pronoun} in "
+                    f"{', '.join(entries.named(i) for i in holders[:_MAX_NAMED_IDS])}. "
+                    "Cite the entry that holds what the text quotes."
+                ),
+                path="citation",
+            )
+        )
+    return violations
 
 
 # ---------------------------------------------------------------------------
