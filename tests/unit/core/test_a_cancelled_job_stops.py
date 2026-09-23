@@ -348,3 +348,80 @@ class TestTheRevisionRoundToo:
                     found.append(f"{path.name}:{node.lineno}: {ast.unparse(node)}")
 
         assert not found, "\n".join(found)
+
+
+class TestWhereTheCancelFoundThePipeline:
+    """The worker's record of a cancel says where the pipeline was.
+
+    A cancel that arrived while the report node was retrying a model call ended
+    the pipeline task where it waited; no check ran, and the worker logged
+    "stopped before any check was reached" three to twelve minutes into runs.
+    """
+
+    def test_a_check_s_own_record_comes_first(self) -> None:
+        job = Cancellation()
+        job.node_started("report")
+        job.cancel("the operator cancelled the job")
+        with pytest.raises(JobCancelled):
+            job.check("before a model call")
+
+        assert job.where_stopped() == "before a model call"
+
+    @pytest.mark.asyncio
+    async def test_a_task_cancelled_inside_a_node_names_the_node(self) -> None:
+        job = Cancellation()
+        entered = asyncio.Event()
+
+        async def _report(state: dict[str, Any]) -> dict[str, Any]:
+            entered.set()
+            await asyncio.sleep(3600)
+            return state  # pragma: no cover
+
+        node = stops_when_cancelled("report", _report)
+
+        async def _run() -> Any:
+            with bound(job):
+                return await node({})
+
+        task = asyncio.create_task(_run())
+        await asyncio.wait_for(entered.wait(), PROMPTLY)
+        job.cancel("the operator cancelled the job")
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert job.stopped_at == ""
+        assert job.where_stopped() == ("while node report was running, when its task was cancelled")
+
+    def test_between_nodes_it_names_the_last_one_to_finish(self) -> None:
+        job = Cancellation()
+        with bound(job):
+            stops_when_cancelled("judge", lambda state: state)({})
+
+        assert job.where_stopped() == (
+            "after node judge finished, when the pipeline task was cancelled"
+        )
+
+    def test_nodes_running_side_by_side_are_all_named(self) -> None:
+        job = Cancellation()
+        job.node_started("static_analyst")
+        job.node_started("network_analyst")
+
+        assert job.where_stopped().startswith(
+            "while nodes static_analyst, network_analyst were running"
+        )
+
+    def test_before_any_node(self) -> None:
+        assert Cancellation().where_stopped() == (
+            "before the first node started, when the pipeline task was cancelled"
+        )
+
+    def test_the_worker_words_its_record_from_it(self) -> None:
+        import inspect
+
+        from app.worker import analysis_worker
+
+        source = inspect.getsource(analysis_worker.run_analysis)
+        assert "before any check was reached" not in source
+        assert "cancellation.where_stopped()" in source
+        assert '{"stopped": _stopped, "seconds_into_run"' in source

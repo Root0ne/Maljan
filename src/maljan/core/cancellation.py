@@ -56,6 +56,13 @@ class Cancellation:
         self.reason = ""
         # The first place a check stopped the pipeline, for the record.
         self.stopped_at = ""
+        # The graph's nodes running now, in the order they started, the ones a
+        # cancellation ended, and the last one to finish: where the pipeline
+        # was when a cancel reached it as a task cancellation rather than
+        # through a check.
+        self._running: list[str] = []
+        self._interrupted: list[str] = []
+        self._last_finished = ""
         self._in_flight: dict[int, Callable[[], None]] = {}
         self._next = 0
 
@@ -89,6 +96,49 @@ class Cancellation:
             if not self.stopped_at:
                 self.stopped_at = str(where)
         raise JobCancelled(f"{self.reason}; stopped {where}")
+
+    def node_started(self, name: str) -> None:
+        with self._lock:
+            self._running.append(str(name))
+
+    def node_finished(self, name: str) -> None:
+        with self._lock:
+            with contextlib.suppress(ValueError):
+                self._running.remove(str(name))
+            self._last_finished = str(name)
+
+    def node_interrupted(self, name: str) -> None:
+        """A node a cancellation ended before it returned."""
+        with self._lock:
+            with contextlib.suppress(ValueError):
+                self._running.remove(str(name))
+            if str(name) not in self._interrupted:
+                self._interrupted.append(str(name))
+
+    def where_stopped(self) -> str:
+        """Where the pipeline stopped, from what happened: a check's own record first.
+
+        A cancel reaches the pipeline two ways. A check that raises records its
+        place (``stopped_at``). The worker also cancels the pipeline task, and
+        a task awaiting something — a model call being retried, a tool — ends
+        there with no check involved; then the nodes that were running say
+        where it was.
+        """
+        if self.stopped_at:
+            return self.stopped_at
+        with self._lock:
+            running = [
+                *self._interrupted,
+                *(n for n in self._running if n not in self._interrupted),
+            ]
+            last = self._last_finished
+        if len(running) == 1:
+            return f"while node {running[0]} was running, when its task was cancelled"
+        if running:
+            return f"while nodes {', '.join(running)} were running, when their task was cancelled"
+        if last:
+            return f"after node {last} finished, when the pipeline task was cancelled"
+        return "before the first node started, when the pipeline task was cancelled"
 
     def track(self, stop: Callable[[], None]) -> Callable[[], None]:
         """Register a call in flight; ``stop`` ends it on cancel. Returns the unregister.
@@ -182,13 +232,39 @@ def stops_when_cancelled(name: str, fn: Callable[..., Any]) -> Callable[..., Any
         @functools.wraps(fn)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             check(where)
-            return await fn(*args, **kwargs)
+            job = current()
+            if job is None:
+                return await fn(*args, **kwargs)
+            job.node_started(name)
+            try:
+                result = await fn(*args, **kwargs)
+            except (asyncio.CancelledError, JobCancelled):
+                job.node_interrupted(name)
+                raise
+            except BaseException:
+                job.node_finished(name)
+                raise
+            job.node_finished(name)
+            return result
 
         return async_wrapper
 
     @functools.wraps(fn)
     def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
         check(where)
-        return fn(*args, **kwargs)
+        job = current()
+        if job is None:
+            return fn(*args, **kwargs)
+        job.node_started(name)
+        try:
+            result = fn(*args, **kwargs)
+        except JobCancelled:
+            job.node_interrupted(name)
+            raise
+        except BaseException:
+            job.node_finished(name)
+            raise
+        job.node_finished(name)
+        return result
 
     return sync_wrapper

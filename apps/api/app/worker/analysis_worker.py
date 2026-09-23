@@ -2079,18 +2079,23 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 if not isinstance(sys.exc_info()[1], asyncio.CancelledError):
                     raise asyncio.CancelledError from sys.exc_info()[1]
                 raise
-            _stopped = app.container.cancellation.stopped_at
+            # Worded from where the pipeline was: a check's own record when
+            # one stopped it, otherwise the nodes that were running when the
+            # task was cancelled under them.
+            _stopped = app.container.cancellation.where_stopped()
+            _into = max(0.0, time.time() - start_time)
             logger.info(
-                "Pipeline cancelled by user request: job=%s (stopped %s)",
+                "Pipeline cancelled by user request: job=%s (stopped %s, %.0f s into the run)",
                 job_id,
-                _stopped or "before any check was reached",
+                _stopped,
+                _into,
                 extra={"job_id": job_id},
             )
             await _publish_event(
                 redis_conn,
                 job_id,
                 "cancelled",
-                {"stopped": _stopped} if _stopped else {},
+                {"stopped": _stopped, "seconds_into_run": round(_into, 1)},
             )
             # On a session of its own, like every other outcome this task
             # records: the one it was working through may be the one the
