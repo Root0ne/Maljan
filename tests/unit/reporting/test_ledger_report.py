@@ -106,6 +106,19 @@ class TestOtherToolBuilders:
         sections = _by_key(build_sections([_entry("strings")]))
         assert sections["strings"].rows[0][2].startswith("http://c2.evil.tld")
 
+    def test_a_reputation_lookup_lifts_its_engine_counts_into_rows(self) -> None:
+        payload = {
+            "sha256": "0" * 64,
+            "last_analysis_stats": {"malicious": 52, "undetected": 23},
+            "coverage": {"engines": 75},
+        }
+        sections = _by_key(build_sections([_entry("get_file_report", payload, agent="pipeline")]))
+        rows = dict(sections["tool_get_file_report"].rows)
+        assert rows["engines malicious"] == "52"
+        assert rows["engines undetected"] == "23"
+        assert rows["engines"] == "75"
+        assert sections["tool_get_file_report"].evidence_ids == ["ev_0001"]
+
     def test_yara(self) -> None:
         sections = _by_key(build_sections([_entry("yara_scan")]))
         assert sections["yara_matches"].rows[0][0] == "Win32_Loader_Generic"

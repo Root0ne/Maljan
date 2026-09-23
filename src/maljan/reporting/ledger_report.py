@@ -765,6 +765,26 @@ def _functions_examined(acc: _Sections, entry: LedgerEntry, _data: Any) -> None:
     acc.credit(section, entry)
 
 
+def _reputation(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
+    """A reputation lookup, with the engine counts as rows of their own.
+
+    The service answers the counts nested inside its payload, and the generic
+    block flattens that into one cell a reader has to scroll to; the count is
+    the one fact of the lookup a report states.
+    """
+    _generic_kv(acc, entry, data)
+    body = data.get("data") if isinstance(data.get("data"), dict) else data
+    stats = body.get("last_analysis_stats") if isinstance(body, dict) else None
+    coverage = body.get("coverage") if isinstance(body, dict) else None
+    section = acc.get(f"tool_{entry.tool}", entry.tool.replace("_", " ").capitalize(), "kv")
+    if isinstance(stats, dict):
+        for name in ("malicious", "suspicious", "undetected", "harmless"):
+            if isinstance(stats.get(name), int):
+                acc.add_row(section, [f"engines {name}", str(stats[name])])
+    if isinstance(coverage, dict) and isinstance(coverage.get("engines"), int):
+        acc.add_row(section, ["engines", str(coverage["engines"])])
+
+
 _BUILDERS: dict[str, Any] = {
     "identify_file": _identity,
     "hashes": _identity,
@@ -790,6 +810,8 @@ _BUILDERS: dict[str, Any] = {
     "sandbox_services_and_tasks": _sandbox_services,
     "sandbox_report_section": _sandbox_section,
     "pcap_summary": _pcap,
+    "get_file_report": _reputation,
+    "check_hash": _reputation,
 }
 
 

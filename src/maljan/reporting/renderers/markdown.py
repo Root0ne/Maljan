@@ -1962,15 +1962,33 @@ def _reputation_line(report: MalwareReport) -> str:
     if not entries:
         return "no reputation lookup in this run"
     ids = {row.id for row in entries}
-    facts: list[str] = []
+    where = ", ".join(f"{row.tool}, {row.id}" for row in entries)
+    rows: dict[str, str] = {}
     for section in report.sections:
         if not ids.intersection(section.evidence_ids) or section.kind != "kv":
             continue
         for row in section.rows:
-            if len(row) >= 2 and str(row[0]).strip().lower() in _REPUTATION_KEYS:
-                facts.append(f"{row[0]} {row[1]}")
-    where = ", ".join(f"{row.tool} ({row.id})" for row in entries)
+            if len(row) >= 2:
+                rows.setdefault(str(row[0]).strip().lower(), str(row[1]))
+    # The engine counts: the section's own rows where the lookup was lifted into
+    # them, and otherwise the flattened answer a stored report carries.
+    blob = " ".join(rows.values())
+    flagged = rows.get("engines malicious") or _first_match(
+        r"last_analysis_stats=malicious=(\d+)", blob
+    )
+    engines = rows.get("engines") or _first_match(r"engines=(\d+)", blob)
+    source = rows.get("source", "").split(" via ")[0].strip() or "Reputation lookup"
+    if flagged and engines:
+        when = rows.get("analysis date")
+        said = f"{source}: {flagged} of {engines} engines flag it as malicious"
+        return said + (f" (analysis {when}; {where})" if when else f" ({where})")
+    facts = [f"{k} {v}" for k, v in rows.items() if k in _REPUTATION_KEYS]
     return f"{where}: {'; '.join(facts[:6])}" if facts else f"{where}; see Appendix A"
+
+
+def _first_match(pattern: str, text: str) -> str:
+    match = re.search(pattern, text)
+    return match.group(1) if match else ""
 
 
 def _environment_line(report: MalwareReport) -> str:

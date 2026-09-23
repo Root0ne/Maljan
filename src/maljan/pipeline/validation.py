@@ -1418,9 +1418,9 @@ def flow_voice_violations(payload: Any, sandbox_ids: Iterable[str]) -> list[Viol
         if any(value in sandbox for value in _cited(row, "evidence_refs")):
             continue
         where = (
-            f"the sandbox entries in this run are {_named_ids(sorted(sandbox))}"
+            f"the sandbox answers that recorded something are {_named_ids(sorted(sandbox))}"
             if sandbox
-            else "no sandbox ran in this run"
+            else "no sandbox answer in this run recorded anything"
         )
         out.append(
             Violation(

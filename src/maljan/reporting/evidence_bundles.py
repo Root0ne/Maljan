@@ -390,12 +390,41 @@ def bundle_for(
 
 
 def sandbox_entry_ids(report: MalwareReport) -> list[str]:
-    """The ledger ids a sandbox wrote, in the order they were issued."""
-    return [
+    """The ledger ids of the sandbox answers that recorded something, in issue order.
+
+    A sandbox answer with nothing in it — a mock with no fixture, a call that
+    returned empty lists — is not an observation, so a step citing only such
+    an entry has not been observed. An answer recorded something when the
+    section built from it holds a value: the section builders credit an entry
+    only when it added a row, and the generic block's rows are read for a
+    value that is not empty.
+    """
+    sandbox = {
         row.id
         for row in report.evidence_index
         if str(row.tool or "").startswith(SANDBOX_TOOL_PREFIXES)
-    ]
+    }
+    holding: set[str] = set()
+    for section in report.sections:
+        cited = sandbox.intersection(section.evidence_ids)
+        if cited and section_holds_something(section):
+            holding.update(cited)
+    return [row.id for row in report.evidence_index if row.id in holding]
+
+
+_EMPTY_VALUES = frozenset({"", "[]", "{}", "0", "none", "null", "-", "false", "no"})
+
+
+def section_holds_something(section: Any) -> bool:
+    """Whether an evidence section carries a value rather than an empty answer."""
+    values: list[str] = []
+    for row in getattr(section, "rows", None) or []:
+        cells = [str(cell) for cell in row]
+        # A key/value block's first cell is the field's name, not a value.
+        values.extend(cells[1:] if getattr(section, "kind", "") == "kv" else cells)
+    values.extend(str(item) for item in getattr(section, "items", None) or [])
+    values.append(str(getattr(section, "text", "") or ""))
+    return any(value.strip().lower() not in _EMPTY_VALUES for value in values)
 
 
 def _process_lines(node: Any, depth: int) -> list[str]:

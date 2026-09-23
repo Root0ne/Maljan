@@ -533,7 +533,7 @@ class TestTheNewSectionsAreCheckedAndKept:
         assert result.steps[0].voice == "observed"
         (row,) = comp.validation_tally.unresolved
         assert row["code"] == "report.flow_voice"
-        assert "no sandbox ran in this run" in row["message"]
+        assert "no sandbox answer in this run recorded anything" in row["message"]
         assert comp.degradations == []
 
     def test_a_decrypted_value_that_cites_nothing_is_asked_about(self) -> None:
