@@ -8,6 +8,28 @@ change landed on `main`.
 
 ### Added
 
+- **The report model states the host identifiers it read.** The report
+  contract gains a composer section, `host_identifiers`
+  (`HostIdentifier{kind, value, purpose, evidence_refs}` on
+  `technical_analysis`): what a responder can search a host for, each value as
+  the entry the model read it in records it, with the entry cited. The model
+  decides what goes in; the platform copies no string in. An identifier citing
+  no entry of the run is asked about once (`report.identifier_uncited`). The
+  Markdown prints the rows in §9 under the report model's voice, unpublished;
+  the console draws them in the technical-analysis panel. A benchmark report
+  had printed nine such items only as raw rows of its decoded-strings dump.
+- **A value cited to the wrong entry is asked about.** A value a report
+  sentence states verbatim — in quotes or backticks, or a record's `value` or
+  `endpoints` — is looked for in the entries the sentence cites, as the run
+  holds them (`validation.EntryTexts`). Held only by another entry, the report
+  model is asked once with that entry named (`report.citation_wrong_entry`);
+  held by none, nothing is said. The id is never rewritten. A benchmark report
+  cited the reputation lookup for strings only the decoded-strings entry held,
+  in four sections.
+- **A technique written with another technique's name is asked about**
+  (`report.technique_name`), from the vendored ATT&CK table, with the
+  catalogue's name and the id the written name belongs to.
+
 - **What changed between two runs.** `GET /api/v1/reports/diff?a=&b=`
   (`by=job` for job ids) compares two stored analyses section by section:
   verdict, confidence, severity and family with who stated each; ATT&CK
@@ -744,6 +766,33 @@ change landed on `main`.
   read from the header.
 
 ### Changed
+
+- **A composer section's output budget is derived, not fixed.**
+  `reporting.composer_section_max_tokens` ships at 0, which gives each model
+  of the reporter's list the room an analyst's reply is given on it: the
+  larger of `llm.expert_max_tokens` and `llm.judge_max_tokens`, at most a
+  quarter of the context window the model serves
+  (`llm.context_window.reply_budget`). The run summary prints the derivation
+  beside the section's wait. A positive value is an operator's own budget, as
+  before. The fixed 900 dropped a live report's payloads section.
+- **The IOC table and `/iocs` publish what the STIX export publishes.** A
+  value the export carries from the judge's own indicators
+  (`stix_renderer.exported_indicator_values`) is a published row with source
+  `judge`, in place of a withheld row of the same value; the table is built
+  again once the export exists. `/iocs` may now serve `email`, `path`,
+  `registry`, `mutex` and `command` rows, and a `hash` of another file, from
+  that source.
+- **A draft detection rule matches only what the run publishes.** YARA
+  strings and Suricata alerts are drawn from the IOC table's published rows,
+  and the drafts are generated after the export. Import names are no longer
+  YARA strings. A Benign verdict gets no draft, and §10.2 says why.
+- **A composer section is shown the techniques the report publishes and,
+  after each analyst claim, the entries that hold the values the claim
+  quotes.** A section shown only a claim had called it unsupported while a
+  strings entry held the value and the report published the technique.
+- **Every section's contract** (`composer.section_contract`) says a list item
+  is written only with a value, never with nulls, and a value is a JSON
+  string, numbers included; the prompt-leak test now reads every contract.
 
 - **The STIX export cites the ledger.** An exported object now carries the
   ledger entries the run's record ties to it, as `x_maljan_evidence_refs`
@@ -1722,6 +1771,36 @@ change landed on `main`.
   `MALJAN_FLOSS_PATH` to a missing file unless a test names a build.
 
 ### Fixed
+
+- **A value is grounded however the tool's answer spells it.** A tool answers
+  in JSON and the triage pack quotes decoded strings with its own escapes; the
+  grounding search compared the plain value a judge wrote with that text and
+  called a quoted command line and a Windows path the pack had shown it absent
+  from the evidence. `utils.written_forms` names every spelling and the
+  haystack asks each of them.
+- **A STIX pattern the grammar refuses is asked about, then declined.** A key
+  written in brackets (`extensions['windows-pebinary-ext']`) and a property an
+  extension does not define are now path problems: the judge is asked through
+  `stix.unknown_object_path`, and an indicator that keeps the pattern is
+  declined by the export with its record instead of failing the official
+  validator.
+- **A cut text says it was cut.** A claim's stored evidence, a tool answer in
+  a section's bundle, a procedure quote in the ATT&CK table and a claim in the
+  live transcript end in `…` where they are shortened (`utils.marked_cut`); a
+  report had printed "… This suggests" as the model's sentence.
+- **A version number is not an address.** The string sweep read the dotted
+  numbers after a version word (`version="6.0.0.0"`, `FileVersion`, `v…`) as
+  an IPv4 address; a benign tool got a "C2 IP" alert for one.
+- **`NONE` is not an ATT&CK row.** A word for no technique in a finding's or a
+  claim's technique field makes no row; the findings table prints it as
+  written without calling it a claim.
+- **The string sweep's own network rows ground no capability.** A network
+  block of swept hosts and addresses let "lateral movement" through the
+  ungrounded-capability check; a block grounds a capability only when
+  something other than the sweep recorded a row of it.
+- **A configuration section is no longer dropped for nulls the contract
+  allowed.** Its items carried `"value": null`, which the contract's own line
+  permitted and the schema refused twice.
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was
   written into one directory under the system temp directory, shared by every
@@ -4142,6 +4221,26 @@ change landed on `main`.
 - **`reporting.builder.defang`**, replaced by `reporting.defang.defang(value, kind)`.
 
 ### Upgrading
+
+`reporting.composer_section_max_tokens` now ships at 0, meaning derived from
+each reporter model's context window. A deployment that stored 900 (or any
+positive value) in its settings keeps that value; set it to 0 to take the
+derived budget. The report stage learns each reporter model's window when it
+builds the composer, the way the analysts' tool-output cap does (metadata
+endpoints only, cached per model and endpoint).
+
+`/reports/{id}/iocs` and `consolidated_iocs` may carry rows whose `source` is
+`judge`, of kinds the feed never served before (`email`, `path`, `registry`,
+`mutex`, `command`, and a `hash` of another file). A consumer that switches on
+`kind` should expect them. A stored report is read the same way from its
+stored export, so its feed can change without a new run.
+
+Draft detection rules are no longer generated for a Benign verdict, and a
+YARA draft no longer carries import names as strings; a Suricata draft alerts
+only on published network values. `technical_analysis.host_identifiers` is a
+new optional field; a report stored before it renders without the rows.
+`run_summary.validation` may carry `report.citation_wrong_entry`,
+`report.identifier_uncited` and `report.technique_name`.
 
 A stored STIX bundle keeps the shape it was stored with: `x_maljan_evidence_refs`
 appears only in exports rendered after this change, so the relationship graph

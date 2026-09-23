@@ -417,6 +417,34 @@ Two producers use it:
   over-claim that survives the retry is printed as written and recorded
   unresolved; only a broken shape costs the section.
 
+  Two more questions are asked where they can be decided. **A value cited to
+  the wrong entry** (`report.citation_wrong_entry`): a value a sentence states
+  verbatim — in quotes or backticks, or a record's `value` or `endpoints` — is
+  looked for in the text of each entry the sentence (or its record) cites, as
+  the run holds it (`validation.EntryTexts`: the corpus copy, else the stored
+  output). Held by a cited entry, the citation stands; held only by another
+  entry, the model is asked once with that entry named; held by none, nothing
+  is said, because a paraphrase or a composed value cannot be judged. The id is
+  never rewritten. **A technique written with another technique's name**
+  (`report.technique_name`): an id followed by a name in brackets whose name
+  the vendored ATT&CK table does not give that id — its own name, or its
+  parent's name before a sub-technique's, stands — is asked about with the
+  catalogue's name and the id the written name belongs to. Every search that
+  compares a value a model wrote with a tool's text asks each spelling the
+  value takes there (`utils.written_forms`: plain, as a JSON string carries
+  it, as the triage pack quotes it), so a quote or a backslash in a decoded
+  string no longer hides it.
+
+  What a composer section is shown includes two facts the platform can state:
+  the techniques the report publishes (its ATT&CK table), and, after each
+  analyst claim, the entries whose text holds the values the claim quotes. A
+  section shown only a claim once called it unsupported while a strings entry
+  held the claimed value word for word and the report published the technique.
+  A text the platform shortens before showing it — a claim's stored evidence, a
+  tool answer in a section's bundle, a procedure quote in the ATT&CK table, a
+  claim in the live transcript — ends in `…` (`utils.marked_cut`), so a cut is
+  never read, or copied, as a finished sentence.
+
 * **A judge that did not answer with a bundle** — the pipeline builds one from
   whatever text there was, and that bundle states its verdict in
   `x_maljan_fallback_verdict` rather than implying it through its objects. The
@@ -2000,7 +2028,24 @@ is assembled from what the run gathered rather than recomputed beside it:
   rebuilds the table on request from the stored report, the way `/iocs` does,
   so an enrichment that ran later is reflected and a report stored before the
   table carried kinds prints in the new shape. A row the export mints nothing
-  from says so rather than borrowing an answer.
+  from says so rather than borrowing an answer. **The table carries what the
+  export publishes.** The export carries the judge's own indicators beside the
+  rows it mints, each asked the host question and grounded in the run's
+  evidence first; a value only they carry (`stix_renderer.exported_indicator_values`
+  reads each single-comparison pattern of the export) is a published row
+  whose source is `judge`, standing in for the string sweep's refused row of
+  the same value. The table is built again once the export exists, and
+  `/reports/{id}/iocs` reads the export the same way, so the three surfaces
+  cannot disagree about a value: a run once exported two C2 names decoded from
+  the sample's strings while the table and the feed listed four hashes.
+* **Draft detection rules match only what the run publishes.** The YARA,
+  Sigma and Suricata drafts (`reporting.detection_signatures`) are generated
+  after the export, and the values a YARA string or a Suricata alert matches
+  on are the IOC table's rows published `yes`; the import names a rule fired
+  on are no longer YARA strings, since an import is not an indicator. A Benign
+  verdict publishes no malicious indicator, so it gets no draft, and §10.2
+  says so. A signed benign tool once got twenty `trojan-activity` alerts for
+  certificate hosts and a "C2 IP" rule for a version number.
 * **What the models write is asked for as the exact object, with an example,
   and printed as written.** The narrative round answers `executive_summary`,
   `key_findings` (each `{text, evidence_ids}`) — the prompt asks for three to
@@ -2011,16 +2056,36 @@ is assembled from what the run gathered rather than recomputed beside it:
   action, voice, evidence_refs}`, `voice` *observed* or *assessed*), the prose
   subsections for packing, API and string resolution, discovery, persistence,
   evasion, command and control and payloads, the configuration
-  (`ConfigItem{key, value, how_obtained, evidence_refs}`), the commands
-  (`CommandRow{id, name, description, evidence_refs}`) and the C2 channels,
-  which now carry their endpoints and citations; the conclusion is no longer
-  asked for. Three checks are shown to the model once through the existing
-  retry-with-feedback and recorded unresolved when they survive, and none
-  drops what it is about: `narrative.ungrounded_finding` (a key finding cites
-  an id no ledger entry carries), `report.flow_voice` (a step marked observed
-  cites no sandbox entry) and `report.configuration_uncited` (a value said to
-  be decrypted or observed cites no entry). A field a model did not supply is
-  absent from the report. The recommendation's category is the model's own.
+  (`ConfigItem{key, value, how_obtained, evidence_refs}`), the host
+  identifiers (`HostIdentifier{kind, value, purpose, evidence_refs}`: what a
+  responder can search a host for, each value as the entry the model read it
+  in records it — the model decides what goes in and the platform copies no
+  string in), the commands (`CommandRow{id, name, description,
+  evidence_refs}`) and the C2 channels, which now carry their endpoints and
+  citations; the conclusion is no longer asked for. Every section's contract
+  (`composer.section_contract`) says that a list item is written only with a
+  value and never with nulls, and that a value is a JSON string, numbers
+  included: a configuration section whose items carried `"value": null` —
+  as the contract then allowed — failed its schema twice and was dropped. Four
+  checks are shown to the model once through the existing retry-with-feedback
+  and recorded unresolved when they survive, and none drops what it is about:
+  `narrative.ungrounded_finding` (a key finding cites an id no ledger entry
+  carries), `report.flow_voice` (a step marked observed cites no sandbox
+  entry), `report.configuration_uncited` (a value said to be decrypted or
+  observed cites no entry) and `report.identifier_uncited` (a host identifier
+  cites no entry of the run). A field a model did not supply is absent from
+  the report. The recommendation's category is the model's own. The Markdown
+  prints the host identifiers in §9 under the report model's voice, unpublished,
+  and the console draws them in the technical-analysis panel.
+* **A section's output budget is the model's reply room.** At its default of
+  0, `reporting.composer_section_max_tokens` derives each model's budget the
+  way an analyst's reply room is derived (`llm.context_window.reply_budget`):
+  the larger of `llm.expert_max_tokens` and `llm.judge_max_tokens`, at most a
+  quarter of the context window that model serves, reasoning included. A
+  positive value is the operator's own budget. The derivation is printed in
+  Appendix B beside the section's wait ("Output budget of `composer:section`").
+  A fixed 900 tokens dropped a section of a live report when the model reasoned
+  past it.
 * **When no summary was written, the report says why and writes none.** The
   fallback that filled the summary, the capability paragraphs and a
   recommendation from a template is gone: its sentences read as the report
@@ -2104,7 +2169,11 @@ image knows is not offered to something that would block on it. `include=all`
 returns everything and `include=unpublished` only the withheld rows. Every row
 carries its `source` and a `published` flag; `IOCEntry` declared neither, so
 FastAPI dropped the source the service had always attached and the distinction
-never reached a consumer.
+never reached a consumer. A value the STIX export publishes from the judge's
+own indicators is a published row whose source is `judge` — in place of a
+withheld row of the same value — and may be of a kind the network block has
+no rows of (`email`, `path`, `registry`, `mutex`, `command`, or a `hash` of
+another file).
 
 Every row in the network block — a domain, an address and a URL alike —
 records where it came from: `sandbox` for something the sample resolved,

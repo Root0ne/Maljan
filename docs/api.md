@@ -122,7 +122,9 @@ is not the caller's, answers 404. A kept record carries `"kept": true`, and a
 label the judge gave two objects maps to the list of ids it named.
 
 `iocs` is a feed another system acts on, and it answers accordingly. `kind`
-narrows to one of `hash`, `domain`, `ip`, `url`, `user_agent`, `ja3`, `ja3s`.
+narrows to one of `hash`, `domain`, `ip`, `url`, `user_agent`, `ja3`, `ja3s`,
+and, for a value the exported STIX bundle carries from the judge's own
+indicators, `email`, `path`, `registry`, `mutex` or `command`.
 `include` decides what is returned:
 
 | `include` | what comes back |
@@ -134,8 +136,11 @@ narrows to one of `hash`, `domain`, `ip`, `url`, `user_agent`, `ja3`, `ja3s`.
 Every row carries `kind`, `value`, `is_suspicious`, `notes`, **`source`** —
 `sandbox` for something the sample resolved, reached or requested, `analyst`
 for something an agent put in an artefact, `strings` for a run of bytes in the
-file that has the shape of one, `identity` for the sample's own hashes — and
-**`published`**. A name only the sample's own byte image knows is not an
+file that has the shape of one, `identity` for the sample's own hashes,
+`judge` for a value the exported bundle publishes from the judge's own
+indicators — and **`published`**. The feed publishes what the export
+publishes: a value the export carries that the report's own rows withheld is
+served as a published `judge` row in place of the withheld one. A name only the sample's own byte image knows is not an
 observation of infrastructure, so it is withheld from the default feed and
 labelled in the wider ones rather than shipped looking like one the sandbox
 watched.

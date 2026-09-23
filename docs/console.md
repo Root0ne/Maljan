@@ -133,13 +133,16 @@ findings, each bullet with the ledger entries it cites (or *no evidence cited*),
 then the summary paragraph; and a technical-analysis card with the execution
 flow — each step carrying the model's own mark, *observed in sandbox* or
 *assessed* — the configuration it recovered with how each value was obtained,
-the commands the sample accepts and its C2 channels. Both cards say *Written by
+the host identifiers it read (kind, value, purpose and the entries cited, with
+a line saying they are not published), the commands the sample accepts and its
+C2 channels. Both cards say *Written by
 the report model* beside their heading. A run whose report model wrote nothing
 says why, in the words the report records, rather than showing a template: the
 platform writes no prose of its own, and that line is labelled *Measured*, not
 as the report model's. A step or a configuration item the validator kept a
 finding on shows it beside the row (`report.flow_voice`,
-`report.configuration_uncited`), as the exported report does, and a step marked
+`report.configuration_uncited`, `report.identifier_uncited`), as the exported
+report does, and a step marked
 observed in a run with no sandbox observation says so. The console is a reading
 surface, so the defanging rule applies to it: a C2 channel's endpoints are
 written `hxxp://`, `[.]` and `[:]`; the machine surfaces keep them live. The

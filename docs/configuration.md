@@ -730,10 +730,25 @@ and the cap is derived from then on.
 Two calls have an output budget of their own: the judge's verdict
 (`core.llm.judge_max_tokens`, 8,192 by default, under the judge definition's
 timeout — 600 s in the shipped team) and each composer section
-(`core.reporting.composer_section_max_tokens`, 900, under
+(`core.reporting.composer_section_max_tokens`, under
 `core.reporting.composer_per_section_timeout`, 120 s). A timeout chosen for a
 fast model cuts a slow one off: at 3.8 tokens a second only about 2,280 of the
-judge's tokens fit in 600 s, and a full composer section needs about 237 s.
+judge's tokens fit in 600 s.
+
+A section's budget is not a fixed number. `composer_section_max_tokens` ships
+at **0**, which derives it for each model of the reporter's list the way an
+analyst's reply room is derived: the larger of `llm.expert_max_tokens` and
+`llm.judge_max_tokens` (8,192 each as shipped), at most a quarter of the
+context window that model serves (learned as the tool-output cap's window is:
+declared, probed, the vendored table, then the fallback). On a 32,768-token
+window that is 8,192 tokens; on a 16,384-token window, 4,096. Reasoning is
+spent inside it. The run summary prints the derivation beside the section's
+wait ("Output budget of `composer:section`: 8192 tokens — the generation cap of
+8192 tokens …, at most a quarter (8192) of the model's 32768-token context
+window (probed) …"). A positive value is the operator's own budget and behaves
+as the fixed value always did, including the reasoning room below. A fixed 900
+tokens dropped a live report's payloads section when the model reasoned past
+it.
 
 So each of those calls waits
 `max(configured, min(max_tokens / measured rate × 1.5, 1800 s))`. The rate is
@@ -751,10 +766,10 @@ second the judge's budget needs 8,192 / 3.8 × 1.5 ≈ 3,234 s, so the verdict
 call is held at 1,800 s and can receive about 6,840 tokens (3.8 × 1,800) where
 600 s allowed about 2,280. A composer section is its answer and the one retry
 its validation allows, so its wait holds two calls of its output cap. At 3.8
-tokens a second that is 2 × 900 / 3.8 × 1.5 ≈ 710 s with the reporter's
-`disable_thinking` on (cap 900), and 2 × min(9,092 / 3.8 × 1.5, 1,800) =
-3,600 s with the shipped default, which leaves thinking on (cap 900 + 8,192,
-below). A fast model's derived time falls under its
+tokens a second the derived budget of 8,192 tokens on a 32,768-token window
+needs 2 × min(8,192 / 3.8 × 1.5, 1,800) = 3,600 s; an operator's budget of 900
+with the reporter's `disable_thinking` on needs 2 × 900 / 3.8 × 1.5 ≈ 710 s.
+A fast model's derived time falls under its
 configured one, which then stands. Until a model has answered once, and for a
 call with no output budget, the configured value stands. Rates are kept per
 model and per server, so one tag served by a local and a remote Ollama is two
@@ -767,11 +782,13 @@ holds for the rest of the report stage.
 
 The section budget is also the section's real cap, and a model's reasoning
 counts against it: Ollama's `num_predict` and llama.cpp's `n_predict` include
-the thinking channel. Where the reporter's provider has been told to keep
-reasoning out (`llm.ollama.disable_thinking` or `llm.openai.disable_thinking`),
-the composer's model is capped at `composer_section_max_tokens` alone. Where it
-has not, the cap is that budget plus `judge_max_tokens` — the reporter's own
-room — for the reasoning. Each model of the reporter's list is capped by its
+the thinking channel. The derived budget already is the model's whole reply
+room. With an operator's own `composer_section_max_tokens`, where the
+reporter's provider has been told to keep reasoning out
+(`llm.ollama.disable_thinking` or `llm.openai.disable_thinking`), the
+composer's model is capped at that value alone; where it has not, the cap is
+that value plus `judge_max_tokens` — the reporter's own room — for the
+reasoning. Each model of the reporter's list is capped by its
 own provider's switch, and the wait is sized from the largest cap: the platform
 cannot tell a reasoning tag from its name, and sending `think: false` to a
 model that does not reason is an error on Ollama. A section the cap cut is
