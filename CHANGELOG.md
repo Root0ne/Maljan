@@ -3237,8 +3237,8 @@ change landed on `main`.
   documentation-shaped runs instead: one malware id appeared in fourteen stored
   runs of six different samples, so a consumer merging on id folded those
   analyses into one object, and its version digit is one no RFC 4122 UUID has,
-  so the OASIS validator refused every object that carried or named it — 21 of
-  39 stored exports. The judge now writes `<type>--<label>` ids unique in its
+  so the OASIS validator refused every object that carried or named it — 22 of
+  40 stored exports. The judge now writes `<type>--<label>` ids unique in its
   bundle, a short label being enough, and the post-processor mints every
   published id under the object's own type and rewrites every reference to
   match.
@@ -3263,8 +3263,9 @@ change landed on `main`.
   relationship's technique only from `x_maljan_technique_id`, which the prompt
   never asks for and no stored judge relationship carried, so every number the
   judge put on a technique was dropped: all twenty judge-only techniques in the
-  stored runs were published at confidence 0.0 on the report, `/mitre` and
-  the STIX bundle — T1490 on the ELF run at 0.0 beside the judge's own 0.95.
+  stored runs were published at confidence 0.0 in `ttp_mappings`, the
+  report's ATT&CK section and the narrative's prompt — T1490 on the ELF run at
+  0.0, while the bundle's own `uses` edge carried the judge's 0.95.
   The technique is now read from the attack-pattern the relationship points
   at. The agents the judge credits (`STATIC ANALYST` for T1490, which the static
   analyst never claimed) stay on the relationship as written and are no longer
@@ -3280,7 +3281,59 @@ change landed on `main`.
   passes the evidence summary as data, and `stix.credit_without_claim` tells
   the judge which sources did name the technique, by the names the summary
   gives them (a parent or sub-technique counts). The credit is never
-  rewritten; what the judge answers is published.
+  rewritten in the judge's own bundle; one the judge keeps is left off the
+  export's copy of the relationship and recorded as
+  `stix.unpublishable_credit`, so no surface prints an agent as having named a
+  technique it never named.
+
+- **Nothing is written into a judge object that the judge did not write.** An
+  indicator with no `indicator_types` was published as `malicious-activity`
+  and, under a Benign verdict, the judge was then asked about that word; it now
+  stays untyped (the property is optional in STIX 2.1). A malware object with
+  no `is_family` was published as `false`; the judge is now asked
+  (`stix.is_family_missing`). A relationship annotation outside the schema — a
+  confidence of `1.5` or `95`, a basis such as `static+dynamic+network` — used
+  to parse as a plain relationship and lose the whole annotation silently; it
+  is now kept as written and asked about (`stix.annotation_out_of_schema`), and
+  no reader puts a number off the 0–1 scale on a technique.
+
+- **A label the judge repeats is asked about, never resolved.** Two objects
+  sharing an id had every reference rewired onto the first, and the integrity
+  pass folded the second object's edges away. The label is now a
+  `stix.duplicate_label` question naming both objects, and no reference naming
+  it is rewired onto either. Feedback names the judge's own positions and
+  labels (`objects[3] 'indicator--2'`) rather than positions in the
+  post-processed list.
+
+- **A technique nobody put a number on is published without one.** The
+  matrix printed `conf=0.00` for a technique no source numbered — every
+  technique the judge names alone under a Suspicious or Benign verdict, where
+  there is no malware object to hang a numbered edge on.
+  `CapabilityCell.confidence` and `TTPMapping.confidence` are now `null` there,
+  and the report and the narrative's prompt print "not given".
+
+- **The export's observed data is STIX 2.1, and the official validator gates
+  every export shape.** The process tree was a deprecated `objects` dictionary
+  of processes with no id and a `name` 2.1 does not define, with the process
+  count in `number_observed`; the OASIS validator crashed on it. It is now
+  `process` and `file` observables named by `object_refs`, with
+  `number_observed: 1`. `stix2-validator` is pinned at 3.2.0 (3.3.1 ships no
+  schemas and validates nothing), and a test renders a rich, a sandbox and a
+  Benign export and fails on any validator error.
+
+- **The judge's own bundle is kept, and the export says who did what.**
+  `analysis_reports.judge_stix_bundle` (migration `20260928000000`) holds the
+  judge's bundle and the map from each label it wrote to the published id,
+  served at `/reports/{id}/stix?source=judge` — the bundle every decline row
+  says an object "is unchanged in". A network-block row the export declines is
+  filed under the source that recorded it rather than under the judge; a
+  text-fallback bundle credits the analysts whose claims it carries rather
+  than the judge; a producer the export names in place of one it cannot hold
+  is recorded (`stix.unpublishable_producer`). A pattern over a path its type
+  does not have, or a type written in the wrong case, is asked
+  (`stix.unknown_object_path`) and declined as `stix.unpublishable_pattern`. A
+  technique id is read only from a MITRE ATT&CK reference, and the judge's
+  bundle and the export derive technique ids in one namespace.
 
 ### Removed
 
@@ -3438,3 +3491,26 @@ words should update the filter: the producer identity is now
 every other object, and the report object's `report_types` is `malware`. A
 bundle stored before this change keeps `software`, `malware-analysis` and a
 per-run identity id; nothing is rewritten.
+
+A consumer of the exported STIX bundle or of the report's technique rows
+should know what else moved. `x_maljan_confidence` and `x_maljan_evidence_basis`
+are absent on a relationship whose writer gave none, where they used to be
+present as `0.5` and `unknown`; read them as optional. `contributing_layers`
+no longer lists the agents a judge relationship credits, so `is_corroborated`
+is true only when two analysts named the technique themselves — a dashboard
+counting corroborated techniques moves down. A technique's `confidence` in
+`capability_matrix` and `ttp_mappings` is `null` when no source gave one. The
+judge's malware, indicator and relationship ids are fresh per run: the
+documentation-copied ids some runs shared were stable by accident, and a
+consumer that merged on them sees new objects. An untyped judge indicator
+carries no `indicator_types`. Observed data carries `object_refs` to `process`
+and `file` objects instead of an `objects` dictionary. New codes in
+`run_summary.validation` and the export's rows, for a consumer that partitions
+on them: `stix.unknown_observable_type`, `stix.unknown_object_path`,
+`stix.indicator_type_vocabulary`, `stix.credit_without_claim`,
+`stix.annotation_out_of_schema`, `stix.duplicate_label`,
+`stix.is_family_missing` (questions the judge is asked) and
+`stix.unpublishable_pattern`, `stix.unpublishable_credit`,
+`stix.unpublishable_producer` (the export's own decisions). Apply migration
+`20260928000000` for `analysis_reports.judge_stix_bundle`; a report stored
+before it has none, and `/reports/{id}/stix?source=judge` answers 404 for it.

@@ -545,6 +545,18 @@ documentation-shaped hex instead, one malware id reached fourteen stored runs
 of six samples, and its version digit is one no RFC 4122 UUID has, so the OASIS
 validator refused every object that carried or named it.
 
+A label two objects share is not resolved: `duplicate_label_violations` asks
+the judge (`stix.duplicate_label`), each object gets its own id, and no
+reference naming the label is rewired onto either. The map from each label to
+its published id travels with the verdict and is kept, with the judge's own
+bundle, in `analysis_reports.judge_stix_bundle`, served at
+`/reports/{id}/stix?source=judge` — the bundle every export decline row says an
+object "is unchanged in". Feedback names the judge's own positions and labels
+(`objects[3] 'indicator--2'`), not positions in the post-processed list, and a
+drop maps them back. Nothing is written into a judge object that the judge left
+out: an untyped indicator stays untyped, and a malware object without
+`is_family`, which STIX requires, is asked about (`stix.is_family_missing`).
+
 The export names its producer in STIX's own vocabulary: one `identity` for this
 platform, `identity_class: system`, under an id derived once
 (`stix_renderer.PRODUCER_IDENTITY_ID`) so every export carries the same one,
@@ -1467,7 +1479,12 @@ is assembled from what the run gathered rather than recomputed beside it:
   (`x_maljan_technique_id` wins where written, which the judge never does), so
   the number the judge put on it is the judge's number; reading the property
   alone published all twenty judge-only techniques in the stored runs at 0.0.
-  A relationship with no number adds none. A technique's
+  A relationship with no number adds none, and a number off the 0–1 scale is
+  no number (`stix.annotation_out_of_schema` asks about it; the annotation is
+  kept as written rather than lost to a plain relationship). A technique no
+  source numbered has `confidence: null` and is printed "not given" — the case
+  for every technique the judge names alone under a verdict with no malware
+  object to hang a numbered edge on. A technique's
   `contributing_layers` are the judge and the analysts whose own claims name
   it: the agents a judge relationship credits are its words about the
   evidence, published on the relationship and not counted as sources, so one
@@ -1476,8 +1493,14 @@ is assembled from what the run gathered rather than recomputed beside it:
   technique: the judge node passes the evidence summary as data
   (`evidence_summary.collect`), and `stix.credit_without_claim` tells the
   judge which sources did name it, by the summary's names — a parent or
-  sub-technique counts, and nothing rewrites the credit. The ELF run credited
-  `STATIC ANALYST` with T1490 and T1048.001, which no source named. It is
+  sub-technique counts. Nothing rewrites the credit in the judge's bundle; one
+  the judge keeps is left off the export's copy of the relationship and
+  recorded as `stix.unpublishable_credit`, so no surface prints it. The ELF run
+  credited `STATIC ANALYST` with T1490 and T1048.001, which no source named. A
+  bundle the pipeline built from the analysts' claims because the judge's
+  answer was not one credits those analysts, not the judge. A technique id is
+  read only from a reference filed under MITRE ATT&CK
+  (`analysis.technique_ids.attack_reference_id`). It is
   where an id the ATT&CK check rejected stays on the record, marked
   `technique_id_valid=False` and spelled as the producer wrote it. **Every id
   that reaches the report is collected into it**, from all three carriers: the
@@ -1842,8 +1865,12 @@ same misspelling around `127.0.0.1` would have exported a loopback. The judge
 is asked `stix.unknown_observable_type`, with the type the value is named when
 the value or the spelling says (`82.157.13.47` is an `ipv4-addr`) and the list
 of types when neither does; nothing rewrites the pattern. An indicator that
-keeps the type is declined as `stix.unpublishable_pattern`. Its
-`indicator_types` is asked about under `stix.indicator_type_vocabulary` when a
+keeps the type is declined as `stix.unpublishable_pattern`. A type is read as
+written — STIX types are lower case, so `IPv4-Addr` is not one — and the path
+after it must be one the type defines (`SCO_PROPERTIES`, `SCO_EXTENSIONS`):
+`[file:extensions['pe'].pe_imphash = …]` names an extension a file does not
+have, is asked `stix.unknown_object_path` and, kept, is declined the same way.
+Its `indicator_types` is asked about under `stix.indicator_type_vocabulary` when a
 value is outside STIX's vocabulary — the same run typed the address `ip-addr`
 and a file name `file`, the kind of value where the vocabulary says what the
 value indicates — and, the vocabulary being open, what the judge keeps is
