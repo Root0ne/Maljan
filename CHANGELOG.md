@@ -3204,6 +3204,26 @@ change landed on `main`.
   `run_summary.validation.unresolved`; a consumer that partitions on validation
   codes should know the name.
 
+- **Out of room, an agent's tool phase now ends where the room did.** Once a
+  conversation had no room left for a tool answer, every later call was refused
+  without running a tool, but nothing stopped the graph: a live analyst that
+  kept asking spent about nineteen more steps and five minutes on refusals, was
+  stopped by the step limit, and its budget record, `stage_ended_at_cap` event
+  and `run_summary.budget` said `steps`. Two causes: the stream loop broke only
+  for a repeating loop, and the no-room mark was read after the loop had
+  forgotten its conversation, which clears the mark. The stream now breaks on
+  the step at which the agent is out of room, exactly as it does for repeated
+  calls, the mark is read before it is cleared, and the three surfaces say
+  `no_room`; the forced synthesis still writes the answer from what was
+  gathered. langgraph's step-limit sentence ("Sorry, need more steps to process
+  this request.") is no longer published as the agent's words in the
+  conversation feed, no longer sent back to a model as the agent's own turn in
+  the salvage or the nudge, and no longer returned as the judge's mediation
+  reasoning. Where a loop a cap ended produced no answer and the salvage wrote
+  none either, the platform says so in its own sentence ("The platform ended
+  this agent's tool loop: …"), from which no claim is read, instead of handing
+  on the graph's sentence or a tool's notice as the agent's answer.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**

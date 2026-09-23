@@ -554,9 +554,14 @@ From there that agent's tool calls are **not run** — a server's time is not
 spent on an answer with nowhere to go — and a call made anyway returns one
 short line. The run-state block carries the same fact on every model turn,
 replaced rather than appended, so it costs the same whether the loop reads it
-once or forty times. The loop then ends the way a repeating loop already does:
-`no_room` on its budget record with the reason, and the forced synthesis turns
-what was gathered into the answer instead of a "need more steps" non-answer.
+once or forty times. The loop then ends on that same step, the way a repeating
+loop does, whatever the model asks next: `no_room` on its budget record with
+the reason, on the `stage_ended_at_cap` event and under the agent's `caps` in
+`run_summary.budget`, and the forced synthesis turns what was gathered into the
+answer. The graph's own step-limit sentence ("need more steps") is never shown
+or handed on as an agent's words; where a loop a cap ended leaves no answer and
+the salvage writes none, the platform says so in its own sentence, and no claim
+is read from it.
 
 Both notices come out of the **tool budget** — the window less the room kept
 back for the model's reply — and are withheld when they would not fit. So does

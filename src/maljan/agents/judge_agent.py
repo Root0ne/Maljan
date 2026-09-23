@@ -39,6 +39,8 @@ from maljan.agents.base_agent import (
     BudgetMeter,
     LoopBudget,
     _turn_key,
+    is_the_graph_s_step_stop,
+    loop_ended_without_an_answer,
     loop_limits,
     retry_on_connection_error,
     run_on_agent_loop,
@@ -639,6 +641,11 @@ class JudgeAgent(BudgetMeter):
             for _m in _msgs:
                 if getattr(_m, "type", "") == "ai":
                     record_response_usage(self.token_ledger, _m)
+            # The graph's own sentence at its step limit is not the judge's
+            # reasoning, and what reads the reasoning next is a model.
+            if _msgs and is_the_graph_s_step_stop(_msgs[-1]):
+                cap = "steps"
+                return loop_ended_without_an_answer(f"the loop reached its {max_steps}-step limit")
             return str(_msgs[-1].content)
         except TimeoutError:
             self.logger.error("JudgeAgent ReAct timed out after %ds.", timeout)

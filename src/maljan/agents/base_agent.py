@@ -66,6 +66,31 @@ _RECURSION_STOP_RE = re.compile(r"need more steps to process", re.IGNORECASE)
 # so the salvage path that follows treats it the way it treats langgraph's.
 RECURSION_STOP_TEXT = "Sorry, need more steps to process this request."
 
+# What a loop that a cap ended says when nothing could be salvaged from it. The
+# graph's sentence above is written into the conversation as an assistant turn,
+# so handed on it reads as the agent's own words; a tool's notice at the end of
+# a loop broken for want of room is not the agent's either. This is the
+# platform saying what happened, and a claim is never read out of it.
+LOOP_ENDED_PREFIX = "The platform ended this agent's tool loop"
+
+
+def loop_ended_without_an_answer(reason: str) -> str:
+    """The platform's sentence for a loop a cap ended with no answer written."""
+    return (
+        f"{LOOP_ENDED_PREFIX}: {reason}. The agent wrote no answer, and none was "
+        "written from what it gathered."
+    )
+
+
+def is_the_graph_s_step_stop(message: Any) -> bool:
+    """Whether ``message`` is langgraph's step-limit sentence rather than a model turn."""
+    return (
+        getattr(message, "type", "") == "ai"
+        and not getattr(message, "tool_calls", None)
+        and bool(_RECURSION_STOP_RE.search(str(getattr(message, "content", "") or "")))
+    )
+
+
 # Bounds for the forced-synthesis salvage (see ``_force_final_synthesis``).
 #
 # Below this many seconds the salvage is skipped rather than attempted: a call
@@ -1908,6 +1933,10 @@ class BudgetMeter:
             for index, message in enumerate(list(messages or [])):
                 if getattr(message, "type", "") != "ai":
                     continue
+                # The graph's own sentence at its step limit, not the agent's:
+                # the ``stage_ended_at_cap`` event is what says the loop ended.
+                if is_the_graph_s_step_stop(message):
+                    continue
                 marker = _turn_key(message, index)
                 if marker in already:
                     continue
@@ -2784,6 +2813,21 @@ class BaseAnalyst(BudgetMeter, ABC):
                                     repeats.served_repeats,
                                 )
                                 break
+                            # The same end for a conversation with no room
+                            # left. The guardrail marked this agent when it
+                            # told the model so, and every call after that is
+                            # refused without running a tool — so a model that
+                            # asks anyway is spending the step budget on
+                            # refusals, which is what ran a live loop from its
+                            # sixteenth step to its fortieth.
+                            if self._out_of_room():
+                                self.logger.warning(
+                                    "%s ReAct loop ended: the conversation has no room "
+                                    "left for a tool answer; synthesising from what it "
+                                    "gathered.",
+                                    self.name,
+                                )
+                                break
                     except GraphRecursionError:
                         # The step cap, reached without langgraph's own
                         # "need more steps" turn — which it only takes when
@@ -2886,6 +2930,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             # because the last one timed out is the opposite of a ledger.
             self._finish_evidence(recorder)
             self.loop_budget = None
+            # Read before the conversation is forgotten: forgetting it clears
+            # the mark, so a question asked afterwards is always answered no
+            # and a loop that ran out of room recorded the step cap instead.
+            no_room = self._out_of_room()
             # The loop is over and its conversation is gone, so it stops
             # deciding how much of an answer the next one may read. In the same
             # ``finally`` and for the same reason: a loop that died still held
@@ -2970,7 +3018,6 @@ class BaseAnalyst(BudgetMeter, ABC):
         # read another answer, is in the same place as one that spent its
         # steps: it has evidence and no answer, and the salvage is what turns
         # the first into the second.
-        no_room = self._out_of_room()
         ended_early = repeats.ending_the_loop() or no_room
         self._record_react_loop(hit_step_cap=hit_step_cap)
         if repeats.ending_the_loop():
@@ -2983,6 +3030,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             cap, why = None, ""
         self._record_budget(budget, msgs, cap, detail=why)
         self._budget_tick(budget, msgs, final=True, ledger_entries=len(recorder.entries))
+        # Counted above, where it cost a step; not sent back to a model, which
+        # would read the graph's sentence as its own last turn.
+        msgs = [message for message in msgs if not is_the_graph_s_step_stop(message)]
+        answered = False
         if tool_call_count > 0 and (not content.strip() or hit_step_cap or ended_early):
             self.logger.warning(
                 "%s ReAct loop ended without a final answer after %d tool calls "
@@ -3000,6 +3051,14 @@ class BaseAnalyst(BudgetMeter, ABC):
             if synthesized.strip() and not _RECURSION_STOP_RE.search(synthesized):
                 content = synthesized
                 msgs = [*msgs, AIMessage(content=synthesized)]
+                answered = True
+        # A loop a cap ended ends on the graph's sentence or on a tool's
+        # notice, and neither is what the agent said. Where the salvage wrote
+        # nothing, the platform says what happened instead.
+        if cap is not None and not answered:
+            content = loop_ended_without_an_answer(
+                why or f"the loop reached its {max_steps}-step limit"
+            )
 
         # A final message that is neither a structured report nor a findings
         # block is not an answer. The loop's own stop condition cannot see that
@@ -4218,6 +4277,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         # the fallback, so probe both the raw first line and the same line with
         # a leading ``CLAIM:``/``EVIDENCE:`` label stripped.
         stripped = text.strip()
+        if stripped.startswith(LOOP_ENDED_PREFIX):
+            return True
         first = stripped.splitlines()[0] if stripped else ""
         unlabelled = re.sub(r"^\s*(?:claim|evidence)\s*:\s*", "", first, flags=re.IGNORECASE)
         if self._META_CLAIM_RE.match(first) or self._META_CLAIM_RE.match(unlabelled):
