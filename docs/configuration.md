@@ -131,6 +131,38 @@ treatment a global one does — the llama.cpp sampler keys and the structured
 output the local servers handle badly are decided from the endpoint the agent
 will actually call.
 
+An entry may also name the models the agent falls back to, in order, under
+`fallbacks` — each one a provider, a model and, for `openai` and `ollama`, a
+base URL of its own, written exactly like the entry's first model. A fallback
+with no temperature takes the entry's. The Agents page edits the list under
+the model override (add, remove, move up and down). The next model is asked
+**only when the one before failed as a provider**: a refused or dropped
+connection, a timeout, an HTTP 5xx, 408 or 429, a model the server does not
+have, a refused credential, or a refusal the provider reports as an error.
+Never on what a model said: an answer the validation loop rejects is sent back
+to the model that wrote it, and a parse or validation error a model's answer
+raises reaches the loop rather than the next model. A timeout is a provider
+failure because every model on a list but the last has its own turn deadline —
+`core.llm.fallback_turn_share` (0.5) of what is left, at that turn, of the
+budget the current loop runs under (never less than one second), so inside an
+ask it is a share of the ask's clock and a stall late in a loop is still
+replaced before the loop cancels it; a share of the loop because the loop is
+what would otherwise cancel a stalled model first. The reporter's list starts
+over before the narrative round, against its 600 s, and again before the
+composer sections, against `core.reporting.composer_per_section_timeout` —
+and every provider's client has a 1800 s request timeout. A 429 or 503 whose
+`Retry-After` (seconds or an HTTP date) asks for at most thirty seconds is waited out on the same model
+once before the list moves on. Once the list has moved, the model that answered
+stays for the rest of that loop (a stalled first model costs one deadline, not
+one per turn), and the next loop starts at the first model again.
+A model named twice in one list is refused on save. An entry without
+`fallbacks` is the single-model form every entry had before, unchanged.
+
+Which model answered is recorded on every turn — on the ledger entry of each
+call the turn asked for and per agent in `run_summary.models` — and the switch
+is recorded once, with the reason in words: in the run summary and as a
+`model_fallback` event the conversation draws whether or not deltas stream.
+
 ### Which dialect an OpenAI-compatible endpoint speaks
 
 `llm.openai.compat` says whether the endpoint behind `base_url` is llama.cpp or
@@ -263,7 +295,10 @@ one endpoint apiece, named rather than addressed, so a per-agent entry there
 differs only in its model — and each is still asked, because a key may be
 refused for one model and not another. The same pair named twice is one call
 and one row. The judge model is listed and never called, so it is not filed.
-The `agent` probe files the one pair its agent would use.
+The `agent` probe files the pairs its agent would use: its first model, and
+every model it falls back to, one after another — the agent passes only when
+every model on its list answered. The `llm` probe asks the fallbacks served by
+the selected provider along with the per-agent entries.
 
 Where a call goes is worked out in one place (`maljan.core.model_assignments`)
 for the probe and for the gate alike, and folded there the way a URL folds —
@@ -288,7 +323,8 @@ host, so a base URL that carries credentials does not reach the screen or the
 stored row.
 
 **Where the gate stands.** Submitting a job reads that record for every model
-the run can reach — the agents its team's stages name, and every agent those
+the run can reach — fallbacks included, each named in the refusal as the model
+the agent *falls back to* — the agents its team's stages name, and every agent those
 can ask through `ask_<key>`, and so on — and refuses with 422 when one of them
 has no passing row, naming the agent, the model, the endpoint and the probe's
 last message. The endpoint appears there as its label — scheme and host — and
@@ -552,6 +588,15 @@ at 131,072 the first is 46,080; at a million, 371,928. At the floor the answer
 meets the structural shortener exactly as any other does and carries the same
 notice naming the arguments that would narrow it.
 
+An answer over the cap only because of its whitespace is not shortened. A tool
+that indents its JSON spends a quarter or more of its characters on layout, and
+a derived cap makes that gap the common case: a recorded `elf_info` was 8,628
+characters indented and 5,577 compact against a cap of 8,486. Such an answer is
+handed over whole, written without the whitespace — parseable, every value the
+tool's, and with no notice, because nothing was left out — and the run summary
+counts it as `tool_output_compacted`. Only a compact form that still does not
+fit meets the shortener, and what the shortener then cuts is the compact form.
+
 **When the room runs out, the tool phase ends.** Below about a thousand
 characters an answer cannot survive its own notice, so nothing of it is handed
 over. The model is told once, in one sentence, that the conversation has no
@@ -561,9 +606,17 @@ From there that agent's tool calls are **not run** — a server's time is not
 spent on an answer with nowhere to go — and a call made anyway returns one
 short line. The run-state block carries the same fact on every model turn,
 replaced rather than appended, so it costs the same whether the loop reads it
-once or forty times. The loop then ends the way a repeating loop already does:
-`no_room` on its budget record with the reason, and the forced synthesis turns
-what was gathered into the answer instead of a "need more steps" non-answer.
+once or forty times. The loop then ends on that same step, the way a repeating
+loop does, whatever the model asks next: `no_room` on its budget record with
+the reason, on the `stage_ended_at_cap` event and under the agent's `caps` in
+`run_summary.budget`, and the forced synthesis turns what was gathered into the
+answer. The graph's own step-limit sentence ("need more steps") is never shown
+or handed on as an agent's words, and the platform writes none of its own in
+their place: where a loop a cap ended leaves no answer and the salvage writes
+none, the agent's answer is empty and its status `no_claims`, and why is on the
+budget record and the `stage_ended_at_cap` event. The node does not run such an
+analyst a second time over the same material, which would meet the same full
+window.
 
 Both notices come out of the **tool budget** — the window less the room kept
 back for the model's reply — and are withheld when they would not fit. So does
@@ -581,6 +634,59 @@ window, 2,048 on 8,192, 1,024 on 4,096.
 What is outside that guarantee is the model's own output: its tool requests and
 its prose are not the platform's to cap, and on a very small window they reach
 the window before the platform's text does.
+
+What a conversation is measured at is what its next request will weigh, not the
+messages alone. The definitions of the loop's tools go with every request, and
+they are counted: a static analyst holding the default toolset — 35 tools
+from the analysis, knowledge and VirusTotal servers — carries about 20,500
+characters of them, 28% of a 32,768-token window's 73,728-character tool
+budget, and a count that left them out said there was room until the server
+refused. With the framing, about 46,000 characters (63%) are left for answers
+and the model's own turns. On a small window, or with a large toolset, untick
+the tools an agent does not need in each server's tick list in the Tools step:
+that list is the only thing that narrows what a server sends an agent, and
+every unticked tool is its definition's characters back on every request. Where the
+server reported how many tokens the last request really took, that figure,
+converted at the same three characters per token, plus what the conversation
+gained since, is a floor under the measure, so content that tokenises worse
+than three characters a token — pages of `strings` noise do — or the template
+the server wraps each message in cannot hide room that is gone.
+
+And where a server says the window is full anyway — llama.cpp's "context shift
+is disabled" or "the request exceeds the available context size", an
+OpenAI-compatible "maximum context length", Anthropic's "prompt is too long" —
+after the analyst's loop has gathered at least one tool answer, that agent's
+tool phase ends with `no_room` ("the model server reported its context window
+full" on the record and the stage event), and the forced synthesis writes the
+answer from what was gathered, rather than the agent failing and its work being
+lost. Only an error the provider's SDK raised for the server's answer counts.
+A server that names the reply cap is read by its numbers. vLLM words a full
+conversation as "'max_tokens' … is too large: 8192. This model's maximum
+context length is 32768 tokens and your request has 24808 input tokens": the
+cap fits the window on its own and the prompt grew until the two together did
+not, so that is a full window. A cap at least as large as the window, or one
+named with no numbers to read, is a configuration fault no conversation could
+avoid. The same full-window sentence on the first request, before anything was
+gathered, means the framing alone does not fit; and an error that is not a
+server's answer is the platform's own. Each of those faults still fails the
+agent, because there is nothing to salvage and the failure is the true
+statement. After the server has said the window is full, the final-answer
+nudge is not sent — it would re-send the conversation the server just refused
+— while after the platform's own budget ended the phase it still is, because
+that conversation is inside the tool budget with the reply reserve whole.
+
+The judge's tool loop is accounted the same way, under the judge's own name:
+its conversation and its tool definitions are measured before every model
+turn, with the server's reported count as a floor; its answers are capped from
+its own room; its loop is streamed, ends on the step it runs out of room, and
+ends with `no_room` on the same strict full-window answer once it has gathered
+something. Its reasoning is then asked for once, with no tools, from what it
+gathered, and mediation reads the verdict from that; a judge loop that fails
+before gathering anything fails as before. Both salvages re-send the
+conversation trimmed to two fifths of the window the budget counts on — the
+smaller of the declared and the probed one, so a `context_size` left larger
+than the served window cannot size a salvage close to the request the server
+just refused — and each gets only what is left of its loop's time.
 
 The window itself is learned free of charge and without asking the operator
 anything. In order:
@@ -607,7 +713,10 @@ answer fit, which switches the shortener, the summariser and the character cut
 off for the whole run.
 
 A run whose agents sit on different models takes the **smallest** of their
-windows, because one cap is handed to every tool server the job opens.
+windows, because one cap is handed to every tool server the job opens. The
+models an agent falls back to count as models it sits on: a fallback with a
+smaller window than the first model governs the cap, because the turn it
+answers reads the same conversation.
 
 Where to see what applied: the Settings page prints the detected window beside
 the field, with the source word itself, and `run_summary.truncation` records
@@ -1333,6 +1442,44 @@ somewhere the worker did not put it — a corpus directory an operator points th
 CLI at, or an HTTP sidecar on another host that is handed paths rather than
 uploads. `ruleset` is held to the rule corpora instead: the repository's `data`
 tree and whatever `MALJAN_YARA_RULES_DIR` and `MALJAN_SIGMA_RULES_DIR` name.
+
+### A tool server that keeps failing is rested
+
+Per job and per tool server, three settings under **Tool servers → Resilience**:
+
+| Setting | Default | Where the default came from |
+|---|---|---|
+| `core.mcp.breaker.failures_to_open` | 3 | The number of attempts the platform already gives a model call that drops its connection before calling it a failure. No recorded live run had a tool server fail at the transport, so it is a judgement, not a measurement. |
+| `core.mcp.breaker.cooldown_seconds` | 60 | A judgement: long enough for a sidecar being restarted to come back, short against the analysts' own loop budgets. |
+| `core.mcp.breaker.call_timeout_seconds` | 0 (derived) | Derived from the longest tool budget the deployment configures — `core.static.capa.timeout_seconds`, 300 by default and 900 on a slow host — so a call never times out before the analysis it runs may finish. A tool whose server declares a longer budget in its manifest gets that; thirty seconds of grace are added either way. |
+| `core.mcp.breaker.max_concurrent_calls` | 4 | A judgement: the shipped teams run their analysts one after another, and four lets one analyst's parallel tool calls through while bounding a team that fans out. `0` leaves the calls uncapped, as every server was before. |
+
+An unanswered call is either a transport failure — a timeout, a refused or
+dropped connection, the server's process gone — or a call that did not finish
+within its caller's own budget (a loop's or an ask's) while it waited on the
+server. Every call is sent with a deadline (above), so a server that hangs
+times out and is counted; a call its caller's budget cut short is counted too,
+under its own reason, rather than let go. After that many in a row the
+server rests: a call is not sent, and the model is answered with a tool error
+in the structured shape —
+
+```json
+{"error": {"code": "server_resting",
+           "message": "tool server 'analysis' is resting after 3 calls in a row it did not answer; it will be tried again in 60 s",
+           "remediation": "this server did not answer several calls in a row and is not being called for now; use another tool, or call this one again after the time the message names"},
+ "tool": "pe_info"}
+```
+
+— which the ledger records as a failed call like any other. After the cooldown
+one call is let through (the others are told that one call is trying the server
+again and nothing more is sent until it answers); a success ends the rest and
+its own failure to answer starts another. The guard covers every server the job's
+registry attaches; the Ghidra and CAPE providers' own toolkits are outside it. A tool that answers with its own error (a bad argument, a file
+that is not there) has answered, and never counts. Each rest is published as a
+`tool_server_rested` event, drawn in the conversation, and kept in
+`run_summary.server_rests`, which the report and the console's "What the run
+spent" print. The call cap queues calls per event loop: a handle is opened per
+loop, and for a stdio server that is one child process per loop.
 
 ## Writing a tool server
 

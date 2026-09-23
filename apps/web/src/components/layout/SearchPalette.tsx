@@ -6,9 +6,9 @@ import { api } from "@/lib/api";
 import type { JobDTO, ReportSummaryDTO, SampleDTO } from "@/lib/api";
 import { analysisRows } from "@/lib/analyses";
 import { timeAgo } from "@/lib/report-utils";
-import { verdictBucket, verdictLabel } from "@/lib/verdict";
+import { statusTone } from "@/lib/status";
+import { verdictLabel, verdictTone } from "@/lib/verdict";
 import { getErrorMessage } from "@/lib/errors";
-import type { VerdictBucket } from "@/lib/verdict";
 
 /* ── Types ─────────────────────────────────────────────── */
 
@@ -58,23 +58,9 @@ interface SearchPaletteProps {
 /* Keyed by the shared bucket, not the raw string. The
  * backend emits "Malware", which was not a key here — every malicious report's
  * badge silently fell through to the muted "unknown" grey. */
-const VERDICT_CLASS: Record<VerdictBucket, string> = {
-  malicious: "text-status-red",
-  suspicious: "text-status-orange",
-  benign: "text-status-green",
-  unknown: "text-text-muted",
-};
-
 function verdictClass(verdict: string | null): string {
-  return VERDICT_CLASS[verdictBucket(verdict ?? "")];
+  return verdictTone(verdict).text;
 }
-
-/** How a run that has not produced a verdict yet is badged. */
-const STATUS_CLASS: Record<string, string> = {
-  completed: "text-status-green",
-  failed: "text-status-red",
-  running: "text-status-orange",
-};
 
 function ci(haystack: string | null | undefined, needle: string): boolean {
   if (!haystack) return false;
@@ -242,7 +228,7 @@ export default function SearchPalette({
           .filter(Boolean)
           .join(" · "),
         badge: row.verdict ? verdictLabel(row.verdict) : row.status,
-        badgeClass: row.verdict ? verdictClass(row.verdict) : STATUS_CLASS[row.status] ?? "text-text-muted",
+        badgeClass: row.verdict ? verdictClass(row.verdict) : statusTone(row.status).text,
         href: `/analysis/${row.id}`,
       }));
 

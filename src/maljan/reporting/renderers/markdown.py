@@ -18,7 +18,9 @@ from maljan.analysis.run_summary import (
     NOT_APPLICABLE,
     NOT_APPLICABLE_SENTENCE,
     generation_lines,
+    server_rest_sentence,
     stage_duration_lines,
+    tokens_sentence,
 )
 from maljan.core.logger import logger
 from maljan.reporting.models import (
@@ -1092,6 +1094,18 @@ class MarkdownRenderer:
                     continue
                 message = " ".join(str(row.get("message") or "").split())
                 lines.append(f"  - `{row.get('code', '')}` ({row.get('agent', '')}): {message}")
+        # What the models spent, as the providers reported it, and the turns a
+        # fallback model answered because the first one failed as a provider.
+        spent = tokens_sentence(run_summary.get("tokens"))
+        if spent:
+            lines.append(f"- {spent}")
+        for agent, block in sorted((run_summary.get("models") or {}).items()):
+            for row in (block or {}).get("fallbacks") or []:
+                if isinstance(row, dict):
+                    lines.append(f"- Model fallback ({agent}): {row.get('reason', '')}")
+        for row in run_summary.get("server_rests") or []:
+            if isinstance(row, dict):
+                lines.append(f"- {server_rest_sentence(row)}")
         if corroboration:
             lines.append("")
             lines.append("**Corroboration per technique:**")

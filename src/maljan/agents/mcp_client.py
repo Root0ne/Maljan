@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Sequence
 from contextlib import suppress
+from datetime import timedelta
 from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
@@ -55,6 +56,7 @@ class MCPLangChainToolkit:
         http_headers: dict[str, str] | None = None,
         truncation_ledger: Any | None = None,
         context_budget: Any | None = None,
+        guard: Any | None = None,
     ):
         self.server_params = server_params
         self.transport = (transport or "stdio").lower()
@@ -74,6 +76,10 @@ class MCPLangChainToolkit:
         # and what the conversation currently holds. None outside a job, and the
         # conservative window then answers.
         self._context_budget = context_budget
+        # The job's breaker and call cap for this server
+        # (``maljan.providers.server_guard``). None outside a job's registry,
+        # and every call is then sent exactly as it always was.
+        self._guard = guard
 
     async def initialize(self) -> None:
         """Initialize the connection to the MCP server and fetch available tools."""
@@ -250,23 +256,32 @@ class MCPLangChainToolkit:
             # second turns "unset" into "explicitly null" and denies the server
             # the chance to apply its own default.
             args = {k: v for k, v in kwargs.items() if v is not None or k in required}
+            guard = self._guard
+            if guard is None:
+                return await self._call(tool_name, args, narrowing)
+            # Asked before waiting for a slot and again after it: a server
+            # that is resting answers at once, and one that began resting
+            # while this call queued is not sent the call either. The trial
+            # after a cooldown is admitted once and keeps its admission.
+            refused, trial = guard.admit(tool_name)
+            if refused is not None:
+                return str(refused)
+            sent = False
             try:
-                result = await self.session.call_tool(tool_name, arguments=args)
-                if result.isError:
-                    return (
-                        f'{{"tool_error": "tool_returned_error", "tool": "{tool_name}", '
-                        f'"detail": {result.content!r}}}'
-                    )
-                output = "\n".join(c.text for c in result.content if hasattr(c, "text"))
-                # On a thread: shortening a five-megabyte answer is CPU-bound
-                # and synchronous, and this is a coroutine serving an agent.
-                return await asyncio.to_thread(self._apply_output_guardrail, output, narrowing)
-            except Exception as exc:
-                logger.warning("MCP tool '%s' raised %s: %s", tool_name, type(exc).__name__, exc)
-                return (
-                    f'{{"tool_error": "exception", "tool": "{tool_name}", '
-                    f'"type": "{type(exc).__name__}", "detail": "{exc}"}}'
-                )
+                async with guard.slot():
+                    if not trial:
+                        refused, trial = guard.admit(tool_name)
+                        if refused is not None:
+                            return str(refused)
+                    # From here ``_call`` owns the outcome, abandonment
+                    # included, so the guard is told exactly once.
+                    sent = True
+                    return await self._call(tool_name, args, narrowing, trial=trial)
+            except BaseException:
+                if not sent:
+                    # Cancelled while it queued for a slot: nothing was sent.
+                    guard.abandoned(trial=trial)
+                raise
 
         # Compress description to reduce ReAct context bloat
         raw_desc = mcp_tool.description or f"Executes {mcp_tool.name} on the MCP server."
@@ -279,6 +294,74 @@ class MCPLangChainToolkit:
             description=description,
             args_schema=args_schema,
         )
+
+    async def _call(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        narrowing: Sequence[str],
+        *,
+        trial: bool = False,
+    ) -> str:
+        """Send one call and tell the guard whether the transport carried it."""
+        from maljan.providers.server_guard import transport_failure
+
+        guard = self._guard
+        settled = False
+        try:
+            session = self.session
+            if session is None:
+                return f'{{"tool_error": "mcp_session_inactive", "tool": "{tool_name}"}}'
+            deadline = guard.call_timeout(tool_name) if guard is not None else None
+            # The client library answers a call past its deadline with its own
+            # request-timeout error, which is a transport failure. Only named
+            # when there is one, so an unguarded call is sent exactly as before.
+            timing: dict[str, Any] = (
+                {"read_timeout_seconds": timedelta(seconds=deadline)} if deadline else {}
+            )
+            try:
+                result = await session.call_tool(tool_name, arguments=args, **timing)
+            except asyncio.CancelledError:
+                # The caller's own budget ran out while this call was with the
+                # server: a call the server did not answer in the time there
+                # was, counted as one rather than let go as abandoned.
+                if guard is not None and not settled:
+                    guard.failed(
+                        "the call did not finish within its caller's budget",
+                        trial=trial,
+                    )
+                    settled = True
+                raise
+            if guard is not None:
+                guard.answered()
+                settled = True
+            if result.isError:
+                return (
+                    f'{{"tool_error": "tool_returned_error", "tool": "{tool_name}", '
+                    f'"detail": {result.content!r}}}'
+                )
+            output = "\n".join(c.text for c in result.content if hasattr(c, "text"))
+            # On a thread: shortening a five-megabyte answer is CPU-bound
+            # and synchronous, and this is a coroutine serving an agent.
+            return await asyncio.to_thread(self._apply_output_guardrail, output, narrowing)
+        except Exception as exc:
+            if guard is not None and not settled:
+                reason = transport_failure(exc)
+                if reason is None:
+                    # The server answered with an error of its own; the
+                    # transport carried it, and that is all the breaker reads.
+                    guard.answered()
+                else:
+                    guard.failed(reason, trial=trial)
+                settled = True
+            logger.warning("MCP tool '%s' raised %s: %s", tool_name, type(exc).__name__, exc)
+            return (
+                f'{{"tool_error": "exception", "tool": "{tool_name}", '
+                f'"type": "{type(exc).__name__}", "detail": "{exc}"}}'
+            )
+        finally:
+            if guard is not None and not settled:
+                guard.abandoned(trial=trial)
 
     def _tag_description(self, name: str, description: str) -> str:
         """Add a category tag and truncate to keep ReAct context lean."""
@@ -353,6 +436,11 @@ class MCPLangChainToolkit:
         much as the cut: pitfall P6 asks for truncation *frequency*, and a
         frequency needs its denominator.
 
+        A JSON answer over the limit only because of its whitespace is handed
+        over whole, written without it: no value changes, so it carries no
+        notice, and the ledger counts it as ``compacted``. Only a compact form
+        that still does not fit is shortened.
+
         A JSON object is shortened as a document: elements come off the end of
         its largest lists, then characters off the end of its largest long
         strings, until it fits, and one reserved key says what was left out
@@ -401,7 +489,12 @@ class MCPLangChainToolkit:
             limit,
         )
 
-        attempt = shorten_json_document(output, shorten_target(limit, narrowing))
+        attempt = shorten_json_document(output, shorten_target(limit, narrowing), cap=limit)
+        if attempt.compacted:
+            self._record_guardrail(
+                chars_in, len(attempt.text), over_limit=True, compacted=True, limit=limit
+            )
+            return attempt.text
         if attempt.shortened:
             self._charge_overage(len(attempt.text), limit)
             self._record_guardrail(
@@ -493,6 +586,7 @@ class MCPLangChainToolkit:
         shortened: bool = False,
         shortening_timed_out: bool = False,
         no_room: bool = False,
+        compacted: bool = False,
         limit: int = 0,
     ) -> None:
         """Record one guardrail decision; no-op without a ledger, never raises."""
@@ -508,5 +602,6 @@ class MCPLangChainToolkit:
             shortened=shortened,
             shortening_timed_out=shortening_timed_out,
             no_room=no_room,
+            compacted=compacted,
             limit=limit,
         )

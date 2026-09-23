@@ -124,6 +124,33 @@ async def test_a_generic_agent_resolves_to_the_prompt_the_operator_typed():
 
 
 @pytest.mark.asyncio
+async def test_every_model_the_agent_falls_back_to_is_asked_and_filed(monkeypatch):
+    asked: list[tuple[str, str]] = []
+
+    async def _answered(
+        provider: str, *, endpoint: str, model: str, api_key: str = "", **_body: Any
+    ):
+        asked.append((provider, model))
+        return (model != "gemma3:nope", f"{model!r} answered")
+
+    monkeypatch.setattr(settings_probes, "complete_one_turn", _answered)
+    staged = {
+        "llm.agents": {
+            "network": {
+                "provider": "ollama",
+                "model": "qwen3:4b",
+                "fallbacks": [{"provider": "ollama", "model": "gemma3:nope"}],
+            }
+        }
+    }
+    result = await probe_agent({"name": "network", "settings": staged})
+    assert asked == [("ollama", "qwen3:4b"), ("ollama", "gemma3:nope")]
+    assert result.ok is False, "an agent passes only when every model on its list answered"
+    assert [c["model"] for c in result.details["completions"]] == ["qwen3:4b", "gemma3:nope"]
+    assert "fallback 1 ollama/gemma3:nope" in result.detail
+
+
+@pytest.mark.asyncio
 async def test_an_unknown_agent_is_a_legible_failure_not_a_stack_trace():
     result = await probe_agent({"name": "ghost", "settings": {}})
     assert result.ok is False and "ghost" in result.detail

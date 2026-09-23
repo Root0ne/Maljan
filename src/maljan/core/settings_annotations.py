@@ -202,10 +202,31 @@ ANNOTATIONS: dict[str, Annotation] = {
             "explicitly to keep the verdict call deterministic. A per-agent base URL "
             "applies to openai and ollama entries only and lets different agents use "
             "different local servers, while the provider's API key stays shared. "
+            "An entry may list fallbacks, models tried in order only when the one "
+            "before fails as a provider (a refused connection, a timeout, a server "
+            "error, a model the server does not have) and never because of what a "
+            "model answered; each is probed like the first. "
             "Ordinarily edited from "
             "the Agents page; this raw view is for bulk edits."
         ),
         "probe": "llm",
+        "advanced": True,
+    },
+    "llm.fallback_turn_share": {
+        "title": "Turn deadline for a model on a fallback list (share of the loop)",
+        "description": (
+            "How much of what is left of the current loop one model on its fallback list "
+            "may spend on a turn before it is treated as stalled and the next model is "
+            "asked (never less than one second); the model that answers then stays for the "
+            "rest of that loop. Worked out per turn from the budget that loop runs under, so "
+            "an agent answering an ask gets a share of the ask's clock and a late stall is "
+            "still replaced; the reporter's narrative round and composer sections are each "
+            "measured against their own clock. A share of the "
+            "loop, because the loop budget is what would otherwise cancel a stalled model "
+            "before any timeout inside it: the default of a half leaves the other half of "
+            "the loop to the model that took over. The last model on a list has no "
+            "deadline of its own and is bounded by the loop, as a lone model is."
+        ),
         "advanced": True,
     },
     "llm.anthropic.api_key": {
@@ -1632,6 +1653,66 @@ ANNOTATIONS.update(
             "group": "mcp",
             "editor": "server_map",
             "order": -1,
+        },
+        "mcp.breaker.failures_to_open": {
+            "title": "Unanswered calls before a server rests",
+            "description": (
+                "How many calls in a row a tool server does not answer before it rests for "
+                "its cooldown, per job. A call is unanswered when it fails at the transport "
+                "— a timeout, a refused connection, the server's process gone — or does not "
+                "finish within its caller's own budget while it waits on the server. A tool "
+                "that answers with its own error (a bad argument, a missing file) has "
+                "answered and never counts. "
+                "The default is the number of attempts the platform already gives a "
+                "model call that drops its connection before calling it a failure; no "
+                "recorded live run had a tool server fail at the transport, so it is a "
+                "judgement and not a measurement."
+            ),
+            "subgroup": "Resilience",
+            "advanced": True,
+        },
+        "mcp.breaker.cooldown_seconds": {
+            "title": "How long a failing server rests (seconds)",
+            "description": (
+                "How long a rested tool server is left alone. A call in that time is "
+                "answered by the platform with a tool error naming the server, that it "
+                "is resting and when it will be tried again; after it, one call is let "
+                "through and a success ends the rest. The default is a judgement: long "
+                "enough for a sidecar being restarted to come back, short against the "
+                "analysts' own loop budgets. Zero tries the server again on the next call."
+            ),
+            "subgroup": "Resilience",
+            "advanced": True,
+        },
+        "mcp.breaker.call_timeout_seconds": {
+            "title": "How long a tool call may go unanswered (seconds)",
+            "description": (
+                "The budget every tool call gets at least before it counts as a server that "
+                "did not answer — a transport failure the breaker counts. A tool whose server "
+                "declares a longer budget in its capabilities manifest gets that one, and "
+                "thirty seconds of grace are added either way, so a tool that gives up at its "
+                "own budget answers with its own timeout error first. Zero, the default, "
+                "derives it from the longest tool budget this deployment configures: "
+                "core.static.capa.timeout_seconds (300, and 900 on a slow host, still fits). "
+                "A call cut short by its caller's own budget while it waited on the server "
+                "counts as unanswered too."
+            ),
+            "subgroup": "Resilience",
+            "advanced": True,
+        },
+        "mcp.breaker.max_concurrent_calls": {
+            "title": "Calls in flight per server",
+            "description": (
+                "How many calls one tool server may have in flight for one job at once; "
+                "the rest wait their turn, so parallel analysts queue rather than pile "
+                "onto one slow sidecar. Zero leaves the calls uncapped, which is how "
+                "every server was driven before this setting existed. The default is a "
+                "judgement: the shipped teams run their analysts one after another, and "
+                "four lets one analyst's parallel tool calls through while bounding a "
+                "team that fans out."
+            ),
+            "subgroup": "Resilience",
+            "advanced": True,
         },
         "static.generic.server": {
             "title": "Custom MCP server",

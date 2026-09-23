@@ -53,6 +53,13 @@
       "severity": null
     }
   ],
+  "generation": {
+    "ceiling_s": null,
+    "margin": null,
+    "models": "<data-keyed map>",
+    "timeouts": "<data-keyed map>"
+  },
+  "models": "<data-keyed map>",
   "negotiation": {
     "confidence_history": [
       null
@@ -75,6 +82,14 @@
     "name": null
   },
   "sections_without_evidence": null,
+  "server_rests": [
+    {
+      "cooldown_s": null,
+      "failures": null,
+      "reason": null,
+      "server": null
+    }
+  ],
   "settings_snapshot": "<data-keyed map>",
   "stages": [
     {
@@ -92,11 +107,15 @@
   "techniques_by_layer": "<data-keyed map>",
   "timestamp": null,
   "tokens": {
-    "estimated_calls": null,
+    "cost": null,
+    "cost_calls": null,
     "input_tokens": null,
     "llm_calls": null,
     "output_tokens": null,
-    "total_tokens": null
+    "per_agent": "<data-keyed map>",
+    "sentence": null,
+    "total_tokens": null,
+    "unreported_calls": null
   },
   "tool_latency": null,
   "triage": {
@@ -128,6 +147,7 @@
     "react_step_cap_hits": null,
     "tool_output_calls": null,
     "tool_output_chars_dropped": null,
+    "tool_output_compacted": null,
     "tool_output_hard_truncated": null,
     "tool_output_limit_largest": null,
     "tool_output_limit_smallest": null,

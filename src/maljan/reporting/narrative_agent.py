@@ -343,6 +343,9 @@ class NarrativeAgent:
         # and must count toward run_summary token metrics. Recorded on the raw
         # path below (the structured path hides usage behind the parser).
         self.token_ledger = token_ledger
+        # The job's event sink, set by the container, so a switch of the
+        # reporter's model list is said in the conversation like any agent's.
+        self.event_sink: Any | None = None
         # What this round was told was wrong with its answer, by code. The
         # narrative runs after the run summary is built, so the report node
         # reads this and folds it in rather than the builder collecting it.
@@ -420,7 +423,12 @@ class NarrativeAgent:
                 try:
                     from maljan.core.token_ledger import record_response_usage
 
-                    record_response_usage(self.token_ledger, raw)
+                    record_response_usage(self.token_ledger, raw, agent="reporter")
+                    from maljan.pipeline.events import announce_model_fallback
+
+                    announce_model_fallback(
+                        getattr(self, "event_sink", None), raw, agent="reporter", stage="report"
+                    )
                 except Exception as exc:  # noqa: BLE001
                     # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
                     logger.debug("NarrativeAgent: token usage not recorded (%s).", exc)

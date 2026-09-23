@@ -202,8 +202,15 @@ class EvidenceRecorder:
         stage: str = "analysis",
         sink: EventSink | None = None,
         corpus: Any = None,
+        model: str = "",
     ) -> None:
         self.agent = agent
+        # The model whose turn the next calls answer: the agent's first model
+        # until a turn says otherwise (``note_turn``). A fallback list stamps
+        # every answer with the model that gave it, and the calls a turn asks
+        # for are that model's.
+        self.default_model = model
+        self.model = model
         self.stage = stage
         # A recorder without a counter is an agent running outside a job — a
         # test, a script, the CLI. Its ids are still monotonic, they are just
@@ -219,6 +226,15 @@ class EvidenceRecorder:
         # budget blanks the entry later, after the model has read it, and a
         # grounding check over what survived is a check over the wrong thing.
         self.corpus = corpus
+
+    def note_turn(self, message: Any) -> None:
+        """The model that gave ``message`` asked for the calls that follow it. Never raises."""
+        try:
+            from maljan.llm.fallback import turn_model
+
+            self.model = turn_model(message, self.default_model)[0]
+        except Exception:  # noqa: BLE001 — a label is never worth a lost call
+            self.model = self.default_model
 
     def call_started(
         self, *, tool: str, args: dict[str, Any] | None = None, server: str | None = None
@@ -281,6 +297,7 @@ class EvidenceRecorder:
             remediation=remediation,
             args_repaired=args_repaired,
             args_raw=args_raw,
+            model=self.model or None,
         )
         self.entries.append(entry)
         # ``output``, the text the model was handed, and not ``entry.output``,

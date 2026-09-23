@@ -118,8 +118,11 @@ def _sentence(assignment: ModelAssignment, detail: str) -> str:
     with userinfo (the ordinary shape for a llama.cpp behind basic auth) would
     otherwise show them the endpoint's credentials.
     """
+    # A fallback is gated exactly as the first model is, and the sentence
+    # says which one it is, so an operator knows which entry of the list to fix.
+    names = "falls back to" if getattr(assignment, "position", 0) else "names"
     return (
-        f"agent {assignment.agent!r} names model {assignment.model!r} at "
+        f"agent {assignment.agent!r} {names} model {assignment.model!r} at "
         f"{endpoint_label(assignment.endpoint)}: {detail}"
     )
 
@@ -164,12 +167,22 @@ async def unprobed_models_being_saved(
 
 
 def _points_somewhere_new(now: Any, was: Any) -> bool:
-    """Whether an agent's entry names a model or an endpoint it did not before."""
+    """Whether an agent's entry names a model or an endpoint it did not before.
+
+    Its fallbacks included: a model added to the list, or one of the list
+    moved to another endpoint, is a model the agent may now call.
+    """
     if not isinstance(now, dict):
         return False
     if not isinstance(was, dict):
         return True
-    return any(now.get(field) != was.get(field) for field in ("provider", "model", "base_url"))
+    return _calls(now) != _calls(was)
+
+
+def _calls(entry: dict[str, Any]) -> list[tuple[Any, Any, Any]]:
+    """``(provider, model, base_url)`` for each model of an entry's list, in order."""
+    rows = [entry, *[row for row in (entry.get("fallbacks") or []) if isinstance(row, dict)]]
+    return [(row.get("provider"), row.get("model"), row.get("base_url")) for row in rows]
 
 
 async def unprobed_models(db: AsyncSession, settings: Any, agents: list[str]) -> list[str]:

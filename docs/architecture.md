@@ -1083,6 +1083,78 @@ each class of external tool, so the choice is configuration rather than code.
 Every provider that can be reached over the network has a probe behind a Test
 button in the console; see [configuration.md](configuration.md).
 
+### When a provider fails
+
+**A model that fails as a provider.** An agent's entry under `llm.agents` may
+name an ordered list of models (`fallbacks`), held as one model object
+(`maljan.llm.fallback.FallbackChatModel`). The next model is asked only when
+the one before failed *as a provider* — a refused or dropped connection, a
+timeout, an HTTP 5xx, 408 or 429, a model the server does not have, a refused
+credential, or a refusal the provider reports as an error. A timeout is real
+because every model on a list but the last has its own turn deadline:
+`core.llm.fallback_turn_share` (a half by default) of what is *left*, at that
+turn, of the budget the loop runs under — an ask's ceiling included, so an
+agent asked for help under a shorter clock gets a shorter deadline — never less
+than one second. Worked out per turn, so a model that stalls late in a loop is
+still replaced before the loop's clock cancels it. The reporter's list starts
+over twice per report stage, measured against the narrative round's 600 s and
+then against one composer section's `core.reporting.composer_per_section_timeout`. A model that stops answering raises
+inside the list rather than being cancelled with the whole loop (on the
+blocking path the abandoned call is left in a daemon thread, so it never holds
+up the process's exit); and every provider's client has a request
+timeout (1800 s, `PROVIDER_REQUEST_TIMEOUT_SECONDS` — Ollama's had none). A 429
+or 503 that asks, in `Retry-After` (seconds or an HTTP date), for at most thirty seconds is waited out on
+the same model once before the list moves on. The switch is **sticky for the
+loop**: the model that took over answers the rest of that loop, so a stalled
+first model costs one turn deadline rather than one per turn, and the next loop
+(the next stage, the next chunk) starts at the first model again. Only the
+explicit cause chain of an exception is read, and an HTTP status only from the
+provider SDKs' own exception types. A turn a model *answered* is never moved: an answer the
+validation loop rejects goes back, with the feedback, to the model that wrote
+it, because asking another model would be the platform choosing a different
+answer (`tests/unit/test_no_silent_overrides.py` holds a case for exactly
+this). Every answer carries the model that gave it in `response_metadata`
+(`maljan_model`) and, when a fallback gave it, the reason in words
+(`maljan_fallback`) — on the turn the list moved, once per switch; that is what
+the ledger entry, the `model_fallback` event and the run summary read. Every model on the list passes the probe gate the first one
+does, and the context-window budget counts every model on every list — the
+smallest window governs.
+
+**What a run spent.** Every model call's usage, as the provider reported it —
+prompt and completion tokens, and the cost an OpenAI-compatible router reports
+where it reports one — is added to the run's `TokenLedger` under the agent that
+made the call and the model that answered. `run_summary.tokens` holds the sums
+for the run and per agent, and `run_summary.models` the per-agent model count
+and the fallbacks with their reasons. A call whose provider reported no usage
+is counted as *not reported*: its tokens are not estimated, and a figure the
+report prints as a count is always a count a provider gave. There is no price
+table; a cost appears only where the provider reported one.
+
+**A tool server that keeps failing.** Each tool server the job's registry
+attaches — the built-in sidecars and every operator-configured server — has one
+guard (`maljan.providers.server_guard`), shared by every handle the registry
+opens for it. The Ghidra static provider and the CAPE sandbox provider build
+their own toolkits outside the registry and are not guarded; bringing them
+under it is a recorded follow-up. `core.mcp.breaker.failures_to_open` calls in a row the server
+did not answer — a timeout, a refused connection, the server's process gone, or
+a call that did not finish within its caller's budget — rest the server
+for `core.mcp.breaker.cooldown_seconds`. A call made while it rests is not
+sent; the platform answers it with a tool error in the structured shape
+(`maljan.tools.errors`, code `server_resting`) naming the server, that it is
+resting and when it will be tried again. A timeout counts: every call is sent
+with a deadline — the larger of the tool's budget in the server's own
+`capabilities` manifest and `core.mcp.breaker.call_timeout_seconds` (derived by
+default from the longest tool budget configured, capa's), plus thirty seconds —
+and a call still waiting when its caller's own budget runs out counts too.
+After the cooldown one call is let through, and a success ends the rest; that
+call's own failure is the only one that starts another rest, and only while the
+rest it was let through for is still on. A tool that answers with its own error —
+a bad argument, a missing file — has answered, and never counts.
+`core.mcp.breaker.max_concurrent_calls` caps how many calls one server has in
+flight for one job, so parallel analysts queue rather than pile onto one slow
+sidecar. Each rest is published as `tool_server_rested` and kept in
+`run_summary.server_rests`.
+
 ## Memory
 
 Past analyses and family fingerprints are vectorised and stored in Qdrant, and
@@ -1137,6 +1209,12 @@ lookup — go through the same recorder under `agent="judge"`, so a verdict that
 leans on one can cite it. An agent's ask of another agent is an entry under
 `server="team"`, `tool="ask_<key>"`, and the calls the asked agent made are
 entries under its own key (see *Delegation*).
+
+Each entry names the model whose turn asked for the call (`model`, as
+`provider/model` with the endpoint as its scheme and host): an agent may fall
+back to another model mid-loop, so which model a call came from is a fact of
+the turn and not of the agent's settings. A row written before the column
+existed names none.
 
 A call that failed is an entry with `ok` false whichever way it failed: a
 tool that raised, and a tool that returned an error. The entry keeps the
@@ -1280,12 +1358,14 @@ and the console draws the running analysis from them.
 | `phase_change` | the worker | `phase` |
 | `stage_started` / `stage_skipped` / `stage_finished` | the stage nodes | `stage`, `kind`, and `agents` / `reason` / `ran`, `duration_ms` |
 | `agent_message` | every speaking node | `speaker`, `role`, `round`, `status`, `text`, `kind`, and optionally `stage`, `addressed_to`, `display_name`, `confidence`, `claims`, `dissent`, `report`, `report_truncated` |
-| `agent_message_delta` | the analyst loop, behind `core.events.stream_deltas` | `stage`, `agent`, `text_delta` |
+| `agent_message_delta` | the analyst loop, behind `core.events.stream_deltas` | `stage`, `agent`, `text_delta`, and `model` (the model that gave the turn) and `tokens` (what the turn spent, when the provider reported it); a turn that only asked for tools is published with an empty `text_delta` when it carries tokens |
+| `model_fallback` | an agent, on the turn its model list moved on — published whether or not deltas stream | `stage`, `agent`, `model` (the model that answers from here), `reason` |
 | `tool_call_started` | the evidence recorder | `stage`, `agent`, `tool`, `server`, `args_summary` |
 | `tool_call_finished` | the evidence recorder, as each entry is written | `stage`, `agent`, `tool`, `server`, `evidence_id`, `ok`, `duration_ms`, `summary` |
 | `validation_feedback` | `pipeline/validation.retry_with_feedback` | `stage`, `agent`, `code`, `message`, `retry_index`, `state`, `path` |
 | `judge_question` | the judge's ReAct loop | `stage`, `text`, `addressed_to` |
 | `budget_tick` / `stage_ended_at_cap` | the budget meter | see *The evidence ledger* |
+| `tool_server_rested` | a tool server's guard, when its breaker opens | `server`, `failures`, `cooldown_s`, `reason` |
 | `enrichment_complete` | the enrichment worker, after the run | `report_id`, `domains_enriched`, `ips_enriched`, `similar_samples` |
 | `completed` / `error` / `cancelled` | the worker | the outcome |
 

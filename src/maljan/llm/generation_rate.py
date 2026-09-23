@@ -31,6 +31,8 @@ from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
 
+from maljan.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
+
 # The time a budget takes at the measured rate is multiplied by this before it
 # is compared with the configured timeout. It covers what the rate leaves out
 # — the prompt read before the first token, which on the slow run's 27–36K
@@ -38,13 +40,14 @@ from langchain_core.callbacks import BaseCallbackHandler
 # run went from about 70 s to 240 s around a typical 100 s.
 TIMEOUT_MARGIN = 1.5
 
-# No derived timeout goes above this. It is the HTTP request timeout the
-# OpenAI-compatible provider builds every model with (``openai_provider``
-# reads it from here), because a wait longer than that is cut by the client
-# before this one would fire. At 3.8 tokens a second it holds about 6,840 of
-# the judge's 8,192 tokens against the configured 600 s's 2,280. A configured
-# value above the ceiling is the operator's and is kept.
-TIMEOUT_CEILING_SECONDS = 1800.0
+# No derived timeout goes above this. It is the HTTP request timeout every
+# provider builds its client with (``registry.PROVIDER_REQUEST_TIMEOUT_SECONDS``,
+# 1,800 s), because a wait longer than that is cut by the client before this
+# one would fire. At 3.8 tokens a second the judge's 8,192-token budget needs
+# 8,192 / 3.8 × 1.5 ≈ 3,234 s; held at 1,800 s it receives about 6,840 tokens,
+# against the 2,280 its configured 600 s allowed. A configured value above the
+# ceiling is the operator's and is kept.
+TIMEOUT_CEILING_SECONDS = float(PROVIDER_REQUEST_TIMEOUT_SECONDS)
 
 OLLAMA_SOURCE = "ollama eval_count/eval_duration"
 LLAMA_CPP_SOURCE = "llama.cpp timings.predicted_n/predicted_ms"
@@ -69,6 +72,10 @@ def measured_generation(message: Any, wall_seconds: float) -> tuple[int, float, 
                 return int(n), float(ms) / 1000.0, LLAMA_CPP_SOURCE
         usage = getattr(message, "usage_metadata", None) or {}
         out = int(usage.get("output_tokens") or 0) if isinstance(usage, dict) else 0
+        # The llama.cpp path lands here: its ``timings`` do not survive the
+        # OpenAI-compatible client. The wall clock includes reading the prompt,
+        # so this rate is lower than the server's and every timeout sized from
+        # it longer — the safe side, never a call cut short.
         if out > 0 and wall_seconds > 0:
             return out, float(wall_seconds), WALL_CLOCK_SOURCE
     except (TypeError, ValueError):
@@ -218,8 +225,26 @@ class RateMeter(BaseCallbackHandler):
             self.rates.observe(self.model, *measured)
 
 
+def _fallback_list(llm: Any) -> list[Any] | None:
+    """The models of an agent's fallback list, or ``None`` for a single model."""
+    models = getattr(llm, "models", None)
+    if isinstance(models, list) and models and hasattr(llm, "answering"):
+        return models
+    return None
+
+
 def model_name_of(llm: Any) -> str:
-    """The model a chat model object calls, as the rates are keyed."""
+    """The model a chat model object calls, as the rates are keyed.
+
+    For an agent's fallback list it is the model a turn starts at now — the
+    one that will answer unless it fails as a provider.
+    """
+    models = _fallback_list(llm)
+    if models is not None:
+        try:
+            return model_name_of(models[min(int(llm.answering), len(models) - 1)])
+        except Exception:  # noqa: BLE001 — a name is a label, never a failure
+            return model_name_of(models[0])
     for attr in ("model_name", "model"):
         value = getattr(llm, attr, None)
         if isinstance(value, str) and value:
@@ -230,10 +255,17 @@ def model_name_of(llm: Any) -> str:
 def attach_rate_meter(llm: Any, rates: GenerationRates | None, model: str | None = None) -> Any:
     """Add a ``RateMeter`` to ``llm``'s callbacks, once; returns ``llm``.
 
+    An agent's fallback list is metered model by model rather than as the
+    list, so each answer is counted against the model that actually gave it.
     Never raises: a model object that takes no callbacks is left as it is and
     its calls keep the configured timeouts.
     """
     if rates is None or llm is None:
+        return llm
+    models = _fallback_list(llm)
+    if models is not None:
+        for inner in models:
+            attach_rate_meter(inner, rates)
         return llm
     try:
         existing = list(getattr(llm, "callbacks", None) or [])
