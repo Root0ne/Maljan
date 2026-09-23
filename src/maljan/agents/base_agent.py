@@ -23,7 +23,7 @@ from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import tiktoken
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -1915,6 +1915,36 @@ def _cancel_and_watch(
     threading.Thread(target=_watch_quietly, name="maljan-agent-loop-watchdog", daemon=True).start()
 
 
+def _job_s_cancellation(coro: Any, what: str) -> Any | None:
+    """The cancellation of the job this call runs for; a cancelled job's call is not started."""
+    from maljan.core.cancellation import JobCancelled, current
+
+    job = current()
+    if job is not None:
+        try:
+            job.check(f"before {what}")
+        except JobCancelled:
+            coro.close()
+            raise
+    return job
+
+
+def _in_flight(
+    job: Any | None,
+    loop: asyncio.AbstractEventLoop,
+    future: _ConcurrentFuture[Any],
+    running: list[asyncio.Task[Any]],
+    what: str,
+) -> Callable[[], None]:
+    """Register a call on the agent loop with its job, so a cancel stops it; the unregister."""
+    if job is None:
+        return lambda: None
+    return cast(
+        "Callable[[], None]",
+        job.track(lambda: _cancel_and_watch(loop, future, running, f"{what} (job cancelled)")),
+    )
+
+
 def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
     """Submit ``coro`` to the shared agent loop and block until done / timeout.
 
@@ -1947,7 +1977,11 @@ def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
             "thread, which cannot serve it: await it there instead, or move the "
             "synchronous caller to asyncio.to_thread"
         )
+    job = _job_s_cancellation(coro, what)
     future, running = _submit_to_agent_loop(coro, loop)
+    # A cancelled job stops this call where it is: the task on the agent loop
+    # is cancelled, which cancels the model request it is awaiting.
+    forget = _in_flight(job, loop, future, running, what)
     try:
         return future.result(timeout=hard_timeout)
     except _FuturesTimeout:
@@ -1957,6 +1991,8 @@ def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
         _cancel_and_watch(loop, future, running, what)
         raise TimeoutError(f"{what} exceeded hard cap of {int(hard_timeout)}s") from None
     except _FuturesCancelled as exc:
+        if job is not None and job.is_cancelled:
+            job.check(f"while {what} was in flight")
         # It cancelled itself. ``concurrent.futures.CancelledError`` is an
         # ``Exception`` whose ``str()`` is empty, so left alone it reaches the
         # operator as one uninformative word.
@@ -1964,6 +2000,8 @@ def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
             f"{what} was cancelled from inside — the underlying service closed the "
             f"connection or its task group aborted (no timeout was reached)"
         ) from exc
+    finally:
+        forget()
 
 
 # Public alias: callers outside this module (the sandbox/static providers)
@@ -2000,23 +2038,38 @@ async def run_on_agent_loop(coro: Any, hard_timeout: float, label: str = "") -> 
     ``asyncio.to_thread``, which binds no loop at all.
     """
     loop = _get_agent_loop()
-    future, running = _submit_to_agent_loop(coro, loop)
     what = label or "agent coroutine"
+    job = _job_s_cancellation(coro, what)
+    future, running = _submit_to_agent_loop(coro, loop)
+    forget = _in_flight(job, loop, future, running, what)
     try:
         return await asyncio.wait_for(asyncio.wrap_future(future), hard_timeout)
     except TimeoutError:
         _cancel_and_watch(loop, future, running, what)
         raise TimeoutError(f"{what} exceeded hard cap of {int(hard_timeout)}s") from None
     except (asyncio.CancelledError, _FuturesCancelled) as exc:
+        # The caller itself being cancelled is not the call failing: the
+        # cancellation goes on up, and the call on the agent loop is stopped
+        # with it. This branch used to turn it into ``AgentLoopCancelled``, an
+        # ordinary error: a cancelled job's mediation was then caught as a
+        # failed one, and the graph went on to the judge and the report.
+        task = asyncio.current_task()
+        if task is not None and task.cancelling():
+            _cancel_and_watch(loop, future, running, what)
+            raise
+        future.cancel()
+        if job is not None and job.is_cancelled:
+            job.check(f"while {what} was in flight")
         # Same distinction as ``_run_coro_blocking``, and here the old code was
         # actively misleading: it folded cancellation into ``TimeoutError``, so
         # a transport that died in milliseconds was reported as having "exceeded
         # a hard cap" of several minutes. This is the mediator and judge path.
-        future.cancel()
         raise AgentLoopCancelled(
             f"{what} was cancelled from inside — the underlying service closed the "
             f"connection or its task group aborted (no timeout was reached)"
         ) from exc
+    finally:
+        forget()
 
 
 # The negotiation-round instructions the ISR revision path appends to whatever

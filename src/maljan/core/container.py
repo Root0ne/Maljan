@@ -39,6 +39,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from maljan.agents.registry import AgentRegistry
 from maljan.agents.run_evidence_corpus import RunEvidenceCorpus
+from maljan.core.cancellation import Cancellation
 from maljan.core.config import PROMPT_ROLES, REPORTER_AGENT_KEY, Settings
 from maljan.core.exceptions import ConfigurationError
 from maljan.core.logger import logger
@@ -389,6 +390,11 @@ class ServiceContainer:
         # composer size their per-call timeouts from it; the judge node and
         # the report node snapshot it into RunSummary.
         self._generation_rates = GenerationRates()
+
+        # Whether this job has been cancelled. The worker sets it; the graph's
+        # nodes, every model call and every call in flight on the agent loop
+        # answer to it (``core.cancellation``).
+        self.cancellation = Cancellation()
 
         # Per-run truncation ledger (pitfall P6). Same lifecycle as the token
         # ledger: written to at every bound, snapshotted by the judge node.

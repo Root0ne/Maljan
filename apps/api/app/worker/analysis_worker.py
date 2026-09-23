@@ -14,6 +14,7 @@ import json
 import os
 import platform
 import signal
+import threading
 import time
 import traceback
 import uuid
@@ -25,6 +26,8 @@ from typing import Any
 
 import redis.asyncio as aioredis
 from arq import cron
+from maljan.agents.base_agent import CANCEL_DELIVERY_GRACE
+from maljan.core.cancellation import Cancellation, JobCancelled
 from maljan.core.config import Settings as _CoreSettings
 from maljan.core.settings_catalog import core_catalog
 from maljan.core.settings_overrides import build_settings, public_snapshot
@@ -917,6 +920,69 @@ def _make_event_sink(
 # have to wait a quarter of a minute for it.
 CANCEL_POLL_SECONDS = 15.0
 
+# How long a pipeline that has been told to stop is waited for before the job
+# goes on without it, and how long the process waits at exit for threads still
+# blocked in a call nothing can cancel — a synchronous model call in flight on a
+# thread — before it leaves them. The grace a cancellation is given to be
+# delivered anywhere else (``base_agent.CANCEL_DELIVERY_GRACE``). SIGTERM ends
+# the worker within these two, the job's teardown (``WORKER_TEARDOWN_TIMEOUT``)
+# and the closing of its connections: 10 s + 60 s + 10 s as shipped.
+PIPELINE_STOP_GRACE = CANCEL_DELIVERY_GRACE
+EXIT_GRACE = CANCEL_DELIVERY_GRACE
+
+
+async def await_the_pipeline(task: asyncio.Task[Any], cancellation: Cancellation) -> Any:
+    """The pipeline task's result, and a stop that reaches all of it when this job is cancelled.
+
+    The job's own task being cancelled — the worker shutting down on SIGTERM,
+    or arq's job timeout — used to reach the pipeline only as a cancellation of
+    the task it awaited, and a pipeline that turned the cancellation into an
+    ordinary error ran on: the worker ignored SIGTERM for three minutes, and
+    arq's shutdown waited on it. Now the job's cancellation is set first, which
+    stops every model call the job has in flight and every one it would make
+    next, the pipeline task is cancelled, and it is waited for at most
+    ``PIPELINE_STOP_GRACE`` before the cancellation carries on.
+    """
+    try:
+        await asyncio.wait({task})
+    except asyncio.CancelledError:
+        cancellation.cancel("the worker is shutting down")
+        task.cancel()
+        await asyncio.wait({task}, timeout=PIPELINE_STOP_GRACE)
+        raise
+    return task.result()
+
+
+def _leave_blocked_threads_after(grace: float) -> None:
+    """End the process ``grace`` seconds from now if something still holds it open.
+
+    A daemon thread, so a process whose threads all end first exits on its own
+    and this dies with it. What can hold it is a thread blocked in a call that
+    cannot be cancelled — a synchronous model request in flight — which the
+    interpreter joins at exit and which ends only at its provider's request
+    timeout. The shutdown is complete by the time this runs, so nothing is
+    lost by leaving them.
+    """
+
+    def _leave() -> None:
+        time.sleep(grace)
+        held = sorted(
+            thread.name
+            for thread in threading.enumerate()
+            if not thread.daemon and thread is not threading.main_thread()
+        )
+        logger.warning(
+            "Worker exit held %.0fs after shutdown by %d thread(s) blocked in calls that "
+            "cannot be cancelled (%s); leaving them.",
+            grace,
+            len(held),
+            ", ".join(held) or "none named",
+            extra={"component": "worker.lifecycle"},
+        )
+        os._exit(0)
+
+    threading.Thread(target=_leave, name="worker-exit-guard", daemon=True).start()
+
 
 # ── Job ownership ───────────────────────────────────────────────
 
@@ -1795,6 +1861,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                                 job_id,
                                 extra={"job_id": job_id, "component": "heartbeat"},
                             )
+                            # The job's own flag first: it stops the model
+                            # calls in flight and refuses the next ones, which
+                            # a task cancellation alone does not reach.
+                            app.container.cancellation.cancel("the operator cancelled the job")
                             if pipeline_task is not None:
                                 pipeline_task.cancel()
                             return
@@ -1832,8 +1902,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     started_at=start_time,
                 )
             )
-            pipeline_result = await pipeline_task
-        except asyncio.CancelledError:
+            pipeline_result = await await_the_pipeline(pipeline_task, app.container.cancellation)
+        except (asyncio.CancelledError, JobCancelled):
             # Two things cancel this task and they end differently. An
             # operator's cancel leaves its flag in Redis — the heartbeat may
             # have read it already, or the cancel may have arrived between two
@@ -1847,12 +1917,19 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 cancelled_by_user = await cancel_was_requested(redis_conn, job_id)
             if not cancelled_by_user:
                 raise
+            _stopped = app.container.cancellation.stopped_at
             logger.info(
-                "Pipeline cancelled by user request: job=%s",
+                "Pipeline cancelled by user request: job=%s (stopped %s)",
                 job_id,
+                _stopped or "before any check was reached",
                 extra={"job_id": job_id},
             )
-            await _publish_event(redis_conn, job_id, "cancelled", {})
+            await _publish_event(
+                redis_conn,
+                job_id,
+                "cancelled",
+                {"stopped": _stopped} if _stopped else {},
+            )
             # On a session of its own, like every other outcome this task
             # records: the one it was working through may be the one the
             # cancellation came with.
@@ -2909,6 +2986,7 @@ async def shutdown(ctx: dict) -> None:
         "Worker shutdown complete",
         extra={"component": "worker.lifecycle"},
     )
+    _leave_blocked_threads_after(EXIT_GRACE)
 
 
 # The enrichment task lives in a sibling module. Importing it at module
