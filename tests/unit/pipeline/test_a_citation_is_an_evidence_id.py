@@ -310,3 +310,27 @@ class TestOnlyProseIsAskedAboutItsBrackets:
         (found,) = citation_violations({"body": "[x]"}, ["ev_0001", "<b>not an id</b>"])
         assert "ev_0001" in found.message
         assert "not an id" not in found.message
+
+
+class TestAdjacentBracketsAreEachJudged:
+    """``[id][id]`` is how a model often writes two citations; each is read on its own."""
+
+    def _prose(self, text: str) -> list[Any]:
+        return citation_violations({"body": text}, CITABLE, prose=("body",))
+
+    def test_a_heading_beside_an_id_is_asked_about(self) -> None:
+        (found,) = self._prose("It lacks a signature [ev_0004][BINARY FACTS].")
+        assert "[BINARY FACTS] is cited" in found.message
+
+    def test_an_unissued_id_beside_an_issued_one_is_asked_about(self) -> None:
+        (found,) = self._prose("Seen in [ev_0004][ev_0999].")
+        assert "[ev_0999] is not an entry" in found.message
+
+    def test_two_issued_ids_side_by_side_pass(self) -> None:
+        assert self._prose("Seen in [ev_0004][ev_0011].") == []
+
+    def test_notation_side_by_side_is_still_not_a_citation(self) -> None:
+        assert self._prose("Frames are [4-byte length][RC4 payload].") == []
+        assert self._prose("Frames are `[4-byte length][RC4 payload]`.") == []
+        assert self._prose("It opens [Content_Types].xml.") == []
+        assert self._prose("It calls [System.Convert]::FromBase64String.") == []

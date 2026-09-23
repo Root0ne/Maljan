@@ -1334,12 +1334,13 @@ def section_capability_violations(payload: Any, grounding: CapabilityGrounding) 
 
 CITATION_NOT_EVIDENCE_CODE = "report.citation_not_evidence"
 
-# A bracketed group in prose, standing alone. Not the index of an expression
-# (``key[i]``), not the text of a markdown link (its target follows in
-# parentheses), and not part of a token: a layout written ``[len][payload]``, a
-# part name such as ``[Content_Types].xml``, a type accelerator such as
+# A run of one or more adjacent bracketed groups in prose. Not the index of an
+# expression (``key[i]``), not the text of a markdown link (its target follows
+# in parentheses), and not part of a token: a part name such as
+# ``[Content_Types].xml``, a type accelerator such as
 # ``[System.Convert]::FromBase64String``.
-_BRACKETED_RE = re.compile(r"(?<![\w\]])\[([^\[\]\n]{1,200})\](?![(\[\w]|\.\w|::)")
+_BRACKET_RUN_RE = re.compile(r"(?<![\w\]])(?:\[[^\[\]\n]{1,200}\])+(?![(\w]|\.\w|::)")
+_BRACKET_GROUP_RE = re.compile(r"\[([^\[\]\n]{1,200})\]")
 # Code, which the check does not read: a fenced block, then an inline span.
 _CODE_SPAN_RE = re.compile(r"```.*?```|`[^`\n]*`", re.DOTALL)
 # An IPv6 literal in brackets is the host of a URL or a socket address.
@@ -1379,6 +1380,27 @@ def _strings_of(value: Any, depth: int = 0) -> list[str]:
     if isinstance(value, list | tuple):
         return [s for item in value for s in _strings_of(item, depth + 1)]
     return []
+
+
+def _cited_groups(text: str) -> list[str]:
+    """The bracketed groups of ``text`` that read as citations, each on its own.
+
+    A lone group is one. A run of adjacent groups — ``[ev_0004][ev_0005]``, the
+    way a model often writes two citations — is split and every group judged,
+    when any group of the run holds an evidence id; a run with none, such as a
+    layout written ``[len][payload]``, is notation and is not read.
+    """
+    found: list[str] = []
+    for run in _BRACKET_RUN_RE.finditer(text):
+        groups = _BRACKET_GROUP_RE.findall(run.group(0))
+        cites = any(
+            _EVIDENCE_ID_RE.fullmatch(item.strip())
+            for group in groups
+            for item in re.split(r"[,;]", group)
+        )
+        if len(groups) == 1 or cites:
+            found.extend(groups)
+    return found
 
 
 def citation_violations(
@@ -1424,8 +1446,8 @@ def citation_violations(
     seen: set[str] = set()
     violations: list[Violation] = []
     for text in _strings_of(payload):
-        for group in _BRACKETED_RE.finditer(_CODE_SPAN_RE.sub(" ", text)):
-            for raw in re.split(r"[,;]", group.group(1)):
+        for group in _cited_groups(_CODE_SPAN_RE.sub(" ", text)):
+            for raw in re.split(r"[,;]", group):
                 item = raw.strip()
                 if not item or item.lower() in seen:
                     continue
