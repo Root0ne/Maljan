@@ -19,6 +19,7 @@ no evidence, leave it empty — never invent** (the renderer states absence).
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Sequence
 from types import UnionType
 from typing import Any, Literal, Union, get_args, get_origin
@@ -184,9 +185,13 @@ _INSTRUCTIONS: dict[str, str] = {
     ),
     "host_identifiers": (
         "List the identifiers a responder could search a host for — names, file and folder "
-        "paths, registry keys, strings the sample writes or checks — that you read in this "
-        "run's evidence. Write each value as the entry you read it in records it, say what "
-        "the sample uses it for where the evidence says, and cite that entry."
+        "paths, registry keys and values, other strings the sample writes or checks — that "
+        "you read in this run's evidence. Write each value once, as the entry you read it "
+        "in records it, and cite that entry. Name its kind by what the entry shows the "
+        "value is: a registry key or value only when it is written under a registry hive "
+        "or the entry records it as a registry access, and 'String' when the entry does "
+        "not show what the value is. Give its purpose in a short phrase where the evidence "
+        "says, and leave the purpose empty where it does not."
     ),
     "commands": "Extract the commands the sample accepts from its operator.",
     "encryption_scheme": "Extract the encryption scheme.",
@@ -326,7 +331,8 @@ def section_contract(section: str, schema: type[BaseModel]) -> str:
         contract += (
             "\nAn item of a list is written only when the evidence gives it a value; an "
             "item the evidence cannot fill is left out of the list, never written with "
-            "null in its fields."
+            "null in its fields. Each item is written once, and the JSON on one line "
+            "without indentation."
         )
     example = _example_for(section, schema)
     if example:
@@ -492,6 +498,50 @@ def _published_techniques(report: MalwareReport) -> str:
 # The calls one section may take: its answer and the one retry the validation
 # loop gives an answer that breaks its schema.
 SECTION_ATTEMPTS = 2
+
+
+# A section answer the output cap ended. Its JSON is cut before it closes, so
+# the schema check could only say "not JSON at all" — and a model told that
+# writes the same long answer again, into the same cap. Both answers of a
+# benchmark report's host-identifier section ran to exactly 8,192 tokens.
+SECTION_CUT_CODE = "composer.cut_at_output_cap"
+
+
+def section_cut_feedback(cap: int) -> str:
+    """What a section the cap cut is told, with the cap it ran into."""
+    return (
+        f"Your previous answer reached the output limit of {int(cap)} tokens and was cut "
+        "off before its JSON closed, so none of it could be read. Any reasoning you write "
+        "counts against the same limit. Answer again with an object that closes well "
+        f"inside {int(cap)} tokens: only the items the evidence supports best, each "
+        "written once, every text a short phrase, the JSON on one line without "
+        "indentation."
+    )
+
+
+# A key and the string written under it, in a JSON text that may be cut.
+_JSON_STRING_FIELD_RE = re.compile(r'"([A-Za-z_]+)"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def cut_answer_shape(text: str) -> str:
+    """How far a cut answer got, in words: its length, the items begun and how many differ.
+
+    Read off the text the cap ended, so the record says whether the budget went
+    on many items or on one item written again and again. The items begun are
+    counted by the string field written most often; "distinct" is the most
+    different values any one string field holds, so items written again and
+    again show as few. An answer with no string field says only its length.
+    """
+    fields = _JSON_STRING_FIELD_RE.findall(text or "")
+    length = f"{len(text or ''):,} characters"
+    if not fields:
+        return length
+    by_key: dict[str, list[str]] = {}
+    for key, value in fields:
+        by_key.setdefault(key, []).append(value)
+    begun = max(len(values) for values in by_key.values())
+    distinct = max(len(set(values)) for values in by_key.values())
+    return f"{length}, {begun} item(s) begun, at most {distinct} of them distinct"
 
 
 def _reached_the_cap(answer: Any, cap: int) -> bool:
@@ -961,14 +1011,25 @@ class ReportComposer:
         declined = False
         cut = False
         cut_at = 0
+        cut_shapes: list[str] = []
 
         async def _run(turns: list[BaseMessage]) -> Any:
             nonlocal cut, cut_at
             raw = await retry_on_connection_error(
                 lambda: self.llm.ainvoke(turns), what="ReportComposer raw"
             )
-            if _reached_the_cap(raw, self._cap_of(raw)):
-                cut, cut_at = True, self._cap_of(raw)
+            # Per answer: a retry that closes inside the cap is not a cut one.
+            cut = _reached_the_cap(raw, self._cap_of(raw))
+            if cut:
+                cut_at = self._cap_of(raw)
+                shape = cut_answer_shape(_message_text(raw))
+                cut_shapes.append(shape)
+                logger.warning(
+                    "ReportComposer: section '%s' reached the output cap of %d tokens (%s).",
+                    section or schema.__name__,
+                    cut_at,
+                    shape,
+                )
             if self.token_ledger is not None:
                 try:
                     from maljan.core.token_ledger import record_response_usage
@@ -1021,6 +1082,11 @@ class ReportComposer:
             # again would be arguing with a correct answer.
             if declined:
                 return []
+            if cut and cut_at:
+                # Whatever a repair made of the text, it is the front of an
+                # answer the cap ended: the model is told why, and asked once
+                # for a shorter one.
+                return [Violation(code=SECTION_CUT_CODE, message=section_cut_feedback(cut_at))]
             found = [
                 *schema_violations(schema, payload, code="composer.schema"),
                 *section_capability_violations(payload, self._grounding),
@@ -1068,10 +1134,12 @@ class ReportComposer:
             if cut:
                 # The cap ended the answer, not the model: the schema only
                 # failed because the JSON was cut off. Said as what it was.
+                asked = "; asked once for a shorter answer, which was cut too" if retries else ""
                 self._note_degradation(
                     f"report section '{section or schema.__name__}' is missing: its answer "
                     f"reached the output cap of {cut_at} tokens and was cut off "
-                    "(the section's output budget, derived in the run summary; a model's "
+                    f"({'; '.join(cut_shapes)}{asked}; "
+                    "the section's output budget, derived in the run summary; a model's "
                     "reasoning counts against it)"
                 )
                 return None
