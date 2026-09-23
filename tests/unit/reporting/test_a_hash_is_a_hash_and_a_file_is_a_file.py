@@ -192,15 +192,19 @@ class TestOnePathIsOneRow:
 
 def _rendered(judge: Bundle) -> Bundle:
     from maljan.reporting.models import (
+        DynamicBehavior,
         FileHashes,
         MalwareReport,
         SampleIdentity,
     )
 
+    # The sandbox saw the file written: the second source the one publish rule
+    # asks of a judge value as of any other.
     report = MalwareReport(
         verdict="Malware",
         identity=SampleIdentity(hashes=FileHashes(sha256="e" * 64), file_name="sample.bin"),
         executive_summary="",
+        dynamic=DynamicBehavior(file_operations=[{"operation": "write", "path": DIST}]),
     )
     return ExtendedSTIXRenderer().render(report, base_bundle=judge)
 

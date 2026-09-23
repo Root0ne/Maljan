@@ -46,6 +46,7 @@ from maljan.reporting.models import (
     DefensiveRecommendation,
     EvidenceIndexRow,
     ExternalReference,
+    JudgeIndicator,
     KeyFinding,
     MalwareReport,
     ReportFrontMatter,
@@ -131,6 +132,8 @@ class MalwareReportBuilder:
 
     def build_deterministic(self) -> MalwareReport:
         """Build a deterministic ``MalwareReport`` out of the evidence ledger."""
+        from maljan.reporting.renderers.stix_renderer import exported_indicator_values
+
         identity = identity_from_ledger(
             self.evidence_ledger,
             sample_path=self.sample_path,
@@ -187,6 +190,10 @@ class MalwareReportBuilder:
             run_summary=self.run_summary,
             negotiation_summary=negotiation_summary,
             stix_bundle_extended=self.stix_output,
+            judge_indicators=[
+                JudgeIndicator(kind=value.kind, value=value.value, algorithm=value.algorithm)
+                for value in exported_indicator_values(self.stix_output)
+            ],
             references=references,
         )
         # The sections the report is actually made of, and the index of the
@@ -745,10 +752,10 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 is_network=True,
             )
 
-    return _with_what_the_export_publishes(rows, report)
+    return _with_the_judge_s_values(rows, report)
 
 
-# The table's type for each kind an exported indicator can name.
+# The table's type for each kind a judge indicator can name.
 _EXPORTED_TYPE_LABELS = {
     "domain": "Domain",
     "url": "URL",
@@ -760,36 +767,40 @@ _EXPORTED_TYPE_LABELS = {
 }
 
 
-def _with_what_the_export_publishes(
+def _with_the_judge_s_values(
     rows: list[ConsolidatedIOC], report: MalwareReport
 ) -> list[ConsolidatedIOC]:
-    """The table with every value the STIX export publishes on it, marked published.
+    """The table with the values the judge's indicators name, each with the rule's answer.
 
-    The export mints indicators from this table's own rows, and carries the
-    judge's indicators besides, asked the host question and grounded in the
-    run's evidence before it did. A value only the judge's objects carry was
-    published by the export and missing here: a run exported the two C2 names
-    FLOSS decoded while this table and ``/iocs`` listed four hashes, and another
-    exported an address this table called "seen only in the file's strings".
-    Such a value is a row whose source is ``judge``: added where the table had
-    none, and standing in for the string sweep's row of the same value where
-    the table had that one refused. A value this table already publishes stays
-    the table's own row.
+    The export asks the one publish rule of every judge indicator before it
+    carries one (``stix_renderer.judge_value_answer``); this table asks the same
+    rule of the same values, so it prints what the export decided: a judge
+    value the rule publishes is ``yes``, and one it refuses — a host only the
+    file's strings carry — is ``no:`` with the reason, and is not exported. A
+    value the table already has a row for keeps that row: its answer is the
+    same one, asked of the same source. A run once exported two C2 names the
+    judge read out of decoded strings while this table listed four hashes.
     """
-    from maljan.reporting.renderers.stix_renderer import exported_indicator_values
+    from maljan.reporting.renderers.stix_renderer import judge_indicator_rows
 
-    exported = exported_indicator_values(getattr(report, "stix_bundle_extended", None))
-    if not exported:
+    judged = judge_indicator_rows(report)
+    if not judged:
         return rows
     out = list(rows)
-    for item in exported:
+    for item, answer in judged:
         wanted = item.value.strip().lower()
         same = [
             index
             for index, row in enumerate(out)
             if (row.kind or "") == item.kind and row.value.strip().lower() == wanted
         ]
-        if any(out[index].published == "yes" for index in same):
+        if same:
+            # A row the table never asked the rule of — a sandbox's file write,
+            # an analyst's persistence target — is asked it now, because the
+            # export asks it of the judge's indicator for the same value.
+            for index in same:
+                if out[index].published is None:
+                    out[index] = out[index].model_copy(update={"published": answer})
             continue
         if item.kind == "hash":
             label = item.algorithm or "Hash"
@@ -803,14 +814,11 @@ def _with_what_the_export_publishes(
             kind=item.kind,
             value=item.value,
             source="judge",
-            context="the judge's indicator, carried by the STIX export",
-            description="the judge's indicator, carried by the STIX export",
-            published="yes",
+            context="the judge's indicator",
+            description="the judge's indicator",
+            published=answer,
             is_network=network,
         )
-        if same:
-            out[same[0]] = row
-            continue
         if network:
             out.append(row)
             continue

@@ -357,7 +357,12 @@ def _malware_exports() -> list[tuple[str, Bundle]]:
 
 
 def _benign_typed_indicator() -> Bundle:
-    """A judge indicator for a vendor update host, typed ``benign``, related to nothing."""
+    """A judge indicator for a vendor updater file, typed ``benign``, related to nothing.
+
+    The sandbox saw the file written, which is the second source the one
+    publish rule asks of the judge's value; a file name is a value the export
+    mints no row of its own for, so the object carried is the judge's.
+    """
     judge = _judge(
         {
             "type": "bundle",
@@ -366,15 +371,19 @@ def _benign_typed_indicator() -> Bundle:
                 {
                     "type": "indicator",
                     "id": "indicator--1",
-                    "name": "update host",
-                    "pattern": "[domain-name:value = 'update.microsoft.com']",
+                    "name": "vendor updater",
+                    "pattern": "[file:name = 'vendor_update.exe']",
                     "pattern_type": "stix",
                     "indicator_types": ["benign"],
                 },
             ],
         }
     )
-    return ExtendedSTIXRenderer().render(_report("Malware", judge), judge)
+    report = _report("Malware", judge)
+    report.dynamic = DynamicBehavior(
+        file_operations=[{"operation": "write", "path": "C:\\ProgramData\\vendor_update.exe"}]
+    )
+    return ExtendedSTIXRenderer().render(report, judge)
 
 
 class TestEveryMalwareExportHangsTogether:
@@ -428,9 +437,7 @@ class TestEveryMalwareExportHangsTogether:
         bundle = _benign_typed_indicator()
 
         (indicator,) = [
-            o
-            for o in bundle.objects
-            if o.type == "indicator" and "update.microsoft.com" in o.pattern
+            o for o in bundle.objects if o.type == "indicator" and "vendor_update.exe" in o.pattern
         ]
         assert indicator.indicator_types == ["benign"]
         assert not [

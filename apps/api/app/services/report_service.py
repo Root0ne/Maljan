@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from arq import ArqRedis
 from maljan.reporting.renderers.stix_renderer import (
-    exported_indicator_values,
     indicator_publish_reason,
+    judge_indicator_rows,
 )
 from maljan.reporting.run_diff import RunRecord, diff_runs
 from sqlalchemy import select
@@ -106,19 +106,32 @@ def _publishable(kind: str, value: Any, source: Any, reputation: Any) -> bool:
         return False
 
 
-def _with_what_the_export_publishes(out: list[dict], bundle: Any, kind: str | None) -> None:
-    """Add to the feed every value the STIX export publishes that the feed withheld.
+def _with_the_judge_s_values(out: list[dict], mr: dict, kind: str | None) -> None:
+    """Add the values the judge's indicators name, each with the one rule's answer.
 
-    The export is the run's publish decision made concrete, and it carries the
-    judge's indicators beside the rows minted from the report. A value only the
-    judge's objects carry — two C2 names decoded from the sample's strings, an
-    address the string sweep alone had — was exported and absent from this
-    feed, or served here as unpublished. It is served as the report's IOC table
-    serves it: a published row whose source is ``judge``, in place of a
-    withheld row of the same value. A value this feed already publishes keeps
-    its own row. Rows are changed in place.
+    The export asks the publish rule of every judge indicator before it carries
+    one, and the report's IOC table asks it of the same values
+    (``stix_renderer.judge_indicator_rows``); this feed reads the same answer, so
+    a value the export declined is withheld here too and one it carries is
+    published. A value the feed already has a row for keeps its row: its answer
+    is the same one. Rows are added in place; a stored report the model cannot
+    read adds none, and says so in the log.
     """
-    for item in exported_indicator_values(bundle if isinstance(bundle, dict) else None):
+    if not mr.get("judge_indicators"):
+        return
+    try:
+        from maljan.reporting.models import MalwareReport
+
+        judged = judge_indicator_rows(MalwareReport.model_validate(mr))
+    except Exception as exc:  # noqa: BLE001 — a feed answers, and says what broke
+        logger.error(
+            "the judge's indicator values could not be asked the publish rule; none is "
+            "served (%s: %s)",
+            type(exc).__name__,
+            log_safe(exc),
+        )
+        return
+    for item, answer in judged:
         if kind and item.kind != kind:
             continue
         value = (
@@ -127,19 +140,14 @@ def _with_what_the_export_publishes(out: list[dict], bundle: Any, kind: str | No
             else item.value
         )
         wanted = value.strip().lower()
-        same = [
-            index
-            for index, row in enumerate(out)
-            if row.get("kind") == item.kind
-            and str(row.get("value") or "").strip().lower() == wanted
-        ]
-        if any(bool(out[index].get("published", True)) for index in same):
+        if any(
+            row.get("kind") == item.kind and str(row.get("value") or "").strip().lower() == wanted
+            for row in out
+        ):
             continue
-        row = {"kind": item.kind, "value": value, "source": "judge", "published": True}
-        if same:
-            out[same[0]] = row
-        else:
-            out.append(row)
+        out.append(
+            {"kind": item.kind, "value": value, "source": "judge", "published": answer == "yes"}
+        )
 
 
 def _url_host(raw: Any) -> str:
@@ -603,7 +611,7 @@ class ReportService:
                 continue
             for value in network.get(field) or []:
                 out.append({"kind": row_kind, "value": value, "source": "sandbox"})
-        _with_what_the_export_publishes(out, mr.get("stix_bundle_extended"), kind)
+        _with_the_judge_s_values(out, mr, kind)
         rows = [row for row in out if row.get("value")]
         wanted = str(include or "published").strip().lower()
         if wanted == "all":

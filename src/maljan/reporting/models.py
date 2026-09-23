@@ -855,6 +855,16 @@ class C2Channel(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
+class JudgeIndicator(BaseModel):
+    """One value a judge indicator names: its IOC kind, the value, a hash's algorithm."""
+
+    model_config = _STRICT_CONFIG
+
+    kind: str
+    value: str
+    algorithm: str = ""
+
+
 class ConsolidatedIOC(BaseModel):
     """One row of the consolidated, typed IOC table.
 
@@ -1069,6 +1079,11 @@ class MalwareReport(BaseModel):
 
     # --- IOC export ---
     stix_bundle_extended: dict[str, Any] = Field(default_factory=dict)
+    # The values the judge's own indicators name, one per single-comparison
+    # pattern, as the judge wrote them. Read by the IOC table and ``/iocs``,
+    # which ask the one publish rule of each exactly as the export does; empty
+    # on a report stored before the field existed.
+    judge_indicators: list[JudgeIndicator] = Field(default_factory=list)
     misp_attributes: list[dict[str, Any]] | None = None
 
     # --- References ---

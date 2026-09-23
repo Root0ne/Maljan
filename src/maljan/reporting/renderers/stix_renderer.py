@@ -127,6 +127,11 @@ MALFORMED_HASH_CODE = "stix.malformed_hash"
 # about under ``stix.unknown_observable_type`` and kept. This row is the
 # export's decision rather than the judge's answer, so it has a code of its own.
 UNPUBLISHABLE_PATTERN_CODE = "stix.unpublishable_pattern"
+# A judge indicator naming a value the one publish rule refuses — a host only
+# the file's strings carry, a command line. Not exported, recorded, and
+# unchanged in the judge's own bundle; the IOC table and /iocs print the same
+# answer for the value.
+UNPUBLISHED_VALUE_CODE = "stix.indicator_not_published"
 
 # The sources whose rows are worth a recorded decline. Something a sandbox
 # watched, an agent wrote down or the judge asserted is an observation, and a
@@ -632,6 +637,31 @@ def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
     return None
 
 
+def _judge_indicator_unpublished(
+    report: Any, indicator: Indicator, corroborating: str
+) -> tuple[str, str] | None:
+    """Why the one publish rule declines this judge indicator, or ``None``.
+
+    Every comparison whose value is of a kind the rule answers is asked it,
+    exactly as the report's own row for the value is asked
+    (:func:`judge_value_answer`); one refused value declines the indicator. A
+    comparison of a kind the IOC table has no row for (a port, a property of a
+    process) is left to the host question and the grounding check before this.
+    """
+    named = safe_finding_value(getattr(indicator, "name", "") or indicator.pattern)
+    for value in pattern_values(indicator.pattern or ""):
+        answer = judge_value_answer(report, value.kind, value.value, corroborating)
+        if answer == "yes":
+            continue
+        return (
+            UNPUBLISHED_VALUE_CODE,
+            f"the judge's indicator {named!r} names {safe_finding_value(value.value)!r}, "
+            f"which this run does not publish ({safe_finding_value(answer)}). It is not in "
+            "the exported bundle and is unchanged in the judge's own bundle.",
+        )
+    return None
+
+
 class ExtendedSTIXRenderer:
     """Augment a minimal Bundle with the SDOs derived from a ``MalwareReport``.
 
@@ -737,6 +767,9 @@ class ExtendedSTIXRenderer:
                 if getattr(obj, "type", "") == "malware"
                 and _missing_what_the_standard_requires(obj)
             }
+        # The run's second-source record, read once for the judge's values here
+        # and for the string rows below: one rule, asked of both.
+        judge_corroborating = _corroborating_values(report, corpus)
         if base_bundle is not None:
             self._normalize_judge_timestamps(base_bundle.objects)
             remap = _technique_remap(report, base_bundle)
@@ -787,7 +820,9 @@ class ExtendedSTIXRenderer:
                     awaiting_stand_in.append(moved)
                     continue
                 if isinstance(moved, Indicator):
-                    declined = _judge_indicator_problem(moved)
+                    declined = _judge_indicator_problem(moved) or _judge_indicator_unpublished(
+                        report, moved, judge_corroborating
+                    )
                     if declined:
                         self.declined.append(declined)
                         continue
@@ -950,7 +985,7 @@ class ExtendedSTIXRenderer:
         # the network block's own answer for a name, and everything some other
         # producer in this run wrote down for every other kind.
         publishable_domains = _publishable_domains(report)
-        corroborating = _corroborating_values(report, corpus)
+        corroborating = judge_corroborating
 
         # Apply the same acceptance-based filter
         # used by the judge bundle postprocess so deterministic
@@ -1593,11 +1628,35 @@ def indicator_publish_reason(
             return None
     if kind == "path" and not path_names_a_file(value):
         return None
+    if kind == "hash":
+        # A digest is publishable when it is whole and somebody other than the
+        # string sweep knows it: the sample's own identity, a sandbox's dropped
+        # file, an analyst's carved payload, a second source's record. A run of
+        # hex the byte image carries is not a file anybody has.
+        if not _is_a_whole_digest(value):
+            return None
+        if str(source or "").strip().lower() not in ("", "strings"):
+            return str(source)
+        return corroborated_by or None
+    # A command line is not an indicator this platform publishes: it is a
+    # behaviour a detection rule reads, not a value a blocklist or the /iocs
+    # feed matches on, and STIX has no pattern this export writes for one. The
+    # rule answers it — no — rather than leaving it to whichever path asks.
     if kind not in STRING_IOC_KINDS or indicator_pattern(kind, value) is None:
         return None
     if str(source or "").strip().lower() not in ("", "strings"):
         return str(source)
     return corroborated_by or None
+
+
+_WHOLE_DIGEST_RE = re.compile(r"^[0-9a-fA-F]+$")
+_DIGEST_HEX_LENGTHS = frozenset({32, 40, 56, 64, 96, 128})
+
+
+def _is_a_whole_digest(value: Any) -> bool:
+    """Whether ``value`` is hex of a digest's own length."""
+    text = str(value or "").strip()
+    return bool(_WHOLE_DIGEST_RE.match(text)) and len(text) in _DIGEST_HEX_LENGTHS
 
 
 def publish_answer(
@@ -1642,7 +1701,11 @@ def publish_answer(
         return "no: its domain part reads as code in the file, not as a host"
     if kind == "path" and not path_names_a_file(text):
         return "no: names a directory or a root, not a file"
-    if kind not in STRING_IOC_KINDS or indicator_pattern(kind, text) is None:
+    if kind == "hash" and not _is_a_whole_digest(text):
+        return "no: not a whole digest"
+    if kind == "command":
+        return "no: a command line is not an indicator this run publishes"
+    if kind != "hash" and (kind not in STRING_IOC_KINDS or indicator_pattern(kind, text) is None):
         return "no: the export has no object for this kind"
     return "no: seen only in the file's strings"
 
@@ -1650,6 +1713,64 @@ def publish_answer(
 def corroborating_values(report: Any, corpus: Any = None) -> str:
     """The run's second-source record, as :func:`publish_answer` asks it."""
     return _corroborating_values(report, corpus)
+
+
+def judge_value_answer(report: Any, kind: str, value: str, corroborating: str) -> str:
+    """The one publish rule's answer for a value the judge's indicator names.
+
+    The judge asserting a value is not a second source for it — the export
+    used to take "the judge said so" as one, and a certificate authority's host
+    the judge copied out of the strings table was published, fed and drafted
+    an alert for. So the value is asked exactly as the report's own row for it
+    is: a network value with the source and reputation of its row in the
+    network block where the block has one, the sample's own digest as its
+    identity, and anything else as the string sweep's, with the run's
+    second-source record (:func:`corroborating_values`) asked whole-value.
+    ``yes`` or ``no: <reason>``, as :func:`publish_answer` writes it.
+    """
+    text = str(value or "").strip()
+    network = getattr(report, "network", None)
+    if kind == "domain" and network is not None:
+        for row in network.domains:
+            if row.fqdn.strip().lower().rstrip(".") == text.lower().rstrip("."):
+                return publish_answer("domain", text, row.source, row.reputation)
+    if kind == "ip" and network is not None:
+        for ip_row in network.ips:
+            if ip_row.address.strip() == text:
+                return publish_answer("ip", text, ip_row.source, ip_row.reputation)
+    if kind == "url" and network is not None:
+        for url_row in network.urls:
+            if url_row.url.strip() == text:
+                return publish_answer(
+                    "url",
+                    text,
+                    url_row.source or "strings",
+                    _host_reputation(report, url_host(text)),
+                )
+    if kind == "hash":
+        hashes = getattr(getattr(report, "identity", None), "hashes", None)
+        own = {
+            str(getattr(hashes, name, "") or "").strip().lower()
+            for name in ("md5", "sha1", "sha256", "sha512", "imphash")
+        } - {""}
+        if text.lower() in own:
+            return publish_answer("hash", text, "identity")
+    reputation = _host_reputation(report, url_host(text)) if kind == "url" else None
+    return publish_answer(kind, text, "strings", reputation, corroborating=corroborating)
+
+
+def judge_indicator_rows(report: Any, corpus: Any = None) -> list[tuple[Any, str]]:
+    """Each value the judge's indicators name, with the one rule's answer for it.
+
+    What the IOC table and ``/iocs`` read for a judge value, and what the
+    export asks before it carries a judge indicator, so the three surfaces
+    read one decision.
+    """
+    rows = list(getattr(report, "judge_indicators", None) or [])
+    if not rows:
+        return []
+    corroborating = _corroborating_values(report, corpus)
+    return [(row, judge_value_answer(report, row.kind, row.value, corroborating)) for row in rows]
 
 
 # What one comparison of an exported pattern names, as the IOC table's kind.
@@ -1678,26 +1799,13 @@ class ExportedValue:
     algorithm: str = ""
 
 
-def exported_indicator_values(bundle: Any) -> list[ExportedValue]:
-    """Every value the export's indicators publish, one per single-comparison pattern.
+def pattern_values(pattern: str) -> list[ExportedValue]:
+    """The values a pattern compares with ``=``, each typed as the IOC table types it.
 
-    The export is the run's publish decision made concrete: whatever it
-    carries was published. The IOC table and ``/reports/{id}/iocs`` read it
-    here so that none of the three surfaces can publish a value the others
-    withhold — the export carried the judge's C2 names, and the table beside it
-    listed four hashes. A compound pattern (``[a] AND [b]``) is not one value
-    and is left to the bundle.
+    A comparison over a path the table has no kind for is not returned.
     """
-    objects = (bundle or {}).get("objects") if isinstance(bundle, dict) else None
     found: list[ExportedValue] = []
-    seen: set[tuple[str, str]] = set()
-    for obj in objects or []:
-        if not isinstance(obj, dict) or obj.get("type") != "indicator":
-            continue
-        comparisons = read_comparisons(str(obj.get("pattern") or ""))
-        if len(comparisons) != 1:
-            continue
-        (comparison,) = comparisons
+    for comparison in read_comparisons(str(pattern or "")):
         if not comparison.readable or comparison.operator != "=":
             continue
         value = comparison.literal.strip()
@@ -1706,10 +1814,35 @@ def exported_indicator_values(bundle: Any) -> list[ExportedValue]:
         digest = _HASH_PROPERTY_RE.match(comparison.prop)
         if comparison.object_type == "file" and digest:
             kind, algorithm = "hash", digest.group(1).upper()
-        if not kind or not value or (kind, value.lower()) in seen:
+        if kind and value:
+            found.append(ExportedValue(kind=kind, value=value, algorithm=algorithm))
+    return found
+
+
+def exported_indicator_values(bundle: Any) -> list[ExportedValue]:
+    """Every value a bundle's single-comparison indicators name, once each.
+
+    Read of the judge's own bundle by the report builder, which stores the
+    values for the IOC table and ``/iocs`` to ask the one publish rule of
+    (:func:`judge_indicator_rows`), and of the export by the consistency test
+    that holds the three surfaces to one decision. It decides nothing. A
+    compound pattern (``[a] AND [b]``) names no single value and is left to
+    the bundle, where the export asks each of its values the rule.
+    """
+    objects = (bundle or {}).get("objects") if isinstance(bundle, dict) else None
+    found: list[ExportedValue] = []
+    seen: set[tuple[str, str]] = set()
+    for obj in objects or []:
+        if not isinstance(obj, dict) or obj.get("type") != "indicator":
             continue
-        seen.add((kind, value.lower()))
-        found.append(ExportedValue(kind=kind, value=value, algorithm=algorithm))
+        pattern = str(obj.get("pattern") or "")
+        if len(read_comparisons(pattern)) != 1:
+            continue
+        for value in pattern_values(pattern):
+            if (value.kind, value.value.lower()) in seen:
+                continue
+            seen.add((value.kind, value.value.lower()))
+            found.append(value)
     return found
 
 

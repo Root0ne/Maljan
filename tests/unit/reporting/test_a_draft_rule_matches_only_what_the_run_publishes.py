@@ -83,17 +83,25 @@ class TestAMalwareVerdict:
         assert SWEPT not in body
         assert "185.99.133.7" not in body
 
-    def test_a_value_the_export_publishes_from_the_judge_is_drafted(self) -> None:
-        bundle = {
-            "type": "bundle",
-            "objects": [
-                {"type": "indicator", "id": "x", "pattern": f"[domain-name:value = '{JUDGED}']"}
-            ],
-        }
+    def test_a_judge_value_the_rule_publishes_is_drafted(self) -> None:
+        from maljan.reporting.models import DynamicBehavior, JudgeIndicator
 
-        body = _rule(_report(stix_bundle_extended=bundle), "suricata").body
+        report = _report(
+            judge_indicators=[JudgeIndicator(kind="path", value="C:\\ProgramData\\relay4.dat")],
+            dynamic=DynamicBehavior(
+                file_operations=[{"operation": "write", "path": "C:\\ProgramData\\relay4.dat"}]
+            ),
+        )
 
-        assert JUDGED in body
+        assert "relay4.dat" in _rule(report, "yara").body
+
+    def test_a_judge_value_the_rule_refuses_is_not_drafted(self) -> None:
+        from maljan.reporting.models import JudgeIndicator
+
+        report = _report(judge_indicators=[JudgeIndicator(kind="domain", value=JUDGED)])
+
+        assert JUDGED not in _rule(report, "suricata").body
+        assert JUDGED not in _rule(report, "yara").body
 
     def test_no_published_network_value_means_no_suricata(self) -> None:
         report = _report()
