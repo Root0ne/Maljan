@@ -104,14 +104,25 @@ def _model_context_tokens(cfg: Any, agent_name: str) -> int:
     which describes the global one. That is a known limit of this lookup and
     not a claim about that agent's server; the floor below is what protects it.
 
+    An agent that may fall back to another model reads the smallest window
+    any of its models declares: the salvage is re-sent to whichever model is
+    answering, and a conversation sized for the roomiest would overflow the
+    tightest.
+
     Zero means nothing declared it, and the caller falls back to the floor.
     """
     try:
         entry = (getattr(cfg.llm, "agents", None) or {}).get(agent_name)
-        provider = str(getattr(entry, "provider", "") or cfg.llm.provider)
-        if provider == "ollama":
-            return int(cfg.llm.ollama.num_ctx)
-        return int(getattr(cfg.llm.openai, "context_size", 0) or 0)
+        chain: list[Any] = entry.chain() if entry is not None else [None]
+        windows: list[int] = []
+        for choice in chain:
+            provider = str(getattr(choice, "provider", "") or cfg.llm.provider)
+            if provider == "ollama":
+                windows.append(int(cfg.llm.ollama.num_ctx))
+            else:
+                windows.append(int(getattr(cfg.llm.openai, "context_size", 0) or 0))
+        declared = [window for window in windows if window > 0]
+        return min(declared) if declared else 0
     except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost salvage
         logger.debug("synthesis budget: the context size could not be read (%s).", exc)
         return 0
@@ -999,15 +1010,6 @@ def _extract_technique_ids(text: str) -> list[str]:
     return list(dict.fromkeys(_TECHNIQUE_RE.findall(text)))
 
 
-def _messages_text(messages: list) -> str:
-    """Join message contents into a prompt string (for token estimation)."""
-    parts: list[str] = []
-    for m in messages:
-        content = getattr(m, "content", m)
-        parts.append(content if isinstance(content, str) else str(content))
-    return "\n".join(parts)
-
-
 # ---------------------------------------------------------------------------
 # View-decomposition (findings-log §3.6) — text-path only.
 # Each "view" is a focused sub-prompt over the SAME evidence (AppPoet-style),
@@ -1877,6 +1879,29 @@ class BudgetMeter:
     # — cannot drain another one's rows out of a list they all share.
     _budget_records: Sequence[dict[str, Any]] = ()
 
+    # Which global model an agent with no entry of its own runs on: the
+    # analysts take the expert model, the judge its own.
+    _model_role: str = "expert"
+
+    def _model_label(self) -> str:
+        """The label of the model this agent calls first, or ``""`` outside a job."""
+        config = getattr(getattr(self, "_container", None), "config", None)
+        name = str(getattr(self, "name", "") or "")
+        if config is None or not name:
+            return ""
+        from maljan.core.model_assignments import model_label_for
+
+        return model_label_for(config, name, role=self._model_role)
+
+    def _record_usage(self, response: Any) -> None:
+        """One model answer onto the run's ledger, under this agent and the model that gave it."""
+        record_response_usage(
+            getattr(self, "token_ledger", None),
+            response,
+            agent=str(getattr(self, "name", "") or ""),
+            model=self._model_label(),
+        )
+
     def _event_sink(self) -> Any:
         """The job's event sink, or ``None`` for an agent outside a job."""
         return getattr(getattr(self, "_container", None), "event_sink", None)
@@ -1897,6 +1922,8 @@ class BudgetMeter:
         if sink is None:
             return
         try:
+            from maljan.core.token_ledger import turn_usage
+            from maljan.llm.fallback import turn_model
             from maljan.pipeline.events import emit_agent_message_delta, scrub
 
             # The job's settings, not the process's: a switch this job was
@@ -1905,6 +1932,7 @@ class BudgetMeter:
             if not bool(getattr(getattr(config, "events", None), "stream_deltas", True)):
                 return
             messages = snapshot.get("messages") if isinstance(snapshot, dict) else None
+            default_model = self._model_label()
             for index, message in enumerate(list(messages or [])):
                 if getattr(message, "type", "") != "ai":
                     continue
@@ -1912,11 +1940,15 @@ class BudgetMeter:
                 if marker in already:
                     continue
                 already.add(marker)
+                model, fallback = turn_model(message, default_model)
                 emit_agent_message_delta(
                     sink,
                     stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
                     agent=str(self.name),
                     text_delta=scrub(str(getattr(message, "content", "") or "")),
+                    model=model,
+                    fallback=scrub(fallback),
+                    tokens=turn_usage(message),
                 )
         except Exception as exc:  # noqa: BLE001 — a delta never costs a turn
             self.logger.debug("%s: delta not published (%s).", self.name, exc)
@@ -2670,6 +2702,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             sink=self._event_sink(),
             # What the run saw, before the byte budget trims what it keeps.
             corpus=getattr(self, "evidence_corpus", None),
+            # The model a call is filed under until a turn names another.
+            model=self._model_label(),
         )
         # The repeat guard is per loop, like the recorder: a second chunk is a
         # new conversation and the model has not seen the first one's answers.
@@ -2703,6 +2737,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             it sees is the message with the call in ``tool_calls`` where the
             arguments could be closed off, and untouched where they could not.
             """
+            # The calls this turn asks for are this turn's model's.
+            recorder.note_turn(answer)
             try:
                 repaired = repair_invalid_tool_calls(answer, repairs)
             except Exception as exc:  # noqa: BLE001 — a repair never costs a loop
@@ -2913,7 +2949,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # ``usage_metadata``) so the ledger reflects real LLM spend.
         for _m in msgs:
             if getattr(_m, "type", "") == "ai":
-                record_response_usage(self.token_ledger, _m)
+                self._record_usage(_m)
         elapsed = _time.monotonic() - _t0
         # A loop that overran is a slow model or a slow tool, and the loop's
         # own elapsed time cannot tell them apart. Every ledger entry carries
@@ -3106,7 +3142,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return None
             modes.append("tool_choice_none")
         self._nudge_retry_mode = "+".join(modes) or None
-        record_response_usage(self.token_ledger, answer)
+        self._record_usage(answer)
         text = str(getattr(answer, "content", "") or "")
         return text or None
 
@@ -3351,7 +3387,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 asyncio.to_thread(self.llm.invoke, messages),
                 timeout=float(timeout),
             )
-            record_response_usage(self.token_ledger, response, prompt_text=_messages_text(messages))
+            self._record_usage(response)
             return str(response.content)
 
         _t0 = _time.monotonic()
@@ -3713,7 +3749,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             except Exception:  # noqa: BLE001 — provider may not accept the kwarg
                 llm = self.llm
         response = llm.invoke(messages)
-        record_response_usage(self.token_ledger, response, prompt_text=f"{instruction}\n\n{data}")
+        self._record_usage(response)
         return str(response.content)
 
     def analyze_isr_views(

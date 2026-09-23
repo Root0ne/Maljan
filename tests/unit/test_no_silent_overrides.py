@@ -573,3 +573,61 @@ class TestARejectedIdIsDroppedAndNeverRewritten:
         _cells, mappings = self._matrix()
 
         assert mappings == []
+
+
+class TestARejectedAnswerIsNeverAskedOfAnotherModel:
+    """An agent's fallback models answer for a provider, never for a validator.
+
+    The feedback turn a rejected answer gets goes to the model that wrote the
+    answer. Moving it to the next model on the agent's list would be the
+    platform picking the answer it liked better, which is the override every
+    other class here forbids — so the one thing that moves a turn is an
+    exception a provider raised, and a validator raises nothing.
+    """
+
+    @staticmethod
+    def _models() -> tuple[Any, list[Any]]:
+        from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+        from maljan.llm.fallback import FallbackChatModel
+
+        first = FakeListChatModel(responses=["T9999 is what it does", "T1055 is what it does"])
+        second = FakeListChatModel(responses=["the other model's answer"])
+        chain = FallbackChatModel(
+            models=[first, second], labels=["openai/first", "ollama/second"], agent="static"
+        )
+        return chain, [first, second]
+
+    def test_the_feedback_turn_goes_back_to_the_model_that_answered(self) -> None:
+        from langchain_core.messages import HumanMessage
+
+        from maljan.llm.fallback import turn_model
+        from maljan.pipeline.validation import Violation, retry_with_feedback_sync
+
+        chain, (first, second) = self._models()
+        asked: list[str] = []
+
+        def run(turns: list[Any]) -> Any:
+            answer = chain.invoke(turns)
+            asked.append(turn_model(answer)[0])
+            return answer
+
+        def unknown_id(answer: Any) -> list[Violation]:
+            text = str(answer.content)
+            return (
+                [Violation("technique.unknown", "T9999 is not in the catalogue")]
+                if "T9999" in text
+                else []
+            )
+
+        parsed, left, retries = retry_with_feedback_sync(
+            run,
+            [HumanMessage(content="what does it do")],
+            [unknown_id],
+            parse=lambda answer: answer,
+        )
+
+        assert retries == 1 and left == []
+        assert asked == ["openai/first", "openai/first"]
+        assert parsed.content == "T1055 is what it does"
+        assert second.i == 0, "the fallback model was asked for an answer the first one gave"

@@ -173,19 +173,57 @@ class LLMProviderRegistry:
             )
             return self.build_model(role=fallback_role, **kwargs)
 
-        temp = agent_cfg.temperature if agent_cfg.temperature is not None else 0.1
-        agent_base_url = getattr(agent_cfg, "base_url", None)
+        fallbacks = list(getattr(agent_cfg, "fallbacks", None) or [])
+        primary = self._build_choice(agent_name, agent_cfg, None, **kwargs)
+        if not fallbacks:
+            return primary
+        from maljan.core.model_assignments import assignment_chain_for
+        from maljan.llm.fallback import FallbackChatModel
+
+        # Each fallback is built now rather than on the turn that needs it:
+        # a fallback that cannot be built — an unknown provider, a missing
+        # key — is a configuration mistake, and the job should say so before
+        # it starts rather than on the one turn it was meant to rescue.
+        models: list[Any] = [primary]
+        for choice in fallbacks:
+            if choice.provider not in _PROVIDER_REGISTRY:
+                available = ", ".join(_PROVIDER_REGISTRY.keys()) or "(none)"
+                raise LLMError(
+                    f"Agent '{agent_name}' falls back to unknown provider "
+                    f"'{choice.provider}' (available: {available})."
+                )
+            models.append(
+                self._build_choice(agent_name, choice, agent_cfg.temperature, **dict(kwargs))
+            )
+        labels = [a.label for a in assignment_chain_for(self._config, agent_name.lower())]
+        logger.info("Agent '%s' falls back through: %s.", agent_name, " -> ".join(labels))
+        return FallbackChatModel(models=models, labels=labels, agent=agent_name)
+
+    def _build_choice(
+        self,
+        agent_name: str,
+        choice: Any,
+        inherited_temperature: float | None,
+        **kwargs: Any,
+    ) -> BaseChatModel:
+        """One model of an agent's list, at its own endpoint and temperature."""
+        provider_cls = _PROVIDER_REGISTRY[choice.provider]
+        if choice.temperature is not None:
+            temp = choice.temperature
+        elif inherited_temperature is not None:
+            temp = inherited_temperature
+        else:
+            temp = 0.1
+        agent_base_url = getattr(choice, "base_url", None)
         logger.info(
             "Building dedicated LLM for agent '%s': %s/%s (temp=%.2f, base_url=%s)",
             agent_name,
-            agent_cfg.provider,
-            agent_cfg.model,
+            choice.provider,
+            choice.model,
             temp,
             agent_base_url or "(global)",
         )
 
-        # Build a temporary Settings-like config targeting the agent's provider
-        # by patching _config at the provider level — clean duck-typing approach
         provider = provider_cls(config=self._config)
         # Only forwarded when the agent actually overrides the endpoint: the
         # providers resolve a missing kwarg to the global value themselves, and
@@ -193,7 +231,7 @@ class LLMProviderRegistry:
         if agent_base_url:
             kwargs["base_url"] = agent_base_url
         return provider.build_model(  # type: ignore[no-any-return]
-            model=agent_cfg.model,
+            model=choice.model,
             temperature=temp,
             **kwargs,
         )

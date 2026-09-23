@@ -115,6 +115,9 @@ def emit(sink: EventSink | None, event_type: str, data: dict[str, Any]) -> None:
 # changes what a model said.
 BUDGET_TICK = "budget_tick"
 STAGE_ENDED_AT_CAP = "stage_ended_at_cap"
+# A tool server this job stopped calling for a while, after a run of
+# transport failures (``maljan.providers.server_guard``).
+TOOL_SERVER_RESTED = "tool_server_rested"
 BUDGET_TICK_EVERY = 5
 CAPS: tuple[str, ...] = ("steps", "time", "repeats", "budget_seconds")
 
@@ -158,6 +161,20 @@ def emit_stage_ended_at_cap(
     if detail:
         payload["detail"] = str(detail)
     emit(sink, STAGE_ENDED_AT_CAP, payload)
+
+
+def emit_tool_server_rested(sink: EventSink | None, record: dict[str, Any]) -> None:
+    """A tool server is resting: which one, after how many failures, for how long and why."""
+    emit(
+        sink,
+        TOOL_SERVER_RESTED,
+        {
+            "server": str(record.get("server") or ""),
+            "failures": max(0, int(record.get("failures") or 0)),
+            "cooldown_s": round(max(0.0, float(record.get("cooldown_s") or 0.0)), 1),
+            "reason": str(record.get("reason") or ""),
+        },
+    )
 
 
 def emit_agent_message(
@@ -982,6 +999,9 @@ def emit_agent_message_delta(
     stage: str,
     agent: str,
     text_delta: str,
+    model: str = "",
+    fallback: str = "",
+    tokens: dict[str, Any] | None = None,
 ) -> None:
     """Part of what an agent is saying, before it has finished saying it.
 
@@ -990,14 +1010,28 @@ def emit_agent_message_delta(
     the smallest thing it observes is one model turn's text. The console
     appends deltas under the speaker and replaces them with the
     ``agent_message`` that closes the turn.
+
+    It is also the one event per model turn, so it says which model gave the
+    turn (``model``), why another model gave it when the first one failed as
+    a provider (``fallback``, in words), and what the turn spent as the
+    provider reported it (``tokens``; absent where the provider reported
+    nothing). A turn that said nothing is still announced when a fallback
+    answered it, because a reader has to see that the model changed.
     """
-    if not text_delta:
+    if not text_delta and not fallback:
         return
-    emit(
-        sink,
-        AGENT_MESSAGE_DELTA,
-        {"stage": str(stage), "agent": str(agent), "text_delta": str(text_delta)},
-    )
+    payload: dict[str, Any] = {
+        "stage": str(stage),
+        "agent": str(agent),
+        "text_delta": str(text_delta),
+    }
+    if model:
+        payload["model"] = str(model)
+    if fallback:
+        payload["fallback"] = str(fallback)
+    if tokens:
+        payload["tokens"] = dict(tokens)
+    emit(sink, AGENT_MESSAGE_DELTA, payload)
 
 
 def _field(obj: Any, name: str, fallback: Any = "") -> Any:

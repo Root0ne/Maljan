@@ -202,6 +202,10 @@ ANNOTATIONS: dict[str, Annotation] = {
             "explicitly to keep the verdict call deterministic. A per-agent base URL "
             "applies to openai and ollama entries only and lets different agents use "
             "different local servers, while the provider's API key stays shared. "
+            "An entry may list fallbacks, models tried in order only when the one "
+            "before fails as a provider (a refused connection, a timeout, a server "
+            "error, a model the server does not have) and never because of what a "
+            "model answered; each is probed like the first. "
             "Ordinarily edited from "
             "the Agents page; this raw view is for bulk edits."
         ),

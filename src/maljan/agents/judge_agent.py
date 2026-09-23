@@ -46,7 +46,7 @@ from maljan.agents.base_agent import (
 from maljan.agents.judge_postprocess import ASSESSMENT_RELOCATED_CODE
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
-from maljan.core.token_ledger import TokenLedger, record_response_usage
+from maljan.core.token_ledger import TokenLedger
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
 from maljan.pipeline.events import emit_judge_question, scrub
 from maljan.pipeline.mediation_models import MediatorVerdict
@@ -329,6 +329,9 @@ class JudgeAgent(BudgetMeter):
         bundle = judge.give_verdict(reports, history, attck_validator=validator)
     """
 
+    # With no entry of its own the judge runs on the judge model.
+    _model_role = "judge"
+
     def __init__(
         self,
         llm: BaseChatModel,
@@ -538,7 +541,7 @@ class JudgeAgent(BudgetMeter):
                 ),
                 timeout=float(no_tools_timeout),
             )
-            record_response_usage(self.token_ledger, response, prompt_text=str(messages_pre))
+            self._record_usage(response)
             record_judge_response(
                 getattr(self, "truncation_ledger", None),
                 response,
@@ -638,7 +641,7 @@ class JudgeAgent(BudgetMeter):
             # the no-tools fallback above did).
             for _m in _msgs:
                 if getattr(_m, "type", "") == "ai":
-                    record_response_usage(self.token_ledger, _m)
+                    self._record_usage(_m)
             return str(_msgs[-1].content)
         except TimeoutError:
             self.logger.error("JudgeAgent ReAct timed out after %ds.", timeout)

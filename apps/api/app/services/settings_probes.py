@@ -467,11 +467,17 @@ def _agent_models(v: dict[str, Any], provider: str) -> dict[str, tuple[str, str 
             data = entry.model_dump(mode="json")
         else:
             continue
-        entry_provider = str(data.get("provider") or "") or global_provider
-        model = str(data.get("model") or "")
-        base_url = str(data.get("base_url") or "").strip() or None
-        if model and entry_provider == provider:
-            out[str(name)] = (model, base_url)
+        # The models an entry falls back to are asked exactly as its first one
+        # is: a fallback is a model the run may call, and the gate refuses a
+        # job whose fallback no probe has reached.
+        rows = [data, *[row for row in (data.get("fallbacks") or []) if isinstance(row, dict)]]
+        for position, row in enumerate(rows):
+            entry_provider = str(row.get("provider") or "") or global_provider
+            model = str(row.get("model") or "")
+            base_url = str(row.get("base_url") or "").strip() or None
+            if model and entry_provider == provider:
+                label = str(name) if position == 0 else f"{name} fallback {position}"
+                out[label] = (model, base_url)
     return out
 
 
@@ -1155,22 +1161,26 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
         endpoint = endpoint_for(
             settings, llm_provider, getattr(agent_llm, "base_url", None) if agent_llm else None
         )
-        answered, said = await complete_one_turn(
-            llm_provider,
-            endpoint=endpoint,
-            model=str(llm_model or ""),
-            api_key=_provider_key(settings, llm_provider),
-            # An agent's own endpoint gets the body its own run would carry.
-            # Each provider is asked about its own thinking switch — the two
-            # are spelled differently and read by different code — and
-            # ``compat`` belongs to the OpenAI block alone.
-            disable_thinking=(
-                bool(settings.llm.ollama.disable_thinking)
-                if llm_provider == "ollama"
-                else bool(settings.llm.openai.disable_thinking)
-            ),
-            compat=str(settings.llm.openai.compat or "auto"),
-        )
+
+        async def _ask(provider: str, where: str, model: str) -> tuple[bool | None, str]:
+            return await complete_one_turn(
+                provider,
+                endpoint=where,
+                model=model,
+                api_key=_provider_key(settings, provider),
+                # An agent's own endpoint gets the body its own run would carry.
+                # Each provider is asked about its own thinking switch — the two
+                # are spelled differently and read by different code — and
+                # ``compat`` belongs to the OpenAI block alone.
+                disable_thinking=(
+                    bool(settings.llm.ollama.disable_thinking)
+                    if provider == "ollama"
+                    else bool(settings.llm.openai.disable_thinking)
+                ),
+                compat=str(settings.llm.openai.compat or "auto"),
+            )
+
+        answered, said = await _ask(llm_provider, endpoint, str(llm_model or ""))
         detail = f"{detail}; {said}"
         # A call that ran out of time proves nothing either way, so the probe
         # reports it as a failure the operator can act on and files no row —
@@ -1188,6 +1198,25 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
                 }
             ]
         )
+        # Each model the agent falls back to is asked the same one turn, one
+        # after another, and filed under its own pair: the gate refuses a job
+        # whose fallback no probe has reached, and this is the probe that
+        # reaches it. The agent passes only when every model on its list did.
+        for position, choice in enumerate(getattr(agent_llm, "fallbacks", None) or [], 1):
+            where = endpoint_for(settings, choice.provider, choice.base_url)
+            reached, told = await _ask(choice.provider, where, str(choice.model))
+            detail = f"{detail}; fallback {position} {choice.provider}/{choice.model}: {told}"
+            if reached is not None:
+                completions.append(
+                    {
+                        "endpoint": where,
+                        "model": str(choice.model),
+                        "provider": choice.provider,
+                        "ok": bool(reached),
+                        "detail": told,
+                    }
+                )
+            answered = bool(answered) and bool(reached)
         return ProbeResult(
             bool(answered),
             _ms(t0),

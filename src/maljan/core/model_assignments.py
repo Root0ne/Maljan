@@ -52,6 +52,14 @@ class ModelAssignment:
     provider: str
     endpoint: str
     model: str
+    # Where this model stands in the agent's list: 0 for the model it calls
+    # first, 1 for the first it falls back to, and so on.
+    position: int = 0
+
+    @property
+    def label(self) -> str:
+        """The model as a reader sees it, the endpoint cut to scheme and host."""
+        return model_label(self.provider, self.model, self.endpoint)
 
     @property
     def key(self) -> tuple[str, str]:
@@ -162,27 +170,87 @@ def endpoint_for(settings: object, provider: str, base_url: str | None = None) -
     )
 
 
-def assignment_for(settings: object, agent: str) -> ModelAssignment:
-    """What ``agent`` would call, its own override over the global expert model."""
-    llm = settings.llm  # type: ignore[attr-defined]
-    override = llm.agents.get(agent)
-    if override is not None:
-        provider = str(override.provider)
-        return ModelAssignment(
-            agent=agent,
-            provider=provider,
-            endpoint=endpoint_for(settings, provider, override.base_url),
-            model=str(override.model),
-        )
-    provider = str(llm.provider)
+def model_label(provider: object, model: object, endpoint: object = None) -> str:
+    """``provider/model``, with the endpoint's label when it names a URL.
+
+    The name a turn is recorded under — on the ledger entry, in the
+    conversation and in the run summary — so it has to be one spelling of one
+    model and carry nothing a reader may not see: the endpoint is its label,
+    never the address with whatever credentials it was configured with. A
+    vendor API has one endpoint, and naming it would only repeat the provider.
+    """
+    base = f"{provider}/{model}"
+    where = str(endpoint or "")
+    if "://" not in where:
+        return base
+    return f"{base} @ {endpoint_label(where)}"
+
+
+def _assignment(
+    settings: object, agent: str, provider: str, model: str, base_url: str | None, position: int
+) -> ModelAssignment:
     return ModelAssignment(
         agent=agent,
         provider=provider,
-        endpoint=endpoint_for(settings, provider),
-        model=str(llm.expert_model),
+        endpoint=endpoint_for(settings, provider, base_url),
+        model=model,
+        position=position,
     )
 
 
+def assignment_chain_for(
+    settings: object, agent: str, *, role: str = "expert"
+) -> list[ModelAssignment]:
+    """Every model ``agent`` may call, in the order it tries them.
+
+    The agent's own entry and the models it falls back to, or the global
+    model for ``role`` alone when the agent has no entry. A fallback is a
+    model the run can reach exactly as the first one is, so everything that
+    asks what a run will call — the probe gate, the context window — asks
+    this.
+    """
+    llm = settings.llm  # type: ignore[attr-defined]
+    override = llm.agents.get(agent)
+    if override is not None:
+        chain = override.chain() if hasattr(override, "chain") else [override]
+        return [
+            _assignment(
+                settings,
+                agent,
+                str(choice.provider),
+                str(choice.model),
+                choice.base_url,
+                position,
+            )
+            for position, choice in enumerate(chain)
+        ]
+    provider = str(llm.provider)
+    model = str(llm.judge_model if role == "judge" else llm.expert_model)
+    return [_assignment(settings, agent, provider, model, None, 0)]
+
+
+def assignment_for(settings: object, agent: str) -> ModelAssignment:
+    """What ``agent`` calls first, its own override over the global expert model."""
+    return assignment_chain_for(settings, agent)[0]
+
+
+def model_label_for(settings: object, agent: str, *, role: str = "expert") -> str:
+    """The label of the model ``agent`` calls first, or ``""`` when it cannot be read."""
+    try:
+        return assignment_chain_for(settings, agent, role=role)[0].label
+    except Exception:  # noqa: BLE001 — a label is never worth a lost turn
+        return ""
+
+
 def assignments_for(settings: object, agents: list[str]) -> list[ModelAssignment]:
-    """One assignment per agent, in the order given, without repeating an agent."""
-    return [assignment_for(settings, agent) for agent in dict.fromkeys(agents)]
+    """Every model the named agents may call, each agent's list in its own order.
+
+    An agent is asked about once however often it is named, and each of its
+    models is one assignment — its fallbacks included, because a model the
+    run falls back to is a model the run calls.
+    """
+    return [
+        assignment
+        for agent in dict.fromkeys(agents)
+        for assignment in assignment_chain_for(settings, agent)
+    ]
