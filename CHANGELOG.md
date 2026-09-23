@@ -3318,6 +3318,11 @@ change landed on `main`.
   tools that ran over the file; PEB access is listed once; the unscored
   similarity line reads "No similarity measure was recorded for these
   samples."
+- **A family-specific section needs its family.** An encryption scheme with no
+  file-encryption field prints beside the anti-analysis prose rather than under
+  a ransomware heading, and a block of placeholder values ("none", "unknown")
+  is not content. A Malware Behavior Catalog id claimed as a technique is listed
+  under the ATT&CK table as a behaviour, not as an unresolved technique row.
 
 ### Removed
 
