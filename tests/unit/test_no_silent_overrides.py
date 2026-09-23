@@ -45,7 +45,31 @@ SRC = Path(__file__).resolve().parents[2] / "src" / "maljan"
 # may write it, which is how a signed utility came to be published as malware
 # over a judge that had called it benign.
 GUARDED = frozenset(
-    {"technique_id", "confidence", "severity", "malware_category", "family", "verdict"}
+    {
+        "technique_id",
+        "confidence",
+        "severity",
+        "malware_category",
+        "family",
+        "verdict",
+        # What the judge writes into its STIX objects. The annotation on a
+        # relationship is the judge's own number, basis and credit; a pattern,
+        # its indicator types and a relationship's type are what the judge
+        # states about the sample; and the producer an object names is a
+        # statement too. The export may decline one with a record, through the
+        # copy helpers in ``schemas/stix_models``; nothing writes one.
+        "x_maljan_confidence",
+        "x_maljan_contributing_agents",
+        "x_maljan_evidence_basis",
+        "pattern",
+        "indicator_types",
+        "created_by_ref",
+        "relationship_type",
+        # Whether a malware object stands for the family or for this one
+        # sample. The renderer used to force a judge's ``true`` to ``false``;
+        # where an instance-level object is needed, the platform mints its own.
+        "is_family",
+    }
 )
 
 # Where a write to one of them is the answer rather than an override of one.
@@ -93,6 +117,45 @@ def _setattr_target(node: ast.Call) -> str | None:
     if isinstance(key, ast.Constant) and key.value in GUARDED:
         return str(key.value)
     return None
+
+
+def _model_copy_targets(node: ast.Call) -> list[str]:
+    """The guarded names a ``obj.model_copy(update={...})`` call writes.
+
+    A copy with a guarded key changed is a write like any other: the object it
+    returns stands in for the one that was said. A computed update (a name, a
+    comprehension) is not read — there is nothing to read — the same rule as a
+    computed key.
+    """
+    func = node.func
+    if getattr(func, "attr", "") != "model_copy":
+        return []
+    for keyword in node.keywords:
+        if keyword.arg != "update" or not isinstance(keyword.value, ast.Dict):
+            continue
+        return [
+            str(key.value)
+            for key, value in zip(keyword.value.keys, keyword.value.values, strict=True)
+            if isinstance(key, ast.Constant)
+            and key.value in GUARDED
+            and not _keeps_what_was_said(value, str(key.value))
+        ]
+    return []
+
+
+def _keeps_what_was_said(value: ast.expr, name: str) -> bool:
+    """``update={"technique_id": rec.technique_id or found}`` — a fill, not an override.
+
+    The object's own value wins whenever it has one, so nothing it said is
+    replaced; only an absence is filled, which is the "move a model's own
+    content to where the schema wants it" act. Anything else is a write.
+    """
+    return (
+        isinstance(value, ast.BoolOp)
+        and isinstance(value.op, ast.Or)
+        and isinstance(value.values[0], ast.Attribute)
+        and value.values[0].attr == name
+    )
 
 
 def _constructor_lines(tree: ast.AST) -> set[int]:
@@ -144,6 +207,8 @@ def offences(source: str, label: str) -> list[str]:
             attribute = _setattr_target(node)
             if attribute:
                 found.append(f"{label}:{node.lineno}: setattr(..., {attribute!r}, ...)")
+            for name in _model_copy_targets(node):
+                found.append(f"{label}:{node.lineno}: model_copy(update={{{name!r}: ...}})")
             continue
 
         for target in targets:
@@ -154,6 +219,47 @@ def offences(source: str, label: str) -> list[str]:
             found.append(f"{label}:{node.lineno}: assignment to {how} {name!r}")
 
     return found
+
+
+# The export's two guarded copies, which live in ``schemas/stix_models.py``.
+# The ``schemas/`` exemption is for a model constructing its own fields; these
+# two copy an object the judge wrote with one guarded field changed, so they are
+# named here with the reason each is allowed, and the test below holds them to
+# it rather than letting their placement pass them.
+EXPORT_DECLINE_COPIES: dict[str, str] = {
+    "produced_by": (
+        "names this platform's identity on the export's copy of an object that named no "
+        "producer the bundle holds; a replaced one is recorded as stix.unpublishable_producer"
+    ),
+    "crediting_only": (
+        "leaves off the export's copy a credit the judge kept after stix.credit_without_claim; "
+        "recorded as stix.unpublishable_credit, and the judge's own bundle keeps it"
+    ),
+}
+
+
+def _function_at(tree: ast.AST, line: int) -> str:
+    """The name of the innermost function holding ``line``, or ``""``."""
+    found = ""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            end = getattr(node, "end_lineno", node.lineno)
+            if node.lineno <= line <= end:
+                found = node.name
+    return found
+
+
+def test_the_stix_models_guarded_writes_are_the_named_export_copies_only():
+    """Scanned despite the ``schemas/`` exemption, and each write accounted for."""
+    path = SRC / "schemas" / "stix_models.py"
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    writers = {
+        _function_at(tree, int(found.split(":")[1]))
+        for found in offences(source, "schemas/stix_models.py")
+    }
+
+    assert writers == set(EXPORT_DECLINE_COPIES), writers
 
 
 def test_nothing_outside_schemas_tools_and_validation_overrides_a_decision():
@@ -213,6 +319,31 @@ class TestTheScannerWouldActuallyCatchOne:
 
     def test_a_computed_key_is_not_caught(self):
         assert offences("row[name] = value\n", "probe.py") == []
+
+    def test_a_model_copy_that_changes_a_decision_is_caught(self):
+        source = "moved = edge.model_copy(update={'x_maljan_confidence': 0.5})\n"
+
+        assert offences(source, "probe.py") == [
+            "probe.py:1: model_copy(update={'x_maljan_confidence': ...})"
+        ]
+
+    def test_a_model_copy_that_only_fills_an_absence_is_not_caught(self):
+        source = "row = rec.model_copy(update={'technique_id': rec.technique_id or found})\n"
+
+        assert offences(source, "probe.py") == []
+
+    def test_a_model_copy_of_a_reference_is_not_caught(self):
+        assert offences("moved = edge.model_copy(update={'source_ref': new})\n", "probe.py") == []
+
+    def test_forcing_is_family_is_caught(self):
+        source = "if isinstance(obj, Malware) and obj.is_family:\n    obj.is_family = False\n"
+
+        assert offences(source, "probe.py") == ["probe.py:2: assignment to attribute 'is_family'"]
+
+    def test_a_pattern_write_is_caught(self):
+        assert offences("indicator.pattern = fixed\n", "probe.py") == [
+            "probe.py:1: assignment to attribute 'pattern'"
+        ]
 
     def test_a_constructor_passthrough_is_exempt(self):
         source = "class A:\n    def __init__(self, severity):\n        self.severity = severity\n"

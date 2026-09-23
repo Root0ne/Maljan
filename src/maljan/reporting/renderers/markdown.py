@@ -36,6 +36,7 @@ from maljan.reporting.models import (
     SandboxSignature,
     SeverityAssessment,
     StringIOC,
+    confidence_text,
 )
 from maljan.schemas.isr_models import UNVERIFIED_TECHNIQUE_MARKER
 
@@ -669,7 +670,7 @@ class MarkdownRenderer:
                     _row(
                         tactic,
                         f"{cell.technique_id} {cell.technique_name}{marker}",
-                        f"{cell.confidence:.2f}",
+                        confidence_text(cell.confidence),
                         layers,
                     )
                 )
@@ -683,7 +684,7 @@ class MarkdownRenderer:
                 marker = "" if mapping.technique_id_valid else f", {UNVERIFIED_TECHNIQUE_MARKER}"
                 lines.append(
                     f"**{mapping.technique_id} — {mapping.technique_name}**  "
-                    f"`(conf={mapping.confidence:.2f}, {corroborated}{marker})`"
+                    f"`(conf={confidence_text(mapping.confidence)}, {corroborated}{marker})`"
                 )
                 lines.append("")
                 for quote in mapping.evidence_quotes[:6]:

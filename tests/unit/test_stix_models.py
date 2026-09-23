@@ -18,7 +18,8 @@ class TestSTIXModels:
         assert indicator.type == "indicator"
         assert indicator.id.startswith("indicator--")
         assert indicator.pattern_type == "stix"
-        assert "malicious-activity" in indicator.indicator_types
+        # Nothing is stamped on an indicator nobody typed (optional in STIX 2.1).
+        assert indicator.indicator_types == []
 
     def test_malware_creation(self) -> None:
         malware = Malware(
