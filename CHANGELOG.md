@@ -1309,6 +1309,18 @@ change landed on `main`.
   reads `1837` where it read `1842` and five category shares move by one
   rounding place; no Linux rule's rate moves at all. No behaviour category was
   renamed or removed, so a consumer reading `category` alone is unaffected.
+
+- **The exported STIX bundle names its producer, in STIX's vocabulary.** The
+  platform's `identity` was `identity_class: "software"` under a new random id
+  every run, the report object was typed `"malware-analysis"`, and no object
+  carried `created_by_ref` — in all forty stored exports, with an OASIS warning
+  for each word. The identity is now `identity_class: "system"` under one
+  derived id, `identity--9f9e2570-073b-5b46-b156-05d12a086911` in every export;
+  every other object carries `created_by_ref` naming it, and the report is
+  typed `"malware"`. **What a consumer does:** a filter on `report_types`
+  containing `malware-analysis` or on `identity_class: software` stops matching
+  new exports; match `malware` and `system`, or the producer's
+  `created_by_ref`.
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was
@@ -3379,3 +3391,11 @@ The same applies to an export carrying the judgement-layer settings —
 and `core.preprocessing.category_inference_backend`. `core.analysis.sigma_rules_dir`
 is not dropped but moved: it becomes `MALJAN_SIGMA_RULES_DIR` in the `analysis`
 tool server's `env`, and the migration moves a stored value across for you.
+
+A consumer of the exported STIX bundle that filters on the platform's own
+words should update the filter: the producer identity is now
+`identity_class: system` under the one id
+`identity--9f9e2570-073b-5b46-b156-05d12a086911`, named by `created_by_ref` on
+every other object, and the report object's `report_types` is `malware`. A
+bundle stored before this change keeps `software`, `malware-analysis` and a
+per-run identity id; nothing is rewritten.

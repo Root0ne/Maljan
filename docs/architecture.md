@@ -532,6 +532,14 @@ documentation-shaped hex instead, one malware id reached fourteen stored runs
 of six samples, and its version digit is one no RFC 4122 UUID has, so the OASIS
 validator refused every object that carried or named it.
 
+The export names its producer in STIX's own vocabulary: one `identity` for this
+platform, `identity_class: system`, under an id derived once
+(`stix_renderer.PRODUCER_IDENTITY_ID`) so every export carries the same one,
+and `created_by_ref` naming it on every other object — a copy, so the judge's
+own bundle is not edited. The report object is typed `malware`. Every stored
+export before this carried `software` and `malware-analysis`, neither of them
+in its vocabulary, and an identity no object named.
+
 ### The technique check
 
 Four parts, all in `pipeline/validation.py` and `tools/knowledge.py`, none of

@@ -149,6 +149,10 @@ class STIXObject(_SpecConformantModel):
     spec_version: Literal["2.1"] = "2.1"
     created: datetime = Field(default_factory=get_utcnow)
     modified: datetime = Field(default_factory=get_utcnow)
+    # The identity that produced the object. The export names this platform's
+    # own identity on every object it publishes; ``None`` keeps the property
+    # out of a bundle that has no identity to name.
+    created_by_ref: str | None = None
 
 
 class Indicator(STIXObject):

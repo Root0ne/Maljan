@@ -618,10 +618,14 @@ class ExtendedSTIXRenderer:
                 objects.append(moved)
             self.unlinked = _unlinked_techniques(base_bundle, gone)
 
-        # 2) Identity SDO for Maljan itself.
+        # 2) Identity SDO for Maljan itself. ``system`` is STIX's word for a
+        #    producer that is software; ``software`` is not in the vocabulary.
+        #    One id on every export, so a consumer holding several reads one
+        #    producer rather than one per run.
         identity = Identity(
+            id=PRODUCER_IDENTITY_ID,
             name="Maljan",
-            identity_class="software",
+            identity_class="system",
             description="Automated multi-agent malware analysis pipeline",
         )
         objects.append(identity)
@@ -861,7 +865,9 @@ class ExtendedSTIXRenderer:
                         )
                     ),
                     published=report.generated_at,
-                    report_types=["malware-analysis"],
+                    # A report type says what the report is about; the
+                    # object type ``malware-analysis`` is not one of them.
+                    report_types=["malware"],
                     object_refs=refs,
                 )
             )
@@ -883,18 +889,16 @@ class ExtendedSTIXRenderer:
 
         objects = enforce_bundle_integrity(objects, ledger=ledger)
         capped = _within_the_indicator_cap(objects, order, ledger=ledger)
-        if capped is objects:
-            return Bundle(objects=objects)
-        # Only what the cap orphaned is left to sweep, and it is the cap's
-        # doing rather than a defect of anybody's bundle — so it is counted
-        # under a reason of its own. Counted it must be: the pass used to run
-        # here with no ledger at all, so this sweep's losses appeared in no
-        # total. The cap's own removals are counted beside them, under
-        # ``indicator_cap_removed``, so every object that left this bundle
-        # left under a name.
-        return Bundle(
-            objects=enforce_bundle_integrity(capped, ledger=ledger, dropped_as=CAP_ORPHAN_REASON)
-        )
+        if capped is not objects:
+            # Only what the cap orphaned is left to sweep, and it is the cap's
+            # doing rather than a defect of anybody's bundle — so it is counted
+            # under a reason of its own. Counted it must be: the pass used to
+            # run here with no ledger at all, so this sweep's losses appeared in
+            # no total. The cap's own removals are counted beside them, under
+            # ``indicator_cap_removed``, so every object that left this bundle
+            # left under a name.
+            objects = enforce_bundle_integrity(capped, ledger=ledger, dropped_as=CAP_ORPHAN_REASON)
+        return Bundle(objects=_produced_by(objects, identity.id))
 
     @staticmethod
     def _normalize_judge_timestamps(objects: list[Any]) -> None:
@@ -935,11 +939,39 @@ class ExtendedSTIXRenderer:
         return None
 
 
+def _produced_by(objects: list[Any], producer: str) -> list[Any]:
+    """Every object naming the identity that produced it, as a copy.
+
+    A copy, because the judge's objects are the judge's own bundle's too, and
+    that bundle is stored as the run's record. An object that already names a
+    producer in this bundle keeps the one it names; one naming an identity the
+    bundle does not hold names nothing, the way a relationship pointing at
+    nothing does, and is given this one.
+    """
+    present = {getattr(obj, "id", None) for obj in objects} - {None}
+    out: list[Any] = []
+    for obj in objects:
+        named = getattr(obj, "created_by_ref", None)
+        if getattr(obj, "id", None) == producer or named in present:
+            out.append(obj)
+            continue
+        if not hasattr(obj, "model_copy") or "created_by_ref" not in type(obj).model_fields:
+            out.append(obj)
+            continue
+        out.append(obj.model_copy(update={"created_by_ref": producer}))
+    return out
+
+
 # The namespace the technique objects' ids are derived in. A UUIDv5 over the
 # technique id, so the same technique is the same object across exports of the
 # same run and across runs — and never a UUID copied out of the STIX
 # documentation, which is what the judge's own objects sometimes carried.
 _ATTACK_PATTERN_NAMESPACE = uuid.UUID("2f0b4c10-6f7e-5b6a-9d3b-1f6a5c7e8d90")
+
+# This platform's identity, the producer every exported object names. Derived
+# in the same namespace, so it is the same object in every export and a
+# consumer holding many of them holds one producer.
+PRODUCER_IDENTITY_ID = f"identity--{uuid.uuid5(_ATTACK_PATTERN_NAMESPACE, 'maljan')}"
 
 
 def _pattern_id_for(technique_id: str) -> str:
