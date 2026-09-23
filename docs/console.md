@@ -67,9 +67,11 @@ section is absent while no run has called anything.
 **Status colours.** A run's status — completed, running, pending, failed,
 cancelled — is coloured by one map (`apps/web/src/lib/status.ts`), read by the
 dashboard, the analyses list, the search palette and the analysis header, and
-a stage's or a participant's running and done take the same two colours. The
-status word is always printed beside it. `status.test.ts` fails on a status
-given a status colour anywhere else.
+a stage's or a participant's running and done, and an analyst's or a
+message's failed, take the same colours. The status word is always printed
+beside it. `status.test.ts` fails, anywhere else, on a state word given a
+status colour in a map and on a ternary that colours by comparing any value
+with a state word.
 
 The analysis header carries the verdict, the sample, the job status and the
 run's stages, and the stage strip is there and nowhere else, so the shape of
@@ -115,7 +117,7 @@ falling back to the published key where the roster names nobody.
 what it draws: a ledger section routed to it, or its own typed block
 (`apps/web/src/components/analysis/analysisTabs.ts`). Where a tab's content
 needs parsing before it is known to be drawable, the rule and the panel share
-one reading — the rule for DETECTION is the rule-match parser itself
+one reading — the rule for DETECTION is the rule-match reader itself
 (`ruleMatches.ts`), and the rule for ATT&CK is the mapped techniques the
 matrix is built from, never the corroboration it only decorates a card with. SUMMARY, CONVERSATION
 and EVIDENCE are always offered — the first is where a run lands, the second
@@ -265,19 +267,29 @@ not a rung sorts last and is drawn in Informational's colour with its own word
 beside it. The colour is never the only carrier: the rung's word is always
 printed.
 
-A DETECTION Sigma row shows the rule's own `level` — the severity the rule's
-author declared, which the Sigma layer now carries into the match it records —
-labelled as the rule's level, sorted and dotted by it on the same ladder (one
-dot per rung from Informational up). A row stored before the layer carried it
-says "level not recorded", draws no dots and takes no part in the sort; it
-follows the rows that have one, in the order the layer recorded them. The
-confidence beside each row is the layer's, set from the rule's maturity
-status, and is printed as the number it is: nothing reads it as a severity.
+DETECTION's rule matches are the report sections the rule tools' ledger rows
+build: `yara_matches` and `sigma_matches`, whose Level column is the level the
+Sigma rule's author declared. They are routed to DETECTION and to nowhere
+else; STATIC says where they are and links there rather than drawing the same
+table twice. A Sigma row shows its level labelled as the rule's level, sorted
+and dotted by it on the same ladder (one dot per rung from Informational up);
+a rule that declares none says "no level declared" and takes no part in the
+sort. A run stored before those tools recorded its matches as the old
+deterministic layers' claims instead, and only such a run is read from them:
+its Sigma rows say "level not recorded", draw no dots, take no part in the
+sort, and show the layer's confidence — set from the rule's maturity status —
+as the number it is. Nothing reads a confidence as a severity.
 
-A DYNAMIC signature's number is the sandbox's own, on CAPEv2's 1 to 3 scale:
-1 is drawn as Low, 2 as Medium and 3 as High, and a number above the scale
-keeps its top colour rather than becoming Critical. The number is printed as
-it came.
+A DYNAMIC signature's number is the sandbox's own, and its scale depends on
+which sandbox produced it: a CAPEv2 signature declares 1 to 3 (low, medium,
+high), and Hatching Triage writes its 1 to 10 signature score into the same
+field (1 no malicious behaviour, 2–5 likely benign, 6–7 suspicious, 8–9 likely
+malicious, 10 known bad). The console reads the provider the run recorded
+(`sandbox.provider` in `run_summary.settings_snapshot`). On `cape2` and
+`triage` a score inside the scale takes the rung it means and prints as
+"n/max". On any other provider — an uploaded or REST report can be on either
+scale — and for a number outside its scale, the number is drawn in one neutral
+tone as it came.
 
 `severity.test.ts` fails, anywhere outside the ladder module, on a rung given a
 status colour; on a rung compared by its spelling against a `severity`,
@@ -351,7 +363,8 @@ that says what it does in the console's own language.
 No gradients, and no colour or background that eases from one value to
 another: a hover state is a state, so it arrives when the pointer does. That
 holds for the charts and bars too: a bar is one flat fill, and an SVG
-gradient, Tailwind's bare `transition` class (which eases colours by default),
+gradient, Tailwind's bare `transition` class in a class list (it eases colours
+by default),
 an arbitrary `transition-[…]` over a colour and an inline or stylesheet
 `transition` over one are caught like the class names are. The
 transitions that stay are the ones that move something — a rail widening, a

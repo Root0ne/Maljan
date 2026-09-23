@@ -1328,19 +1328,22 @@ change landed on `main`.
   header's verdict-against-severity rule read it. A guard fails the unit suite
   on a severity coloured, compared by its spelling (either way round or in a
   `switch`) or sorted by its label anywhere else.
-- **DETECTION shows a Sigma rule's own level, not a severity made from its
-  confidence.** The console used to turn each match's confidence — the rule's
-  maturity status as a number — into "High" or "Medium", and could never say
-  Critical. The Sigma layer now carries the rule author's `level` on each match
-  (`SigmaMatch.level`, and `level=<level>` at the end of the claim text), and
-  DETECTION shows it labelled as the rule's level, sorted and dotted by it. A
-  row stored before this says "level not recorded", draws no dots and follows
-  the rest in its recorded order; the confidence is printed as the number it
-  is. A reader of the claim text that parsed `source=` up to the closing
-  parenthesis now meets `, level=…` after it.
-- **DYNAMIC colours a signature's number on the sandbox's scale.** CAPEv2
-  signatures declare 1 to 3; 1 is now Low, 2 Medium and 3 High, where the
-  thresholds used to assume a 0–10 scale and drew almost every signature grey.
+- **DETECTION shows the rules a current run fired, with each Sigma rule's own
+  level.** DETECTION read only the old deterministic layers' claims, which no
+  current run writes, and turned their confidence — the rule's maturity status
+  as a number — into "High" or "Medium". It now reads the `yara_matches` and
+  `sigma_matches` report sections the rule tools build, shows each Sigma rule's
+  declared level labelled as the rule's level, and sorts and dots the rows by
+  it on the severity ladder. The two sections moved from STATIC to DETECTION;
+  STATIC links there. A run stored before those tools is still read from its
+  layer claims, which say "level not recorded", and their confidence is printed
+  as the number it is. `SigmaMatch` also carries the rule's `level` as a field;
+  its claim text is unchanged.
+- **DYNAMIC colours a signature's number only where its scale is known.** The
+  run's recorded sandbox provider says which scale the number is on: CAPEv2's
+  1 to 3 or Triage's 1 to 10 signature score, each drawn on the ladder by what
+  it means and printed as "n/max". An uploaded, REST or unknown provider's
+  number, and one outside its scale, is drawn in one neutral tone as it came.
 - **One colour per run status.** `apps/web/src/lib/status.ts` colours
   completed, running, pending, failed and cancelled for the dashboard, the
   analyses list, the search palette and the analysis header, and a stage's or
