@@ -3421,6 +3421,7 @@ def make_judge_node(
                         )
                     )
                     .set_token_usage(container.get_token_ledger().snapshot())
+                    .set_server_rests(container.server_rests())
                     .set_truncation(_truncation_snapshot(container))
                     .set_triage(_triage_facts)
                     .set_nudge(state.get("nudge_retry_modes") or {})

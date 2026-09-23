@@ -966,6 +966,27 @@ def builtin_env_allow(key: str, configured: Iterable[str]) -> list[str]:
     return list(dict.fromkeys([*REQUIRED_ENV_ALLOW.get(key, ()), *configured]))
 
 
+class MCPBreakerConfig(BaseModel):
+    """A tool server that keeps failing is rested; a slow one is not piled onto.
+
+    ``failures_to_open`` transport failures in a row — a timeout, a refused
+    connection, the server's process gone — open the server's breaker for
+    ``cooldown_seconds``. A call in that time is answered by the platform with
+    an authored tool error naming the server, that it is resting and when it
+    will be tried again; after it, one call is let through and a success
+    closes the breaker. A tool that answers with its own error is not a
+    transport failure and never counts.
+
+    ``max_concurrent_calls`` is how many calls one server may have in flight
+    for one job at once, so parallel analysts queue rather than pile onto one
+    slow sidecar. ``0`` leaves the calls uncapped.
+    """
+
+    failures_to_open: Annotated[int, Field(ge=1)] = 3
+    cooldown_seconds: Annotated[float, Field(ge=0.0)] = 60.0
+    max_concurrent_calls: Annotated[int, Field(ge=0)] = 4
+
+
 class MCPConfig(BaseModel):
     """The operator-visible registry of tool servers.
 
@@ -980,6 +1001,10 @@ class MCPConfig(BaseModel):
     # entries are re-seeded on load, so "delete" in the UI means enabled=False
     # for them and a real removal for a custom key.
     servers: dict[str, MCPServerConfig] = Field(default_factory=_builtin_servers)
+    # How a job treats a tool server that keeps failing at the transport, and
+    # how many calls it may have in flight at once. Per job and per server;
+    # see ``maljan.providers.server_guard``.
+    breaker: MCPBreakerConfig = Field(default_factory=lambda: MCPBreakerConfig())
 
     @model_validator(mode="after")
     def _reseed_builtins(self) -> "MCPConfig":

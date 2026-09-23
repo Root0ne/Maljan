@@ -1633,6 +1633,48 @@ ANNOTATIONS.update(
             "editor": "server_map",
             "order": -1,
         },
+        "mcp.breaker.failures_to_open": {
+            "title": "Transport failures before a server rests",
+            "description": (
+                "How many transport failures in a row — a timeout, a refused connection, "
+                "the server's process gone — rest a tool server for the rest of its "
+                "cooldown, per job. A tool that answers with its own error (a bad "
+                "argument, a missing file) is not a transport failure and never counts. "
+                "The default is the number of attempts the platform already gives a "
+                "model call that drops its connection before calling it a failure; no "
+                "recorded live run had a tool server fail at the transport, so it is a "
+                "judgement and not a measurement."
+            ),
+            "subgroup": "Resilience",
+            "advanced": True,
+        },
+        "mcp.breaker.cooldown_seconds": {
+            "title": "How long a failing server rests (seconds)",
+            "description": (
+                "How long a rested tool server is left alone. A call in that time is "
+                "answered by the platform with a tool error naming the server, that it "
+                "is resting and when it will be tried again; after it, one call is let "
+                "through and a success ends the rest. The default is a judgement: long "
+                "enough for a sidecar being restarted to come back, short against the "
+                "analysts' own loop budgets. Zero tries the server again on the next call."
+            ),
+            "subgroup": "Resilience",
+            "advanced": True,
+        },
+        "mcp.breaker.max_concurrent_calls": {
+            "title": "Calls in flight per server",
+            "description": (
+                "How many calls one tool server may have in flight for one job at once; "
+                "the rest wait their turn, so parallel analysts queue rather than pile "
+                "onto one slow sidecar. Zero leaves the calls uncapped, which is how "
+                "every server was driven before this setting existed. The default is a "
+                "judgement: the shipped teams run their analysts one after another, and "
+                "four lets one analyst's parallel tool calls through while bounding a "
+                "team that fans out."
+            ),
+            "subgroup": "Resilience",
+            "advanced": True,
+        },
         "static.generic.server": {
             "title": "Custom MCP server",
             "description": (

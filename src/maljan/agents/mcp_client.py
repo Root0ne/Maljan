@@ -55,6 +55,7 @@ class MCPLangChainToolkit:
         http_headers: dict[str, str] | None = None,
         truncation_ledger: Any | None = None,
         context_budget: Any | None = None,
+        guard: Any | None = None,
     ):
         self.server_params = server_params
         self.transport = (transport or "stdio").lower()
@@ -74,6 +75,10 @@ class MCPLangChainToolkit:
         # and what the conversation currently holds. None outside a job, and the
         # conservative window then answers.
         self._context_budget = context_budget
+        # The job's breaker and call cap for this server
+        # (``maljan.providers.server_guard``). None outside a job's registry,
+        # and every call is then sent exactly as it always was.
+        self._guard = guard
 
     async def initialize(self) -> None:
         """Initialize the connection to the MCP server and fetch available tools."""
@@ -250,23 +255,20 @@ class MCPLangChainToolkit:
             # second turns "unset" into "explicitly null" and denies the server
             # the chance to apply its own default.
             args = {k: v for k, v in kwargs.items() if v is not None or k in required}
-            try:
-                result = await self.session.call_tool(tool_name, arguments=args)
-                if result.isError:
-                    return (
-                        f'{{"tool_error": "tool_returned_error", "tool": "{tool_name}", '
-                        f'"detail": {result.content!r}}}'
-                    )
-                output = "\n".join(c.text for c in result.content if hasattr(c, "text"))
-                # On a thread: shortening a five-megabyte answer is CPU-bound
-                # and synchronous, and this is a coroutine serving an agent.
-                return await asyncio.to_thread(self._apply_output_guardrail, output, narrowing)
-            except Exception as exc:
-                logger.warning("MCP tool '%s' raised %s: %s", tool_name, type(exc).__name__, exc)
-                return (
-                    f'{{"tool_error": "exception", "tool": "{tool_name}", '
-                    f'"type": "{type(exc).__name__}", "detail": "{exc}"}}'
-                )
+            guard = self._guard
+            if guard is None:
+                return await self._call(tool_name, args, narrowing)
+            # Asked before waiting for a slot and again after it: a server
+            # that is resting answers at once, and one that began resting
+            # while this call queued is not sent the call either.
+            refused = guard.refusal(tool_name)
+            if refused is not None:
+                return str(refused)
+            async with guard.slot():
+                refused = guard.refusal(tool_name)
+                if refused is not None:
+                    return str(refused)
+                return await self._call(tool_name, args, narrowing)
 
         # Compress description to reduce ReAct context bloat
         raw_desc = mcp_tool.description or f"Executes {mcp_tool.name} on the MCP server."
@@ -279,6 +281,48 @@ class MCPLangChainToolkit:
             description=description,
             args_schema=args_schema,
         )
+
+    async def _call(self, tool_name: str, args: dict[str, Any], narrowing: Sequence[str]) -> str:
+        """Send one call and tell the guard whether the transport carried it."""
+        from maljan.providers.server_guard import transport_failure
+
+        guard = self._guard
+        settled = False
+        try:
+            session = self.session
+            if session is None:
+                return f'{{"tool_error": "mcp_session_inactive", "tool": "{tool_name}"}}'
+            result = await session.call_tool(tool_name, arguments=args)
+            if guard is not None:
+                guard.answered()
+                settled = True
+            if result.isError:
+                return (
+                    f'{{"tool_error": "tool_returned_error", "tool": "{tool_name}", '
+                    f'"detail": {result.content!r}}}'
+                )
+            output = "\n".join(c.text for c in result.content if hasattr(c, "text"))
+            # On a thread: shortening a five-megabyte answer is CPU-bound
+            # and synchronous, and this is a coroutine serving an agent.
+            return await asyncio.to_thread(self._apply_output_guardrail, output, narrowing)
+        except Exception as exc:
+            if guard is not None and not settled:
+                reason = transport_failure(exc)
+                if reason is None:
+                    # The server answered with an error of its own; the
+                    # transport carried it, and that is all the breaker reads.
+                    guard.answered()
+                else:
+                    guard.failed(reason)
+                settled = True
+            logger.warning("MCP tool '%s' raised %s: %s", tool_name, type(exc).__name__, exc)
+            return (
+                f'{{"tool_error": "exception", "tool": "{tool_name}", '
+                f'"type": "{type(exc).__name__}", "detail": "{exc}"}}'
+            )
+        finally:
+            if guard is not None and not settled:
+                guard.abandoned()
 
     def _tag_description(self, name: str, description: str) -> str:
         """Add a category tag and truncate to keep ReAct context lean."""

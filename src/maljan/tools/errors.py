@@ -36,6 +36,7 @@ NO_SUCH_FILE = "no_such_file"
 PATH_OUTSIDE_ROOTS = "path_outside_roots"
 UNSUPPORTED_FORMAT = "unsupported_format"
 NOT_CONFIGURED = "not_configured"
+SERVER_RESTING = "server_resting"
 TOOL_FAILED = "tool_failed"
 
 
@@ -70,6 +71,10 @@ REMEDIATIONS: dict[str, str] = {
     ),
     NOT_CONFIGURED: (
         "set the credential or setting this tool needs in Settings and run the probe again"
+    ),
+    SERVER_RESTING: (
+        "this server failed at the transport several times in a row and is not being called "
+        "for now; use another tool, or call this one again after the time the message names"
     ),
     TOOL_FAILED: (
         "read the message; if it names nothing you can change, report it with the server log"

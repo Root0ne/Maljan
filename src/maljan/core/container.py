@@ -640,6 +640,7 @@ class ServiceContainer:
                     self.config,
                     truncation_ledger=self._truncation_ledger,
                     context_budget=budget,
+                    event_sink=self.event_sink,
                 )
                 logger.info(
                     "Tool servers: %s.",
@@ -656,6 +657,15 @@ class ServiceContainer:
         """
         registry = self._server_registry_cache
         return list(registry.degradation_reasons) if registry is not None else []
+
+    def server_rests(self) -> list[dict[str, Any]]:
+        """Every tool-server rest this job gave, in order, or an empty list.
+
+        Reads the cached registry only, for the same reason
+        ``server_degradation_reasons`` does.
+        """
+        registry = self._server_registry_cache
+        return [dict(row) for row in getattr(registry, "rests", None) or []]
 
     def get_token_ledger(self) -> TokenLedger:
         """Return the per-run LLM token/cost ledger (findings-log §4 Item 1)."""
