@@ -435,10 +435,13 @@ reason, so the graph and the table account for every object. An object the
 export declined is not in the bundle and so not in the graph; the run's
 validation findings name it.
 
-Selecting a node or an edge, by pointer or with Enter or Space on a focused
-node, shows its STIX JSON, its relationships, and the evidence-ledger ids it
-carries in `x_maljan_evidence_refs` as links into EVIDENCE; the Relationships
-table lists them too. The export writes that property from the run's record:
+Selecting a node or an edge by pointer, or a node with Enter or Space, shows
+its STIX JSON, its relationships, and the evidence-ledger ids it carries in
+`x_maljan_evidence_refs` as links into EVIDENCE; the Relationships table lists
+them too. Nodes take keyboard focus and edges do not: a selected node lists
+each of its relationships as a button, which is how the keyboard reaches an
+edge, and a bundle with hundreds of edges does not put hundreds of stops in
+the tab order. The export writes that property from the run's record:
 the sample's `uses` edge to a technique carries the entries that tie to it,
 and an object the record ties to nothing says it carries none. A bundle stored
 before the property existed has none anywhere. The table is in the page
@@ -446,8 +449,10 @@ under the graph for a screen reader, and is the view itself under Table. A
 bundle of more than 300 objects opens on the table and says so, with the
 graph one click away; 300 lays out in tens of milliseconds and edge labels
 past 120 edges show only around the selected or focused node. Export SVG
-saves the drawing with the page's colours written in, and Export PNG saves it
-at twice its size.
+saves the drawing with the page's colours written in, a legend of the types
+above it and no selection or focus on it, and Export PNG saves the same at
+twice its size. A second object under an id the bundle already used is listed
+under "not drawn" with that reason.
 
 ## Evidence
 

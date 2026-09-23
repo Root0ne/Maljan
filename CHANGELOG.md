@@ -699,7 +699,11 @@ change landed on `main`.
   `family_evidence_ids`. Nothing is inferred: no id is read out of a claim's
   sentence, no object is matched by value, an id the ledger does not hold is
   left out, and an object the record ties to nothing has no such property.
-  The console's relationship graph and its table read only this property.
+  A run with no ledger entries exports no ids, and a family id the ledger
+  does not hold is recorded as `stix.evidence_ref_not_in_ledger`. The property
+  is the platform's: a judge object that writes it is read without it and
+  recorded as `stix.property_not_carried`, with no retry. The console's
+  relationship graph and its table read only this property.
 - **Staging is per job.** The sidecars' staging directory held every job the
   server process ever ran: `put_sample` uploads landed flat in it under
   sixteen hex characters and the original file name, every sample's carved tree
