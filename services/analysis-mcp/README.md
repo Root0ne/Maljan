@@ -82,6 +82,12 @@ what it returns. A file without an `MZ` header is refused before FLOSS runs,
 and so is a file with a saved vivisect workspace (`<file>.viv`) beside it:
 vivisect would load that pickle in place of the file.
 
+The triage pack runs the same function once on every PE, in the worker, and
+every agent reads its first strings in the pack; the tool's description says to
+call it when a PE's strings look encrypted or are missing, for the rest of the
+answer (`offset`) or to search it (`pattern`). The pack's run is the worker's
+own, so a call here emulates the file once more for this server's kept result.
+
 ### Sample delivery
 
 | tool | arguments |

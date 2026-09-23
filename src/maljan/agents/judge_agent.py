@@ -42,6 +42,7 @@ from maljan.agents.base_agent import (
     _trim_for_synthesis,
     _turn_key,
     counted_window_tokens,
+    is_model_turn,
     is_the_graph_s_step_stop,
     loop_limits,
     note_a_window_that_moved,
@@ -57,7 +58,7 @@ from maljan.agents.judge_postprocess import (
 )
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
-from maljan.core.token_ledger import TokenLedger
+from maljan.core.token_ledger import TokenLedger, structured_answer
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
 from maljan.llm.context_window import (
     ContextBudget,
@@ -435,6 +436,26 @@ class JudgeAgent(BudgetMeter):
         # once per round, and a buffer replaced on each of them would persist
         # only the last round's calls while the earlier ones consumed ids.
         self._evidence_entries: list[LedgerEntry] = []
+        # Which of the container's models this instance was built on: the
+        # verdict's judge model, or the expert model the mediator runs on. A
+        # call is recorded under the model that answered it, and the
+        # mediator's answers are the expert model's whatever an entry for the
+        # judge says.
+        self._runs_on: str = "judge"
+        # What the tool definitions of the current loop weigh with each
+        # request, for the budget record and the ticks; none before a loop.
+        self._tool_definition_chars: int = 0
+
+    def _model_label(self) -> str:
+        """The label of the model this instance calls first, or ``""`` outside a job."""
+        if getattr(self, "_runs_on", "judge") != "expert":
+            return super()._model_label()
+        config = getattr(getattr(self, "_container", None), "config", None)
+        if config is None:
+            return ""
+        from maljan.core.model_assignments import global_model_label
+
+        return global_model_label(config, "expert")
 
     def _publish_questions(self, conversation: list[Any], already: set[str]) -> None:
         """Publish each question the judge has asked and not published yet.
@@ -664,6 +685,8 @@ class JudgeAgent(BudgetMeter):
         room = self._context_budget()
         recorded = record_tools(self.tools, recorder, context_budget=room)
         definitions = tool_definition_chars(recorded)
+        # On the budget record and the ticks, as the analysts' loop puts it.
+        self._tool_definition_chars = definitions
 
         def _note_the_conversation(conversation: list[Any]) -> None:
             if not isinstance(room, ContextBudget):
@@ -746,6 +769,18 @@ class JudgeAgent(BudgetMeter):
                     ended["window_full"] = True
                     note_a_window_that_moved(exc)
 
+        turns_recorded = False
+
+        def _record_the_turns() -> None:
+            """The loop's answered turns onto the run's ledger, once however the loop ends."""
+            nonlocal turns_recorded
+            if turns_recorded:
+                return
+            turns_recorded = True
+            for _m in list(latest.get("messages") or [])[len(messages) :]:
+                if is_model_turn(_m):
+                    self._record_usage(_m)
+
         try:
             await asyncio.wait_for(_until_it_answers_or_runs_out(), timeout=timeout)
             _msgs = list(latest.get("messages") or [])
@@ -756,9 +791,7 @@ class JudgeAgent(BudgetMeter):
             # so the mediator's tool-loop LLM calls land in the per-run
             # TokenLedger (the tools path previously recorded nothing — only
             # the no-tools fallback above did).
-            for _m in _msgs:
-                if getattr(_m, "type", "") == "ai":
-                    self._record_usage(_m)
+            _record_the_turns()
             if ended["no_room"] or ended["window_full"]:
                 cap = "no_room"
                 why = (
@@ -785,6 +818,14 @@ class JudgeAgent(BudgetMeter):
         except TimeoutError:
             self.logger.error("JudgeAgent ReAct timed out after %ds.", timeout)
             cap = "time"
+            # The turns the loop took before its clock ran out were answered
+            # and spent; they are on the ledger like the turns of a loop that
+            # finished.
+            _record_the_turns()
+            raise
+        except Exception:
+            # So are the turns of a loop that failed any other way.
+            _record_the_turns()
             raise
         finally:
             # In a ``finally`` for the reason the analysts' loop uses one: a
@@ -1047,6 +1088,7 @@ class JudgeAgent(BudgetMeter):
                 await self._initialize_mcp_client()
                 reasoning_text = await self.execute_tool_loop(prompt_messages)
             else:
+                self._record_usage(response)
                 reasoning_text = str(response.content)
 
         # Agreement among fewer than two analysts that said something measures
@@ -1246,6 +1288,7 @@ class JudgeAgent(BudgetMeter):
                 what="Judge verdict",
                 log=self.logger,
             )
+            self._record_usage(answer)
             # Whether the verdict reached its token cap, recorded like every
             # other judge call: a cut bundle reads as malformed JSON, and the
             # count is what says the cap, not the model, ended it.
@@ -1599,9 +1642,14 @@ class JudgeAgent(BudgetMeter):
         last_exc: Exception | None = None
         for attempt in range(1, max_attempts + 1):
             try:
-                llm_structured = self.llm.with_structured_output(MediatorVerdict)
-                result = await (extract_prompt | llm_structured).ainvoke(
-                    {"reasoning_log": reasoning_text}
+                llm_structured = self.llm.with_structured_output(MediatorVerdict, include_raw=True)
+                result = structured_answer(
+                    await (extract_prompt | llm_structured).ainvoke(
+                        {"reasoning_log": reasoning_text}
+                    ),
+                    self.token_ledger,
+                    agent=str(self.name),
+                    model=self._model_label(),
                 )
                 if isinstance(result, MediatorVerdict):
                     return result

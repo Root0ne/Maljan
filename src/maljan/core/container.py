@@ -963,6 +963,9 @@ class ServiceContainer:
                     config=self.config,
                 )
                 cached._job_id = self.job_key()
+                # The mediator's instance is built on the expert model, and its
+                # calls are recorded under that model.
+                cached._runs_on = "judge" if role == "judge" else "expert"
                 cached.token_ledger = getattr(self, "_token_ledger", None)
                 cached.generation_rates = getattr(self, "_generation_rates", None)
                 cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
@@ -1156,9 +1159,28 @@ class ServiceContainer:
                     llm=llm,
                     max_input_tokens=max_tokens,
                     token_ledger=getattr(self, "_token_ledger", None),
+                    model_label=self._reporter_model_label(),
                 )
                 self._narrative_agent_cache.event_sink = self.event_sink
             return self._narrative_agent_cache
+
+    def _reporter_model_label(self) -> str:
+        """The label of the model ``get_reporter_llm`` builds for the report's rounds."""
+        from maljan.core.model_assignments import model_label_for
+
+        return model_label_for(self.config, REPORTER_AGENT_KEY, role="judge")
+
+    def _summarizer_model_label(self) -> str:
+        """The label of the model ``get_summarizer_llm`` builds, or ``""``."""
+        from maljan.core.model_assignments import endpoint_for, model_label
+
+        try:
+            pre = self.config.preprocessing
+            provider = str(pre.summarizer_provider or self.config.llm.provider)
+            model = str(pre.summarizer_model or self.config.llm.expert_model)
+            return model_label(provider, model, endpoint_for(self.config, provider))
+        except Exception:  # noqa: BLE001 — a label is never worth a lost summary
+            return ""
 
     def get_report_composer(self) -> Any | None:
         """Return the singleton section-wise ReportComposer, or ``None``.
@@ -1203,6 +1225,7 @@ class ServiceContainer:
                     section_max_tokens=rc.composer_section_max_tokens,
                     per_section_timeout=rc.composer_per_section_timeout,
                     token_ledger=getattr(self, "_token_ledger", None),
+                    model_label=self._reporter_model_label(),
                     generation_rates=getattr(self, "_generation_rates", None),
                     output_cap=output_cap,
                     caps_by_model=caps,
@@ -1360,6 +1383,8 @@ class ServiceContainer:
                 self._function_summarizer_cache = FunctionSummarizer(
                     llm=summarizer_llm,
                     max_summary_words=self.config.preprocessing.summarizer_max_words,
+                    token_ledger=getattr(self, "_token_ledger", None),
+                    model_label=self._summarizer_model_label(),
                 )
                 logger.info(
                     "FunctionSummarizer initialized (%s / %s, max_words=%d).",

@@ -1177,6 +1177,11 @@ class RunSummaryBuilder:
                 "elapsed_s": round(sum(float(row.get("elapsed_s") or 0.0) for row in loops), 1),
                 "timeout_s": max(float(row.get("timeout_s") or 0.0) for row in loops),
                 "delegated_steps": sum(int(row.get("delegated_steps") or 0) for row in loops),
+                # The largest of its loops: a figure sent with every request
+                # of a loop, not an amount spent, so it is not summed.
+                "tool_definition_chars": max(
+                    int(row.get("tool_definition_chars") or 0) for row in loops
+                ),
                 "caps": caps,
             }
         self._budget = out or None

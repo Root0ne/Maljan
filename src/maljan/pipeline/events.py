@@ -137,8 +137,14 @@ def emit_budget_tick(
     prompt_chars: int,
     ledger_entries: int,
     final: bool = False,
+    tool_definition_chars: int = 0,
 ) -> None:
-    """One agent's spend as of now: steps against its cap, seconds against its limit."""
+    """One agent's spend as of now: steps against its cap, seconds against its limit.
+
+    ``tool_definition_chars`` is what the loop's tool definitions weigh; they
+    go with every request and the context budget counts them beside the
+    prompt, so the two figures together are what a turn sends.
+    """
     emit(
         sink,
         BUDGET_TICK,
@@ -151,6 +157,7 @@ def emit_budget_tick(
             "timeout_s": round(max(0.0, float(timeout_s)), 1),
             "prompt_chars": max(0, int(prompt_chars)),
             "ledger_entries": max(0, int(ledger_entries)),
+            "tool_definition_chars": max(0, int(tool_definition_chars)),
             "final": bool(final),
         },
     )

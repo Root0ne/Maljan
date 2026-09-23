@@ -654,6 +654,12 @@ change landed on `main`.
   strings in 38 s — the mutex name, the install directory and file names, the
   scheduled-task name, both C2 URLs, the User-Agent, the beacon format and the
   command words that a plain `strings` pass cannot see.
+- **The tool-definition size is on the record.** The context budget counted
+  every tool definition with every request and never wrote the figure down,
+  so a run whose answer cap shrank could not show how much of that was the
+  definitions. Each loop's budget record, every `budget_tick` and each agent's
+  `run_summary.budget` row now carry `tool_definition_chars` (the largest of an
+  agent's loops in the summary), for the analysts and the judge alike.
 
 - **Key findings, an execution flow, a configuration table and a command
   table, written by the report model.** The narrative round answers two to
@@ -1617,6 +1623,27 @@ change landed on `main`.
   `expert_max_tokens`, reasoning included. With a reasoning model, set
   `disable_thinking` or raise the cap where a section or verdict comes back
   empty or cut.
+
+- **A PE's decoded strings are in the triage pack.** A static analyst offered
+  `floss` among thirty-six tools never called it, so the configuration an
+  analyst recovers from an encrypted-string loader reached no model. The pack
+  now runs FLOSS once on every PE, last, through the function the sidecar's
+  tool serves (the pinned build, its wall clock and memory limit), with the
+  `analysis` server's environment and a directory in the job's staging
+  directory, and every agent reads one line of it: the counts, then up to 100
+  strings in 3,000 characters, each with the routine that produced it and its
+  offset from the image base, the bound and its reason stated when it cut, and
+  a statement that the strings are the sample's own text: data, not
+  instructions, ledger entries or findings.
+  Without a build the entry says so with the remedy and is not a failure; a run
+  stopped by its clock or its memory is a failed entry that says which. On the
+  reference loader the line carries all 81 strings and adds about 28 s to the
+  pack. The tool's description now says to call it when a PE's strings look
+  encrypted or are missing.
+  **Upgrading:** a PE's pack has one more entry, `floss`, after every other;
+  the pack's own ids do not move, and every id after the pack (the analysts',
+  the judge's) moves by +1 on a PE. A test suite that runs the pack sets
+  `MALJAN_FLOSS_PATH` to a missing file unless a test names a build.
 
 ### Fixed
 
@@ -3885,6 +3912,35 @@ change landed on `main`.
   such a run makes fewer tool calls and has one more analyst reporting; the
   hard cap is unchanged.
 
+- **The run's token total counts every model call.** A smoke run counted 20
+  calls while the model server served 22. The mediator's fast path, the
+  mediator's structured extraction and the judge's verdict (and its retry)
+  recorded nothing, nor did the three built-in analysts' revision rounds, the
+  function summariser, or the turns of a tool loop its hard cap or a failure
+  stopped (a judge loop's included), or an attempt abandoned on a connection
+  error; the step-cap stop sentence the loop appends was counted as a call; the narrative's and the composer's calls were recorded under no
+  model, and their structured paths not at all. Each path now records its usage
+  under its agent and the model that answered: the mediator's against the
+  expert model, the report's against the reporter's, the summariser's under
+  `summarizer`. A structured call asks for the raw turn beside the parsed
+  answer (`with_structured_output(..., include_raw=True)`).
+  **Upgrading:** `run_summary.tokens.llm_calls` and the per-agent figures rise
+  for the same work, `per_agent` gains `judge` and, when the summariser is on,
+  `summarizer`, and `run_summary.models.reporter` names the reporter's model;
+  a comparison across this release compares different counts.
+- **A citation is an evidence id or it is asked about.** The composer cited
+  "[BINARY FACTS]" and "[DETERMINISTIC FACTS]" — its own prompt's block
+  headings — beside real evidence ids, and nothing checked a citation. The
+  narrative and every composer section now get `report.citation_not_evidence`
+  for each bracketed item in their prose that is not an id the run's ledger
+  issued, with a sentence naming the ids they may cite. Only prose fields are
+  read, never a record field or a code span; ATT&CK and MBC ids, IPv6 literals,
+  markdown links and a bracket that is part of a token are left alone, and a
+  numbered reference such as `[1]` is asked about. An id inside a sample's own
+  decoded string is never citable. The citation is never rewritten:
+  one the retry does not fix prints as written and is recorded unresolved, and
+  the section is kept.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**
@@ -4123,6 +4179,7 @@ labels rather than the published ids — read those through `labels`), `false`
 for a record kept as the parsed bundle. A `/reports/{id}/stix?source=judge`
 answer with `"kept": false` now covers a run whose judge produced no bundle
 too. Malware objects may carry `sample_refs`.
+
 Reports are not migrated. A report stored before the vendor layout renders in
 it with the sections it has: its score is ignored, its capability paragraphs
 print under the technical analysis, its conclusion's rating beside the verdict
@@ -4133,3 +4190,8 @@ prose fields are written by nothing, and the value is live. Scripts that parse
 the Markdown by heading must use the new numbered headings, and a pipeline
 that expected a summary on a mock run must expect `executive_summary` empty
 and read the degradation reason instead.
+
+The triage pack runs `floss` on every PE, so a worker host needs the pinned
+FLOSS build as the `analysis` server's host does; the backend image has it.
+Without it the pack's entry says the build is missing and names the remedy,
+and the run goes on.

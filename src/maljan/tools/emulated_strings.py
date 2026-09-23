@@ -42,7 +42,7 @@ import signal
 import subprocess
 import tempfile
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -178,19 +178,25 @@ def _is_pinned_build(path: Path) -> bool:
     return _VERIFIED[key]
 
 
-def find_floss() -> tuple[Path | None, str]:
+def find_floss(environ: Mapping[str, str] | None = None) -> tuple[Path | None, str]:
     """The pinned FLOSS executable, or ``None`` and the reason there is none.
 
     ``MALJAN_FLOSS_PATH`` when it is set, and nothing else then; otherwise the
     user tools directory, then ``PATH``. The reason names where the tool looked
     and never a host path, because it travels to the capability manifest, the
-    console and the judge's prompt.
+    console and the judge's prompt. ``environ`` is the environment to read the
+    two variables from, this process's when it is not given: the triage pack
+    passes the analysis server's, so the pack and the server find one build.
     """
-    configured = os.environ.get(FLOSS_PATH_ENV, "").strip()
+    source = os.environ if environ is None else environ
+    configured = str(source.get(FLOSS_PATH_ENV, "")).strip()
     if configured:
         candidates = [configured]
     else:
-        candidates = [str(default_install_path()), shutil.which("floss") or ""]
+        candidates = [
+            str(default_install_path()),
+            shutil.which("floss", path=source.get("PATH")) or "",
+        ]
     found = [Path(c) for c in candidates if c and Path(c).is_file() and os.access(c, os.X_OK)]
     if not found:
         where = (
@@ -208,14 +214,20 @@ def find_floss() -> tuple[Path | None, str]:
     )
 
 
-def floss_unavailable() -> str | None:
+def floss_unavailable(environ: Mapping[str, str] | None = None) -> str | None:
     """The capability manifest's probe: ``None`` when the pinned build is here."""
-    path, reason = find_floss()
+    path, reason = find_floss(environ)
     return None if path is not None else reason
 
 
-def _scratch() -> Path:
-    """This job's directory for the child's home and temporary files, created private."""
+def _scratch(directory: Path | None = None) -> Path:
+    """This job's directory for the child's home and temporary files, created private.
+
+    ``directory`` is one a caller outside the sidecar opened for its job; the
+    sidecar itself joins the staging base and the job leaf its spawn named.
+    """
+    if directory is not None:
+        return staging.private_dir(Path(directory))
     base = staging.private_dir(staging.staging_base())
     root = staging.staging_root()
     if root != base:
@@ -264,7 +276,10 @@ def _verified_copy(source: Path, directory: Path) -> Path:
 
 
 def _run(
-    argv: Sequence[str], timeout: float, pinned: Path | None = None
+    argv: Sequence[str],
+    timeout: float,
+    pinned: Path | None = None,
+    scratch: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """FLOSS's command line, bounded in time and memory, its whole group killed on overrun.
 
@@ -273,14 +288,15 @@ def _run(
     standalone build unpacks itself (about 63 MB). It is removed when the run
     ends, however it ends — an answer, a timeout, the memory limit. With
     ``pinned``, that executable is copied into the run's directory through
-    ``_verified_copy`` and the copy is what ``argv`` runs.
+    ``_verified_copy`` and the copy is what ``argv`` runs. ``scratch`` is the
+    job directory the run's own directory goes in, when the caller opened one.
 
     The environment is built rather than inherited: a search path, a locale,
     the run's directory as home and temporary directory, and the switch that
     keeps FLOSS from saving a vivisect workspace beside the sample. Nothing of
     the server's own environment reaches the child.
     """
-    run = Path(tempfile.mkdtemp(prefix="run-", dir=_scratch()))
+    run = Path(tempfile.mkdtemp(prefix="run-", dir=_scratch(scratch)))
     try:
         command = list(argv)
         if pinned is not None:
@@ -512,6 +528,8 @@ def floss(
     pattern: str | None = None,
     timeout_s: int = FLOSS_TIMEOUT_S,
     runner: Runner | None = None,
+    environ: Mapping[str, str] | None = None,
+    scratch: str | Path | None = None,
 ) -> dict[str, Any]:
     """The decoded, stack and tight strings FLOSS recovers from a PE by emulation.
 
@@ -520,7 +538,10 @@ def floss(
     ``next_offset`` where the following page starts, ``None`` on the last one.
     ``counts`` says how many of each kind FLOSS found before any filter.
     ``runner`` stands in for the child process in tests; with it, the
-    executable is not looked for.
+    executable is not looked for. ``environ`` is where the executable is
+    looked for (``find_floss``) and ``scratch`` the job directory the run's
+    own directory is made in; the sidecar passes neither, the triage pack
+    passes both.
     """
     target = Path(path)
     if not target.is_file():
@@ -550,12 +571,12 @@ def floss(
         )
 
     if runner is None:
-        executable, reason = find_floss()
+        executable, reason = find_floss(environ)
         if executable is None:
             return tool_error(
                 MISSING_DEPENDENCY, reason, tool="floss", remediation=FLOSS_REMEDIATION
             )
-        pinned = partial(_run, pinned=executable)
+        pinned = partial(_run, pinned=executable, scratch=Path(scratch) if scratch else None)
         document = _document(str(executable), target, minimum, max(1, int(timeout_s)), pinned)
     else:
         document = _document("floss", target, minimum, max(1, int(timeout_s)), runner)
