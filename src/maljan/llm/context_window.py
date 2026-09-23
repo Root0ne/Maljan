@@ -1067,23 +1067,40 @@ _WINDOW_FULL_SIGNATURES = (
 )
 
 
+# The reply cap and the window, as a server that names ``max_tokens`` states
+# them: "'max_tokens' … is too large: 8192. This model's maximum context length
+# is 32768 tokens and your request has 24808 input tokens".
+_REPLY_CAP_RE = re.compile(r"too large:\s*(\d+)")
+_WINDOW_RE = re.compile(r"maximum context length is\s*(\d+)")
+
+
 def window_full_error(exc: BaseException) -> bool:
     """Whether ``exc`` is a model server saying the conversation filled its window.
 
     Strict where :func:`note_provider_error` is loose. Only an error a provider
     SDK raised for a server's answer counts, and only a sentence that says the
-    request did not fit. A request whose reply cap alone is larger than the
-    window names ``max_tokens`` and is a configuration fault, not a full
-    conversation, so it is not one either. Never raises.
+    request did not fit. A server that names the reply cap is read by its
+    numbers: a cap at least as large as the window is a configuration fault
+    that no conversation could avoid, and is not a full window; a cap that
+    fits the window on its own means the prompt grew until the two together
+    did not, which is. Named without numbers to read, it is taken as the
+    fault, because a false positive here swallows an agent's failure. Never
+    raises.
     """
     try:
         package = type(exc).__module__.split(".", 1)[0]
         if package not in _PROVIDER_PACKAGES:
             return False
         text = str(exc).lower()
-        if "max_tokens" in text:
+        if not any(signature in text for signature in _WINDOW_FULL_SIGNATURES):
             return False
-        return any(signature in text for signature in _WINDOW_FULL_SIGNATURES)
+        if "max_tokens" not in text:
+            return True
+        cap = _REPLY_CAP_RE.search(text)
+        window = _WINDOW_RE.search(text)
+        if cap is None or window is None:
+            return False
+        return int(cap.group(1)) < int(window.group(1))
     except Exception:  # noqa: BLE001 — an error path never raises another error
         return False
 

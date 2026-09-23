@@ -229,6 +229,19 @@ class TestAServerThatSaysTheWindowIsFull:
         )
         assert cw.window_full_error(_server_error(said, status=400)) is False
 
+    def test_vllm_s_wording_of_a_full_conversation_is_a_full_window(self) -> None:
+        """It names the reply cap too, but the cap fits the window on its own."""
+        said = (
+            "'max_tokens' or 'max_completion_tokens' is too large: 8192. This model's maximum "
+            "context length is 32768 tokens and your request has 24808 input tokens "
+            "(8192 > 32768 - 24808)."
+        )
+        assert cw.window_full_error(_server_error(said, status=400)) is True
+
+    def test_a_reply_cap_named_without_numbers_is_taken_as_the_fault(self) -> None:
+        said = "'max_tokens' is too large for this model's maximum context length"
+        assert cw.window_full_error(_server_error(said, status=400)) is False
+
     def test_an_error_that_is_not_a_server_s_answer_is_not(self) -> None:
         assert cw.window_full_error(ValueError("could not read n_ctx from the props")) is False
 
@@ -294,6 +307,7 @@ class _RefusesAtTheFourthTurn(BaseChatModel):
 
     refuse_at: int = 3
     error: Any = None
+    salvage: str = CLAIM
     calls: list[list[BaseMessage]] = []
 
     def _generate(
@@ -302,7 +316,7 @@ class _RefusesAtTheFourthTurn(BaseChatModel):
         sent = list(messages)
         self.calls.append(sent)
         if _told_to_stop(sent):
-            return ChatResult(generations=[ChatGeneration(message=AIMessage(content=CLAIM))])
+            return ChatResult(generations=[ChatGeneration(message=AIMessage(content=self.salvage))])
         turn = sum(1 for message in sent if isinstance(message, AIMessage))
         if turn == self.refuse_at:
             raise (
@@ -366,3 +380,14 @@ def _run(model: BaseChatModel) -> tuple[_Analyst, _Container, str]:
     container = agent._container
     assert isinstance(container, _Container)
     return agent, container, answer
+
+
+class TestNoNudgeIntoAWindowTheServerSaysIsFull:
+    def test_after_the_server_refused_the_nudge_is_not_sent(self) -> None:
+        model = _RefusesAtTheFourthTurn(calls=[], salvage="")
+        agent, _container, answer = _run(model)
+
+        asked_to_stop = [sent for sent in model.calls if _told_to_stop(sent)]
+        assert len(asked_to_stop) == 1, "the salvage only; no nudge re-sends the full window"
+        assert answer == ""
+        assert agent._answer_unstructured is True

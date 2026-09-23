@@ -617,20 +617,29 @@ tool phase ends with `no_room` ("the model server reported its context window
 full" on the record and the stage event), and the forced synthesis writes the
 answer from what was gathered, rather than the agent failing and its work being
 lost. Only an error the provider's SDK raised for the server's answer counts.
-The same sentence on the first request, before anything was gathered, means
-the framing alone does not fit; a reply cap larger than the window names
-`max_tokens`; and an error that is not a server's answer is the platform's own.
-Each of those still fails the agent, because there is nothing to salvage and
-the failure is the true statement.
+A server that names the reply cap is read by its numbers. vLLM words a full
+conversation as "'max_tokens' … is too large: 8192. This model's maximum
+context length is 32768 tokens and your request has 24808 input tokens": the
+cap fits the window on its own and the prompt grew until the two together did
+not, so that is a full window. A cap at least as large as the window, or one
+named with no numbers to read, is a configuration fault no conversation could
+avoid. The same full-window sentence on the first request, before anything was
+gathered, means the framing alone does not fit; and an error that is not a
+server's answer is the platform's own. Each of those faults still fails the
+agent, because there is nothing to salvage and the failure is the true
+statement. After the server has said the window is full, the final-answer
+nudge is not sent — it would re-send the conversation the server just refused
+— while after the platform's own budget ended the phase it still is, because
+that conversation is inside the tool budget with the reply reserve whole.
 
-The judge's tool loop takes no part in this. It is awaited whole rather than
-streamed, so a failure leaves nothing gathered to salvage, and it runs only to
-mediate a dispute or to ask who a sample is, on a conversation built from the
-analysts' reports rather than grown call by call. Its tool answers still go
-through the same guardrail, capped against the fullest conversation the budget
-knows of, because the judge's own is not recorded; its tool definitions are not
-counted; and a server that says the window is full fails the judge's loop as
-any other server error does.
+The judge's tool loop is accounted the same way, under the judge's own name:
+its conversation and its tool definitions are measured before every model
+turn, with the server's reported count as a floor; its answers are capped from
+its own room; its loop is streamed, ends on the step it runs out of room, and
+ends with `no_room` on the same strict full-window answer once it has gathered
+something. Its reasoning is then asked for once, with no tools, from what it
+gathered, and mediation reads the verdict from that; a judge loop that fails
+before gathering anything fails as before.
 
 The window itself is learned free of charge and without asking the operator
 anything. In order:

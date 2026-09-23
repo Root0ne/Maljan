@@ -195,6 +195,19 @@ def _reported_request_chars(messages: list, per_token: int) -> int:
     return 0
 
 
+def request_chars(messages: list, definition_chars: int, per_token: int) -> int:
+    """What a tool loop's next request weighs, in the budget's characters.
+
+    The messages as the server will see them, plus the definitions of the
+    loop's tools, which go with every request; and never less than what the
+    server itself reported for the last request plus what came after it. One
+    rule for every loop that sizes itself against the window — the analysts'
+    and the judge's.
+    """
+    measured = sum(_message_chars(m) for m in messages) + max(0, int(definition_chars))
+    return max(measured, _reported_request_chars(messages, per_token))
+
+
 def _conversation_units(msgs: list) -> list[list]:
     """The conversation as the things that can be dropped whole.
 
@@ -2365,12 +2378,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         if budget is None:
             return
         try:
-            measured = sum(_message_chars(m) for m in messages) + int(
-                getattr(self, "_tool_definition_chars", 0) or 0
+            budget.note_conversation(
+                self.name,
+                request_chars(
+                    messages,
+                    int(getattr(self, "_tool_definition_chars", 0) or 0),
+                    int(getattr(budget, "chars_per_token", CHARS_PER_TOKEN) or CHARS_PER_TOKEN),
+                ),
             )
-            per_token = int(getattr(budget, "chars_per_token", CHARS_PER_TOKEN) or CHARS_PER_TOKEN)
-            reported = _reported_request_chars(messages, per_token)
-            budget.note_conversation(self.name, max(measured, reported))
         except Exception as exc:  # noqa: BLE001 — a budget is never worth a lost loop
             self.logger.debug("%s: the conversation size was not recorded (%s).", self.name, exc)
 
@@ -3129,6 +3144,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         # of "Let me search for more specific strings related to malware
         # indicators:" at 0.5. Say so once, in the same conversation, and give
         # it the step to answer in.
+        if window_full:
+            # The nudge re-sends the conversation the server has just refused,
+            # so it cannot fit and would only occupy the model's one slot for a
+            # full prefill to learn that again. After the platform's own budget
+            # ended the phase the conversation is inside the tool budget with
+            # the reply reserve whole, and the nudge below still has room.
+            self._answer_unstructured = not answer_is_isr(content)
+            return self._capture_findings(content)
         return self._capture_findings(
             self._settle_final_answer(content, msgs, timeout, elapsed, max_steps)
         )

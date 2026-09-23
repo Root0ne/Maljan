@@ -3265,10 +3265,17 @@ change landed on `main`.
   loop has gathered at least one tool answer, now ends that agent's tool phase
   with `no_room` and the detail "the model server reported its context window
   full", and the forced synthesis writes the answer from what was gathered. The
-  same sentence on the first request, a reply cap larger than the window, an
-  error that is not a provider's, and any other server error still fail the
-  agent. The judge's tool loop is not covered, and the configuration guide says
-  why. "context shift" also joins the wordings that retire a learned window.
+  same sentence on the first request, a reply cap at least as large as the
+  window, an error that is not a provider's, and any other server error still
+  fail the agent; vLLM's wording of a full conversation, which names the reply
+  cap beside the input-token count, counts as full. After the server reported
+  the window full the final-answer nudge is no longer sent. The judge's tool loop
+  is now accounted the same way under its own name — its conversation and tool
+  definitions counted, its answers capped from its own room, its loop streamed
+  and ended on `no_room`, and its reasoning then written once from what it
+  gathered — where before every judge answer was capped against whatever
+  conversation happened to be live, usually none. "context shift" also joins the
+  wordings that retire a learned window.
   **Upgrading:** a derived cap reaches zero sooner for an agent with many tools,
   so a run on a small window ends tool phases earlier than before and says
   `no_room` where it used to overflow; unticking the tools an agent does not

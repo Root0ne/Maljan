@@ -353,3 +353,13 @@ class TestAJudgeWithNoReasoning:
 
         extract.assert_not_called()
         assert consensus is False
+
+
+class TestTheNudgeAfterTheBudgetEndedThePhase:
+    def test_is_still_sent_because_the_reply_reserve_is_whole(self) -> None:
+        _agent, model, _container, _ran, _ledger, _answer = _run(
+            _a_budget_that_runs_out(), max_steps=40, salvage=""
+        )
+
+        asked_to_stop = [sent for sent in model.calls if _told_to_stop(sent)]
+        assert len(asked_to_stop) >= 2, "the salvage, then the nudge"
