@@ -35,6 +35,41 @@ def corroboration_row(row: Mapping[str, Any] | Sequence[str] | None) -> dict[str
     return {"asserted_by": [], "claimed_by": [str(x) for x in (row or [])]}
 
 
+def rule_match_only(report: Any) -> dict[str, str]:
+    """The published techniques only a rule match stands behind, each with its note.
+
+    ``{technique_id: "rule match only (yara `name`, 1 string), no analyst
+    claim"}``: a technique a deterministic rule asserted and no analyst
+    claimed. The publish rule is unchanged — the judge named it and a rule
+    matched it — and what a reader is told is how much matched. Such a
+    technique grounds no capability word (``validation.CapabilityGrounding``):
+    a one-string match is not evidence of the capability its name says.
+    """
+    corroboration = (getattr(report, "run_summary", None) or {}).get("corroboration") or {}
+    strings = getattr(report, "rule_match_strings", None) or {}
+    out: dict[str, str] = {}
+    for mapping in getattr(report, "ttp_mappings", None) or []:
+        tid = str(getattr(mapping, "technique_id", "") or "")
+        row = corroboration_row(corroboration.get(tid))
+        if not row["asserted_by"] or row["claimed_by"]:
+            continue
+        parts: list[str] = []
+        for source in dict.fromkeys(row["asserted_by"]):
+            rules = (
+                [r for r in strings.get(tid, []) if isinstance(r, dict)] if source == "yara" else []
+            )
+            if rules:
+                parts.extend(
+                    f"{source} `{r.get('rule')}`, {int(r.get('strings') or 0)} "
+                    f"string{'' if int(r.get('strings') or 0) == 1 else 's'}"
+                    for r in rules
+                )
+            else:
+                parts.append(str(source))
+        out[tid] = f"rule match only ({'; '.join(parts)}), no analyst claim"
+    return out
+
+
 def corroboration_sources(row: Mapping[str, Any] | Sequence[str] | None) -> list[str]:
     """Every source of one corroboration row, whichever shape the row has."""
     normalised = corroboration_row(row)

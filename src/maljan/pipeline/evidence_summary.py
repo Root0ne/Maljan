@@ -124,6 +124,39 @@ def collect(
 EVIDENCE_ID_RE = re.compile(r"^ev_[0-9]+$")
 
 
+def yara_rule_strings(ledger: Sequence[Any] | None) -> dict[str, list[dict[str, Any]]]:
+    """``{technique_id: [{"rule": name, "strings": n}, ...]}`` for the YARA rules that assert one.
+
+    ``strings`` is how many of the rule's own strings matched — distinct
+    identifiers, not offsets — which is what a reader needs to weigh a
+    technique a rule alone put in the report: one string in a large file is a
+    different finding from a rule whose whole condition matched. Read from the
+    scan's structured answer as the tool wrote it.
+    """
+    found: dict[str, list[dict[str, Any]]] = {}
+    for entry in ledger or []:
+        if _base_tool_name(getattr(entry, "tool", "")) != "yara_scan":
+            continue
+        structured = getattr(entry, "structured", None)
+        matches = structured.get("matches") if isinstance(structured, dict) else None
+        for match in matches or []:
+            if not isinstance(match, dict):
+                continue
+            raw_meta = match.get("meta")
+            meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
+            identifiers = {
+                str(item.get("identifier") or "")
+                for item in match.get("strings") or []
+                if isinstance(item, dict)
+            } - {""}
+            for tid in technique_ids_in(meta.get("technique_id")):
+                rows = found.setdefault(tid, [])
+                row = {"rule": str(match.get("rule") or ""), "strings": len(identifiers)}
+                if row not in rows:
+                    rows.append(row)
+    return found
+
+
 def technique_evidence(
     isrs: dict[str, Any] | None, ledger: Sequence[Any] | None = None
 ) -> dict[str, list[str]]:

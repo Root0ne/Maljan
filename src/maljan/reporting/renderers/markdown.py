@@ -1246,7 +1246,9 @@ class MarkdownRenderer:
                     _with_rules(procedure, folded),
                     ", ".join(mapping.contributing_layers) or "-",
                     _stated(mapping.confidence, ""),
-                    "published" + (", corroborated" if mapping.is_corroborated else ""),
+                    "published"
+                    + (", corroborated" if mapping.is_corroborated else "")
+                    + (f"; {ctx.rule_only[tid]}" if tid in ctx.rule_only else ""),
                     ", ".join(
                         dict.fromkeys(
                             _ids_in(mapping.evidence_quotes) + _rule_ids(folded, capa_ids)
@@ -1946,6 +1948,11 @@ class _Context:
             for row in self.unresolved
             if str(row.get("code", "")).startswith("narrative.")
         ]
+        # The published techniques only a rule match stands behind, with how
+        # much matched: printed beside the row's status.
+        from maljan.analysis.corroboration import rule_match_only
+
+        self.rule_only = rule_match_only(report)
         self.identifier_findings = {
             int(n)
             for n in _named_in(self.unresolved, "report.identifier_uncited", r"identifier (\d+)")
@@ -2877,6 +2884,9 @@ def _attack_row(
         status = "published" + (
             ", corroborated" if mapping is not None and mapping.is_corroborated else ""
         )
+        rule_only = ctx.rule_only.get(cell.technique_id)
+        if rule_only:
+            status += f"; {rule_only}"
     # The platform's unresolved findings about this technique, beside its
     # row: the ATT&CK checks, and the judge crediting a source that never
     # named it.

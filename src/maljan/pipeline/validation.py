@@ -1136,9 +1136,25 @@ class CapabilityGrounding:
         keys: set[str] = set()
         words: list[str] = []
         try:
+            # A technique only a rule match stands behind — one string of a
+            # YARA rule in a large file, with no analyst claiming it — grounds
+            # no capability word: "credential dumping" was waved through by the
+            # very match in question. Neither its id, its name nor its rule's
+            # row in the evidence counts.
+            from maljan.analysis.corroboration import rule_match_only
+
+            rule_only = set(rule_match_only(report))
+            rule_only_rules = {
+                str(hit.get("rule") or "").lower()
+                for tid in rule_only
+                for hit in (getattr(report, "rule_match_strings", None) or {}).get(tid, [])
+                if isinstance(hit, dict)
+            } - {""}
             for row in list(getattr(report, "ttp_mappings", None) or []) + list(
                 getattr(report, "capability_matrix", None) or []
             ):
+                if str(getattr(row, "technique_id", "") or "") in rule_only:
+                    continue
                 base = _base_technique(getattr(row, "technique_id", ""))
                 if base:
                     techniques.add(base)
@@ -1161,6 +1177,8 @@ class CapabilityGrounding:
                     keys.add(key)
                 words.append(str(getattr(section, "title", "") or ""))
                 for row in getattr(section, "rows", None) or []:
+                    if row and str(row[0]).strip().lower() in rule_only_rules:
+                        continue
                     words.extend(str(cell) for cell in row)
                 words.append(str(getattr(section, "text", "") or ""))
             values = isr_reports.values() if hasattr(isr_reports, "values") else ()

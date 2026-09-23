@@ -1084,6 +1084,11 @@ class MalwareReport(BaseModel):
     # which ask the one publish rule of each exactly as the export does; empty
     # on a report stored before the field existed.
     judge_indicators: list[JudgeIndicator] = Field(default_factory=list)
+    # For each technique a YARA rule of this run asserted, the rules and how
+    # many of each rule's own strings matched (``{"rule", "strings"}``), as the
+    # scan answered. Read by the ATT&CK table's "rule match only" note and by
+    # the capability grounding; empty on a report stored before it existed.
+    rule_match_strings: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     misp_attributes: list[dict[str, Any]] | None = None
 
     # --- References ---
