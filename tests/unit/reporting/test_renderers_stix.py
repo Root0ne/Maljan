@@ -224,7 +224,8 @@ class TestObservedDataAndNote:
                 }
             }
         )
-        return MalwareReportBuilder.apply_fallback_narrative(report)
+        report.executive_summary = "A written summary of the run, as the report model wrote it."
+        return report
 
     def test_observed_data_added(self, report: MalwareReport) -> None:
         bundle = ExtendedSTIXRenderer().render(report, base_bundle=None)

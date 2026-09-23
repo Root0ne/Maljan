@@ -708,6 +708,145 @@ class TestARejectedIdIsDroppedAndNeverRewritten:
         assert mappings == []
 
 
+# The report fields a model writes, and the one module each may be written from:
+# the code that receives that model's answer. Anything else writing one of them
+# is the platform putting words where a model's go — the fallback narrative did
+# exactly that until it stopped, and the report printed its template as though
+# the report model had written it.
+REPORT_PROSE_WRITERS: dict[str, frozenset[str]] = {
+    "executive_summary": frozenset({"reporting/builder.py"}),
+    "key_findings": frozenset({"reporting/builder.py"}),
+    "defensive_recommendations": frozenset({"reporting/builder.py"}),
+    "capabilities_narrative": frozenset(),
+    "intro_background": frozenset({"reporting/composer.py"}),
+    "execution_flow": frozenset({"reporting/composer.py"}),
+    "configuration": frozenset({"reporting/composer.py"}),
+    "commands": frozenset({"reporting/composer.py"}),
+    "c2_channels": frozenset({"reporting/composer.py"}),
+    "conclusion": frozenset(),
+    # The composer's spine and each of its prose subsections.
+    "technical_analysis": frozenset({"reporting/composer.py"}),
+    "packing_obfuscation": frozenset({"reporting/composer.py"}),
+    "evasion_antiforensics": frozenset({"reporting/composer.py"}),
+    "string_resolution": frozenset({"reporting/composer.py"}),
+    "persistence_detail": frozenset({"reporting/composer.py"}),
+    "discovery": frozenset({"reporting/composer.py"}),
+    "command_and_control": frozenset({"reporting/composer.py"}),
+    "message_packet_structure": frozenset({"reporting/composer.py"}),
+    "payloads": frozenset({"reporting/composer.py"}),
+    "cli_flags": frozenset({"reporting/composer.py"}),
+    "encryption_scheme": frozenset({"reporting/composer.py"}),
+    "ransom_note": frozenset({"reporting/composer.py"}),
+    "service_process_kill": frozenset({"reporting/composer.py"}),
+    "shadow_copy_destruction": frozenset({"reporting/composer.py"}),
+    # The words inside a model-written element: a step's action, a
+    # subsection's body, a recommendation's rationale. Nothing assigns them
+    # after the model answered.
+    "action": frozenset(),
+    "body": frozenset(),
+    "rationale": frozenset(),
+    "detection": frozenset(),
+    "business_impact": frozenset(),
+}
+
+# A ``setattr`` whose field name is computed is a write the scanner cannot
+# read. Each module that has one is named here with what it writes; a new one
+# fails the test until it is looked at.
+DYNAMIC_SETATTR: dict[str, str] = {
+    "reporting/composer.py": "a prose subsection, from the answer the composer received for it",
+    "agents/judge_postprocess.py": "a STIX object's property, not a report field",
+    "agents/delegation.py": "a callee's attribute, not a report field",
+    "core/config.py": "a settings attribute, not a report field",
+}
+
+# The list methods that change a model-written list in place.
+_MUTATORS = frozenset({"append", "extend", "insert", "clear", "pop", "remove", "sort", "reverse"})
+
+
+def prose_writes(source: str, label: str) -> list[tuple[str, str]]:
+    """Every write of a report prose field, in any of the shapes one takes.
+
+    ``obj.<field> = …``, ``setattr(obj, "<field>", …)``, ``obj.<field>[i] = …``
+    and ``obj.<field>.append(…)`` (or any list mutator). A ``setattr`` whose
+    name is computed is reported as ``<dynamic>``.
+    """
+    tree = ast.parse(source, filename=label)
+    found: list[tuple[str, str]] = []
+    for node in ast.walk(tree):
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AugAssign | ast.AnnAssign):
+            targets = [node.target]
+        elif isinstance(node, ast.Call):
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+            key = node.args[1] if name == "setattr" and len(node.args) >= 2 else None  # noqa: PLR2004
+            if isinstance(key, ast.Constant) and key.value in REPORT_PROSE_WRITERS:
+                found.append((str(key.value), f"{label}:{node.lineno}"))
+            elif key is not None and not isinstance(key, ast.Constant):
+                found.append(("<dynamic>", f"{label}:{node.lineno}"))
+            owner = func.value if isinstance(func, ast.Attribute) else None
+            if (
+                name in _MUTATORS
+                and isinstance(owner, ast.Attribute)
+                and owner.attr in REPORT_PROSE_WRITERS
+            ):
+                found.append((owner.attr, f"{label}:{node.lineno}"))
+            continue
+        for target in targets:
+            if isinstance(target, ast.Subscript):
+                target = target.value
+            if isinstance(target, ast.Attribute) and target.attr in REPORT_PROSE_WRITERS:
+                found.append((target.attr, f"{label}:{node.lineno}"))
+    return found
+
+
+def test_the_report_prose_is_written_only_by_the_code_that_received_it():
+    found: list[str] = []
+    for path in sorted(SRC.rglob("*.py")):
+        relative = _relative(path)
+        if relative.startswith("schemas/"):
+            continue
+        for field_name, where in prose_writes(path.read_text(encoding="utf-8"), relative):
+            if field_name == "<dynamic>":
+                if relative not in DYNAMIC_SETATTR:
+                    found.append(f"{where}: a setattr whose field name is computed")
+            elif relative not in REPORT_PROSE_WRITERS[field_name]:
+                found.append(f"{where}: writes {field_name!r}")
+    assert not found, (
+        "These write a report field a model writes, from a module that did not "
+        "receive the model's answer:\n  " + "\n  ".join(found)
+    )
+
+
+class TestTheProseScannerWouldCatchOne:
+    def test_an_attribute_write_is_caught(self):
+        assert prose_writes("report.executive_summary = 'template'\n", "p.py") == [
+            ("executive_summary", "p.py:1")
+        ]
+
+    def test_setattr_is_caught(self):
+        assert prose_writes("setattr(ta, 'execution_flow', [])\n", "p.py") == [
+            ("execution_flow", "p.py:1")
+        ]
+
+    def test_an_element_mutation_is_caught(self):
+        assert prose_writes("report.key_findings.append(x)\n", "p.py") == [
+            ("key_findings", "p.py:1")
+        ]
+        assert prose_writes("report.key_findings[0] = x\n", "p.py") == [("key_findings", "p.py:1")]
+
+    def test_a_write_inside_an_element_is_caught(self):
+        assert prose_writes("step.action = 'template'\n", "p.py") == [("action", "p.py:1")]
+
+    def test_a_computed_setattr_is_named(self):
+        assert prose_writes("setattr(ta, name, sub)\n", "p.py") == [("<dynamic>", "p.py:1")]
+
+    def test_a_constructor_argument_is_not_a_write(self):
+        assert prose_writes("MalwareReport(executive_summary='')\n", "p.py") == []
+
+
 class TestARejectedAnswerIsNeverAskedOfAnotherModel:
     """An agent's fallback models answer for a provider, never for a validator.
 

@@ -147,16 +147,55 @@ class TestComposer:
         assert len(r.c2_channels) == 1
         assert r.c2_channels[0].name == "HTTP C2"
 
-    def test_conclusion_authored(self) -> None:
+    def test_the_conclusion_is_no_longer_asked_for(self) -> None:
+        """A conclusion restated the summary; the layout dropped it, and the
+        composer stopped spending a call on it."""
         r = _report()
-        _compose(
+        llm = _compose(
             r,
             by_schema={
                 "Conclusion": {"sophistication_rating": "medium", "text": "A capable dropper."}
             },
         )
-        assert r.conclusion is not None
-        assert r.conclusion.sophistication_rating == "medium"
+        assert r.conclusion is None
+        assert "Conclusion" not in llm.seen
+
+    def test_the_execution_flow_is_authored_from_the_claims(self) -> None:
+        isr = {
+            "static": AgentISR(
+                agent_id="static",
+                domain="static",
+                claims=[
+                    ClaimEvidence(
+                        claim="Resolves APIs by CRC32 hash", evidence_ref="ev_0009", confidence=0.8
+                    )
+                ],
+            )
+        }
+        r = _report()
+        _compose(
+            r,
+            by_schema={
+                "_FlowOut": {
+                    "steps": [
+                        {
+                            "order": 1,
+                            "action": "Resolves APIs by hash",
+                            "voice": "assessed",
+                            "evidence_refs": ["ev_0009"],
+                        }
+                    ]
+                }
+            },
+            isr=isr,
+        )
+        assert r.technical_analysis is not None
+        (step,) = r.technical_analysis.execution_flow
+        assert (step.action, step.voice, step.evidence_refs) == (
+            "Resolves APIs by hash",
+            "assessed",
+            ["ev_0009"],
+        )
 
     def test_empty_llm_output_leaves_section_unset(self) -> None:
         # LLM returns an all-empty EncryptionScheme → not attached (no fabrication).
@@ -420,4 +459,168 @@ class TestASectionWithKeysItsSchemaDoesNotDeclare:
     def test_a_section_that_answered_cleanly_says_nothing(self) -> None:
         _result, comp = self._invoke(json.dumps({"text": "The sample is a loader."}))
 
+        assert comp.degradations == []
+
+
+class TestTheNewSectionsAreCheckedAndKept:
+    """An observed step that cites no sandbox entry, and a decrypted value that
+    cites no entry at all, are each asked about once. What survives is kept as
+    the model wrote it and recorded beside it; neither drops the section."""
+
+    _OBSERVED_UNCITED = json.dumps(
+        {"steps": [{"order": 1, "action": "Creates a mutex", "voice": "observed"}]}
+    )
+    _OBSERVED_CITED = json.dumps(
+        {
+            "steps": [
+                {
+                    "order": 1,
+                    "action": "Creates a mutex",
+                    "voice": "observed",
+                    "evidence_refs": ["ev_0002"],
+                }
+            ]
+        }
+    )
+
+    def _invoke(self, schema_name: str, validator: Any, *answers: str) -> tuple[Any, Any, Any]:
+        from langchain_core.messages import HumanMessage
+
+        from maljan.reporting import composer as module
+
+        llm = TestTheManualPathGetsOneTurnToFixItsShape._RawLLM(*answers)
+        comp = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            result = asyncio.run(
+                comp._invoke(
+                    [HumanMessage(content="write it")],
+                    getattr(module, schema_name),
+                    section=schema_name,
+                    validators=[validator],
+                )
+            )
+        return result, comp, llm
+
+    def test_an_observed_step_without_a_sandbox_entry_is_asked_about(self) -> None:
+        from maljan.pipeline.validation import flow_voice_violations
+
+        result, comp, llm = self._invoke(
+            "_FlowOut",
+            lambda p: flow_voice_violations(p, ["ev_0002"]),
+            self._OBSERVED_UNCITED,
+            self._OBSERVED_CITED,
+        )
+
+        assert result is not None and result.steps[0].evidence_refs == ["ev_0002"]
+        feedback = str(llm.sent[1][-1].content)
+        assert "[report.flow_voice]" in feedback
+        assert "ev_0002" in feedback
+        assert comp.validation_tally.unresolved == []
+
+    def test_a_step_that_keeps_its_mark_is_kept_and_recorded(self) -> None:
+        from maljan.pipeline.validation import flow_voice_violations
+
+        result, comp, _llm = self._invoke(
+            "_FlowOut",
+            lambda p: flow_voice_violations(p, []),
+            self._OBSERVED_UNCITED,
+            self._OBSERVED_UNCITED,
+        )
+
+        assert result is not None, "the section ships; the mark is the model's"
+        assert result.steps[0].voice == "observed"
+        (row,) = comp.validation_tally.unresolved
+        assert row["code"] == "report.flow_voice"
+        assert "no sandbox answer in this run recorded anything" in row["message"]
+        assert comp.degradations == []
+
+    def test_a_decrypted_value_that_cites_nothing_is_asked_about(self) -> None:
+        from maljan.pipeline.validation import configuration_citation_violations
+
+        uncited = json.dumps(
+            {"items": [{"key": "RC4 key", "value": "12345", "how_obtained": "decrypted"}]}
+        )
+        inferred = json.dumps(
+            {"items": [{"key": "RC4 key", "value": "12345", "how_obtained": "inferred"}]}
+        )
+        result, comp, llm = self._invoke(
+            "_ConfigOut",
+            lambda p: configuration_citation_violations(p, ["ev_0001"]),
+            uncited,
+            inferred,
+        )
+
+        assert result is not None and result.items[0].how_obtained == "inferred"
+        assert "[report.configuration_uncited]" in str(llm.sent[1][-1].content)
+        assert comp.validation_tally.unresolved == []
+
+
+class TestEachSectionIsShownAnExampleOfItsShape:
+    def test_every_example_is_a_valid_answer_to_its_schema(self) -> None:
+        from maljan.reporting import composer as module
+
+        schemas = {
+            "prose": module._ProseOut,
+            "execution_flow": module._FlowOut,
+            "configuration": module._ConfigOut,
+            "commands": module._CommandsOut,
+            "communications": module._C2Out,
+        }
+        assert set(schemas) == set(module._EXAMPLES)
+        for key, schema in schemas.items():
+            answer = json.loads(module._EXAMPLES[key])
+            assert set(answer) == set(schema.model_fields), key
+            schema.model_validate(answer)
+
+    def test_the_prompt_carries_the_object_and_the_example(self) -> None:
+        from maljan.reporting import composer as module
+
+        class _Recording:
+            def __init__(self) -> None:
+                self.sent: list[Any] = []
+
+            def with_structured_output(self, schema: type) -> Any:
+                raise RuntimeError("unused")
+
+            async def ainvoke(self, messages: Any) -> Any:
+                self.sent.append(messages)
+                return SimpleNamespace(content='{"steps": []}')
+
+        llm = _Recording()
+        comp = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
+        isr = {
+            "static": AgentISR(
+                agent_id="static",
+                domain="static",
+                claims=[
+                    ClaimEvidence(claim="Loads itself", evidence_ref="ev_0001", confidence=0.7)
+                ],
+            )
+        }
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+        ):
+            asyncio.run(
+                comp._author("execution_flow", _report(), isr, module._FlowOut, "List the steps.")
+            )
+        human = str(llm.sent[0][-1].content)
+        assert module._expected_object(module._FlowOut) in human
+        assert module._EXAMPLES["execution_flow"] in human
+
+
+class TestAModelListIsCutOnlyWithARecord:
+    def test_a_list_past_its_cap_is_kept_to_the_cap_and_recorded(self) -> None:
+        comp = ReportComposer(llm=None, per_section_timeout=5)  # type: ignore[arg-type]
+        kept = comp._kept("execution_flow", list(range(25)), 20)
+        assert kept == list(range(20))
+        assert comp.degradations == [
+            "report section 'execution_flow' was trimmed: the report keeps the first 20 of "
+            "the 25 items the report model wrote"
+        ]
+
+    def test_a_list_within_its_cap_is_kept_whole_and_says_nothing(self) -> None:
+        comp = ReportComposer(llm=None, per_section_timeout=5)  # type: ignore[arg-type]
+        assert comp._kept("commands", [1, 2], 40) == [1, 2]
         assert comp.degradations == []

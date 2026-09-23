@@ -44,11 +44,10 @@ from maljan.analysis.corroboration import (
 # two analysts produced claims, or the stage did not run.
 NOT_APPLICABLE = "not_applicable"
 
-# The sentence every surface prints for it.
-NOT_APPLICABLE_SENTENCE = (
-    "Consensus: not applicable — fewer than two analysts produced claims, "
-    "so no agreement was measured."
-)
+# What every surface says for it. The record does not say which of the two
+# causes held, so the words name neither.
+NOT_APPLICABLE_PHRASE = "not applicable; no agreement was measured"
+NOT_APPLICABLE_SENTENCE = f"Consensus: {NOT_APPLICABLE_PHRASE}."
 
 
 @dataclass

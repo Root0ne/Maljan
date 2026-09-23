@@ -43,11 +43,14 @@ _PERMISSIVE_CONFIG = ConfigDict(extra="ignore")
 
 
 class SeverityAssessment(BaseModel):
-    """CVSS-style summary used for the report header and dashboard sorting."""
+    """The judge's severity rating, with its rationale and the affected platforms."""
 
-    model_config = _STRICT_CONFIG
+    # Permissive on purpose: every report stored before the score was dropped
+    # carries ``overall_score``, a number the builder derived from the rating
+    # and no model ever stated. The key is ignored on load rather than kept as
+    # a field nothing writes.
+    model_config = _PERMISSIVE_CONFIG
 
-    overall_score: Annotated[float, Field(ge=0.0, le=10.0)] = 0.0
     rating: Literal["Critical", "High", "Medium", "Low", "Informational"] = "Informational"
     business_impact: str = ""
     affected_platforms: list[str] = Field(default_factory=list)
@@ -126,6 +129,16 @@ class SampleIdentity(BaseModel):
     compile_timestamp: datetime | None = None
     language_or_compiler: str | None = None
     signing: SignatureInfo = Field(default_factory=SignatureInfo)
+    # What the format tool read out of the header, stated as facts beside the
+    # file type: the machine it was built for, whether it is a library, and
+    # the names the binary gives itself. A DLL carrying an ``.exe`` name is a
+    # fact a reader needs before they try to run it, and the export
+    # directory's own name is often the family's internal one. ``None`` when
+    # no format tool answered, on a report stored before these existed too.
+    architecture: str | None = None
+    is_dll: bool | None = None
+    internal_name: str | None = None
+    export_name: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +204,18 @@ class StringIOC(BaseModel):
     notes: str | None = None
 
 
+class ExportRow(BaseModel):
+    """One exported symbol as the export directory states it."""
+
+    model_config = _STRICT_CONFIG
+
+    name: str
+    ordinal: int | None = None
+    # Hex string, e.g. ``"0x3ce4"``. Printed beside the name because several
+    # exports sharing one address is itself a finding a reader should see.
+    rva: str | None = None
+
+
 class StaticAnalysis(BaseModel):
     """Findings from binary parsing / disassembly (no execution)."""
 
@@ -199,6 +224,10 @@ class StaticAnalysis(BaseModel):
     sections: list[PESection] = Field(default_factory=list)
     imports: list[ImportRow] = Field(default_factory=list)
     exports: list[str] = Field(default_factory=list)
+    # The same exports with their ordinal and address, when the format tool
+    # reported them. ``exports`` stays the plain list every older consumer and
+    # every stored report reads.
+    export_rows: list[ExportRow] = Field(default_factory=list)
     interesting_strings: list[StringIOC] = Field(default_factory=list)
     embedded_resources: list[dict[str, Any]] = Field(default_factory=list)
     packer_hint: str | None = None
@@ -467,6 +496,9 @@ class CapabilityCell(BaseModel):
     # The highest number a source put on the technique, or ``None`` when no
     # source gave one — printed "not given", never as a confidence of zero.
     confidence: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
+    # Who stated ``confidence``: "the judge", "the static analyst". Empty when
+    # no source gave a number and on a row stored before it was recorded.
+    confidence_source: str = ""
     contributing_layers: list[str] = Field(default_factory=list)
     # ``False`` when the ATT&CK catalogue has no entry for this id and the
     # producer kept it after being told. The row stays — deleting an analyst's
@@ -530,6 +562,12 @@ class FamilyAttribution(BaseModel):
     # rows persisted before the guardrail (where every populated family
     # was implicitly grounded) keep their meaning.
     family_grounded: bool = True
+    # The ledger entries the judge cited for the name, and who named it:
+    # ``judge`` when the judge's assessment carried it, ``sandbox`` when the
+    # judge abstained and the sandbox's own ``cti.family[]`` supplied it.
+    # Empty and ``None`` on a report stored before either was recorded.
+    family_evidence_ids: list[str] = Field(default_factory=list)
+    family_source: Literal["judge", "sandbox"] | None = None
     actor: str | None = None
     campaign: str | None = None
     # Filled by ``attribution.py`` from the Qdrant LTM nearest neighbours.
@@ -714,11 +752,58 @@ class TechnicalSubsection(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
+class FlowStep(BaseModel):
+    """One step of what the sample does from its entry point to steady state.
+
+    ``voice`` is the report model's own mark: ``observed`` for a step a sandbox
+    watched, ``assessed`` for one read from the code or inferred. The renderer
+    prints the mark as written; the validation loop asks the model once when an
+    ``observed`` step cites no sandbox entry and records it if the step stays.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    order: int
+    action: str
+    voice: Literal["observed", "assessed"] = "assessed"
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
+class ConfigItem(BaseModel):
+    """One configuration value the report model recovered, and how."""
+
+    model_config = _STRICT_CONFIG
+
+    key: str
+    value: str
+    how_obtained: Literal["decrypted", "observed", "static-string", "inferred"] = "inferred"
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
+class CommandRow(BaseModel):
+    """One command the sample accepts from its operator."""
+
+    model_config = _STRICT_CONFIG
+
+    id: str | None = None
+    name: str
+    description: str = ""
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
 class TechnicalAnalysis(BaseModel):
     """The report's technical-analysis spine (reference §8)."""
 
     model_config = _STRICT_CONFIG
 
+    # Ordered steps from entry to steady state, the configuration table and the
+    # command table: model-written, printed as written, absent when the report
+    # model supplied none.
+    execution_flow: list[FlowStep] = Field(default_factory=list)
+    configuration: list[ConfigItem] = Field(default_factory=list)
+    commands: list[CommandRow] = Field(default_factory=list)
+    command_and_control: TechnicalSubsection | None = None
+    payloads: TechnicalSubsection | None = None
     packing_obfuscation: TechnicalSubsection | None = None
     cli_flags: list[CliFlag] = Field(default_factory=list)
     string_resolution: TechnicalSubsection | None = None
@@ -743,17 +828,37 @@ class C2Channel(BaseModel):
     packet_layout: str | None = None
     beacon_format: str | None = None
     evidence_ref: str | None = None
+    # The hosts, addresses or URLs the channel talks to, as the model wrote
+    # them, and the entries it cited. The report prints each endpoint defanged
+    # and says beside it whether the run may publish it.
+    endpoints: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
 
 
 class ConsolidatedIOC(BaseModel):
-    """One row of the consolidated, typed, defanged IOC table (reference §11)."""
+    """One row of the consolidated, typed IOC table.
+
+    ``value`` is live, like every other value in the JSON report: the
+    human-readable renderings defang it by ``kind`` when they print it. A row
+    stored before ``kind`` existed carries the value the old table wrote,
+    already defanged, and is printed as stored.
+    """
 
     model_config = _STRICT_CONFIG
 
-    type: str  # Domain / C2 URL / IPv4 / Registry Key / Path / File / Mutex / Filename / Hash
+    type: str  # SHA-256 / Domain / URL / IPv4 / Registry Key / Path / Mutex / Scheduled task / …
     description: str = ""
-    value: str  # defanged
+    value: str
     is_network: bool = False
+    # The indicator kind the defanging and the publish rule are keyed on
+    # (``domain``, ``ip``, ``url``, ``email``, ``path``, ``registry``, ``mutex``,
+    # ``hash``, …), who recorded the row (``identity``, ``sandbox``,
+    # ``analyst``, ``judge``, ``strings``, ``persistence``), what else is known
+    # about it, and the one publish rule's answer: ``yes`` or ``no: <reason>``.
+    kind: str | None = None
+    source: str | None = None
+    context: str = ""
+    published: str | None = None
 
 
 class Figure(BaseModel):
@@ -780,12 +885,25 @@ class Figure(BaseModel):
 
 
 class Conclusion(BaseModel):
-    """Graded closing assessment (reference §10)."""
+    """Graded closing assessment, as stored by reports written before it was dropped.
+
+    Nothing writes this now. A stored report's ``sophistication_rating`` is
+    printed beside the verdict; its text restated the summary and is not.
+    """
 
     model_config = _STRICT_CONFIG
 
     sophistication_rating: str | None = None  # e.g. "medium sophistication"
     text: str = ""
+
+
+class KeyFinding(BaseModel):
+    """One key-finding bullet, written by the report model with its citations."""
+
+    model_config = _STRICT_CONFIG
+
+    text: str
+    evidence_ids: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -913,6 +1031,12 @@ class MalwareReport(BaseModel):
 
     # --- LLM-generated narrative ---
     executive_summary: str = ""
+    # Three to six bullets the report leads with, from the same narrative
+    # round as the summary. Empty when the report model wrote none.
+    key_findings: list[KeyFinding] = Field(default_factory=list)
+    # Written by no code now: the technical-analysis subsections carry what
+    # these paragraphs used to. Kept so a report stored before the change
+    # still prints its paragraphs, under the technical analysis's lead-in.
     capabilities_narrative: list[str] = Field(default_factory=list)
     defensive_recommendations: list[DefensiveRecommendation] = Field(default_factory=list)
 
@@ -949,7 +1073,7 @@ class MalwareReport(BaseModel):
     # --- Professional-report front-matter & spine ---
     # All additive/optional. Deterministic extractors fill front_matter /
     # version_history / consolidated_iocs; the section-wise Composer fills the
-    # prose (technical spine, intro, conclusion, C2). Empty/None until those
+    # prose (execution flow, technical spine, background, C2). Empty/None until those
     # steps populate them — legacy consumers ignore unknown fields.
     front_matter: ReportFrontMatter | None = None
     version_history: list[VersionHistoryEntry] = Field(default_factory=list)
@@ -957,6 +1081,7 @@ class MalwareReport(BaseModel):
     intro_background: str = ""
     technical_analysis: TechnicalAnalysis | None = None
     c2_channels: list[C2Channel] = Field(default_factory=list)
+    # Written by no code now; a stored report keeps its sophistication rating.
     conclusion: Conclusion | None = None
     consolidated_iocs: list[ConsolidatedIOC] = Field(default_factory=list)
     figures: list[Figure] = Field(default_factory=list)

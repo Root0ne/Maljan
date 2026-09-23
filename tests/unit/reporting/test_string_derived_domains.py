@@ -173,15 +173,15 @@ class TestTheReportSaysWhereEachNameCameFrom:
         report = TestNoStringDerivedDomainReachesTheBundle()._report()
         return MarkdownRenderer().render(report)
 
-    def test_the_domains_table_carries_a_source_column(self) -> None:
+    def test_the_network_table_carries_a_source_column(self) -> None:
         markdown = self._markdown()
-        assert "| FQDN | Source | Suspicious |" in markdown
+        assert "| Type | Value (defanged) | Port/Path | Context | Source | Published |" in markdown
 
-    def test_each_row_names_its_own_source(self) -> None:
-        rows = [line for line in self._markdown().splitlines() if line.startswith("| `")]
+    def test_each_row_names_its_own_source_and_the_publish_answer(self) -> None:
+        rows = [line for line in self._markdown().splitlines() if line.startswith("| Domain |")]
         by_fqdn = {line.split("`")[1]: line for line in rows}
-        assert "| strings |" in by_fqdn["rosoft.com"]
-        assert "| sandbox |" in by_fqdn["c2.evil.tld"]
+        assert "| strings | no: seen only in the file's strings |" in by_fqdn["rosoft[.]com"]
+        assert "| sandbox | yes |" in by_fqdn["c2[.]evil[.]tld"]
 
 
 def _a_v3_onion() -> str:
@@ -265,12 +265,13 @@ class TestTheMachineReadableSurfacesSayItToo:
 
     def test_the_consolidated_table_carries_the_source(self) -> None:
         report = TestNoStringDerivedDomainReachesTheBundle()._report()
-        # The table defangs what it prints, so the rows are keyed on that.
-        described = {
-            row.value: row.description for row in report.consolidated_iocs if row.type == "Domain"
-        }
-        assert "strings" in described["rosoft[.]com"]
-        assert "sandbox" in described["c2[.]evil[.]tld"]
+        # Live values, as every JSON surface carries them; the source is its
+        # own column now, and the publish rule's answer beside it.
+        rows = {row.value: row for row in report.consolidated_iocs if row.type == "Domain"}
+        assert rows["rosoft.com"].source == "strings"
+        assert rows["rosoft.com"].published == "no: seen only in the file's strings"
+        assert rows["c2.evil.tld"].source == "sandbox"
+        assert rows["c2.evil.tld"].published == "yes"
 
 
 class TestAnIndicatorWithNothingToSaySaysNothing:

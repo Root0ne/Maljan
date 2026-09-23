@@ -305,7 +305,7 @@ class TestAFindingsOwnTechniqueIdsAreAsked:
         report.capability_matrix = cells
         report.ttp_mappings = mappings
 
-        rendered = MarkdownRenderer()._section_attack_matrix(report)
+        rendered = MarkdownRenderer().render(report).split("## 8. MITRE ATT&CK mapping", 1)[1]
 
         assert "Claims that were not published as techniques" in rendered
         assert ENTERPRISE in rendered

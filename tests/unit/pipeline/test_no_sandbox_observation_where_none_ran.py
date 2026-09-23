@@ -196,10 +196,9 @@ class TestTheRunSummary:
         assert "**Sandbox**" not in summary.to_markdown()
 
     def test_the_report_s_run_summary_prints_it(self) -> None:
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
 
         statement = status.sandbox_status(FIXTURE).statement
-        text = MarkdownRenderer()._section_run_summary(
+        text = _run_summary_text(
             {"sandbox": {"status": status.RECORDED_FIXTURE, "statement": statement}}
         )
 
@@ -229,3 +228,14 @@ class TestTheReportSection:
 
         assert section.title == "Sandbox"
         assert section.text == statement
+
+
+def _run_summary_text(run_summary: dict) -> str:
+    """The report's run-summary appendix for a report carrying ``run_summary``."""
+    from maljan.reporting.models import MalwareReport
+    from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+    report = MalwareReport.model_validate(
+        {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": run_summary}
+    )
+    return MarkdownRenderer()._appendix_run(report)

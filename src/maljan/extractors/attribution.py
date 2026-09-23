@@ -91,6 +91,8 @@ def build_family_attribution(
             family=name,
             family_confidence=max(0.0, min(1.0, confidence)),
             family_grounded=bool(evidence_ids),
+            family_evidence_ids=[str(eid) for eid in evidence_ids],
+            family_source="judge",
         )
 
     sandbox_family = _extract_sandbox_family(sandbox_report)
@@ -98,6 +100,7 @@ def build_family_attribution(
         family=sandbox_family,
         family_confidence=0.0,
         family_grounded=True,
+        family_source="sandbox" if sandbox_family else None,
     )
 
 

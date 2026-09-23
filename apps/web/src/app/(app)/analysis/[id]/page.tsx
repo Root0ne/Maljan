@@ -23,6 +23,14 @@ import { getErrorMessage } from "@/lib/errors";
 import { ENRICH_BUTTON_LABEL, ENRICH_STATUS_MESSAGE } from "@/lib/enrichment";
 import { degradedBannerText } from "@/lib/degradedBanner";
 import { validationRowText } from "@/lib/validationRows";
+import EvidenceChips from "@/components/analysis/EvidenceChips";
+import TechnicalAnalysisPanel from "@/components/analysis/TechnicalAnalysisPanel";
+import {
+  MEASURED_VOICE,
+  REPORT_MODEL_VOICE,
+  keyFindings,
+  noSummaryReason,
+} from "@/components/analysis/reportProse";
 import { severityTone } from "@/lib/severity";
 import type { FpWarning, MalwareReport } from "@/types/malware-report";
 
@@ -157,6 +165,9 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
   const sharedExplanation = explanations.length === 1 ? explanations[0] : null;
   const evidence = runSummary?.evidence ?? null;
   const ungroundedSections = runSummary?.sections_without_evidence ?? 0;
+  const findings = keyFindings(mr);
+  const storedParagraphs = mr.capabilities_narrative ?? [];
+  const summaryAbsentBecause = noSummaryReason(mr);
 
   return (
     <div className="flex flex-col gap-4">
@@ -275,7 +286,6 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
                   className={`inline-flex items-center gap-2 px-2 py-0.5 rounded text-xs font-medium ${sevStyle.bg} ${sevStyle.border} ${sevStyle.text} border`}
                 >
                   {mr.severity.rating}
-                  <span className="font-mono">{mr.severity.overall_score.toFixed(1)}/10</span>
                 </span>
                 {/* The rating alone is a number with no argument behind it. The
                     judge writes why it chose that rating, and printing the
@@ -286,9 +296,13 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
                     {mr.severity.business_impact}
                   </p>
                 )}
-                {mr.severity.affected_platforms.length > 0 && (
+                {/* Read from the file format by the report builder, not
+                    assessed by the judge, and labelled that way. */}
+                {mr.severity.affected_platforms.filter((p) => p && p !== "Unknown").length >
+                  0 && (
                   <p className="mt-1 text-[11px] text-text-muted">
-                    Affects: {mr.severity.affected_platforms.join(", ")}
+                    Platform (from the file format, {MEASURED_VOICE.toLowerCase()}):{" "}
+                    {mr.severity.affected_platforms.join(", ")}
                   </p>
                 )}
               </div>
@@ -385,24 +399,57 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
 
       <StageTimingCard jobId={jobId} elapsedSeconds={job?.duration_seconds ?? null} />
 
-      {/* Executive summary — drawn when the run wrote one. A heading over an
-          apology is a section that exists to say it has nothing. */}
-      {(mr.executive_summary.trim() || mr.capabilities_narrative.length > 0) && (
+      {/* Key findings and the summary, as the report model wrote them, or the
+          reason none was written. The exported report's §1; the paragraphs a
+          report stored before the technical analysis existed carried are kept
+          under the summary rather than lost. */}
+      {(findings.length > 0 ||
+        mr.executive_summary.trim() ||
+        storedParagraphs.length > 0 ||
+        summaryAbsentBecause) && (
         <div className="bg-bg-reading border border-border rounded">
-          <div className="px-4 py-3 border-b border-border">
+          <div className="px-4 py-3 border-b border-border flex items-baseline gap-3">
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
-              Executive Summary
+              Key findings
             </h2>
+            {/* The platform's "no summary was written" is not the report
+                model's text and is not labelled as if it were. */}
+            <span className="text-[11px] italic text-text-muted">
+              {findings.length > 0 || mr.executive_summary.trim() || storedParagraphs.length > 0
+                ? REPORT_MODEL_VOICE
+                : MEASURED_VOICE}
+            </span>
           </div>
           <div className="p-4">
+            {findings.length > 0 && (
+              <ul className="mb-3 space-y-1.5 list-disc pl-5">
+                {findings.map((finding, i) => (
+                  <li key={i} className="text-sm text-text-secondary leading-relaxed">
+                    {finding.text}
+                    {finding.evidence_ids.length > 0 ? (
+                      <EvidenceChips ids={finding.evidence_ids} className="ml-2" />
+                    ) : (
+                      <span className="ml-2 text-[10px] italic text-text-muted">
+                        no evidence cited
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
             {mr.executive_summary.trim() && (
               <p className="text-sm text-text-secondary leading-relaxed whitespace-pre-wrap">
                 {mr.executive_summary}
               </p>
             )}
-            {mr.capabilities_narrative.length > 0 && (
+            {!mr.executive_summary.trim() && findings.length === 0 && summaryAbsentBecause && (
+              <p className="text-sm text-text-muted">
+                No summary was written: {summaryAbsentBecause}.
+              </p>
+            )}
+            {storedParagraphs.length > 0 && (
               <ul className="mt-3 space-y-2">
-                {mr.capabilities_narrative.map((para, i) => (
+                {storedParagraphs.map((para, i) => (
                   <li key={i} className="text-sm text-text-secondary leading-relaxed">
                     <span className="text-text-muted mr-2">{i + 1}.</span>
                     {para}
@@ -413,6 +460,8 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
           </div>
         </div>
       )}
+
+      <TechnicalAnalysisPanel report={mr} />
 
       {/* How the run was set up and what it spent, in the one place that
           answers it. This is the rollup the retired pipeline panel carried:

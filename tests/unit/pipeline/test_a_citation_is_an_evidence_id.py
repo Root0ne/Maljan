@@ -226,7 +226,10 @@ class TestTheNarrative:
         summary = "A loader, malicious by 52 of 75 engines [ev_0011], signed [BINARY FACTS]. " * 3
         answer = {
             "executive_summary": summary,
-            "capabilities_narrative": ["one capability", "two capability", "three capability"],
+            "key_findings": [
+                {"text": "It resolves its imports by hash.", "evidence_ids": []},
+                {"text": "It builds its strings at run time.", "evidence_ids": []},
+            ],
             "defensive_recommendations": [
                 {
                     "category": "edr_hunting",
@@ -334,3 +337,16 @@ class TestAdjacentBracketsAreEachJudged:
         assert self._prose("Frames are `[4-byte length][RC4 payload]`.") == []
         assert self._prose("It opens [Content_Types].xml.") == []
         assert self._prose("It calls [System.Convert]::FromBase64String.") == []
+
+
+class TestTheNarrativeProseFields:
+    def test_a_key_finding_s_text_is_read_and_its_id_list_is_not(self) -> None:
+        from maljan.reporting.narrative_agent import NARRATIVE_PROSE
+
+        answer = {
+            "executive_summary": "A loader [ev_0011].",
+            "key_findings": [{"text": "Signed [BINARY FACTS].", "evidence_ids": ["ev_0999"]}],
+            "defensive_recommendations": [{"action": "Block [port] outbound."}],
+        }
+        (found,) = citation_violations(answer, CITABLE, prose=NARRATIVE_PROSE)
+        assert "[BINARY FACTS] is cited" in found.message

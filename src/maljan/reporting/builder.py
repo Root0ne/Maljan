@@ -29,7 +29,6 @@ from maljan.core.logger import logger
 from maljan.extractors.attribution import build_family_attribution
 from maljan.extractors.capability_matrix import build_capability_matrix, unmapped_behaviours
 from maljan.pipeline.outcome import (
-    INCONCLUSIVE_REASONS,
     INCONCLUSIVE_VERDICT,
     normalise_verdict,
 )
@@ -47,25 +46,20 @@ from maljan.reporting.models import (
     DefensiveRecommendation,
     EvidenceIndexRow,
     ExternalReference,
+    KeyFinding,
     MalwareReport,
     ReportFrontMatter,
     SeverityAssessment,
     VersionHistoryEntry,
 )
+from maljan.schemas.judgement import SEVERITY_RATINGS
 
 if TYPE_CHECKING:
     from maljan.schemas.evidence import LedgerEntry
 
-# The score a rating prints as. A rating is what the judge decided; the score is
-# a rendering of it, kept because the header and the dashboard sort on a number.
-# Deliberately coarse: a value like 8.3 would imply a measurement.
-_SEVERITY_SCORES: dict[str, float] = {
-    "Critical": 9.5,
-    "High": 7.5,
-    "Medium": 5.0,
-    "Low": 2.5,
-    "Informational": 0.5,
-}
+# How the reason for an absent summary begins, so the key-findings section can
+# find it among the degradation reasons and print it where the summary would be.
+NO_SUMMARY_REASON = "the report model wrote no summary"
 
 
 class MalwareReportBuilder:
@@ -187,8 +181,7 @@ class MalwareReportBuilder:
             unmapped_behaviours=unmapped_behaviours(self.stix_output),
             attribution=attribution,
             executive_summary="",  # filled by NarrativeAgent
-            capabilities_narrative=[],  # filled by NarrativeAgent
-            defensive_recommendations=[],  # filled by NarrativeAgent + detection rules
+            defensive_recommendations=[],  # filled by NarrativeAgent
             detection_signatures=[],  # filled by detection_signatures.py
             run_summary=self.run_summary,
             negotiation_summary=negotiation_summary,
@@ -288,9 +281,17 @@ class MalwareReportBuilder:
 
     @staticmethod
     def apply_narrative(report: MalwareReport, narrative: dict[str, Any]) -> MalwareReport:
-        """Merge an ``NarrativeOutput`` dict into the report in-place."""
+        """Merge an ``NarrativeOutput`` dict into the report, as the model wrote it."""
         report.executive_summary = str(narrative.get("executive_summary") or "")
-        report.capabilities_narrative = list(narrative.get("capabilities_narrative") or [])
+        findings: list[KeyFinding] = []
+        for item in narrative.get("key_findings") or []:
+            try:
+                findings.append(
+                    item if isinstance(item, KeyFinding) else KeyFinding.model_validate(item)
+                )
+            except Exception:  # noqa: BLE001
+                continue
+        report.key_findings = findings
         rec_raw = narrative.get("defensive_recommendations") or []
         recs: list[DefensiveRecommendation] = []
         for item in rec_raw:
@@ -302,20 +303,16 @@ class MalwareReportBuilder:
                     recs.append(DefensiveRecommendation.model_validate(item))
                 except Exception:  # noqa: BLE001
                     continue
-        # The narrative LLM gets no guidance on the
-        # ``category`` enum and collapses every recommendation to "patching"
-        # (none of which were patches). Re-derive the category deterministically
-        # from the action/rationale text so the label matches the advice.
         valid_tids = {m.technique_id for m in report.ttp_mappings if m.technique_id}
         # A fresh row per recommendation rather than an edit in place. The
         # technique id is read out of the model's own sentence — it wrote
         # "block T1547 autorun" and left the structured field empty — so this
         # moves a value the LLM supplied into the field it belongs in rather
-        # than choosing one on its behalf.
+        # than choosing one on its behalf. The category is the model's own:
+        # the prompt names the vocabulary, and the report prints what it chose.
         report.defensive_recommendations = [
             rec.model_copy(
                 update={
-                    "category": _derive_recommendation_category(rec.action, rec.rationale),
                     "technique_id": rec.technique_id
                     or _first_report_technique(
                         f"{rec.action} {rec.rationale} {rec.detection or ''}", valid_tids
@@ -342,84 +339,24 @@ class MalwareReportBuilder:
         return report
 
     @staticmethod
-    def apply_fallback_narrative(report: MalwareReport) -> MalwareReport:
-        """Fill narrative fields with a deterministic templated summary.
+    def apply_fallback_narrative(
+        report: MalwareReport, why: str = "no report model ran"
+    ) -> MalwareReport:
+        """Say that no summary was written, and write none.
 
-        Used when no LLM is available (mock mode) or the structured-output
-        invocation fails — guarantees the report never ships empty
-        narrative blocks.
+        Used when no LLM is available (mock mode) or the narrative round failed.
+        It used to fill the summary, the capability paragraphs and a
+        recommendation from a template, and the report printed them where the
+        model's words go, so a reader could not tell the platform's sentence
+        from the model's. The prose fields stay empty now; the reason is
+        recorded once among the degradation reasons, and the report's key
+        findings section says it and lists the verdict's facts itself.
         """
-        verdict = report.verdict
-        family = report.attribution.family or report.malware_category or "unclassified malware"
-        # A count followed by a shorter list has to say it is a shorter list.
-        # "reported 11 ATT&CK techniques: T1027 ..., T1055 ..." and then five
-        # of them reads as a contradiction rather than as a sample.
-        named = [f"{m.technique_id} ({m.technique_name})" for m in report.ttp_mappings[:5]]
-        rest = len(report.ttp_mappings) - len(named)
-        ttp_summary = (
-            f"including {', '.join(named)}, and {rest} more" if rest > 0 else ", ".join(named)
-        )
-        if any(reason in INCONCLUSIVE_REASONS for reason in report.degradation_reasons or []):
-            # A run that examined nothing has no classification to report, and
-            # "classified as suspicious" would read as a finding drawn from
-            # evidence that does not exist.
-            report.executive_summary = (
-                "This analysis is inconclusive: no analysis was performed, so nothing "
-                "about the sample was established. The verdict is not a finding about "
-                "the sample and must not be read as one. Re-run the analysis once the "
-                "cause named in the degradation reasons is resolved."
-            )
-        else:
-            # The confidence is not restated here. Every surface that draws
-            # this paragraph draws the verdict and its confidence above it --
-            # the console's header chip, the exported report's own header --
-            # and the two used to disagree about notation on one screen.
-            techniques = (
-                "The pipeline mapped no ATT&CK technique. "
-                if not named
-                else f"The pipeline mapped {len(report.ttp_mappings)} ATT&CK techniques, "
-                f"{ttp_summary}. "
-            )
-            report.executive_summary = (
-                f"Sample classified as {verdict.lower()}. Best-guess family: {family}. "
-                f"{techniques}"
-                "This is an auto-generated summary (no LLM available); review the "
-                "detailed sections for evidence."
-            )
-        # Which tabs to point at is read from the report rather than written
-        # down: the console offers a tab only when the run filled it, so a
-        # fixed "Static, Dynamic and Network" named one it had chosen to hide.
-        drawn = [
-            name
-            for name, block in (
-                ("Identity", report.identity),
-                ("Static", report.static),
-                ("Dynamic", report.dynamic),
-                ("Network", report.network),
-            )
-            if block is not None
-        ]
-        # ``identity`` is not optional on a report, so ``drawn`` always names at
-        # least the Identity tab and there is no empty case to write for.
-        where = (
-            f"the {', '.join(drawn[:-1])} and {drawn[-1]} tabs"
-            if len(drawn) > 1
-            else f"the {drawn[0]} tab"
-        )
-        report.capabilities_narrative = [
-            "Detailed narrative was not generated because the analysis ran in "
-            "mock/offline mode or the narrative LLM call failed. The deterministic "
-            f"evidence on {where} carries the full picture.",
-        ]
-        report.defensive_recommendations = [
-            DefensiveRecommendation(
-                category="edr_hunting",
-                action="Review the listed MITRE ATT&CK techniques and hunt for the "
-                "associated indicators in EDR telemetry.",
-                rationale="Auto-generated fallback recommendation — narrative LLM unavailable.",
-                priority="P1",
-            )
-        ]
+        reason = f"{NO_SUMMARY_REASON}: {why}"
+        if not any(
+            str(existing).startswith(NO_SUMMARY_REASON) for existing in report.degradation_reasons
+        ):
+            report.degradation_reasons.append(reason)
         return report
 
     # ------------------------------------------------------------------
@@ -452,20 +389,16 @@ class MalwareReportBuilder:
         verdict confidence, plus 0.5 per persistence entry, plus 0.3 per
         suspicious domain, plus 0.2 per obfuscation indicator — presented in the
         report header as a severity score out of ten. Every constant in it was
-        chosen here, by a builder that had read no evidence, and the number it
-        produced was the most authoritative-looking thing on the page.
-
-        ``overall_score`` is derived from the rating rather than the other way
-        round, because a rating is what the judge actually decided and a score
-        to one decimal place would claim a precision nobody has.
+        chosen here, by a builder that had read no evidence. The score that
+        replaced it was read off the rating through a fixed table, which is the
+        rating said twice in a precision nobody has, and it is gone too.
         """
         verdict = getattr(self.judge_assessment, "severity", None)
         rating = str(getattr(verdict, "rating", "") or "")
-        if rating not in _SEVERITY_SCORES:
+        if rating not in SEVERITY_RATINGS:
             logger.info("MalwareReportBuilder: the judge assessed no severity.")
             return None
         return SeverityAssessment(
-            overall_score=_SEVERITY_SCORES[rating],
             rating=rating,  # type: ignore[arg-type]
             business_impact=str(getattr(verdict, "rationale", "") or ""),
             affected_platforms=self._guess_platforms(static, dynamic, identity),
@@ -607,168 +540,246 @@ def _build_version_history(front_matter: ReportFrontMatter) -> list[VersionHisto
     ]
 
 
-def defang(value: str) -> str:
-    """Neutralise a live indicator for safe distribution (reference VI.3).
-
-    Bracket the dots in domains/IPs and the scheme separator in URLs. Idempotent
-    and conservative — only touches ``.``, ``://`` and the ``http``/``https``
-    scheme so hashes/registry paths pass through unchanged.
-    """
-    if not value:
-        return value
-    out = value
-    if "://" in out:
-        out = out.replace("http://", "hxxp[://]").replace("https://", "hxxps[://]")
-    # Only defang dotted network-looking tokens (contain a dot, no path sep and
-    # not an obvious filesystem path) to avoid mangling registry/file paths.
-    looks_networky = "." in out and "\\" not in out
-    if looks_networky:
-        out = out.replace("[.]", ".").replace(".", "[.]")
-    return out
-
-
 def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
-    """Gather + dedupe + defang every IOC into one typed table (reference §11).
+    """Every indicator the report holds, typed, deduplicated and live, in one table.
 
-    A recurring corpus weakness is IOCs dispersed inline; this consolidates
-    hashes, network domains/IPs/URLs, suspicious static strings, and persistence
-    targets into a single ``Type | Description | Value`` table, host- vs
-    network-based via ``is_network``.
+    Host indicators first — the sample's own hashes, then carved and dropped
+    files, paths, directories, registry keys, mutexes, named pipes, scheduled
+    tasks, services and command lines — then the network indicators. Each row
+    carries who recorded it and the one publish rule's answer
+    (:func:`~maljan.reporting.renderers.stix_renderer.publish_answer`), asked
+    with the arguments ``/reports/{id}/iocs`` and the STIX export ask it with.
+    Values are stored live; the human-readable renderings defang them by kind.
     """
+    from maljan.extractors.network_extractor import url_host
+    from maljan.reporting.renderers.stix_renderer import (
+        corroborating_values,
+        path_names_a_file,
+        publish_answer,
+    )
+
     rows: list[ConsolidatedIOC] = []
     seen: set[tuple[str, str]] = set()
+    corroborating = corroborating_values(report)
 
-    def _add(ioc_type: str, value: str, description: str = "", is_network: bool = False) -> None:
+    def _add(
+        ioc_type: str,
+        kind: str,
+        value: str,
+        source: str | None,
+        context: str = "",
+        *,
+        published: str | None = None,
+        is_network: bool = False,
+    ) -> None:
         value = (value or "").strip()
         if not value:
             return
-        rendered = defang(value) if is_network else value
-        key = (ioc_type, rendered.lower())
+        key = (ioc_type, value.lower())
         if key in seen:
             return
         seen.add(key)
         rows.append(
             ConsolidatedIOC(
-                type=ioc_type, description=description, value=rendered, is_network=is_network
+                type=ioc_type,
+                kind=kind,
+                value=value,
+                source=source,
+                context=context,
+                description=context,
+                published=published,
+                is_network=is_network,
             )
         )
 
+    def _from_strings(kind: str, value: str) -> str:
+        return publish_answer(kind, value, "strings", corroborating=corroborating)
+
     h = report.identity.hashes
-    _add("SHA-256", h.sha256 or "", "Sample hash")
-    _add("MD5", h.md5 or "", "Sample hash")
-    _add("SHA-1", h.sha1 or "", "Sample hash")
+    # The sample's own identity, established by the router: `/iocs` serves
+    # every one of these as published, and so does this table.
+    for label, digest in (
+        ("SHA-256", h.sha256),
+        ("SHA-1", h.sha1),
+        ("MD5", h.md5),
+        ("SHA-512", h.sha512),
+        ("imphash", h.imphash),
+        ("ssdeep", h.ssdeep),
+        ("TLSH", h.tlsh),
+    ):
+        _add(label, "hash", digest or "", "identity", "the sample", published="yes")
+
+    static = report.static
+    dynamic = report.dynamic
+    strings = list(static.interesting_strings) if static else []
+    file_ops = [op for op in (dynamic.file_operations if dynamic else []) if isinstance(op, dict)]
+
+    if static:
+        for res in static.embedded_resources:
+            if res.get("carved") and res.get("sha256"):
+                _add("SHA-256", "hash", str(res["sha256"]), "static", f"carved at {res.get('id')}")
+    for op in file_ops:
+        if op.get("operation") == "write" and op.get("sha256"):
+            name = str(op.get("path") or op.get("name") or "")
+            _add("SHA-256", "hash", str(op["sha256"]), "sandbox", f"dropped {name}".strip())
+
+    for op in file_ops:
+        if op.get("operation") == "write" and op.get("path"):
+            _add("File path", "path", str(op["path"]), "sandbox", "written by the sample")
+    for s in strings:
+        if s.kind == "path" and not _is_pipe(s.value):
+            ioc_type = "File path" if path_names_a_file(s.value) else "Directory"
+            _add(ioc_type, "path", s.value, "strings", s.notes or "")
+
+    if dynamic:
+        for mod in dynamic.registry_mods:
+            if mod.operation in ("create", "modify") and mod.key:
+                target = f"{mod.key} ({mod.value_name})" if mod.value_name else mod.key
+                _add("Registry key", "registry", target, "sandbox", mod.operation)
+    for mech in report.persistence:
+        if mech.kind == "registry_run" and mech.target:
+            _add("Registry key", "registry", mech.target, "persistence", "run key")
+    for s in strings:
+        if s.kind == "registry":
+            _add("Registry key", "registry", s.value, "strings", s.notes or "")
+
+    for op in file_ops:
+        if op.get("operation") == "mutex" and op.get("name"):
+            _add("Mutex", "mutex", str(op["name"]), "sandbox", "created at run time")
+    for s in strings:
+        if s.kind == "mutex":
+            _add("Mutex", "mutex", s.value, "strings", s.notes or "")
+
+    for s in strings:
+        if s.kind == "path" and _is_pipe(s.value):
+            _add("Named pipe", "path", s.value, "strings", s.notes or "")
+
+    for mech in report.persistence:
+        if mech.kind == "scheduled_task" and mech.target:
+            _add("Scheduled task", "scheduled_task", mech.target, "persistence", mech.payload)
+    for mech in report.persistence:
+        if mech.kind in ("service", "systemd_service") and mech.target:
+            _add("Service", "service", mech.target, "persistence", mech.payload)
+
+    for node in _spawned(dynamic.process_tree if dynamic else []):
+        if node.command_line:
+            _add("Command line", "command", node.command_line, "sandbox", f"pid {node.pid}")
+    for s in strings:
+        if s.kind == "command":
+            _add("Command line", "command", s.value, "strings", s.notes or "")
+
+    # Credentials and wallet addresses: no export carries them, and a
+    # responder still needs to see them.
+    for s in strings:
+        if s.kind == "secret":
+            _add("Leaked credential", "secret", s.value, "strings", s.notes or "")
+        elif s.kind == "crypto_wallet":
+            _add("Cryptocurrency address", "crypto_wallet", s.value, "strings", s.notes or "")
+
+    # A string row of a kind the rule answers for is asked it; the sandbox's,
+    # the persistence mechanisms' and the identity's rows are observations
+    # and records the export reads on its own terms, and keep what they carry.
+    for row in rows:
+        if row.source == "strings" and row.kind in ("path", "registry", "mutex", "command"):
+            row.published = _from_strings(row.kind, row.value)
 
     net = report.network
+    reputations: dict[str, Any] = {}
     if net:
         for d in net.domains:
-            # Where the name came from belongs beside it: the consolidated
-            # table is read by somebody deciding what to block.
-            note = "; ".join(part for part in (d.reason, d.source) if part)
-            _add("Domain", d.fqdn, note, is_network=True)
+            reputations[d.fqdn.strip().lower().rstrip(".")] = d.reputation
+            _add(
+                "Domain",
+                "domain",
+                d.fqdn,
+                d.source,
+                _domain_context(d),
+                published=publish_answer("domain", d.fqdn, d.source, d.reputation),
+                is_network=True,
+            )
         for ip in net.ips:
-            _add("IPv4", ip.address, f"port {ip.port}" if ip.port else "", is_network=True)
+            where = [f"port {ip.port}" if ip.port else "", ip.transport or "", ip.asn or ""]
+            _add(
+                "IPv6" if ":" in ip.address else "IPv4",
+                "ip",
+                ip.address,
+                ip.source,
+                "; ".join(part for part in [*where, ip.geo or ""] if part),
+                published=publish_answer("ip", ip.address, ip.source, ip.reputation),
+                is_network=True,
+            )
         for u in net.urls:
-            _add("URL", u.url, u.method or "", is_network=True)
+            # ``or "strings"`` exactly as the export and the feed read it: a URL
+            # that records no source is the weakest claim there is.
+            source = u.source or "strings"
+            _add(
+                "URL",
+                "url",
+                u.url,
+                source,
+                "; ".join(
+                    part for part in (u.method, f"HTTP {u.status}" if u.status else "") if part
+                ),
+                published=publish_answer("url", u.url, source, reputations.get(url_host(u.url))),
+                is_network=True,
+            )
+        for ua in net.user_agents:
+            _add("User-Agent", "user_agent", ua, "sandbox", published="yes", is_network=True)
+        for ja3 in net.ja3_fingerprints:
+            _add("JA3", "ja3", ja3, "sandbox", published="yes", is_network=True)
+        for ja3s in net.ja3s_fingerprints:
+            _add("JA3S", "ja3s", ja3s, "sandbox", published="yes", is_network=True)
 
-    if report.static:
-        _kind_to_type = {
-            "url": "URL",
-            "ip": "IPv4",
-            "domain": "Domain",
-            "registry": "Registry Key",
-            "path": "Path",
-            "mutex": "Mutex",
-            "email": "Email",
-            "command": "Command",
-            # Without these two, a leaked AWS key lands in the table as an
-            # untyped "String" — present, but indistinguishable from a version
-            # banner, and therefore useless to whoever has to act on it.
-            "secret": "Leaked Credential",
-            "crypto_wallet": "Cryptocurrency Address",
-        }
-        for s in report.static.interesting_strings:
-            ioc_type = _kind_to_type.get(s.kind, "String")
-            is_net = s.kind in {"url", "ip", "domain"}
-            _add(ioc_type, s.value, s.notes or "", is_network=is_net)
-
-    for pm in report.persistence:
-        if pm.target:
-            _add("Persistence", pm.target, pm.kind.replace("_", " "))
+    labels = {"url": "URL", "domain": "Domain", "email": "Email"}
+    for s in strings:
+        if s.kind in ("url", "domain", "ip", "email"):
+            label = labels.get(s.kind) or ("IPv6" if ":" in s.value else "IPv4")
+            _add(
+                label,
+                s.kind,
+                s.value,
+                "strings",
+                s.notes or "",
+                published=_from_strings(s.kind, s.value),
+                is_network=True,
+            )
 
     return rows
 
 
-def _derive_recommendation_category(action: str, rationale: str) -> str:
-    """Map a recommendation's free text to the correct ``category`` enum value.
+_PIPE_PREFIXES = ("\\\\.\\pipe\\", "//./pipe/")
 
-    The narrative LLM labelled every recommendation
-    "patching" regardless of content. This deterministic mapper inspects the
-    action/rationale wording and returns one of the ``DefensiveRecommendation``
-    enum members, defaulting to ``other`` when nothing matches. Order matters —
-    the most specific signal wins.
-    """
-    text = f"{action} {rationale}".lower()
-    if any(k in text for k in ("patch", "cve-", " cve", "vulnerab", "update the software")):
-        return "patching"
-    if any(
-        k in text
-        for k in (
-            "firewall",
-            "block outbound",
-            "outbound traffic",
-            "outbound connection",
-            "network connection",
-            "egress",
-            "sinkhole",
-            "proxy",
-            " c2 ",
-            "c2 infrastructure",
-            "command and control",
-            "block the domain",
-            "block the ip",
-        )
-    ):
-        return "firewall"
-    if "registry" in text:
-        return "registry_hardening"
-    if any(
-        k in text
-        for k in (
-            "group policy",
-            "gpo",
-            "applocker",
-            "wdac",
-            "constrained language",
-            "software restriction",
-        )
-    ):
-        return "gpo"
-    if any(
-        k in text
-        for k in ("awareness", "phishing", "user training", "user education", "social engineering")
-    ):
-        return "user_awareness"
-    if any(
-        k in text
-        for k in (
-            "monitor",
-            "alert",
-            " edr",
-            "endpoint detection",
-            "hunt",
-            "detect",
-            "sigma",
-            "yara",
-            "sysmon",
-            "telemetry",
-            "process injection",
-            "behaviour",
-            "behavior",
-            "log",
-        )
-    ):
-        return "edr_hunting"
-    return "other"
+
+def _is_pipe(value: str) -> bool:
+    """Whether a path names a Windows named pipe."""
+    return str(value or "").lower().startswith(_PIPE_PREFIXES)
+
+
+def _spawned(roots: list[Any]) -> list[Any]:
+    """Every process below the roots: the ones the sample started."""
+    out: list[Any] = []
+    for root in roots:
+        for child in root.children:
+            out.append(child)
+            out.extend(_spawned([child]))
+    return out
+
+
+def _domain_context(d: Any) -> str:
+    """What else the network block knows about a name, for the IOC table's context cell."""
+    notes = [d.reason] if d.reason else []
+    if isinstance(d.dga_score, int | float) and d.dga_score > 0:
+        notes.append(f"DGA score {float(d.dga_score):.2f}")
+    if d.is_punycode:
+        target = f" resembling {d.homograph_target}" if d.homograph_target else ""
+        notes.append(f"punycode{target}")
+    if d.resolved_ips:
+        notes.append("resolved to " + ", ".join(d.resolved_ips[:4]))
+    if d.queried_pids:
+        # Which process asked: when a dropped child resolves the C2 rather
+        # than the parent, this is the whole story.
+        notes.append("queried by pid " + ", ".join(str(p) for p in d.queried_pids[:6]))
+    return "; ".join(notes)
 
 
 _TECHNIQUE_RE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b")

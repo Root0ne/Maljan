@@ -270,9 +270,7 @@ class TestTheRunSummaryRecordsIt:
         assert generation["timeouts"]["composer:section"]["configured_s"] == 120.0
 
     def test_the_report_states_every_number(self) -> None:
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
-
-        text = MarkdownRenderer()._section_run_summary(self._summary().to_dict())
+        text = _appendix_text(self._summary().to_dict())
 
         assert f"Generation rate of `{SLOW}`: 3.80 tokens/s" in text
         assert "Timeout of `judge:verdict`: 1800s" in text
@@ -576,3 +574,14 @@ class TestAModelListSwitchSticksForTheReportStage:
         assert all(section is not None for section in authored), composer.degradations
         assert len(primary.calls) == 1, "the stalled first model was waited out once"
         assert len(fallback.calls) == 4
+
+
+def _appendix_text(run_summary: dict) -> str:
+    """The report's run-summary appendix for a report carrying ``run_summary``."""
+    from maljan.reporting.models import MalwareReport
+    from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+    report = MalwareReport.model_validate(
+        {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": run_summary}
+    )
+    return MarkdownRenderer()._appendix_run(report)

@@ -330,6 +330,8 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
         "min_sdk",
         "target_sdk",
         "pdb_path",
+        "export_name",
+        "version_info",
         "filetype",
         "flags",
     ):
@@ -374,8 +376,23 @@ def _binary_info(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> No
             acc.add_row(table, [_text(row.get("dll")), _text(row.get("function"))])
         acc.credit(table, entry)
 
+    # With the ordinals and addresses when the tool reported them: several
+    # exports sharing one address is a fact the names alone hide.
+    export_rows = [row for row in data.get("export_rows") or [] if isinstance(row, dict)]
     exports = data.get("exports")
-    if isinstance(exports, list) and exports:
+    if export_rows:
+        table = acc.get(
+            f"{prefix}_exports",
+            f"{prefix.upper()} exports",
+            "table",
+            columns=["Name", "Ordinal", "RVA"],
+        )
+        for row in export_rows[:MAX_ROWS]:
+            acc.add_row(
+                table, [_text(row.get("name")), _text(row.get("ordinal")), _text(row.get("rva"))]
+            )
+        acc.credit(table, entry)
+    elif isinstance(exports, list) and exports:
         listing = acc.get(f"{prefix}_exports", f"{prefix.upper()} exports", "list")
         for name in exports[:MAX_ROWS]:
             acc.add_item(listing, _text(name))
@@ -763,6 +780,31 @@ def _functions_examined(acc: _Sections, entry: LedgerEntry, _data: Any) -> None:
     acc.credit(section, entry)
 
 
+def _finding_confidence(value: Any) -> str:
+    """A finding's confidence as the analyst stated it, or that it stated none."""
+    return f"{float(value):.2f}" if isinstance(value, int | float) else "not given"
+
+
+def _reputation(acc: _Sections, entry: LedgerEntry, data: dict[str, Any]) -> None:
+    """A reputation lookup, with the engine counts as rows of their own.
+
+    The service answers the counts nested inside its payload, and the generic
+    block flattens that into one cell a reader has to scroll to; the count is
+    the one fact of the lookup a report states.
+    """
+    _generic_kv(acc, entry, data)
+    body = data.get("data") if isinstance(data.get("data"), dict) else data
+    stats = body.get("last_analysis_stats") if isinstance(body, dict) else None
+    coverage = body.get("coverage") if isinstance(body, dict) else None
+    section = acc.get(f"tool_{entry.tool}", entry.tool.replace("_", " ").capitalize(), "kv")
+    if isinstance(stats, dict):
+        for name in ("malicious", "suspicious", "undetected", "harmless"):
+            if isinstance(stats.get(name), int):
+                acc.add_row(section, [f"engines {name}", str(stats[name])])
+    if isinstance(coverage, dict) and isinstance(coverage.get("engines"), int):
+        acc.add_row(section, ["engines", str(coverage["engines"])])
+
+
 _BUILDERS: dict[str, Any] = {
     "identify_file": _identity,
     "hashes": _identity,
@@ -789,6 +831,8 @@ _BUILDERS: dict[str, Any] = {
     "sandbox_report_section": _sandbox_section,
     "sandbox_status": _sandbox_status,
     "pcap_summary": _pcap,
+    "get_file_report": _reputation,
+    "check_hash": _reputation,
 }
 
 
@@ -982,7 +1026,7 @@ def _findings_section(
                     str(agent),
                     _text(getattr(finding, "title", "")),
                     _technique_cell(getattr(finding, "technique_ids", []) or [], published),
-                    f"{float(getattr(finding, 'confidence', 0.0) or 0.0):.2f}",
+                    _finding_confidence(getattr(finding, "confidence", None)),
                     _text(getattr(finding, "evidence_ids", []) or []),
                 ],
                 sets=(0, 4),

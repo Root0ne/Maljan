@@ -53,6 +53,9 @@ class TestSignalQuality:
         # The judge read the analysts, not the sample, so it corroborates
         # nothing on its own.
         assert mappings[0].is_corroborated is False
+        # And it put no number on it: the 0.0 the cell carries is not a
+        # confidence anybody stated, and the report prints "not assessed".
+        assert cells[0].confidence is None
 
     def test_a_technique_nothing_asserted_is_dropped(self) -> None:
         cells, mappings = build_capability_matrix(stix_output=None, isr_reports=None)
@@ -89,6 +92,53 @@ class TestItProjectsTheJudgeAndTheAnalysts:
         # sources that named the technique: no analyst claimed it here.
         assert cells[0].contributing_layers == ["judge"]
         assert mappings[0].is_corroborated is False
+        assert cells[0].confidence_source == "the judge"
+
+    def test_the_cell_names_who_stated_its_number(self) -> None:
+        """The cell holds the highest number any source stated; the report
+        prints it with the name of the source that stated it."""
+        bundle = _bundle(
+            techniques=["T1055"],
+            relationships=[
+                {
+                    "type": "relationship",
+                    "x_maljan_technique_id": "T1055",
+                    "x_maljan_confidence": 0.9,
+                    "x_maljan_contributing_agents": ["static"],
+                }
+            ],
+        )
+        cells, _ = build_capability_matrix(
+            stix_output=bundle,
+            isr_reports={"static": _isr("static", _claim("T1055", 0.6))},
+        )
+        assert cells[0].confidence == 0.9
+        assert cells[0].confidence_source == "the judge"
+
+        cells, _ = build_capability_matrix(
+            stix_output=None, isr_reports={"static": _isr("static", _claim("T1059", 0.7))}
+        )
+        assert cells[0].confidence_source == "the static analyst"
+
+    def test_a_finding_with_no_number_states_none(self) -> None:
+        """A finding written without a confidence adds no 0.0 and names no
+        producer; the confidence list and its producers stay in step."""
+        from maljan.schemas.isr_models import Finding
+
+        isr = AgentISR(
+            agent_id="static",
+            domain="static",
+            findings=[Finding(title="Queries the system", technique_ids=["T1082"])],
+        )
+        cells, _ = build_capability_matrix(stix_output=None, isr_reports={"static": isr})
+        assert cells[0].confidence is None
+        assert cells[0].confidence_source == ""
+
+    def test_a_cell_nobody_put_a_number_on_names_nobody(self) -> None:
+        cells, _ = build_capability_matrix(
+            stix_output=_bundle(techniques=["T1055"]), isr_reports=None
+        )
+        assert cells[0].confidence_source == ""
 
     def test_an_analyst_claim_adds_its_own_evidence_quote(self) -> None:
         cells, _ = build_capability_matrix(

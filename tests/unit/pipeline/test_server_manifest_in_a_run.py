@@ -188,6 +188,25 @@ class TestAStageRecordsWhatItCannotHave:
             "uv sync --extra tools"
         ]
 
+    def test_a_parser_the_sample_s_format_never_needs_is_not_a_reason(self) -> None:
+        """A missing document parser on a PE sample lost this run nothing."""
+        manifest = ServerCapabilities.from_payload("analysis", MANIFEST)
+        registry = _Registry({"analysis": manifest})
+        agent = MagicMock()
+        agent.tools = [_bound("document_info", "analysis")]
+
+        assert note_unavailable_tools(_Container(registry), agent, "pe") == []
+        assert registry.degradation_reasons == []
+        assert note_unavailable_tools(_Container(registry), agent, "ole2") != []
+
+    def test_a_sample_of_unknown_format_keeps_the_reason(self) -> None:
+        manifest = ServerCapabilities.from_payload("analysis", MANIFEST)
+        registry = _Registry({"analysis": manifest})
+        agent = MagicMock()
+        agent.tools = [_bound("document_info", "analysis")]
+
+        assert note_unavailable_tools(_Container(registry), agent, "unknown") != []
+
     def test_a_tool_the_agent_does_not_bind_is_not_its_reason(self) -> None:
         manifest = ServerCapabilities.from_payload("analysis", MANIFEST)
         registry = _Registry({"analysis": manifest})
@@ -207,3 +226,23 @@ class TestAStageRecordsWhatItCannotHave:
         assert run_is_degraded([reason]) is False
         assert run_is_degraded([reason, "mcp server 'analysis' unavailable"]) is True
         assert run_is_degraded(["triage.identify_file_failed"]) is True
+
+
+class TestAServerReasonMeetsTheSample:
+    """The registry records a withheld tool before any sample is known."""
+
+    MACHO = (
+        "server.analysis.macho_info_unavailable(macholib is not installed); uv sync --extra tools"
+    )
+
+    def test_a_mach_o_parser_is_nothing_to_a_pe_sample(self) -> None:
+        from maljan.pipeline.nodes import reason_applies_to_format
+
+        assert reason_applies_to_format(self.MACHO, "pe") is False
+        assert reason_applies_to_format(self.MACHO, "mach-o") is True
+
+    def test_every_other_reason_is_kept(self) -> None:
+        from maljan.pipeline.nodes import reason_applies_to_format
+
+        assert reason_applies_to_format("server 'vt' could not be attached", "pe") is True
+        assert reason_applies_to_format(self.MACHO, "") is True

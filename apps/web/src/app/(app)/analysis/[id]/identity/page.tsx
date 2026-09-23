@@ -149,6 +149,17 @@ export default function IdentityTab() {
                 : "",
             },
             { label: "Language / compiler", value: identity.language_or_compiler ?? "" },
+            // What the format tool read out of the header: the machine, and
+            // whether the image is a library — a DLL submitted under an .exe
+            // name is a fact a reader needs before trying to run it.
+            { label: "Architecture", value: identity.architecture ?? "" },
+            {
+              label: "Image",
+              value:
+                identity.is_dll === true ? "DLL" : identity.is_dll === false ? "executable" : "",
+            },
+            { label: "Export directory name", value: identity.export_name ?? "" },
+            { label: "Internal name", value: identity.internal_name ?? "" },
           ]
             // A field the ledger table above already carries is not drawn
             // again: `size` appeared in both tables on the one screen.

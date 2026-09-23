@@ -122,9 +122,8 @@ class TestTheConversationEvent:
 
 
 def test_the_report_says_what_the_run_spent_and_which_turns_fell_back() -> None:
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
 
-    text = MarkdownRenderer()._section_run_summary(
+    text = _run_summary_text(
         {
             "tokens": {
                 "llm_calls": 4,
@@ -196,3 +195,14 @@ class TestTheReporter:
 
         agent = NarrativeAgent(llm=AIMessage(content="unused"))  # type: ignore[arg-type]
         assert agent.event_sink is None
+
+
+def _run_summary_text(run_summary: dict) -> str:
+    """The report's run-summary appendix for a report carrying ``run_summary``."""
+    from maljan.reporting.models import MalwareReport
+    from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+    report = MalwareReport.model_validate(
+        {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": run_summary}
+    )
+    return MarkdownRenderer()._appendix_run(report)

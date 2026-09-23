@@ -246,11 +246,11 @@ class TestTheGuardIsNarrow:
 
 
 class TestTheTwoProducersReadTheirOwnAnswers:
-    def test_the_narrative_payload_is_read_field_by_field(self) -> None:
+    def test_the_narrative_payload_is_read_field_by_field_key_findings_included(self) -> None:
         grounding = CapabilityGrounding.from_report(_report(techniques=("T1027",)))
         payload = {
             "executive_summary": "A packed dropper with obfuscated strings.",
-            "capabilities_narrative": ["It exfiltrates browser credentials."],
+            "key_findings": [{"text": "It exfiltrates browser credentials.", "evidence_ids": []}],
             "defensive_recommendations": [],
         }
 
@@ -286,7 +286,7 @@ class TestTheSummaryIsKeptAndTheTermsRecorded:
         return json.dumps(
             {
                 "executive_summary": summary,
-                "capabilities_narrative": ["one", "two", "three"],
+                "key_findings": [{"text": "one"}, {"text": "two"}, {"text": "three"}],
                 "defensive_recommendations": [
                     {
                         "category": "edr_hunting",

@@ -54,8 +54,13 @@ class TestTheStagesArePrintedBesideIt:
         assert stage_duration_lines(None) == []
 
     def test_the_report_prints_the_run_and_the_stages(self) -> None:
-        rendered = MarkdownRenderer()._section_run_summary(
-            {"elapsed_seconds": 472.9, "stages": STAGES}
+        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+
+        rendered = MarkdownRenderer()._appendix_run(
+            MalwareReport(
+                identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+                run_summary={"elapsed_seconds": 472.9, "stages": STAGES},
+            )
         )
         assert "Elapsed: 472.9s (the whole run, to this report)" in rendered
         assert "Per stage: triage_pack 191.0s" in rendered

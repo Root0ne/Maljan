@@ -235,7 +235,7 @@ class TestTheReportSaysTheJudgeDidNotAnswer:
         report, markdown = _reported({"decision": "Suspicious", "failure": "TimeoutError"})
 
         assert report["overall_confidence"] is None
-        assert "**Overall Confidence**: not assessed" in markdown
+        assert "(not assessed) · **Severity:**" in markdown
         assert "NO CONFIDENCE ASSESSED" in markdown
         # The number that used to be printed here belongs to the analysts'
         # claims, and it is still on the record where it means something.
@@ -279,7 +279,7 @@ class TestTheReportSaysTheJudgeDidNotAnswer:
         report, markdown = _reported(None)
 
         assert report["overall_confidence"] is None
-        assert "**Overall Confidence**: not assessed" in markdown
+        assert "(not assessed) · **Severity:**" in markdown
         assert "NO CONFIDENCE ASSESSED" in markdown
         assert "verdict.fallback" not in str(report["run_summary"].get("validation") or {})
 
