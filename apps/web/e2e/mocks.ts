@@ -1710,6 +1710,44 @@ export async function installApiMocks(
     const keys = Object.keys(body.values ?? {});
     return json(route, { applied: keys, applies: { next_job: keys.length } });
   });
+  // The team lint, registered after the generic `settings/*` handler above so
+  // it wins for its own path. No findings; each staged team laid out as the
+  // column its written order makes (row = position), with its `depends_on`
+  // as edges — enough for the stage graph to draw. A spec that wants
+  // findings overrides this with its own `page.route(...)`.
+  await page.route("**/api/v1/settings/lint-teams", (route) => {
+    const body = (route.request().postDataJSON() ?? {}) as {
+      profiles?: Record<string, { stages?: Array<Record<string, unknown>> }>;
+    };
+    const graphs: Record<string, unknown> = {};
+    for (const [team, entry] of Object.entries(body.profiles ?? {})) {
+      const stages = entry?.stages ?? [];
+      graphs[team] = {
+        nodes: stages.map((stage, row) => ({
+          key: String(stage.key ?? row),
+          label: String(stage.label ?? ""),
+          kind: String(stage.kind ?? "analysis"),
+          agents: (stage.agents as string[] | undefined) ?? [],
+          when: String(stage.when ?? ""),
+          reads: String(stage.inject_upstream ?? "findings"),
+          mode: String(stage.mode ?? "sequential"),
+          row,
+          column: 0,
+        })),
+        edges: stages.flatMap((stage) =>
+          ((stage.depends_on as string[] | undefined) ?? []).map((source) => ({
+            source,
+            target: String(stage.key),
+            implicit: false,
+            legal: true,
+          }))
+        ),
+        rows: stages.length,
+        columns: stages.length ? 1 : 0,
+      };
+    }
+    return json(route, { findings: [], graphs });
+  });
   await page.route("**/api/v1/settings/test/*", (route) =>
     json(route, { ok: true, latency_ms: 42, detail: "mock probe ok", models: null, tools: null })
   );

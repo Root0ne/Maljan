@@ -31,7 +31,9 @@ __all__ = [
     "StageContext",
     "StageResult",
     "TriageFacts",
+    "constant_truth",
     "evaluate",
+    "stage_references",
     "validate_condition",
 ]
 
@@ -350,9 +352,16 @@ def parse_condition(expr: str) -> ast.Expression:
         raise ConditionError("an empty condition is always true and is not parsed")
     try:
         tree = ast.parse(text, mode="eval")
+        _check(tree)
     except SyntaxError as exc:
         raise ConditionError(f"cannot parse the condition: {exc.msg}") from exc
-    _check(tree)
+    except (RecursionError, MemoryError) as exc:
+        # Python's parser and the checker both descend the tree, and an
+        # expression nested thousands deep (``not not not …``) runs out of
+        # interpreter stack before either finishes. That is still operator
+        # text that cannot be a condition, and it is refused as one rather
+        # than escaping as a server error.
+        raise ConditionError("the condition is nested too deeply to parse") from exc
     return tree
 
 
@@ -389,3 +398,47 @@ def validate_condition(expr: str) -> list[str]:
     except Exception as exc:  # noqa: BLE001 — an unexpected failure is still the operator's
         return [f"the condition could not be evaluated: {exc}"]
     return []
+
+
+def stage_references(expr: str) -> list[str]:
+    """Every stage key ``expr`` reads through ``stages.<key>.<field>``, in order.
+
+    Empty for an empty or a refused expression: a condition the checker
+    refuses is reported as that, not also as the stages it would have read.
+    """
+    if not (expr or "").strip():
+        return []
+    try:
+        tree = parse_condition(expr)
+    except ConditionError:
+        return []
+    keys: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and not _is_triage_lookup(node):
+            holder = node.value
+            if isinstance(holder, (ast.Attribute, ast.Subscript)):
+                key = _stage_key(holder)
+                if key not in keys:
+                    keys.append(key)
+    return keys
+
+
+def constant_truth(expr: str) -> bool | None:
+    """What ``expr`` evaluates to when it names nothing, else ``None``.
+
+    A condition that reads no field of the sample or the run has one answer
+    for every sample, and that answer is known without guessing. Anything
+    that names a field is ``None``: what it will be is the sample's business.
+    """
+    if not (expr or "").strip():
+        return None
+    try:
+        tree = parse_condition(expr)
+    except ConditionError:
+        return None
+    if any(isinstance(node, ast.Name) for node in ast.walk(tree)):
+        return None
+    try:
+        return bool(_resolve(tree, StageContext()))
+    except (ConditionError, RecursionError):
+        return None
