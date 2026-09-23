@@ -69,4 +69,5 @@ class TestTheRecord:
 
         assert tool.__doc__ is not None
         assert tool.__doc__.startswith("Look something up.")
-        assert "``query``, ``text`` as the raw text or pattern itself, unquoted" in tool.__doc__
+        assert "Give ``query``, ``text`` the value itself, written as it" in tool.__doc__
+        assert "the parameter's own name is not a value" in tool.__doc__

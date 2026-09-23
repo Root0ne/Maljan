@@ -3177,7 +3177,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             return repaired if repaired is not None else answer
 
         recorded = record_tools(
-            self.pinned_tools(), recorder, repeats, repairs, self._context_budget()
+            self.pinned_tools(),
+            recorder,
+            repeats,
+            repairs,
+            self._context_budget(),
+            on_question=self._count_question,
         )
         # Sent with every request of this loop, so counted with its conversation.
         self._tool_definition_chars = tool_definition_chars(recorded)
@@ -3659,6 +3664,13 @@ class BaseAnalyst(BudgetMeter, ABC):
         return self._capture_findings(
             self._settle_final_answer(content, msgs, timeout, elapsed, max_steps)
         )
+
+    def _count_question(self, code: str) -> None:
+        """Count one question a tool call was answered with, where the run summary reads it."""
+        with self._the_meter_s_lock():
+            fed_back = dict(getattr(self, "validation_fed_back", None) or {})
+            fed_back[code] = fed_back.get(code, 0) + 1
+            self.validation_fed_back = fed_back
 
     def _give_the_final_turn(self, reserve: float, remaining: float) -> None:
         """Hold a model list's per-turn deadline at the final answer's reserve.
