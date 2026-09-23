@@ -407,8 +407,13 @@ Two producers use it:
   block's heading such as `[BINARY FACTS]`, a source's name, or an `ev_` id
   the ledger never issued. The citable ids are the run's ledger ids, never ids
   read out of prompt text — a decoded string can carry any `[ev_NNNN]` — and the
-  question's sentence names them. An ATT&CK or MBC id in brackets (`[T1027]`, `[C0027.009]`) is an
-  identifier, not a citation, and a markdown link is neither. A citation or an
+  question's sentence names them. Only prose is read — a section's `body` or
+  `text`, the narrative's summary and paragraphs — never a record field such
+  as a C2 channel's packet layout or a flag, and never a code span. An ATT&CK or
+  MBC id or an IPv6 literal in brackets is an identifier, not a citation; a
+  markdown link and a bracket that is part of a token (`[len][payload]`,
+  `[Content_Types].xml`, `[System.Convert]::`) are neither. A numbered
+  reference such as `[1]` in prose is asked about. A citation or an
   over-claim that survives the retry is printed as written and recorded
   unresolved; only a broken shape costs the section.
 
