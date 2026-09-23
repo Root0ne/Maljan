@@ -219,6 +219,21 @@ def _bundle_text(section: str, bundle: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# The calls one section may take: its answer and the one retry the validation
+# loop gives an answer that breaks its schema.
+SECTION_ATTEMPTS = 2
+
+
+def _reached_the_cap(answer: Any, cap: int) -> bool:
+    """Whether the server stopped this answer at its output cap."""
+    from maljan.core.truncation_ledger import completion_tokens_of, hit_length_cap
+
+    if hit_length_cap(answer):
+        return True
+    produced = completion_tokens_of(answer)
+    return bool(cap > 0 and produced is not None and produced >= cap)
+
+
 class ReportComposer:
     """Authors the professional spine section-by-section. Async; per-section
     timeout + deterministic skip. Never raises to the caller."""
@@ -230,9 +245,25 @@ class ReportComposer:
         per_section_timeout: int = 120,
         token_ledger: Any | None = None,
         model_label: str = "",
+        generation_rates: Any | None = None,
+        output_cap: int | None = None,
+        caps_by_model: dict[str, int] | None = None,
+        turn_share: float | None = None,
     ) -> None:
         self.llm = llm
         self.section_max_tokens = section_max_tokens
+        # What the model is allowed to generate for one section: the section's
+        # own budget, plus room for its reasoning when the model has not been
+        # asked to keep reasoning out (the container decides). The wait and the
+        # cut are both judged against this, because it is what the server caps.
+        self.output_cap = int(output_cap or section_max_tokens)
+        # Each model of the reporter's list, by the label its answers carry,
+        # and the cap its own provider was given: what "cut" means for the
+        # model that answered.
+        self.caps_by_model = dict(caps_by_model or {})
+        # The job's share of a section's clock a model of the list may take
+        # before the next one is asked.
+        self.turn_share = turn_share
         self.per_section_timeout = per_section_timeout
         self.token_ledger = token_ledger
         # The label of the model the sections call first, so a call is
@@ -241,6 +272,10 @@ class ReportComposer:
         # The job's event sink, set by the container, so a switch of the
         # reporter's model list is said in the conversation like any agent's.
         self.event_sink: Any | None = None
+        # The job's measured generation rates (``llm.generation_rate``). A
+        # section's wait is sized from them so a slow model is given the time
+        # its ``section_max_tokens`` take; ``None`` keeps the configured wait.
+        self.generation_rates = generation_rates
         # What each section was told was wrong with its answer, by code, across
         # every section. The composer runs after the run summary is built, so
         # the report node reads this and folds it in.
@@ -385,16 +420,17 @@ class ReportComposer:
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=human),
         ]
+        timeout = self._section_timeout()
+        self._start_the_section_clock(timeout)
         try:
             return await asyncio.wait_for(
                 self._invoke(messages, schema, section=section),
-                timeout=float(self.per_section_timeout),
+                timeout=timeout,
             )
         except TimeoutError:
             logger.warning("ReportComposer: section '%s' timed out; skipping.", section)
             self._note_degradation(
-                f"report section '{section}' is missing: it did not answer within "
-                f"{int(self.per_section_timeout)}s"
+                f"report section '{section}' is missing: it did not answer within {int(timeout)}s"
             )
             return None
         except Exception as exc:  # noqa: BLE001
@@ -406,6 +442,60 @@ class ReportComposer:
                 f"report section '{section}' is missing: the round failed ({type(exc).__name__})"
             )
             return None
+
+    def _start_the_section_clock(self, seconds: float) -> None:
+        """Measure the model list's turn deadline against this section's clock.
+
+        Not a restart: the report node starts the list once, at the start of
+        the report stage, and a model that failed as a provider in one section
+        has failed for the next as well. Restarting per section waited out a
+        stalled first model's deadline in every section.
+        """
+        enter = getattr(getattr(self, "llm", None), "enter_loop", None)
+        if not callable(enter) or seconds <= 0:
+            return
+        share = getattr(self, "turn_share", None)
+        if not isinstance(share, int | float):
+            from maljan.llm.fallback import _configured_share
+
+            share = _configured_share()
+        if share > 0:
+            enter(float(seconds), float(share))
+
+    def _cap_of(self, answer: Any) -> int:
+        """The output cap of the model that gave ``answer``."""
+        from maljan.llm.fallback import turn_model
+
+        model, _switched = turn_model(answer)
+        caps = getattr(self, "caps_by_model", None) or {}
+        return int(caps.get(model) or getattr(self, "output_cap", 0) or 0)
+
+    def _section_timeout(self) -> float:
+        """One section's wait: configured, or what its calls need at the model's pace.
+
+        A section is its answer and, when the answer breaks its schema, the one
+        retry the validation loop allows: ``SECTION_ATTEMPTS`` calls. Where a
+        rate is measured the wait holds that many calls of the output cap at
+        the model's pace; where none is, the configured wait stands for the
+        whole section, as it always did.
+        """
+        configured = float(self.per_section_timeout)
+        rates = getattr(self, "generation_rates", None)
+        if rates is None:
+            return configured
+        from maljan.llm.generation_rate import model_name_of
+
+        per_call = float(
+            rates.call_timeout(
+                "composer:section",
+                model_name_of(self.llm),
+                configured,
+                int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0),
+            )
+        )
+        if per_call <= configured:
+            return configured
+        return per_call * SECTION_ATTEMPTS
 
     async def _invoke(
         self, messages: list[BaseMessage], schema: type[BaseModel], *, section: str = ""
@@ -449,11 +539,16 @@ class ReportComposer:
         # missing from a delivered report, and the model can usually fix it
         # when told which field broke which rule.
         declined = False
+        cut = False
+        cut_at = 0
 
         async def _run(turns: list[BaseMessage]) -> Any:
+            nonlocal cut, cut_at
             raw = await retry_on_connection_error(
                 lambda: self.llm.ainvoke(turns), what="ReportComposer raw"
             )
+            if _reached_the_cap(raw, self._cap_of(raw)):
+                cut, cut_at = True, self._cap_of(raw)
             if self.token_ledger is not None:
                 try:
                     from maljan.core.token_ledger import record_response_usage
@@ -545,6 +640,15 @@ class ReportComposer:
                 "y" if retries == 1 else "ies",
                 "; ".join(f"{v.path}: {v.message}" for v in broken),
             )
+            if cut:
+                # The cap ended the answer, not the model: the schema only
+                # failed because the JSON was cut off. Said as what it was.
+                self._note_degradation(
+                    f"report section '{section or schema.__name__}' is missing: its answer "
+                    f"reached the output cap of {cut_at} tokens and was cut off "
+                    "(composer_section_max_tokens; a model's reasoning counts against it)"
+                )
+                return None
             self._note_degradation(
                 f"report section '{section or schema.__name__}' is missing: its answer did "
                 f"not fit the schema after {retries} retr{'y' if retries == 1 else 'ies'} "

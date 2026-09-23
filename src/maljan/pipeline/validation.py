@@ -3272,33 +3272,16 @@ def validation_metrics(
     }
 
 
-# What the deterministic sources are called in a corroboration row. The
-# tools that carry their own ATT&CK ids: capa's ``attck`` field, a Sigma rule's
-# tags, a YARA TTP rule's ``meta.technique_id``, ``lolbin_lookup``'s technique
-# id.
-# A tool this table does not name is listed under its own name.
-ASSERTING_SOURCES: dict[str, str] = {
-    "capa": "capa",
-    "sigma_match": "sigma",
-    "sigma_match_sandbox": "sigma",
-    "lolbin_lookup": "lolbin",
-    # Our own YARA TTP rules carry ``meta.technique_id``; a match asserts it.
-    "yara_scan": "yara",
-}
-# ``api_capability`` is deliberately absent: the API catalogue associates a
-# technique with an import set, it does not observe one. Its associations
-# travel under ``associated_by`` and never count as a source.
-
-
 def corroboration(
     isrs: dict[str, Any] | None, ledger: Sequence[Any] | None
 ) -> dict[str, dict[str, Any]]:
     """Per technique id, who asserted it and who claimed it, by name.
 
-    ``asserted_by`` is the deterministic sources that carry their own ATT&CK
-    ids — a rule that fired names its technique — and ``claimed_by`` is the
-    agents. Two flat lists, no weights, no score: the number that used to
-    live here was a weighted sum over layer weights and cross-layer
+    ``asserted_by`` is the deterministic sources that assert a technique from
+    this sample — a rule that fired on it names its technique; the tools are
+    ``evidence_summary.ASSERTING_SOURCES``, and a reference lookup is never one
+    — and ``claimed_by`` is the agents. Two flat lists, no weights, no score:
+    the number that used to live here was a weighted sum over layer weights and cross-layer
     multipliers, and its inputs were constants nobody could derive from
     anything. Two agents and a capa rule naming ``T1055`` is a fact; 0.87 was
     an opinion with a decimal point. A technique nothing asserted is not
@@ -3307,7 +3290,11 @@ def corroboration(
     The same collection feeds the judge's evidence-summary block, so the metric
     the report carries and the block the judge read cannot disagree.
     """
-    from maljan.pipeline.evidence_summary import catalogue_associations, collect
+    from maljan.pipeline.evidence_summary import (
+        ASSERTING_SOURCES,
+        catalogue_associations,
+        collect,
+    )
 
     agents = {str(getattr(isr, "agent_id", "") or name) for name, isr in (isrs or {}).items()}
     associations = catalogue_associations(ledger)
@@ -3323,6 +3310,7 @@ def corroboration(
                 if source not in claimed:
                     claimed.append(source)
             else:
+                # ``collect`` hands back only the asserting tools' own names.
                 label = ASSERTING_SOURCES.get(source, source)
                 if label not in asserted:
                     asserted.append(label)

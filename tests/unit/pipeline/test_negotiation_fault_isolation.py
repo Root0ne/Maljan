@@ -14,18 +14,28 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from maljan.pipeline.nodes import make_negotiation_node
+from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+
+
+def _claiming(name: str) -> AgentISR:
+    return AgentISR(
+        agent_id=name,
+        domain=name,
+        claims=[ClaimEvidence(claim="c", evidence_ref="[ev_0001] x", confidence=0.6)],
+    )
 
 
 def _container_with_failing_judge(exc: BaseException) -> Any:
     """ServiceContainer stub whose mediate() raises ``exc``."""
     container = MagicMock()
     container.is_mock = False
-    container.agent_registry.list_agents.return_value = ["static"]
+    container.agent_registry.list_agents.return_value = ["static", "dynamic"]
+    container.analyst_keys.return_value = ["static", "dynamic"]
     judge = MagicMock()
     judge.mediate = AsyncMock(side_effect=exc)
     container.get_judge_agent.return_value = judge
@@ -34,10 +44,16 @@ def _container_with_failing_judge(exc: BaseException) -> Any:
 
 def _run_node(container: Any) -> dict[str, Any]:
     node_fn = make_negotiation_node(container)
-    # iteration>=1 + empty isr_reports keeps the sycophancy detector dormant so
-    # the test exercises only the mediation try/except path.
-    state = {"iteration_count": 1, "reports": {"static": "finding"}, "isr_reports": {}}
-    return asyncio.run(node_fn(state))
+    # Two analysts that produced claims, so consensus applies and a failed
+    # round is a "no consensus"; the sycophancy detector is held dormant so the
+    # test exercises only the mediation try/except path.
+    state = {
+        "iteration_count": 1,
+        "reports": {"static": "finding", "dynamic": "finding"},
+        "isr_reports": {"static": _claiming("static"), "dynamic": _claiming("dynamic")},
+    }
+    with patch("maljan.pipeline.nodes.detect_sycophancy", return_value=False):
+        return asyncio.run(node_fn(state))
 
 
 @pytest.mark.parametrize(
@@ -71,7 +87,8 @@ def test_negotiation_success_path_unaffected() -> None:
 
     container = MagicMock()
     container.is_mock = False
-    container.agent_registry.list_agents.return_value = ["static"]
+    container.agent_registry.list_agents.return_value = ["static", "dynamic"]
+    container.analyst_keys.return_value = ["static", "dynamic"]
     judge = MagicMock()
     arg = AgentArgument(agent_name="Mediator", finding="all agree", confidence_score=0.9)
     judge.mediate = AsyncMock(return_value=(arg, True))

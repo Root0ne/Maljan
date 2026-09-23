@@ -463,8 +463,10 @@ ANNOTATIONS: dict[str, Annotation] = {
         "description": (
             "How long Ollama keeps the model loaded in memory after the last request "
             "(an Ollama duration string, e.g. 30m). Longer values avoid reload latency "
-            "between calls at the cost of holding GPU/RAM."
+            "between calls at the cost of holding GPU/RAM. The LLM probe sends it "
+            "too, so the model it loads is the one a job finds."
         ),
+        "probe": "llm",
         "subgroup": "Ollama",
         "advanced": True,
     },
@@ -473,8 +475,10 @@ ANNOTATIONS: dict[str, Annotation] = {
         "description": (
             "Context window size (tokens) requested from the Ollama model. Must be "
             "large enough for the chunked prompt plus generation budget, or the server "
-            "silently truncates the oldest context."
+            "silently truncates the oldest context. The LLM probe asks at this size "
+            "too, so it loads the model the way a job will."
         ),
+        "probe": "llm",
         "subgroup": "Ollama",
     },
     "llm.openai.context_size": {

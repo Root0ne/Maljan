@@ -146,6 +146,12 @@ def default_profile_summary() -> dict[str, Any]:
     builder.set_server_rests(
         [{"server": "analysis", "failures": 3, "cooldown_s": 60.0, "reason": "timed out"}]
     )
+    from maljan.llm.generation_rate import GenerationRates
+
+    rates = GenerationRates()
+    rates.observe("qwen", 380, 100.0, "ollama eval_count/eval_duration")
+    rates.call_timeout("judge:verdict", "qwen", 600.0, 8192)
+    builder.set_generation(rates.snapshot())
     builder.set_truncation(
         {
             "tool_output_calls": 4,
@@ -241,6 +247,9 @@ DATA_KEYED = frozenset(
         # One row per agent that made a model call, keyed by the agent.
         "models",
         "tokens.per_agent",
+        # Keyed by the model measured, and by the calls a run sized.
+        "generation.models",
+        "generation.timeouts",
     }
 )
 

@@ -23,6 +23,10 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import StructuredTool
+from tests.unit.agents.test_the_time_cap_salvages import TASK, _SlowModel, _strings_tool
+from tests.unit.agents.test_the_time_cap_salvages import _Analyst as _SlowAnalyst
+from tests.unit.agents.test_the_time_cap_salvages import _Container as _SlowContainer
+from tests.unit.agents.test_the_time_cap_salvages import _settings as _time_cap_settings
 
 from maljan.agents import base_agent
 from maljan.agents.base_agent import BaseAnalyst
@@ -34,6 +38,7 @@ from maljan.analysis.function_summarizer import FunctionSummarizer
 from maljan.core.config import REPORTER_AGENT_KEY, Settings
 from maljan.core.model_assignments import global_model_label, model_label_for
 from maljan.core.token_ledger import TokenLedger
+from maljan.llm.fallback import FallbackChatModel
 from maljan.pipeline.mediation_models import MediatorVerdict
 from maljan.reporting.composer import ReportComposer
 from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
@@ -282,6 +287,116 @@ class TestALoopThatDidNotComeBack:
         assert llm.asked, "the loop took a turn before its clock ran out"
         assert _calls(ledger, "static") == len(llm.asked)
         assert _models(ledger, "static") == {"openai/static-model": len(llm.asked)}
+
+
+class _Served(_SlowModel):
+    """The time-cap stand-in, keeping how many of its calls it actually answered.
+
+    A call a turn deadline or a cancelled loop cut off was asked and never
+    answered; the ledger counts what the server answered, so this does too.
+    """
+
+    answered: list[int] = []
+
+    def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kw: Any):
+        result = super()._generate(messages, stop, run_manager, **kw)
+        self.answered.append(1)
+        return result
+
+    async def _agenerate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kw: Any):
+        result = await super()._agenerate(messages, stop, run_manager, **kw)
+        self.answered.append(1)
+        return result
+
+
+def _slow_run(llm: Any, budget: int) -> tuple[TokenLedger, str]:
+    ledger = TokenLedger()
+    agent = _SlowAnalyst(llm=llm, name="static")
+    agent._container = _SlowContainer()
+    agent.tools = [_strings_tool()]
+    agent.token_ledger = ledger
+    with _time_cap_settings(budget):
+        answer = agent.execute_tool_loop([("system", "read the sample"), ("human", TASK)])
+    return ledger, answer
+
+
+class TestTheSlowModelPaths:
+    """Every call the time cap, its salvage, the nudge and a model list make, counted once."""
+
+    def test_the_time_cap_s_turns_and_its_salvage(self) -> None:
+        model = _Served(calls=[], answered=[])
+        ledger, answer = _slow_run(model, budget=8)
+
+        assert "only one copy runs" in answer, "the salvage wrote the answer"
+        assert _calls(ledger, "static") == len(model.answered) == len(model.calls)
+
+    def test_the_salvage_and_the_nudge_after_it(self) -> None:
+        model = _Served(calls=[], answered=[], salvage="The sample seems to check something.")
+        ledger, _answer = _slow_run(model, budget=8)
+
+        assert _calls(ledger, "static") == len(model.answered)
+
+    def test_a_model_list_s_switch_is_counted_under_the_model_that_answered(self) -> None:
+        primary = _Served(calls=[], answered=[], stall_from=3)
+        secondary = _Served(calls=[], answered=[])
+        llm = FallbackChatModel(
+            models=[primary, secondary], labels=["primary", "secondary"], agent="static"
+        )
+        ledger, answer = _slow_run(llm, budget=16)
+
+        assert "only one copy runs" in answer
+        assert len(primary.calls) > len(primary.answered), "the primary stalled"
+        assert _models(ledger, "static") == {
+            "primary": len(primary.answered),
+            "secondary": len(secondary.answered),
+        }
+        assert _calls(ledger, "static") == len(primary.answered) + len(secondary.answered)
+
+    def test_a_verdict_a_fallback_answered_is_counted_once_under_it(self) -> None:
+        answering = _model("not a bundle")
+        llm = FallbackChatModel(
+            models=[_Refusing(), answering], labels=["openai/first", "openai/second"], agent="judge"
+        )
+        ledger = TokenLedger()
+        judge = _judge(llm, ledger)  # type: ignore[arg-type]
+
+        asyncio.run(judge.give_verdict(reports={"static": "text"}, history=[]))
+
+        assert _models(ledger, "judge") == {"openai/second": len(answering.asked)}
+
+    def test_every_composer_section_a_fallback_answered_is_counted_once_under_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "maljan.reporting.composer.structured_output_supported_for_llm", lambda _llm: False
+        )
+        answering = _model("{}")
+        llm = FallbackChatModel(
+            models=[_Refusing(), answering],
+            labels=["openai/first", "openai/second"],
+            agent=REPORTER_AGENT_KEY,
+        )
+        llm.restart()
+        ledger = TokenLedger()
+        composer = ReportComposer(
+            llm=llm, per_section_timeout=5, token_ledger=ledger, model_label="openai/first"
+        )
+
+        asyncio.run(composer.compose(_report()))
+
+        assert answering.asked
+        assert _models(ledger, REPORTER_AGENT_KEY) == {"openai/second": len(answering.asked)}
+
+
+class _Refusing(BaseChatModel):
+    """A first model the provider refuses to connect to: nothing is served."""
+
+    @property
+    def _llm_type(self) -> str:
+        return "refusing"
+
+    def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **_: Any):
+        raise ConnectionRefusedError(111, "refused")
 
 
 class _Tooling(BaseChatModel):

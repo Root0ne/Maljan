@@ -40,6 +40,17 @@ from maljan.analysis.corroboration import (
 # ---------------------------------------------------------------------------
 
 
+# The termination reason of a debate that measured no agreement: fewer than
+# two analysts produced claims, or the stage did not run.
+NOT_APPLICABLE = "not_applicable"
+
+# The sentence every surface prints for it.
+NOT_APPLICABLE_SENTENCE = (
+    "Consensus: not applicable — fewer than two analysts produced claims, "
+    "so no agreement was measured."
+)
+
+
 @dataclass
 class NegotiationMetrics:
     """Statistics from the negotiation loop.
@@ -48,10 +59,13 @@ class NegotiationMetrics:
         rounds_completed:    Number of negotiation rounds actually executed.
         max_rounds:          Hard limit configured at startup.
         termination_reason:  Why the loop stopped (consensus / hard_limit /
-                             convergence / sycophancy).
+                             convergence / sycophancy / not_applicable).
         sycophancy_events:   Number of rounds where sycophancy was detected.
         confidence_history:  Per-round mediator confidence scores.
-        final_confidence:    Last recorded confidence value.
+        final_confidence:    Last recorded confidence value; ``None`` when
+                             consensus did not apply, because fewer than two
+                             analysts produced claims or the debate did not
+                             run. No agreement was measured, so none is stated.
     """
 
     rounds_completed: int
@@ -59,7 +73,11 @@ class NegotiationMetrics:
     termination_reason: str
     sycophancy_events: int
     confidence_history: list[float]
-    final_confidence: float
+    final_confidence: float | None
+
+    @property
+    def consensus_applicable(self) -> bool:
+        return self.termination_reason != NOT_APPLICABLE
 
     @property
     def converged_early(self) -> bool:
@@ -479,6 +497,47 @@ def stage_duration_lines(stages: Any) -> list[str]:
     return [f"**Per stage**: {spent}  "] if spent else []
 
 
+def generation_lines(generation: Any) -> list[str]:
+    """Each model's measured generation rate and each call timeout it produced.
+
+    One line per model and one per sized call, so a reader can check the
+    arithmetic: the budget, the rate, the margin, the ceiling, and what the
+    call was finally given. Nothing measured contributes nothing.
+    """
+    if not isinstance(generation, dict):
+        return []
+    lines: list[str] = []
+    for model, row in sorted((generation.get("models") or {}).items()):
+        if not isinstance(row, dict) or row.get("tokens_per_second") is None:
+            continue
+        sources = "; ".join(str(x) for x in row.get("sources") or []) or "unknown"
+        lines.append(
+            f"Generation rate of `{model}`: {float(row['tokens_per_second']):.2f} tokens/s "
+            f"({int(row.get('tokens') or 0)} tokens over {float(row.get('seconds') or 0.0):.1f}s "
+            f"in {int(row.get('calls') or 0)} call(s); from {sources})"
+        )
+    margin = generation.get("margin")
+    ceiling = generation.get("ceiling_s")
+    for call, row in sorted((generation.get("timeouts") or {}).items()):
+        if not isinstance(row, dict):
+            continue
+        configured = float(row.get("configured_s") or 0.0)
+        applied = float(row.get("applied_s") or 0.0)
+        if row.get("derived_s") is None:
+            lines.append(
+                f"Timeout of `{call}`: {applied:.0f}s, the configured value "
+                "(no rate measured for its model yet, or no output budget)"
+            )
+            continue
+        lines.append(
+            f"Timeout of `{call}`: {applied:.0f}s — the larger of {configured:.0f}s configured "
+            f"and {int(row.get('max_tokens') or 0)} tokens at "
+            f"{float(row.get('tokens_per_second') or 0.0):.2f} tokens/s × {margin} "
+            f"= {float(row['derived_s']):.0f}s, at most {float(ceiling or 0.0):.0f}s"
+        )
+    return lines
+
+
 def tool_latency_lines(latency: Any) -> list[str]:
     """What each agent's tool calls cost, and which single call cost the most.
 
@@ -613,6 +672,10 @@ class RunSummary:
     # ran, or the report is a recorded fixture. ``None`` when a sandbox
     # observed the run, which needs no sentence.
     sandbox: dict[str, str] | None = None
+    # Each model's measured generation rate and each per-call timeout it
+    # produced (``llm.generation_rate.GenerationRates.snapshot``). ``None`` on
+    # a run that measured no answer and sized no call.
+    generation: dict[str, Any] | None = None
     # ``dedupe`` is deliberately not a field here. What the report folded is
     # counted while the report's sections are built, which happens after this
     # object exists, so the report builder writes ``dedupe`` onto the summary
@@ -675,10 +738,15 @@ class RunSummary:
             f"| Rounds completed | {n.rounds_completed} / {n.max_rounds} |",
             f"| Termination reason | `{n.termination_reason}` |",
             f"| Sycophancy events | {n.sycophancy_events} |",
-            f"| Final confidence | {n.final_confidence:.3f} |",
-            f"| Converged early | {'yes' if n.converged_early else 'no'} |",
-            "",
         ]
+        if n.consensus_applicable and n.final_confidence is not None:
+            lines += [
+                f"| Final confidence | {n.final_confidence:.3f} |",
+                f"| Converged early | {'yes' if n.converged_early else 'no'} |",
+            ]
+        lines.append("")
+        if not n.consensus_applicable:
+            lines += [NOT_APPLICABLE_SENTENCE, ""]
 
         if n.confidence_history:
             history_str = " → ".join(f"{c:.2f}" for c in n.confidence_history)
@@ -824,6 +892,10 @@ class RunSummary:
                 lines.append(f"- {server_rest_sentence(row)}")
             lines.append("")
 
+        generation = generation_lines(self.generation)
+        if generation:
+            lines += ["## Generation Rate", "", *(f"- {line}" for line in generation), ""]
+
         if self.truncation:
             trunc = self.truncation
             lines += [
@@ -927,8 +999,15 @@ class RunSummary:
                 "termination_reason": n.termination_reason,
                 "sycophancy_events": n.sycophancy_events,
                 "confidence_history": n.confidence_history,
-                "final_confidence": round(n.final_confidence, 4),
-                "converged_early": n.converged_early,
+                # Absent, not zero, when no agreement was measured.
+                **(
+                    {
+                        "final_confidence": round(n.final_confidence, 4),
+                        "converged_early": n.converged_early,
+                    }
+                    if n.consensus_applicable and n.final_confidence is not None
+                    else {}
+                ),
             },
             "agent_stats": [
                 {
@@ -974,6 +1053,9 @@ class RunSummary:
             result["tokens"] = self._tokens_dict()
         result["models"] = dict(self.models) if self.models else None
         result["server_rests"] = [dict(row) for row in self.server_rests or []] or None
+
+        if self.generation:
+            result["generation"] = dict(self.generation)
 
         if self.truncation:
             t = self.truncation
@@ -1059,6 +1141,7 @@ class RunSummaryBuilder:
         self._failed_analysts: list[str] = []
         self._techniques_by_layer: dict[str, int] = {}
         self._tokens: TokenUsageMetrics | None = None
+        self._generation: dict[str, Any] | None = None
         self._truncation: TruncationMetrics | None = None
         self._profile: dict[str, Any] | None = None
         self._stages: list[dict[str, Any]] = []
@@ -1225,6 +1308,15 @@ class RunSummaryBuilder:
         self._server_rests = [dict(row) for row in rows or [] if isinstance(row, dict)] or None
         return self
 
+    def set_generation(self, snapshot: dict[str, Any] | None) -> RunSummaryBuilder:
+        """Record the measured generation rates and the timeouts they produced.
+
+        A snapshot with no measured model and no sized call leaves it unset.
+        """
+        if isinstance(snapshot, dict) and (snapshot.get("models") or snapshot.get("timeouts")):
+            self._generation = dict(snapshot)
+        return self
+
     def set_truncation(self, snapshot: dict[str, Any] | None) -> RunSummaryBuilder:
         """Record bound-hits from a ``TruncationLedger.snapshot()`` (pitfall P6).
 
@@ -1339,7 +1431,7 @@ class RunSummaryBuilder:
         """
         confidence_history: list[float] = state.get("confidence_history") or []
         iteration_count: int = state.get("iteration_count", 0)
-        is_consensus: bool = state.get("is_consensus", False)
+        is_consensus = bool(state.get("is_consensus", False))
         sycophancy_detected: bool = state.get("sycophancy_detected", False)
         discussion_history = state.get("discussion_history") or []
 
@@ -1352,7 +1444,10 @@ class RunSummaryBuilder:
         if sycophancy_detected and sycophancy_events == 0:
             sycophancy_events = 1
 
-        if is_consensus:
+        applicable = state.get("consensus_applicable", True) is not False
+        if not applicable:
+            termination_reason = NOT_APPLICABLE
+        elif is_consensus:
             termination_reason = "consensus"
         elif len(confidence_history) >= 3:
             recent = confidence_history[-3:]
@@ -1371,7 +1466,9 @@ class RunSummaryBuilder:
             termination_reason=termination_reason,
             sycophancy_events=sycophancy_events,
             confidence_history=confidence_history,
-            final_confidence=confidence_history[-1] if confidence_history else 0.0,
+            final_confidence=(
+                None if not applicable else confidence_history[-1] if confidence_history else 0.0
+            ),
         )
         return self
 
@@ -1474,6 +1571,7 @@ class RunSummaryBuilder:
             budget=self._budget,
             tool_latency=self._tool_latency,
             sandbox=self._sandbox,
+            generation=self._generation,
         )
 
 

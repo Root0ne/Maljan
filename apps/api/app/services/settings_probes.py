@@ -131,6 +131,8 @@ async def complete_one_turn(
     api_key: str = "",
     disable_thinking: bool = False,
     compat: str = "auto",
+    num_ctx: int | None = None,
+    keep_alive: str | None = None,
 ) -> tuple[bool | None, str]:
     """Ask ``model`` at ``endpoint`` for one short answer.
 
@@ -150,7 +152,11 @@ async def complete_one_turn(
 
     ``disable_thinking`` and ``compat`` are the two OpenAI-compatible settings
     that decide the request body's shape, carried in so that the turn asked
-    here is the turn an agent would ask. See ``_completion_request``.
+    here is the turn an agent would ask. ``num_ctx`` and ``keep_alive`` are
+    Ollama's: the server loads a model at the context size the request names
+    and keeps it for the time the request names, so a probe asked without them
+    leaves the model loaded at the server's own default and the job's first
+    call pays a full reload. See ``_completion_request``.
 
     Never raises: a probe answers with what happened, including when what
     happened is that nothing did.
@@ -165,6 +171,8 @@ async def complete_one_turn(
         api_key,
         disable_thinking=disable_thinking,
         compat=compat,
+        num_ctx=num_ctx,
+        keep_alive=keep_alive,
     )
     if url is None:
         return False, f"unknown provider: {provider!r}"
@@ -319,8 +327,15 @@ def _completion_request(
     *,
     disable_thinking: bool = False,
     compat: str = "auto",
+    num_ctx: int | None = None,
+    keep_alive: str | None = None,
 ) -> tuple[str | None, dict[str, str], dict[str, Any]]:
-    """The one-turn request each provider takes, as ``(url, headers, body)``."""
+    """The one-turn request each provider takes, as ``(url, headers, body)``.
+
+    ``num_ctx`` and ``keep_alive`` travel to Ollama only, the two fields the
+    agents' provider sends with every call that decide the instance Ollama
+    keeps loaded. The other providers take no such field.
+    """
     base = str(endpoint or "").rstrip("/")
     if provider == "openai":
         return (
@@ -345,6 +360,12 @@ def _completion_request(
         # models that never had the problem.
         if disable_thinking:
             body["think"] = False
+        # The job's own window and keep-alive, so the model this loads is the
+        # instance the job's first call finds rather than one it has to reload.
+        if num_ctx:
+            body["options"]["num_ctx"] = int(num_ctx)
+        if keep_alive:
+            body["keep_alive"] = str(keep_alive)
         return (
             f"{base or 'http://localhost:11434'}/api/generate",
             {},
@@ -524,6 +545,8 @@ async def _complete_each_pair(
     deadline: float,
     disable_thinking: bool = False,
     compat: str = "auto",
+    num_ctx: int | None = None,
+    keep_alive: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[str], list[str]]:
     """One completion per pair in turn; what was reached, what failed, what was not tried.
 
@@ -556,6 +579,8 @@ async def _complete_each_pair(
             api_key=api_key,
             disable_thinking=disable_thinking,
             compat=compat,
+            num_ctx=num_ctx,
+            keep_alive=keep_alive,
         )
         if answered is None:
             broken.append(f"{label}: {said}")
@@ -596,6 +621,8 @@ async def _probe_llm_ollama(v: dict[str, Any]) -> ProbeResult:
         "",
         deadline=deadline,
         disable_thinking=bool(v.get("ollama_disable_thinking")),
+        num_ctx=int(v.get("ollama_num_ctx") or 0) or None,
+        keep_alive=str(v.get("ollama_keep_alive") or "") or None,
     )
     return _completed(t0, reached, broken, untried, f"{len(models)} models available", models)
 
@@ -1178,6 +1205,11 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
                     else bool(settings.llm.openai.disable_thinking)
                 ),
                 compat=str(settings.llm.openai.compat or "auto"),
+                # Ollama loads a model at the window and for the keep-alive the
+                # request names; asked the way the job asks, the probe leaves
+                # loaded the instance the job's first call will find.
+                num_ctx=int(settings.llm.ollama.num_ctx) if provider == "ollama" else None,
+                keep_alive=str(settings.llm.ollama.keep_alive) if provider == "ollama" else None,
             )
 
         answered, said = await _ask(llm_provider, endpoint, str(llm_model or ""))
@@ -1523,6 +1555,9 @@ _INPUTS: dict[str, dict[str, str]] = {
         "core.llm.ollama.expert_model": "ollama_expert_model",
         "core.llm.ollama.judge_model": "ollama_judge_model",
         "core.llm.ollama.disable_thinking": "ollama_disable_thinking",
+        # The two leaves that decide which instance Ollama keeps loaded.
+        "core.llm.ollama.num_ctx": "ollama_num_ctx",
+        "core.llm.ollama.keep_alive": "ollama_keep_alive",
         "core.llm.gemini.api_key": "gemini_api_key",
         "core.llm.gemini.expert_model": "gemini_expert_model",
         "core.llm.gemini.judge_model": "gemini_judge_model",

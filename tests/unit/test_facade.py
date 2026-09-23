@@ -50,7 +50,9 @@ class TestRunMockMode:
         result = mock_maljan_app.run("abc123")
         assert result["iteration_count"] >= 1
         assert len(result["discussion_history"]) >= 1
-        assert len(result["confidence_history"]) >= 1
+        # The mock analysts file no claims, so the round records no agreement.
+        assert result["consensus_applicable"] is False
+        assert result["confidence_history"] == []
 
     def test_run_stix_output_is_dict(self, mock_maljan_app: MaljanApp):
         """Mock judge returns an empty STIX dict."""
