@@ -49,7 +49,24 @@ const RULES: Rule[] = [
     // in this tree spells a class that way.
     pattern: /\bclassName[^\n]*\b(from|via|to)-\[?(?:[a-z]+-)*[a-z0-9#(./]+/g,
   },
+  // A chart draws its own surface: an SVG gradient is a gradient that no
+  // class name spells, and a bar list or a pie is where one would be added.
+  { what: "SVG gradient", pattern: /<(linear|radial)Gradient\b/g },
   { what: "colour transition", pattern: /\btransition-(colors|background|border)\b/g },
+  {
+    what: "colour transition by arbitrary property",
+    pattern: /\btransition-\[[^\]]*(color|background|border|fill|stroke|shadow)[^\]]*\]/g,
+  },
+  {
+    // `style={{ transition: "background 150ms" }}`: the same ease, written
+    // where no class list would show it.
+    what: "colour transition in an inline style",
+    pattern: /\btransition(Property)?\s*:\s*["'`][^"'`]*(color|background|border|fill|stroke|all)\b/g,
+  },
+  {
+    what: "colour transition in a stylesheet",
+    pattern: /(^|[;{\s])transition(-property)?\s*:[^;"'`]*\b(color|background|border|fill|stroke|all)\b/gm,
+  },
   { what: "transition of everything, which includes colour", pattern: /\btransition-all\b/g },
   { what: "backdrop blur", pattern: /\bbackdrop-blur\b/g },
 ];
