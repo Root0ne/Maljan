@@ -73,6 +73,7 @@ from maljan.tools import (
     strings,
 )
 from maljan.tools.errors import error_parts, normalise_error
+from maljan.utils.written_forms import pack_escaped
 
 __all__ = [
     "ESSENTIAL_TOOLS",
@@ -1513,9 +1514,6 @@ DECODED_STRINGS_PROVENANCE = (
     "not ledger entries and not the platform's findings"
 )
 
-# How a character that would break the line or the quoting is written.
-_ESCAPES = {'"': '\\"', "\n": "\\n", "\r": "\\r", "\t": "\\t"}
-
 
 def _quoted(text: str) -> str:
     """One recovered string, quoted, cut to ``DECODED_STRING_CHARS`` and on one line.
@@ -1526,10 +1524,10 @@ def _quoted(text: str) -> str:
     closing quote.
     """
     value = text if len(text) <= DECODED_STRING_CHARS else text[: DECODED_STRING_CHARS - 1] + "…"
-    out = "".join(_ESCAPES.get(ch, ch if ch.isprintable() else f"\\x{ord(ch):02x}") for ch in value)
-    if out.endswith("\\"):
-        out = out[:-1] + "\\x5c"
-    return f'"{out}"'
+    # One escaping rule, read by the grounding search too
+    # (``utils.written_forms``), so a value a model copied out of this line is
+    # found again in the entry it came from.
+    return f'"{pack_escaped(value)}"'
 
 
 def _decoded_item(row: dict[str, Any]) -> str:

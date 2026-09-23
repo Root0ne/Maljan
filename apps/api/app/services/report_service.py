@@ -7,7 +7,12 @@ import uuid
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from arq import ArqRedis
-from maljan.reporting.renderers.stix_renderer import indicator_publish_reason
+from maljan.reporting.renderers.stix_renderer import (
+    emulation_kwargs,
+    emulation_record,
+    indicator_publish_reason,
+    judge_indicator_rows,
+)
 from maljan.reporting.run_diff import RunRecord, diff_runs
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -74,7 +79,9 @@ def _shorten_hash_like(stem: str) -> str:
     return f"{short}.{ext}" if ext else short
 
 
-def _publishable(kind: str, value: Any, source: Any, reputation: Any) -> bool:
+def _publishable(
+    kind: str, value: Any, source: Any, reputation: Any, emulated: dict[str, Any] | None = None
+) -> bool:
     """Whether the platform's own publish rule would publish this row.
 
     The one rule, asked from a second place rather than copied into it: the
@@ -91,7 +98,10 @@ def _publishable(kind: str, value: Any, source: Any, reputation: Any) -> bool:
     operator notices and can work around with ``include=all``.
     """
     try:
-        return indicator_publish_reason(kind, str(value or ""), source, reputation) is not None
+        return (
+            indicator_publish_reason(kind, str(value or ""), source, reputation, **(emulated or {}))
+            is not None
+        )
     except Exception as exc:  # noqa: BLE001 — a feed answers, and says what broke
         logger.error(
             "the publish rule could not answer for a %s row; it is withheld from the "
@@ -101,6 +111,50 @@ def _publishable(kind: str, value: Any, source: Any, reputation: Any) -> bool:
             log_safe(exc),
         )
         return False
+
+
+def _with_the_judge_s_values(out: list[dict], mr: dict, kind: str | None) -> None:
+    """Add the values the judge's indicators name, each with the one rule's answer.
+
+    The export asks the publish rule of every judge indicator before it carries
+    one, and the report's IOC table asks it of the same values
+    (``stix_renderer.judge_indicator_rows``); this feed reads the same answer, so
+    a value the export declined is withheld here too and one it carries is
+    published. A value the feed already has a row for keeps its row: its answer
+    is the same one. Rows are added in place; a stored report the model cannot
+    read adds none, and says so in the log.
+    """
+    if not mr.get("judge_indicators"):
+        return
+    try:
+        from maljan.reporting.models import MalwareReport
+
+        judged = judge_indicator_rows(MalwareReport.model_validate(mr))
+    except Exception as exc:  # noqa: BLE001 — a feed answers, and says what broke
+        logger.error(
+            "the judge's indicator values could not be asked the publish rule; none is "
+            "served (%s: %s)",
+            type(exc).__name__,
+            log_safe(exc),
+        )
+        return
+    for item, answer in judged:
+        if kind and item.kind != kind:
+            continue
+        value = (
+            f"{item.algorithm.lower().replace('-', '')}:{item.value}"
+            if item.kind == "hash"
+            else item.value
+        )
+        wanted = value.strip().lower()
+        if any(
+            row.get("kind") == item.kind and str(row.get("value") or "").strip().lower() == wanted
+            for row in out
+        ):
+            continue
+        out.append(
+            {"kind": item.kind, "value": value, "source": "judge", "published": answer == "yes"}
+        )
 
 
 def _url_host(raw: Any) -> str:
@@ -494,6 +548,9 @@ class ReportService:
             if isinstance(dom, dict)
         }
         out: list[dict] = []
+        # What the run's FLOSS entry recovered by emulation, read from the
+        # stored report the way the report's own table reads it.
+        emulated = emulation_record(mr)
         identity = mr.get("identity") or {}
         hashes = identity.get("hashes") or {}
         for algo, value in hashes.items():
@@ -515,7 +572,11 @@ class ReportService:
                         # presented them identically.
                         "source": dom.get("source"),
                         "published": _publishable(
-                            "domain", dom.get("fqdn"), dom.get("source"), dom.get("reputation")
+                            "domain",
+                            dom.get("fqdn"),
+                            dom.get("source"),
+                            dom.get("reputation"),
+                            emulation_kwargs(mr, "domain", str(dom.get("fqdn") or ""), emulated),
                         ),
                     }
                 )
@@ -528,7 +589,11 @@ class ReportService:
                         "is_suspicious": bool(ip.get("is_suspicious")),
                         "source": ip.get("source"),
                         "published": _publishable(
-                            "ip", ip.get("address"), ip.get("source"), ip.get("reputation")
+                            "ip",
+                            ip.get("address"),
+                            ip.get("source"),
+                            ip.get("reputation"),
+                            emulation_kwargs(mr, "ip", str(ip.get("address") or ""), emulated),
                         ),
                     }
                 )
@@ -549,6 +614,7 @@ class ReportService:
                             url.get("url"),
                             url.get("source") or "strings",
                             reputations.get(host),
+                            emulation_kwargs(mr, "url", str(url.get("url") or ""), emulated),
                         ),
                     }
                 )
@@ -564,6 +630,7 @@ class ReportService:
                 continue
             for value in network.get(field) or []:
                 out.append({"kind": row_kind, "value": value, "source": "sandbox"})
+        _with_the_judge_s_values(out, mr, kind)
         rows = [row for row in out if row.get("value")]
         wanted = str(include or "published").strip().lower()
         if wanted == "all":

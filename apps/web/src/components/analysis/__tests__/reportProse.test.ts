@@ -10,6 +10,8 @@ import {
   flowMark,
   flowNote,
   hasTechnicalAnalysis,
+  hostIdentifiers,
+  identifierFindings,
   keyFindings,
   noSummaryReason,
 } from "../reportProse";
@@ -158,5 +160,48 @@ describe("the platform's note beside a model's row", () => {
       } as MalwareReport["run_summary"],
     });
     expect([...configFindings(mr)]).toEqual([3]);
+  });
+});
+
+describe("the host identifiers the report model read", () => {
+  it("are read as written and draw the panel on their own", () => {
+    const mr = report({
+      technical_analysis: {
+        host_identifiers: [
+          {
+            kind: "State file",
+            value: "ExampleCorp\\Cache\\state.bin",
+            purpose: "Holds the next stage",
+            evidence_refs: ["ev_0012"],
+          },
+        ],
+      },
+    });
+    expect(hostIdentifiers(mr)).toHaveLength(1);
+    expect(hostIdentifiers(mr)[0].value).toBe("ExampleCorp\\Cache\\state.bin");
+    expect(hasTechnicalAnalysis(mr)).toBe(true);
+  });
+
+  it("are absent from a report stored before the field existed", () => {
+    const mr = report({ technical_analysis: {} });
+    expect(hostIdentifiers(mr)).toEqual([]);
+    expect(hasTechnicalAnalysis(mr)).toBe(false);
+  });
+
+  it("names the identifier a kept finding names", () => {
+    const mr = report({
+      run_summary: {
+        validation: {
+          unresolved: [
+            {
+              agent: "composer",
+              code: "report.identifier_uncited",
+              message: "identifier 2 (x) cites no entry in this run's evidence.",
+            },
+          ],
+        },
+      } as MalwareReport["run_summary"],
+    });
+    expect([...identifierFindings(mr)]).toEqual([2]);
   });
 });

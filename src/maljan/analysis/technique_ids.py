@@ -28,6 +28,19 @@ MITRE_ATTACK_SOURCES = frozenset(
 )
 
 
+# The words a producer writes in a technique field to say there is none. They
+# are an answer — no technique — and a row made of one printed ``NONE`` in the
+# ATT&CK table of a benign tool's report as an "unverified id".
+NO_TECHNIQUE_WORDS = frozenset(
+    {"NONE", "N/A", "NA", "NULL", "NIL", "UNKNOWN", "-", "NOT APPLICABLE"}
+)
+
+
+def says_no_technique(value: Any) -> bool:
+    """Whether a technique field holds a word for "no technique" rather than an id."""
+    return str(value or "").strip().upper() in NO_TECHNIQUE_WORDS
+
+
 def attack_reference_id(obj: Any) -> str:
     """The technique id an object's MITRE ATT&CK reference names, or ``""``.
 

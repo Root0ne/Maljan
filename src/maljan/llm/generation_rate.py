@@ -189,12 +189,16 @@ class GenerationRates:
             row = self._models.get(str(model))
             return row.prompt_rate() if row is not None else None
 
-    def call_timeout(self, call: str, model: str, configured: float, max_tokens: int) -> float:
+    def call_timeout(
+        self, call: str, model: str, configured: float, max_tokens: int, *, budget: str = ""
+    ) -> float:
         """The seconds one call of ``call`` waits, and a record of how it was reached.
 
         ``max(configured, min(max_tokens / rate × TIMEOUT_MARGIN, ceiling))``:
         never shorter than configured, never raised past the ceiling. With no
-        rate or no output budget the configured value stands.
+        rate or no output budget the configured value stands. ``budget`` is how
+        the caller reached ``max_tokens``, kept with the row so the record says
+        where both numbers came from.
         """
         configured = float(configured)
         rate = self.rate(model)
@@ -212,6 +216,8 @@ class GenerationRates:
                 "derived_s": None if derived is None else round(derived, 1),
                 "applied_s": round(applied, 1),
             }
+            if budget:
+                self._timeouts[call]["budget"] = budget
         return applied
 
     def snapshot(self) -> dict[str, Any]:

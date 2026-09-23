@@ -46,6 +46,7 @@ from maljan.pipeline.events import (
 from maljan.schemas.evidence import entry_ids_in
 from maljan.schemas.judgement import BENIGN_VERDICT, SEVERITY_RATINGS, VERDICT_VALUES
 from maljan.schemas.stix_pattern import read_comparisons
+from maljan.utils.written_forms import written_forms
 
 # How many alternatives a suggestion list carries. Three is what fits in one
 # line of feedback; a longer list reads as a menu and the model picks from the
@@ -1184,16 +1185,39 @@ class CapabilityGrounding:
         keys: set[str] = set()
         words: list[str] = []
         try:
+            # A technique only a rule match stands behind — one string of a
+            # YARA rule in a large file, with no analyst claiming it — grounds
+            # no capability word: "credential dumping" was waved through by the
+            # very match in question. Neither its id, its name nor its rule's
+            # row in the evidence counts.
+            from maljan.analysis.corroboration import rule_match_only
+
+            rule_only = set(rule_match_only(report))
+            rule_only_rules = {
+                str(hit.get("rule") or "").lower()
+                for tid in rule_only
+                for hit in (getattr(report, "rule_match_strings", None) or {}).get(tid, [])
+                if isinstance(hit, dict)
+            } - {""}
             for row in list(getattr(report, "ttp_mappings", None) or []) + list(
                 getattr(report, "capability_matrix", None) or []
             ):
+                if str(getattr(row, "technique_id", "") or "") in rule_only:
+                    continue
                 base = _base_technique(getattr(row, "technique_id", ""))
                 if base:
                     techniques.add(base)
                 words.append(str(getattr(row, "technique_name", "") or ""))
-            for block in ("static", "dynamic", "network"):
+            for block in ("static", "dynamic"):
                 if getattr(report, block, None) is not None:
                     keys.add(block)
+            # The network block exists whenever the string sweep found a run of
+            # bytes shaped like a host, and its presence grounded "lateral
+            # movement", "command and control" and "exfiltration" in a run
+            # that observed no traffic at all. It grounds them when something
+            # other than the sweep recorded a row of it.
+            if _network_observed(getattr(report, "network", None)):
+                keys.add("network")
             if list(getattr(report, "persistence", None) or []):
                 keys.add("persistence")
             for section in getattr(report, "sections", None) or []:
@@ -1202,6 +1226,8 @@ class CapabilityGrounding:
                     keys.add(key)
                 words.append(str(getattr(section, "title", "") or ""))
                 for row in getattr(section, "rows", None) or []:
+                    if row and str(row[0]).strip().lower() in rule_only_rules:
+                        continue
                     words.extend(str(cell) for cell in row)
                 words.append(str(getattr(section, "text", "") or ""))
             values = isr_reports.values() if hasattr(isr_reports, "values") else ()
@@ -1220,6 +1246,25 @@ class CapabilityGrounding:
             evidence_keys=frozenset(keys),
             evidence_text=" ".join(w for w in words if w).lower(),
         )
+
+
+def _network_observed(network: Any) -> bool:
+    """Whether a network block holds anything but the string sweep's own rows.
+
+    A sandbox's or an analyst's row, or a fingerprint a capture recorded. A
+    row that records no source is read as the sweep's, the reading the export
+    gives it.
+    """
+    if network is None:
+        return False
+    for kind in ("domains", "ips", "urls"):
+        for row in getattr(network, kind, None) or []:
+            if str(getattr(row, "source", "") or "").strip().lower() not in ("", "strings"):
+                return True
+    return any(
+        getattr(network, recorded, None)
+        for recorded in ("user_agents", "ja3_fingerprints", "ja3s_fingerprints")
+    )
 
 
 # What ends the clause a term was written in. A capability word after one of
@@ -1526,6 +1571,9 @@ def citation_violations(
 UNGROUNDED_FINDING_CODE = "narrative.ungrounded_finding"
 FLOW_VOICE_CODE = "report.flow_voice"
 UNCITED_CONFIGURATION_CODE = "report.configuration_uncited"
+CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
+UNCITED_IDENTIFIER_CODE = "report.identifier_uncited"
+TECHNIQUE_NAME_CODE = "report.technique_name"
 
 # The codes a report round's answer is kept with. A broken shape leaves nothing
 # to print; each of these leaves a printable answer with a finding beside it.
@@ -1536,6 +1584,9 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         FLOW_VOICE_CODE,
         UNCITED_CONFIGURATION_CODE,
         CITATION_NOT_EVIDENCE_CODE,
+        CITATION_WRONG_ENTRY_CODE,
+        UNCITED_IDENTIFIER_CODE,
+        TECHNIQUE_NAME_CODE,
     }
 )
 
@@ -1654,6 +1705,357 @@ def configuration_citation_violations(payload: Any, known_ids: Iterable[str]) ->
             )
         )
     return out
+
+
+def identifier_citation_violations(payload: Any, known_ids: Iterable[str]) -> list[Violation]:
+    """Host identifiers that cite no entry of this run's evidence.
+
+    An identifier is a value the report model says it read, and the entry it
+    was read in is what lets a reader check it. One with no entry the run
+    issued is asked about once; the model decides whether to cite the entry or
+    leave the identifier out. With no ledger to compare against, only an empty
+    citation list is judged.
+    """
+    known = {str(value).strip().lower() for value in known_ids}
+    out: list[Violation] = []
+    for index, row in enumerate(_rows_of(payload, "identifiers")):
+        cited = [value.lower() for value in _cited(row, "evidence_refs")]
+        if cited and (not known or any(value in known for value in cited)):
+            continue
+        out.append(
+            Violation(
+                code=UNCITED_IDENTIFIER_CODE,
+                message=(
+                    f"identifier {safe_finding_value(index + 1)} "
+                    f"({safe_finding_value(row.get('value'))}) cites no entry in this run's "
+                    "evidence. Cite the ev_ id of the entry the value was read in, or leave "
+                    "the identifier out."
+                ),
+                path=f"identifiers.{index}.evidence_refs",
+            )
+        )
+    return out
+
+
+# A technique id with a name written after it in brackets, the way a report
+# writes one: "T1027 (Obfuscated Files or Information)". The name is words; a
+# bracket holding an id, a count or a list is not a name and is not read.
+_ID_THEN_NAME_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\s*\(([A-Za-z][A-Za-z0-9 ,:/&'\-]{2,80})\)")
+
+
+def technique_name_violations(payload: Any) -> list[Violation]:
+    """Technique ids written with a name the ATT&CK catalogue gives another technique.
+
+    "T1027 (Binary Padding)" names T1027.001, and "T1027 (Indicator Removal from
+    Host)" names a technique T1027 is not. A reader acts on the id and reads the
+    name, and the two disagree. Asked once per id and name, with the
+    catalogue's name for the id and the id the written name belongs to, from
+    the vendored table; kept as written if the model keeps it. A name the
+    catalogue gives the id — alone, or after its parent's name for a
+    sub-technique — stands, and an id the table does not have is the
+    catalogue check's question, not this one.
+    """
+    if payload is None:
+        return []
+    from maljan.memory.attck_loader import technique_entry, technique_ids_named
+
+    def _fold(name: str) -> str:
+        return " ".join(re.sub(r"[^a-z0-9]+", " ", str(name or "").lower()).split())
+
+    seen: set[tuple[str, str]] = set()
+    out: list[Violation] = []
+    for text in _strings_of(payload):
+        for match in _ID_THEN_NAME_RE.finditer(text):
+            tid, written = match.group(1).upper(), match.group(2).strip()
+            entry = technique_entry(tid)
+            if entry is None or (tid, _fold(written)) in seen:
+                continue
+            accepted = {_fold(entry.name)}
+            if "." in tid:
+                parent = technique_entry(tid.split(".")[0])
+                if parent is not None:
+                    accepted.add(_fold(f"{parent.name} {entry.name}"))
+            if _fold(written) in accepted:
+                continue
+            seen.add((tid, _fold(written)))
+            owners = [owner for owner in technique_ids_named(written) if owner != tid]
+            belongs = (
+                f" The name {safe_finding_value(written)!r} is "
+                f"{safe_finding_value(', '.join(owners))}'s."
+                if owners
+                else ""
+            )
+            out.append(
+                Violation(
+                    code=TECHNIQUE_NAME_CODE,
+                    message=(
+                        f"{safe_finding_value(tid)} is {safe_finding_value(entry.name)!r} in the "
+                        f"ATT&CK catalogue, not {safe_finding_value(written)!r}.{belongs} Write "
+                        "the catalogue's name beside the id, or the id the name belongs to."
+                    ),
+                    path="technique_name",
+                )
+            )
+    return out
+
+
+# What a sentence states verbatim: a span in backticks, in double quotes, in
+# typographic quotes, or in single quotes that stand apart from the words
+# around them (an apostrophe inside a word opens nothing). A span of any length
+# is matched, so its closing mark is consumed with it; only a value of three
+# characters or more is kept (``quoted_values``), so a format specifier or a
+# one-letter value, which half the run's answers carry, is never the thing a
+# citation is judged by.
+_QUOTED_SPAN_RE = re.compile(
+    r"`([^`\n]{1,300})`"
+    r'|"([^"\n]{1,300})"'
+    r"|“([^”\n]{1,300})”"
+    r"|(?<![\w'])'([^'\n]{1,300})'(?![\w'])"
+)
+# Where one sentence ends and the next begins, for reading which citation a
+# quoted value sits under. A new line always ends one.
+_SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z(`\"“'])|\n+")
+# The fields of a record whose whole value is a value the sample carries, read
+# as written rather than for quotes inside it.
+_VERBATIM_FIELDS = frozenset({"value", "endpoints"})
+# The fields a record cites its entries in.
+_CITING_FIELDS = ("evidence_refs", "evidence_ids", "evidence_ref")
+
+
+@dataclass(frozen=True)
+class EntryTexts:
+    """Each ledger entry's text as this run holds it, lower-cased, and the tool behind it.
+
+    The text a check reads for "is this value in that entry": the answer as
+    the model received it where the run's corpus kept it, and the stored
+    output where it did not. Read-only, built once per report.
+    """
+
+    texts: Mapping[str, str] = field(default_factory=dict)
+    tools: Mapping[str, str] = field(default_factory=dict)
+    # The entries whose text is known not to be the whole answer — shortened
+    # for the model or trimmed by the byte budget. A value absent from one of
+    # them may be in the part that is not here, so no absence is read off it.
+    partial: frozenset[str] = frozenset()
+
+    @classmethod
+    def from_ledger(cls, ledger: Iterable[Any], corpus: Any = None) -> EntryTexts:
+        """One text per entry: the corpus's copy first, the stored output after it."""
+        texts: dict[str, str] = {}
+        tools: dict[str, str] = {}
+        partial: set[str] = set()
+        for entry in ledger or ():
+            written = str(getattr(entry, "id", "") or "").strip()
+            entry_id = written.lower()
+            if not entry_id:
+                continue
+            text = ""
+            if corpus is not None:
+                try:
+                    text = str(corpus.text_for(written) or "")
+                except Exception:  # noqa: BLE001 — a missing copy falls back to the stored one
+                    text = ""
+            text = text or str(getattr(entry, "output", "") or "").lower()
+            if getattr(entry, "truncated", False):
+                partial.add(entry_id)
+            if text:
+                texts[entry_id] = text
+                tools[entry_id] = str(getattr(entry, "tool", "") or "")
+        return cls(texts=texts, tools=tools, partial=frozenset(partial))
+
+    def holds(self, entry_id: str, value: str) -> bool:
+        """Whether this entry's text holds ``value`` as a value of its own, however spelt.
+
+        A whole value, never a slice of a longer run: ``443`` is not held by an
+        answer whose only ``443`` is inside a timestamp. See :func:`decidable`
+        for the values no text can answer for at all.
+        """
+        from maljan.agents._indicator_denylists import whole_value_in
+
+        text = self.texts.get(str(entry_id).strip().lower(), "")
+        return bool(text) and any(
+            whole_value_in(form, text) for form in written_forms(value.lower())
+        )
+
+    def holding(self, value: str) -> list[str]:
+        """Every entry whose text holds ``value``, in ledger order; none for an undecidable one."""
+        if not decidable(value):
+            return []
+        return [entry_id for entry_id in self.texts if self.holds(entry_id, value)]
+
+    def named(self, entry_id: str) -> str:
+        """``ev_0012 (floss)``: an id with the tool that answered it."""
+        tool = self.tools.get(entry_id, "")
+        return f"{entry_id} ({tool})" if tool else entry_id
+
+
+# A value that is only a number — decimal, hex, dotted — is one no text can be
+# said to hold or lack: an answer may write it another way (``0x12c`` for
+# ``300``), and a reputation report or a strings dump holds almost every short
+# number inside some longer run. Such a value raises no question and no note.
+# A number: ``0x``-prefixed hex, a hex run with a digit in it (a word spelled
+# only with a–f, ``added``, is a word), or digits with separators.
+_ONLY_A_NUMBER_RE = re.compile(
+    r"0x[0-9a-f]+|(?=[a-f]*[0-9])[0-9a-f]+|[0-9][0-9.,:]*", re.IGNORECASE
+)
+_WHOLE_DIGEST_RE = re.compile(
+    r"[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64}|[0-9a-f]{128}", re.IGNORECASE
+)
+
+
+def decidable(value: str) -> bool:
+    """Whether a text can be said to hold or to lack ``value``.
+
+    A short number is not (``443`` sits in many entries by chance); a whole
+    digest is, whatever its letters.
+    """
+    text = str(value or "").strip()
+    if _WHOLE_DIGEST_RE.fullmatch(text):
+        return True
+    return len(text) >= 3 and _ONLY_A_NUMBER_RE.fullmatch(text) is None
+
+
+def quoted_values(text: str) -> list[str]:
+    """What ``text`` states verbatim, in the order written, once each."""
+    found: list[str] = []
+    for match in _QUOTED_SPAN_RE.finditer(str(text or "")):
+        value = next(group for group in match.groups() if group is not None).strip()
+        if len(value) >= 3 and value not in found:
+            found.append(value)
+    return found
+
+
+def _ids_in(value: Any) -> list[str]:
+    """The evidence ids a citing field carries, lower-cased, in order."""
+    items = value if isinstance(value, list | tuple) else [value]
+    ids: list[str] = []
+    for item in items:
+        for found in _EVIDENCE_ID_RE.findall(str(item or "")):
+            if found.lower() not in ids:
+                ids.append(found.lower())
+    return ids
+
+
+def _sentences_with_citations(text: str) -> list[tuple[str, list[str]]]:
+    """Each sentence of ``text`` with the evidence ids it cites in brackets."""
+    out: list[tuple[str, list[str]]] = []
+    for sentence in _SENTENCE_END_RE.split(str(text or "")):
+        cited: list[str] = []
+        for group in _cited_groups(_CODE_SPAN_RE.sub(" ", sentence)):
+            for raw in re.split(r"[,;]", group):
+                item = raw.strip().lower()
+                if _EVIDENCE_ID_RE.fullmatch(item) and item not in cited:
+                    cited.append(item)
+        if cited:
+            out.append((sentence, cited))
+    return out
+
+
+def wrong_entry_citations(
+    payload: Any, entries: EntryTexts | None, *, prose: Sequence[str] = ()
+) -> list[Violation]:
+    """Values a text quotes that the entry it cites does not hold, and another entry does.
+
+    Decided only where it can be: a value the text states verbatim — in quotes
+    or backticks, or the whole of a record's value — is looked for in the text
+    of each entry cited for it. Found in one of them, the citation stands.
+    Found in none of them but in another entry of the run, the citation points
+    a reader at the wrong answer, and the model is asked once, with the entry
+    that holds it offered. Found nowhere, nothing is said: a value the run's
+    texts do not spell as the sentence does is a paraphrase or a composition
+    this check cannot judge. The id is never rewritten.
+
+    ``prose`` names the fields that are running text, read sentence by
+    sentence under the brackets each sentence carries. Every other string is
+    read under its own brackets when it has any, and otherwise under the
+    citations of the record it belongs to (``evidence_refs``,
+    ``evidence_ids``, ``evidence_ref``); a string with neither is not judged.
+    """
+    if payload is None or entries is None or not entries.texts:
+        return []
+    data = payload if isinstance(payload, dict) else getattr(payload, "__dict__", {}) or {}
+    wrong: dict[tuple[tuple[str, ...], tuple[str, ...]], list[str]] = {}
+
+    def _ask(value: str, cited: Sequence[str]) -> None:
+        value = str(value or "").strip()
+        known = [entry_id for entry_id in cited if entry_id in entries.texts]
+        if not decidable(value) or not known:
+            return
+        if any(entries.holds(entry_id, value) for entry_id in known):
+            return
+        if any(entry_id in entries.partial for entry_id in known):
+            # A cited entry that is not the whole answer may hold it in the
+            # part that is missing; no "is not in" is said of it.
+            return
+        holders = entries.holding(value)
+        if not holders:
+            return
+        values = wrong.setdefault((tuple(known), tuple(holders)), [])
+        if value not in values:
+            values.append(value)
+
+    def _read_prose(text: Any) -> None:
+        for sentence, cited in _sentences_with_citations(str(text or "")):
+            for value in quoted_values(sentence):
+                _ask(value, cited)
+
+    def _walk(node: Any, depth: int = 0) -> None:
+        if depth > 4:
+            return
+        if isinstance(node, list | tuple):
+            for item in node:
+                _walk(item, depth + 1)
+            return
+        if not isinstance(node, dict):
+            return
+        refs: list[str] = []
+        for key in _CITING_FIELDS:
+            refs.extend(ref for ref in _ids_in(node.get(key)) if ref not in refs)
+        for key, value in node.items():
+            if key in _CITING_FIELDS:
+                continue
+            if isinstance(value, str):
+                if _sentences_with_citations(value):
+                    _read_prose(value)
+                elif refs:
+                    if key in _VERBATIM_FIELDS:
+                        _ask(value, refs)
+                    for quoted in quoted_values(value):
+                        _ask(quoted, refs)
+            elif key in _VERBATIM_FIELDS and isinstance(value, list | tuple) and refs:
+                for item in value:
+                    if isinstance(item, str):
+                        _ask(item, refs)
+            else:
+                _walk(value, depth + 1)
+
+    for key in prose:
+        if isinstance(data.get(key), str):
+            _read_prose(data.get(key))
+    _walk({key: value for key, value in data.items() if key not in prose})
+    for key in prose:
+        if not isinstance(data.get(key), str):
+            _walk(data.get(key))
+
+    violations: list[Violation] = []
+    for (cited, holders), values in wrong.items():
+        quoted = safe_finding_value(", ".join(repr(value) for value in values[:_MAX_NAMED_IDS]))
+        more = len(values) - _MAX_NAMED_IDS
+        named = safe_finding_value(", ".join(entries.named(i) for i in cited))
+        holding = safe_finding_value(", ".join(entries.named(i) for i in holders[:_MAX_NAMED_IDS]))
+        message = (
+            f"{quoted} is not in {named}, which the text cites for it; this run's evidence "
+            f"holds it in {holding}. Cite the entry that holds what the text quotes."
+            if len(values) == 1
+            else f"{quoted} are not in {named}, which the text cites for them; this run's "
+            f"evidence holds them in {holding}"
+            f"{' (with ' + safe_finding_value(more) + ' more)' if more > 0 else ''}. "
+            "Cite the entry that holds what the text quotes."
+        )
+        violations.append(
+            Violation(code=CITATION_WRONG_ENTRY_CODE, message=message, path="citation")
+        )
+    return violations
 
 
 # ---------------------------------------------------------------------------
@@ -2798,20 +3200,28 @@ class Haystack:
         self.parts: tuple[str, ...] = tuple(part for part in parts if part)
 
     def __contains__(self, needle: str) -> bool:
-        return any(needle in part for part in self.parts)
+        # Every spelling the value takes in a tool's answer: the answers are
+        # JSON, so a quote in a value is stored ``\"`` and a backslash ``\\``,
+        # and the plain value a model writes back is in none of them as
+        # written. ``utils.written_forms`` names the spellings; the question
+        # asked of each is the one that was asked of the plain value.
+        forms = written_forms(needle)
+        return any(form in part for part in self.parts for form in forms)
 
     def __bool__(self) -> bool:
         return bool(self.parts)
 
     def holds_value(self, value: str) -> bool:
-        """Whether the evidence holds ``value`` as a value of its own."""
+        """Whether the evidence holds ``value`` as a value of its own, however spelt."""
         from maljan.agents._indicator_denylists import whole_value_in
 
-        return any(whole_value_in(value, part) for part in self.parts)
+        forms = written_forms(value)
+        return any(whole_value_in(form, part) for part in self.parts for form in forms)
 
     def holds_token(self, value: str) -> bool:
         """Whether ``value`` stands between two boundaries rather than inside a run."""
-        return any(_token_in(value, part) for part in self.parts)
+        forms = written_forms(value)
+        return any(_token_in(form, part) for part in self.parts for form in forms)
 
 
 def _token_in(lowered: str, part: str) -> bool:

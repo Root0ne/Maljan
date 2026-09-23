@@ -35,17 +35,22 @@ from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
     KEPT_WITH_A_FINDING,
     CapabilityGrounding,
+    EntryTexts,
     ValidationTally,
     Validator,
     Violation,
     citation_violations,
     configuration_citation_violations,
     flow_voice_violations,
+    identifier_citation_violations,
     keep_known_keys,
     pack_line_ids,
+    quoted_values,
     retry_with_feedback,
     schema_violations,
     section_capability_violations,
+    technique_name_violations,
+    wrong_entry_citations,
 )
 from maljan.reporting.evidence_bundles import bundle_for, is_empty, sandbox_entry_ids
 from maljan.reporting.models import (
@@ -55,12 +60,14 @@ from maljan.reporting.models import (
     ConfigItem,
     EncryptionScheme,
     FlowStep,
+    HostIdentifier,
     MalwareReport,
     RansomNote,
     TechnicalAnalysis,
     TechnicalSubsection,
 )
 from maljan.utils.json_cleaner import safe_parse_json
+from maljan.utils.marked_cut import marked_cut
 
 # ---------------------------------------------------------------------------
 # Per-section output schemas
@@ -100,6 +107,11 @@ class _FlowOut(BaseModel):
 class _ConfigOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
     items: list[ConfigItem] = Field(default_factory=list)
+
+
+class _HostIdentifiersOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    identifiers: list[HostIdentifier] = Field(default_factory=list)
 
 
 class _CommandsOut(BaseModel):
@@ -170,6 +182,12 @@ _INSTRUCTIONS: dict[str, str] = {
         "Extract the sample's configuration: its network endpoints, identifiers, keys, "
         "version, timing values and install path."
     ),
+    "host_identifiers": (
+        "List the identifiers a responder could search a host for — names, file and folder "
+        "paths, registry keys, strings the sample writes or checks — that you read in this "
+        "run's evidence. Write each value as the entry you read it in records it, say what "
+        "the sample uses it for where the evidence says, and cite that entry."
+    ),
     "commands": "Extract the commands the sample accepts from its operator.",
     "encryption_scheme": "Extract the encryption scheme.",
     "cli_flags": "Extract command-line flags.",
@@ -217,6 +235,13 @@ _EXAMPLES: dict[str, str] = {
         '"how_obtained": "static-string", "evidence_refs": ["ev_0015"]}, '
         '{"key": "Skipped folders", "value": "Windows, Program Files", '
         '"how_obtained": "inferred", "evidence_refs": []}]}'
+    ),
+    "host_identifiers": (
+        '{"identifiers": ['
+        '{"kind": "Note file name", "value": "RESTORE_FILES.example.txt", '
+        '"purpose": "Written to every folder it encrypts", "evidence_refs": ["ev_0014"]}, '
+        '{"kind": "Registry value", "value": "HKCU\\\\Software\\\\ExampleLocker\\\\state", '
+        '"purpose": "Marks a finished encryption pass", "evidence_refs": ["ev_0017"]}]}'
     ),
     "commands": (
         '{"commands": ['
@@ -279,6 +304,66 @@ def _expected_object(schema: type[BaseModel], depth: int = 0) -> str:
     return "{" + body + "}"
 
 
+def section_contract(section: str, schema: type[BaseModel]) -> str:
+    """Everything a section is told about the shape of its answer, as one text.
+
+    The exact object, how an unsupported field and a value are written, how
+    an item of a list is written, and the example. Module-level, so the test
+    that holds every word a report model is shown to the invented sample class
+    reads the contracts as well as the instructions.
+    """
+    contract = (
+        "Answer with exactly this JSON object, these keys and no others:\n"
+        f"{_expected_object(schema)}\n"
+        "A field the evidence does not support is left empty or null; the keys stay. "
+        'A value shown as "..." is written as a JSON string, a number included.'
+    )
+    if _has_record_lists(schema):
+        # The line above is about the object. An item of a list is a record,
+        # and a record the evidence gives no value for is not a record with
+        # nulls in it: a configuration section whose items carried
+        # ``"value": null`` failed its schema twice and was dropped.
+        contract += (
+            "\nAn item of a list is written only when the evidence gives it a value; an "
+            "item the evidence cannot fill is left out of the list, never written with "
+            "null in its fields."
+        )
+    example = _example_for(section, schema)
+    if example:
+        contract += (
+            "\nFor example (the shape only; write what this run's evidence supports):\n" + example
+        )
+    return contract
+
+
+# Every section the composer asks for, with the object it answers with, in the
+# order it asks. Read by the prompt-leak test, which holds every contract to
+# the invented sample class.
+SECTION_SCHEMAS: dict[str, type[BaseModel]] = {
+    "introduction": _IntroOut,
+    "execution_flow": _FlowOut,
+    "prose": _ProseOut,
+    "configuration": _ConfigOut,
+    "host_identifiers": _HostIdentifiersOut,
+    "commands": _CommandsOut,
+    "encryption_scheme": EncryptionScheme,
+    "cli_flags": _CliFlagsOut,
+    "ransom_note": RansomNote,
+    "communications": _C2Out,
+}
+
+
+def _has_record_lists(schema: type[BaseModel]) -> bool:
+    """Whether the object the section answers with holds a list of records."""
+    for field in (getattr(schema, "model_fields", {}) or {}).values():
+        args = [arg for arg in get_args(field.annotation) if arg is not type(None)]
+        if get_origin(field.annotation) in (list, tuple) and any(
+            isinstance(arg, type) and hasattr(arg, "model_fields") for arg in args
+        ):
+            return True
+    return False
+
+
 def _example_for(section: str, schema: type[BaseModel]) -> str:
     """The example answer shown for one section, or ``""`` for the shapes that have none."""
     if schema is _ProseOut:
@@ -286,8 +371,20 @@ def _example_for(section: str, schema: type[BaseModel]) -> str:
     return _EXAMPLES.get(section, "")
 
 
-def _bundle_text(section: str, bundle: dict[str, Any]) -> str:
+def _bundle_text(
+    section: str,
+    bundle: dict[str, Any],
+    entries: EntryTexts | None = None,
+    item_chars: int | None = None,
+) -> str:
     """Render an evidence bundle into a compact prompt body.
+
+    Every analyst claim and every tool answer is shown, each within
+    ``item_chars`` characters: the share of the room the section's window
+    leaves (``ReportComposer._item_chars``), a cut marked as one; ``None`` is a
+    composer that knows no window and shows each whole; ``0`` shows the
+    sentence saying there was no room; a negative value shows each empty,
+    which is how the rest of the prompt is measured. The facts enter whole.
 
     The heading used to be the bare line ``SECTION: <name>``, which is a key
     with a value next to it: both models answered with ``{"SECTION": ...,
@@ -320,17 +417,76 @@ def _bundle_text(section: str, bundle: dict[str, Any]) -> str:
     claims = bundle.get("claims") or []
     if claims:
         lines.append("ANALYST CLAIMS (claim — evidence):")
-        for c in claims[:10]:
-            lines.append(f"- {c.get('claim', '')} — {c.get('evidence_ref', '')}")
+        for c in claims:
+            claim = f"{c.get('claim', '')} — {c.get('evidence_ref', '')}"
+            lines.append(f"- {_within(claim, item_chars)}" + _where_quoted(claim, entries))
         lines.append("")
     tools = bundle.get("tool_outputs") or []
     if tools:
         lines.append("CAPTURED TOOL OUTPUT:")
-        for t in tools[:6]:
+        for t in tools:
             sym = f" [{t.get('symbol')}]" if t.get("symbol") else ""
-            lines.append(f"- {t.get('tool', '')}{sym}: {t.get('output', '')[:1200]}")
+            shown = _within(str(t.get("output", "") or ""), item_chars)
+            lines.append(f"- {t.get('tool', '')}{sym}: {shown}")
         lines.append("")
     return "\n".join(lines)
+
+
+# What a section is shown in place of a claim or a tool answer its window has
+# no room for.
+NO_ROOM_FOR_THE_ANSWER = "(not shown: this section's context window has no room left for it)"
+
+
+def _within(text: str, chars: int | None) -> str:
+    """``text`` within ``chars`` characters: whole, cut with a mark, or the no-room sentence."""
+    if chars is None:
+        return text
+    if chars < 0:
+        return ""
+    if chars == 0:
+        return NO_ROOM_FOR_THE_ANSWER
+    return marked_cut(text, chars)
+
+
+# The headings of what the platform adds to a section's prompt beside the
+# model-facing text above: module data, so the prompt-leak test reads them.
+PUBLISHED_TECHNIQUES_HEADING = (
+    "TECHNIQUES THIS REPORT PUBLISHES (its ATT&CK table; the name beside each id is the "
+    "catalogue's):"
+)
+WHERE_QUOTED_LEAD = "the run's evidence: "
+
+
+def _where_quoted(line: str, entries: EntryTexts | None) -> str:
+    """Which of the run's entries hold the values a claim quotes, as a note after it.
+
+    A claim is another model's words and is shown as written. What the
+    platform adds is a fact it can state: the entries whose text holds each
+    value the claim quotes. A section shown only the claim and the facts of
+    its own bundle once called a claim unsupported that an entry it was never
+    shown carried word for word. A value no entry holds gets no note.
+    """
+    if entries is None:
+        return ""
+    notes: list[str] = []
+    for value in quoted_values(line):
+        holders = entries.holding(value)
+        if holders:
+            where = ", ".join(entries.named(entry_id) for entry_id in holders[:4])
+            notes.append(f"`{value}` is in {where}")
+    return f" ({WHERE_QUOTED_LEAD}{'; '.join(notes)})" if notes else ""
+
+
+def _published_techniques(report: MalwareReport) -> str:
+    """The techniques the report publishes, one line each, for every section's prompt."""
+    rows = [
+        f"- {m.technique_id} {m.technique_name}".rstrip()
+        for m in (getattr(report, "ttp_mappings", None) or [])
+        if getattr(m, "technique_id", "")
+    ]
+    if not rows:
+        return ""
+    return "\n".join([PUBLISHED_TECHNIQUES_HEADING, *rows])
 
 
 # The calls one section may take: its answer and the one retry the validation
@@ -355,7 +511,7 @@ class ReportComposer:
     def __init__(
         self,
         llm: BaseChatModel,
-        section_max_tokens: int = 900,
+        section_max_tokens: int = 0,
         per_section_timeout: int = 120,
         token_ledger: Any | None = None,
         model_label: str = "",
@@ -363,6 +519,8 @@ class ReportComposer:
         output_cap: int | None = None,
         caps_by_model: dict[str, int] | None = None,
         turn_share: float | None = None,
+        budget_note: str = "",
+        window_tokens: int = 0,
     ) -> None:
         self.llm = llm
         self.section_max_tokens = section_max_tokens
@@ -371,6 +529,14 @@ class ReportComposer:
         # asked to keep reasoning out (the container decides). The wait and the
         # cut are both judged against this, because it is what the server caps.
         self.output_cap = int(output_cap or section_max_tokens)
+        # How that budget was reached, in one sentence: the configured value,
+        # or the reply room of the model's own context window. Printed beside
+        # the section's wait in the run summary, so the number can be checked.
+        self.budget_note = budget_note
+        # The smallest context window of the reporter's models, in tokens: what
+        # a section's claims and tool answers are sized against (``_item_chars``). Zero is
+        # a window nobody learned, and the answers are then shown whole.
+        self.window_tokens = int(window_tokens or 0)
         # Each model of the reporter's list, by the label its answers carry,
         # and the cap its own provider was given: what "cut" means for the
         # model that answered.
@@ -401,6 +567,9 @@ class ReportComposer:
         # ``compose`` call.
         self._facts_block = ""
         self._run_state = ""
+        # Each ledger entry's text, set per ``compose`` call; ``None`` judges
+        # no citation against an entry and annotates no claim.
+        self._entries: EntryTexts | None = None
         # What this report lost or had trimmed, in the words the report's own
         # degradation reasons are written in. A section dropped after its
         # retries used to leave the report with no conclusion and nothing
@@ -415,6 +584,7 @@ class ReportComposer:
         facts_block: str = "",
         run_state: str = "",
         citable_ids: Sequence[str] | None = None,
+        evidence: EntryTexts | None = None,
     ) -> None:
         """Fill report.intro_background / technical_analysis / c2_channels.
 
@@ -424,6 +594,13 @@ class ReportComposer:
         block; every section's prompt leads with the two, so no section is
         written without the facts the run established or without knowing
         which stages ran.
+
+        ``evidence`` is each ledger entry's text as the run holds it. With it,
+        a value a section quotes under a citation is looked for in the entry
+        cited (``wrong_entry_citations``), and a value an analyst's claim
+        quotes is shown with the entries that hold it, so a section is never
+        left to call a claim unsupported that an entry it was not shown
+        supports.
         """
         ta = report.technical_analysis or TechnicalAnalysis()
         authored = 0
@@ -433,6 +610,7 @@ class ReportComposer:
         # handed none, the pack's own line ids — never ids read out of prompt
         # text, where a sample's decoded string can carry any.
         self._citable = list(citable_ids) if citable_ids is not None else pack_line_ids(facts_block)
+        self._entries = evidence
         # What this run established, read once and asked of every section, so
         # a conclusion cannot be the first place "command-and-control" appears.
         self._grounding = CapabilityGrounding.from_report(report, isr_reports)
@@ -492,6 +670,19 @@ class ReportComposer:
         )
         if config and isinstance(config, _ConfigOut) and config.items:
             ta.configuration = self._kept("configuration", config.items, 30)
+            authored += 1
+
+        identifiers = await self._author(
+            "host_identifiers",
+            report,
+            isr_reports,
+            _HostIdentifiersOut,
+            _INSTRUCTIONS["host_identifiers"],
+            validators=[lambda p: identifier_citation_violations(p, known_ids)],
+        )
+        if identifiers and isinstance(identifiers, _HostIdentifiersOut) and identifiers.identifiers:
+            # All of them: the section holds what the model writes.
+            ta.host_identifiers = list(identifiers.identifiers)
             authored += 1
 
         commands = await self._author(
@@ -570,23 +761,40 @@ class ReportComposer:
         facts = str(getattr(self, "_facts_block", "") or "")
         if facts:
             head.append(facts)
+        # What the report already publishes, so a section cannot call a
+        # technique unsupported that the report's own ATT&CK table carries.
+        published = _published_techniques(report)
+        if published:
+            head.append(published)
         # The two standing blocks lead, then the instruction, then the exact
         # object the answer has to be, then the section's own bundle. The
         # object is in the prompt because the manual parse is the primary path
         # on a local server — ``with_structured_output`` is skipped there — and
         # on that path nothing had ever shown the model a key name.
-        contract = (
-            "Answer with exactly this JSON object, these keys and no others:\n"
-            f"{_expected_object(schema)}\n"
-            "A field the evidence does not support is left empty or null; the keys stay."
+        contract = section_contract(section, schema)
+        entries = getattr(self, "_entries", None)
+        # The claims and the tool answers share what the model's window leaves
+        # after its reply and the rest of this prompt; measured on the prompt
+        # with each of them empty, so only its line's own lead is charged.
+        without = "\n\n".join(
+            [*head, instruction, contract, _bundle_text(section, bundle, entries, item_chars=-1)]
         )
-        example = _example_for(section, schema)
-        if example:
-            contract += (
-                "\nFor example (the shape only; write what this run's evidence supports):\n"
-                + example
+        prompt_chars = len(_SYSTEM) + len(without)
+        room = self._room_chars()
+        if room is not None and prompt_chars > room:
+            # The facts enter whole: a section that cannot hold them says so.
+            self._note_degradation(
+                f"The {section} section's prompt without its claims and tool answers "
+                f"({prompt_chars} characters) exceeds the {room} its model's context "
+                "window leaves after the reply."
             )
-        human = "\n\n".join([*head, instruction, contract, _bundle_text(section, bundle)])
+        item_chars = self._item_chars(
+            prompt_chars,
+            len(bundle.get("claims") or []) + len(bundle.get("tool_outputs") or []),
+        )
+        human = "\n\n".join(
+            [*head, instruction, contract, _bundle_text(section, bundle, entries, item_chars)]
+        )
         messages = [
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=human),
@@ -613,6 +821,35 @@ class ReportComposer:
                 f"report section '{section}' is missing: the round failed ({type(exc).__name__})"
             )
             return None
+
+    def _item_chars(self, prompt_chars: int, answers: int) -> int | None:
+        """How many characters of each claim and tool answer this section may show, or ``None``.
+
+        What the model's context window leaves after the section's output
+        budget and the rest of its prompt, shared evenly across the claims and
+        the answers: ``((window − output budget) × chars per token − prompt) ÷
+        items``,
+        the arithmetic the analysts' tool-output cap uses. ``None`` when no
+        window is known (the answers are shown whole), ``0`` when nothing is
+        left. A fixed 1,200 characters used to stand here.
+        """
+        room = self._room_chars()
+        if room is None or answers <= 0:
+            return None
+        return max(0, (room - int(prompt_chars)) // answers)
+
+    def _room_chars(self) -> int | None:
+        """The characters a section's whole prompt may take, or ``None`` with no window known.
+
+        ``(window − output budget) × chars per token``.
+        """
+        window = int(getattr(self, "window_tokens", 0) or 0)
+        if window <= 0:
+            return None
+        from maljan.llm.context_window import CHARS_PER_TOKEN
+
+        reply = int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0)
+        return (window - reply) * CHARS_PER_TOKEN
 
     def _start_the_section_clock(self, seconds: float) -> None:
         """Measure the model list's turn deadline against this section's clock.
@@ -662,6 +899,7 @@ class ReportComposer:
                 model_name_of(self.llm),
                 configured,
                 int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0),
+                budget=str(getattr(self, "budget_note", "") or ""),
             )
         )
         if per_call <= configured:
@@ -682,6 +920,7 @@ class ReportComposer:
         # every one of eight sections is still eight timeouts nobody needs.
         citable = list(getattr(self, "_citable", None) or [])
         prose = _PROSE_FIELDS.get(schema, ())
+        entries = getattr(self, "_entries", None)
         try:
             if not structured_output_supported_for_llm(self.llm):
                 raise _StructuredOutputUnavailable
@@ -705,6 +944,8 @@ class ReportComposer:
                 found = [
                     *section_capability_violations(answer, self._grounding),
                     *citation_violations(answer, citable, prose=prose),
+                    *wrong_entry_citations(answer, entries, prose=prose),
+                    *technique_name_violations(answer),
                 ]
                 for extra in validators or []:
                     found.extend(extra(answer))
@@ -784,6 +1025,8 @@ class ReportComposer:
                 *schema_violations(schema, payload, code="composer.schema"),
                 *section_capability_violations(payload, self._grounding),
                 *citation_violations(payload, citable, prose=prose),
+                *wrong_entry_citations(payload, entries, prose=prose),
+                *technique_name_violations(payload),
             ]
             for extra in validators or []:
                 found.extend(extra(payload))
@@ -828,7 +1071,8 @@ class ReportComposer:
                 self._note_degradation(
                     f"report section '{section or schema.__name__}' is missing: its answer "
                     f"reached the output cap of {cut_at} tokens and was cut off "
-                    "(composer_section_max_tokens; a model's reasoning counts against it)"
+                    "(the section's output budget, derived in the run summary; a model's "
+                    "reasoning counts against it)"
                 )
                 return None
             self._note_degradation(

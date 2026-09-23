@@ -132,7 +132,10 @@ def _drop_llm_caches_on_retirement(loop: object) -> None:
 
 
 def composer_output_cap(config: Settings, provider: str | None = None) -> int:
-    """What a composer section may generate, reasoning included.
+    """What a composer section may generate under a configured section budget.
+
+    Only asked when ``reporting.composer_section_max_tokens`` is set; at its
+    default of 0 the budget is derived per model (:func:`composer_output_budget`).
 
     Ollama's ``num_predict`` and llama.cpp's ``n_predict`` count the reasoning
     channel with the answer, and a reasoning model left thinking spends its
@@ -150,6 +153,8 @@ def composer_output_cap(config: Settings, provider: str | None = None) -> int:
     own provider's switch. With no provider named, the reporter's first.
     """
     section = int(config.reporting.composer_section_max_tokens)
+    if section <= 0:
+        return 0
     if provider is None:
         agent = config.llm.agents.get(REPORTER_AGENT_KEY)
         provider = str(getattr(agent, "provider", "") or config.llm.provider)
@@ -157,6 +162,39 @@ def composer_output_cap(config: Settings, provider: str | None = None) -> int:
     if provider not in ("ollama", "openai") or bool(getattr(block, "disable_thinking", False)):
         return section
     return section + max(0, int(config.llm.judge_max_tokens or 0))
+
+
+def composer_output_budget(config: Settings, assignment: Any) -> tuple[int, str, int]:
+    """What one model of the reporter's list may generate for a section, and why.
+
+    ``reporting.composer_section_max_tokens`` above 0 is the operator's own
+    budget, used as it always was (:func:`composer_output_cap`). At 0, the
+    default, nothing is fixed: the budget is the room an analyst's reply is
+    given on the same model — the deployment's generation cap, at most a
+    quarter of the context window that model serves
+    (``llm.context_window.reply_budget``) — and a model's reasoning is spent
+    inside it. A fixed 900 tokens dropped a section of a live report when the
+    model reasoned past it.
+
+    Returns the tokens, the sentence that says how they were reached, which
+    the run summary prints beside the section's wait, and the model's context
+    window in tokens, which a section's tool answers are sized against
+    whichever way the budget was set.
+    """
+    from maljan.llm.context_window import reply_budget, window_for_assignment
+
+    configured = int(config.reporting.composer_section_max_tokens)
+    if configured > 0:
+        cap = composer_output_cap(config, str(assignment.provider))
+        extra = "" if cap == configured else f", plus {cap - configured} for its reasoning"
+        window = window_for_assignment(config, assignment)
+        return (
+            cap,
+            f"{cap} tokens — reporting.composer_section_max_tokens is set to {configured}{extra}",
+            window.tokens,
+        )
+    budget = reply_budget(config, assignment)
+    return budget.tokens, budget.sentence(), budget.window.tokens
 
 
 def _swap_healed_llm(replaced: object, healed: object) -> None:
@@ -1193,37 +1231,66 @@ class ServiceContainer:
 
         ``None`` in mock mode or when ``composer_enabled`` is
         off (callers then simply skip the professional spine). Runs on the
-        reporter's model like the NarrativeAgent, built with
-        ``composer_section_max_tokens`` as its output cap, and pins it for the
-        same reason and under the same condition: the report node is the one
-        caller, on one loop.
+        reporter's model like the NarrativeAgent, built with each model's
+        section budget as its output cap (:func:`composer_output_budget`), and
+        pins it for the same reason and under the same condition: the report
+        node is the one caller, on one loop.
         """
         registry = self._llm_registry
         if self.is_mock or not self.config.reporting.composer_enabled or registry is None:
             return None
+        config = self.config
+        budgets: dict[str, tuple[int, str, int]] = {}
+        chain: list[Any] = []
+        if getattr(self, "_report_composer_cache", None) is None:
+            # Learned before the lock: learning a window may ask the model's
+            # server, and nothing else the container serves should wait on it.
+            from maljan.core.model_assignments import assignment_chain_for
+
+            chain = assignment_chain_for(config, REPORTER_AGENT_KEY, role="judge")
+            budgets = {a.label: composer_output_budget(config, a) for a in chain}
         with self._lock:
             if getattr(self, "_report_composer_cache", None) is None:
                 from maljan.reporting.composer import ReportComposer
 
                 rc = self.config.reporting
                 # The reporter's model, built with the section's own output cap
-                # rather than the judge's: ``composer_section_max_tokens`` is
-                # what a section may generate, and a wait sized from it over a
-                # call allowed ``judge_max_tokens`` would say something untrue.
+                # rather than the judge's: the section budget is what a section
+                # may generate, and a wait sized from it over a call allowed
+                # ``judge_max_tokens`` would say something untrue.
                 # Held by the composer, which is dropped with the loop it ran on.
-                from maljan.core.model_assignments import assignment_chain_for
-
-                config = self.config
-                caps = {
-                    a.label: composer_output_cap(config, a.provider)
-                    for a in assignment_chain_for(config, REPORTER_AGENT_KEY, role="judge")
-                }
+                caps = {label: tokens for label, (tokens, _why, _window) in budgets.items()}
+                # What each provider's model is built with: the budget of its
+                # model on the list, the smaller where one provider serves two.
+                by_provider: dict[str, int] = {}
+                for a in chain:
+                    tokens = budgets[a.label][0]
+                    by_provider[a.provider] = min(by_provider.get(a.provider, tokens), tokens)
+                # A section's tool answers are sized for the tightest window of
+                # the list, since any model of it may be the one that answers.
+                window_tokens = min(
+                    (window for _tokens, _why, window in budgets.values()), default=0
+                )
                 # The wait is sized for the most a model of the list may write.
                 output_cap = max(caps.values(), default=composer_output_cap(config))
+                budget_note = "; ".join(
+                    why if len(budgets) == 1 else f"{label}: {why}"
+                    for label, (_tokens, why, _window) in budgets.items()
+                )
+                if window_tokens > 0:
+                    from maljan.llm.context_window import CHARS_PER_TOKEN
+
+                    budget_note += (
+                        f". A section's tool answers share what the {window_tokens}-token "
+                        "window leaves after the output budget and the rest of the section's "
+                        f"prompt, at {CHARS_PER_TOKEN} characters a token, evenly"
+                    )
                 composer_llm = registry.build_model_for_agent(
                     REPORTER_AGENT_KEY,
                     fallback_role="judge",
-                    max_tokens_for=lambda provider: composer_output_cap(config, provider),
+                    max_tokens_for=lambda provider: by_provider.get(
+                        provider, composer_output_cap(config, provider)
+                    ),
                 )
                 attach_rate_meter(composer_llm, getattr(self, "_generation_rates", None))
                 self._report_composer_cache = ReportComposer(
@@ -1236,6 +1303,8 @@ class ServiceContainer:
                     output_cap=output_cap,
                     caps_by_model=caps,
                     turn_share=float(config.llm.fallback_turn_share),
+                    budget_note=budget_note,
+                    window_tokens=window_tokens,
                 )
                 self._report_composer_cache.event_sink = self.event_sink
             return self._report_composer_cache

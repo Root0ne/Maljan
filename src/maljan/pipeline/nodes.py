@@ -401,6 +401,27 @@ def _what_the_run_saw(container: Any, ledger: Any) -> tuple[list[str], CorpusSta
     return [e.output for e in entries if e.output], both_searched(corpus_state, stored)
 
 
+def _report_entry_texts(container: Any, ledger: Any) -> Any:
+    """Each ledger entry's text for the report rounds, or ``None`` when none can be read.
+
+    The run's corpus first, which holds every answer as the model received it,
+    and the stored output where the corpus kept nothing. Never raises: without
+    it the rounds judge no citation against an entry, which is what they did
+    before.
+    """
+    try:
+        from maljan.pipeline.validation import EntryTexts
+
+        try:
+            corpus = container.get_evidence_corpus()
+        except Exception:  # noqa: BLE001 — the stored outputs are the fallback
+            corpus = None
+        return EntryTexts.from_ledger(list(ledger or []), corpus)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("report_node: entry texts not read (%s).", exc)
+        return None
+
+
 def _violations_from_rows(rows: Any) -> list[Violation]:
     """Rebuild the violations an analyst node put on the state channel."""
     out: list[Violation] = []
@@ -4266,6 +4287,11 @@ def make_report_node(
         # answers. They run after the judge built the run summary, so the
         # summary's ``validation`` block is amended here rather than there.
         _report_tally = ValidationTally()
+        # Each ledger entry's text as the run holds it, read once for both
+        # report rounds: a value their prose quotes is looked for in the entry
+        # it cites, and the composer is shown which entries hold what the
+        # analysts' claims quote.
+        _entry_texts = _report_entry_texts(container, _ledger)
 
         narrative_dict: dict[str, Any] | None = None
         # Why no summary was written, when none is: said where the summary
@@ -4301,6 +4327,7 @@ def make_report_node(
                         facts_block=pack_text(state, container),
                         run_state=render_run_state(state),
                         citable_ids=ledger_ids(state),
+                        evidence=_entry_texts,
                     ),
                     timeout=_NARRATIVE_TIMEOUT_SECONDS,
                 )
@@ -4366,6 +4393,7 @@ def make_report_node(
                     facts_block=pack_text(state, container),
                     run_state=render_run_state(state),
                     citable_ids=ledger_ids(state),
+                    evidence=_entry_texts,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
@@ -4388,20 +4416,6 @@ def make_report_node(
             report.figures = build_figures(report)
         except Exception as exc:  # noqa: BLE001
             logger.warning("report_node: figure generation failed (%s).", exc)
-
-        # Detection signatures — template-based YARA/Sigma/Suricata
-        # generation. Runs after narrative so the LLM-written family name can
-        # influence rule metadata. Disabled via config when desired.
-        if cfg is None or cfg.auto_generate_detection_rules:
-            try:
-                report = MalwareReportBuilder.attach_detection_signatures(report)
-                logger.info(
-                    "report_node: detection rules generated (count=%d, errors=%d).",
-                    len(report.detection_signatures),
-                    sum(1 for r in report.detection_signatures if r.compile_error),
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("report_node: detection rule generation failed (%s).", exc)
 
         extended_dump: dict[str, Any] | None = None
         if cfg is None or cfg.include_extended_stix:
@@ -4484,6 +4498,31 @@ def make_report_node(
                     break
 
             report.stix_bundle_extended = extended_dump
+            # The IOC table read again, now that the export exists: a value
+            # the export publishes from the judge's objects is a published row
+            # of the table, the one ``/iocs`` serves as well.
+            try:
+                from maljan.reporting.builder import build_consolidated_iocs
+
+                report.consolidated_iocs = build_consolidated_iocs(report)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("report_node: the IOC table was not re-read (%s).", exc)
+
+        # Detection signatures — template-based YARA/Sigma/Suricata
+        # generation. Runs after narrative so the LLM-written family name can
+        # influence rule metadata, and after the export, because a draft matches
+        # only on what the run publishes: the IOC table's published rows, read
+        # once the export has decided them. Disabled via config when desired.
+        if cfg is None or cfg.auto_generate_detection_rules:
+            try:
+                report = MalwareReportBuilder.attach_detection_signatures(report)
+                logger.info(
+                    "report_node: detection rules generated (count=%d, errors=%d).",
+                    len(report.detection_signatures),
+                    sum(1 for r in report.detection_signatures if r.compile_error),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("report_node: detection rule generation failed (%s).", exc)
 
         # Post-pipeline FP linter. Run after every other
         # mutation has happened (narrative + detection sigs + STIX dump)

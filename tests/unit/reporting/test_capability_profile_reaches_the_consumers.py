@@ -118,14 +118,16 @@ class TestTheNarrativePrompt:
 
 
 class TestTheYaraDraft:
-    def test_the_strings_are_the_imports_a_rule_fired_on(self) -> None:
+    def test_an_import_a_rule_fired_on_is_not_a_string(self) -> None:
+        """A draft matches only on what the run publishes, and an import name is
+        not an indicator: ``8 of them`` over common API names matched a great
+        deal of ordinary software."""
         report, _ = _report()
         rule = _build_yara(report)
         assert rule is not None
         body: str = rule.body
-        assert '"WriteProcessMemory"' in body
-        assert '"CreateRemoteThread"' in body
-        # The API the rule did not match is not a string.
+        assert "WriteProcessMemory" not in body
+        assert "CreateRemoteThread" not in body
         assert "RegQueryValueExA" not in body
 
     def test_bare_names_not_dll_bang_function(self) -> None:

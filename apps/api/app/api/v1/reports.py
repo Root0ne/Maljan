@@ -353,7 +353,11 @@ async def get_full_malware_report_iocs(
     report_id: uuid.UUID,
     kind: str | None = Query(
         default=None,
-        description="Filter to one of: hash, domain, ip, url, user_agent, ja3, ja3s",
+        description=(
+            "Filter to one of: hash, domain, ip, url, user_agent, ja3, ja3s; and, for a value "
+            "the STIX export carries from the judge's objects, email, path, registry, mutex, "
+            "command"
+        ),
     ),
     include: str = Query(
         default="published",

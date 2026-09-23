@@ -781,6 +781,23 @@ class ConfigItem(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
+class HostIdentifier(BaseModel):
+    """One identifier the report model read that a responder can look for on a host.
+
+    What it is in a responder's words, the value as the entry it was read in
+    records it, what the sample uses it for where the evidence says, and the
+    entries it was read in. Model-written and printed as written; the platform
+    copies no string into it.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    kind: str
+    value: str
+    purpose: str = ""
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
 class CommandRow(BaseModel):
     """One command the sample accepts from its operator."""
 
@@ -802,6 +819,9 @@ class TechnicalAnalysis(BaseModel):
     # model supplied none.
     execution_flow: list[FlowStep] = Field(default_factory=list)
     configuration: list[ConfigItem] = Field(default_factory=list)
+    # The identifiers a responder searches a host for — names, paths, keys,
+    # strings — as the report model read them, each citing its entry.
+    host_identifiers: list[HostIdentifier] = Field(default_factory=list)
     commands: list[CommandRow] = Field(default_factory=list)
     command_and_control: TechnicalSubsection | None = None
     payloads: TechnicalSubsection | None = None
@@ -834,6 +854,32 @@ class C2Channel(BaseModel):
     # and says beside it whether the run may publish it.
     endpoints: list[str] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
+
+
+class EmulatedStrings(BaseModel):
+    """What emulation alone recovered in a run: network-shaped values and their entry.
+
+    ``values`` maps a recovered value (lower case; a URL adds its host) to the
+    FLOSS entry that recovered it, with every value the static string sweep
+    also read held out into ``plain`` (value to the sweep's entry). ``partial``
+    says why the record may not be the run's whole, or is empty.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    values: dict[str, str] = Field(default_factory=dict)
+    plain: dict[str, str] = Field(default_factory=dict)
+    partial: str = ""
+
+
+class JudgeIndicator(BaseModel):
+    """One value a judge indicator names: its IOC kind, the value, a hash's algorithm."""
+
+    model_config = _STRICT_CONFIG
+
+    kind: str
+    value: str
+    algorithm: str = ""
 
 
 class ConsolidatedIOC(BaseModel):
@@ -1050,6 +1096,20 @@ class MalwareReport(BaseModel):
 
     # --- IOC export ---
     stix_bundle_extended: dict[str, Any] = Field(default_factory=dict)
+    # The values the judge's own indicators name, one per single-comparison
+    # pattern, as the judge wrote them. Read by the IOC table and ``/iocs``,
+    # which ask the one publish rule of each exactly as the export does; empty
+    # on a report stored before the field existed.
+    judge_indicators: list[JudgeIndicator] = Field(default_factory=list)
+    # For each technique a YARA rule of this run asserted, the rules and how
+    # many of each rule's own strings matched (``{"rule", "strings"}``), as the
+    # scan answered. Read by the ATT&CK table's "rule match only" note and by
+    # the capability grounding; empty on a report stored before it existed.
+    rule_match_strings: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    # What emulation alone recovered, built from the ledger's FLOSS and strings
+    # entries at build time; ``None`` on a report stored before it existed,
+    # which is then read from its kept section rows and said to be partial.
+    emulated_strings: EmulatedStrings | None = None
     misp_attributes: list[dict[str, Any]] | None = None
 
     # --- References ---

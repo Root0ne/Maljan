@@ -37,7 +37,6 @@ from maljan.reporting.models import (
     PersistenceMechanism,
     RegistryMod,
     SandboxSignature,
-    StringIOC,
 )
 
 # yara-python is an optional dependency (C extension). When absent we still
@@ -52,7 +51,6 @@ except ImportError:
 
 
 _MAX_YARA_STRINGS = 25
-_MAX_SIGMA_VALUES = 12
 _MAX_SURICATA_RULES = 12
 _SAFE_RULE_NAME_RE = re.compile(r"[^A-Za-z0-9_]+")
 
@@ -81,7 +79,18 @@ def build_detection_rules(report: MalwareReport) -> list[DetectionRule]:
       ungrounded OR the sample platform is unknown.
     * **Suricata** is network-fokus; the rule body fires on PCAP IOCs
       regardless of host OS, so it's safe to ship.
+
+    Every value a draft matches on is one this run **publishes**: a row of the
+    report's IOC table the one publish rule answered ``yes`` for, which is what
+    the STIX export and ``/iocs`` carry. A Benign verdict publishes no
+    malicious indicator, so it gets no draft at all, and the report says so.
+    Twenty ``trojan-activity`` rules were drafted for a signed benign tool —
+    certificate hosts, the vendor's home page and a version number read as an
+    address — because the drafts read every row the string sweep produced.
     """
+    if is_benign(report):
+        logger.info("detection_signatures: the verdict is Benign; no draft rule is generated.")
+        return []
     sigma_skip = _sigma_gate_reason(report)
     yara_skip = _yara_gate_reason(report)
     if sigma_skip:
@@ -119,6 +128,30 @@ def build_detection_rules(report: MalwareReport) -> list[DetectionRule]:
         "yes" if yara_skip else "no",
     )
     return rules
+
+
+def is_benign(report: MalwareReport) -> bool:
+    """Whether the run's published verdict is Benign."""
+    return str(getattr(report, "verdict", "") or "").strip().lower() == "benign"
+
+
+# The IOC-table kinds a draft may match on, and the network kinds among them.
+_DRAFT_STRING_KINDS = frozenset({"url", "domain", "ip", "registry", "mutex", "command", "path"})
+_DRAFT_NETWORK_KINDS = frozenset({"domain", "ip", "url"})
+
+
+def _published_rows(report: MalwareReport) -> list[Any]:
+    """The rows of the report's IOC table this run publishes, in the table's order.
+
+    The table the report prints and ``/iocs`` serves, and the one publish rule's
+    answer on each row: a draft matches only on what the platform publishes.
+    """
+    rows = list(getattr(report, "consolidated_iocs", None) or [])
+    if not rows:
+        from maljan.reporting.builder import build_consolidated_iocs
+
+        rows = build_consolidated_iocs(report)
+    return [row for row in rows if str(getattr(row, "published", "") or "") == "yes"]
 
 
 # Names that assert an attribution the report does not actually have. A rule
@@ -217,20 +250,6 @@ def _yara_gate_reason(report: MalwareReport) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _rule_matched_imports(report: MalwareReport) -> list[str]:
-    """API names the pack's technique rules matched, in first-seen order."""
-    out: list[str] = []
-    static = report.static
-    for hit in static.api_technique_hits if static is not None else []:
-        if hit.get("source") != "api_capability":
-            continue
-        for api in hit.get("matched_apis") or []:
-            name = str(api).strip()
-            if name and name not in out:
-                out.append(name)
-    return out
-
-
 def _build_yara(report: MalwareReport) -> DetectionRule | None:
     """Build a single YARA rule that matches the sample by hash and IOC strings.
 
@@ -238,6 +257,11 @@ def _build_yara(report: MalwareReport) -> DetectionRule | None:
     - ``hash.sha256(0, filesize) == "..."`` always present (sha256 is required)
     - ``pe.imphash() == "..."`` when imphash is known
     - ``N of them`` when at least two string IOCs are collected
+
+    The strings are the published rows of the IOC table and nothing else. The
+    import names the pack's technique rules fired on used to be strings here
+    too, and ``8 of them`` over common API names matches a great deal of
+    ordinary software: an import name is not an indicator this run publishes.
     """
     sha256 = report.identity.hashes.sha256
     if not sha256:
@@ -247,21 +271,14 @@ def _build_yara(report: MalwareReport) -> DetectionRule | None:
     strings: list[tuple[str, str]] = []  # (slot, value)
     sources: list[str] = [f"sha256:{sha256}"]
 
-    if report.static is not None:
-        for ioc in report.static.interesting_strings[:_MAX_YARA_STRINGS]:
-            if not _yara_string_eligible(ioc):
-                continue
-            slot = f"$s{len(strings)}"
-            strings.append((slot, ioc.value))
-            sources.append(f"string:{ioc.kind}:{ioc.value[:80]}")
-        # The imports worth a string are the ones a rule fired on: the pack's
-        # ``api_capability`` rows carry the API names that cleared a technique
-        # rule's floor, and the report keeps them under ``api_technique_hits``.
-        # Bare names, since that is how they sit in an import table.
-        for api in _rule_matched_imports(report)[: max(0, _MAX_YARA_STRINGS - len(strings))]:
-            slot = f"$s{len(strings)}"
-            strings.append((slot, api))
-            sources.append(f"import:{api}")
+    for row in _published_rows(report):
+        if len(strings) >= _MAX_YARA_STRINGS:
+            break
+        if not _yara_string_eligible(row):
+            continue
+        slot = f"$s{len(strings)}"
+        strings.append((slot, row.value))
+        sources.append(f"string:{row.kind}:{row.value[:80]}")
 
     # Gated above when the seed is a placeholder, so this normally uses the real
     # family; _rule_name_component keeps the name honest anyway should the gate
@@ -335,15 +352,14 @@ def _render_yara(
     return "\n".join(lines) + "\n"
 
 
-def _yara_string_eligible(ioc: StringIOC) -> bool:
+def _yara_string_eligible(ioc: Any) -> bool:
     """Filter out IOCs that would produce noisy or unsafe YARA strings."""
-    if not ioc.value:
+    value = str(getattr(ioc, "value", "") or "")
+    if not value:
         return False
-    if len(ioc.value) < 4 or len(ioc.value) > 200:
+    if len(value) < 4 or len(value) > 200:
         return False
-    if ioc.kind in {"url", "domain", "ip", "registry", "mutex", "command", "path"}:
-        return True
-    return False
+    return str(getattr(ioc, "kind", "") or "") in _DRAFT_STRING_KINDS
 
 
 def _escape_yara(value: str) -> str:
@@ -375,9 +391,25 @@ def _validate_yara(body: str) -> str | None:
 
 
 def _build_sigma(report: MalwareReport) -> DetectionRule | None:
-    """Build a Sigma YAML rule keyed by registry / persistence / sandbox sigs."""
-    registry_targets = _collect_registry_targets(report)
-    persistence_images = _collect_persistence_images(report.persistence)
+    """Build a Sigma YAML rule keyed by registry / persistence / sandbox sigs.
+
+    A Sigma selection is a value too, and it is held to the drafts' rule
+    (:func:`sigma_admits`): a registry key or an image path is selected on only
+    when the IOC table publishes it or a sandbox watched it, and the sandbox's
+    own signature names only when a sandbox recorded them. An analyst's
+    persistence target the table does not publish selects nothing: it is the
+    analyst's reading, not a value this run publishes. With no such source
+    there is no Sigma draft.
+    """
+    admitted = frozenset(_registry_form(item) for item in sigma_admits(report))
+    registry_targets = _collect_registry_targets(report, admitted)
+    persistence_images = _collect_persistence_images(
+        [
+            mech
+            for mech in report.persistence
+            if _admitted_value(mech.target, admitted) or _admitted_value(mech.payload, admitted)
+        ]
+    )
     signatures = _collect_signature_names(report)
 
     if not (registry_targets or persistence_images or signatures):
@@ -393,17 +425,17 @@ def _build_sigma(report: MalwareReport) -> DetectionRule | None:
 
     if registry_targets:
         selections["selection_registry"] = {
-            "TargetObject|contains": registry_targets[:_MAX_SIGMA_VALUES],
+            "TargetObject|contains": registry_targets,
         }
         sources.extend(f"registry:{p}" for p in registry_targets[:5])
     if persistence_images:
         selections["selection_persistence"] = {
-            "Image|endswith": persistence_images[:_MAX_SIGMA_VALUES],
+            "Image|endswith": persistence_images,
         }
         sources.extend(f"persistence:{p}" for p in persistence_images[:5])
     if signatures:
         selections["selection_sandbox"] = {
-            "Description|contains": signatures[:_MAX_SIGMA_VALUES],
+            "Description|contains": signatures,
         }
         sources.extend(f"sandbox:{s}" for s in signatures[:5])
 
@@ -446,23 +478,99 @@ def _build_sigma(report: MalwareReport) -> DetectionRule | None:
     )
 
 
-def _collect_registry_targets(report: MalwareReport) -> list[str]:
+def sigma_admits(report: MalwareReport) -> frozenset[str]:
+    """The values a Sigma selection may name: published rows and what a sandbox watched.
+
+    Folded to lower case. The rule, stated once: a value the IOC table
+    publishes (``yes``) is the run's published indicator, and a row a sandbox
+    recorded is the run's own observation of the sample, which is what a
+    Sigma rule over process and registry events describes. Nothing else — a
+    string sweep's row, an analyst's persistence target the table did not
+    publish — reaches a selection.
+    """
+    rows = list(getattr(report, "consolidated_iocs", None) or [])
+    if not rows:
+        from maljan.reporting.builder import build_consolidated_iocs
+
+        rows = build_consolidated_iocs(report)
+    return frozenset(
+        row.value.strip().lower()
+        for row in rows
+        if str(row.published or "") == "yes" or str(row.source or "") == "sandbox"
+    )
+
+
+# The spellings of a registry hive a run writes: a sandbox's short name, the
+# long name, the kernel path (a user hive with its SID), and the placeholder
+# of an unread hive.
+_USER_SID = r"(?:\\(?:s-1-[0-9-]+(?:_classes)?|\.default))?"
+_HIVE_PREFIX_RE = re.compile(
+    r"^\\*(?:registry\\machine"
+    rf"|registry\\user{_USER_SID}"
+    r"|hkey_(?:local_machine|current_user|classes_root|current_config)"
+    rf"|(?:hkey_users|hku){_USER_SID}"
+    r"|hklm|hkcu|hkcr|hkcc|unknown)(?:\\|$)",
+    re.IGNORECASE,
+)
+# The value name the IOC table writes after a key: ``<key> (<value name>)``.
+_VALUE_NAME_SUFFIX_RE = re.compile(r" \([^()]*\)$")
+
+
+def _hiveless_key(value: Any) -> str:
+    """A registry path without its hive or a trailing value name, in the case written.
+
+    Hive prefixes are stripped until the text stops changing, so a key a
+    sandbox wrote in long form under a short-name prefix
+    (``HKCU\\HKEY_CURRENT_USER\\...``) reads as the key. A value that is not
+    a registry path passes through.
+    """
+    text = _VALUE_NAME_SUFFIX_RE.sub("", str(value or "").strip().replace("/", "\\"))
+    while True:
+        stripped = _HIVE_PREFIX_RE.sub("", text, count=1)
+        if stripped == text:
+            return text.strip("\\")
+        text = stripped
+
+
+def _registry_form(value: Any) -> str:
+    """One form of a value for comparison: lower case, no hive, no trailing value name.
+
+    A sandbox writes ``HKCU`` and a key, or the key in long or kernel form;
+    the IOC table writes the key and the value name; an analyst may write
+    ``HKEY_CURRENT_USER\\...``: the same key, read the same way on both sides
+    of the comparison.
+    """
+    return _hiveless_key(value).lower()
+
+
+def _admitted_value(value: Any, admitted: frozenset[str]) -> bool:
+    """Whether ``value`` is admitted, both sides read in :func:`_registry_form`."""
+    text = _registry_form(value)
+    return bool(text) and text in admitted
+
+
+def _collect_registry_targets(report: MalwareReport, admitted: frozenset[str]) -> list[str]:
     """Registry paths worth a Sigma selection, from wherever the run recorded them.
 
     Registry writes reach the report two ways now: a sandbox view that lists
     them, and a persistence entry an analyst wrote down after reading the call
     itself. Both are the same fact, and a rule generated from only the first
     would be silent on every run where the analyst is the one who saw it.
+    Every admitted path is kept: admission is asked of each before anything
+    is collected, and no count cuts the list.
     """
     out: list[str] = []
     seen: set[str] = set()
 
     def _add(key: str) -> None:
-        lower = key.strip().lower()
-        if not lower or lower in seen or len(out) >= _MAX_SIGMA_VALUES:
+        form = _registry_form(key)
+        if not form or form in seen or form not in admitted:
             return
-        seen.add(lower)
-        out.append(key.strip())
+        seen.add(form)
+        # Without its hive: Sysmon logs a user hive as ``HKU\\<SID>\\...``, so
+        # a selection naming ``HKCU`` would match no event; the key with a
+        # leading separator matches every hive and SID it is written under.
+        out.append("\\" + _hiveless_key(key))
 
     if report.dynamic is not None:
         for reg in report.dynamic.registry_mods:
@@ -474,7 +582,12 @@ def _collect_registry_targets(report: MalwareReport) -> list[str]:
 
 
 def _registry_full_path(reg: RegistryMod) -> str:
-    return f"{reg.hive}\\{reg.key}" if reg.key and not reg.key.startswith(reg.hive) else reg.key
+    """The sandbox's key, with its hive prefixed only when the key names none."""
+    from maljan.reporting.ledger_projection import _hive_of
+
+    if not reg.key or _hive_of(reg.key) != "UNKNOWN":
+        return reg.key
+    return f"{reg.hive}\\{reg.key}"
 
 
 def _collect_persistence_images(persistence: list[PersistenceMechanism]) -> list[str]:
@@ -494,8 +607,6 @@ def _collect_persistence_images(persistence: list[PersistenceMechanism]) -> list
             continue
         seen.add(image.lower())
         out.append(image)
-        if len(out) >= _MAX_SIGMA_VALUES:
-            break
     return out
 
 
@@ -507,7 +618,7 @@ def _collect_signature_names(report: MalwareReport) -> list[str]:
     sigs: list[SandboxSignature] = sorted(
         report.dynamic.sandbox_signatures, key=lambda s: s.severity, reverse=True
     )
-    for sig in sigs[:_MAX_SIGMA_VALUES]:
+    for sig in sigs:
         text = (sig.description or sig.name).strip()
         if not text or text.lower() in seen:
             continue
@@ -560,11 +671,11 @@ _SURICATA_MAX_BODY_BYTES = 16_000
 
 
 def _build_suricata(report: MalwareReport) -> DetectionRule | None:
-    if report.network is None:
-        return None
-    domains = [d for d in report.network.domains if d.is_suspicious] or list(report.network.domains)
-    ips = list(report.network.ips)
-    urls = list(report.network.urls)
+    """Alert rules over the network indicators this run publishes, and no others."""
+    published = [row for row in _published_rows(report) if row.kind in _DRAFT_NETWORK_KINDS]
+    domains = [NetworkDomain(fqdn=row.value) for row in published if row.kind == "domain"]
+    ips = [NetworkIP(address=row.value) for row in published if row.kind == "ip"]
+    urls = [NetworkURL(url=row.value) for row in published if row.kind == "url"]
 
     if not (domains or ips or urls):
         return None

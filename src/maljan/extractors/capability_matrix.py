@@ -42,10 +42,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.analysis.technique_ids import attack_reference_id
+from maljan.analysis.technique_ids import attack_reference_id, says_no_technique
 from maljan.core.logger import logger
 from maljan.reporting.models import CapabilityCell, TTPMapping
 from maljan.schemas.stix_models import stated_confidence
+from maljan.utils.marked_cut import marked_cut
 
 # Fallback MITRE ATT&CK Enterprise tactic catalogue (pre-v19 names). Used only
 # when the live bundle's tactic catalogue is unavailable. ``kill_chain_phases``
@@ -384,7 +385,7 @@ def _collect_techniques(
         for agent_name, isr in isr_reports.items():
             for claim in getattr(isr, "claims", None) or []:
                 claim_tid = getattr(claim, "technique_id", None)
-                if not claim_tid:
+                if not claim_tid or says_no_technique(claim_tid):
                     continue
                 row = _row(str(claim_tid))
                 # The same id on a claim and on a finding is judged as the
@@ -404,7 +405,7 @@ def _collect_techniques(
                     row["layers"].append(str(layer))
                 quote = getattr(claim, "claim", None) or getattr(claim, "evidence_ref", None) or ""
                 if quote and quote not in row["evidence"]:
-                    row["evidence"].append(str(quote)[:200])
+                    row["evidence"].append(marked_cut(str(quote), 200))
             # 3. The findings' own technique ids. An ISR carries ids in two
             # places, and this was the one no check ever saw: the report's
             # Findings table and the corroboration metric are both built from
@@ -422,7 +423,7 @@ def _collect_techniques(
                 layer = getattr(isr, "domain", None) or agent_name or "agent"
                 for raw in getattr(finding, "technique_ids", None) or []:
                     tid = str(raw or "").strip().upper()
-                    if not tid:
+                    if not tid or says_no_technique(tid):
                         continue
                     row = _row(tid)
                     # A finding with no number adds none, and names no one
@@ -433,7 +434,7 @@ def _collect_techniques(
                     if layer and str(layer) not in row["layers"]:
                         row["layers"].append(str(layer))
                     if title and title not in row["evidence"]:
-                        row["evidence"].append(title[:200])
+                        row["evidence"].append(marked_cut(title, 200))
 
     # The catalogue question, asked of every id still standing. A claim was
     # asked it in the analyst's own loop and carries the answer; an id that

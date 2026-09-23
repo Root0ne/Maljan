@@ -1176,6 +1176,60 @@ def _provider_key(settings: Any, provider: str) -> str:
         return ""
 
 
+def window_for_assignment(settings: Any, assignment: Any, *, probe: bool = True) -> WindowFact:
+    """The served window of one model an agent calls, learned the way every window is."""
+    declared, is_default = declared_window(settings, str(assignment.provider))
+    return learn_window(
+        str(assignment.provider),
+        endpoint=assignment.endpoint,
+        model=str(assignment.model or ""),
+        api_key=_provider_key(settings, str(assignment.provider)),
+        declared=declared,
+        declared_is_default=is_default,
+        probe=probe,
+    )
+
+
+@dataclass(frozen=True)
+class OutputBudget:
+    """How many tokens one reply may run to, and the numbers it was worked out from."""
+
+    tokens: int
+    window: WindowFact
+    generation_cap: int
+
+    def sentence(self) -> str:
+        """The derivation in one sentence, so a reader can check the arithmetic."""
+        quarter = max(1, self.window.tokens // REPLY_RESERVE_DIVISOR)
+        wanted = (
+            f"the generation cap of {self.generation_cap} tokens (the larger of "
+            "llm.expert_max_tokens and llm.judge_max_tokens)"
+            if self.generation_cap > 0
+            else f"the default reply room of {DEFAULT_REPLY_TOKENS} tokens (no generation cap "
+            "is set)"
+        )
+        return (
+            f"{self.tokens} tokens — {wanted}, at most a quarter ({quarter}) of the model's "
+            f"{self.window.tokens}-token context window ({self.window.source}), the room an "
+            "analyst's reply is given"
+        )
+
+
+def reply_budget(settings: Any, assignment: Any, *, probe: bool = True) -> OutputBudget:
+    """How long one reply of this model may run: the analysts' reply reserve, derived.
+
+    The same rule the analysts' calls are held to (:func:`reply_reserve_tokens`):
+    the deployment's generation cap, never more than a quarter of the window the
+    model serves. A report section is one such reply, so it gets the same
+    room, and a model's reasoning is spent inside it rather than past it.
+    """
+    window = window_for_assignment(settings, assignment, probe=probe)
+    cap = generation_reserve(settings)
+    return OutputBudget(
+        tokens=reply_reserve_tokens(window.tokens, cap), window=window, generation_cap=cap
+    )
+
+
 def _questions(settings: Any, agents: list[str]) -> list[dict[str, Any]]:
     """The distinct windows this run has to learn, one per pair, in order.
 

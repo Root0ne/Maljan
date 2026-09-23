@@ -27,7 +27,7 @@ from maljan.pipeline.validation import (
     validate_verdict_bundle,
 )
 from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import MalwareReport
+from maljan.reporting.models import DynamicBehavior, MalwareReport
 from maljan.reporting.renderers.stix_renderer import (
     UNPUBLISHABLE_PATTERN_CODE,
     ExtendedSTIXRenderer,
@@ -159,11 +159,20 @@ class TestTheExport:
         assert not [p for p in patterns if "127.0.0.1" in p]
 
     def test_a_kept_indicator_type_is_published_as_written(self) -> None:
+        # The sandbox saw the file written: the second source the one publish
+        # rule asks of the judge's value. A file name is a value the export
+        # mints no object of its own for, so the object carried is the judge's.
+        report = _report()
+        report.dynamic = DynamicBehavior(
+            file_operations=[{"operation": "write", "path": "/tmp/dropper.bin"}]
+        )
         exported = ExtendedSTIXRenderer().render(
-            _report(), _bundle(_indicator(f"[ipv4-addr:value = '{ADDRESS}']", "ip-addr"))
+            report, _bundle(_indicator("[file:name = '/tmp/dropper.bin']", "ip-addr"))
         )
 
-        kept = [o for o in exported.objects if isinstance(o, Indicator) and ADDRESS in o.pattern]
+        kept = [
+            o for o in exported.objects if isinstance(o, Indicator) and "dropper.bin" in o.pattern
+        ]
         assert [o.indicator_types for o in kept] == [["ip-addr"]]
 
 

@@ -1247,7 +1247,9 @@ class MarkdownRenderer:
                     _with_rules(procedure, folded),
                     ", ".join(mapping.contributing_layers) or "-",
                     _stated(mapping.confidence, ""),
-                    "published" + (", corroborated" if mapping.is_corroborated else ""),
+                    "published"
+                    + (", corroborated" if mapping.is_corroborated else "")
+                    + (f"; {ctx.rule_only[tid]}" if tid in ctx.rule_only else ""),
                     ", ".join(
                         dict.fromkeys(
                             _ids_in(mapping.evidence_quotes) + _rule_ids(folded, capa_ids)
@@ -1289,7 +1291,9 @@ class MarkdownRenderer:
         lines = [_heading(9, "Indicators of compromise", PER_ROW), ""]
         host = [row for row in ctx.iocs if row.kind not in _NETWORK_KINDS]
         network = [row for row in ctx.iocs if row.kind in _NETWORK_KINDS]
-        if not host and not network:
+        ta = report.technical_analysis
+        identifiers = list(ta.host_identifiers) if ta is not None else []
+        if not host and not network and not identifiers:
             lines.extend(["No indicator was extracted in this run.", ""])
         if host:
             lines.extend([_subheading("", "File and host indicators", PER_ROW), ""])
@@ -1314,6 +1318,8 @@ class MarkdownRenderer:
                     ]
                 )
             lines.append("")
+        if identifiers:
+            lines.extend(_host_identifier_table(identifiers, ctx))
         if network:
             reputation = ctx.reputations
             lines.extend([_subheading("", "Network indicators", PER_ROW), ""])
@@ -1402,7 +1408,11 @@ class MarkdownRenderer:
                 _absent_subsection(
                     "10.2",
                     "Draft detection rules",
-                    "Nothing generated in this run: no draft rule was built from this report.",
+                    "Nothing generated in this run: the verdict is Benign, and a Benign run "
+                    "publishes no malicious indicator to draft a rule from."
+                    if str(report.verdict or "").strip().lower() == "benign"
+                    else "Nothing generated in this run: no draft rule was built from the "
+                    "indicators this report publishes.",
                 )
             )
         hunting = [rec for rec in report.defensive_recommendations if rec.detection]
@@ -1939,6 +1949,15 @@ class _Context:
             for row in self.unresolved
             if str(row.get("code", "")).startswith("narrative.")
         ]
+        # The published techniques only a rule match stands behind, with how
+        # much matched: printed beside the row's status.
+        from maljan.analysis.corroboration import rule_match_only
+
+        self.rule_only = rule_match_only(report)
+        self.identifier_findings = {
+            int(n)
+            for n in _named_in(self.unresolved, "report.identifier_uncited", r"identifier (\d+)")
+        }
         self.config_findings = {
             int(n)
             for n in _named_in(
@@ -2757,6 +2776,40 @@ def _endpoint(value: str) -> str:
     )
 
 
+def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
+    """The identifiers the report model read, as it wrote them, each with its entries.
+
+    The model's own table, under its own voice: the platform copies no string
+    into it and publishes none of it. Host values are never defanged. A row
+    the validator asked about and the model kept says so beside its evidence.
+    """
+    lines = [_subheading("", "Host identifiers read by the report model", REPORT_MODEL), ""]
+    lines.append(_row("Kind", "Value", "Purpose", "Evidence"))
+    lines.append(_divider(4))
+    for index, item in enumerate(identifiers):
+        cited = ", ".join(item.evidence_refs) or "no evidence cited"
+        if index + 1 in ctx.identifier_findings:
+            cited += " (unresolved: report.identifier_uncited)"
+        lines.append(
+            _row(
+                ctx.cell(item.kind),
+                f"`{_one_line(item.value)}`",
+                ctx.cell(item.purpose) if item.purpose else "-",
+                cited,
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "_Read out of this run's evidence by the report model and cited to the entries it "
+            "names. These rows are not published: the export and `/iocs` carry the indicators "
+            "above._",
+            "",
+        ]
+    )
+    return lines
+
+
 def _port_or_path(row: ConsolidatedIOC, report: MalwareReport) -> str:
     if row.kind == "url":
         try:
@@ -2832,6 +2885,9 @@ def _attack_row(
         status = "published" + (
             ", corroborated" if mapping is not None and mapping.is_corroborated else ""
         )
+        rule_only = ctx.rule_only.get(cell.technique_id)
+        if rule_only:
+            status += f"; {rule_only}"
     # The platform's unresolved findings about this technique, beside its
     # row: the ATT&CK checks, and the judge crediting a source that never
     # named it.

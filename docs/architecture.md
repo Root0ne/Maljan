@@ -469,6 +469,47 @@ Two producers use it:
   over-claim that survives the retry is printed as written and recorded
   unresolved; only a broken shape costs the section.
 
+  Two more questions are asked where they can be decided. **A value cited to
+  the wrong entry** (`report.citation_wrong_entry`): a value a sentence states
+  verbatim — in quotes or backticks, or a record's `value` or `endpoints` — is
+  looked for in the text of each entry the sentence (or its record) cites, as
+  the run holds it (`validation.EntryTexts`: the corpus copy, else the stored
+  output). Held by a cited entry, the citation stands; held only by another
+  entry, the model is asked once with that entry named; held by none, nothing
+  is said, because a paraphrase or a composed value cannot be judged. "Held"
+  means held as a whole value in one of its spellings, never as a slice of a
+  longer run; a value that is only a number raises no question (an answer may
+  write it another way, and every reputation report holds short numbers), and
+  a cited entry whose text is known to be partial is never said to lack one.
+  The id is never rewritten. **A technique written with another technique's name**
+  (`report.technique_name`): an id followed by a name in brackets whose name
+  the vendored ATT&CK table does not give that id — its own name, or its
+  parent's name before a sub-technique's, stands — is asked about with the
+  catalogue's name and the id the written name belongs to. Every search that
+  compares a value a model wrote with a tool's text asks each spelling the
+  value takes there (`utils.written_forms`: plain, as a JSON string carries
+  it, as the triage pack quotes it), so a quote or a backslash in a decoded
+  string no longer hides it.
+
+  What a composer section is shown includes two facts the platform can state:
+  the techniques the report publishes (its ATT&CK table), and, after each
+  analyst claim, the entries whose text holds the values the claim quotes. A
+  section shown only a claim once called it unsupported while a strings entry
+  held the claimed value word for word and the report published the technique.
+  A section's analyst claims and tool answers share what the reporter
+  model's context window leaves after the section's output budget and the rest
+  of its prompt, evenly; no count cuts a section's claims. A full window shows
+  a sentence in place of a claim or an answer, and the run summary's budget
+  line says how they are sized. A section's facts (its techniques, network
+  values, process lines and command lines, persistence, capability profile,
+  carved and dropped files) enter whole, with no count cutting them, and are
+  measured as the rest of the prompt; a section whose facts alone exceed what
+  the window leaves records a degradation naming it. A text the platform shortens
+  before showing it — a claim's stored evidence, a tool answer cut to its
+  share, a procedure quote in the ATT&CK table, a claim in the live transcript
+  — ends in `…` (`utils.marked_cut`), so a cut is never read, or copied, as a
+  finished sentence.
+
 * **A judge that did not answer with a bundle** — the pipeline builds one from
   whatever text there was, and that bundle states its verdict in
   `x_maljan_fallback_verdict` rather than implying it through its objects. The
@@ -2117,7 +2158,80 @@ is assembled from what the run gathered rather than recomputed beside it:
   rebuilds the table on request from the stored report, the way `/iocs` does,
   so an enrichment that ran later is reflected and a report stored before the
   table carried kinds prints in the new shape. A row the export mints nothing
-  from says so rather than borrowing an answer.
+  from says so rather than borrowing an answer. **One decision for the judge's
+  values.** The export asks every value a judge indicator compares the one
+  publish rule, exactly as the report's own row for that value is asked
+  (`stix_renderer.judge_value_answer`): with the network row's source and
+  reputation where the block has one, as the sample's identity for its own
+  digest, and otherwise as the string sweep's with the run's second-source
+  record. The judge asserting a value is not a second source. A refused value
+  declines the indicator (`stix.indicator_not_published`); the judge's own
+  bundle keeps it. The builder stores the judge's single-comparison values on
+  the report (`judge_indicators`); the table and `/reports/{id}/iocs` ask the
+  same rule of them through one helper (`judge_indicator_rows`), so a value
+  the table has no row for is a `judge` row with the rule's answer, and a row
+  the table never asked (a sandbox's file write) is asked now. The rule
+  answers two kinds it used to leave open: a hash is publishable when it is a
+  whole digest a second source knows (the sample's identity, a dropped file),
+  and a command line is not an indicator this run publishes. A run once
+  exported two C2 names decoded from the sample's strings while the table
+  listed four hashes; under the rule both are unpublished rows ("seen only in
+  the file's strings") and the export declines them. A test holds the export
+  and the table to one decision.
+* **A value emulation recovered is a source of its own.** A domain, an
+  address or a URL that the run's FLOSS entry holds as a decoded, stack or
+  tight string — text the sample hid and only running it recovers — is
+  publishable when it passes every other question of the rule (the host
+  question, the address classes, the reputation half, the URL host denylist)
+  and is not a well-known benign host; the reason reads "recovered by
+  emulation (decoded strings), ev_NNNN", the FLOSS entry's own id. Hiding a
+  host behind encoding is a deliberate act benign software rarely performs,
+  while a plain string in a binary is routinely benign, so a value only the
+  static string sweep read stays unpublished — and so does a value FLOSS
+  gives a decoded kind that the sweep also read as a whole value in the
+  file's plain strings (a `strings` or `iocs_from_file` entry): text the
+  sample did not hide is not recovered by emulation, and the refusal names
+  the sweep's entry. Under a Benign verdict it publishes nothing, nor under a
+  verdict the judge did not state with a confidence (a fallback's default
+  word), and the table's refusal says so. A well-known benign host is read by
+  its registered name (`*.co.uk` included), and a public resolver's address
+  is one too. The record (`emulated_strings` on the report) is built at build
+  time from every FLOSS, `strings` and `iocs_from_file` entry on the ledger,
+  so no kept-row cap of a section decides an answer; it says why it is partial
+  when no FLOSS entry listed every string it recovered, or no `strings` entry
+  listed every plain string, and the reason carries that. A report stored
+  before the record existed is read from its kept `tool_floss_strings` and
+  `strings` rows, and the reason says the record is partial. The export, the
+  IOC table and `/iocs` read it through the one rule. Replayed on the
+  benchmark's stored runs, the two C2 names the sample decrypted publish on
+  both models' runs (the static sweep's complete listing does not hold them),
+  and nothing new publishes on the benign control.
+* **Draft detection rules match only what the run publishes.** The YARA,
+  Sigma and Suricata drafts (`reporting.detection_signatures`) are generated
+  after the export. A YARA string or a Suricata alert matches on the IOC
+  table's rows published `yes`; the import names a rule fired on are no longer
+  YARA strings, since an import is not an indicator. A Sigma selection names a
+  registry key or an image path only when the table publishes it or a sandbox
+  recorded it, and the sandbox's own signature names (`sigma_admits`); an
+  analyst's persistence target the table does not publish selects nothing.
+  A registry key is compared in one form on both sides — without its hive
+  (`HKCU`, `HKEY_CURRENT_USER`, `HKU\<SID>`, `\REGISTRY\USER\<SID>`,
+  stripped until the text stops changing) and without the table's trailing
+  value name — admission is asked of every value before anything is
+  collected, and no count cuts a selection. The selection names the key
+  without its hive (`TargetObject|contains: '\Software\...'`), since Sysmon
+  logs a user hive as `HKU\<SID>\...` and a `HKCU` selection would match no
+  event. A
+  Benign verdict publishes no malicious indicator, so it gets no draft, and
+  §10.2 says so. A signed benign tool once got twenty `trojan-activity` alerts
+  for certificate hosts and a "C2 IP" rule for a version number.
+* **A technique only a rule match stands behind says so.** A published
+  technique a deterministic rule asserted and no analyst claimed is marked in
+  the ATT&CK table: "rule match only (yara `rule`, N string(s)), no analyst
+  claim", the count read from the scan's answer (distinct string identifiers,
+  kept as `rule_match_strings`). The publish rule is unchanged. Such a
+  technique grounds no capability word: neither its id, its name nor its
+  rule's row in the evidence counts toward `narrative.ungrounded_capability`.
 * **What the models write is asked for as the exact object, with an example,
   and printed as written.** The narrative round answers `executive_summary`,
   `key_findings` (each `{text, evidence_ids}`) — the prompt asks for three to
@@ -2128,16 +2242,36 @@ is assembled from what the run gathered rather than recomputed beside it:
   action, voice, evidence_refs}`, `voice` *observed* or *assessed*), the prose
   subsections for packing, API and string resolution, discovery, persistence,
   evasion, command and control and payloads, the configuration
-  (`ConfigItem{key, value, how_obtained, evidence_refs}`), the commands
-  (`CommandRow{id, name, description, evidence_refs}`) and the C2 channels,
-  which now carry their endpoints and citations; the conclusion is no longer
-  asked for. Three checks are shown to the model once through the existing
-  retry-with-feedback and recorded unresolved when they survive, and none
-  drops what it is about: `narrative.ungrounded_finding` (a key finding cites
-  an id no ledger entry carries), `report.flow_voice` (a step marked observed
-  cites no sandbox entry) and `report.configuration_uncited` (a value said to
-  be decrypted or observed cites no entry). A field a model did not supply is
-  absent from the report. The recommendation's category is the model's own.
+  (`ConfigItem{key, value, how_obtained, evidence_refs}`), the host
+  identifiers (`HostIdentifier{kind, value, purpose, evidence_refs}`: what a
+  responder can search a host for, each value as the entry the model read it
+  in records it — the model decides what goes in and the platform copies no
+  string in), the commands (`CommandRow{id, name, description,
+  evidence_refs}`) and the C2 channels, which now carry their endpoints and
+  citations; the conclusion is no longer asked for. Every section's contract
+  (`composer.section_contract`) says that a list item is written only with a
+  value and never with nulls, and that a value is a JSON string, numbers
+  included: a configuration section whose items carried `"value": null` —
+  as the contract then allowed — failed its schema twice and was dropped. Four
+  checks are shown to the model once through the existing retry-with-feedback
+  and recorded unresolved when they survive, and none drops what it is about:
+  `narrative.ungrounded_finding` (a key finding cites an id no ledger entry
+  carries), `report.flow_voice` (a step marked observed cites no sandbox
+  entry), `report.configuration_uncited` (a value said to be decrypted or
+  observed cites no entry) and `report.identifier_uncited` (a host identifier
+  cites no entry of the run). A field a model did not supply is absent from
+  the report. The recommendation's category is the model's own. The Markdown
+  prints the host identifiers in §9 under the report model's voice, unpublished,
+  and the console draws them in the technical-analysis panel.
+* **A section's output budget is the model's reply room.** At its default of
+  0, `reporting.composer_section_max_tokens` derives each model's budget the
+  way an analyst's reply room is derived (`llm.context_window.reply_budget`):
+  the larger of `llm.expert_max_tokens` and `llm.judge_max_tokens`, at most a
+  quarter of the context window that model serves, reasoning included. A
+  positive value is the operator's own budget. The derivation is printed in
+  Appendix B beside the section's wait ("Output budget of `composer:section`").
+  A fixed 900 tokens dropped a section of a live report when the model reasoned
+  past it.
 * **When no summary was written, the report says why and writes none.** The
   fallback that filled the summary, the capability paragraphs and a
   recommendation from a template is gone: its sentences read as the report
@@ -2221,7 +2355,10 @@ image knows is not offered to something that would block on it. `include=all`
 returns everything and `include=unpublished` only the withheld rows. Every row
 carries its `source` and a `published` flag; `IOCEntry` declared neither, so
 FastAPI dropped the source the service had always attached and the distinction
-never reached a consumer.
+never reached a consumer. A value a judge indicator names is a row whose
+source is `judge`, with the one publish rule's answer — the answer the export
+acted on — and may be of a kind the network block has no rows of (`email`,
+`path`, `registry`, `mutex`, `command`, or a `hash` of another file).
 
 Every row in the network block — a domain, an address and a URL alike —
 records where it came from: `sandbox` for something the sample resolved,

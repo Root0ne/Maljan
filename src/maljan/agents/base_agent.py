@@ -56,6 +56,7 @@ from maljan.pipeline.validation import (
 from maljan.schemas.evidence import ENTRY_ID_RE, EvidenceCounter, LedgerEntry, apply_budget
 from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence, Finding
 from maljan.schemas.tool_evidence import CapturedToolOutput
+from maljan.utils.marked_cut import CUT_MARK
 
 # Regex: matches MITRE ATT&CK technique IDs like T1055 or T1055.001.
 _TECHNIQUE_RE = re.compile(r"\b(T\d{4}(?:\.\d{3})?)\b")
@@ -1267,11 +1268,15 @@ def evidence_ref_text(evidence_text: str) -> str:
     the report prints and what long-term memory embeds, and the width should
     bound it. An id the cut sliced through is removed from
     the kept text, since the whole id follows.
+
+    The cut is marked (``utils.marked_cut.CUT_MARK``) where the kept text ends.
+    Unmarked, "… This suggests" was printed in a report, and copied into a
+    section's prose, as the model's own finished sentence.
     """
     kept = evidence_text[: evidence_ref_width()]
     if len(kept) == len(evidence_text):
         return kept
-    kept = _PARTIAL_ID_AT_END_RE.sub("", kept)
+    kept = _PARTIAL_ID_AT_END_RE.sub("", kept).rstrip() + CUT_MARK
     still_there = {found.lower() for found in ENTRY_ID_RE.findall(kept)}
     dropped = [
         found

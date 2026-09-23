@@ -46,6 +46,7 @@ from maljan.reporting.models import (
     DefensiveRecommendation,
     EvidenceIndexRow,
     ExternalReference,
+    JudgeIndicator,
     KeyFinding,
     MalwareReport,
     ReportFrontMatter,
@@ -71,8 +72,9 @@ class MalwareReportBuilder:
         report = builder.build_deterministic()
         if not is_mock:
             report = builder.apply_narrative(narrative_output)
-        report = builder.attach_detection_signatures(report)
         builder.render_extended_stix(report)  # mutates report.stix_bundle_extended
+        report.consolidated_iocs = build_consolidated_iocs(report)  # reads the export
+        report = builder.attach_detection_signatures(report)  # published rows only
     """
 
     def __init__(
@@ -130,6 +132,12 @@ class MalwareReportBuilder:
 
     def build_deterministic(self) -> MalwareReport:
         """Build a deterministic ``MalwareReport`` out of the evidence ledger."""
+        from maljan.pipeline.evidence_summary import yara_rule_strings
+        from maljan.reporting.renderers.stix_renderer import (
+            emulation_from_ledger,
+            exported_indicator_values,
+        )
+
         identity = identity_from_ledger(
             self.evidence_ledger,
             sample_path=self.sample_path,
@@ -186,6 +194,12 @@ class MalwareReportBuilder:
             run_summary=self.run_summary,
             negotiation_summary=negotiation_summary,
             stix_bundle_extended=self.stix_output,
+            judge_indicators=[
+                JudgeIndicator(kind=value.kind, value=value.value, algorithm=value.algorithm)
+                for value in exported_indicator_values(self.stix_output)
+            ],
+            rule_match_strings=yara_rule_strings(self.evidence_ledger),
+            emulated_strings=emulation_from_ledger(self.evidence_ledger),
             references=references,
         )
         # The sections the report is actually made of, and the index of the
@@ -553,6 +567,8 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     from maljan.extractors.network_extractor import url_host
     from maljan.reporting.renderers.stix_renderer import (
         corroborating_values,
+        emulation_kwargs,
+        emulation_record,
         path_names_a_file,
         publish_answer,
     )
@@ -560,6 +576,9 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     rows: list[ConsolidatedIOC] = []
     seen: set[tuple[str, str]] = set()
     corroborating = corroborating_values(report)
+    # What the run's FLOSS entry recovered by emulation: a network value it
+    # holds is a source of its own under the one rule.
+    emulated = emulation_record(report)
 
     def _add(
         ioc_type: str,
@@ -592,7 +611,13 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         )
 
     def _from_strings(kind: str, value: str) -> str:
-        return publish_answer(kind, value, "strings", corroborating=corroborating)
+        return publish_answer(
+            kind,
+            value,
+            "strings",
+            corroborating=corroborating,
+            **emulation_kwargs(report, kind, value, emulated),
+        )
 
     h = report.identity.hashes
     # The sample's own identity, established by the router: `/iocs` serves
@@ -693,7 +718,13 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 d.fqdn,
                 d.source,
                 _domain_context(d),
-                published=publish_answer("domain", d.fqdn, d.source, d.reputation),
+                published=publish_answer(
+                    "domain",
+                    d.fqdn,
+                    d.source,
+                    d.reputation,
+                    **emulation_kwargs(report, "domain", d.fqdn, emulated),
+                ),
                 is_network=True,
             )
         for ip in net.ips:
@@ -704,7 +735,13 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 ip.address,
                 ip.source,
                 "; ".join(part for part in [*where, ip.geo or ""] if part),
-                published=publish_answer("ip", ip.address, ip.source, ip.reputation),
+                published=publish_answer(
+                    "ip",
+                    ip.address,
+                    ip.source,
+                    ip.reputation,
+                    **emulation_kwargs(report, "ip", ip.address, emulated),
+                ),
                 is_network=True,
             )
         for u in net.urls:
@@ -719,7 +756,13 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 "; ".join(
                     part for part in (u.method, f"HTTP {u.status}" if u.status else "") if part
                 ),
-                published=publish_answer("url", u.url, source, reputations.get(url_host(u.url))),
+                published=publish_answer(
+                    "url",
+                    u.url,
+                    source,
+                    reputations.get(url_host(u.url)),
+                    **emulation_kwargs(report, "url", u.url, emulated),
+                ),
                 is_network=True,
             )
         for ua in net.user_agents:
@@ -743,7 +786,81 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 is_network=True,
             )
 
-    return rows
+    return _with_the_judge_s_values(rows, report)
+
+
+# The table's type for each kind a judge indicator can name.
+_EXPORTED_TYPE_LABELS = {
+    "domain": "Domain",
+    "url": "URL",
+    "email": "Email",
+    "path": "File path",
+    "registry": "Registry key",
+    "mutex": "Mutex",
+    "command": "Command line",
+}
+
+
+def _with_the_judge_s_values(
+    rows: list[ConsolidatedIOC], report: MalwareReport
+) -> list[ConsolidatedIOC]:
+    """The table with the values the judge's indicators name, each with the rule's answer.
+
+    The export asks the one publish rule of every judge indicator before it
+    carries one (``stix_renderer.judge_value_answer``); this table asks the same
+    rule of the same values, so it prints what the export decided: a judge
+    value the rule publishes is ``yes``, and one it refuses — a host only the
+    file's strings carry — is ``no:`` with the reason, and is not exported. A
+    value the table already has a row for keeps that row: its answer is the
+    same one, asked of the same source. A run once exported two C2 names the
+    judge read out of decoded strings while this table listed four hashes.
+    """
+    from maljan.reporting.renderers.stix_renderer import judge_indicator_rows
+
+    judged = judge_indicator_rows(report)
+    if not judged:
+        return rows
+    out = list(rows)
+    for item, answer in judged:
+        wanted = item.value.strip().lower()
+        same = [
+            index
+            for index, row in enumerate(out)
+            if (row.kind or "") == item.kind and row.value.strip().lower() == wanted
+        ]
+        if same:
+            # A row the table never asked the rule of — a sandbox's file write,
+            # an analyst's persistence target — is asked it now, because the
+            # export asks it of the judge's indicator for the same value.
+            for index in same:
+                if out[index].published is None:
+                    out[index] = out[index].model_copy(update={"published": answer})
+            continue
+        if item.kind == "hash":
+            label = item.algorithm or "Hash"
+        elif item.kind == "ip":
+            label = "IPv6" if ":" in item.value else "IPv4"
+        else:
+            label = _EXPORTED_TYPE_LABELS.get(item.kind, item.kind)
+        network = item.kind in ("domain", "ip", "url", "email")
+        row = ConsolidatedIOC(
+            type=label,
+            kind=item.kind,
+            value=item.value,
+            source="judge",
+            context="the judge's indicator",
+            description="the judge's indicator",
+            published=answer,
+            is_network=network,
+        )
+        if network:
+            out.append(row)
+            continue
+        last_host = max(
+            (index for index, existing in enumerate(out) if not existing.is_network), default=-1
+        )
+        out.insert(last_host + 1, row)
+    return out
 
 
 _PIPE_PREFIXES = ("\\\\.\\pipe\\", "//./pipe/")

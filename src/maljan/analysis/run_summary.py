@@ -537,6 +537,8 @@ def generation_lines(generation: Any) -> list[str]:
     for call, row in sorted((generation.get("timeouts") or {}).items()):
         if not isinstance(row, dict):
             continue
+        if row.get("budget"):
+            lines.append(f"Output budget of `{call}`: {row['budget']}")
         configured = float(row.get("configured_s") or 0.0)
         applied = float(row.get("applied_s") or 0.0)
         if row.get("derived_s") is None:

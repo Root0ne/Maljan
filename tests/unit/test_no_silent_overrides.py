@@ -722,6 +722,7 @@ REPORT_PROSE_WRITERS: dict[str, frozenset[str]] = {
     "execution_flow": frozenset({"reporting/composer.py"}),
     "configuration": frozenset({"reporting/composer.py"}),
     "commands": frozenset({"reporting/composer.py"}),
+    "host_identifiers": frozenset({"reporting/composer.py"}),
     "c2_channels": frozenset({"reporting/composer.py"}),
     "conclusion": frozenset(),
     # The composer's spine and each of its prose subsections.

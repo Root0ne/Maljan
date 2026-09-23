@@ -38,6 +38,7 @@ from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
     KEPT_WITH_A_FINDING,
     CapabilityGrounding,
+    EntryTexts,
     ValidationTally,
     Violation,
     citation_violations,
@@ -46,6 +47,8 @@ from maljan.pipeline.validation import (
     pack_line_ids,
     retry_with_feedback,
     schema_violations,
+    technique_name_violations,
+    wrong_entry_citations,
 )
 from maljan.reporting.models import (
     DefensiveRecommendation,
@@ -445,6 +448,7 @@ class NarrativeAgent:
         facts_block: str = "",
         run_state: str = "",
         citable_ids: Sequence[str] | None = None,
+        evidence: EntryTexts | None = None,
     ) -> NarrativeOutput | None:
         """Return a ``NarrativeOutput`` or ``None`` if both paths fail.
 
@@ -496,12 +500,16 @@ class NarrativeAgent:
                 )
                 if isinstance(result, NarrativeOutput):
                     return self._kept_with_ungrounded_recorded(
-                        result, grounding, known_ids, citable
+                        result, grounding, known_ids, citable, evidence
                     )
                 # Some providers return a dict — coerce defensively.
                 if isinstance(result, dict):
                     return self._kept_with_ungrounded_recorded(
-                        NarrativeOutput.model_validate(result), grounding, known_ids, citable
+                        NarrativeOutput.model_validate(result),
+                        grounding,
+                        known_ids,
+                        citable,
+                        evidence,
                     )
                 logger.warning(
                     "NarrativeAgent: unexpected structured-output type %s; "
@@ -552,6 +560,8 @@ class NarrativeAgent:
                     lambda p: narrative_capability_violations(p, grounding),
                     lambda p: key_finding_citation_violations(p, known_ids),
                     lambda p: citation_violations(p, citable, prose=NARRATIVE_PROSE),
+                    lambda p: wrong_entry_citations(p, evidence, prose=NARRATIVE_PROSE),
+                    technique_name_violations,
                 ],
                 parse=_narrative_payload,
                 on_feedback=self.validation_tally.count,
@@ -608,6 +618,7 @@ class NarrativeAgent:
         grounding: CapabilityGrounding,
         known_ids: list[str] | None = None,
         citable: Sequence[str] = (),
+        evidence: EntryTexts | None = None,
     ) -> NarrativeOutput:
         """The structured path's answer, with its over-claims and stray citations recorded.
 
@@ -621,6 +632,8 @@ class NarrativeAgent:
             *narrative_capability_violations(answer, grounding),
             *key_finding_citation_violations(answer, known_ids or []),
             *citation_violations(answer, citable, prose=NARRATIVE_PROSE),
+            *wrong_entry_citations(answer, evidence, prose=NARRATIVE_PROSE),
+            *technique_name_violations(answer),
         ]
         self.validation_tally.count(found)
         self._record_ungrounded(found)

@@ -21,11 +21,21 @@ contract, the prompts and the instructions.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import pytest
 
-from maljan.reporting.composer import _EXAMPLES, _INSTRUCTIONS, _PROSE_SECTIONS, _SYSTEM
+from maljan.reporting.composer import (
+    _EXAMPLES,
+    _INSTRUCTIONS,
+    _PROSE_SECTIONS,
+    _SYSTEM,
+    PUBLISHED_TECHNIQUES_HEADING,
+    SECTION_SCHEMAS,
+    WHERE_QUOTED_LEAD,
+    section_contract,
+)
 from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXAMPLE_OBJECT, EXPECTED_OBJECT
 
 # The distinctive terms of the evaluation key: how the scored sample resolves its
@@ -158,6 +168,17 @@ PROMPTS: dict[str, str] = {
     "composer system prompt": _SYSTEM,
     **{f"composer instruction {name}": text for name, text in _INSTRUCTIONS.items()},
     "composer section titles": " ".join(_PROSE_SECTIONS.values()),
+    "composer published-techniques heading": PUBLISHED_TECHNIQUES_HEADING,
+    "composer claim note": WHERE_QUOTED_LEAD,
+}
+
+# Each composer section's whole contract — the object, the lines on how to
+# write it and its example — with the object's key names taken out: a key is
+# the schema's own name, the one part of a contract a model is not writing.
+_KEY_NAME_RE = re.compile(r'"[a-z_]+":')
+CONTRACTS: dict[str, str] = {
+    name: _KEY_NAME_RE.sub(" ", section_contract(name, schema))
+    for name, schema in SECTION_SCHEMAS.items()
 }
 
 
@@ -173,6 +194,18 @@ def test_no_contract_prompt_or_instruction_carries_a_term_the_key_scores(name: s
     text = PROMPTS[name].lower()
     shared = [term for term in KEY_TERMS if term in text]
     assert not shared, f"the {name} carries {shared}"
+
+
+@pytest.mark.parametrize("name", sorted(CONTRACTS))
+def test_no_section_contract_carries_a_term_the_key_scores(name: str) -> None:
+    text = CONTRACTS[name].lower()
+    shared = [term for term in KEY_TERMS if term in text]
+    assert not shared, f"the {name} contract carries {shared}"
+
+
+def test_every_section_the_composer_asks_for_has_its_contract_read() -> None:
+    assert set(SECTION_SCHEMAS) >= {"configuration", "host_identifiers"}
+    assert set(SECTION_SCHEMAS) - {"prose"} <= set(_INSTRUCTIONS)
 
 
 def test_the_guard_would_catch_one() -> None:
