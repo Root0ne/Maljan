@@ -525,18 +525,17 @@ class StaticAnalyst(BaseAnalyst):
             ]
         )
 
-        response = (prompt | self.llm).invoke(
-            {
-                "own_report": own_report,
-                "peer_section": peer_section,
-                "mediator_feedback": mediator_feedback,
+        return self.ask_the_model(
+            prompt.format_messages(
+                own_report=own_report,
+                peer_section=peer_section,
+                mediator_feedback=mediator_feedback,
                 # Don't let the "No static data available" placeholder
                 # talk the model out of its live-Ghidra ORIGINAL REPORT.
-                "data": _reframe_static_raw_data(original_data, bool(self.tools)),
-            }
+                data=_reframe_static_raw_data(original_data, bool(self.tools)),
+            ),
+            what="revision",
         )
-        self._record_usage(response)
-        return str(response.content)
 
     # ------------------------------------------------------------------
     # ISR interface (structured claim extraction)
@@ -713,9 +712,9 @@ class StaticAnalyst(BaseAnalyst):
         # that obeys it puts a JSON fence into the revised report, and nothing
         # downstream of here — the claim parser, the transcript, the Composer —
         # should ever see it.
-        response = self.llm.invoke(self.frame_messages(messages))
-        self._record_usage(response)
-        content = self._capture_findings(str(response.content))
+        content = self._capture_findings(
+            self.ask_the_model(self.frame_messages(messages), what="revision")
+        )
 
         parsed = _parse_claim_blocks(content)
         # Drop defeatist meta-claims ("could not be performed / missing

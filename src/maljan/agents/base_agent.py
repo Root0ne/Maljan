@@ -4152,14 +4152,36 @@ class BaseAnalyst(BudgetMeter, ABC):
         }
         self._note_on_last_loop("salvage", row)
 
-    def _invoke_llm_with_timeout(self, messages: list, timeout: float) -> str:
-        """Run ``self.llm.invoke(messages)`` with a hard wall-clock timeout.
+    def ask_the_model(self, messages: list, *, model: Any = None, what: str = "turn") -> str:
+        """One tools-free model call outside a tool loop, cancellable in flight.
+
+        The revision rounds, the view and tier decomposition turns and the
+        other single calls an analyst makes used ``invoke`` on a thread: a
+        cancelled job refused the next such call but left the one on the wire
+        generating on the model server until the provider's request timeout,
+        with the next job queued behind it. This goes through
+        ``_invoke_llm_with_timeout``: the model's own async call on the agent
+        loop, registered with the job's cancellation, held to this agent's
+        loop budget.
+        """
+        timeout, _steps = loop_limits(self.name, getattr(self, "_budget_ceiling", None))
+        return self._invoke_llm_with_timeout(messages, float(timeout), model=model, what=what)
+
+    def _invoke_llm_with_timeout(
+        self,
+        messages: list,
+        timeout: float,
+        *,
+        model: Any = None,
+        what: str = "no-tools fallback",
+    ) -> str:
+        """Run ``model.ainvoke(messages)`` (``self.llm`` by default) with a hard wall-clock timeout.
 
         Used by ``execute_tool_loop`` when
-        the agent has no tools registered. Mirrors the daemon-thread pattern
-        from the tools path so a stalled / queued llama-server cannot freeze
-        the worker. The thread is daemonised so the OS will reap it if it
-        refuses to die after ``timeout + 30``s.
+        the agent has no tools registered, by the salvage, by the validation
+        turn and by ``ask_the_model``. Runs on the shared agent loop so a
+        stalled / queued llama-server cannot freeze the worker, and a timeout
+        or a cancelled job cancels the request itself.
         """
         import time as _time
 
@@ -4168,11 +4190,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Run on the shared agent loop (see ``_get_agent_loop``)
         # rather than a throwaway per-call loop, so no openai async client is
         # ever orphaned on a closed loop.
+        llm: Any = self.llm if model is None else model
+
         async def _invoke() -> str:
-            self.logger.info(
-                "Invoking LLM (no-tools fallback, timeout=%ds)...",
-                timeout,
-            )
+            # ``what`` goes into the format itself so the timeout stays the
+            # line's first argument, as log readers of this line expect.
+            self.logger.info(f"Invoking LLM ({what}, timeout=%ds)...", timeout)  # noqa: G004
             # The model's own async call where it has one, so the timeout and
             # a cancelled job cancel the request itself: the connection closes
             # and the server stops generating. A synchronous ``invoke`` in a
@@ -4180,11 +4203,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             # the worker's side and went on generating on the server's, and
             # the next loop's first turn queued behind it for 908 s. A stand-in
             # that stubs only ``invoke`` is still run in a thread.
-            ask = getattr(type(self.llm), "ainvoke", None)
+            ask = getattr(type(llm), "ainvoke", None)
             call = (
-                self.llm.ainvoke(messages)
+                llm.ainvoke(messages)
                 if inspect.iscoroutinefunction(ask)
-                else asyncio.to_thread(self.llm.invoke, messages)
+                else asyncio.to_thread(llm.invoke, messages)
             )
             response = await asyncio.wait_for(call, timeout=float(timeout))
             self._record_usage(response)
@@ -4196,21 +4219,23 @@ class BaseAnalyst(BudgetMeter, ABC):
             content = _run_coro_blocking(_invoke(), hard_timeout, label=f"llm:{self.name}")
         except TimeoutError:
             self.logger.critical(
-                "%s no-tools fallback exceeded the %ds hard cap.",
+                "%s %s exceeded the %ds hard cap.",
                 self.name,
+                what,
                 hard_timeout,
             )
             raise
         except AnalystError:
             raise
         except Exception as exc:
-            self.logger.error("LLM no-tools fallback failed: %s (%s)", type(exc).__name__, exc)
-            raise AnalystError(f"{self.name} no-tools fallback failed: {exc}") from exc
+            self.logger.error("LLM %s failed: %s (%s)", what, type(exc).__name__, exc)
+            raise AnalystError(f"{self.name} {what} failed: {exc}") from exc
 
         elapsed = _time.monotonic() - _t0
         self.logger.info(
-            "%s no-tools fallback: elapsed=%.1fs, timeout=%ds.",
+            "%s %s: elapsed=%.1fs, timeout=%ds.",
             self.name,
+            what,
             elapsed,
             timeout,
         )
@@ -4608,9 +4633,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 llm = self.llm.bind(max_tokens=max_tokens)
             except Exception:  # noqa: BLE001 — provider may not accept the kwarg
                 llm = self.llm
-        response = llm.invoke(messages)
-        self._record_usage(response)
-        return str(response.content)
+        return self.ask_the_model(messages, model=llm, what="view")
 
     def analyze_isr_views(
         self,

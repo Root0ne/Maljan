@@ -306,3 +306,45 @@ class TestTheWorker:
 
         with pytest.raises(JobCancelled):
             asyncio.run(_main())
+
+
+class TestTheRevisionRoundToo:
+    """The debate's model calls are in flight on the agent loop, not on a thread."""
+
+    def test_a_single_model_call_ends_with_the_job(self) -> None:
+        class _Analyst(BaseAnalyst):
+            def analyze(self, data: str) -> str:  # pragma: no cover - unused
+                return ""
+
+            def revise(self, *args: Any, **kwargs: Any) -> str:  # pragma: no cover - unused
+                return ""
+
+        model = _SlowModel()
+        analyst = _Analyst(llm=model, name="static")  # type: ignore[arg-type]
+        job = Cancellation()
+        _cancel_when_started(job, model, "the operator cancelled the job")
+
+        started = time.monotonic()
+        with bound(job), pytest.raises(JobCancelled):
+            analyst.ask_the_model([HumanMessage(content="revise")], what="revision")
+
+        assert time.monotonic() - started < PROMPTLY
+        assert model.abandoned.wait(PROMPTLY)
+
+    def test_no_analyst_calls_its_model_synchronously(self) -> None:
+        import ast
+        from pathlib import Path
+
+        agents = Path(__file__).resolve().parents[3] / "src" / "maljan" / "agents"
+        found = []
+        for path in sorted(agents.glob("*.py")):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "invoke"
+                    and "llm" in ast.unparse(node.func.value)
+                ):
+                    found.append(f"{path.name}:{node.lineno}: {ast.unparse(node)}")
+
+        assert not found, "\n".join(found)
