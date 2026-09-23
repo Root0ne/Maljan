@@ -390,16 +390,95 @@ SCO_EXTENSIONS: dict[str, frozenset[str]] = {
     "user-account": frozenset({"unix-account-ext"}),
 }
 
+# The properties each predefined extension defines (STIX 2.1, section 6), so a
+# step into an extension is asked the question a step into a type is.
+SCO_EXTENSION_PROPERTIES: dict[str, frozenset[str]] = {
+    "archive-ext": frozenset({"contains_refs", "comment"}),
+    "ntfs-ext": frozenset({"sid", "alternate_data_streams"}),
+    "pdf-ext": frozenset({"version", "is_optimized", "document_info_dict", "pdfid0", "pdfid1"}),
+    "raster-image-ext": frozenset({"image_height", "image_width", "bits_per_pixel", "exif_tags"}),
+    "windows-pebinary-ext": frozenset(
+        {
+            "pe_type",
+            "imphash",
+            "machine_hex",
+            "number_of_sections",
+            "time_date_stamp",
+            "pointer_to_symbol_table_hex",
+            "number_of_symbols",
+            "size_of_optional_header",
+            "characteristics_hex",
+            "file_header_hashes",
+            "optional_header",
+            "sections",
+        }
+    ),
+    "http-request-ext": frozenset(
+        {
+            "request_method",
+            "request_value",
+            "request_version",
+            "request_header",
+            "message_body_length",
+            "message_body_data_ref",
+        }
+    ),
+    "icmp-ext": frozenset({"icmp_type_hex", "icmp_code_hex"}),
+    "socket-ext": frozenset(
+        {
+            "address_family",
+            "is_blocking",
+            "is_listening",
+            "options",
+            "socket_type",
+            "socket_descriptor",
+            "socket_handle",
+        }
+    ),
+    "tcp-ext": frozenset({"src_flags_hex", "dst_flags_hex"}),
+    "windows-process-ext": frozenset(
+        {
+            "aslr_enabled",
+            "dep_enabled",
+            "priority",
+            "owner_sid",
+            "window_title",
+            "startup_info",
+            "integrity_level",
+        }
+    ),
+    "windows-service-ext": frozenset(
+        {
+            "service_name",
+            "descriptions",
+            "display_name",
+            "group_name",
+            "start_type",
+            "service_dll_refs",
+            "service_type",
+            "service_status",
+        }
+    ),
+    "unix-account-ext": frozenset({"gid", "groups", "home_dir", "shell"}),
+}
+
 _FIRST_STEP_RE = re.compile(r"^([a-z0-9_]+)")
 _EXTENSION_KEY_RE = re.compile(r"^extensions(?:\.'((?:\\.|[^'\\])*)'|\['((?:\\.|[^'\\])*)'\])")
+# A key written inside brackets. The pattern grammar steps into a dictionary
+# with ``.'key'`` and into a list with ``[*]`` or ``[n]``; ``['key']`` is
+# neither, and the official validator refuses the whole pattern for it.
+_BRACKETED_KEY_RE = re.compile(r"\['((?:\\.|[^'\\])*)'\]")
 
 
 def object_path_problems(pattern: str) -> list[str]:
     """What is wrong with the object paths ``pattern`` compares, one sentence each.
 
     Asked only of a STIX type written as STIX writes it: a property the type
-    does not define, or an extension it does not have. Each problem is named
-    once. A type STIX does not have is :func:`unknown_object_types`' answer.
+    does not define, an extension it does not have, a property the extension
+    does not define, or a key written in brackets, which the grammar has no
+    form for. Each comparison's problems are one sentence, so the judge reads
+    everything wrong with a path at once, and each sentence is named once. A
+    type STIX does not have is :func:`unknown_object_types`' answer.
     """
     found: list[str] = []
     for comparison in read_comparisons(pattern):
@@ -407,22 +486,38 @@ def object_path_problems(pattern: str) -> list[str]:
         properties = SCO_PROPERTIES.get(kind)
         if properties is None:
             continue
+        parts: list[str] = [
+            f"a key is written .'{key}' in a pattern, never ['{key}']"
+            for key in dict.fromkeys(_BRACKETED_KEY_RE.findall(comparison.prop))
+        ]
         step = _FIRST_STEP_RE.match(comparison.prop)
         name = step.group(1) if step else comparison.prop
         if name == "extensions":
             key_match = _EXTENSION_KEY_RE.match(comparison.prop)
             key = (key_match.group(1) or key_match.group(2) or "") if key_match else ""
             allowed = SCO_EXTENSIONS.get(kind, frozenset())
-            if key and (
+            if not key or not (
                 key in allowed or key.startswith("x-") or key.startswith("extension-definition--")
             ):
-                continue
-            listed = ", ".join(sorted(allowed)) if allowed else "no predefined extension"
-            problem = f"{kind} has no extension {key!r} (it has {listed})"
-        elif name in properties or name in SCO_COMMON_PROPERTIES or name.startswith("x_"):
+                listed = ", ".join(sorted(allowed)) if allowed else "no predefined extension"
+                parts.append(f"{kind} has no extension {key!r} (it has {listed})")
+            elif key in SCO_EXTENSION_PROPERTIES and key_match is not None:
+                inside = _FIRST_STEP_RE.match(comparison.prop[key_match.end() :].lstrip("."))
+                defined = SCO_EXTENSION_PROPERTIES[key]
+                if (
+                    inside
+                    and inside.group(1) not in defined
+                    and not inside.group(1).startswith("x_")
+                ):
+                    parts.append(
+                        f"{key} has no property {inside.group(1)!r} "
+                        f"(it has {', '.join(sorted(defined))})"
+                    )
+        elif not (name in properties or name in SCO_COMMON_PROPERTIES or name.startswith("x_")):
+            parts.append(f"{kind} has no property {name!r}")
+        if not parts:
             continue
-        else:
-            problem = f"{kind} has no property {name!r}"
+        problem = "; and ".join(parts)
         if problem not in found:
             found.append(problem)
     return found
