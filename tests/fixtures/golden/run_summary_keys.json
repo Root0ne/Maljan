@@ -128,6 +128,7 @@
     "react_step_cap_hits": null,
     "tool_output_calls": null,
     "tool_output_chars_dropped": null,
+    "tool_output_compacted": null,
     "tool_output_hard_truncated": null,
     "tool_output_limit_largest": null,
     "tool_output_limit_smallest": null,

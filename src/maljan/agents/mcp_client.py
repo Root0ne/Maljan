@@ -353,6 +353,11 @@ class MCPLangChainToolkit:
         much as the cut: pitfall P6 asks for truncation *frequency*, and a
         frequency needs its denominator.
 
+        A JSON answer over the limit only because of its whitespace is handed
+        over whole, written without it: no value changes, so it carries no
+        notice, and the ledger counts it as ``compacted``. Only a compact form
+        that still does not fit is shortened.
+
         A JSON object is shortened as a document: elements come off the end of
         its largest lists, then characters off the end of its largest long
         strings, until it fits, and one reserved key says what was left out
@@ -401,7 +406,12 @@ class MCPLangChainToolkit:
             limit,
         )
 
-        attempt = shorten_json_document(output, shorten_target(limit, narrowing))
+        attempt = shorten_json_document(output, shorten_target(limit, narrowing), cap=limit)
+        if attempt.compacted:
+            self._record_guardrail(
+                chars_in, len(attempt.text), over_limit=True, compacted=True, limit=limit
+            )
+            return attempt.text
         if attempt.shortened:
             self._charge_overage(len(attempt.text), limit)
             self._record_guardrail(
@@ -493,6 +503,7 @@ class MCPLangChainToolkit:
         shortened: bool = False,
         shortening_timed_out: bool = False,
         no_room: bool = False,
+        compacted: bool = False,
         limit: int = 0,
     ) -> None:
         """Record one guardrail decision; no-op without a ledger, never raises."""
@@ -508,5 +519,6 @@ class MCPLangChainToolkit:
             shortened=shortened,
             shortening_timed_out=shortening_timed_out,
             no_room=no_room,
+            compacted=compacted,
             limit=limit,
         )

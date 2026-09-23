@@ -545,6 +545,15 @@ at 131,072 the first is 46,080; at a million, 371,928. At the floor the answer
 meets the structural shortener exactly as any other does and carries the same
 notice naming the arguments that would narrow it.
 
+An answer over the cap only because of its whitespace is not shortened. A tool
+that indents its JSON spends a quarter or more of its characters on layout, and
+a derived cap makes that gap the common case: a recorded `elf_info` was 8,628
+characters indented and 5,577 compact against a cap of 8,486. Such an answer is
+handed over whole, written without the whitespace — parseable, every value the
+tool's, and with no notice, because nothing was left out — and the run summary
+counts it as `tool_output_compacted`. Only a compact form that still does not
+fit meets the shortener, and what the shortener then cuts is the compact form.
+
 **When the room runs out, the tool phase ends.** Below about a thousand
 characters an answer cannot survive its own notice, so nothing of it is handed
 over. The model is told once, in one sentence, that the conversation has no

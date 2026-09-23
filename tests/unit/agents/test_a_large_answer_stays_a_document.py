@@ -665,6 +665,10 @@ class TestOverManyShapesAtOnce:
         for answer in self._documents():
             for limit in (200, 1000, 6000):
                 result = shorten_json_document(answer, limit)
+                if result.compacted:
+                    assert json.loads(result.text) == json.loads(answer)
+                    assert len(result.text) <= limit
+                    continue
                 if not result.shortened:
                     assert result.text == answer
                     continue

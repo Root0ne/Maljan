@@ -3224,6 +3224,26 @@ change landed on `main`.
   this agent's tool loop: …"), from which no claim is read, instead of handing
   on the graph's sentence or a tool's notice as the agent's answer.
 
+- **A JSON answer over the cap only because of its indentation is handed over
+  whole.** The document shortener measured an indented answer at its compact
+  size, found it already inside the target, cut nothing and handed back the
+  indented text, which the guardrail then cut as characters: on a live run
+  `elf_info` (8,628 characters indented, 5,577 compact, cap 8,486) and
+  `strings` (8,442 against 7,334) both reached the model ending in
+  `[OUTPUT TRUNCATED]` and the ledger with `structured: null`, so neither
+  reached the report. A JSON answer whose compact form fits the cap is now
+  handed over in that form — every value the tool's, parseable, with no
+  shortening notice — on both the MCP toolkit and the Ghidra HTTP client, and
+  counted as the new `tool_output_compacted` in the truncation ledger,
+  `run_summary.truncation` and the report's Bounds Hit table. When the compact
+  form still does not fit, the structural shortener now acts on it, and every
+  document it returns is written compactly, where an indented answer used to be
+  shortened in the library's spaced form.
+  **Upgrading:** `run_summary.truncation.tool_output_compacted` is new and is
+  one of the outcomes counted under `tool_output_over_limit`; a summary stored
+  before it reads 0. `tool_output_chars_dropped` includes the whitespace a
+  compacted answer lost, though no value was.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**
