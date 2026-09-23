@@ -77,8 +77,13 @@ test.describe("Analyses", () => {
     const sha = page.getByRole("button", { name: /^Copy SHA-256 of invoice_scan\.exe/ });
     await sha.focus();
     await page.keyboard.press("Enter");
-    await expect(page.getByRole("button", { name: /^Copied SHA-256 of invoice_scan\.exe/ })).toBeVisible();
+    // One announcement: the live region. The button keeps its name, and the
+    // "Copied" a sighted reader sees is hidden from the accessibility tree.
     await expect(page.getByRole("status").filter({ hasText: /^Copied SHA-256 of invoice_scan\.exe/ })).toHaveCount(1);
+    await expect(sha).toHaveAccessibleName(/^Copy SHA-256 of invoice_scan\.exe/);
+    await expect(page.getByText("Copied", { exact: true }).first()).toBeVisible();
+    const box = await sha.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(24);
 
     await page.getByRole("button", { name: /^Copy job id of invoice_scan\.exe/ }).click();
     await expect(page.getByRole("status").filter({ hasText: /^Copied job id of invoice_scan\.exe/ })).toHaveCount(1);

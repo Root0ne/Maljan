@@ -108,13 +108,16 @@ test.describe("tool servers and the REST sandbox", () => {
     const detail = page.locator('[data-server-detail="r2custom"]');
     await detail.getByRole("button", { name: "Load tool list" }).click();
 
-    const count = detail.getByRole("status").filter({ hasText: /^enabled/ });
+    const count = detail.locator('[data-tool-count="r2custom"]');
+    const spoken = detail.locator('[data-tool-count-spoken="r2custom"]');
     await expect(count).toHaveText("enabled 0 of 4");
 
     // The reason sits on the tool's own row, and only there.
     const decompile = detail.locator('[data-tool-row="decompile"]');
     await expect(decompile).toContainText("unavailable: the decompiler plugin is not installed; install the plugin on the sidecar host");
     await expect(detail.getByRole("list", { name: "unavailable tools" })).toHaveCount(0);
+    // Nothing is announced when the table first draws.
+    await expect(spoken).toHaveText("");
 
     await detail.getByRole("button", { name: "Select all", exact: true }).click();
     await expect(count).toHaveText("enabled 4 of 4");
@@ -124,6 +127,9 @@ test.describe("tool servers and the REST sandbox", () => {
     await expect(detail.locator("[data-tool-row]")).toHaveCount(3);
     await detail.getByRole("button", { name: "Select none shown" }).click();
     await expect(count).toHaveText("enabled 1 of 4 · 3 shown");
+    // Announced once the change settles, in a polite region of its own.
+    await expect(spoken).toHaveAttribute("role", "status");
+    await expect(spoken).toHaveText("enabled 1 of 4 · 3 shown");
     await expect(detail.getByLabel("r2custom tool analyze")).toHaveCount(0);
 
     await detail.getByRole("searchbox", { name: "Search the tools of r2custom" }).fill("");

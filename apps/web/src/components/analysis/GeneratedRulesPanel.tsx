@@ -178,7 +178,7 @@ function RuleCard({ rule }: { rule: DetectionRule }) {
           <CopyButton
             value={rule.body}
             what={`${rule.kind} rule ${rule.name}`}
-            className="px-2 py-1 text-[11px] uppercase tracking-wider text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted"
+            className="inline-flex min-h-6 items-center px-2 py-1 text-[11px] uppercase tracking-wider text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted"
           />
           <button
             onClick={() => downloadBlob(rule.body, filename, KIND_MIME[rule.kind])}
