@@ -107,20 +107,21 @@ export function bundleObjects(bundle: unknown): StixObject[] {
   return objects.filter(isStixObject);
 }
 
+/** The property the export writes an object's ledger ids under. */
+export const EVIDENCE_REFS_PROPERTY = "x_maljan_evidence_refs";
+
 /**
- * The ledger ids an object carries: every `ev_` id under a top-level property
- * whose name says evidence. `x_maljan_evidence_basis` holds a domain such as
- * `static`, which is not an id, and yields nothing.
+ * The ledger ids an object carries: the `ev_` ids in the export's
+ * `x_maljan_evidence_refs`, which it writes from the run's record and only
+ * where the record ties the object to entries. No other property is read, and
+ * an id in a description or a pattern stays text.
  */
 export function evidenceIdsOf(obj: Record<string, unknown>): string[] {
+  const value = obj[EVIDENCE_REFS_PROPERTY];
   const found: string[] = [];
-  for (const [key, value] of Object.entries(obj)) {
-    if (!/evidence/i.test(key)) continue;
-    const values = Array.isArray(value) ? value : [value];
-    for (const v of values) {
-      const id = text(v);
-      if (EVIDENCE_ID.test(id) && !found.includes(id)) found.push(id);
-    }
+  for (const v of Array.isArray(value) ? value : []) {
+    const id = text(v);
+    if (EVIDENCE_ID.test(id) && !found.includes(id)) found.push(id);
   }
   return found;
 }

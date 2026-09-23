@@ -41,6 +41,7 @@ function exportBundle(extra: StixObject[] = []) {
         x_maljan_confidence: 0.95,
         x_maljan_evidence_basis: "static",
         x_maljan_contributing_agents: ["static_analyst"],
+        x_maljan_evidence_refs: ["ev_0002", "ev_0005"],
       },
       { type: "identity", id: IDENTITY, name: "Maljan", identity_class: "system" },
       {
@@ -67,7 +68,7 @@ function exportBundle(extra: StixObject[] = []) {
         id: HASH,
         name: "Sample hash 6091f2589fef",
         pattern: "[file:hashes.'SHA-256' = '6091…']",
-        x_maljan_evidence: ["ev_0007"],
+        description: "Read from ev_0007",
       },
       {
         type: "relationship",
@@ -211,15 +212,24 @@ describe("what a node carries", () => {
     expect(node?.label).toBe("T1027 Obfuscated Files or Information");
   });
 
-  it("takes the evidence ids an object carries and nothing that is not one", () => {
-    expect(evidenceIdsOf({ x_maljan_evidence: ["ev_0007", "ev_0007", "ev_0012"] })).toEqual([
+  it("takes the ledger ids the export wrote and nothing that is not one", () => {
+    expect(evidenceIdsOf({ x_maljan_evidence_refs: ["ev_0007", "ev_0007", "ev_0012"] })).toEqual([
       "ev_0007",
       "ev_0012",
     ]);
-    expect(evidenceIdsOf({ evidence_ids: "ev_0003" })).toEqual(["ev_0003"]);
-    expect(evidenceIdsOf({ x_maljan_evidence_basis: "static", description: "ev_0001" })).toEqual([]);
-    const hash = readStixGraph(exportBundle()).nodes.find((n) => n.id === HASH);
-    expect(hash?.evidenceIds).toEqual(["ev_0007"]);
+    expect(evidenceIdsOf({ x_maljan_evidence_refs: ["note", 7, "ev_0003"] })).toEqual(["ev_0003"]);
+    expect(evidenceIdsOf({ x_maljan_evidence_refs: "ev_0003" })).toEqual([]);
+    expect(
+      evidenceIdsOf({
+        x_maljan_evidence_basis: "static",
+        x_maljan_evidence: ["ev_0001"],
+        evidence_ids: ["ev_0002"],
+        description: "ev_0001",
+      }),
+    ).toEqual([]);
+    const graph = readStixGraph(exportBundle());
+    expect(graph.edges[0].evidenceIds).toEqual(["ev_0002", "ev_0005"]);
+    expect(graph.nodes.find((n) => n.id === HASH)?.evidenceIds).toEqual([]);
   });
 
   it("labels an observable by its value, a file by its name or first hash", () => {

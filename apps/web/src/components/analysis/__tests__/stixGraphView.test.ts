@@ -27,6 +27,7 @@ const bundle = {
       source_ref: MALWARE,
       target_ref: TECHNIQUE,
       x_maljan_confidence: 0.9,
+      x_maljan_evidence_refs: ["ev_0002"],
     },
     { type: "report", id: "report--5", name: "r", object_refs: [MALWARE] },
   ],
@@ -57,6 +58,8 @@ describe("the drawn graph", () => {
     expect(hidden).toContain("Relationships (1)");
     expect(hidden).toContain("In the bundle, not drawn (1)");
     expect(hidden.split("<aside")[0]).not.toContain("<button");
+    expect(hidden.split("<aside")[0]).toContain("ev_0002");
+    expect(hidden.split("<aside")[0]).not.toContain("<a ");
   });
 });
 
@@ -67,6 +70,10 @@ describe("the table view", () => {
     expect(html).not.toContain("<svg viewBox");
     expect(html).not.toContain('class="sr-only"');
     expect(count(html, /<button type="button"/g)).toBe(4);
+  });
+
+  it("links an edge's ledger ids into the evidence view", () => {
+    expect(html).toContain("evidence?evidence=ev_0002");
   });
 
   it("says a missing confidence is not stated, never a number", () => {

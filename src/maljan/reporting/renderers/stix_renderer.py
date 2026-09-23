@@ -22,6 +22,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import uuid
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from maljan.agents._indicator_denylists import (
@@ -47,6 +48,7 @@ from maljan.extractors.network_extractor import (
     url_host,
 )
 from maljan.pipeline.events import safe_finding_value
+from maljan.pipeline.evidence_summary import EVIDENCE_ID_RE
 from maljan.reporting.models import (
     MalwareReport,
     NetworkDomain,
@@ -58,6 +60,7 @@ from maljan.reporting.models import (
 from maljan.schemas.judgement import indicator_type_for
 from maljan.schemas.stix_models import (
     ATTACK_PATTERN_NAMESPACE,
+    EVIDENCE_REFS_PROPERTY,
     AttackPattern,
     Bundle,
     File,
@@ -655,6 +658,7 @@ class ExtendedSTIXRenderer:
         ledger: Any | None = None,
         corpus: Any = None,
         technique_sources: Any = None,
+        technique_evidence: Mapping[str, Sequence[str]] | None = None,
     ) -> Bundle:
         """Render the extended bundle.
 
@@ -664,6 +668,13 @@ class ExtendedSTIXRenderer:
         runs — the judge's
         own post-process is the first — so both must report or the aggregate
         undercounts.
+
+        ``technique_evidence`` is ``{technique id: [ledger id, ...]}`` as the
+        run's record ties them (``pipeline.evidence_summary.technique_evidence``).
+        The ids are written on the sample's ``uses`` edge to that technique,
+        and the attribution's family ids on a malware object this export mints
+        from the family name, as ``x_maljan_evidence_refs``. Nothing else gets
+        the property, and nothing is matched by value or read out of text.
         """
         objects: list[Any] = []
         self.unlinked = []
@@ -798,6 +809,14 @@ class ExtendedSTIXRenderer:
                 description=f"Sample {report.identity.hashes.sha256}",
                 is_family=False,
                 malware_types=[report.malware_category] if report.malware_category else [],
+                # Named from the family, so the family's own citations are
+                # this object's; a name from the category or ``unknown`` has
+                # none in the record.
+                x_maljan_evidence_refs=(
+                    _evidence_refs(report.attribution.family_evidence_ids)
+                    if report.attribution.family
+                    else None
+                ),
             )
             objects.append(malware_obj)
             malware_id = malware_obj.id
@@ -1010,6 +1029,14 @@ class ExtendedSTIXRenderer:
                 object_refs=[about],
             )
             objects.append(note)
+
+        # 8.5) The ledger entries the record ties to each technique, on the
+        #      sample's ``uses`` edge to it. On the edge and not on the
+        #      attack-pattern: the attack-pattern's id is the same in every
+        #      export, and one run's evidence written on it would make two
+        #      bundles disagree about one object. The edge is this run's claim.
+        if malware_id is not None and technique_evidence:
+            objects = _with_technique_evidence(objects, malware_id, technique_evidence)
 
         # 9) Report SDO bundles every object_ref. Pre-existing AttackPattern
         #    objects are referenced too so the report stays the single root.
@@ -1243,6 +1270,48 @@ def _unlinked_techniques(base_bundle: Bundle, gone: dict[str, str]) -> list[tupl
                 counts[label] = counts.get(label, 0) + 1
                 break
     return sorted(counts.items())
+
+
+def _evidence_refs(ids: Any) -> list[str] | None:
+    """Ledger ids as the export writes them: ``ev_`` ids once each, in ledger
+    order, which is the order the ledger numbers them in. ``None`` for none."""
+    kept: list[str] = []
+    for raw in ids or []:
+        eid = str(raw or "").strip()
+        if EVIDENCE_ID_RE.match(eid) and eid not in kept:
+            kept.append(eid)
+    kept.sort(key=lambda eid: int(eid.split("_", 1)[1]))
+    return kept or None
+
+
+def _with_technique_evidence(
+    objects: list[Any], malware_id: str, technique_evidence: Mapping[str, Sequence[str]]
+) -> list[Any]:
+    """``objects`` with each technique's ledger ids on the sample's ``uses`` edge to it.
+
+    An edge that already carries the property keeps what it carries. A copy is
+    written rather than the object changed, because the judge's edges are the
+    judge's own bundle's too.
+    """
+    by_pattern: dict[str, list[str]] = {}
+    for tid, ids in technique_evidence.items():
+        refs = _evidence_refs(ids)
+        if refs:
+            by_pattern[_pattern_id_for(str(tid).strip().upper())] = refs
+    out: list[Any] = []
+    for obj in objects:
+        refs = by_pattern.get(str(getattr(obj, "target_ref", "") or ""))
+        if (
+            refs is not None
+            and getattr(obj, "type", "") == "relationship"
+            and getattr(obj, "relationship_type", "") == "uses"
+            and getattr(obj, "source_ref", None) == malware_id
+            and EVIDENCE_REFS_PROPERTY in type(obj).model_fields
+            and getattr(obj, EVIDENCE_REFS_PROPERTY, None) is None
+        ):
+            obj = obj.model_copy(update={EVIDENCE_REFS_PROPERTY: refs})
+        out.append(obj)
+    return out
 
 
 def _attack_patterns_for(

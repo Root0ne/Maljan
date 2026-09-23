@@ -301,12 +301,13 @@ function GraphTable({
               <th scope="col" className={th}>Relationship</th>
               <th scope="col" className={th}>Target</th>
               <th scope="col" className={th}>Confidence</th>
+              <th scope="col" className={th}>Evidence</th>
             </tr>
           </thead>
           <tbody>
             {graph.edges.length === 0 && (
               <tr>
-                <td colSpan={4} className={`${td} text-text-muted`}>
+                <td colSpan={5} className={`${td} text-text-muted`}>
                   This bundle holds no relationship.
                 </td>
               </tr>
@@ -330,6 +331,15 @@ function GraphTable({
                 <td className={`${td} break-words text-text-primary`}>{name(e.target)}</td>
                 <td className={`${td} text-text-secondary`}>
                   {e.confidence ? formatConfidence(e.confidence) : "not stated"}
+                </td>
+                <td className={td}>
+                  {e.evidenceIds.length > 0 && onSelect ? (
+                    <EvidenceChips ids={e.evidenceIds} />
+                  ) : (
+                    <span className="text-text-muted">
+                      {e.evidenceIds.length > 0 ? e.evidenceIds.join(", ") : "none"}
+                    </span>
+                  )}
                 </td>
               </tr>
             ))}
