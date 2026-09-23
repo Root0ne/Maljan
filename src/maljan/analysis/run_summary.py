@@ -507,14 +507,24 @@ def generation_lines(generation: Any) -> list[str]:
         return []
     lines: list[str] = []
     for model, row in sorted((generation.get("models") or {}).items()):
-        if not isinstance(row, dict) or row.get("tokens_per_second") is None:
+        if not isinstance(row, dict):
             continue
-        sources = "; ".join(str(x) for x in row.get("sources") or []) or "unknown"
-        lines.append(
-            f"Generation rate of `{model}`: {float(row['tokens_per_second']):.2f} tokens/s "
-            f"({int(row.get('tokens') or 0)} tokens over {float(row.get('seconds') or 0.0):.1f}s "
-            f"in {int(row.get('calls') or 0)} call(s); from {sources})"
-        )
+        if row.get("tokens_per_second") is not None:
+            sources = "; ".join(str(x) for x in row.get("sources") or []) or "unknown"
+            lines.append(
+                f"Generation rate of `{model}`: {float(row['tokens_per_second']):.2f} tokens/s "
+                f"({int(row.get('tokens') or 0)} tokens over "
+                f"{float(row.get('seconds') or 0.0):.1f}s "
+                f"in {int(row.get('calls') or 0)} call(s); from {sources})"
+            )
+        if row.get("prompt_tokens_per_second") is not None:
+            read_from = "; ".join(str(x) for x in row.get("prompt_sources") or []) or "unknown"
+            lines.append(
+                f"Prompt reading rate of `{model}`: "
+                f"{float(row['prompt_tokens_per_second']):.2f} tokens/s "
+                f"({int(row.get('prompt_tokens') or 0)} tokens over "
+                f"{float(row.get('prompt_seconds') or 0.0):.1f}s; from {read_from})"
+            )
     margin = generation.get("margin")
     ceiling = generation.get("ceiling_s")
     for call, row in sorted((generation.get("timeouts") or {}).items()):
@@ -1170,6 +1180,13 @@ class RunSummaryBuilder:
                 cap = row.get("cap")
                 if cap and str(cap) not in caps:
                     caps.append(str(cap))
+            # Each loop's salvage as it was recorded: what it sent, what it
+            # was sized by and how it ended, in loop order. A list, not a sum,
+            # because two salvages of one agent are two requests and the
+            # question a reader asks is which could not finish and why.
+            salvages = [
+                dict(row["salvage"]) for row in loops if isinstance(row.get("salvage"), dict)
+            ]
             out[str(agent)] = {
                 "loops": len(loops),
                 "steps_used": sum(int(row.get("steps_used") or 0) for row in loops),
@@ -1183,6 +1200,7 @@ class RunSummaryBuilder:
                     int(row.get("tool_definition_chars") or 0) for row in loops
                 ),
                 "caps": caps,
+                **({"salvages": salvages} if salvages else {}),
             }
         self._budget = out or None
         return self

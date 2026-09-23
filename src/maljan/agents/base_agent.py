@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import itertools
 import json
 import re
@@ -102,6 +103,16 @@ def is_the_graph_s_step_stop(message: Any) -> bool:
 # nothing left is precisely how the hard cap came to fire on 2026-08-11.
 _SYNTHESIS_MIN_SECONDS = 60
 
+# What the salvage tells the model before the ids it can still cite.
+_SYNTHESIS_DIRECTIVE = (
+    "You have gathered enough tool output above. Do NOT request or "
+    "call any more tools. Using ONLY the evidence already collected "
+    "in this conversation, write your FINAL answer now in the exact "
+    "format the system prompt requested. Where the evidence is "
+    "genuinely insufficient for a point, state that briefly instead "
+    "of asking for more steps. "
+)
+
 # The floor under the character budget for the conversation re-sent to the
 # model. The measured failure re-sent 19 tool outputs — the guardrail caps each
 # at 6,000 chars, so ~114,000 characters before the system prompt. Prefilling
@@ -174,6 +185,44 @@ def synthesis_budget_chars(cfg: Any, agent_name: str, window_tokens: int = 0) ->
     if tokens <= 0:
         return _SYNTHESIS_MIN_CHARS
     return max(_SYNTHESIS_MIN_CHARS, int(tokens * _CHARS_PER_TOKEN * _SYNTHESIS_CONTEXT_SHARE))
+
+
+def salvage_chars_at_pace(
+    seconds: float,
+    *,
+    generation_rate: float | None,
+    prompt_rate: float | None,
+    chars_per_token: int,
+    answer_tokens: int | None = None,
+) -> int | None:
+    """Characters of conversation a no-tools salvage can send and still finish in ``seconds``.
+
+    The salvage re-sends the conversation without the loop's tools, so the
+    server cannot reuse what it had cached for the loop and reads the whole
+    request again, then writes the final answer. At the model's measured
+    rates that takes ``sent / chars_per_token / prompt_rate`` plus
+    ``answer_tokens / generation_rate`` seconds, and the two together, times
+    ``TIMEOUT_MARGIN`` for the spread between turns, must fit in what is left.
+    ``answer_tokens`` defaults to ``FINAL_ANSWER_EXPECTED_TOKENS``, the answer
+    the loop's own time reserve was sized for.
+
+    ``None`` when either rate is unmeasured: nothing is sized from a rate
+    nobody measured, and the window alone then bounds the request. ``0`` when
+    the answer alone does not fit.
+
+    The slow run's numbers are why: 393 s left, a 50,000-character
+    conversation read at 110–240 tokens a second and an answer written at 5.5,
+    and the call ran into its hard cap on all three PE samples.
+    """
+    from maljan.llm.generation_rate import TIMEOUT_MARGIN
+
+    if not generation_rate or not prompt_rate or generation_rate <= 0 or prompt_rate <= 0:
+        return None
+    tokens = FINAL_ANSWER_EXPECTED_TOKENS if answer_tokens is None else int(answer_tokens)
+    reading = float(seconds) / TIMEOUT_MARGIN - tokens / float(generation_rate)
+    if reading <= 0:
+        return 0
+    return int(reading * float(prompt_rate) * max(1, int(chars_per_token)))
 
 
 def ledger_ids_in(msgs: Sequence[Any]) -> list[str]:
@@ -275,6 +324,16 @@ def _conversation_units(msgs: list) -> list[list]:
 def _is_a_tool_pair(unit: list) -> bool:
     """Whether this unit is a tool call with its results."""
     return bool(getattr(unit[0], "tool_calls", None))
+
+
+def _framing_of(msgs: list) -> list:
+    """The leading framing a trimmed salvage always keeps: at most two turns before a tool result."""
+    head: list = []
+    for message in msgs:
+        if len(head) >= 2 or type(message).__name__ == "ToolMessage":
+            break
+        head.append(message)
+    return head
 
 
 def _trim_for_synthesis(msgs: list, budget: int) -> list:
@@ -3863,7 +3922,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         the deadline it was called to respect is not a salvage), skips entirely
         when too little remains to be worth starting, and re-sends a conversation
         trimmed to a character budget — the model cannot synthesise from context
-        it never finishes reading.
+        it never finishes reading. The budget is the smaller of what the window
+        allows and, where this model's reading and writing rates are measured,
+        what the time left can be read and answered in
+        (``salvage_chars_at_pace``); the framing — the task and the pack — is
+        always kept, and the oldest tool calls go first. When even the framing
+        cannot be read and answered in the time left, the salvage is not sent.
+        Either way what it sent and how it ended is on the loop's budget record
+        under ``salvage``.
 
         Best-effort throughout: on any failure it returns "" so the caller keeps
         the original content.
@@ -3873,7 +3939,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Not truncated to whole seconds: at the time cap a second is a large
         # share of what the final answer was kept.
         remaining = max(0.0, float(timeout) - elapsed)
-        if remaining < _SYNTHESIS_MIN_SECONDS:
+        generation_rate, prompt_rate = self._measured_rates()
+        paced_unknown = generation_rate is None or prompt_rate is None
+        if paced_unknown and remaining < _SYNTHESIS_MIN_SECONDS:
             self.logger.warning(
                 "%s skipping forced synthesis: only %ds of the %ds budget left "
                 "(minimum %ds) — starting it is how the hard cap fires.",
@@ -3882,22 +3950,63 @@ class BaseAnalyst(BudgetMeter, ABC):
                 timeout,
                 _SYNTHESIS_MIN_SECONDS,
             )
+            self._note_salvage(
+                seconds_left=remaining,
+                outcome="not sent",
+                detail=(
+                    f"{remaining:.0f}s were left, under the {_SYNTHESIS_MIN_SECONDS}s a salvage "
+                    "is started with when no rate of this model is measured"
+                ),
+            )
             return ""
 
-        budget = synthesis_budget_chars(
+        window_budget = synthesis_budget_chars(
             get_settings(), self.name, counted_window_tokens(self._context_budget())
         )
+        # What the time left can hold at this model's measured pace, when both
+        # of its rates are known; the window's bound applies either way.
+        paced = salvage_chars_at_pace(
+            remaining,
+            generation_rate=generation_rate,
+            prompt_rate=prompt_rate,
+            chars_per_token=self._chars_per_token(),
+        )
+        budget = window_budget if paced is None else min(window_budget, paced)
         # The same transcript rule the nudge follows: a tool call whose
         # arguments never parsed is not sent back to the server.
         sendable, _dropped = nudge_turns(msgs)
+        conversation = sum(_message_chars(m) for m in sendable)
+        framing = sum(_message_chars(m) for m in _framing_of(sendable))
+        rates = self._rates_sentence(generation_rate, prompt_rate)
+        if paced is not None and paced < framing + len(_SYNTHESIS_DIRECTIVE):
+            # Not even the task and the pack can be read and answered in the
+            # time left at this pace. Starting anyway is a call that runs into
+            # its hard cap and keeps the model busy past it.
+            detail = (
+                f"{remaining:.0f}s were left; at {rates} they hold {max(0, paced)} characters "
+                f"of request, and the task alone is {framing}"
+            )
+            self.logger.warning("%s skipping forced synthesis: %s.", self.name, detail)
+            self._note_salvage(
+                seconds_left=remaining,
+                conversation_chars=conversation,
+                budget_chars=max(0, paced),
+                sized_by="pace",
+                outcome="not sent",
+                detail=detail,
+            )
+            return ""
+
         trimmed = _trim_for_synthesis(sendable, budget)
+        sent = sum(_message_chars(m) for m in trimmed)
         if len(trimmed) < len(msgs):
             self.logger.warning(
-                "%s forced synthesis: trimmed %d of %d messages to fit %d chars.",
+                "%s forced synthesis: trimmed %d of %d messages to fit %d chars%s.",
                 self.name,
                 len(msgs) - len(trimmed),
                 len(msgs),
                 budget,
+                f" ({remaining:.0f}s left at {rates})" if paced is not None else "",
             )
         # What the model can still see, named for it. Trimming drops whole
         # tool calls, so an id that was in the conversation a moment ago may
@@ -3909,18 +4018,16 @@ class BaseAnalyst(BudgetMeter, ABC):
             if visible
             else "Cite only evidence ids that appear above."
         )
-        directive = HumanMessage(
-            content=(
-                "You have gathered enough tool output above. Do NOT request or "
-                "call any more tools. Using ONLY the evidence already collected "
-                "in this conversation, write your FINAL answer now in the exact "
-                "format the system prompt requested. Where the evidence is "
-                "genuinely insufficient for a point, state that briefly instead "
-                "of asking for more steps. " + citable
-            )
-        )
+        directive = HumanMessage(content=_SYNTHESIS_DIRECTIVE + citable)
+        record = {
+            "seconds_left": remaining,
+            "conversation_chars": conversation,
+            "sent_chars": sent,
+            "budget_chars": budget,
+            "sized_by": "window" if paced is None or window_budget <= paced else "pace",
+        }
         try:
-            return self._invoke_llm_with_timeout([*trimmed, directive], remaining)
+            answer = self._invoke_llm_with_timeout([*trimmed, directive], remaining)
         except Exception as exc:  # noqa: BLE001 - best-effort salvage
             self.logger.error(
                 "%s forced synthesis failed: %s (%s)",
@@ -3928,7 +4035,61 @@ class BaseAnalyst(BudgetMeter, ABC):
                 type(exc).__name__,
                 exc,
             )
+            self._note_salvage(**record, outcome="failed", detail=type(exc).__name__)
             return ""
+        self._note_salvage(**record, outcome="answered")
+        return answer
+
+    def _measured_rates(self) -> tuple[float | None, float | None]:
+        """``(generation, prompt reading)`` tokens a second of this agent's model, as measured."""
+        rates_of = getattr(getattr(self, "_container", None), "get_generation_rates", None)
+        if not callable(rates_of):
+            return None, None
+        try:
+            from maljan.llm.generation_rate import model_name_of
+
+            rates = rates_of()
+            model = model_name_of(self.llm)
+            generation, reading = rates.rate(model), rates.prompt_rate(model)
+        except Exception:  # noqa: BLE001 — an unmeasured model sizes nothing from a rate
+            return None, None
+        return (
+            generation if isinstance(generation, int | float) else None,
+            reading if isinstance(reading, int | float) else None,
+        )
+
+    @staticmethod
+    def _rates_sentence(generation: float | None, reading: float | None) -> str:
+        if generation is None or reading is None:
+            return "no measured rate"
+        return f"{reading:.0f} tokens/s read and {generation:.1f} tokens/s written"
+
+    def _chars_per_token(self) -> int:
+        """Characters a token of this run's requests holds, as the context budget counts them."""
+        from maljan.llm.context_window import CHARS_PER_TOKEN
+
+        budget = self._context_budget()
+        return int(getattr(budget, "chars_per_token", 0) or CHARS_PER_TOKEN)
+
+    def _note_salvage(self, **record: Any) -> None:
+        """Put what the salvage sent and how it ended on this loop's budget record.
+
+        On the last record, which is the loop the salvage belongs to: it is
+        written before the salvage starts. Never raises.
+        """
+        try:
+            row = {
+                key: round(value, 1) if isinstance(value, float) else value
+                for key, value in record.items()
+            }
+            with self._the_meter_s_lock():
+                records = list(getattr(self, "_budget_records", None) or [])
+                if not records:
+                    return
+                records[-1] = {**records[-1], "salvage": row}
+                self._budget_records = records
+        except Exception as exc:  # noqa: BLE001 — a record never costs a salvage
+            self.logger.debug("%s: the salvage was not recorded (%s).", self.name, exc)
 
     def _invoke_llm_with_timeout(self, messages: list, timeout: float) -> str:
         """Run ``self.llm.invoke(messages)`` with a hard wall-clock timeout.
@@ -3951,14 +4112,20 @@ class BaseAnalyst(BudgetMeter, ABC):
                 "Invoking LLM (no-tools fallback, timeout=%ds)...",
                 timeout,
             )
-            # Run the (sync) ``invoke`` in a thread executor so ``wait_for`` can
-            # cancel it — mirrors langchain's own sync-bridge and keeps
-            # compatibility with MagicMock-based unit tests that only stub
-            # ``invoke``.
-            response = await asyncio.wait_for(
-                asyncio.to_thread(self.llm.invoke, messages),
-                timeout=float(timeout),
+            # The model's own async call where it has one, so the timeout and
+            # a cancelled job cancel the request itself: the connection closes
+            # and the server stops generating. A synchronous ``invoke`` in a
+            # thread cannot be cancelled — the slow run's salvage timed out on
+            # the worker's side and went on generating on the server's, and
+            # the next loop's first turn queued behind it for 908 s. A stand-in
+            # that stubs only ``invoke`` is still run in a thread.
+            ask = getattr(type(self.llm), "ainvoke", None)
+            call = (
+                self.llm.ainvoke(messages)
+                if inspect.iscoroutinefunction(ask)
+                else asyncio.to_thread(self.llm.invoke, messages)
             )
+            response = await asyncio.wait_for(call, timeout=float(timeout))
             self._record_usage(response)
             return str(response.content)
 
