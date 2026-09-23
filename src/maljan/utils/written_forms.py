@@ -1,7 +1,7 @@
 """The spellings one value takes in the texts a run records.
 
-A tool answers in JSON, so the string ``/c net group "Admins" /domain`` reaches
-the ledger and the corpus as ``/c net group \\"Admins\\" /domain``, and a path
+A tool answers in JSON, so the string ``/c query "Example Operators" /all`` reaches
+the ledger and the corpus as ``/c query \\"Example Operators\\" /all``, and a path
 ``C:\\Windows\\x.exe`` as ``C:\\\\Windows\\\\x.exe``. The triage pack quotes a
 decoded string on one line, so a quote in it is written ``\\"``, a control
 character as an escape and a backslash that would end the string as ``\\x5c``.
@@ -80,10 +80,22 @@ def written_forms(value: str) -> tuple[str, ...]:
         bases.append(unescaped)
     forms: list[str] = []
     for base in bases:
+        # A text escaped before it was lower-cased — the run's corpus is — keeps
+        # the case of a non-ASCII capital in its escape (``Ú`` is ``\\u00da``,
+        # ``ú`` is ``\\u00fa``), while a caller folds the value first. The
+        # escape of the capitals is asked too, folded as the corpus folds it.
+        # A value mixing capital and small non-ASCII letters is the case this
+        # does not cover.
+        capitals = (
+            _json_body(base.upper(), ascii_only=True).lower()
+            if any(ord(ch) > 127 for ch in base)
+            else ""
+        )
         for form in (
             base,
             _json_body(base, ascii_only=False),
             _json_body(base, ascii_only=True),
+            capitals,
             pack_escaped(base),
         ):
             if form and form not in forms:

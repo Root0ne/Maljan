@@ -97,6 +97,16 @@ class TestAJsonAnswer:
 
         assert _absences(pattern, searched) == []
 
+    def test_a_non_ascii_capital_escaped_before_the_fold_is_grounded(self) -> None:
+        """The corpus escapes, then folds: ``Ú`` stays ``\\u00da``, not ``\\u00fa``."""
+        value = "C:\\Users\\ÚLTIMO\\example.dat"
+        answer = json.dumps({"strings": [{"string": value}]}, ensure_ascii=True)
+        searched = _searched(answer)
+
+        pattern = "[process:command_line = '" + value.replace("\\", "\\\\") + "']"
+
+        assert _absences(pattern, searched) == []
+
     def test_a_value_the_model_copied_with_its_json_escapes_is_grounded(self) -> None:
         searched = _searched(_decoded_answer(QUOTED_COMMAND))
         copied = json.dumps(QUOTED_COMMAND)[1:-1]
