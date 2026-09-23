@@ -63,9 +63,12 @@ tight strings — by emulating the sample's own decoding and string-building
 functions under vivisect. The sample is never executed. FLOSS runs as FLARE's
 pinned standalone Linux build (see *Optional dependencies*), in a child process
 of its own session with an address-space limit of 4 GiB, its whole group killed
-at `timeout_s`; its home and temporary directory are a `floss/` directory inside
-this job's staging directory and it receives no other environment. Either
-bound, when hit, is answered as "no result within its budget". Each row carries its `kind`, the `string`, the `function` that
+at `timeout_s`. Each run gets a directory of its own under `floss/` inside this
+job's staging directory, as its home, temporary and working directory, and no
+other environment; the directory, with the ~63 MB the build unpacks into it, is
+removed when the run ends, however it ends. Either bound, when hit, is
+answered as "no result within its budget". Each row carries its `kind`, the
+`string`, the `function` that
 decoded or built it with `function_rva` (the same address relative to the
 image base FLOSS loaded at, which is what a disassembler agrees with), and for
 a decoded string the `called_at` call site and the `address` it was written
@@ -209,7 +212,10 @@ publishes no digest, so both were computed when it was pinned.
 
 The tool looks for the executable at `MALJAN_FLOSS_PATH` (set in this server's
 `env`) and, when that is unset, in the user tools directory and then on `PATH`,
-and runs it only when its sha256 is the pinned one. `scripts/install_floss.sh`
+and runs it only when its sha256 is the pinned one: each run copies the executable
+into the run's own directory, hashing the bytes as it writes them, and runs that
+copy, so a file changed after it was checked is refused rather than run.
+`scripts/install_floss.sh`
 downloads the asset, checks both digests and installs the executable at
 `~/.local/share/maljan/tools/floss-3.1.1/floss`, the first
 place looked. The backend image does the same in a build stage and puts it at

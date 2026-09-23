@@ -370,10 +370,14 @@ class TestTheChild:
         finished = tool._run([sys.executable, "-c", script], 30)
 
         seen = json.loads(finished.stdout)
-        scratch = str(tmp_path / "staging" / "floss")
+        scratch = tmp_path / "staging" / "floss"
         assert seen["limit"] == tool.FLOSS_ADDRESS_SPACE_BYTES
-        assert seen["home"] == seen["tmp"] == seen["cwd"] == scratch
+        assert seen["home"] == seen["tmp"] == seen["cwd"]
+        assert Path(seen["home"]).parent == scratch
+        assert Path(seen["home"]).name.startswith("run-")
         assert seen["secret"] is None
+        # The run's own directory goes with the run.
+        assert list(scratch.iterdir()) == []
 
     def test_an_overrun_kills_the_whole_group(self, tmp_path: Path) -> None:
         import os
@@ -390,6 +394,8 @@ class TestTheChild:
         with pytest.raises(subprocess.TimeoutExpired):
             tool._run([sys.executable, "-c", script], 2)
 
+        # What the killed run unpacked goes with it, not with the job.
+        assert list((tmp_path / "staging" / "floss").iterdir()) == []
         grandchild = int(marker.read_text())
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
@@ -431,3 +437,136 @@ class TestOneEmulationPerSample:
 
         assert len(calls) == 1
         assert [answer["total"] for answer in answers] == [3, 3]
+
+
+class TestWhatRunsIsWhatWasVerified:
+    @pytest.fixture(autouse=True)
+    def _staging(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.delenv("MALJAN_STAGING_JOB", raising=False)
+
+    def _script(self, tmp_path: Path, text: str) -> tuple[Path, str]:
+        import hashlib
+
+        body = f"#!/bin/sh\n{text}\n".encode()
+        target = tmp_path / "floss-build"
+        target.write_bytes(body)
+        target.chmod(0o755)
+        return target, hashlib.sha256(body).hexdigest()
+
+    def test_the_pinned_build_runs_from_a_verified_copy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        source, digest = self._script(tmp_path, 'echo "$0"')
+        monkeypatch.setattr(tool, "FLOSS_BINARY_SHA256", digest)
+
+        finished = tool._run([str(source)], 30, pinned=source)
+
+        ran = Path(finished.stdout.strip())
+        assert ran != source
+        assert ran.parent.parent == tmp_path / "staging" / "floss"
+        assert not ran.exists(), "the copy goes with its run"
+
+    def test_a_build_changed_after_it_was_checked_is_refused_and_not_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        marker = tmp_path / "ran"
+        source, _digest = self._script(tmp_path, f"touch {marker}")
+        monkeypatch.setattr(tool, "FLOSS_BINARY_SHA256", "0" * 64)
+
+        with pytest.raises(tool.NotThePinnedBuild) as refused:
+            tool._run([str(source)], 30, pinned=source)
+
+        assert not marker.exists()
+        assert str(tmp_path) not in str(refused.value)
+        assert list((tmp_path / "staging" / "floss").iterdir()) == []
+
+    def test_a_replaced_file_is_checked_again(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        source, digest = self._script(tmp_path, "true")
+        monkeypatch.setattr(tool, "FLOSS_BINARY_SHA256", digest)
+        assert tool._is_pinned_build(source) is True
+
+        replacement = tmp_path / "other"
+        replacement.write_bytes(b"#!/bin/sh\nfalse\n")
+        stat = source.stat()
+        replacement.chmod(0o755)
+        import os
+
+        os.utime(replacement, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        replacement.replace(source)
+
+        assert tool._is_pinned_build(source) is False
+
+
+class TestTheArgv:
+    def test_a_relative_sample_path_reaches_floss_absolute(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        _pe(tmp_path, "rel.dll")
+
+        argv = tool._floss_argv("floss", Path("rel.dll"), 4)
+
+        assert argv[-1] == str(tmp_path / "rel.dll")
+
+
+class TestOnePinEverywhere:
+    """The version and both digests are written in five places and must agree."""
+
+    ROOT = Path(__file__).resolve().parents[3]
+
+    def _text(self, relative: str) -> str:
+        return (self.ROOT / relative).read_text(encoding="utf-8")
+
+    def test_the_install_script_pins_the_module_s_build(self) -> None:
+        import re
+
+        script = self._text("scripts/install_floss.sh")
+        values = dict(re.findall(r'^(VERSION|ZIP_SHA256|BINARY_SHA256)="([^"]+)"$', script, re.M))
+        assert values == {
+            "VERSION": tool.FLOSS_VERSION,
+            "ZIP_SHA256": tool.FLOSS_ZIP_SHA256,
+            "BINARY_SHA256": tool.FLOSS_BINARY_SHA256,
+        }
+
+    def test_the_image_pins_the_module_s_build(self) -> None:
+        import re
+
+        dockerfile = self._text("docker/Dockerfile.backend")
+        values = dict(
+            re.findall(
+                r"^ARG (FLOSS_VERSION|FLOSS_ZIP_SHA256|FLOSS_BINARY_SHA256)=(\S+)$",
+                dockerfile,
+                re.M,
+            )
+        )
+        assert values == {
+            "FLOSS_VERSION": tool.FLOSS_VERSION,
+            "FLOSS_ZIP_SHA256": tool.FLOSS_ZIP_SHA256,
+            "FLOSS_BINARY_SHA256": tool.FLOSS_BINARY_SHA256,
+        }
+
+    @pytest.mark.parametrize(
+        "relative, pins",
+        [
+            ("services/analysis-mcp/README.md", ("version", "zip", "binary")),
+            ("docs/configuration.md", ("version", "zip")),
+        ],
+    )
+    def test_the_docs_state_the_same_pin(self, relative: str, pins: tuple[str, ...]) -> None:
+        import re
+
+        text = self._text(relative)
+        written = {
+            "version": set(re.findall(r"floss-(\d+\.\d+\.\d+)", text)),
+            "digests": set(re.findall(r"\b[0-9a-f]{64}\b", text)),
+        }
+        assert written["version"] == {tool.FLOSS_VERSION}
+        expected = set()
+        if "zip" in pins:
+            expected.add(tool.FLOSS_ZIP_SHA256)
+        if "binary" in pins:
+            expected.add(tool.FLOSS_BINARY_SHA256)
+        assert written["digests"] == expected

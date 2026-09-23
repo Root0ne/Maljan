@@ -40,8 +40,10 @@ import resource
 import shutil
 import signal
 import subprocess
+import tempfile
 import threading
 from collections.abc import Callable, Sequence
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -107,15 +109,21 @@ _LOCK = threading.Lock()
 # result rather than starting a second emulation of the same file.
 _IN_FLIGHT: dict[tuple[str, int, int, int], threading.Lock] = {}
 
-# The executables whose digest has been checked, keyed by path, size and mtime.
-_VERIFIED: dict[tuple[str, int, int], bool] = {}
+# The executables whose digest has been checked, keyed by path and by the
+# file's size, mtime, inode and ctime, so any write, replacement or rename onto
+# the path is checked again.
+_VERIFIED: dict[tuple[str, int, int, int, int], bool] = {}
+
+# The name the verified copy of the build is written under, inside the run's
+# own directory.
+_RUN_COPY = "floss"
 
 # The last line of FLOSS's stderr is what an error answer quotes, bounded.
 _ERROR_TAIL_CHARS = 400
 
-# The directory under this job's staging directory the child uses as its home
-# and its temporary directory: the standalone build unpacks itself into
-# ``TMPDIR`` and vivisect creates ``~/.envi`` under ``HOME``.
+# The directory under this job's staging directory that holds each run's own
+# directory, the child's home and temporary directory: the standalone build
+# unpacks itself into ``TMPDIR`` and vivisect creates ``~/.envi`` under ``HOME``.
 _SCRATCH_DIRECTORY = "floss"
 
 # How a child that ran out of address space ends: Python's MemoryError, or a
@@ -143,12 +151,19 @@ def default_install_path() -> Path:
 
 
 def _is_pinned_build(path: Path) -> bool:
-    """Whether ``path`` is the pinned build, by its sha256, remembered per size and mtime."""
+    """Whether ``path`` is the pinned build, by its sha256.
+
+    This choice of candidate is what the manifest reports; it is not what makes
+    a run safe. The bytes that run are the copy ``_verified_copy`` writes and
+    hashes as it writes them, so a file swapped in after this check is refused
+    rather than run. The verdict is remembered per size, mtime, inode and
+    ctime, and anything that changes the file changes one of those.
+    """
     try:
         info = path.stat()
     except OSError:
         return False
-    key = (str(path), info.st_size, info.st_mtime_ns)
+    key = (str(path), info.st_size, info.st_mtime_ns, info.st_ino, info.st_ctime_ns)
     known = _VERIFIED.get(key)
     if known is not None:
         return known
@@ -213,29 +228,84 @@ def _limit_address_space() -> None:
     resource.setrlimit(resource.RLIMIT_AS, (FLOSS_ADDRESS_SPACE_BYTES, FLOSS_ADDRESS_SPACE_BYTES))
 
 
-def _run(argv: Sequence[str], timeout: float) -> subprocess.CompletedProcess[str]:
+class NotThePinnedBuild(OSError):
+    """The executable's bytes, read to be run, are not the pinned build's."""
+
+
+def _verified_copy(source: Path, directory: Path) -> Path:
+    """``source`` copied into ``directory`` and hashed as it is read, or refused.
+
+    What this protects against: an executable at the configured path or on
+    ``PATH`` that is not the pinned build, or that was changed or replaced
+    after the manifest checked it. The copy is the file that runs, it is
+    written by this process into a directory only this user may enter, and its
+    digest is of exactly the bytes written, so no check-then-run gap remains.
+    The copy is refused and removed when the digest is not the pinned one.
+    """
+    target = directory / _RUN_COPY
+    hasher = hashlib.sha256()
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    fd = os.open(target, flags, 0o700)
+    try:
+        with source.open("rb") as handle, os.fdopen(fd, "wb") as out:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                hasher.update(block)
+                out.write(block)
+    except OSError:
+        target.unlink(missing_ok=True)
+        raise
+    if hasher.hexdigest() != FLOSS_BINARY_SHA256:
+        target.unlink(missing_ok=True)
+        raise NotThePinnedBuild(
+            f"the floss executable is not the pinned FLOSS {FLOSS_VERSION} build "
+            "(sha256 mismatch when read to run); nothing was run"
+        )
+    return target
+
+
+def _run(
+    argv: Sequence[str], timeout: float, pinned: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     """FLOSS's command line, bounded in time and memory, its whole group killed on overrun.
 
-    The environment is built rather than inherited: a search path, a locale, a
-    home and a temporary directory inside this job's staging directory, and
-    the switch that keeps FLOSS from saving a vivisect workspace beside the
-    sample. Nothing of the server's own environment reaches the child.
+    Each run has a directory of its own inside this job's scratch directory:
+    the child's home, temporary directory and working directory, where the
+    standalone build unpacks itself (about 63 MB). It is removed when the run
+    ends, however it ends — an answer, a timeout, the memory limit. With
+    ``pinned``, that executable is copied into the run's directory through
+    ``_verified_copy`` and the copy is what ``argv`` runs.
+
+    The environment is built rather than inherited: a search path, a locale,
+    the run's directory as home and temporary directory, and the switch that
+    keeps FLOSS from saving a vivisect workspace beside the sample. Nothing of
+    the server's own environment reaches the child.
     """
-    scratch = str(_scratch())
+    run = Path(tempfile.mkdtemp(prefix="run-", dir=_scratch()))
+    try:
+        command = list(argv)
+        if pinned is not None:
+            command[0] = str(_verified_copy(pinned, run))
+        return _spawn(command, timeout, str(run))
+    finally:
+        shutil.rmtree(run, ignore_errors=True)
+
+
+def _spawn(command: list[str], timeout: float, workdir: str) -> subprocess.CompletedProcess[str]:
+    """One child in its own session, in ``workdir``, its group killed if it overruns."""
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "LANG": "C.UTF-8",
-        "HOME": scratch,
-        "TMPDIR": scratch,
+        "HOME": workdir,
+        "TMPDIR": workdir,
         "FLOSS_SAVE_WORKSPACE": "0",
     }
     process = subprocess.Popen(  # noqa: S603 - a fixed argv naming the verified build
-        list(argv),
+        command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         env=env,
-        cwd=scratch,
+        cwd=workdir,
         start_new_session=True,
         preexec_fn=_limit_address_space,  # noqa: PLW1509 - one setrlimit call
     )
@@ -248,11 +318,15 @@ def _run(argv: Sequence[str], timeout: float) -> subprocess.CompletedProcess[str
             os.killpg(process.pid, signal.SIGKILL)
         process.communicate()
         raise
-    return subprocess.CompletedProcess(list(argv), process.returncode, stdout, stderr)
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 def _floss_argv(executable: str, path: Path, min_len: int) -> list[str]:
-    """The command FLOSS is run as: JSON out, no prompt, no static strings."""
+    """The command FLOSS is run as: JSON out, no prompt, no static strings.
+
+    The sample's path is absolute because the child runs in a directory of its
+    own, where a relative path names nothing.
+    """
     return [
         executable,
         "--json",
@@ -263,7 +337,7 @@ def _floss_argv(executable: str, path: Path, min_len: int) -> list[str]:
         "--only",
         *KINDS,
         "--",
-        str(path),
+        str(path.resolve()),
     ]
 
 
@@ -481,7 +555,8 @@ def floss(
             return tool_error(
                 MISSING_DEPENDENCY, reason, tool="floss", remediation=FLOSS_REMEDIATION
             )
-        document = _document(str(executable), target, minimum, max(1, int(timeout_s)), _run)
+        pinned = partial(_run, pinned=executable)
+        document = _document(str(executable), target, minimum, max(1, int(timeout_s)), pinned)
     else:
         document = _document("floss", target, minimum, max(1, int(timeout_s)), runner)
     if isinstance(document, str):
