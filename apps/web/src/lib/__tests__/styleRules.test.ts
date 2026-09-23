@@ -56,9 +56,12 @@ const RULES: Rule[] = [
   {
     // Tailwind's bare `transition` eases colour, background, border, fill and
     // stroke by default, so it is a colour transition under another name. Read
-    // as a whole token inside a quoted class string.
+    // as a whole token in a class-name context only — a `className` or
+    // `class` attribute, or a constant named for a class list — so prose that
+    // uses the word is left alone.
     what: "bare transition class",
-    pattern: /["'`](?:[^"'`\n]*\s)?transition(?:\s[^"'`\n]*)?["'`]/g,
+    pattern:
+      /(?:\bclass(?:Name)?\s*=\s*\{?\s*|\b[A-Za-z_]*(?:CLASS|Class|STYLE|Style|BUTTON|INPUT)\w*\s*=\s*)["'`](?:[^"'`\n]*\s)?transition(?:\s[^"'`\n]*)?["'`]/g,
   },
   {
     what: "colour transition by arbitrary property",
@@ -90,8 +93,11 @@ describe("the style rules", () => {
     const hits = (text: string) => [...text.matchAll(rule.pattern)].length;
     expect(hits('className="transition duration-150 hover:bg-bg-hover"')).toBe(1);
     expect(hits("className={`px-2 transition`}")).toBe(1);
+    expect(hits('const BUTTON = "px-2 transition hover:text-text-primary";')).toBe(1);
     expect(hits('className="transition-transform duration-200"')).toBe(0);
     expect(hits("// a staged transition is ours")).toBe(0);
+    expect(hits('<p>{"Skip the transition"}</p>')).toBe(0);
+    expect(hits('const note = "the transition is ours";')).toBe(0);
   });
 
   for (const rule of RULES) {

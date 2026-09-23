@@ -21,6 +21,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { copyToClipboard } from "@/lib/report-utils";
+import { statusTone } from "@/lib/status";
 import { copyAnnouncement, copyButtonName, copyConfirmation, type CopyState } from "./copyState";
 
 /** How long the confirmation stays before the control reads as itself again. */
@@ -29,8 +30,8 @@ const RESET_MS = 1500;
 /** The colour of the sighted confirmation; the word is always printed. */
 const CONFIRMATION_CLASS: Record<CopyState, string> = {
   idle: "",
-  copied: "text-status-green",
-  failed: "text-status-red",
+  copied: statusTone("completed").text,
+  failed: statusTone("failed").text,
 };
 
 /* At least 24 px tall (WCAG 2.5.8), whatever the text size. */
