@@ -20,6 +20,7 @@ import { validationRowText } from "@/lib/validationRows";
 import EvidenceChips from "@/components/analysis/EvidenceChips";
 import TechnicalAnalysisPanel from "@/components/analysis/TechnicalAnalysisPanel";
 import {
+  MEASURED_VOICE,
   REPORT_MODEL_VOICE,
   keyFindings,
   noSummaryReason,
@@ -291,9 +292,13 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
                     {mr.severity.business_impact}
                   </p>
                 )}
-                {mr.severity.affected_platforms.length > 0 && (
+                {/* Read from the file format by the report builder, not
+                    assessed by the judge, and labelled that way. */}
+                {mr.severity.affected_platforms.filter((p) => p && p !== "Unknown").length >
+                  0 && (
                   <p className="mt-1 text-[11px] text-text-muted">
-                    Affects: {mr.severity.affected_platforms.join(", ")}
+                    Platform (from the file format, {MEASURED_VOICE.toLowerCase()}):{" "}
+                    {mr.severity.affected_platforms.join(", ")}
                   </p>
                 )}
               </div>
@@ -401,7 +406,13 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
             <h2 className="text-xs font-medium text-text-primary uppercase tracking-wider">
               Key findings
             </h2>
-            <span className="text-[11px] italic text-text-muted">{REPORT_MODEL_VOICE}</span>
+            {/* The platform's "no summary was written" is not the report
+                model's text and is not labelled as if it were. */}
+            <span className="text-[11px] italic text-text-muted">
+              {findings.length > 0 || mr.executive_summary.trim() || storedParagraphs.length > 0
+                ? REPORT_MODEL_VOICE
+                : MEASURED_VOICE}
+            </span>
           </div>
           <div className="p-4">
             {findings.length > 0 && (

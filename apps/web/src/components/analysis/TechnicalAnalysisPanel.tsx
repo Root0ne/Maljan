@@ -6,9 +6,12 @@ import {
   c2Channels,
   channelEvidence,
   commands,
+  configFindings,
   configuration,
+  defangEndpoint,
   executionFlow,
   flowMark,
+  flowNote,
   hasTechnicalAnalysis,
 } from "./reportProse";
 import type { MalwareReport } from "@/types/malware-report";
@@ -20,7 +23,9 @@ import type { MalwareReport } from "@/types/malware-report";
  *
  * Every block is labelled with its voice. The words are the report model's and
  * are printed as written; a step's mark (observed or assessed) is the model's
- * own; a row that cites nothing says so.
+ * own; a row that cites nothing says so. The platform's unresolved finding on
+ * a step or a configuration item is printed beside it, as the exported report
+ * prints it, and a channel's endpoints are defanged as they are there.
  */
 export default function TechnicalAnalysisPanel({ report }: { report: MalwareReport }) {
   if (!hasTechnicalAnalysis(report)) return null;
@@ -28,6 +33,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
   const config = configuration(report);
   const cmds = commands(report);
   const channels = c2Channels(report);
+  const uncitedConfig = configFindings(report);
 
   return (
     <div className="bg-bg-surface border border-border rounded">
@@ -52,6 +58,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
                     {flowMark(step)}
                   </span>
                   <Cited ids={step.evidence_refs} />
+                  <Unresolved note={flowNote(report, step)} />
                 </li>
               ))}
             </ol>
@@ -79,7 +86,14 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
                     <td className="py-1 pr-3 font-mono break-all text-text-secondary">
                       {item.value}
                     </td>
-                    <td className="py-1 pr-3 text-text-muted">{item.how_obtained}</td>
+                    <td className="py-1 pr-3 text-text-muted">
+                      {item.how_obtained}
+                      <Unresolved
+                        note={
+                          uncitedConfig.has(i + 1) ? "unresolved: report.configuration_uncited" : ""
+                        }
+                      />
+                    </td>
                     <td className="py-1">
                       <Cited ids={item.evidence_refs} />
                     </td>
@@ -138,7 +152,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
                   )}
                   {(ch.endpoints ?? []).length > 0 && (
                     <div className="mt-0.5 font-mono break-all text-text-muted">
-                      {(ch.endpoints ?? []).join(", ")}
+                      {(ch.endpoints ?? []).map(defangEndpoint).join(", ")}
                     </div>
                   )}
                   <Cited ids={channelEvidence(ch)} />
@@ -150,6 +164,12 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
       </div>
     </div>
   );
+}
+
+/** The platform's note beside a model's row, in the words the exported report prints. */
+function Unresolved({ note }: { note: string }) {
+  if (!note) return null;
+  return <span className="ml-2 text-[10px] italic text-status-orange">({note})</span>;
 }
 
 /** A row's citations, or the words the exported report prints when it has none. */
