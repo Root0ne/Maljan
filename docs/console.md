@@ -437,8 +437,11 @@ validation findings name it.
 
 Selecting a node or an edge, by pointer or with Enter or Space on a focused
 node, shows its STIX JSON, its relationships, and the evidence-ledger ids it
-carries as links into EVIDENCE. The export writes no ledger ids onto its
-objects today, so most objects say they carry none. The table is in the page
+carries in `x_maljan_evidence_refs` as links into EVIDENCE; the Relationships
+table lists them too. The export writes that property from the run's record:
+the sample's `uses` edge to a technique carries the entries that tie to it,
+and an object the record ties to nothing says it carries none. A bundle stored
+before the property existed has none anywhere. The table is in the page
 under the graph for a screen reader, and is the view itself under Table. A
 bundle of more than 300 objects opens on the table and says so, with the
 graph one click away; 300 lays out in tens of milliseconds and edge labels

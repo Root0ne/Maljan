@@ -690,6 +690,16 @@ change landed on `main`.
 
 ### Changed
 
+- **The STIX export cites the ledger.** An exported object now carries the
+  ledger entries the run's record ties to it, as `x_maljan_evidence_refs`
+  (`ev_` ids, each once, in ledger order): the sample's `uses` edge to a
+  technique carries the entries an analyst finding naming it cites and the
+  entries of the asserting tools whose structured output names it, and a
+  malware object minted from the family name carries the family's
+  `family_evidence_ids`. Nothing is inferred: no id is read out of a claim's
+  sentence, no object is matched by value, an id the ledger does not hold is
+  left out, and an object the record ties to nothing has no such property.
+  The console's relationship graph and its table read only this property.
 - **Staging is per job.** The sidecars' staging directory held every job the
   server process ever ran: `put_sample` uploads landed flat in it under
   sixteen hex characters and the original file name, every sample's carved tree
@@ -4023,6 +4033,10 @@ change landed on `main`.
 - **`reporting.builder.defang`**, replaced by `reporting.defang.defang(value, kind)`.
 
 ### Upgrading
+
+A stored STIX bundle keeps the shape it was stored with: `x_maljan_evidence_refs`
+appears only in exports rendered after this change, so the relationship graph
+of an older run shows no ledger ids until that run is analysed again.
 
 An existing `.env` deployment is not migrated automatically. Move the bootstrap
 variables into the process environment (or `docker/.env` and `bootstrap.env`),

@@ -617,6 +617,21 @@ own bundle is not edited. The report object is typed `malware`. Every stored
 export before this carried `software` and `malware-analysis`, neither of them
 in its vocabulary, and an identity no object named.
 
+An exported object carries the ledger entries the run's record ties to it, as
+`x_maljan_evidence_refs`: `ev_` ids, each once, in ledger order. The sample's
+`uses` edge to a technique carries the entries an analyst finding naming that
+technique cites (`evidence_ids`) and the entries of the asserting tools (capa,
+Sigma, YARA, LOLBin, sandbox signatures) whose structured output names it
+(`pipeline/evidence_summary.technique_evidence`). A malware object the export
+mints from the family name carries the attribution's `family_evidence_ids`.
+Nothing else gets the property. An id in a claim's `evidence_ref` sentence
+stays in the sentence, no object is matched by value, and an id the ledger
+does not hold is left out. The edge carries the ids and the attack-pattern
+does not, because the attack-pattern's id is the same in every export. The
+validator's only remark on the property is the best-practice note that every
+`x_maljan_` property draws (custom properties through an extension
+definition).
+
 A sandbox's process tree is exported as STIX 2.1 observables: one `process`
 per node (pid, command line, `child_refs`), the image each ran from as a
 `file` whose id is derived from its name, and an `observed-data` naming them
