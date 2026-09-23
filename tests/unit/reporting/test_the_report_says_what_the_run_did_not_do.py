@@ -360,3 +360,76 @@ class TestWhatLookedIsNamed:
             "2 previously analysed samples were returned by the long-term memory and are not "
             "listed. No similarity measure was recorded for these samples."
         ) in similarity
+
+
+class TestAFamilySpecificSectionNeedsItsFamily:
+    def test_a_loader_s_cipher_is_not_a_ransomware_section(self) -> None:
+        from maljan.reporting.models import EncryptionScheme
+
+        report = rich_report()
+        assert report.technical_analysis is not None
+        report.technical_analysis.encryption_scheme = EncryptionScheme(
+            cipher="RC4",
+            mode="PRGA",
+            library="none",
+            file_marker="none",
+            extension="none",
+            partial_threshold="none",
+            evidence_ref="ev_0008",
+        )
+        technical = _section(_render(report), "## 5. Technical analysis")
+        assert "### 5.9 Family-specific behaviour · _Measured_" in technical
+        assert "Ransomware behaviour" not in technical
+        packing = technical.split("### 5.1", 1)[1].split("### 5.2", 1)[0]
+        assert "| Cipher | RC4 |" in packing
+        assert "| none |" not in technical
+        assert "File marker" not in technical
+
+    def test_a_file_encryption_scheme_stays_under_the_ransomware_heading(self) -> None:
+        from maljan.reporting.models import EncryptionScheme
+
+        report = rich_report()
+        assert report.technical_analysis is not None
+        report.technical_analysis.encryption_scheme = EncryptionScheme(
+            cipher="ChaCha20", extension=".example-locked"
+        )
+        technical = _section(_render(report), "## 5. Technical analysis")
+        family = technical.split("### 5.9", 1)[1]
+        assert "Ransomware behaviour" in family
+        assert "| Extension | .example-locked |" in family
+
+    def test_a_block_of_placeholders_is_no_content(self) -> None:
+        from maljan.reporting.composer import _has_content
+        from maljan.reporting.models import EncryptionScheme
+
+        assert not _has_content(
+            EncryptionScheme(cipher="none", mode="unknown", evidence_ref="ev_1")
+        )
+        assert _has_content(EncryptionScheme(cipher="RC4"))
+
+
+class TestAnMbcIdIsNotAnAttackRow:
+    def test_it_is_listed_as_a_behaviour_under_the_table(self) -> None:
+        from maljan.reporting.models import CapabilityCell
+
+        report = rich_report()
+        report.capability_matrix.append(
+            CapabilityCell(
+                tactic="TA0000",
+                tactic_name="Unknown",
+                technique_id="B0001.019",
+                technique_name="B0001.019",
+                evidence=["PEB Access for Anti-Debugging"],
+                confidence=0.9,
+                contributing_layers=["static"],
+                technique_id_valid=False,
+                not_published="the ATT&CK catalogue has no entry for this id in any domain",
+            )
+        )
+        attack = _section(_render(report), "## 8. MITRE ATT&CK mapping")
+        assert not [line for line in attack.splitlines() if line.startswith("| Unknown")]
+        assert (
+            "- B0001.019: PEB Access for Anti-Debugging (claimed by static; not an ATT&CK "
+            "technique, not published)"
+        ) in attack
+        assert "B0001.019 B0001.019" not in attack

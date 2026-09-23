@@ -820,10 +820,22 @@ def _message_text(msg: Any) -> str:
 
 
 def _has_content(model: BaseModel) -> bool:
-    """True when any field on a structured model carries real content."""
-    for value in model.model_dump().values():
-        if isinstance(value, bool):
+    """True when any field on a structured model carries real content.
+
+    A string a model writes to fill a field it has nothing for ("none",
+    "unknown", "n/a") is not content: a block made only of them would print a
+    family-specific section for a sample that has none of it.
+    """
+    for key, value in model.model_dump().items():
+        if isinstance(value, bool) or key in {"evidence_ref", "evidence_refs"}:
+            continue
+        if isinstance(value, str) and value.strip().lower() in _PLACEHOLDER_VALUES:
             continue
         if value:
             return True
     return False
+
+
+_PLACEHOLDER_VALUES = frozenset(
+    {"", "none", "unknown", "n/a", "na", "null", "-", "not applicable", "not found", "no data"}
+)

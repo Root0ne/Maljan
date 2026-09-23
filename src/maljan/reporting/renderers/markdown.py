@@ -582,6 +582,14 @@ class MarkdownRenderer:
         elif static is not None and static.packer_hint:
             measured.append(f"_{MEASURED}:_ packer hint {_one_line(static.packer_hint)}.")
         measured.extend(_capa_table(capa, _is_evasion_rule))
+        # A cipher the model extracted that encrypts no files — a loader's
+        # string or traffic cipher — belongs beside the obfuscation prose, not
+        # under a ransomware heading.
+        enc = ta.encryption_scheme if ta is not None else None
+        if enc is not None and not _encrypts_files(enc):
+            table = _encryption_table(enc, ctx)
+            if table:
+                measured.extend(["", *table])
         evasive = [
             sig
             for sig in (dynamic.sandbox_signatures if dynamic else [])
@@ -1147,14 +1155,19 @@ class MarkdownRenderer:
     # ------------------------------------------------------------------
 
     def _section_attack(self, report: MalwareReport, ctx: _Context) -> str:
-        cells = list(report.capability_matrix)
+        # A Malware Behavior Catalog id is not an ATT&CK technique that failed
+        # to resolve; it is listed under the table as the behaviour it is.
+        cells = [c for c in report.capability_matrix if not _is_mbc_id(c.technique_id)]
         lines = [_heading(8, "MITRE ATT&CK mapping", PER_ROW), ""]
         mappings = {m.technique_id: m for m in report.ttp_mappings}
         hits = list(report.static.api_technique_hits) if report.static else []
         if not cells and not mappings and not hits:
             lines.append("_No ATT&CK techniques mapped._")
             return "\n".join(
-                lines + _not_published_lines(report) + _unmapped_behaviour_lines(report)
+                lines
+                + _not_published_lines(report)
+                + _mbc_lines(report)
+                + _unmapped_behaviour_lines(report)
             )
 
         corroboration = (report.run_summary or {}).get("corroboration") or {}
@@ -1249,7 +1262,10 @@ class MarkdownRenderer:
                 ]
             )
         return "\n".join(
-            lines + _not_published_lines(report) + _unmapped_behaviour_lines(report)
+            lines
+            + _not_published_lines(report)
+            + _mbc_lines(report)
+            + _unmapped_behaviour_lines(report)
         ).rstrip()
 
     # ------------------------------------------------------------------
@@ -2415,6 +2431,63 @@ def _voice_of(measured: list[str]) -> str:
 _NOTE_LIMIT = 4000
 
 
+# What a model writes in a field it has nothing for. A field holding one of
+# these carries no content, and a block made only of them is not printed.
+_PLACEHOLDERS = frozenset(
+    {"", "none", "unknown", "n/a", "na", "null", "-", "not applicable", "not found", "no data"}
+)
+
+
+def _said(value: Any) -> Any:
+    """A model-written value, or ``None`` when it is a placeholder for nothing."""
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in _PLACEHOLDERS:
+        return None
+    return value
+
+
+def _encrypts_files(enc: Any) -> bool:
+    """Whether the scheme the model wrote is a file-encryption one.
+
+    The ransomware block is family-specific: a file marker, an extension, a
+    partial-encryption threshold or a per-file key make it one. A loader's
+    string or traffic cipher is not, and prints beside the anti-analysis prose.
+    """
+    return bool(
+        _said(enc.file_marker)
+        or _said(enc.extension)
+        or _said(enc.partial_threshold)
+        or enc.per_file_key is not None
+    )
+
+
+def _encryption_table(enc: Any, ctx: _Context) -> list[str]:
+    """The scheme the model wrote, the fields it filled only, or nothing."""
+    rows = [
+        ("Cipher", enc.cipher),
+        ("Mode", enc.mode),
+        ("Library", enc.library),
+        ("Key source", enc.key_source),
+        ("Key management", enc.key_management),
+        ("IV", enc.iv),
+        ("File marker", enc.file_marker),
+        ("Extension", enc.extension),
+        ("Partial-encryption threshold", enc.partial_threshold),
+        (
+            "Per-file key",
+            None if enc.per_file_key is None else ("yes" if enc.per_file_key else "no"),
+        ),
+    ]
+    present = [(label, value) for label, value in rows if _said(value)]
+    if not present:
+        return []
+    out = [f"_{REPORT_MODEL}:_ encryption scheme", "", _row("Property", "Value"), _divider(2)]
+    out.extend(_row(label, ctx.cell(value)) for label, value in present)
+    out.append(_row("Evidence", _said(enc.evidence_ref) or "no evidence cited"))
+    return out
+
+
 def _ransomware_block(ta: Any, ctx: _Context) -> str:
     lines: list[str] = []
     spk = ta.service_process_kill
@@ -2434,28 +2507,9 @@ def _ransomware_block(ta: Any, ctx: _Context) -> str:
         lines.extend(_item(f"`{cmd}`") for cmd in ta.shadow_copy_destruction)
         lines.append("")
     enc = ta.encryption_scheme
-    if enc is not None:
-        rows = [
-            ("Cipher", enc.cipher),
-            ("Mode", enc.mode),
-            ("Library", enc.library),
-            ("Key source", enc.key_source),
-            ("Key management", enc.key_management),
-            ("IV", enc.iv),
-            ("File marker", enc.file_marker),
-            ("Extension", enc.extension),
-            ("Partial-encryption threshold", enc.partial_threshold),
-            (
-                "Per-file key",
-                None if enc.per_file_key is None else ("yes" if enc.per_file_key else "no"),
-            ),
-            ("Evidence", enc.evidence_ref),
-        ]
-        present = [(label, value) for label, value in rows if value]
-        if present:
-            lines.extend(["Encryption scheme:", "", _row("Property", "Value"), _divider(2)])
-            lines.extend(_row(label, ctx.cell(value)) for label, value in present)
-            lines.append("")
+    if enc is not None and _encrypts_files(enc):
+        lines.extend(_encryption_table(enc, ctx))
+        lines.append("")
     note = ta.ransom_note
     if note is not None and (note.filename or note.verbatim_content or note.sections):
         lines.extend(["Ransom note:", ""])
@@ -3015,6 +3069,45 @@ def _evidence_rows(section: Any, write: Callable[[str], str] = _as_is) -> list[s
     return []
 
 
+_MBC_ID_RE = re.compile(r"^[BCF]\d{4}(?:\.\d{3})?$")
+
+
+def _is_mbc_id(technique_id: str) -> bool:
+    """Whether an id is a Malware Behavior Catalog behaviour (``B0001.019``), not ATT&CK."""
+    return bool(_MBC_ID_RE.match(str(technique_id or "").strip().upper()))
+
+
+def _mbc_lines(report: MalwareReport) -> list[str]:
+    """The behaviours a producer named by their MBC id, under the ATT&CK table.
+
+    They are claims, kept as the producer wrote them, and not ATT&CK
+    techniques: no technique surface publishes them.
+    """
+    rows = [
+        cell
+        for cell in (getattr(report, "capability_matrix", None) or [])
+        if _is_mbc_id(cell.technique_id)
+    ]
+    if not rows:
+        return []
+    lines = ["", _plain_heading("Behaviours named by a Malware Behavior Catalog id"), ""]
+    for cell in rows:
+        name = cell.technique_name if cell.technique_name != cell.technique_id else ""
+        said = _ids_in(cell.evidence)
+        source = ", ".join(cell.contributing_layers) or "not recorded"
+        lines.append(
+            _item(
+                f"{cell.technique_id}"
+                + (f" {name}" if name else "")
+                + (f": {_truncate(cell.evidence[0], 160)}" if cell.evidence else "")
+                + f" (claimed by {source}"
+                + (f"; {', '.join(said)}" if said else "")
+                + "; not an ATT&CK technique, not published)"
+            )
+        )
+    return lines
+
+
 def _not_published_lines(report: MalwareReport) -> list[str]:
     """The techniques a producer claimed and this report does not publish.
 
@@ -3024,7 +3117,9 @@ def _not_published_lines(report: MalwareReport) -> list[str]:
     attack-patterns, not ``/reports/{id}/mitre``.
     """
     rows = [
-        cell for cell in (getattr(report, "capability_matrix", None) or []) if cell.not_published
+        cell
+        for cell in (getattr(report, "capability_matrix", None) or [])
+        if cell.not_published and not _is_mbc_id(cell.technique_id)
     ]
     if not rows:
         return []
