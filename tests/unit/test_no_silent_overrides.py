@@ -573,3 +573,75 @@ class TestARejectedIdIsDroppedAndNeverRewritten:
         _cells, mappings = self._matrix()
 
         assert mappings == []
+
+
+# The report fields a model writes, and the one module each may be written from:
+# the code that receives that model's answer. Anything else writing one of them
+# is the platform putting words where a model's go — the fallback narrative did
+# exactly that until it stopped, and the report printed its template as though
+# the report model had written it.
+REPORT_PROSE_WRITERS: dict[str, frozenset[str]] = {
+    "executive_summary": frozenset({"reporting/builder.py"}),
+    "key_findings": frozenset({"reporting/builder.py"}),
+    "defensive_recommendations": frozenset({"reporting/builder.py"}),
+    "capabilities_narrative": frozenset(),
+    "intro_background": frozenset({"reporting/composer.py"}),
+    "execution_flow": frozenset({"reporting/composer.py"}),
+    "configuration": frozenset({"reporting/composer.py"}),
+    "commands": frozenset({"reporting/composer.py"}),
+    "c2_channels": frozenset({"reporting/composer.py"}),
+    "conclusion": frozenset(),
+}
+
+
+def prose_writes(source: str, label: str) -> list[tuple[str, str]]:
+    """Every ``obj.<field> = …`` or ``setattr(obj, "<field>", …)`` of a report prose field."""
+    tree = ast.parse(source, filename=label)
+    found: list[tuple[str, str]] = []
+    for node in ast.walk(tree):
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AugAssign | ast.AnnAssign):
+            targets = [node.target]
+        elif isinstance(node, ast.Call):
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+            key = node.args[1] if name == "setattr" and len(node.args) >= 2 else None  # noqa: PLR2004
+            if isinstance(key, ast.Constant) and key.value in REPORT_PROSE_WRITERS:
+                found.append((str(key.value), f"{label}:{node.lineno}"))
+            continue
+        for target in targets:
+            if isinstance(target, ast.Attribute) and target.attr in REPORT_PROSE_WRITERS:
+                found.append((target.attr, f"{label}:{node.lineno}"))
+    return found
+
+
+def test_the_report_prose_is_written_only_by_the_code_that_received_it():
+    found: list[str] = []
+    for path in sorted(SRC.rglob("*.py")):
+        relative = _relative(path)
+        if relative.startswith("schemas/"):
+            continue
+        for field_name, where in prose_writes(path.read_text(encoding="utf-8"), relative):
+            if relative not in REPORT_PROSE_WRITERS[field_name]:
+                found.append(f"{where}: writes {field_name!r}")
+    assert not found, (
+        "These write a report field a model writes, from a module that did not "
+        "receive the model's answer:\n  " + "\n  ".join(found)
+    )
+
+
+class TestTheProseScannerWouldCatchOne:
+    def test_an_attribute_write_is_caught(self):
+        assert prose_writes("report.executive_summary = 'template'\n", "p.py") == [
+            ("executive_summary", "p.py:1")
+        ]
+
+    def test_setattr_is_caught(self):
+        assert prose_writes("setattr(ta, 'execution_flow', [])\n", "p.py") == [
+            ("execution_flow", "p.py:1")
+        ]
+
+    def test_a_constructor_argument_is_not_a_write(self):
+        assert prose_writes("MalwareReport(executive_summary='')\n", "p.py") == []

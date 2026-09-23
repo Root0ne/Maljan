@@ -20,7 +20,13 @@ from pydantic import ValidationError
 
 from maljan.pipeline.validation import FEEDBACK_PREAMBLE
 from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import DefensiveRecommendation, MalwareReport, TTPMapping
+from maljan.reporting.models import (
+    DefensiveRecommendation,
+    EvidenceIndexRow,
+    KeyFinding,
+    MalwareReport,
+    TTPMapping,
+)
 from maljan.reporting.narrative_agent import (
     NarrativeAgent,
     NarrativeOutput,
@@ -97,10 +103,10 @@ def _valid_narrative() -> NarrativeOutput:
             "persistence (T1547.001) and TLS C2 to 1.2.3.4. Confidence is high "
             "given corroborated dynamic + network evidence." * 1
         ),
-        capabilities_narrative=[
-            "Persistence: writes Run key (T1547.001) under HKLM Software\\Run.",
-            "Command and Control: outbound TLS to 1.2.3.4 over port 443.",
-            "Defense Evasion: short execution chain with limited debug surface.",
+        key_findings=[
+            KeyFinding(text="It writes a Run key (T1547.001) under HKLM Software\\Run."),
+            KeyFinding(text="It connects out over TLS to 1.2.3.4 on port 443."),
+            KeyFinding(text="Its execution chain is short, with limited debug surface."),
         ],
         defensive_recommendations=[
             DefensiveRecommendation(
@@ -135,13 +141,13 @@ class TestNarrativeOutputSchema:
         out = _valid_narrative()
         rebuilt = NarrativeOutput.model_validate(out.model_dump())
         assert rebuilt.executive_summary == out.executive_summary
-        assert len(rebuilt.capabilities_narrative) == 3
+        assert len(rebuilt.key_findings) == 3
 
-    def test_too_few_paragraphs_rejected(self) -> None:
+    def test_too_few_key_findings_rejected(self) -> None:
         with pytest.raises(ValidationError):
             NarrativeOutput(
                 executive_summary="A" * 200,
-                capabilities_narrative=["only one"],
+                key_findings=[KeyFinding(text="only one")],
                 defensive_recommendations=_valid_narrative().defensive_recommendations,
             )
 
@@ -149,7 +155,7 @@ class TestNarrativeOutputSchema:
         with pytest.raises(ValidationError):
             NarrativeOutput(
                 executive_summary="too short",
-                capabilities_narrative=_valid_narrative().capabilities_narrative,
+                key_findings=_valid_narrative().key_findings,
                 defensive_recommendations=_valid_narrative().defensive_recommendations,
             )
 
@@ -158,7 +164,7 @@ class TestNarrativeOutputSchema:
             NarrativeOutput.model_validate(
                 {
                     "executive_summary": "A" * 200,
-                    "capabilities_narrative": ["a", "b", "c"],
+                    "key_findings": [{"text": "a"}, {"text": "b"}, {"text": "c"}],
                     "defensive_recommendations": [
                         {
                             "category": "firewall",
@@ -285,7 +291,7 @@ class TestNarrativeAgentManualParseFallback:
         agent = NarrativeAgent(llm=llm)
         out = await agent.generate(report)
         assert out is not None
-        assert len(out.capabilities_narrative) >= 3
+        assert len(out.key_findings) >= 3
 
 
 class TestTheNarrativeGetsOneTurnToFixItsShape:
@@ -305,28 +311,28 @@ class TestTheNarrativeGetsOneTurnToFixItsShape:
 
     @pytest.mark.asyncio
     async def test_an_off_schema_answer_earns_one_retry_and_is_then_accepted(self) -> None:
-        # Two capability paragraphs where the schema needs three.
+        # Two key findings where the schema needs three.
         thin = _valid_narrative().model_dump()
-        thin["capabilities_narrative"] = thin["capabilities_narrative"][:2]
+        thin["key_findings"] = thin["key_findings"][:2]
         llm = self._llm(json.dumps(thin), _valid_narrative().model_dump_json())
 
         out = await NarrativeAgent(llm=llm).generate(_make_report())
 
         assert out is not None
-        assert len(out.capabilities_narrative) >= 3
+        assert len(out.key_findings) >= 3
         assert llm.ainvoke.await_count == 2
 
     @pytest.mark.asyncio
     async def test_the_feedback_names_the_field_and_the_rule(self) -> None:
         thin = _valid_narrative().model_dump()
-        thin["capabilities_narrative"] = thin["capabilities_narrative"][:2]
+        thin["key_findings"] = thin["key_findings"][:2]
         llm = self._llm(json.dumps(thin), _valid_narrative().model_dump_json())
 
         await NarrativeAgent(llm=llm).generate(_make_report())
 
         feedback = str(llm.ainvoke.await_args_list[1].args[0][-1].content)
         assert FEEDBACK_PREAMBLE in feedback
-        assert "capabilities_narrative" in feedback
+        assert "key_findings" in feedback
 
     @pytest.mark.asyncio
     async def test_a_good_first_answer_costs_no_retry(self) -> None:
@@ -338,7 +344,7 @@ class TestTheNarrativeGetsOneTurnToFixItsShape:
     @pytest.mark.asyncio
     async def test_an_answer_that_stays_off_schema_ships_no_narrative(self) -> None:
         thin = _valid_narrative().model_dump()
-        thin["capabilities_narrative"] = thin["capabilities_narrative"][:2]
+        thin["key_findings"] = thin["key_findings"][:2]
         llm = self._llm(json.dumps(thin), json.dumps(thin))
 
         assert await NarrativeAgent(llm=llm).generate(_make_report()) is None
@@ -433,11 +439,11 @@ def test_unparseable_text_defers_rather_than_raising() -> None:
     assert _parse_keeping_duplicate_keys("I could not produce JSON.") is None
 
 
-def test_single_string_is_wrapped_for_a_list_field() -> None:
+def test_single_object_is_wrapped_for_a_list_field() -> None:
     from maljan.reporting.narrative_agent import _coerce_narrative_payload
 
-    out = _coerce_narrative_payload({"capabilities_narrative": "one paragraph"})
-    assert out["capabilities_narrative"] == ["one paragraph"]
+    out = _coerce_narrative_payload({"key_findings": {"text": "one finding"}})
+    assert out["key_findings"] == [{"text": "one finding"}]
 
 
 def test_coercion_repairs_shape_but_never_invents_content() -> None:
@@ -454,10 +460,96 @@ def test_coercion_repairs_shape_but_never_invents_content() -> None:
     payload = _coerce_narrative_payload(
         {
             "executive_summary": "x" * 200,
-            "capabilities_narrative": ["a", "b", "c"],
+            "key_findings": [{"text": "a"}, {"text": "b"}, {"text": "c"}],
             # what the model actually returned: the two optional fields only
             "defensive_recommendations": [{"technique_id": "T1055", "detection": "Sysmon 8"}] * 3,
         }
     )
     with pytest.raises(pydantic.ValidationError):
         NarrativeOutput.model_validate(payload)
+
+
+class TestTheKeyFindingsAreAskedForAsAnExactObject:
+    """Two unrelated models answered renamed keys every time until the prompt
+    showed the exact object; the key findings are asked for the same way."""
+
+    def test_the_prompt_shows_the_object_and_its_keys_are_the_schema_s(self) -> None:
+        from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXPECTED_OBJECT
+
+        assert EXPECTED_OBJECT in _SYSTEM_PROMPT
+        shown = json.loads(EXPECTED_OBJECT)
+        assert set(shown) == set(NarrativeOutput.model_fields)
+        assert set(shown["key_findings"][0]) == set(KeyFinding.model_fields)
+        assert set(shown["defensive_recommendations"][0]) == set(
+            DefensiveRecommendation.model_fields
+        )
+
+    def test_the_example_is_a_valid_answer(self) -> None:
+        from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXAMPLE_OBJECT
+
+        assert EXAMPLE_OBJECT in _SYSTEM_PROMPT
+        NarrativeOutput.model_validate(json.loads(EXAMPLE_OBJECT))
+
+    def test_the_prompt_asks_for_estimative_language_and_citations(self) -> None:
+        from maljan.reporting.narrative_agent import _SYSTEM_PROMPT
+
+        assert "estimative words" in _SYSTEM_PROMPT
+        assert "[ev_0007]" in _SYSTEM_PROMPT
+        assert "never introduce a fact nothing above states" in _SYSTEM_PROMPT
+
+
+class TestAKeyFindingCitesOnlyWhatTheLedgerHolds:
+    @staticmethod
+    def _report_with_index() -> MalwareReport:
+        report = _make_report()
+        report.evidence_index = [EvidenceIndexRow(id="ev_0001"), EvidenceIndexRow(id="ev_0002")]
+        return report
+
+    @staticmethod
+    def _answer(*ids: str) -> str:
+        out = _valid_narrative().model_dump()
+        out["key_findings"][0]["evidence_ids"] = list(ids)
+        return json.dumps(out)
+
+    @staticmethod
+    def _llm(*raw_answers: str) -> MagicMock:
+        llm = MagicMock()
+        structured = MagicMock()
+        structured.ainvoke = AsyncMock(side_effect=Exception("schema bork"))
+        llm.with_structured_output.return_value = structured
+        llm.ainvoke = AsyncMock(side_effect=[MagicMock(content=answer) for answer in raw_answers])
+        return llm
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_id_is_fed_back_once_naming_it(self) -> None:
+        llm = self._llm(self._answer("ev_9999"), self._answer("ev_0002"))
+        agent = NarrativeAgent(llm=llm)
+
+        out = await agent.generate(self._report_with_index())
+
+        assert out is not None
+        assert out.key_findings[0].evidence_ids == ["ev_0002"]
+        feedback = str(llm.ainvoke.await_args_list[1].args[0][-1].content)
+        assert "[narrative.ungrounded_finding]" in feedback
+        assert "ev_9999" in feedback
+        assert agent.validation_tally.unresolved == []
+
+    @pytest.mark.asyncio
+    async def test_a_finding_that_keeps_it_is_kept_as_written_and_recorded(self) -> None:
+        llm = self._llm(self._answer("ev_9999"), self._answer("ev_9999"))
+        agent = NarrativeAgent(llm=llm)
+
+        out = await agent.generate(self._report_with_index())
+
+        assert out is not None, "the summary ships; the finding is recorded beside it"
+        assert out.key_findings[0].evidence_ids == ["ev_9999"]
+        (row,) = agent.validation_tally.unresolved
+        assert row["code"] == "narrative.ungrounded_finding"
+        assert row["agent"] == "narrative"
+
+    @pytest.mark.asyncio
+    async def test_a_finding_that_cites_nothing_is_not_a_finding(self) -> None:
+        llm = self._llm(self._answer())
+
+        assert await NarrativeAgent(llm=llm).generate(self._report_with_index()) is not None
+        assert llm.ainvoke.await_count == 1

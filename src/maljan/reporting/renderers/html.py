@@ -29,19 +29,21 @@ from html import escape, unescape
 from markdown_it import MarkdownIt
 
 from maljan.reporting.models import Figure, MalwareReport
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from maljan.reporting.renderers.markdown import MarkdownRenderer, report_title
 
-# Each figure kind is anchored to the H2 section it illustrates so the graphic
-# sits with the table it summarises rather than in a lump at the end. Kinds not
-# listed here (``code_listing``) fall through to the figure appendix, which is
-# also where anything lands if a heading is ever renamed — placement degrades,
-# the figure is never dropped.
-_FIGURE_ANCHORS: dict[str, str] = {
-    "infection_chain": "Executive Summary",
-    "entropy_chart": "Static Analysis",
-    "process_tree": "Dynamic Behavior",
-    "network_graph": "Network IOCs",
-    "attack_matrix": "MITRE ATT&CK Matrix",
+# Each figure kind is anchored to the section it illustrates so the graphic sits
+# with the table or the prose it summarises rather than in a lump at the end.
+# The first heading in the list that the report has wins; a heading is named by
+# its title, without its number and its voice tag. Kinds not listed here
+# (``code_listing``) fall through to the figure appendix, which is also where
+# anything lands if every heading it could go under is absent — placement
+# degrades, the figure is never dropped.
+_FIGURE_ANCHORS: dict[str, tuple[str, ...]] = {
+    "infection_chain": ("Execution flow",),
+    "entropy_chart": ("Packing, obfuscation and anti-analysis", "Static properties"),
+    "process_tree": ("Process tree", "Observed behaviour"),
+    "network_graph": ("Command and control", "Network indicators", "Indicators of compromise"),
+    "attack_matrix": ("MITRE ATT&CK mapping",),
 }
 
 # MarkdownRenderer._safe_section emits an HTML comment when a section blows up.
@@ -52,6 +54,8 @@ _SECTION_FAILED_RE = re.compile(r"<!--\s*section '([^']+)' rendering failed[^>]*
 
 _H2_SPLIT_RE = re.compile(r"(?=<h2>)")
 _H2_HEAD_RE = re.compile(r"^<h2>(.*?)</h2>", re.DOTALL)
+_H3_RE = re.compile(r"<h3>(.*?)</h3>", re.DOTALL)
+_NUMBER_RE = re.compile(r"^(?:\d+(?:\.\d+)*\.?\s+|Appendix [A-Z]\.\s+)")
 _TAG_RE = re.compile(r"<[^>]+>")
 
 _STYLESHEET = """
@@ -199,10 +203,7 @@ class HtmlRenderer:
 
     @staticmethod
     def _title(report: MalwareReport) -> str:
-        name = (report.identity.file_name or "").strip()
-        if not name:
-            name = (report.identity.hashes.sha256 or "unknown sample")[:16]
-        return f"Malware Analysis Report — {name}"
+        return report_title(report)
 
     def _body_html(self, report: MalwareReport) -> str:
         markdown = MarkdownRenderer().render(report)
@@ -227,21 +228,27 @@ class HtmlRenderer:
     ) -> tuple[str, list[str], list[Figure]]:
         """Split the body at H2 boundaries, give each an id, and inject figures.
 
+        A figure goes after the section, or the subsection, it is anchored to:
+        at the end of an H2 chunk, or before the next H3 after an H3 heading.
         Returns the leading title block (everything before the first H2), the
         section chunks, and the figures that found no home — those go to the
         appendix rather than being dropped.
         """
         chunks = [c for c in _H2_SPLIT_RE.split(body_html) if c]
+        present = {_heading_key(m.group(1)) for c in chunks for m in _H2_HEAD_RE.finditer(c)}
+        present |= {_heading_key(m.group(1)) for c in chunks for m in _H3_RE.finditer(c)}
         by_heading: dict[str, list[Figure]] = {}
+        leftover: list[Figure] = []
         for fig in figures:
-            anchor = _FIGURE_ANCHORS.get(fig.kind)
-            if anchor:
+            anchor = next((a for a in _FIGURE_ANCHORS.get(fig.kind, ()) if a in present), None)
+            if anchor is None:
+                leftover.append(fig)
+            else:
                 by_heading.setdefault(anchor, []).append(fig)
 
         number = 1
         out: list[str] = []
         preamble_parts: list[str] = []
-        used: set[str] = set()
         for chunk in chunks:
             match = _H2_HEAD_RE.match(chunk)
             if not match:
@@ -249,21 +256,28 @@ class HtmlRenderer:
                 (preamble_parts if not out else out).append(chunk)
                 continue
             heading = unescape(_TAG_RE.sub("", match.group(1))).strip()
-            slug = _slug(heading)
-            chunk = chunk.replace("<h2>", f'<h2 id="sec-{slug}">', 1)
-            attached = by_heading.get(heading, [])
-            if attached:
-                used.add(heading)
-                rendered = []
-                for fig in attached:
-                    rendered.append(_figure_html(fig, number))
-                    number += 1
-                chunk = chunk.rstrip() + "\n" + "".join(rendered)
+            chunk = chunk.replace("<h2>", f'<h2 id="sec-{_slug(heading)}">', 1)
+            # Insertion points inside the chunk, in document order: after each
+            # anchored H3's block, then the chunk's own figures at its end.
+            points: list[tuple[int, list[Figure]]] = []
+            for h3 in _H3_RE.finditer(chunk):
+                attached = by_heading.get(_heading_key(h3.group(1)))
+                if attached:
+                    following = chunk.find("<h3>", h3.end())
+                    points.append((following if following != -1 else len(chunk), attached))
+            own = by_heading.get(_heading_key(match.group(1)))
+            if own:
+                points.append((len(chunk), own))
+            # Numbered in document order, inserted back to front so each
+            # position is still where it was measured.
+            inserts: list[tuple[int, str]] = []
+            for position, attached in sorted(points, key=lambda p: p[0]):
+                rendered = "".join(_figure_html(fig, number + i) for i, fig in enumerate(attached))
+                number += len(attached)
+                inserts.append((position, rendered))
+            for position, rendered in reversed(inserts):
+                chunk = chunk[:position].rstrip() + "\n" + rendered + chunk[position:]
             out.append(chunk)
-
-        # Anything with no anchor kind, or whose anchor section is absent from
-        # this particular report, still gets published — in the appendix.
-        leftover = [fig for fig in figures if _FIGURE_ANCHORS.get(fig.kind) not in used]
         return "".join(preamble_parts), out, leftover
 
     def _figure_appendix(self, figures: list[Figure], *, start_index: int) -> str:
@@ -293,6 +307,12 @@ class HtmlRenderer:
         if not entries:
             return ""
         return '<nav class="toc"><h2>Contents</h2><ol>' + "".join(entries) + "</ol></nav>\n"
+
+
+def _heading_key(inner_html: str) -> str:
+    """A heading's title without its tags, its number and its voice tag."""
+    text = unescape(_TAG_RE.sub("", inner_html)).strip()
+    return _NUMBER_RE.sub("", text.split(" · ", 1)[0]).strip()
 
 
 def _slug(heading: str) -> str:

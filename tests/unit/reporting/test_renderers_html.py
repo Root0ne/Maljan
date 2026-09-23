@@ -34,16 +34,16 @@ from maljan.reporting.renderers.pdf import PdfRenderer, PdfUnavailableError
 # purpose: if a heading is renamed, the figure anchors in html.py silently stop
 # matching, and only a test that pins the HTML side catches that.
 REQUIRED_SECTIONS = [
-    "Sample Identification",
-    "Severity &amp; Impact",
-    "Executive Summary",
-    "Capabilities Narrative",
-    "MITRE ATT&amp;CK Matrix",
-    "Family Attribution",
-    "Detection Signatures",
-    "Defensive Recommendations",
-    "References",
-    "Run Summary",
+    "1. Key findings",
+    "2. Sample overview",
+    "3. Verdict and assessment",
+    "6. Observed behaviour",
+    "8. MITRE ATT&amp;CK mapping",
+    "9. Indicators of compromise",
+    "12. Attribution and related activity",
+    "13. Limitations and analysis notes",
+    "Appendix C. References",
+    "Appendix D. Methodology",
 ]
 
 
@@ -81,7 +81,9 @@ class TestDocumentShape:
     def test_every_section_survives_conversion(self) -> None:
         html = HtmlRenderer().render(_report())
         for heading in REQUIRED_SECTIONS:
-            assert f">{heading}</h2>" in html, f"missing section: {heading}"
+            assert re.search(rf'<h2 id="[^"]+">{re.escape(heading)} · <em>', html), (
+                f"missing section: {heading}"
+            )
 
     def test_title_block_precedes_contents(self) -> None:
         """The report must open on its cover, not on the table of contents."""
@@ -158,7 +160,7 @@ class TestEscaping:
         def _boom(self: Any, report: MalwareReport) -> str:
             raise RuntimeError("synthetic")
 
-        monkeypatch.setattr(md_mod.MarkdownRenderer, "_section_references", _boom)
+        monkeypatch.setattr(md_mod.MarkdownRenderer, "_appendix_references", _boom)
         html = HtmlRenderer().render(_report())
         assert "&lt;!--" not in html
         assert "could not be rendered" in html
@@ -168,13 +170,19 @@ class TestFigures:
     def test_figures_land_in_their_own_sections(self) -> None:
         html = HtmlRenderer().render(_rich_report())
         # Each figure must appear after its anchor heading and before the next one.
+        # The entropy chart sits under the packing subsection, the process tree
+        # under its own subsection, and the endpoint graph — with no C2
+        # subsection in this report — under the network indicators.
         for anchor, fig_id in (
-            ("Static Analysis", "fig-entropy"),
-            ("Dynamic Behavior", "fig-process-tree"),
-            ("Network IOCs", "fig-network"),
+            ("5.1 Packing, obfuscation and anti-analysis · <em>", "fig-entropy"),
+            ("6.1 Process tree</h3>", "fig-process-tree"),
+            ("9.2 Network indicators · <em>", "fig-network"),
         ):
-            start = html.index(f">{anchor}</h2>")
-            following = html.index("<h2", start + 1)
+            start = html.index(f">{anchor}")
+            following = min(
+                (i for i in (html.find("<h2", start + 1), html.find("<h3", start + 1)) if i != -1),
+                default=len(html),
+            )
             assert start < html.index(f'<figure id="{fig_id}"') < following, (
                 f"{fig_id} not inside the {anchor} section"
             )

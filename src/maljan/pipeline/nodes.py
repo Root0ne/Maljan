@@ -3977,11 +3977,15 @@ def make_report_node(
         _report_tally = ValidationTally()
 
         narrative_dict: dict[str, Any] | None = None
+        # Why no summary was written, when none is: said where the summary
+        # would have been, because the platform no longer writes one itself.
+        no_summary_because = "no report model ran in this run"
         try:
             narrative_agent = container.get_narrative_agent()
         except Exception as exc:  # noqa: BLE001
             logger.warning("report_node: NarrativeAgent unavailable (%s); using fallback.", exc)
             narrative_agent = None
+            no_summary_because = f"the report model was unavailable ({type(exc).__name__})"
 
         if narrative_agent is not None:
             try:
@@ -4007,12 +4011,20 @@ def make_report_node(
                     _NARRATIVE_TIMEOUT_SECONDS,
                 )
                 narrative_output = None
+                no_summary_because = (
+                    f"the report model did not answer within {_NARRATIVE_TIMEOUT_SECONDS}s"
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "report_node: NarrativeAgent.generate raised (%s); using fallback.",
                     exc,
                 )
                 narrative_output = None
+                no_summary_because = f"the narrative round failed ({type(exc).__name__})"
+            else:
+                no_summary_because = (
+                    "the report model's answer did not fit its schema after its retry"
+                )
             if narrative_output is not None:
                 narrative_dict = narrative_output.model_dump(mode="json")
             _report_tally.merge(getattr(narrative_agent, "validation_tally", ValidationTally()))
@@ -4021,16 +4033,17 @@ def make_report_node(
             report = MalwareReportBuilder.apply_narrative(report, narrative_dict)
             logger.info(
                 "report_node: narrative LLM round succeeded (summary_chars=%d, "
-                "paragraphs=%d, recs=%d).",
+                "key_findings=%d, recs=%d).",
                 len(report.executive_summary),
-                len(report.capabilities_narrative),
+                len(report.key_findings),
                 len(report.defensive_recommendations),
             )
         else:
-            report = MalwareReportBuilder.apply_fallback_narrative(report)
+            report = MalwareReportBuilder.apply_fallback_narrative(report, no_summary_because)
 
         # Section-wise Composer authors the professional
-        # spine (intro, technical-analysis subsections, C2 channels, conclusion),
+        # spine (background, execution flow, technical-analysis subsections by
+        # capability, configuration, commands, C2 channels),
         # each grounded in its isolated evidence bundle. Best-effort — a Composer
         # failure never blocks the report. None in mock / when composer disabled.
         try:

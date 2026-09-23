@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -31,6 +32,7 @@ from maljan.analysis.technique_ids import api_capability_hits, sigma_technique_i
 from maljan.core.logger import logger
 from maljan.reporting.models import (
     DynamicBehavior,
+    ExportRow,
     FileHashes,
     ImportRow,
     NetworkDomain,
@@ -167,6 +169,7 @@ def identity_from_ledger(
     )
 
     size = int(facts.get("size") or computed.get("size") or 0)
+    header = _header_facts(ledger)
     return SampleIdentity(
         hashes=hashes,
         file_name=file_name or (Path(sample_path).name if sample_path else None),
@@ -176,7 +179,51 @@ def identity_from_ledger(
         mime_type=_opt(facts.get("mime")),
         magic_bytes=str(facts.get("magic_hex") or computed.get("magic_hex") or ""),
         signing=_signing_from_ledger(ledger),
+        **header,
     )
+
+
+# The PE ``Machine`` values a reader recognises, by the name they go by.
+_PE_MACHINES: dict[int, str] = {
+    0x14C: "x86",
+    0x8664: "x86-64",
+    0x1C0: "ARM",
+    0x1C4: "ARM Thumb-2",
+    0xAA64: "ARM64",
+    0x200: "IA-64",
+}
+
+
+def _header_facts(ledger: list[LedgerEntry]) -> dict[str, Any]:
+    """What the format tool read out of the header, as ``SampleIdentity`` fields.
+
+    Only what the tool stated: an architecture the machine field names (and
+    the raw value when this table does not know it), whether the image is a
+    library, the export directory's own name, the version resource's internal
+    name, and the header's timestamp. Nothing is inferred from the file name.
+    """
+    out: dict[str, Any] = {}
+    for _entry, data in _payloads(ledger, "pe_info"):
+        machine = data.get("machine")
+        if isinstance(machine, int) and machine and not isinstance(machine, bool):
+            out.setdefault("architecture", _PE_MACHINES.get(machine, f"machine 0x{machine:x}"))
+        if isinstance(data.get("is_dll"), bool):
+            out.setdefault("is_dll", data["is_dll"])
+        if data.get("export_name"):
+            out.setdefault("export_name", str(data["export_name"]))
+        version = data.get("version_info")
+        if isinstance(version, dict):
+            name = _opt(version.get("InternalName")) or _opt(version.get("OriginalFilename"))
+            if name:
+                out.setdefault("internal_name", name)
+        stamp = data.get("timestamp")
+        if isinstance(stamp, int) and stamp > 0 and not isinstance(stamp, bool):
+            out.setdefault("compile_timestamp", datetime.fromtimestamp(stamp, tz=UTC))
+    for _entry, data in _payloads(ledger, "elf_info"):
+        bits, endian = data.get("bitness"), data.get("endianness")
+        if bits and endian:
+            out.setdefault("architecture", f"{bits}-bit, {endian}-endian")
+    return out
 
 
 def _signing_from_ledger(ledger: list[LedgerEntry]) -> SignatureInfo:
@@ -281,6 +328,16 @@ def static_from_ledger(
                 ImportRow(dll=str(row.get("dll") or ""), function=str(row.get("function") or ""))
             )
         static.exports.extend(str(name) for name in data.get("exports") or [])
+        for row in data.get("export_rows") or []:
+            if isinstance(row, dict):
+                ordinal = row.get("ordinal")
+                static.export_rows.append(
+                    ExportRow(
+                        name=str(row.get("name") or ""),
+                        ordinal=ordinal if isinstance(ordinal, int) else None,
+                        rva=_opt(row.get("rva")),
+                    )
+                )
         # An APK's declared permissions are its import table: the same
         # question — what did the author ask the platform for — answered in
         # the vocabulary Android uses.

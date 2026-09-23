@@ -70,10 +70,18 @@ class TestTheMarkdownReport:
     def test_the_rule_that_fired_is_a_row_with_its_source_and_entry(self) -> None:
         report, entry_id = _report()
         md = MarkdownRenderer().render(report)
+        (row,) = [
+            line for line in md.splitlines() if line.startswith("| - | T1055 | Process Injection")
+        ]
         assert (
-            "| T1055 | Process Injection "
-            "| allocating or writing memory in another process and starting a thread in it "
-            f"| api_capability ({entry_id}) " in md
+            "| rule allocating or writing memory in another process and starting a thread "
+            "in it over imports " in row
+        )
+        # Nothing claimed T1055 in this run, so the rule's row is not a
+        # published technique; it says so rather than borrowing the status.
+        assert (
+            f"| pipeline:api_capability | rule match | rule match, not published | {entry_id} |"
+            in row
         )
 
     def test_the_row_says_how_much_ordinary_software_the_same_rule_fires_on(self) -> None:
@@ -184,10 +192,10 @@ class TestASampleCannotReshapeTheTableItIsDescribedIn:
             static=StaticAnalysis(api_technique_hits=[hit]),
         )
         md = MarkdownRenderer().render(report)
-        head = md.index("### ATT&CK Techniques Derived From Imports")
+        section = md.split("## 8. MITRE ATT&CK mapping", 1)[1].split("\n## ", 1)[0]
         return [
             line
-            for line in md[head:].splitlines()
+            for line in section.splitlines()
             if line.startswith("|") and not line.startswith("|---")
         ]
 
@@ -196,8 +204,8 @@ class TestASampleCannotReshapeTheTableItIsDescribedIn:
         """Pipes that still divide cells — an escaped one is text, not a column."""
         return len(re.findall(r"(?<!\\)\|", row))
 
-    def test_an_undamaged_row_has_six_cells(self) -> None:
-        assert [self._separators(row) for row in self._rows()] == [7, 7]
+    def test_an_undamaged_row_has_eight_cells(self) -> None:
+        assert [self._separators(row) for row in self._rows()] == [9, 9]
 
     @pytest.mark.parametrize(
         ("field", "value"),
@@ -217,4 +225,4 @@ class TestASampleCannotReshapeTheTableItIsDescribedIn:
         # One header and one data row, each with the cell count an undamaged
         # table has: nothing gained a column and nothing was cut in half.
         assert len(rows) == 2, rows
-        assert [self._separators(row) for row in rows] == [7, 7], rows
+        assert [self._separators(row) for row in rows] == [9, 9], rows

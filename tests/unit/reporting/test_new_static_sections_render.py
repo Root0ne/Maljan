@@ -123,8 +123,7 @@ class TestCarvedPayloadsAreLocatable:
         )
         assert "carved:PE" in md
         assert "overlay+0x1a400" in md, "without the offset nobody can go and look"
-        assert "bbbb" in md, "nor without the hash"
-        assert "7.21" in md
+        assert "b" * 64 in md, "nor without the whole hash"
 
     def test_ordinary_resources_still_render_as_before(self) -> None:
         md = _render(
@@ -142,7 +141,10 @@ class TestCarvedPayloadsAreLocatable:
                 ]
             )
         )
-        assert "Carved payloads" in md
+        payloads = md.split("### 5.8 Payloads and dropped files", 1)[1].split("## ", 1)[0]
+        assert "overlay+0x100" in payloads
+        assert "RT_ICON" not in payloads
+        assert "RT_ICON" in md.split("### 7.4 Resources", 1)[1]
 
 
 class TestASectionCanBeFoundInTheFile:
@@ -229,14 +231,14 @@ class TestTheFamilyNameShowsItsWorking:
                 {"family": "FormBook", "similarity": 0.612, "malware_category": "stealer"}
             ],
         )
-        assert "Family-feature RAG candidates" in md
+        assert "Static-feature similarity" in md
         assert "FormBook" in md
         assert "0.612" in md
 
     def test_nothing_is_printed_when_there_is_no_evidence(self) -> None:
         md = _render(None)
         assert "Function-hash matches" not in md
-        assert "Family-feature RAG candidates" not in md
+        assert "Static-feature similarity" not in md
 
 
 class TestComputedSignalsThatWereNeverPrinted:
@@ -265,7 +267,7 @@ class TestComputedSignalsThatWereNeverPrinted:
             ]
         )
         md = MarkdownRenderer().render(report)
-        assert "xn--pple-43d.com" in md
+        assert "xn--pple-43d[.]com" in md
         assert "apple.com" in md, "the imitated brand is the finding"
         assert "punycode" in md
 
@@ -286,7 +288,7 @@ class TestComputedSignalsThatWereNeverPrinted:
         report = _report()
         report.network = NetworkIOCs(domains=[NetworkDomain(fqdn="example.com")])
         md = MarkdownRenderer().render(report)
-        assert "example.com" in md
+        assert "example[.]com" in md
         assert "DGA score" not in md
         assert "punycode" not in md
 
@@ -327,7 +329,7 @@ class TestTheComposedSectionsReachTheReport:
             )
         )
         md = MarkdownRenderer().render(report)
-        assert "## Technical Analysis" in md
+        assert "## 5. Technical analysis" in md
         assert "UPX-packed with a modified header" in md
         assert "static:sections" in md, "prose without refs is indistinguishable from invention"
 
@@ -353,39 +355,40 @@ class TestTheComposedSectionsReachTheReport:
             C2Channel(name="primary", protocol="HTTPS", encryption="RC4", beacon_format="JSON")
         ]
         md = MarkdownRenderer().render(report)
-        assert "## C2 Channels" in md
+        assert "### 5.7 Command and control" in md
         assert "RC4" in md
 
-    def test_the_conclusion_and_its_sophistication_rating_render(self) -> None:
+    def test_a_stored_conclusion_keeps_its_rating_and_drops_its_restatement(self) -> None:
+        """The conclusion restated the summary and is no longer a section; a
+        stored report's sophistication rating moves beside the verdict."""
         from maljan.reporting.models import Conclusion
 
         report = _report()
         report.conclusion = Conclusion(text="A commodity loader.", sophistication_rating="low")
         md = MarkdownRenderer().render(report)
-        assert "## Conclusion" in md
-        assert "commodity loader" in md
-        assert "low" in md
+        assert "Conclusion" not in md
+        assert "commodity loader" not in md
+        verdict = md.split("## 3. Verdict and assessment", 1)[1].split("## 4", 1)[0]
+        assert "**Sophistication:** low" in verdict
 
     def test_a_run_without_the_composer_is_unchanged(self) -> None:
         """The sections must vanish entirely rather than render as empty
         headings, so disabling the composer produces the report it always did.
         """
         md = MarkdownRenderer().render(_report())
-        assert "## Technical Analysis" not in md
-        assert "## C2 Channels" not in md
-        assert "## Conclusion" not in md
-        assert "## Introduction & Background" not in md
+        assert "## 4. Execution flow" not in md
+        assert "## 5. Technical analysis" not in md
+        assert "Background" not in md
 
     def test_the_html_export_inherits_the_fix(self) -> None:
         """HtmlRenderer builds from MarkdownRenderer and PdfRenderer from that,
         so all three formats were losing the composer output together and all
         three are fixed by one change. Worth pinning: if HTML ever grows its own
         section list, this is what notices."""
-        from maljan.reporting.models import Conclusion
         from maljan.reporting.renderers.html import HtmlRenderer
 
         report = _report()
-        report.conclusion = Conclusion(text="A commodity loader.", sophistication_rating="low")
+        report.intro_background = "A commodity loader."
         html = HtmlRenderer().render(report, embed_figures=False)
         assert "commodity loader" in html
 
@@ -400,17 +403,25 @@ class TestTheComposedSectionsReachTheReport:
         deterministic sections above it. Marking it is the same concession the
         "(unverified)" family badge makes.
         """
-        from maljan.reporting.models import Conclusion, TechnicalAnalysis, TechnicalSubsection
+        from maljan.reporting.models import TechnicalAnalysis, TechnicalSubsection
 
         report = _report()
         report.intro_background = "Background prose."
-        report.conclusion = Conclusion(text="A commodity loader.")
         report.technical_analysis = TechnicalAnalysis(
-            discovery=TechnicalSubsection(title="Discovery", body="It enumerates files.")
+            discovery=TechnicalSubsection(title="Discovery", body="It enumerates files."),
+            persistence_detail=TechnicalSubsection(
+                title="Persistence", body="It writes a Run key.", evidence_refs=["ev_0004"]
+            ),
         )
         md = MarkdownRenderer().render(report)
-        assert md.count("Composed by the report LLM") == 3, "every composed section must say so"
-        assert "verify" in md.lower()
+        # The voice tag is on every composed heading; the uncited note only
+        # where nothing is cited.
+        assert "### 5.5 Discovery · _Written by the report model_" in md
+        assert "### 12.3 Background · _Written by the report model_" in md
+        assert md.count("with no evidence cited; check it against the measured sections") == 2
+        persistence = md.split("### 5.4 Persistence", 1)[1].split("###", 1)[0]
+        assert "[ev_0004]" in persistence
+        assert "no evidence cited" not in persistence
 
     def test_the_note_alone_does_not_create_a_section(self) -> None:
         """Adding the note must not turn an empty TechnicalAnalysis into a
@@ -420,7 +431,7 @@ class TestTheComposedSectionsReachTheReport:
         report = _report()
         report.technical_analysis = TechnicalAnalysis()
         md = MarkdownRenderer().render(report)
-        assert "## Technical Analysis" not in md
+        assert "## 5. Technical analysis" not in md
 
     def test_the_querying_process_is_named(self) -> None:
         """The last producer-without-consumer field on the report models. Only
@@ -434,6 +445,5 @@ class TestTheComposedSectionsReachTheReport:
             domains=[NetworkDomain(fqdn="c2.example.net", queried_pids=[4812, 5120])]
         )
         md = MarkdownRenderer().render(report)
-        assert "Queried by" in md
-        assert "4812" in md
-        assert "5120" in md
+        (row,) = [line for line in md.splitlines() if "c2[.]example[.]net" in line]
+        assert "queried by pid 4812, 5120" in row

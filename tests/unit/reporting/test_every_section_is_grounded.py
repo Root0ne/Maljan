@@ -95,7 +95,7 @@ def test_every_tool_section_cites_an_entry_the_index_knows(report) -> None:
 
 def test_the_rendered_report_prints_the_evidence_ids(report) -> None:
     markdown = MarkdownRenderer().render(report)
-    assert "## Evidence" in markdown
+    assert "## Appendix A. Evidence index" in markdown
     assert "_Evidence: ev_0001" in markdown
 
 

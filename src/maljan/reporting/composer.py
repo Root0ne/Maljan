@@ -1,11 +1,12 @@
 """Section-wise Report Composer — authors the professional technical spine.
 
 The deterministic builder fills every factual table;
-the existing ``NarrativeAgent`` writes the exec-summary / capabilities / defensive
-recommendations in one round. The Composer authors the NEW professional sections
-(introduction, technical-analysis spine, C2 channels, conclusion) **one section
-per LLM call**, each grounded ONLY in that section's evidence bundle
-(``evidence_bundles.bundle_for``).
+the existing ``NarrativeAgent`` writes the summary, the key findings and the
+defensive recommendations in one round. The Composer authors the rest of the
+assessed prose — the background, the execution flow, the technical-analysis
+subsections by capability, the configuration and command tables and the C2
+channels — **one section per LLM call**, each grounded ONLY in that section's
+evidence bundle (``evidence_bundles.bundle_for``).
 
 Why per-section and not one big call: the local Qwen3.6-35B/SWA model stalls and
 hallucinates on long single-shot generation (documented in
@@ -29,21 +30,26 @@ from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.logger import logger
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
-    UNGROUNDED_CAPABILITY_CODE,
+    KEPT_WITH_A_FINDING,
     CapabilityGrounding,
     ValidationTally,
+    Validator,
     Violation,
+    configuration_citation_violations,
+    flow_voice_violations,
     keep_known_keys,
     retry_with_feedback,
     schema_violations,
     section_capability_violations,
 )
-from maljan.reporting.evidence_bundles import bundle_for, is_empty
+from maljan.reporting.evidence_bundles import bundle_for, is_empty, sandbox_entry_ids
 from maljan.reporting.models import (
     C2Channel,
     CliFlag,
-    Conclusion,
+    CommandRow,
+    ConfigItem,
     EncryptionScheme,
+    FlowStep,
     MalwareReport,
     RansomNote,
     TechnicalAnalysis,
@@ -81,6 +87,21 @@ class _C2Out(BaseModel):
     channels: list[C2Channel] = Field(default_factory=list)
 
 
+class _FlowOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    steps: list[FlowStep] = Field(default_factory=list)
+
+
+class _ConfigOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    items: list[ConfigItem] = Field(default_factory=list)
+
+
+class _CommandsOut(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    commands: list[CommandRow] = Field(default_factory=list)
+
+
 # Rule 2 is the one that was missing, and its absence was not theoretical: on
 # 2026-07-28 a conclusion asserted the sample was a .NET executable calling
 # `_CorExeMain` from `mscoree.dll`, repeating a static-analyst claim, on a
@@ -104,7 +125,15 @@ _SYSTEM = (
     "4. If the evidence does not support a field, leave it empty/null. Never guess.\n"
     "5. Be concise and technical; cite concrete artifacts (function name, API, "
     "string, tool output) where possible.\n"
-    "6. Output MUST conform to the provided JSON schema."
+    "6. Cite the ev_ ids of the entries a statement rests on: in the evidence_refs "
+    "list where the object has one, and in square brackets in prose, e.g. [ev_0007]. "
+    "Only ids that appear in the evidence below.\n"
+    "7. State facts plainly and write inferences with estimative words ('likely', "
+    "'we assess'). Present tense for what the sample does, past tense for what the "
+    "run did. No second person.\n"
+    "8. Delivery, actors and campaigns this run did not see are context, not "
+    "findings: say where they come from, and never write them as observed.\n"
+    "9. Output MUST be the JSON object shown in the request, with its keys."
 )
 
 # How many invented keys a degradation reason names. A model that invents
@@ -112,12 +141,54 @@ _SYSTEM = (
 # stops being readable long before that.
 _MAX_NAMED_KEYS = 6
 
-# Narrative technical subsections authored as free prose (TechnicalSubsection).
+# Narrative technical subsections authored as free prose (TechnicalSubsection),
+# in the order the report prints them.
 _PROSE_SECTIONS: dict[str, str] = {
     "packing_obfuscation": "Packing & Obfuscation",
+    "string_resolution": "API and String Resolution",
     "discovery": "Discovery & Enumeration",
     "persistence_detail": "Persistence",
     "evasion_antiforensics": "Defense Evasion & Anti-Forensics",
+    "command_and_control": "Command and Control",
+    "payloads": "Payloads and Dropped Files",
+}
+
+# One example answer per section shape, shown under the object the answer has
+# to be. The object alone names the keys; the example shows what goes in them
+# — an ordered list with its marks, a value with how it was obtained — which a
+# key name cannot. Each is valid against its schema, and a test says so.
+_PROSE_EXAMPLE = (
+    '{"body": "The loader resolves its imports at run time by hashing export names '
+    '[ev_0009]; we assess the hash is CRC32 from the constant it compares against.", '
+    '"evidence_refs": ["ev_0009"]}'
+)
+_EXAMPLES: dict[str, str] = {
+    "prose": _PROSE_EXAMPLE,
+    "execution_flow": (
+        '{"steps": ['
+        '{"order": 1, "action": "Resolves its Windows APIs by hash", "voice": "assessed", '
+        '"evidence_refs": ["ev_0009"]}, '
+        '{"order": 2, "action": "Creates a mutex and exits if it already exists", '
+        '"voice": "observed", "evidence_refs": ["ev_0021"]}]}'
+    ),
+    "configuration": (
+        '{"items": ['
+        '{"key": "C2 URL", "value": "https://example.org/submit/", '
+        '"how_obtained": "decrypted", "evidence_refs": ["ev_0015"]}, '
+        '{"key": "Sleep interval", "value": "600 s", "how_obtained": "inferred", '
+        '"evidence_refs": []}]}'
+    ),
+    "commands": (
+        '{"commands": ['
+        '{"id": "12", "name": "run_exe", "description": "Downloads and runs an executable", '
+        '"evidence_refs": ["ev_0031"]}]}'
+    ),
+    "communications": (
+        '{"channels": [{"name": "HTTPS beacon", "protocol": "HTTPS POST", '
+        '"encryption": "RC4 then base64", "packet_layout": null, '
+        '"beacon_format": "key=value pairs joined by &", "evidence_ref": null, '
+        '"endpoints": ["https://example.org/submit/"], "evidence_refs": ["ev_0019"]}]}'
+    ),
 }
 
 
@@ -160,6 +231,13 @@ def _expected_object(schema: type[BaseModel], depth: int = 0) -> str:
         f'"{name}": {_field_placeholder(field.annotation, depth)}' for name, field in fields.items()
     )
     return "{" + body + "}"
+
+
+def _example_for(section: str, schema: type[BaseModel]) -> str:
+    """The example answer shown for one section, or ``""`` for the shapes that have none."""
+    if schema is _ProseOut:
+        return _EXAMPLES["prose"]
+    return _EXAMPLES.get(section, "")
 
 
 def _bundle_text(section: str, bundle: dict[str, Any]) -> str:
@@ -249,8 +327,9 @@ class ReportComposer:
         facts_block: str = "",
         run_state: str = "",
     ) -> None:
-        """Fill report.intro_background / technical_analysis / c2_channels /
-        conclusion. Mutates ``report`` in place; each section is best-effort.
+        """Fill report.intro_background / technical_analysis / c2_channels.
+
+        Mutates ``report`` in place; each section is best-effort.
 
         ``facts_block`` is the triage pack and ``run_state`` the run's state
         block; every section's prompt leads with the two, so no section is
@@ -273,7 +352,26 @@ class ReportComposer:
             report.intro_background = intro.text.strip()
             authored += 1
 
-        # 2. Free-prose technical subsections (only when evidence exists).
+        # The entries this run recorded, and which of them a sandbox wrote: an
+        # execution step marked observed has to cite one of the second, and a
+        # configuration value said to be decrypted one of the first.
+        known_ids = [row.id for row in report.evidence_index]
+        sandbox_ids = sandbox_entry_ids(report)
+
+        # 2. The execution flow, entry to steady state.
+        flow = await self._author(
+            "execution_flow",
+            report,
+            isr_reports,
+            _FlowOut,
+            "List what the sample does from its entry point to its steady state, in order.",
+            validators=[lambda p: flow_voice_violations(p, sandbox_ids)],
+        )
+        if flow and isinstance(flow, _FlowOut) and flow.steps:
+            ta.execution_flow = flow.steps[:20]
+            authored += 1
+
+        # 3. Free-prose technical subsections (only when evidence exists).
         for section, title in _PROSE_SECTIONS.items():
             out = await self._author(
                 section, report, isr_reports, _ProseOut, f"Write the '{title}' subsection."
@@ -285,7 +383,32 @@ class ReportComposer:
                 setattr(ta, section, sub)
                 authored += 1
 
-        # 3. Structured extractions (crypto / CLI flags / ransom note).
+        # 4. Structured extractions (configuration, commands, crypto, CLI
+        # flags, ransom note).
+        config = await self._author(
+            "configuration",
+            report,
+            isr_reports,
+            _ConfigOut,
+            "Extract the sample's configuration: C2 list, campaign or group id, keys, "
+            "version, sleep interval, install path.",
+            validators=[lambda p: configuration_citation_violations(p, known_ids)],
+        )
+        if config and isinstance(config, _ConfigOut) and config.items:
+            ta.configuration = config.items[:30]
+            authored += 1
+
+        commands = await self._author(
+            "commands",
+            report,
+            isr_reports,
+            _CommandsOut,
+            "Extract the commands the sample accepts from its operator.",
+        )
+        if commands and isinstance(commands, _CommandsOut) and commands.commands:
+            ta.commands = commands.commands[:40]
+            authored += 1
+
         enc = await self._author(
             "encryption_scheme",
             report,
@@ -311,20 +434,12 @@ class ReportComposer:
             ta.ransom_note = note
             authored += 1
 
-        # 4. Communications / C2 channels.
+        # 5. Communications / C2 channels.
         c2 = await self._author(
             "communications", report, isr_reports, _C2Out, "Describe the C2 channel(s)."
         )
         if c2 and isinstance(c2, _C2Out) and c2.channels:
             report.c2_channels = c2.channels[:6]
-            authored += 1
-
-        # 5. Conclusion (graded sophistication).
-        concl = await self._author(
-            "conclusion", report, isr_reports, Conclusion, "Write a graded conclusion."
-        )
-        if concl and isinstance(concl, Conclusion) and concl.text.strip():
-            report.conclusion = concl
             authored += 1
 
         if _has_content(ta):
@@ -338,9 +453,15 @@ class ReportComposer:
         isr_reports: dict[str, Any] | None,
         schema: type[BaseModel],
         instruction: str,
+        validators: list[Validator] | None = None,
     ) -> BaseModel | None:
         """Author one section from its isolated bundle. Skips empty bundles;
-        structured-output → manual-parse → None; hard per-section timeout."""
+        structured-output → manual-parse → None; hard per-section timeout.
+
+        ``validators`` are the section's own checks beyond its schema and the
+        capability grounding every section gets; what they find is shown to the
+        model once and, if it survives, recorded beside the section.
+        """
         bundle = bundle_for(section, report, report.technical_evidence, isr_reports)
         if is_empty(bundle):
             return None
@@ -363,6 +484,12 @@ class ReportComposer:
             f"{_expected_object(schema)}\n"
             "A field the evidence does not support is left empty or null; the keys stay."
         )
+        example = _example_for(section, schema)
+        if example:
+            contract += (
+                "\nFor example (the shape only; write what this run's evidence supports):\n"
+                + example
+            )
         human = "\n\n".join([*head, instruction, contract, _bundle_text(section, bundle)])
         messages = [
             SystemMessage(content=_SYSTEM),
@@ -370,7 +497,7 @@ class ReportComposer:
         ]
         try:
             return await asyncio.wait_for(
-                self._invoke(messages, schema, section=section),
+                self._invoke(messages, schema, section=section, validators=validators or []),
                 timeout=float(self.per_section_timeout),
             )
         except TimeoutError:
@@ -391,7 +518,12 @@ class ReportComposer:
             return None
 
     async def _invoke(
-        self, messages: list[BaseMessage], schema: type[BaseModel], *, section: str = ""
+        self,
+        messages: list[BaseMessage],
+        schema: type[BaseModel],
+        *,
+        section: str = "",
+        validators: list[Validator] | None = None,
     ) -> BaseModel | None:
         # Skipped outright on endpoints where structured output does not work
         # — see ``structured_output_supported``. The per-section timeout below
@@ -411,7 +543,10 @@ class ReportComposer:
                 # conversation and there is no turn to add one to — but the
                 # answer is still checked: a section that over-claims is no
                 # better for having come from the path that usually works.
-                found = section_capability_violations(result.model_dump(), self._grounding)
+                answer = result.model_dump()
+                found = section_capability_violations(answer, self._grounding)
+                for extra in validators or []:
+                    found.extend(extra(answer))
                 self.validation_tally.count(found)
                 self._record_ungrounded(section or schema.__name__, found)
                 return result
@@ -472,10 +607,13 @@ class ReportComposer:
             # again would be arguing with a correct answer.
             if declined:
                 return []
-            return [
+            found = [
                 *schema_violations(schema, payload, code="composer.schema"),
                 *section_capability_violations(payload, self._grounding),
             ]
+            for extra in validators or []:
+                found.extend(extra(payload))
+            return found
 
         payload, violations, retries = await retry_with_feedback(
             _run,
@@ -498,8 +636,8 @@ class ReportComposer:
         # over-claims can, and dropping it would leave the report with neither
         # the claim nor the record of it. The terms are kept on the record and
         # the prose is left exactly as the model wrote it.
-        broken = [v for v in violations if v.code != UNGROUNDED_CAPABILITY_CODE]
-        ungrounded = [v for v in violations if v.code == UNGROUNDED_CAPABILITY_CODE]
+        broken = [v for v in violations if v.code not in KEPT_WITH_A_FINDING]
+        ungrounded = [v for v in violations if v.code in KEPT_WITH_A_FINDING]
         if broken:
             logger.error(
                 "ReportComposer: section '%s' still breaks its schema after %d retr%s (%s); "
@@ -533,8 +671,7 @@ class ReportComposer:
         if not violations:
             return
         logger.warning(
-            "ReportComposer: section '%s' claims %s, which this run does not establish; "
-            "kept and recorded unresolved.",
+            "ReportComposer: section '%s' kept with finding(s) at %s; recorded unresolved.",
             section,
             ", ".join(v.path for v in violations),
         )

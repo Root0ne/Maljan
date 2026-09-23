@@ -213,7 +213,7 @@ class TestEveryExportSurfaceRenders:
         stix = ExtendedSTIXRenderer().render(report)
         pdf = PdfRenderer().render(report)
 
-        assert markdown.startswith("# Malware Analysis Report")
+        assert markdown.startswith("# ") and "## 1. Key findings" in markdown
         assert html.startswith("<!DOCTYPE html>")
         assert stix.objects, "STIX bundle carried no objects"
         assert pdf.startswith(b"%PDF-")
