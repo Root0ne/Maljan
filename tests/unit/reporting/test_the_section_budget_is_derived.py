@@ -129,13 +129,13 @@ class TestTheToolAnswersShareTheWindow:
         from maljan.llm.context_window import CHARS_PER_TOKEN
 
         room = (16384 - 4096) * CHARS_PER_TOKEN - 1000
-        assert composer._tool_chars(1000, 3) == room // 3
+        assert composer._item_chars(1000, 3) == room // 3
 
     def test_a_full_window_shows_no_answer_and_says_so(self) -> None:
         from maljan.reporting.composer import NO_ROOM_FOR_THE_ANSWER, _bundle_text
 
         composer, _built = _composer(16384, judge_max_tokens=8192, expert_max_tokens=8192)
-        chars = composer._tool_chars(10**7, 2)
+        chars = composer._item_chars(10**7, 2)
         text = _bundle_text(
             "payloads", {"tool_outputs": [{"tool": "x", "output": "y" * 50}]}, None, chars
         )
@@ -147,7 +147,7 @@ class TestTheToolAnswersShareTheWindow:
         from maljan.reporting.composer import _bundle_text
 
         composer = ReportComposer(llm=None, per_section_timeout=5)  # type: ignore[arg-type]
-        chars = composer._tool_chars(100, 1)
+        chars = composer._item_chars(100, 1)
         text = _bundle_text(
             "payloads", {"tool_outputs": [{"tool": "x", "output": "y" * 5000}]}, None, chars
         )
@@ -159,3 +159,52 @@ class TestTheToolAnswersShareTheWindow:
         composer, _built = _composer(16384, judge_max_tokens=8192, expert_max_tokens=8192)
 
         assert "tool answers share what the 16384-token window leaves" in composer.budget_note
+
+
+class TestTheClaimsShareTheWindow:
+    """Every analyst claim reaches its section, sized the way the tool answers are."""
+
+    @staticmethod
+    def _isrs(count: int) -> dict[str, Any]:
+        from types import SimpleNamespace
+
+        claims = [
+            SimpleNamespace(claim=f"The sample writes example value {i}.", evidence_ref="ev_0001")
+            for i in range(count)
+        ]
+        return {"static": SimpleNamespace(claims=claims)}
+
+    @pytest.mark.parametrize("section", ["executive_summary", "introduction", "execution_flow"])
+    def test_no_count_cuts_a_section_s_claims(self, section: str) -> None:
+        from maljan.reporting.evidence_bundles import bundle_for
+        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+
+        report = MalwareReport(identity=SampleIdentity(hashes=FileHashes(sha256="e" * 64)))
+
+        bundle = bundle_for(section, report, isr_reports=self._isrs(40))
+
+        assert len(bundle["claims"]) == 40
+
+    def test_each_claim_is_shown_within_its_share_and_a_cut_says_so(self) -> None:
+        from maljan.reporting.composer import _bundle_text
+        from maljan.utils.marked_cut import CUT_MARK
+
+        claims = [{"claim": "x" * 200, "evidence_ref": "ev_0001"} for _ in range(25)]
+
+        text = _bundle_text("introduction", {"claims": claims}, None, 60)
+
+        shown = [line for line in text.splitlines() if line.startswith("- x")]
+        assert len(shown) == 25
+        assert all(line.endswith(CUT_MARK) and len(line) <= 62 for line in shown)
+
+    def test_a_full_window_says_there_was_no_room_for_a_claim(self) -> None:
+        from maljan.reporting.composer import NO_ROOM_FOR_THE_ANSWER, _bundle_text
+
+        bundle = {"claims": [{"claim": "x", "evidence_ref": ""}]}
+
+        assert f"- {NO_ROOM_FOR_THE_ANSWER}" in _bundle_text("introduction", bundle, None, 0)
+
+    def test_the_claims_and_the_answers_are_counted_together(self) -> None:
+        source = inspect.getsource(ReportComposer._author)
+
+        assert 'len(bundle.get("claims") or []) + len(bundle.get("tool_outputs") or [])' in source

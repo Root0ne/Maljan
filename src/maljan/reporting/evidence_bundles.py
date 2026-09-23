@@ -210,7 +210,7 @@ def _filter_tool_outputs(
                         "tool": name,
                         "symbol": str(o.get("symbol") or ""),
                         # Whole: the composer shares the section's window
-                        # among the answers it shows (``ReportComposer._tool_chars``).
+                        # among the answers it shows (``ReportComposer._item_chars``).
                         "output": str(o.get("output") or ""),
                     }
                 )
@@ -312,7 +312,7 @@ def bundle_for(
 
     if section == "executive_summary":
         return {
-            "claims": all_claims[:12],
+            "claims": all_claims,
             "tool_outputs": [],
             "binary": base,
             "facts": {
@@ -331,7 +331,7 @@ def bundle_for(
         }
     if section == "introduction":
         return {
-            "claims": all_claims[:8],
+            "claims": all_claims,
             "tool_outputs": [],
             "binary": base,
             # Identity stays in ``facts`` here, duplicating part of ``base``,
@@ -355,7 +355,7 @@ def bundle_for(
         for root in dynamic.process_tree if dynamic else []:
             tree.extend(_process_lines(root, 0))
         return {
-            "claims": all_claims[:14],
+            "claims": all_claims,
             "tool_outputs": [],
             "binary": base,
             "facts": {

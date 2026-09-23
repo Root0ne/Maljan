@@ -375,9 +375,15 @@ def _bundle_text(
     section: str,
     bundle: dict[str, Any],
     entries: EntryTexts | None = None,
-    tool_chars: int | None = None,
+    item_chars: int | None = None,
 ) -> str:
     """Render an evidence bundle into a compact prompt body.
+
+    Every analyst claim and every tool answer is shown, each within
+    ``item_chars`` characters: the share of the room the section's window
+    leaves (``ReportComposer._item_chars``), a cut marked as one; ``None`` is a
+    composer that knows no window and shows each whole; ``0`` shows the
+    sentence saying there was no room.
 
     The heading used to be the bare line ``SECTION: <name>``, which is a key
     with a value next to it: both models answered with ``{"SECTION": ...,
@@ -410,32 +416,33 @@ def _bundle_text(
     claims = bundle.get("claims") or []
     if claims:
         lines.append("ANALYST CLAIMS (claim — evidence):")
-        for c in claims[:10]:
-            line = f"- {c.get('claim', '')} — {c.get('evidence_ref', '')}"
-            lines.append(line + _where_quoted(line, entries))
+        for c in claims:
+            claim = f"{c.get('claim', '')} — {c.get('evidence_ref', '')}"
+            lines.append(f"- {_within(claim, item_chars)}" + _where_quoted(claim, entries))
         lines.append("")
     tools = bundle.get("tool_outputs") or []
     if tools:
-        # Each answer gets the share of the room the section's window leaves
-        # it (``ReportComposer._tool_chars``); ``None`` is a composer that
-        # knows no window and shows each whole.
         lines.append("CAPTURED TOOL OUTPUT:")
         for t in tools:
             sym = f" [{t.get('symbol')}]" if t.get("symbol") else ""
-            output = str(t.get("output", "") or "")
-            if tool_chars is None:
-                shown = output
-            elif tool_chars <= 0:
-                shown = NO_ROOM_FOR_THE_ANSWER
-            else:
-                shown = marked_cut(output, tool_chars)
+            shown = _within(str(t.get("output", "") or ""), item_chars)
             lines.append(f"- {t.get('tool', '')}{sym}: {shown}")
         lines.append("")
     return "\n".join(lines)
 
 
-# What a section is shown in place of a tool answer its window has no room for.
+# What a section is shown in place of a claim or a tool answer its window has
+# no room for.
 NO_ROOM_FOR_THE_ANSWER = "(not shown: this section's context window has no room left for it)"
+
+
+def _within(text: str, chars: int | None) -> str:
+    """``text`` within ``chars`` characters: whole, cut with a mark, or the no-room sentence."""
+    if chars is None:
+        return text
+    if chars <= 0:
+        return NO_ROOM_FOR_THE_ANSWER
+    return marked_cut(text, chars)
 
 
 # The headings of what the platform adds to a section's prompt beside the
@@ -524,7 +531,7 @@ class ReportComposer:
         # the section's wait in the run summary, so the number can be checked.
         self.budget_note = budget_note
         # The smallest context window of the reporter's models, in tokens: what
-        # a section's tool answers are sized against (``_tool_chars``). Zero is
+        # a section's claims and tool answers are sized against (``_item_chars``). Zero is
         # a window nobody learned, and the answers are then shown whole.
         self.window_tokens = int(window_tokens or 0)
         # Each model of the reporter's list, by the label its answers carry,
@@ -763,16 +770,18 @@ class ReportComposer:
         # on that path nothing had ever shown the model a key name.
         contract = section_contract(section, schema)
         entries = getattr(self, "_entries", None)
-        # The tool answers share what the model's window leaves after its reply
-        # and the rest of this prompt; measured on the prompt without them.
+        # The claims and the tool answers share what the model's window leaves
+        # after its reply and the rest of this prompt; measured on the prompt
+        # without them.
         without = "\n\n".join(
-            [*head, instruction, contract, _bundle_text(section, bundle, entries, tool_chars=0)]
+            [*head, instruction, contract, _bundle_text(section, bundle, entries, item_chars=0)]
         )
-        tool_chars = self._tool_chars(
-            len(_SYSTEM) + len(without), len(bundle.get("tool_outputs") or [])
+        item_chars = self._item_chars(
+            len(_SYSTEM) + len(without),
+            len(bundle.get("claims") or []) + len(bundle.get("tool_outputs") or []),
         )
         human = "\n\n".join(
-            [*head, instruction, contract, _bundle_text(section, bundle, entries, tool_chars)]
+            [*head, instruction, contract, _bundle_text(section, bundle, entries, item_chars)]
         )
         messages = [
             SystemMessage(content=_SYSTEM),
@@ -801,12 +810,13 @@ class ReportComposer:
             )
             return None
 
-    def _tool_chars(self, prompt_chars: int, answers: int) -> int | None:
-        """How many characters of each tool answer this section may show, or ``None``.
+    def _item_chars(self, prompt_chars: int, answers: int) -> int | None:
+        """How many characters of each claim and tool answer this section may show, or ``None``.
 
         What the model's context window leaves after the section's output
-        budget and the rest of its prompt, shared evenly across the answers:
-        ``((window − output budget) × chars per token − prompt) ÷ answers``,
+        budget and the rest of its prompt, shared evenly across the claims and
+        the answers: ``((window − output budget) × chars per token − prompt) ÷
+        items``,
         the arithmetic the analysts' tool-output cap uses. ``None`` when no
         window is known (the answers are shown whole), ``0`` when nothing is
         left. A fixed 1,200 characters used to stand here.
