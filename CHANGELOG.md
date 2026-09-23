@@ -3487,6 +3487,25 @@ change landed on `main`.
   `null` value as "not measured", never as 0.0 or as no consensus. A mock run's
   analysts file no claims, so a mock run now takes this path too.
 
+- **The time cap salvages, like the step cap and a full window.** A static
+  analyst on a model at about 100 s a turn reached its 1,500 s budget at step 28
+  of 40 and was aborted ("exceeded the 1530s hard cap; aborting this analyst"),
+  and everything it had gathered was lost with no final-answer turn. The soft
+  timeout was reported as the hard cap and handled like it. The loop now times
+  its own model turns and ends its tool phase once the time left cannot hold
+  the longest turn it has seen plus a final-answer reserve — that turn × 1.5,
+  at least the salvage's 60 s floor — and the salvage writes the answer from
+  what was gathered. At that pace with one 240 s turn, the reserve is 360 s and
+  the tool phase ends with 600 s left. A turn longer than any measured that
+  still reaches the budget ends the phase there, with what was gathered kept,
+  rather than failing the analyst. The budget record, the
+  `stage_ended_at_cap` event and `run_summary.budget` say `time`, with a detail
+  naming the time left, the longest turn and the reserve.
+  **Upgrading:** an analyst on a slow model now stops calling tools before its
+  budget and returns claims where it used to fail with a `TimeoutError`, so
+  such a run makes fewer tool calls and has one more analyst reporting; the
+  hard cap is unchanged.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**

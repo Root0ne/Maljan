@@ -1233,6 +1233,19 @@ of each loop; `stage_ended_at_cap` says which cap ended the work when one did
 `run_summary.budget` sums the spend per agent, with the caps it hit, so a
 reader learns that an analyst ran out of steps from the summary and the
 pipeline panel rather than from a log line.
+The time cap ends a tool phase the way the step cap and a full window do: with
+the salvage writing the answer from what was gathered. It has to end early to
+do that, because the thirty seconds of grace past the budget are a fraction of
+one turn of a slow model. So the loop times its own model turns, and once the
+time left cannot hold the longest turn it has seen plus a reserve for the
+final answer — that turn × 1.5, the margin the per-call timeouts use, and at
+least the salvage's 60 s floor — it stops calling tools and salvages. On a
+model at about 100 s a turn with one 240 s turn, the reserve is 360 s and the
+tool phase ends with 600 s of a 1,500 s budget left. A turn longer than any
+measured can still reach the budget itself; the loop then keeps what it
+gathered instead of aborting the analyst, and the salvage gets what time is
+left. Either way the cap is recorded as `time`. The hard cap stays the hard
+cap.
 That stamp is what makes a report checkable: the model can cite the call it read
 a fact from, a report section lists the entries it was built from, and `GET
 /api/v1/jobs/{id}/evidence` serves those entries back.

@@ -428,6 +428,49 @@ _SHARED_STAND_IN_ASKS_LOCK = threading.RLock()
 HARD_CAP_GRACE = 30.0
 
 
+class TurnPace:
+    """How long this loop's model turns take, and whether the time left still fits one.
+
+    A loop that reaches its time budget mid-turn has nothing to write its
+    answer with: the thirty seconds of grace are a tenth of one turn of a model
+    that takes a hundred. So the loop measures its own turns — the time from
+    one step of the graph to the step whose last message is the model's — and
+    ends its tool phase while what is left still holds the next turn and the
+    final-answer turn after it. The final turn is given the longest turn seen
+    times ``TIMEOUT_MARGIN``, the margin the per-call timeouts use for the same
+    uncertainty (``llm.generation_rate``), and never less than the salvage's own
+    minimum. Nothing is decided before the model has taken a turn.
+    """
+
+    def __init__(self) -> None:
+        self._last = time.monotonic()
+        self.turns: list[float] = []
+
+    def note(self, snapshot: Any) -> None:
+        """Record one step of the graph; a step that ends on the model's turn is timed."""
+        now = time.monotonic()
+        messages = (snapshot or {}).get("messages") if isinstance(snapshot, dict) else None
+        last = messages[-1] if messages else None
+        if getattr(last, "type", "") == "ai":
+            self.turns.append(now - self._last)
+        self._last = now
+
+    def longest(self) -> float:
+        return max(self.turns) if self.turns else 0.0
+
+    def reserve(self) -> float:
+        """The seconds kept for the final-answer turn."""
+        from maljan.llm.generation_rate import TIMEOUT_MARGIN
+
+        return max(self.longest() * TIMEOUT_MARGIN, float(_SYNTHESIS_MIN_SECONDS))
+
+    def leaves_no_room_for(self, seconds_left: float) -> bool:
+        """Whether another turn would eat into the final answer's reserve."""
+        if not self.turns:
+            return False
+        return seconds_left < self.longest() + self.reserve()
+
+
 def _model_that_closes_off_truncated_calls(llm: Any, tools: list, repair: Any) -> Any:
     """``llm`` with the repair appended, or ``llm`` when it cannot be appended to.
 
@@ -2900,6 +2943,10 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         # Whether the server, rather than the budget, said the window was full.
         window_full = False
+        # Whether the time budget ended the tool phase, and the sentence saying
+        # how: the loop's own turn times against what was left.
+        time_capped = False
+        time_detail = ""
 
         # Run the ReAct coroutine on the shared, never-closing agent
         # loop (see ``_get_agent_loop``) instead of a throwaway per-call loop.
@@ -2941,12 +2988,14 @@ class BaseAnalyst(BudgetMeter, ABC):
                 alive until the loop's finalizer gets to it, and on a box with
                 one llama-server slot a run that is still alive is not free.
                 """
+                nonlocal time_capped, time_detail
                 stream: Any = agent_executor.astream(
                     {"messages": messages},
                     {"recursion_limit": max_steps},
                     stream_mode="values",
                 )
                 spoken: set[str] = set()
+                pace = TurnPace()
                 async with contextlib.aclosing(stream) as snapshots:
                     try:
                         async for snapshot in snapshots:
@@ -2973,6 +3022,28 @@ class BaseAnalyst(BudgetMeter, ABC):
                                     "left for a tool answer; synthesising from what it "
                                     "gathered.",
                                     self.name,
+                                )
+                                break
+                            # And the same end for the clock, early enough for
+                            # the answer: once what is left cannot hold another
+                            # turn at this model's own pace and the final-answer
+                            # turn after it, the tool phase ends here and the
+                            # salvage below writes up what was gathered. At the
+                            # time budget itself there is no turn left to write.
+                            pace.note(snapshot)
+                            left = budget.seconds_left()
+                            if pace.leaves_no_room_for(left):
+                                time_capped = True
+                                time_detail = (
+                                    f"{left:.0f}s of {float(timeout):.0f}s left, and a turn "
+                                    f"of this model takes up to {pace.longest():.0f}s; "
+                                    f"{pace.reserve():.0f}s kept for the final answer"
+                                )
+                                self.logger.warning(
+                                    "%s ReAct loop ended on its time budget: %s; "
+                                    "synthesising from what it gathered.",
+                                    self.name,
+                                    time_detail,
                                 )
                                 break
                     except GraphRecursionError:
@@ -3036,6 +3107,27 @@ class BaseAnalyst(BudgetMeter, ABC):
                         msg_count,
                     )
                     return result
+                except TimeoutError:
+                    # The time budget itself, reached inside one turn or one
+                    # tool call longer than any the loop had seen. What was
+                    # gathered is kept and handed on rather than dropped with
+                    # the analyst; the salvage gets whatever time is left,
+                    # which may be none. Any other timeout is not this one.
+                    if budget.seconds_left() > 1.0 or not recorder.entries:
+                        raise
+                    nonlocal time_capped, time_detail
+                    time_capped = True
+                    time_detail = (
+                        f"the loop reached its {float(timeout):.0f}s budget inside a "
+                        "turn longer than any it had measured"
+                    )
+                    self.logger.warning(
+                        "%s ReAct loop reached its %ds time budget mid-turn; keeping "
+                        "what it gathered.",
+                        self.name,
+                        timeout,
+                    )
+                    return dict(latest)
                 except APIConnectionError as conn_exc:
                     last_conn_exc = conn_exc
                     if _attempt < 2:
@@ -3187,7 +3279,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # read another answer, is in the same place as one that spent its
         # steps: it has evidence and no answer, and the salvage is what turns
         # the first into the second.
-        ended_early = repeats.ending_the_loop() or no_room or window_full
+        ended_early = repeats.ending_the_loop() or no_room or window_full or time_capped
         self._record_react_loop(hit_step_cap=hit_step_cap)
         if repeats.ending_the_loop():
             cap, why = "repeats", f"{repeats.served_repeats} repeated tool call(s)"
@@ -3195,6 +3287,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             cap, why = "no_room", "the conversation had no room left for a tool answer"
         elif window_full:
             cap, why = "no_room", "the model server reported its context window full"
+        elif time_capped:
+            cap, why = "time", time_detail
         elif hit_step_cap:
             cap, why = "steps", ""
         else:
