@@ -23,6 +23,11 @@ from app.models.user import User
 
 logger = get_logger("service.analysis")
 
+# How many completed runs the dashboard's "Tools used" list reads by default,
+# and the most a caller may ask it to read.
+TOOL_USAGE_RUNS = 20
+TOOL_USAGE_MAX_RUNS = 100
+
 
 class JobEnqueueError(RuntimeError):
     """Raised when ARQ enqueue fails so the route can return 503."""
@@ -269,6 +274,64 @@ class AnalysisService:
             "verdict_distribution": verdict_counts,
             "avg_duration_seconds": round(float(avg_duration), 1) if avg_duration else None,
         }
+
+    async def get_tool_usage(self, user: User, limit: int = TOOL_USAGE_RUNS) -> dict[str, Any]:
+        """Which tools the caller's latest completed runs called, and how often.
+
+        Read from each run's ``run_summary.evidence.by_tool``, the per-tool
+        ledger count the report was built with, so the dashboard's bars and the
+        Summary tab's evidence counts come from one record. Only the last
+        ``limit`` completed runs are read: the question is what recent runs
+        leaned on, and a whole-history scan of a JSON column on every landing
+        page load is a cost that question does not need.
+        """
+        rows = await self.db.execute(tool_usage_query(user.id, limit))
+        return tally_tool_usage([row[0] for row in rows.all()], limit)
+
+
+def tool_usage_query(user_id: uuid.UUID, limit: int) -> Any:
+    """The per-tool counts of one user's latest ``limit`` completed runs.
+
+    Newest report first, so "the last N" means the N that finished last. Only
+    the one JSON path is selected rather than the whole summary, which carries
+    the run's settings snapshot and every failure row.
+    """
+    from app.models.report import AnalysisReport
+
+    return (
+        select(AnalysisReport.run_summary["evidence"]["by_tool"])
+        .join(AnalysisJob, AnalysisReport.job_id == AnalysisJob.id)
+        .where(AnalysisJob.created_by == user_id, AnalysisJob.status == "completed")
+        .order_by(AnalysisReport.created_at.desc())
+        .limit(limit)
+    )
+
+
+def tally_tool_usage(by_tool_rows: list[Any], limit: int) -> dict[str, Any]:
+    """Per-tool call counts summed across runs, and how many runs used each.
+
+    ``runs`` is every completed run read, including one whose report predates
+    the evidence block or called nothing, so "over the last 12 runs" names the
+    runs the bars stand on. A count that is not a positive integer is not a
+    call and is left out rather than coerced.
+    """
+    calls: dict[str, int] = {}
+    used_in: dict[str, int] = {}
+    for by_tool in by_tool_rows:
+        if not isinstance(by_tool, dict):
+            continue
+        for tool, count in by_tool.items():
+            if not isinstance(tool, str) or not tool:
+                continue
+            if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+                continue
+            calls[tool] = calls.get(tool, 0) + count
+            used_in[tool] = used_in.get(tool, 0) + 1
+    tools = [
+        {"tool": tool, "calls": calls[tool], "runs": used_in[tool]}
+        for tool in sorted(calls, key=lambda name: (-calls[name], name))
+    ]
+    return {"limit": limit, "runs": len(by_tool_rows), "tools": tools}
 
 
 async def _enqueue_analysis(arq: Any, job_id: uuid.UUID) -> Any:
