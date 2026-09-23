@@ -111,6 +111,21 @@ class TestTheLines:
             "[ev_0003] signature: authenticode present (subject Simon Tatham, issuer Sectigo)"
         )
 
+    def test_every_digest_is_printed_whole(self) -> None:
+        """A 16-character prefix was copied out as an MD5 indicator and refused."""
+        digests = {
+            "sha256": "6" * 64,
+            "md5": "7" * 32,
+            "sha1": "e" * 40,
+            "imphash": "d" * 32,
+            "ssdeep": "3072:" + "A" * 60 + ":" + "B" * 30,
+        }
+        line = render_pack([_entry("hashes", digests, seq=1)], 0)
+
+        for key, value in digests.items():
+            assert f"{key} {value}" in line
+        assert "…" not in line
+
     def test_no_signature_is_said_as_none(self) -> None:
         payload = {"format": "pe", "authenticode": {"present": False}}
         assert render_pack([_entry("signing_info", payload)], 0) == "[ev_0001] signature: none"

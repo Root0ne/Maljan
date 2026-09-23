@@ -76,7 +76,7 @@ class TestWhatTheBlockSays:
         lines = render_run_state(STATE).splitlines()
         assert lines[0] == f"sample: {'c' * 64}, pe windows, submitted as putty.exe"
         assert lines[1].startswith("[ev_0001] identity: pe windows, 1,633,792 bytes")
-        assert lines[2].startswith("[ev_0002] hashes: sha256 cccccccccccccccc…")
+        assert lines[2] == f"[ev_0002] hashes: sha256 {'c' * 64}, md5 {'d' * 32}"
         assert lines[3] == "[ev_0003] signature: authenticode present (subject Simon Tatham)"
         assert lines[4].startswith("[ev_0005] reputation: ")
 
