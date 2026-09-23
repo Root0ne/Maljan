@@ -45,6 +45,12 @@ from maljan.analysis.technique_ids import technique_ids_in
 from maljan.core.logger import logger
 from maljan.extractors.sample_identity import ARCHIVE_FILE_TYPES, DOCUMENT_FILE_TYPES
 from maljan.pipeline.conditions import TriageFacts
+from maljan.pipeline.sandbox_status import (
+    OBSERVED,
+    STATUS_TOOL,
+    observed_report,
+    sandbox_status,
+)
 from maljan.providers import sandbox_tools
 from maljan.schemas.evidence import LedgerEntry, apply_budget
 from maljan.tools import binary, identify, knowledge, pcap, rules, strings
@@ -545,7 +551,7 @@ class _Pack:
         )
         if found is not None:
             self.capa_hits = len(found.get("capabilities") or [])
-        report = self.inputs.sandbox_report
+        report = observed_report(self.inputs.sandbox_report)
         if report:
             self.record(
                 "sigma_match_sandbox",
@@ -574,7 +580,7 @@ class _Pack:
                 {"api_names": names, "platform": platform},
                 lambda: knowledge.api_capability(names, platform=platform),
             )
-        report = self.inputs.sandbox_report
+        report = observed_report(self.inputs.sandbox_report)
         if report:
             commands = _command_lines(report)
             self.record(
@@ -584,7 +590,18 @@ class _Pack:
             )
 
     def _sandbox_summary(self) -> None:
-        report = self.inputs.sandbox_report
+        """The sandbox views, after the one sentence that says what the report is.
+
+        Where no sandbox ran — no report, or the mock sandbox's empty stand-in
+        — that sentence is all there is: a stand-in's empty sections rendered
+        as "0 processes" and "no network activity recorded" read as a
+        detonation that did nothing. A recorded fixture is said to be one
+        before its contents. A live sandbox's report needs no sentence.
+        """
+        found = sandbox_status(self.inputs.sandbox_report)
+        if found.status != OBSERVED:
+            self.record(STATUS_TOOL, {}, found.as_entry)
+        report = observed_report(self.inputs.sandbox_report)
         if not report:
             return
         for tool, call in (
@@ -1321,6 +1338,7 @@ _GROUP_LABELS: dict[str, str] = {
     "sandbox_signatures": "sandbox signatures",
     "sandbox_dropped_files": "sandbox dropped files",
     "sandbox_channels": "sandbox channels",
+    STATUS_TOOL: "sandbox",
     "pcap_summary": "pcap",
     "reputation": "reputation",
     "get_file_report": "reputation",
@@ -1350,6 +1368,7 @@ _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "sandbox_signatures": _sandbox_signatures,
     "sandbox_dropped_files": _sandbox_dropped,
     "sandbox_channels": _sandbox_channels,
+    STATUS_TOOL: lambda data: str(data.get("statement") or ""),
     "pcap_summary": _pcap,
     "function_matches": _function_matches,
 }

@@ -66,6 +66,8 @@ from maljan.pipeline.outcome import (
     verdict_reading,
 )
 from maljan.pipeline.run_state import render_run_state
+from maljan.pipeline.sandbox_status import NOT_RUN as SANDBOX_NOT_RUN
+from maljan.pipeline.sandbox_status import sandbox_status
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
 from maljan.pipeline.triage_pack import (
@@ -288,6 +290,24 @@ def _sandbox_report_is_synthetic(state: AnalysisState) -> bool:
     """
     report = state.get("sandbox_report")
     return isinstance(report, dict) and bool(report.get("synthetic"))
+
+
+def sandbox_degradation_reason(report: Any) -> str | None:
+    """The degradation reason a run whose sandbox never ran carries, or ``None``.
+
+    No report at all keeps the reason it always had. The mock sandbox's empty
+    stand-in is the same absence and used to carry none, because it is a
+    non-empty dict: a scored run's judge and report were told nothing was
+    missing while the pack listed "0 processes" as an observation.
+    """
+    if not isinstance(report, dict) or not report:
+        return "no sandbox report (dynamic detonation unavailable) — static-only evidence"
+    if sandbox_status(report).status == SANDBOX_NOT_RUN:
+        return (
+            "no sandbox ran (the mock sandbox has no recorded report for this sample) "
+            "— static-only evidence"
+        )
+    return None
 
 
 def _sandbox_fed(role: str) -> bool:
@@ -3187,10 +3207,9 @@ def make_judge_node(
             # confidence shipped for a verdict formed without any dynamic
             # evidence. Verified live: the only operator signal was a single
             # "Sandbox submission failed" line in the worker log.
-            if not state.get("sandbox_report"):
-                _degradation_reasons.append(
-                    "no sandbox report (dynamic detonation unavailable) — static-only evidence"
-                )
+            _no_sandbox = sandbox_degradation_reason(state.get("sandbox_report"))
+            if _no_sandbox:
+                _degradation_reasons.append(_no_sandbox)
             # A container we accept but cannot open. A .docm reaches here
             # legitimately — macro documents are among the commonest Windows
             # carriers, so rejecting them would be wrong — but the only analysis
@@ -3423,6 +3442,7 @@ def make_judge_node(
                     .set_token_usage(container.get_token_ledger().snapshot())
                     .set_truncation(_truncation_snapshot(container))
                     .set_triage(_triage_facts)
+                    .set_sandbox(state.get("sandbox_report"))
                     .set_nudge(state.get("nudge_retry_modes") or {})
                     .set_budget(state.get("budget_records") or {})
                     .set_tool_latency(state.get("evidence_ledger") or [])

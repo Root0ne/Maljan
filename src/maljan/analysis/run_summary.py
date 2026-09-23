@@ -520,6 +520,11 @@ class RunSummary:
     # a slow tool could not be told from a slow model. ``None`` on a run whose
     # ledger holds no timed call.
     tool_latency: dict[str, Any] | None = None
+    # What the run's sandbox report is, when it is not a live sandbox's:
+    # ``{status, statement}`` from ``pipeline.sandbox_status`` — no sandbox
+    # ran, or the report is a recorded fixture. ``None`` when a sandbox
+    # observed the run, which needs no sentence.
+    sandbox: dict[str, str] | None = None
     # ``dedupe`` is deliberately not a field here. What the report folded is
     # counted while the report's sections are built, which happens after this
     # object exists, so the report builder writes ``dedupe`` onto the summary
@@ -550,6 +555,7 @@ class RunSummary:
             f"**Verdict**: {self.final_decision}  ",
             f"**STIX objects**: {self.stix_object_count}  ",
             f"**Elapsed**: {self.elapsed_seconds:.1f}s  ",
+            *([f"**Sandbox**: {self.sandbox['statement']}  "] if self.sandbox else []),
             *stage_duration_lines(self.stages),
             *tool_latency_lines(self.tool_latency),
             "",
@@ -822,6 +828,7 @@ class RunSummary:
             "nudge": dict(self.nudge) if self.nudge else None,
             "budget": dict(self.budget) if self.budget else None,
             "tool_latency": dict(self.tool_latency) if self.tool_latency else None,
+            "sandbox": dict(self.sandbox) if self.sandbox else None,
         }
 
         if self.validation:
@@ -928,6 +935,7 @@ class RunSummaryBuilder:
         self._profile: dict[str, Any] | None = None
         self._stages: list[dict[str, Any]] = []
         self._triage: dict[str, Any] | None = None
+        self._sandbox: dict[str, str] | None = None
         self._nudge: dict[str, Any] | None = None
         self._budget: dict[str, Any] | None = None
         self._tool_latency: dict[str, Any] | None = None
@@ -1018,6 +1026,18 @@ class RunSummaryBuilder:
                 "failed": int(facts.get("failed") or 0),
                 "duration_ms": int(facts.get("duration_ms") or 0),
             }
+        return self
+
+    def set_sandbox(self, report: Any) -> RunSummaryBuilder:
+        """What the run's sandbox report is, when no live sandbox observed the run."""
+        from maljan.pipeline.sandbox_status import OBSERVED, sandbox_status
+
+        found = sandbox_status(report)
+        self._sandbox = (
+            None
+            if found.status == OBSERVED
+            else {"status": found.status, "statement": found.statement}
+        )
         return self
 
     def set_degraded_mode(
@@ -1290,6 +1310,7 @@ class RunSummaryBuilder:
             nudge=self._nudge,
             budget=self._budget,
             tool_latency=self._tool_latency,
+            sandbox=self._sandbox,
         )
 
 

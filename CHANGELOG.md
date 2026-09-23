@@ -1345,6 +1345,24 @@ change landed on `main`.
   **Upgrading:** the reputation line of a pack is longer (about 700 characters
   for 50 labels) and counts against `reporting.upstream_findings_max_chars`
   like every other line.
+- **No sandbox observation is stated where no sandbox ran.** The mock
+  sandbox's empty stand-in for a sample it has no fixture for used to reach
+  the triage pack as "sandbox processes: 0 processes" and "no network activity
+  recorded", and a report built on it spoke of what the sample did during
+  sandbox execution. Where no sandbox ran — no report, or the stand-in — the
+  pack now writes one `sandbox_status` entry that says so in one sentence and
+  none of the sandbox views, `sigma_match_sandbox` or `lolbin_lookup`; the run
+  carries the degradation reason `no sandbox ran …`; `run_summary.sandbox`
+  holds `{status, statement}` and the report's run summary prints it; and the
+  entry becomes the report's *Sandbox* section, on the console's dynamic tab.
+  A report the mock read from a fixture file is marked `recorded_fixture` and
+  said to be a recorded fixture, not a live detonation, before its contents.
+  A live sandbox's report is read as before.
+  **Upgrading:** a run with no sandbox report, or with the mock's stand-in,
+  has one more pack entry (`sandbox_status`) before the reputation lookup, so
+  that lookup's ledger id moves by one; a stand-in run is now marked degraded
+  with its reason, as a run with no report already was; `run_summary` has a
+  `sandbox` key (`null` when a sandbox observed the run).
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was

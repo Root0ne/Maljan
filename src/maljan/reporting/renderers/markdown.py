@@ -1022,6 +1022,12 @@ class MarkdownRenderer:
         verdict = run_summary.get("final_decision")
         if verdict:
             lines.append(f"- Verdict: {verdict}")
+        # Said whenever no live sandbox observed the run: a reader of the
+        # report's prose has to be able to tell a detonation that did nothing
+        # from none at all.
+        sandbox = run_summary.get("sandbox")
+        if isinstance(sandbox, dict) and sandbox.get("statement"):
+            lines.append(f"- Sandbox: {sandbox['statement']}")
         negotiation = run_summary.get("negotiation") or {}
         if negotiation:
             rounds = negotiation.get("rounds_completed")

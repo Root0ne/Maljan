@@ -1088,6 +1088,23 @@ each class of external tool, so the choice is configuration rather than code.
 - **Sandbox** — `mock` (the default), `cape2`, `triage`, `upload` for a report
   produced elsewhere, and `rest`, a mapping-driven adapter for a sandbox
   Maljan has never heard of.
+
+**No sandbox observation where no sandbox ran.** `mock` executes nothing: it
+returns a recorded fixture for a sample it has one for (marked
+`recorded_fixture`), and an empty stand-in marked `synthetic` for any other.
+`pipeline.sandbox_status` reads the run's report once — no report or a
+stand-in is *not run*, a fixture is *recorded fixture*, anything else is
+*observed* — and every reader says the same thing. Where no sandbox ran, the
+triage pack writes one `sandbox_status` entry with the sentence that says so
+(`[ev_0010] sandbox: No sandbox ran for this sample: …`) and none of the
+sandbox views, `sigma_match_sandbox` or `lolbin_lookup`, so a stand-in's empty
+sections are never rendered as "0 processes"; the dynamic and network analysts
+are skipped; the run carries the degradation reason `no sandbox ran …` (or,
+with no report at all, the reason it always had); `run_summary.sandbox` holds
+`{status, statement}` and the report's run summary prints it; and the entry
+becomes the report's *Sandbox* section, which the console files on the dynamic
+tab. A recorded fixture is said to be one — the same entry, then the sandbox
+views as before. A live sandbox's report is read as it always was.
 - **Tool servers (MCP)** — additional servers declared in the settings store,
   each with the tools it is allowed to expose and the agents allowed to call
   it.
