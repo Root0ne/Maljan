@@ -17,7 +17,7 @@ import { getErrorMessage } from "@/lib/errors";
 import { ENRICH_BUTTON_LABEL, ENRICH_STATUS_MESSAGE } from "@/lib/enrichment";
 import { degradedBannerText } from "@/lib/degradedBanner";
 import { validationRowText } from "@/lib/validationRows";
-import { SEVERITY_STYLES } from "@/types/malware-report";
+import { severityTone } from "@/lib/severity";
 import type { FpWarning, MalwareReport } from "@/types/malware-report";
 
 function countNetworkIOCs(mr: MalwareReport): {
@@ -125,9 +125,7 @@ function MalwareReportSummary({ mr }: { mr: MalwareReport }) {
   const jobId = report?.job_id ?? job?.id ?? "";
   // A report whose judge assessed no severity says so. Falling back to
   // "Informational" would print a rating the run never established.
-  const sevStyle = mr.severity
-    ? (SEVERITY_STYLES[mr.severity.rating] ?? SEVERITY_STYLES.Informational)
-    : SEVERITY_STYLES.Informational;
+  const sevStyle = severityTone(mr.severity?.rating);
   const net = countNetworkIOCs(mr);
   const ttpCount = mr.ttp_mappings.length;
   const shortHash = mr.identity.hashes.sha256.slice(0, 12);

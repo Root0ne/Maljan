@@ -3,14 +3,8 @@
 import { useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { useReport } from "@/app/(app)/analysis/[id]/layout";
+import { SEVERITY_LADDER, severityRank, severityTone, severityWord, sortBySeverity } from "@/lib/severity";
 import { ruleMatches } from "./ruleMatches";
-
-const SEVERITY_STYLES: Record<string, { dots: string; text: string }> = {
-  critical: { dots: "bg-status-red", text: "text-status-red" },
-  high: { dots: "bg-status-orange", text: "text-status-orange" },
-  medium: { dots: "bg-status-blue", text: "text-status-blue" },
-  low: { dots: "bg-text-muted", text: "text-text-muted" },
-};
 
 function Section({
   title,
@@ -45,16 +39,23 @@ export default function RulesTab() {
 
   /* One reading of the run's rule matches, shared with the tab rule that
    * decides whether this panel is reachable at all (`ruleMatches.ts`). */
-  const { yara: yaraMatches, sigma: sigmaMatches } = useMemo(
+  const { yara: yaraMatches, sigma: unsortedSigma } = useMemo(
     () => ruleMatches(report?.agent_findings),
     [report?.agent_findings],
+  );
+  /* Highest rung first, by the ladder's rank; matches on one rung keep the
+   * order the layer recorded them in. */
+  const sigmaMatches = useMemo(
+    () => sortBySeverity(unsortedSigma, (r) => r.severity),
+    [unsortedSigma],
   );
 
   const severityCounts = useMemo(
     () =>
       sigmaMatches.reduce(
         (acc, r) => {
-          acc[r.severity] = (acc[r.severity] || 0) + 1;
+          const word = severityWord(r.severity);
+          acc[word] = (acc[word] || 0) + 1;
           return acc;
         },
         {} as Record<string, number>,
@@ -130,39 +131,35 @@ export default function RulesTab() {
               Sigma Rules
             </span>
             <div className="flex items-center gap-3">
-              {(["critical", "high", "medium", "low"] as const).map((sev) => (
+              {/* The ladder's rungs in its order, each that has a match. A
+                  rung at zero says nothing the rows below do not. */}
+              {SEVERITY_LADDER.filter((sev) => severityCounts[sev]).map((sev) => (
                 <span key={sev} className="flex items-center gap-1 text-xs text-text-secondary">
-                  <span className="capitalize">{sev}</span>
-                  <span className="text-text-muted">({severityCounts[sev] || 0})</span>
+                  <span>{sev}</span>
+                  <span className="text-text-muted">({severityCounts[sev]})</span>
                 </span>
               ))}
             </div>
           </div>
           <div className="divide-y divide-border-light">
             {sigmaMatches.map((rule, i) => {
-              const style = SEVERITY_STYLES[rule.severity];
+              const style = severityTone(rule.severity);
               return (
                 <div
                   key={`${rule.rule_name}-${i}`}
                   className="flex items-start gap-3 px-4 py-3 hover:bg-bg-hover"
                 >
                   <div className="flex items-center gap-1 mt-0.5 shrink-0 w-20">
-                    <div className="flex gap-0.5">
-                      {Array.from({
-                        length:
-                          rule.severity === "critical"
-                            ? 4
-                            : rule.severity === "high"
-                              ? 3
-                              : rule.severity === "medium"
-                                ? 2
-                                : 1,
-                      }).map((_, j) => (
-                        <span key={j} className={`w-1.5 h-1.5 rounded-full ${style.dots}`} />
-                      ))}
+                    {/* One dot per rung above the floor: the rank, drawn. */}
+                    <div className="flex gap-0.5" aria-hidden="true">
+                      {Array.from({ length: Math.max(1, severityRank(rule.severity)) }).map(
+                        (_, j) => (
+                          <span key={j} className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
+                        ),
+                      )}
                     </div>
-                    <span className={`text-xs capitalize ml-1 ${style.text}`}>
-                      {rule.severity}
+                    <span className={`text-xs ml-1 ${style.text}`}>
+                      {severityWord(rule.severity)}
                     </span>
                   </div>
                   <div className="flex-1 min-w-0">

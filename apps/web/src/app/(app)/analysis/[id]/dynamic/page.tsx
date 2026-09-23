@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useReport } from "../layout";
 import type { ProcessNode } from "@/types/malware-report";
 import { confidenceClass } from "@/lib/report-utils";
+import { scoreTone } from "@/lib/severity";
 import Th from "@/components/ui/Th";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import { hasSection, isCoveredBySection, sectionsForTab } from "@/components/analysis/reportSections";
@@ -163,13 +164,7 @@ export default function DynamicTab() {
               <div key={i} className="p-4">
                 <div className="flex items-start gap-3">
                   <span
-                    className={`text-[11px] font-mono px-1.5 py-0.5 rounded shrink-0 ${
-                      sig.severity >= 7
-                        ? "bg-status-red/10 text-status-red"
-                        : sig.severity >= 4
-                          ? "bg-status-orange/10 text-status-orange"
-                          : "bg-bg-active text-text-muted"
-                    }`}
+                    className={`text-[11px] font-mono px-1.5 py-0.5 rounded shrink-0 ${scoreTone(sig.severity).bg} ${scoreTone(sig.severity).text}`}
                   >
                     SEV {sig.severity}
                   </span>
