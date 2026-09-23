@@ -108,6 +108,17 @@ def build_capability_matrix(
         # The highest number any source put on this technique. Taken once, here,
         # rather than accumulated into the row as it was collected.
         confidence = max((float(c) for c in info.get("confidences") or ()), default=0.0)
+        # Who stated that number: the first source whose number it is.
+        stated_by = next(
+            (
+                who
+                for c, who in zip(
+                    info.get("confidences") or (), info.get("stated_by") or (), strict=True
+                )
+                if float(c) == confidence
+            ),
+            "",
+        )
         layers = info.get("layers") or []
         valid = bool(info.get("valid", True))
 
@@ -145,6 +156,7 @@ def build_capability_matrix(
                 evidence=evidence[:6],
                 confidence=max(0.0, min(1.0, confidence)),
                 confidence_stated=bool(info.get("confidences")),
+                confidence_source=stated_by,
                 contributing_layers=layers,
                 technique_id_valid=valid,
                 platforms=platforms,
@@ -307,9 +319,17 @@ def _collect_techniques(
         # analyst claim. A finding's technique ids reach the report through a
         # path no check has ever seen, so they leave this false and the caller
         # marks the row unpublished.
+        # ``stated_by`` names the producer of each confidence, index for index.
         return techniques.setdefault(
             tid,
-            {"evidence": [], "confidences": [], "layers": [], "valid": True, "claimed": False},
+            {
+                "evidence": [],
+                "confidences": [],
+                "stated_by": [],
+                "layers": [],
+                "valid": True,
+                "claimed": False,
+            },
         )
 
     # 1. The judge's bundle. An attack-pattern says the technique is in the
@@ -337,6 +357,7 @@ def _collect_techniques(
         if tid in unknown:
             row["valid"] = False
         row["confidences"].append(confidence)
+        row["stated_by"].append("the judge")
         for agent in agents:
             if agent and agent not in row["layers"]:
                 row["layers"].append(str(agent))
@@ -362,6 +383,7 @@ def _collect_techniques(
                     row["valid"] = False
                 row["confidences"].append(float(getattr(claim, "confidence", 0.0) or 0.0))
                 layer = getattr(isr, "domain", None) or agent_name or "agent"
+                row["stated_by"].append(f"the {layer} analyst")
                 if layer and str(layer) not in row["layers"]:
                     row["layers"].append(str(layer))
                 quote = getattr(claim, "claim", None) or getattr(claim, "evidence_ref", None) or ""
@@ -388,6 +410,7 @@ def _collect_techniques(
                         continue
                     row = _row(tid)
                     row["confidences"].append(confidence)
+                    row["stated_by"].append(f"the {layer} analyst, on a finding")
                     if layer and str(layer) not in row["layers"]:
                         row["layers"].append(str(layer))
                     if title and title not in row["evidence"]:

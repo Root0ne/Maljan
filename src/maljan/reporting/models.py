@@ -496,6 +496,9 @@ class CapabilityCell(BaseModel):
     # ``None`` on a row stored before the flag existed, where a 0.0 is read
     # the same way: no producer states a confidence of zero for a technique.
     confidence_stated: bool | None = None
+    # Who stated ``confidence``: "the judge", "the static analyst". Empty on a
+    # row with no stated number and on a row stored before it was recorded.
+    confidence_source: str = ""
     contributing_layers: list[str] = Field(default_factory=list)
     # ``False`` when the ATT&CK catalogue has no entry for this id and the
     # producer kept it after being told. The row stays — deleting an analyst's

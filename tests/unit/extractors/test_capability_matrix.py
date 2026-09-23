@@ -92,6 +92,38 @@ class TestItProjectsTheJudgeAndTheAnalysts:
         assert cells[0].contributing_layers == ["judge", "static", "dynamic"]
         assert mappings[0].is_corroborated is True
 
+    def test_the_cell_names_who_stated_its_number(self) -> None:
+        """The cell holds the highest number any source stated; the report
+        prints it with the name of the source that stated it."""
+        bundle = _bundle(
+            techniques=["T1055"],
+            relationships=[
+                {
+                    "type": "relationship",
+                    "x_maljan_technique_id": "T1055",
+                    "x_maljan_confidence": 0.9,
+                    "x_maljan_contributing_agents": ["static"],
+                }
+            ],
+        )
+        cells, _ = build_capability_matrix(
+            stix_output=bundle,
+            isr_reports={"static": _isr("static", _claim("T1055", 0.6))},
+        )
+        assert cells[0].confidence == 0.9
+        assert cells[0].confidence_source == "the judge"
+
+        cells, _ = build_capability_matrix(
+            stix_output=None, isr_reports={"static": _isr("static", _claim("T1059", 0.7))}
+        )
+        assert cells[0].confidence_source == "the static analyst"
+
+    def test_a_cell_nobody_put_a_number_on_names_nobody(self) -> None:
+        cells, _ = build_capability_matrix(
+            stix_output=_bundle(techniques=["T1055"]), isr_reports=None
+        )
+        assert cells[0].confidence_source == ""
+
     def test_an_analyst_claim_adds_its_own_evidence_quote(self) -> None:
         cells, _ = build_capability_matrix(
             stix_output=_bundle(techniques=["T1055"]),
