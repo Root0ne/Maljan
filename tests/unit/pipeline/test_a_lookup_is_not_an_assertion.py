@@ -56,7 +56,7 @@ SIMILAR = {
 }
 
 
-def _scout_ledger() -> list[Any]:
+def _lookup_heavy_ledger() -> list[Any]:
     """capa on the sample, then an analyst's lookups, as the run recorded them."""
     ledger = [_entry("capa", CAPA, 1, agent="pipeline"), _entry("similar_cases", SIMILAR, 2)]
     for seq, tid in enumerate(("T1027.005", "T1048.003", "T1106", "T1048.004", "T1044"), start=3):
@@ -77,7 +77,7 @@ class TestOnlyASourceThatReadTheSampleAsserts:
         assert knowledge.attck_lookup("T1048.004")["valid"] is False
         assert knowledge.attck_lookup("T1044")["valid"] is False
 
-        rows = corroboration({}, _scout_ledger())
+        rows = corroboration({}, _lookup_heavy_ledger())
 
         assert rows == {
             "T1027": {"asserted_by": ["capa"], "claimed_by": []},
@@ -93,7 +93,7 @@ class TestOnlyASourceThatReadTheSampleAsserts:
         )
         isrs = {"static": AgentISR(agent_id="static", domain="static", claims=[claim])}
 
-        rows = corroboration(isrs, _scout_ledger())
+        rows = corroboration(isrs, _lookup_heavy_ledger())
 
         assert rows["T1048.003"] == {"asserted_by": [], "claimed_by": ["static"]}
 
@@ -122,14 +122,14 @@ class TestEverySurfaceCountsTheSameRows:
     def test_the_per_source_count_names_no_lookup(self) -> None:
         summary = (
             RunSummaryBuilder(start_time=0.0)
-            .set_corroboration(corroboration({}, _scout_ledger()))
+            .set_corroboration(corroboration({}, _lookup_heavy_ledger()))
             ._techniques_by_layer
         )
 
         assert summary == {"capa": 2}
 
     def test_the_judge_s_evidence_block_names_no_lookup(self) -> None:
-        block = summarise({}, _scout_ledger())
+        block = summarise({}, _lookup_heavy_ledger())
 
         assert "attck_lookup" not in block
         assert "similar_cases" not in block
@@ -140,7 +140,7 @@ class TestEverySurfaceCountsTheSameRows:
     def test_the_report_line_counts_two_asserted(self) -> None:
         from maljan.reporting.renderers.markdown import MarkdownRenderer
 
-        rows = corroboration({}, _scout_ledger())
+        rows = corroboration({}, _lookup_heavy_ledger())
         text = MarkdownRenderer()._section_run_summary({"corroboration": rows})
 
         assert "2 asserted by a deterministic source" in text
