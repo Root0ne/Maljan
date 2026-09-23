@@ -81,9 +81,15 @@ on loopback port 8080.
 The evaluation harness behind the published measurements is no longer part of
 this tree; see [paper.md](paper.md).
 
+## Documentation site
+
+The pages under `docs/` are also built into a MkDocs Material site; preview it
+locally with `uv run --group docs mkdocs serve`.
+
 ## Continuous integration
 
-[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on pushes to
+[`.github/workflows/ci.yml`](https://github.com/Root0ne/Maljan/blob/dev/.github/workflows/ci.yml)
+runs on pushes to
 `main` and `dev` and on pull requests into `main`, `dev` or `feat/**`:
 
 | Job | Contents |
@@ -110,7 +116,7 @@ current. A **dependency submission** workflow posts the packages resolved in
 Python alerts follow the lockfile the way the console's follow
 `package-lock.json`. Secret scanning with push protection is on for the repository, and
 vulnerabilities are reported through private vulnerability reporting (see
-[SECURITY.md](../SECURITY.md)).
+[SECURITY.md](https://github.com/Root0ne/Maljan/blob/dev/SECURITY.md)).
 
 ## Conventions
 

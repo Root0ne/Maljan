@@ -95,7 +95,8 @@ production deployment has no interactive schema.
 ## Documentation
 
 Everything below lives in [docs/](docs/README.md) and is written against the
-code in this repository.
+code in this repository. The same set is published as a browsable site at
+<https://root0ne.github.io/Maljan/>.
 
 | Document | What it covers |
 | :-- | :-- |

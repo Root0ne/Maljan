@@ -15,7 +15,8 @@ only — no `.env` file is discovered or read. Construction never refuses;
 deployment does not have to be restarted once per missing variable.
 
 The full surface is documented in
-[`bootstrap.env.example`](../bootstrap.env.example). The table below is the
+[`bootstrap.env.example`](https://github.com/Root0ne/Maljan/blob/dev/bootstrap.env.example).
+The table below is the
 same contract in short form.
 
 | Variable | Required | Default | Notes |
