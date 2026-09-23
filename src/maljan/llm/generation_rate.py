@@ -245,11 +245,26 @@ def model_name_of(llm: Any) -> str:
             return model_name_of(models[min(int(llm.answering), len(models) - 1)])
         except Exception:  # noqa: BLE001 — a name is a label, never a failure
             return model_name_of(models[0])
+    name = type(llm).__name__
     for attr in ("model_name", "model"):
         value = getattr(llm, attr, None)
         if isinstance(value, str) and value:
-            return value
-    return type(llm).__name__
+            name = value
+            break
+    # Keyed by the server too: one tag served by a local and a remote Ollama is
+    # two paces. The label keeps scheme and host only, never a credential.
+    endpoint = _endpoint_of(llm)
+    return f"{name} @ {endpoint}" if endpoint else name
+
+
+def _endpoint_of(llm: Any) -> str:
+    for attr in ("openai_api_base", "base_url", "anthropic_api_url"):
+        value = getattr(llm, attr, None)
+        if isinstance(value, str) and value:
+            from maljan.core.model_assignments import endpoint_label
+
+            return endpoint_label(value)
+    return ""
 
 
 def attach_rate_meter(llm: Any, rates: GenerationRates | None, model: str | None = None) -> Any:

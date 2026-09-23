@@ -428,47 +428,112 @@ _SHARED_STAND_IN_ASKS_LOCK = threading.RLock()
 HARD_CAP_GRACE = 30.0
 
 
+# How long a final answer is expected to run, in tokens, when the reserve is
+# sized from the model's measured rate. The slow run's two final-answer-sized
+# calls took 222 s (the judge's verdict) and 158 s (the narrative) at 3.8
+# tokens a second: about 840 and 600 tokens. A structured report of a loop's
+# findings is of that size, so the reserve holds a thousand tokens at the
+# model's own pace — and never less than its longest measured turn allows.
+FINAL_ANSWER_EXPECTED_TOKENS = 1000
+
+
 class TurnPace:
-    """How long this loop's model turns take, and whether the time left still fits one.
+    """How long this loop's turns take, per answering model, and whether the time left fits one.
 
     A loop that reaches its time budget mid-turn has nothing to write its
     answer with: the thirty seconds of grace are a tenth of one turn of a model
-    that takes a hundred. So the loop measures its own turns — the time from
-    one step of the graph to the step whose last message is the model's — and
-    ends its tool phase while what is left still holds the next turn and the
-    final-answer turn after it. The final turn is given the longest turn seen
-    times ``TIMEOUT_MARGIN``, the margin the per-call timeouts use for the same
-    uncertainty (``llm.generation_rate``), and never less than the salvage's own
-    minimum. Nothing is decided before the model has taken a turn.
+    that takes a hundred. So the loop measures its own turns and ends its tool
+    phase while what is left still holds the next turn and the final-answer
+    turn after it.
+
+    A turn runs from one model answer to the next: the tools the model asked
+    for and the model's next call, which is what "one more turn" costs. Turns
+    are kept per answering model, and the turn on which a model list moved to
+    its next model is not measured at all: it holds the dead model's deadline,
+    which says nothing about the pace of the model that answered.
+
+    The final turn is given ``TIMEOUT_MARGIN`` (``llm.generation_rate``) times
+    the larger of the longest turn seen and, where the model's generation rate
+    is measured, ``FINAL_ANSWER_EXPECTED_TOKENS`` at that rate — and never less
+    than the salvage's own minimum. Nothing is decided before the answering
+    model has taken a measured turn.
     """
 
-    def __init__(self) -> None:
-        self._last = time.monotonic()
-        self.turns: list[float] = []
+    def __init__(self, rate_of: Callable[[], float | None] | None = None) -> None:
+        self._last_answer = time.monotonic()
+        self._rate_of = rate_of
+        self.turns: dict[str, list[float]] = {}
+        self.current = ""
 
-    def note(self, snapshot: Any) -> None:
-        """Record one step of the graph; a step that ends on the model's turn is timed."""
+    def note(self, snapshot: Any, default_model: str = "") -> None:
+        """Record one step of the graph; a step that ends on a model answer closes a turn."""
         now = time.monotonic()
         messages = (snapshot or {}).get("messages") if isinstance(snapshot, dict) else None
         last = messages[-1] if messages else None
-        if getattr(last, "type", "") == "ai":
-            self.turns.append(now - self._last)
-        self._last = now
+        if getattr(last, "type", "") != "ai":
+            return
+        from maljan.llm.fallback import turn_model
+
+        model, switched = turn_model(last, default_model)
+        self.current = model
+        if not switched:
+            self.turns.setdefault(model, []).append(now - self._last_answer)
+        self._last_answer = now
 
     def longest(self) -> float:
-        return max(self.turns) if self.turns else 0.0
+        return max(self.turns.get(self.current) or [0.0])
 
     def reserve(self) -> float:
         """The seconds kept for the final-answer turn."""
         from maljan.llm.generation_rate import TIMEOUT_MARGIN
 
-        return max(self.longest() * TIMEOUT_MARGIN, float(_SYNTHESIS_MIN_SECONDS))
+        needed = self.longest()
+        rate = self._rate_of() if self._rate_of is not None else None
+        if rate:
+            needed = max(needed, FINAL_ANSWER_EXPECTED_TOKENS / rate)
+        return max(needed * TIMEOUT_MARGIN, float(_SYNTHESIS_MIN_SECONDS))
 
     def leaves_no_room_for(self, seconds_left: float) -> bool:
         """Whether another turn would eat into the final answer's reserve."""
-        if not self.turns:
+        if not self.turns.get(self.current):
             return False
         return seconds_left < self.longest() + self.reserve()
+
+
+def without_unanswered_calls(messages: list) -> tuple[list, int]:
+    """The conversation with every tool call nothing answered taken off its turn.
+
+    A loop the clock ended right after a model turn holds that turn's calls
+    with no answer to them, and Anthropic, OpenAI and Gemini refuse such a
+    transcript outright. The model's own text of that turn stays; only the
+    calls that never ran go. Returns the conversation and how many calls went.
+    """
+    answered = {
+        str(getattr(message, "tool_call_id", "") or "")
+        for message in messages
+        if getattr(message, "type", "") == "tool"
+    }
+    kept: list = []
+    dropped = 0
+    for message in messages:
+        calls = list(getattr(message, "tool_calls", None) or [])
+        if getattr(message, "type", "") != "ai" or not calls:
+            kept.append(message)
+            continue
+        ran = [call for call in calls if str(call.get("id") or "") in answered]
+        if len(ran) == len(calls):
+            kept.append(message)
+            continue
+        dropped += len(calls) - len(ran)
+        kept.append(message.model_copy(update={"tool_calls": ran, "invalid_tool_calls": []}))
+    return kept, dropped
+
+
+def _model_label(llm: Any) -> str:
+    """The answering model's name, for a turn that does not carry its own."""
+    from maljan.llm.generation_rate import model_name_of
+
+    return model_name_of(llm)
 
 
 def _model_that_closes_off_truncated_calls(llm: Any, tools: list, repair: Any) -> Any:
@@ -2947,6 +3012,22 @@ class BaseAnalyst(BudgetMeter, ABC):
         # how: the loop's own turn times against what was left.
         time_capped = False
         time_detail = ""
+        # The time kept for the final answer when the clock ended the phase,
+        # and whether the budget ran out with nothing gathered.
+        final_reserve = 0.0
+        budget_ran_out_empty = False
+
+        def _rate_of_the_answering_model() -> float | None:
+            rates_of = getattr(getattr(self, "_container", None), "get_generation_rates", None)
+            if not callable(rates_of):
+                return None
+            try:
+                from maljan.llm.generation_rate import model_name_of
+
+                rate = rates_of().rate(model_name_of(self.llm))
+            except Exception:  # noqa: BLE001 — a missing rate leaves the turn floor
+                return None
+            return rate if isinstance(rate, int | float) else None
 
         # Run the ReAct coroutine on the shared, never-closing agent
         # loop (see ``_get_agent_loop``) instead of a throwaway per-call loop.
@@ -2988,14 +3069,14 @@ class BaseAnalyst(BudgetMeter, ABC):
                 alive until the loop's finalizer gets to it, and on a box with
                 one llama-server slot a run that is still alive is not free.
                 """
-                nonlocal time_capped, time_detail
+                nonlocal time_capped, time_detail, final_reserve
                 stream: Any = agent_executor.astream(
                     {"messages": messages},
                     {"recursion_limit": max_steps},
                     stream_mode="values",
                 )
                 spoken: set[str] = set()
-                pace = TurnPace()
+                pace = TurnPace(_rate_of_the_answering_model)
                 async with contextlib.aclosing(stream) as snapshots:
                     try:
                         async for snapshot in snapshots:
@@ -3030,14 +3111,16 @@ class BaseAnalyst(BudgetMeter, ABC):
                             # turn after it, the tool phase ends here and the
                             # salvage below writes up what was gathered. At the
                             # time budget itself there is no turn left to write.
-                            pace.note(snapshot)
+                            pace.note(snapshot, _model_label(self.llm))
                             left = budget.seconds_left()
                             if pace.leaves_no_room_for(left):
                                 time_capped = True
+                                final_reserve = pace.reserve()
                                 time_detail = (
-                                    f"{left:.0f}s of {float(timeout):.0f}s left, and a turn "
-                                    f"of this model takes up to {pace.longest():.0f}s; "
-                                    f"{pace.reserve():.0f}s kept for the final answer"
+                                    f"{left:.0f}s of {float(timeout):.0f}s left; the longest "
+                                    f"turn of {pace.current} (its tools and its next "
+                                    f"answer) took {pace.longest():.0f}s, and "
+                                    f"{final_reserve:.0f}s are kept for the final answer"
                                 )
                                 self.logger.warning(
                                     "%s ReAct loop ended on its time budget: %s; "
@@ -3113,9 +3196,12 @@ class BaseAnalyst(BudgetMeter, ABC):
                     # gathered is kept and handed on rather than dropped with
                     # the analyst; the salvage gets whatever time is left,
                     # which may be none. Any other timeout is not this one.
-                    if budget.seconds_left() > 1.0 or not recorder.entries:
+                    nonlocal time_capped, time_detail, budget_ran_out_empty
+                    if budget.seconds_left() > 1.0:
                         raise
-                    nonlocal time_capped, time_detail
+                    if not recorder.entries:
+                        budget_ran_out_empty = True
+                        raise
                     time_capped = True
                     time_detail = (
                         f"the loop reached its {float(timeout):.0f}s budget inside a "
@@ -3163,17 +3249,24 @@ class BaseAnalyst(BudgetMeter, ABC):
                     _invoke(), hard_timeout, label=f"react:{self.name}"
                 )
             except TimeoutError:
-                self.logger.critical(
-                    "%s ReAct agent exceeded the %ds hard cap; aborting this analyst.",
-                    self.name,
-                    hard_timeout,
-                )
-                self._record_budget(
-                    budget,
-                    [],
-                    "time",
-                    detail=f"the loop exceeded its {int(hard_timeout)}s hard cap",
-                )
+                # Two different walls. The soft budget with nothing gathered
+                # is not the hard cap, and is not said to be.
+                if budget_ran_out_empty:
+                    self.logger.critical(
+                        "%s ReAct agent reached its %ds budget with nothing gathered; "
+                        "aborting this analyst.",
+                        self.name,
+                        timeout,
+                    )
+                    detail = f"the loop reached its {int(timeout)}s budget with nothing gathered"
+                else:
+                    self.logger.critical(
+                        "%s ReAct agent exceeded the %ds hard cap; aborting this analyst.",
+                        self.name,
+                        hard_timeout,
+                    )
+                    detail = f"the loop exceeded its {int(hard_timeout)}s hard cap"
+                self._record_budget(budget, [], "time", detail=detail)
                 raise
             except AnalystError:
                 raise
@@ -3293,6 +3386,15 @@ class BaseAnalyst(BudgetMeter, ABC):
             cap, why = "steps", ""
         else:
             cap, why = None, ""
+        # A turn the loop ended before its calls ran — the clock breaks right
+        # after the model answers — leaves calls nothing answered, which a
+        # hosted provider refuses to be sent. They go; the turn's text stays,
+        # and the record says they did not run.
+        msgs, unrun = without_unanswered_calls(msgs)
+        if unrun:
+            note = f"{unrun} tool call(s) of the last turn were not run"
+            why = f"{why}; {note}" if why else note
+            self.logger.warning("%s: %s.", self.name, note)
         self._record_budget(budget, msgs, cap, detail=why)
         self._budget_tick(budget, msgs, final=True, ledger_entries=len(recorder.entries))
         # Counted above, where it cost a step; not sent back to a model, which
@@ -3312,6 +3414,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             # the hard cap the loop was already inside. Measured 2026-08-11:
             # 109.5 s loop + a fresh 1,500 s synthesis = 1,677 s against a
             # 1,530 s cap, and zero techniques out the other side.
+            if time_capped:
+                self._give_the_final_turn(final_reserve, float(timeout) - elapsed)
             synthesized = self._force_final_synthesis(msgs, timeout, elapsed)
             if synthesized.strip() and not _RECURSION_STOP_RE.search(synthesized):
                 content = synthesized
@@ -3342,9 +3446,29 @@ class BaseAnalyst(BudgetMeter, ABC):
             # the reply reserve whole, and the nudge below still has room.
             self._answer_unstructured = not answer_is_isr(content)
             return self._capture_findings(content)
+        # What is left *after* the final-answer turn, not before it: handed the
+        # loop's own elapsed time, the nudge was given a second full remainder
+        # and the two together ran past the budget.
+        elapsed = _time.monotonic() - _t0
         return self._capture_findings(
             self._settle_final_answer(content, msgs, timeout, elapsed, max_steps)
         )
+
+    def _give_the_final_turn(self, reserve: float, remaining: float) -> None:
+        """Hold a model list's per-turn deadline at the final answer's reserve.
+
+        Inside the loop a list's turn deadline is a share of what is left, and
+        at the time cap that share is below the reserve the final answer was
+        given — a model writing its own answer would be declared stalled. The
+        list is not restarted: the model answering now keeps answering.
+        """
+        enter = getattr(self.llm, "enter_loop", None)
+        if not callable(enter) or remaining <= 0 or reserve <= 0:
+            return
+        try:
+            enter(float(remaining), min(1.0, float(reserve) / float(remaining)))
+        except Exception as exc:  # noqa: BLE001 — a deadline is never worth a turn
+            self.logger.debug("final-turn deadline not set (%s).", exc)
 
     def _settle_final_answer(
         self, content: str, msgs: list, timeout: int, elapsed: float, max_steps: int
@@ -3599,7 +3723,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         from langchain_core.messages import HumanMessage
 
-        remaining = int(max(0.0, timeout - elapsed))
+        # Not truncated to whole seconds: at the time cap a second is a large
+        # share of what the final answer was kept.
+        remaining = max(0.0, float(timeout) - elapsed)
         if remaining < _SYNTHESIS_MIN_SECONDS:
             self.logger.warning(
                 "%s skipping forced synthesis: only %ds of the %ds budget left "
@@ -3657,7 +3783,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             return ""
 
-    def _invoke_llm_with_timeout(self, messages: list, timeout: int) -> str:
+    def _invoke_llm_with_timeout(self, messages: list, timeout: float) -> str:
         """Run ``self.llm.invoke(messages)`` with a hard wall-clock timeout.
 
         Used by ``execute_tool_loop`` when
