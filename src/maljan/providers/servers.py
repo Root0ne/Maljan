@@ -907,6 +907,10 @@ class ServerHandle:
     def _keep_capabilities(self, payload: Any) -> None:
         parsed = ServerCapabilities.from_payload(self.name, payload)
         self.capabilities = parsed
+        # The budgets the server declares for its own tools set how long the
+        # guard lets one of their calls run before it counts as unanswered.
+        if parsed is not None and self.guard is not None:
+            self.guard.declare(parsed.tools)
         if parsed is None:
             logger.warning("mcp server '%s': capabilities answer was not a manifest.", self.name)
             return

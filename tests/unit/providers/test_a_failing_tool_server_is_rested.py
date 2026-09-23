@@ -112,7 +112,7 @@ class TestTheBreaker:
         clock.now += 61
         assert guard.refusal("first") is None
         second = guard.refusal("second")
-        assert second is not None and "being tried again by another call now" in second
+        assert second is not None and "one call has been let through" in second
         guard.answered()
         assert guard.refusal("third") is None
 
@@ -191,7 +191,7 @@ class _Session:
         self.script = list(script)
         self.calls = 0
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+    async def call_tool(self, name: str, arguments: dict[str, Any], **_: Any) -> Any:
         self.calls += 1
         step = self.script.pop(0)
         if isinstance(step, BaseException):
@@ -327,3 +327,121 @@ def test_the_sentence_counts_in_words(failures: int) -> None:
 
     text = server_rest_sentence({"server": "s", "failures": failures, "cooldown_s": 5})
     assert ("failure in a row" in text) == (failures == 1)
+
+
+class TestTheHalfOpenPath:
+    def test_a_trial_that_fails_after_another_call_closed_the_rest_does_not_reopen_it(self) -> None:
+        guard, clock, opened = _guard()
+        for _ in range(3):
+            guard.failed("x")
+        clock.now += 61
+        _refused, trial = guard.admit("trial")
+        assert trial
+        guard.answered()
+        guard.failed("the trial's own failure", trial=True)
+        assert len(opened) == 1
+        assert guard.refusal("next") is None
+
+    def test_a_trial_cancelled_while_it_queued_is_released_once(self) -> None:
+        guard, clock, _opened = _guard(max_concurrent_calls=1)
+        released: list[bool] = []
+        original = guard.abandoned
+
+        def counting(*, trial: bool = False) -> None:
+            released.append(trial)
+            original(trial=trial)
+
+        guard.abandoned = counting  # type: ignore[method-assign]
+
+        class _Hangs:
+            async def call_tool(self, name: str, arguments: dict[str, Any], **_: Any) -> Any:
+                await asyncio.sleep(30)
+
+        toolkit = MCPLangChainToolkit(guard=guard)
+        toolkit.session = _Hangs()  # type: ignore[assignment]
+        tool = _tool(toolkit)
+
+        async def main() -> None:
+            holder = asyncio.ensure_future(tool.ainvoke({}))
+            await asyncio.sleep(0.01)
+            for _ in range(3):
+                guard.failed("x")
+            clock.now += 61
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(tool.ainvoke({}), timeout=0.05)
+            holder.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await holder
+
+        asyncio.run(main())
+        assert released == [True], "the queued trial is released exactly once"
+        assert guard.admit("next") == (None, True), "and the next caller becomes the trial"
+
+
+class TestAHungServerIsCounted:
+    def test_ten_calls_cut_by_their_caller_rest_the_server(self) -> None:
+        """The reviewer's probe: ten calls to a server that never answers."""
+        guard, _clock, opened = _guard(max_concurrent_calls=4)
+        sent: list[str] = []
+
+        class _Hung:
+            async def call_tool(self, name: str, arguments: dict[str, Any], **_: Any) -> Any:
+                sent.append(name)
+                await asyncio.sleep(30)
+
+        toolkit = MCPLangChainToolkit(guard=guard)
+        toolkit.session = _Hung()  # type: ignore[assignment]
+        tool = _tool(toolkit)
+        answers: list[str] = []
+
+        async def one() -> None:
+            try:
+                answers.append(await asyncio.wait_for(tool.ainvoke({}), timeout=0.05))
+            except TimeoutError:
+                answers.append("cut")
+
+        async def main() -> None:
+            for _ in range(10):
+                await one()
+
+        asyncio.run(main())
+        assert len(opened) == 1
+        assert len(sent) == 3
+        assert answers[:3] == ["cut"] * 3
+        assert all(error_parts(a)[0] == SERVER_RESTING for a in answers[3:])  # type: ignore[index]
+
+    def test_a_call_past_its_deadline_is_a_timeout_the_breaker_counts(self) -> None:
+        guard, _clock, opened = _guard(failures_to_open=1)
+        guard.call_timeout_seconds = 0.01
+        seen: dict[str, Any] = {}
+
+        class _TimesOut:
+            async def call_tool(self, name: str, arguments: dict[str, Any], **kw: Any) -> Any:
+                seen.update(kw)
+                raise McpError(ErrorData(code=408, message="Timed out"))
+
+        toolkit = MCPLangChainToolkit(guard=guard)
+        toolkit.session = _TimesOut()  # type: ignore[assignment]
+        asyncio.run(_tool(toolkit).ainvoke({}))
+        assert seen["read_timeout_seconds"].total_seconds() == pytest.approx(30.01)
+        assert len(opened) == 1
+
+
+class TestTheCallDeadline:
+    def test_it_is_derived_from_the_longest_tool_budget_and_capa_still_fits(self) -> None:
+        settings = Settings()
+        settings.static.capa.timeout_seconds = 900
+        guard = guard_from_settings("analysis", settings)
+        assert guard.call_timeout("capa") == 930.0
+
+    def test_a_longer_budget_the_server_declares_wins(self) -> None:
+        settings = Settings()
+        guard = guard_from_settings("analysis", settings)
+        guard.declare({"slow": {"timeout_s": 2000}, "quick": {"timeout_s": 15}})
+        assert guard.call_timeout("slow") == 2030.0
+        assert guard.call_timeout("quick") == settings.static.capa.timeout_seconds + 30.0
+
+    def test_an_explicit_setting_is_used_as_written(self) -> None:
+        settings = Settings()
+        settings.mcp.breaker.call_timeout_seconds = 45
+        assert guard_from_settings("x", settings).call_timeout("t") == 75.0

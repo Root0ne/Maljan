@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Sequence
 from contextlib import suppress
+from datetime import timedelta
 from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
@@ -265,16 +266,21 @@ class MCPLangChainToolkit:
             refused, trial = guard.admit(tool_name)
             if refused is not None:
                 return str(refused)
+            sent = False
             try:
                 async with guard.slot():
                     if not trial:
                         refused, trial = guard.admit(tool_name)
                         if refused is not None:
                             return str(refused)
+                    # From here ``_call`` owns the outcome, abandonment
+                    # included, so the guard is told exactly once.
+                    sent = True
                     return await self._call(tool_name, args, narrowing, trial=trial)
             except BaseException:
-                # Cancelled while it queued for a slot: the trial was never sent.
-                guard.abandoned(trial=trial)
+                if not sent:
+                    # Cancelled while it queued for a slot: nothing was sent.
+                    guard.abandoned(trial=trial)
                 raise
 
         # Compress description to reduce ReAct context bloat
@@ -306,7 +312,26 @@ class MCPLangChainToolkit:
             session = self.session
             if session is None:
                 return f'{{"tool_error": "mcp_session_inactive", "tool": "{tool_name}"}}'
-            result = await session.call_tool(tool_name, arguments=args)
+            deadline = guard.call_timeout(tool_name) if guard is not None else None
+            # The client library answers a call past its deadline with its own
+            # request-timeout error, which is a transport failure. Only named
+            # when there is one, so an unguarded call is sent exactly as before.
+            timing: dict[str, Any] = (
+                {"read_timeout_seconds": timedelta(seconds=deadline)} if deadline else {}
+            )
+            try:
+                result = await session.call_tool(tool_name, arguments=args, **timing)
+            except asyncio.CancelledError:
+                # The caller's own budget ran out while this call was with the
+                # server: a call the server did not answer in the time there
+                # was, counted as one rather than let go as abandoned.
+                if guard is not None and not settled:
+                    guard.failed(
+                        "the server had not answered when its caller's budget ran out",
+                        trial=trial,
+                    )
+                    settled = True
+                raise
             if guard is not None:
                 guard.answered()
                 settled = True

@@ -39,6 +39,11 @@ from typing import Any
 from maljan.core.logger import logger
 from maljan.tools.errors import SERVER_RESTING
 
+# How long past its budget a call is given for the server to report its own
+# overrun. The same thirty seconds the tool loop gives a model past its soft
+# timeout before the hard cap (``base_agent.HARD_CAP_GRACE``).
+CALL_TIMEOUT_GRACE_SECONDS = 30.0
+
 # The class names a transport raises for a peer that is gone or never came.
 # Matched by name because the stdio transport, the HTTP transport and anyio
 # each raise their own.
@@ -94,6 +99,7 @@ class ServerGuard:
         failures_to_open: int = 3,
         cooldown_seconds: float = 60.0,
         max_concurrent_calls: int = 4,
+        call_timeout_seconds: float = 0.0,
         on_open: Callable[[dict[str, Any]], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -101,6 +107,11 @@ class ServerGuard:
         self.failures_to_open = max(1, int(failures_to_open))
         self.cooldown_seconds = max(0.0, float(cooldown_seconds))
         self.max_concurrent_calls = max(0, int(max_concurrent_calls))
+        # The budget every call of this server gets at least, before the
+        # grace; a tool the server's own manifest declares a longer budget
+        # for gets that one. Zero sends calls with no deadline of their own.
+        self.call_timeout_seconds = max(0.0, float(call_timeout_seconds))
+        self._declared: dict[str, float] = {}
         self._on_open = on_open
         self._clock = clock
         self._lock = threading.Lock()
@@ -108,6 +119,33 @@ class ServerGuard:
         self._reopen_at: float | None = None
         self._trial_in_flight = False
         self._semaphores: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Semaphore]] = {}
+
+    # -- the call deadline ---------------------------------------------------
+
+    def declare(self, tools: dict[str, dict[str, Any]]) -> None:
+        """Keep the budgets the server's own ``capabilities`` manifest declares, per tool."""
+        declared: dict[str, float] = {}
+        for name, cell in (tools or {}).items():
+            value = cell.get("timeout_s") if isinstance(cell, dict) else None
+            if isinstance(value, int | float) and not isinstance(value, bool) and value > 0:
+                declared[str(name)] = float(value)
+        with self._lock:
+            self._declared = declared
+
+    def call_timeout(self, tool: str) -> float | None:
+        """How long one call of ``tool`` may take before it is a transport failure, or ``None``.
+
+        The larger of the tool's own declared budget and the deployment's,
+        plus :data:`CALL_TIMEOUT_GRACE_SECONDS` for the server to report its
+        own overrun: a tool that gives up at its budget answers with its own
+        timeout error, which is an answer; one that says nothing past the
+        grace is a server that did not answer.
+        """
+        if self.call_timeout_seconds <= 0:
+            return None
+        with self._lock:
+            declared = self._declared.get(tool, 0.0)
+        return max(self.call_timeout_seconds, declared) + CALL_TIMEOUT_GRACE_SECONDS
 
     # -- the breaker ---------------------------------------------------------
 
@@ -131,7 +169,8 @@ class ServerGuard:
         when = (
             f"it will be tried again in {max(1, round(left))} s"
             if left > 0
-            else "it is being tried again by another call now"
+            else "one call has been let through to try it again, and no other is sent "
+            "until that call is answered"
         )
         return (
             _resting_answer(
@@ -176,6 +215,10 @@ class ServerGuard:
         """
         with self._lock:
             self._failures += 1
+            # A trial counts as one only while the rest it was let through for
+            # is still on: a call sent before the rest answered and closed it,
+            # and this trial's failure is then the first of a new run.
+            trial = trial and self._reopen_at is not None
             if trial:
                 self._trial_in_flight = False
             elif self._reopen_at is not None or self._failures < self.failures_to_open:
@@ -240,5 +283,27 @@ def guard_from_settings(
         failures_to_open=int(getattr(breaker, "failures_to_open", 3)),
         cooldown_seconds=float(getattr(breaker, "cooldown_seconds", 60.0)),
         max_concurrent_calls=int(getattr(breaker, "max_concurrent_calls", 4)),
+        call_timeout_seconds=deployment_call_budget(cfg),
         on_open=on_open,
     )
+
+
+def deployment_call_budget(cfg: Any) -> float:
+    """The budget every tool call gets at least: the setting, or the longest tool budget configured.
+
+    ``core.mcp.breaker.call_timeout_seconds`` when it is set. Zero means
+    "derive it": the longest budget the deployment gives a tool — capa's
+    ``core.static.capa.timeout_seconds`` (300 by default, raised to 900 for a
+    slow host) and YARA's — so a call never times out at the transport before
+    the analysis it runs is allowed to finish.
+    """
+    breaker = getattr(getattr(cfg, "mcp", None), "breaker", None)
+    explicit = float(getattr(breaker, "call_timeout_seconds", 0.0) or 0.0)
+    if explicit > 0:
+        return explicit
+    static = getattr(cfg, "static", None)
+    budgets = [
+        float(getattr(getattr(static, name, None), "timeout_seconds", 0) or 0)
+        for name in ("capa", "yara")
+    ]
+    return max([b for b in budgets if b > 0], default=0.0)
