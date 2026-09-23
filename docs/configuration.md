@@ -685,13 +685,18 @@ with `uv sync --extra tools` (the backend image already does); without them
 `{"error": "<module> is not installed"}`. Nothing else changes, and the server
 starts either way.
 
-`floss`, the emulating string decoder, rests on `flare-floss` (Apache-2.0),
-pinned exactly in its own extra: `uv sync --extra floss`. The backend image
-does not install it, as it does not install capa. Without it the capability
-manifest marks `floss` unavailable with the reason and the model is not offered
-the tool; with it, the first call on a sample emulates for up to ten minutes
-(declared as the tool's `timeout_s`) and later pages of the answer come from
-the kept result.
+`floss`, the emulating string decoder, runs FLOSS (Apache-2.0) as FLARE's
+pinned standalone Linux build, v3.1.1 (zip sha256
+`40c05a869f34f7e2417b17ca290cc54bd3671ee1f0a2d9bd5103284c01a54666`), outside the
+Python environment. The backend image installs it at `/usr/local/bin/floss` in
+a checksum-verified build stage; on a host, `scripts/install_floss.sh` installs
+it at `${XDG_DATA_HOME:-~/.local/share}/maljan/tools/floss-3.1.1/floss`. To use a
+build elsewhere, set `MALJAN_FLOSS_PATH` in the `analysis` server's `env`. The
+tool runs only the executable whose sha256 is the pinned one. Without it the
+capability manifest marks `floss` unavailable with the reason and the remedy and
+the model is not offered the tool; with it, the first call on a sample emulates
+for up to ten minutes (the tool's declared `timeout_s`) within 4 GiB of address
+space, and later pages of the answer come from the kept result.
 
 Five teams ship built in; they are listed under **Teams** below. `default` is
 the three analysts with their tools.

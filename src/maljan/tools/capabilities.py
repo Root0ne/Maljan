@@ -26,6 +26,7 @@ import importlib
 import importlib.metadata
 import os
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -42,6 +43,9 @@ class Requirement:
 
     kind: str  # "module" | "binary" | "env"
     name: str
+    # For a binary found somewhere other than ``PATH`` alone: the lookup that
+    # answers ``None`` when it is present, else the reason it is not.
+    locate: Callable[[], str | None] | None = field(default=None, compare=False)
 
     def probe(self) -> str | None:
         """``None`` when present, else the reason it is not.
@@ -64,6 +68,8 @@ class Requirement:
                 return f"{self.name} is not installed ({type(exc).__name__})"
             return None
         if self.kind == "binary":
+            if self.locate is not None:
+                return self.locate()
             return None if shutil.which(self.name) else f"{self.name} is not on PATH"
         if self.kind == "env":
             return None if os.environ.get(self.name) else f"{self.name} is not configured"
@@ -74,15 +80,15 @@ def module(name: str) -> Requirement:
     return Requirement("module", name)
 
 
-def binary(name: str) -> Requirement:
-    """A tool that shells out to something on PATH.
+def binary(name: str, locate: Callable[[], str | None] | None = None) -> Requirement:
+    """A tool that shells out to an executable.
 
-    No built-in sidecar needs one — capa is a Python API here, not a command —
-    but the kind is part of the vocabulary ``docs/configuration.md`` publishes
-    for a server somebody else writes, and a kind with no way to declare it is
-    a kind nobody can use.
+    Found on ``PATH`` by default. ``locate`` is for an executable looked for in
+    more places than that, or checked for more than presence — the analysis
+    server's ``floss`` looks at a configured path and a user tools directory
+    and runs only the pinned build — and answers the reason it is absent.
     """
-    return Requirement("binary", name)
+    return Requirement("binary", name, locate)
 
 
 def env(name: str) -> Requirement:
@@ -99,6 +105,9 @@ class ToolNeeds:
     # What the tool still does without the requirement, when it does
     # something: ``apk_info`` answers the zip-level facts without androguard.
     without: str = ""
+    # The remedy when the requirement is missing, where the code's general one
+    # names the wrong thing: an executable is not installed by ``uv sync``.
+    remediation: str = ""
 
 
 def _cell(tool: ToolNeeds) -> dict[str, Any]:
@@ -118,7 +127,7 @@ def _cell(tool: ToolNeeds) -> dict[str, Any]:
     if missing:
         kinds = {req.kind for req, _reason in missing}
         code = NOT_CONFIGURED if kinds == {"env"} else MISSING_DEPENDENCY
-        cell["remediation"] = REMEDIATIONS[code]
+        cell["remediation"] = tool.remediation or REMEDIATIONS[code]
         if tool.without:
             cell["without"] = tool.without
     return cell

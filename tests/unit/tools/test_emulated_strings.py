@@ -151,7 +151,7 @@ class TestTheDocumentIsRead:
         tool.floss(path, min_len=5, runner=runner)
 
         argv = runner.calls[0]
-        assert argv[1:3] == ["-m", "floss"]
+        assert argv[0] == "floss"
         assert "--json" in argv
         assert argv[argv.index("--minimum-length") + 1] == "5"
         only = argv[argv.index("--only") + 1 : argv.index("--")]
@@ -252,16 +252,179 @@ class TestFailuresAreAnswers:
 
         assert answer["error"].startswith("no such file")
 
-    def test_without_floss_installed_the_answer_names_the_extra(
+    def test_without_the_executable_the_answer_says_how_to_install_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from maljan.tools.errors import MISSING_DEPENDENCY, error_parts
 
-        monkeypatch.setattr(tool.importlib.util, "find_spec", lambda _name: None)
+        monkeypatch.setenv("MALJAN_FLOSS_PATH", str(tmp_path / "absent"))
 
         answer = tool.floss(_pe(tmp_path))
 
         parts = error_parts(answer)
         assert parts is not None
         assert parts[0] == MISSING_DEPENDENCY
-        assert "floss extra" in answer["error"]
+        assert parts[2] == tool.FLOSS_REMEDIATION
+        assert str(tmp_path) not in json.dumps(answer), "the reason names a host path"
+
+    def test_a_saved_workspace_beside_the_sample_is_refused(self, tmp_path: Path) -> None:
+        path = _pe(tmp_path)
+        Path(f"{path}.viv").write_bytes(b"not a workspace")
+        runner = _Runner(json.dumps(_document()))
+
+        answer = tool.floss(path, runner=runner)
+
+        assert "saved vivisect workspace" in answer["error"]
+        assert runner.calls == []
+
+    @pytest.mark.parametrize(
+        "returncode, stderr",
+        [(1, "Traceback ...\nMemoryError\n"), (-6, ""), (-9, ""), (-11, "")],
+    )
+    def test_the_memory_limit_is_reported_as_the_budget(
+        self, tmp_path: Path, returncode: int, stderr: str
+    ) -> None:
+        from maljan.tools.errors import TIMEOUT, error_parts
+
+        answer = tool.floss(_pe(tmp_path), runner=_Runner("", returncode=returncode, stderr=stderr))
+
+        parts = error_parts(answer)
+        assert parts is not None
+        assert parts[0] == TIMEOUT
+        assert "MiB of address space" in answer["error"]
+
+
+class TestTheExecutable:
+    def _executable(self, tmp_path: Path, body: bytes) -> Path:
+        target = tmp_path / "floss"
+        target.write_bytes(body)
+        target.chmod(0o755)
+        return target
+
+    def test_only_the_pinned_build_is_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        target = self._executable(tmp_path, b"#!/bin/sh\necho not floss\n")
+        monkeypatch.setenv("MALJAN_FLOSS_PATH", str(target))
+
+        found, reason = tool.find_floss()
+
+        assert found is None
+        assert "not the pinned FLOSS 3.1.1 build" in reason
+        assert str(tmp_path) not in reason
+
+    def test_the_configured_executable_with_the_pinned_digest_is_found(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import hashlib
+
+        body = b"#!/bin/sh\n"
+        target = self._executable(tmp_path, body)
+        monkeypatch.setenv("MALJAN_FLOSS_PATH", str(target))
+        monkeypatch.setattr(tool, "FLOSS_BINARY_SHA256", hashlib.sha256(body).hexdigest())
+
+        assert tool.find_floss() == (target, "")
+        assert tool.floss_unavailable() is None
+
+    def test_the_user_tools_directory_is_looked_in(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import hashlib
+
+        monkeypatch.delenv("MALJAN_FLOSS_PATH", raising=False)
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+        monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+        body = b"#!/bin/sh\n"
+        installed = tool.default_install_path()
+        installed.parent.mkdir(parents=True)
+        installed.write_bytes(body)
+        installed.chmod(0o755)
+        monkeypatch.setattr(tool, "FLOSS_BINARY_SHA256", hashlib.sha256(body).hexdigest())
+
+        assert tool.find_floss() == (installed, "")
+        assert installed == tmp_path / "maljan" / "tools" / "floss-3.1.1" / "floss"
+
+
+class TestTheChild:
+    @pytest.fixture(autouse=True)
+    def _staging(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.delenv("MALJAN_STAGING_JOB", raising=False)
+
+    def test_the_child_gets_the_limit_and_a_home_inside_staging_and_nothing_else(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import sys
+
+        monkeypatch.setenv("A_SERVER_SECRET", "kept-out")
+        script = (
+            "import json, os, resource; print(json.dumps({"
+            "'limit': resource.getrlimit(resource.RLIMIT_AS)[0], 'home': os.environ['HOME'], "
+            "'tmp': os.environ['TMPDIR'], 'cwd': os.getcwd(), "
+            "'secret': os.environ.get('A_SERVER_SECRET')}))"
+        )
+
+        finished = tool._run([sys.executable, "-c", script], 30)
+
+        seen = json.loads(finished.stdout)
+        scratch = str(tmp_path / "staging" / "floss")
+        assert seen["limit"] == tool.FLOSS_ADDRESS_SPACE_BYTES
+        assert seen["home"] == seen["tmp"] == seen["cwd"] == scratch
+        assert seen["secret"] is None
+
+    def test_an_overrun_kills_the_whole_group(self, tmp_path: Path) -> None:
+        import os
+        import sys
+        import time
+
+        marker = tmp_path / "grandchild.pid"
+        script = (
+            "import subprocess, sys, time; "
+            f"p = subprocess.Popen(['sleep', '60']); open({str(marker)!r}, 'w').write(str(p.pid)); "
+            "time.sleep(60)"
+        )
+
+        with pytest.raises(subprocess.TimeoutExpired):
+            tool._run([sys.executable, "-c", script], 2)
+
+        grandchild = int(marker.read_text())
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                os.kill(grandchild, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        else:
+            pytest.fail("the grandchild outlived the overrun")
+
+
+class TestOneEmulationPerSample:
+    def test_a_second_concurrent_caller_waits_for_the_first_result(self, tmp_path: Path) -> None:
+        import threading
+        import time
+
+        calls: list[int] = []
+        gate = threading.Event()
+
+        def slow(argv: Sequence[str], timeout: float) -> subprocess.CompletedProcess[str]:
+            calls.append(1)
+            gate.wait(5)
+            time.sleep(0.05)
+            return subprocess.CompletedProcess(list(argv), 0, json.dumps(_document()), "")
+
+        path = _pe(tmp_path)
+        answers: list[dict[str, Any]] = []
+        threads = [
+            threading.Thread(target=lambda: answers.append(tool.floss(path, runner=slow)))
+            for _ in range(2)
+        ]
+        for thread in threads:
+            thread.start()
+        time.sleep(0.2)
+        gate.set()
+        for thread in threads:
+            thread.join(10)
+
+        assert len(calls) == 1
+        assert [answer["total"] for answer in answers] == [3, 3]

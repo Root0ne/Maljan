@@ -60,18 +60,24 @@ drops the reference really runs without these tools.
 
 `floss` recovers the strings a PE only builds at run time — decoded, stack and
 tight strings — by emulating the sample's own decoding and string-building
-functions under vivisect. The sample is never executed: FLOSS runs as a child
-process (`python -m floss --json`) over the file, and the child is killed at
-`timeout_s`. Each row carries its `kind`, the `string`, the `function` that
+functions under vivisect. The sample is never executed. FLOSS runs as FLARE's
+pinned standalone Linux build (see *Optional dependencies*), in a child process
+of its own session with an address-space limit of 4 GiB, its whole group killed
+at `timeout_s`; its home and temporary directory are a `floss/` directory inside
+this job's staging directory and it receives no other environment. Either
+bound, when hit, is answered as "no result within its budget". Each row carries its `kind`, the `string`, the `function` that
 decoded or built it with `function_rva` (the same address relative to the
 image base FLOSS loaded at, which is what a disassembler agrees with), and for
 a decoded string the `called_at` call site and the `address` it was written
 to. `counts` gives how many of each kind FLOSS found and `meta` its version,
 image base and how many functions it discovered and emulated. The answer is
 paged like `strings` — `next_offset`, `total_matched`, `kinds` and `pattern`
-narrow it — and the result document is kept per file (path, size, mtime), so
-only the first call emulates. The tool concludes nothing from what it
-returns. A file without an `MZ` header is refused before FLOSS runs.
+narrow it — and the result document is kept per file (path, size, mtime), and
+one emulation of a file runs at a time, so only the first call emulates and a
+concurrent second call waits for its result. The tool concludes nothing from
+what it returns. A file without an `MZ` header is refused before FLOSS runs,
+and so is a file with a saved vivisect workspace (`<file>.viv`) beside it:
+vivisect would load that pickle in place of the file.
 
 ### Sample delivery
 
@@ -141,8 +147,8 @@ the sample is the platform's to supply, and which of the payloads
 directories it puts samples in, so a default deployment sets nothing; see
 "Which directories a sidecar may read" in `docs/configuration.md`.
 
-`pattern` on `strings` and `floss` is read the same way `carved_path` is: one
-matching pair of surrounding quotes is not part of the pattern, so
+`pattern` on `strings` and `floss` is read the same way `carved_path` is: a
+pair of quotes enclosing the whole pattern is not part of it, so
 `"CreateMutex"` finds `CreateMutexW`. Nothing else is rewritten, a value
 without a surrounding pair is passed through exactly, and an answer to a call
 whose pattern was read this way carries `read_as` first — the pattern it
@@ -193,14 +199,23 @@ one tool, never the server:
 `pefile`, `pyelftools`, `yara-python`, `pySigma` and `flare-capa` come from the
 main dependency set; `flare-capa` needs `uv sync --extra capa`.
 
-`flare-floss` (Apache-2.0; its own new dependencies `binary2strings`, `halo`,
-`log-symbols`, `spinners`, `tabulate` and `termcolor` are MIT) is the `floss`
-tool's and comes with `uv sync --extra floss`, pinned at exactly 3.1.1 because
-the tool reads FLOSS's JSON result document field by field. Its `networkx<3.2`
-bound holds networkx at 3.1 for every extra in the one lockfile. Without it the
-manifest marks `floss` unavailable and a call answers
-`flare-floss is not installed`. `binary2strings` ships no Linux wheel and is
-built from source, so the host needs a C++ compiler for this extra.
+`floss` runs FLOSS (Apache-2.0) as FLARE's standalone Linux build, not as a
+Python package, so nothing of it is in the lockfile. The build is pinned:
+release `v3.1.1`, asset `floss-v3.1.1-linux.zip`, sha256
+`40c05a869f34f7e2417b17ca290cc54bd3671ee1f0a2d9bd5103284c01a54666`; the executable
+inside it has sha256
+`d71b9ea4fe3b2de974dc1ae3c5d0f67569921bc118dcb02ed72e905a662411cb`. The release
+publishes no digest, so both were computed when it was pinned.
+
+The tool looks for the executable at `MALJAN_FLOSS_PATH` (set in this server's
+`env`) and, when that is unset, in the user tools directory and then on `PATH`,
+and runs it only when its sha256 is the pinned one. `scripts/install_floss.sh`
+downloads the asset, checks both digests and installs the executable at
+`${XDG_DATA_HOME:-~/.local/share}/maljan/tools/floss-3.1.1/floss`, the first
+place looked. The backend image does the same in a build stage and puts it at
+`/usr/local/bin/floss`. Without it the manifest marks `floss` unavailable with
+the reason (not installed, or not the pinned build) and the remedy, and a call
+answers the same.
 
 No tool raises. Anything unexpected comes back as `{"error": ..., "tool": ...}`
 so a model can route around it instead of retrying a failed transport call.

@@ -38,7 +38,7 @@ from maljan.tools import rules as rule_tools
 from maljan.tools import strings as string_tools
 from maljan.tools.arguments import SURROUNDING_QUOTES, read_unquoted, says_unquoted, with_read_as
 from maljan.tools.binary import carved_name_prefix
-from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest, module
+from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, binary, manifest, module
 from maljan.tools.errors import (
     BAD_ARGUMENT,
     NO_SUCH_FILE,
@@ -85,7 +85,12 @@ TOOL_NEEDS: list[ToolNeeds] = [
     ToolNeeds("sigma_match", (module("sigma"),)),
     ToolNeeds("sigma_match_sandbox", (module("sigma"),)),
     ToolNeeds("capa", (module("capa"),), timeout_s=CAPA_TIMEOUT_S),
-    ToolNeeds("floss", (module("floss"),), timeout_s=FLOSS_TIMEOUT_S),
+    ToolNeeds(
+        "floss",
+        (binary("floss", emulated_strings.floss_unavailable),),
+        timeout_s=FLOSS_TIMEOUT_S,
+        remediation=emulated_strings.FLOSS_REMEDIATION,
+    ),
     ToolNeeds("put_sample"),
     ToolNeeds("put_sample_begin"),
     ToolNeeds("put_sample_chunk"),
@@ -262,12 +267,9 @@ _ECHOED_VALUE_CHARS = 80
 # guessing at what was meant rather than reading what was written.
 _SURROUNDING_QUOTES = SURROUNDING_QUOTES
 
-# The arguments a tool here searches by. A model writes a search the way a
-# person types one, between quotes, and one scored run's every ``pattern``
-# arrived with a pair of literal double quotes around ``CreateMutex`` and
-# matched nothing although ``CreateMutexW`` was a string of the sample. Read in
-# ``_guard`` without the pair, the way ``carved_path`` is, and the answer says
-# what each was read as.
+# The arguments a tool here searches by. Each is read in ``_guard`` without
+# the pair of quotes that encloses it, the way ``carved_path`` is, so a quoted
+# ``CreateMutex`` finds ``CreateMutexW``; the answer says what each was read as.
 SEARCH_ARGUMENTS = ("pattern",)
 
 # How many sample digests are remembered at once. One per sample a long-lived

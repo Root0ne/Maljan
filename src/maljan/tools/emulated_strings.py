@@ -16,34 +16,72 @@ What comes back is what FLOSS found, row by row, with the function that
 decoded or built each string and the address FLOSS gives for it. Nothing is
 concluded from the strings here; which of them matter is the reader's call.
 
-FLOSS runs as a child process with a hard wall clock, for the reason capa
-does: vivisect's analysis loop has no point at which it can be cancelled, and
-a child can be killed where a thread cannot. The child is FLOSS's own command
-line with its JSON output, so what is parsed is FLOSS's result document rather
-than objects inside its package. The document is kept for the sample while its
-size and mtime are unchanged, so paging through the answer costs one
-emulation, not one per page.
+FLOSS runs as FLARE's standalone Linux build, a pinned executable outside this
+project's Python environment, so its dependency bounds never reach the
+product's lockfile. It is found at ``MALJAN_FLOSS_PATH``, in the user tools
+directory ``scripts/install_floss.sh`` writes to, or on ``PATH`` (where the
+backend image puts it), and is run only when its sha256 is the pinned build's.
+The child has a hard wall clock and an address-space limit, runs in a session
+of its own so an overrun takes the whole process group, and is given a home and
+a temporary directory inside this job's staging directory and no other
+environment. What is parsed is FLOSS's JSON result document. The document is
+kept for the sample while its size and mtime are unchanged, and one emulation
+of a sample runs at a time, so paging through the answer or asking twice at
+once costs one emulation.
 """
 
 from __future__ import annotations
 
-import importlib.util
+import contextlib
+import hashlib
 import json
 import os
+import resource
+import shutil
+import signal
 import subprocess
-import sys
 import threading
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from maljan.tools import staging
+from maljan.tools.errors import MISSING_DEPENDENCY, tool_error
 from maljan.tools.strings import DEFAULT_STRINGS_LIMIT, _matcher
+
+# The pinned build: FLARE's ``floss-v3.1.1-linux.zip`` release asset. The
+# release publishes no digest, so both were computed from the asset when it was
+# pinned. The install script and the image build check the zip; this module
+# checks the executable it is about to run.
+FLOSS_VERSION = "3.1.1"
+FLOSS_ZIP_SHA256 = "40c05a869f34f7e2417b17ca290cc54bd3671ee1f0a2d9bd5103284c01a54666"
+FLOSS_BINARY_SHA256 = "d71b9ea4fe3b2de974dc1ae3c5d0f67569921bc118dcb02ed72e905a662411cb"
+
+# Where an operator names the executable, set in the analysis server's ``env``.
+FLOSS_PATH_ENV = "MALJAN_FLOSS_PATH"
+
+# What a caller is told to do when no usable executable is found.
+FLOSS_REMEDIATION = (
+    "install the pinned FLOSS build on the host that runs this server with "
+    "scripts/install_floss.sh, put it on PATH, or name it in MALJAN_FLOSS_PATH in the "
+    "analysis server's env"
+)
 
 # The wall clock one emulation may take. A 60 KB DLL was measured at under
 # forty seconds on a laptop; a large one takes many minutes, and past this
 # FLOSS is stopped and the caller told so rather than left waiting on a stage
 # budget.
 FLOSS_TIMEOUT_S = 600
+
+# The address space the child may map. On a 60 KB DLL with 150 functions the
+# standalone build peaked at 814 MB resident and 836 MB of address space (the
+# Python package measured 893 MB resident on the same file); vivisect's
+# workspace grows with the function count, so a large or hostile PE could
+# otherwise hold many gigabytes for the whole wall clock. About five times the
+# measured peak leaves room for a sample several times larger. Past it the
+# child's allocations fail, and that is reported the way an overrun of the wall
+# clock is.
+FLOSS_ADDRESS_SPACE_BYTES = 4 * 1024 * 1024 * 1024
 
 # The three kinds FLOSS recovers by emulation. Its fourth, the static strings,
 # is what the ``strings`` tool already answers, and asking FLOSS for them again
@@ -65,37 +103,154 @@ _MAX_LIMIT = 2000
 _MAX_REMEMBERED = 8
 _REMEMBERED: dict[tuple[str, int, int, int], dict[str, Any]] = {}
 _LOCK = threading.Lock()
+# One lock per sample being emulated, so a second caller waits for the first
+# result rather than starting a second emulation of the same file.
+_IN_FLIGHT: dict[tuple[str, int, int, int], threading.Lock] = {}
+
+# The executables whose digest has been checked, keyed by path, size and mtime.
+_VERIFIED: dict[tuple[str, int, int], bool] = {}
 
 # The last line of FLOSS's stderr is what an error answer quotes, bounded.
 _ERROR_TAIL_CHARS = 400
 
-# What the child is started as. FLOSS's CLI saves a vivisect workspace beside
-# the sample when this variable asks it to, and a workspace written next to a
-# sample in a shared directory is a file this tool had no business creating.
-_NO_WORKSPACE = {"FLOSS_SAVE_WORKSPACE": "0"}
+# The directory under this job's staging directory the child uses as its home
+# and its temporary directory: the standalone build unpacks itself into
+# ``TMPDIR`` and vivisect creates ``~/.envi`` under ``HOME``.
+_SCRATCH_DIRECTORY = "floss"
+
+# How a child that ran out of address space ends: Python's MemoryError, or a
+# signal from a native allocation that failed (SIGABRT, SIGSEGV) or from the
+# kernel (SIGKILL).
+_KILLED_BY = frozenset({-signal.SIGABRT, -signal.SIGSEGV, -signal.SIGKILL})
+_OUT_OF_MEMORY_WORDS = ("MemoryError", "Cannot allocate memory", "std::bad_alloc")
 
 Runner = Callable[[Sequence[str], float], "subprocess.CompletedProcess[str]"]
 
 
-def _run(argv: Sequence[str], timeout: float) -> subprocess.CompletedProcess[str]:
-    """FLOSS's command line, killed if it overruns ``timeout``."""
-    env = {**os.environ, **_NO_WORKSPACE}
-    return subprocess.run(  # noqa: S603 - a fixed argv built from our own interpreter
-        list(argv),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=env,
-        check=False,
+def user_tools_dir() -> Path:
+    """Where ``scripts/install_floss.sh`` puts the build for this user."""
+    data = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(data) / "maljan" / "tools"
+
+
+def default_install_path() -> Path:
+    """The executable ``scripts/install_floss.sh`` writes for the pinned version."""
+    return user_tools_dir() / f"floss-{FLOSS_VERSION}" / "floss"
+
+
+def _is_pinned_build(path: Path) -> bool:
+    """Whether ``path`` is the pinned build, by its sha256, remembered per size and mtime."""
+    try:
+        info = path.stat()
+    except OSError:
+        return False
+    key = (str(path), info.st_size, info.st_mtime_ns)
+    known = _VERIFIED.get(key)
+    if known is not None:
+        return known
+    hasher = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                hasher.update(block)
+    except OSError:
+        return False
+    _VERIFIED[key] = hasher.hexdigest() == FLOSS_BINARY_SHA256
+    return _VERIFIED[key]
+
+
+def find_floss() -> tuple[Path | None, str]:
+    """The pinned FLOSS executable, or ``None`` and the reason there is none.
+
+    ``MALJAN_FLOSS_PATH`` when it is set, and nothing else then; otherwise the
+    user tools directory, then ``PATH``. The reason names where the tool looked
+    and never a host path, because it travels to the capability manifest, the
+    console and the judge's prompt.
+    """
+    configured = os.environ.get(FLOSS_PATH_ENV, "").strip()
+    if configured:
+        candidates = [configured]
+    else:
+        candidates = [str(default_install_path()), shutil.which("floss") or ""]
+    found = [Path(c) for c in candidates if c and Path(c).is_file() and os.access(c, os.X_OK)]
+    if not found:
+        where = (
+            f"{FLOSS_PATH_ENV} names no executable file"
+            if configured
+            else "no floss executable in the user tools directory or on PATH"
+        )
+        return None, f"floss is not installed: {where}"
+    for path in found:
+        if _is_pinned_build(path):
+            return path, ""
+    return None, (
+        f"floss is not installed: the executable found is not the pinned FLOSS "
+        f"{FLOSS_VERSION} build (sha256 mismatch)"
     )
 
 
-def _floss_argv(path: Path, min_len: int) -> list[str]:
+def floss_unavailable() -> str | None:
+    """The capability manifest's probe: ``None`` when the pinned build is here."""
+    path, reason = find_floss()
+    return None if path is not None else reason
+
+
+def _scratch() -> Path:
+    """This job's directory for the child's home and temporary files, created private."""
+    base = staging.private_dir(staging.staging_base())
+    root = staging.staging_root()
+    if root != base:
+        staging.private_dir(root)
+    return staging.private_dir(root / _SCRATCH_DIRECTORY)
+
+
+def _limit_address_space() -> None:
+    """Run in the child before FLOSS starts: cap the address space it may map."""
+    resource.setrlimit(resource.RLIMIT_AS, (FLOSS_ADDRESS_SPACE_BYTES, FLOSS_ADDRESS_SPACE_BYTES))
+
+
+def _run(argv: Sequence[str], timeout: float) -> subprocess.CompletedProcess[str]:
+    """FLOSS's command line, bounded in time and memory, its whole group killed on overrun.
+
+    The environment is built rather than inherited: a search path, a locale, a
+    home and a temporary directory inside this job's staging directory, and
+    the switch that keeps FLOSS from saving a vivisect workspace beside the
+    sample. Nothing of the server's own environment reaches the child.
+    """
+    scratch = str(_scratch())
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "LANG": "C.UTF-8",
+        "HOME": scratch,
+        "TMPDIR": scratch,
+        "FLOSS_SAVE_WORKSPACE": "0",
+    }
+    process = subprocess.Popen(  # noqa: S603 - a fixed argv naming the verified build
+        list(argv),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=scratch,
+        start_new_session=True,
+        preexec_fn=_limit_address_space,  # noqa: PLW1509 - one setrlimit call
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # The standalone build is a bootloader and the interpreter it starts;
+        # the group is what holds both.
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        process.communicate()
+        raise
+    return subprocess.CompletedProcess(list(argv), process.returncode, stdout, stderr)
+
+
+def _floss_argv(executable: str, path: Path, min_len: int) -> list[str]:
     """The command FLOSS is run as: JSON out, no prompt, no static strings."""
     return [
-        sys.executable,
-        "-m",
-        "floss",
+        executable,
         "--json",
         "--quiet",
         "--disable-progress",
@@ -197,46 +352,77 @@ def _tail(text: str) -> str:
     return last[-_ERROR_TAIL_CHARS:]
 
 
-def _document(target: Path, min_len: int, timeout_s: int, runner: Runner) -> dict[str, Any] | str:
-    """FLOSS's result document for this file, or the sentence saying why there is none."""
-    info = target.stat()
-    key = (str(target), info.st_size, info.st_mtime_ns, min_len)
-    with _LOCK:
-        remembered = _REMEMBERED.get(key)
-    if remembered is not None:
-        return remembered
+def _ran_out_of_memory(finished: subprocess.CompletedProcess[str]) -> bool:
+    """Whether a failed child ended the way one past its address-space limit does."""
+    if finished.returncode in _KILLED_BY:
+        return True
+    return any(word in (finished.stderr or "") for word in _OUT_OF_MEMORY_WORDS)
+
+
+def _emulate(
+    executable: str, target: Path, min_len: int, timeout_s: int, runner: Runner
+) -> dict[str, Any] | str:
+    """One FLOSS run over ``target``: its result document, or the sentence saying why not."""
     try:
-        finished = runner(_floss_argv(target, min_len), float(timeout_s))
+        finished = runner(_floss_argv(executable, target, min_len), float(timeout_s))
     except subprocess.TimeoutExpired:
         return f"FLOSS produced no result within its budget ({timeout_s} s) and was stopped"
     except OSError as exc:
         return f"FLOSS could not be started: {exc}"
     if finished.returncode != 0:
+        if _ran_out_of_memory(finished):
+            limit_mib = FLOSS_ADDRESS_SPACE_BYTES // (1024 * 1024)
+            return (
+                f"FLOSS produced no result within its budget ({limit_mib} MiB of address "
+                "space) and was stopped"
+            )
         return f"FLOSS exited with status {finished.returncode}: {_tail(finished.stderr)}"
     output = (finished.stdout or "").strip()
     if not output:
         # FLOSS prints nothing at all for a file with no printable run in it,
         # which is an answer: there was nothing to start from.
-        document: dict[str, Any] = {}
-    else:
-        try:
-            parsed = json.loads(output)
-        except json.JSONDecodeError:
-            return f"FLOSS answered with something other than its JSON document: {_tail(output)}"
-        if not isinstance(parsed, dict):
-            return "FLOSS answered with something other than its JSON document"
-        document = parsed
+        return {}
+    try:
+        parsed = json.loads(output)
+    except json.JSONDecodeError:
+        return f"FLOSS answered with something other than its JSON document: {_tail(output)}"
+    if not isinstance(parsed, dict):
+        return "FLOSS answered with something other than its JSON document"
+    return parsed
+
+
+def _document(
+    executable: str, target: Path, min_len: int, timeout_s: int, runner: Runner
+) -> dict[str, Any] | str:
+    """FLOSS's result document for this file, emulated once however many ask."""
+    info = target.stat()
+    key = (str(target), info.st_size, info.st_mtime_ns, min_len)
     with _LOCK:
-        if len(_REMEMBERED) >= _MAX_REMEMBERED:
-            _REMEMBERED.clear()
-        _REMEMBERED[key] = document
-    return document
+        remembered = _REMEMBERED.get(key)
+        if remembered is not None:
+            return remembered
+        in_flight = _IN_FLIGHT.setdefault(key, threading.Lock())
+    with in_flight:
+        with _LOCK:
+            remembered = _REMEMBERED.get(key)
+        if remembered is not None:
+            return remembered
+        document = _emulate(executable, target, min_len, timeout_s, runner)
+        with _LOCK:
+            _IN_FLIGHT.pop(key, None)
+            if isinstance(document, dict):
+                if len(_REMEMBERED) >= _MAX_REMEMBERED:
+                    _REMEMBERED.clear()
+                _REMEMBERED[key] = document
+        return document
 
 
 def forget_documents() -> None:
-    """Drop every remembered result document. For tests."""
+    """Drop every remembered result document and checked digest. For tests."""
     with _LOCK:
         _REMEMBERED.clear()
+        _IN_FLIGHT.clear()
+    _VERIFIED.clear()
 
 
 def floss(
@@ -255,6 +441,8 @@ def floss(
     ``total_matched`` the rows ``kinds`` and ``pattern`` kept, and
     ``next_offset`` where the following page starts, ``None`` on the last one.
     ``counts`` says how many of each kind FLOSS found before any filter.
+    ``runner`` stands in for the child process in tests; with it, the
+    executable is not looked for.
     """
     target = Path(path)
     if not target.is_file():
@@ -275,10 +463,23 @@ def floss(
             return _error(
                 "FLOSS emulates Windows PE code only; this file is not a PE (no MZ header)"
             )
+    # vivisect loads a saved workspace beside the file in place of the file,
+    # and a saved workspace is a pickle: reading one runs whatever it holds.
+    if Path(f"{target}.viv").exists():
+        return _error(
+            "a saved vivisect workspace sits beside this file; FLOSS would load it in place "
+            "of the file, so the call is refused"
+        )
 
-    if runner is None and importlib.util.find_spec("floss") is None:
-        return _error("flare-floss is not installed; it comes with the floss extra")
-    document = _document(target, minimum, max(1, int(timeout_s)), runner or _run)
+    if runner is None:
+        executable, reason = find_floss()
+        if executable is None:
+            return tool_error(
+                MISSING_DEPENDENCY, reason, tool="floss", remediation=FLOSS_REMEDIATION
+            )
+        document = _document(str(executable), target, minimum, max(1, int(timeout_s)), _run)
+    else:
+        document = _document("floss", target, minimum, max(1, int(timeout_s)), runner)
     if isinstance(document, str):
         return _error(document)
 
