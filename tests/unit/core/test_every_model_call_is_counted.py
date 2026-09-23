@@ -454,3 +454,150 @@ def _cut_off(coro: Any, timeout: float, label: str = "") -> Any:
         raise TimeoutError("hard cap")
 
     return asyncio.run(_within())
+
+
+class _Scripted(BaseChatModel):
+    """Answers from a script of tool calls, final text and exceptions; keeps what it served.
+
+    A string is a final answer, ``"tool"`` a call to ``peek``, an exception is
+    raised. ``served`` counts the answers it returned, which is what a model
+    server would bill.
+    """
+
+    script: list[Any] = []
+    served: list[int] = []
+
+    @property
+    def _llm_type(self) -> str:
+        return "scripted"
+
+    def bind_tools(self, tools: Any, **_: Any) -> Any:
+        return self
+
+    def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **_: Any):
+        step = self.script.pop(0) if self.script else "tool"
+        if isinstance(step, BaseException):
+            raise step
+        if step == "tool":
+            n = len(self.served) + 1
+            answer = AIMessage(
+                content="",
+                tool_calls=[{"name": "peek", "args": {"n": n}, "id": f"c{n}"}],
+                usage_metadata=dict(USAGE),
+            )
+        else:
+            answer = AIMessage(content=step, usage_metadata=dict(USAGE))
+        self.served.append(1)
+        return ChatResult(generations=[ChatGeneration(message=answer)])
+
+
+def _peek(n: int) -> str:
+    """Peek."""
+    return f"bytes {n}"
+
+
+def _peek_tool() -> Any:
+    return StructuredTool.from_function(func=_peek, name="peek", description="p")
+
+
+def _connection_error() -> Exception:
+    import httpx
+    from openai import APIConnectionError
+
+    return APIConnectionError(request=httpx.Request("POST", "http://127.0.0.1:8080/v1"))
+
+
+def _scripted_analyst(script: list[Any]) -> tuple[_Analyst, _Scripted, TokenLedger]:
+    llm, ledger = _Scripted(script=list(script), served=[]), TokenLedger()
+    agent = _Analyst(llm=llm, name="static", tools=[_peek_tool()])
+    agent.token_ledger = ledger
+    agent._container = MagicMock()
+    agent._model_label = lambda: "openai/static-model"
+    return agent, llm, ledger
+
+
+class TestEveryLoopEndingCountsWhatWasServed:
+    def test_a_step_cap_the_graph_ended_counts_each_served_turn_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The graph's own stop replaces a turn the model did answer: one call, usage unknown."""
+        from maljan.core.config import get_settings
+
+        monkeypatch.setitem(get_settings().react_agent_max_steps_overrides, "static", 3)
+        agent, llm, ledger = _scripted_analyst(["tool"] * 10)
+
+        agent.execute_tool_loop([("system", "s"), ("human", "h")])
+
+        assert llm.served
+        assert _calls(ledger, "static") == len(llm.served)
+
+    def test_the_stop_this_code_appends_at_a_recursion_error_is_not_a_call(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from langgraph.errors import GraphRecursionError
+
+        answered = AIMessage(
+            content="",
+            tool_calls=[{"name": "peek", "args": {"n": 1}, "id": "c1"}],
+            usage_metadata=dict(USAGE),
+        )
+
+        class _Executor:
+            def astream(self, state: Any, *_: Any, **__: Any) -> Any:
+                async def _snapshots() -> Any:
+                    yield {"messages": [*state["messages"], answered]}
+                    raise GraphRecursionError("the step cap")
+
+                return _snapshots()
+
+        monkeypatch.setattr("langgraph.prebuilt.create_react_agent", lambda *a, **k: _Executor())
+        agent, llm, ledger = _scripted_analyst(["CLAIM: x\nEVIDENCE: ev_0001"])
+
+        agent.execute_tool_loop([("system", "s"), ("human", "h")])
+
+        # The one turn the loop's model answered, and the salvage's own call.
+        assert _calls(ledger, "static") == 1 + len(llm.served)
+        assert ledger.snapshot()["unreported_calls"] == 0
+
+    def test_an_attempt_abandoned_on_a_connection_error_counts_what_it_was_served(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(asyncio, "sleep", _no_wait)
+        agent, llm, ledger = _scripted_analyst(
+            ["tool", _connection_error(), "tool", "CLAIM: x\nEVIDENCE: ev_0001"]
+        )
+
+        agent.execute_tool_loop([("system", "s"), ("human", "h")])
+
+        assert len(llm.served) == 3, "one turn before the drop, two in the replay"
+        assert _calls(ledger, "static") == 3
+
+    def test_a_loop_that_raised_an_analyst_error_counts_what_it_was_served(self) -> None:
+        from maljan.core.exceptions import AnalystError
+
+        agent, llm, ledger = _scripted_analyst(["tool", "tool", AnalystError("gave up")])
+
+        with pytest.raises(AnalystError):
+            agent.execute_tool_loop([("system", "s"), ("human", "h")])
+
+        assert len(llm.served) == 2
+        assert _calls(ledger, "static") == 2
+
+    def test_a_judge_loop_that_failed_counts_what_it_was_served(self) -> None:
+        llm = _Scripted(script=["tool", "tool", RuntimeError("the server broke")], served=[])
+        ledger = TokenLedger()
+        judge = _judge(llm, ledger)  # type: ignore[arg-type]
+        judge.tools = [_peek_tool()]
+
+        with pytest.raises(RuntimeError):
+            asyncio.run(judge.execute_tool_loop([("system", "s"), ("human", "h")]))
+
+        assert len(llm.served) == 2
+        assert _calls(ledger, "judge") == 2
+
+
+_REAL_SLEEP = asyncio.sleep
+
+
+async def _no_wait(seconds: float, *args: Any, **kwargs: Any) -> Any:
+    return await _REAL_SLEEP(0)

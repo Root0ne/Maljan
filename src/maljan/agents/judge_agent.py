@@ -42,6 +42,7 @@ from maljan.agents.base_agent import (
     _trim_for_synthesis,
     _turn_key,
     counted_window_tokens,
+    is_model_turn,
     is_the_graph_s_step_stop,
     loop_limits,
     note_a_window_that_moved,
@@ -768,6 +769,18 @@ class JudgeAgent(BudgetMeter):
                     ended["window_full"] = True
                     note_a_window_that_moved(exc)
 
+        turns_recorded = False
+
+        def _record_the_turns() -> None:
+            """The loop's answered turns onto the run's ledger, once however the loop ends."""
+            nonlocal turns_recorded
+            if turns_recorded:
+                return
+            turns_recorded = True
+            for _m in list(latest.get("messages") or [])[len(messages) :]:
+                if is_model_turn(_m):
+                    self._record_usage(_m)
+
         try:
             await asyncio.wait_for(_until_it_answers_or_runs_out(), timeout=timeout)
             _msgs = list(latest.get("messages") or [])
@@ -778,9 +791,7 @@ class JudgeAgent(BudgetMeter):
             # so the mediator's tool-loop LLM calls land in the per-run
             # TokenLedger (the tools path previously recorded nothing — only
             # the no-tools fallback above did).
-            for _m in _msgs:
-                if getattr(_m, "type", "") == "ai":
-                    self._record_usage(_m)
+            _record_the_turns()
             if ended["no_room"] or ended["window_full"]:
                 cap = "no_room"
                 why = (
@@ -810,9 +821,11 @@ class JudgeAgent(BudgetMeter):
             # The turns the loop took before its clock ran out were answered
             # and spent; they are on the ledger like the turns of a loop that
             # finished.
-            for _m in list(latest.get("messages") or [])[len(messages) :]:
-                if getattr(_m, "type", "") == "ai":
-                    self._record_usage(_m)
+            _record_the_turns()
+            raise
+        except Exception:
+            # So are the turns of a loop that failed any other way.
+            _record_the_turns()
             raise
         finally:
             # In a ``finally`` for the reason the analysts' loop uses one: a
