@@ -442,6 +442,24 @@ function speakerOf(raw: string): string {
   return raw === ROOM_SPEAKER ? "" : raw;
 }
 
+/** The line a fallback turn gets: who, which model answered, and why. */
+export function fallbackLine(name: string, model: string, reason: string): string {
+  const answered = model ? `${name}'s turn was answered by ${model}` : `${name} fell back`;
+  return `${answered} — ${reason}.`;
+}
+
+/** The line a rested tool server gets, in the words the report prints. */
+export function restedLine(data: Record<string, unknown>): string {
+  const failures = Number(data.failures ?? 0) || 0;
+  const reason = text(data.reason);
+  return (
+    `Tool server ${text(data.server)} is resting for ${Math.round(Number(data.cooldown_s ?? 0) || 0)} s ` +
+    `after ${failures} transport ${failures === 1 ? "failure" : "failures"} in a row` +
+    (reason ? ` (the last: ${reason})` : "") +
+    "."
+  );
+}
+
 function fold(state: BuilderState, event: RunEvent): void {
   const data = event.data ?? {};
   const stageKey = text(data.stage);
@@ -486,6 +504,26 @@ function fold(state: BuilderState, event: RunEvent): void {
     const stage = draftOf(state, stageKey);
     const who = participantOf(state, speaker);
     if (who) who.state = "working";
+    /* A turn another model answered, because the one before it failed as a
+     * provider, is named where it happened: the reader is reading a
+     * different model's words from here on. */
+    const fallback = text(data.fallback);
+    if (fallback) {
+      push(state, stage, {
+        id: `${id}:fallback`,
+        kind: "system",
+        stage: stageKey,
+        round: stage.round,
+        speaker: "",
+        displayName: "",
+        text: fallbackLine(nameOf(state, speaker), text(data.model), fallback),
+        ts: event.ts,
+        seq: event.seq,
+        claims: [],
+        dissent: [],
+      });
+    }
+    if (!text(data.text_delta)) return;
     const openKey = `${stageKey}|${speaker}`;
     const open = state.streaming.get(openKey);
     if (open) {
@@ -760,6 +798,24 @@ function fold(state: BuilderState, event: RunEvent): void {
     };
     state.textLength += closing.text.length - (state.closing?.text.length ?? 0);
     state.closing = closing;
+    return;
+  }
+
+  if (event.type === "tool_server_rested") {
+    const stage = draftOf(state, stageKey);
+    push(state, stage, {
+      id,
+      kind: "system",
+      stage: stageKey,
+      round: stage.round,
+      speaker: "",
+      displayName: "",
+      text: restedLine(data),
+      ts: event.ts,
+      seq: event.seq,
+      claims: [],
+      dissent: [],
+    });
     return;
   }
 
