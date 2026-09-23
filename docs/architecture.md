@@ -404,6 +404,19 @@ retry; a smaller model wrote it inside `objects[0]` in three of three, which
 costs no retry because a misplaced block is moved. Prompt text only: nothing in
 this pipeline writes a verdict.
 
+The STIX rules around it ask the judge for what the judge decides and agree
+with the checks that read its answer. An attack-pattern names its technique in
+`external_references`, and a behaviour with no id goes in `severity.rationale`
+— the prompt used to say *"Omit technique ID if unsure"*, which is exactly what
+`attck.missing_id` then asks about, and that code took the judge's one retry
+in ten of the twenty-four stored runs that retried. Ids are labels (see *The
+published ids are the platform's*), `created`, `modified`, `spec_version` and
+`valid_from` are left out because they are stamped after the answer — ids and
+stamps were about two fifths of what the judge wrote for its objects, output a
+small reply budget runs out on — and a relationship credits sources by the
+names the evidence summary gives them, which is what `stix.credit_without_claim`
+reads.
+
 The statement is read three ways, not two, and `pipeline.outcome.StatedVerdict`
 carries the difference: the judge wrote a word this pipeline knows, it wrote a
 word this pipeline does not, or it wrote nothing. Only the third is a question

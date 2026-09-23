@@ -1321,6 +1321,21 @@ change landed on `main`.
   containing `malware-analysis` or on `identity_class: software` stops matching
   new exports; match `malware` and `system`, or the producer's
   `created_by_ref`.
+
+- **The judge's prompt asks for what the judge decides and agrees with the
+  checks.** It said *"Omit technique ID if unsure"* while `attck.missing_id`
+  asks for the id or for the object to go — the code the judge's one retry was
+  spent on in ten of the twenty-four stored runs that retried. It now says an
+  attack-pattern names its technique in `external_references` and a behaviour
+  with no id belongs in `severity.rationale`. It no longer asks for
+  `created`, `modified`, `spec_version` or `valid_from`, which are stamped after
+  the answer (about a fifth of what the judge wrote for its objects, beside the
+  ids, which are minted now too), names the two relationship types the bundle
+  uses, and says a relationship credits sources by the names the evidence
+  summary gives them. **What changes for a reader:** an unmapped behaviour is
+  more often in the severity rationale than in the report's unmapped-behaviour
+  list, and an indicator's `valid_from` is the analysis time rather than a
+  date copied out of the STIX documentation.
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was
