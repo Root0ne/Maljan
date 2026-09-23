@@ -27,7 +27,7 @@ class TestMinimalConstruction:
         r = _minimal_report()
         assert r.schema_version == "1.0"
         assert r.verdict == "Suspicious"
-        assert r.overall_confidence == 0.0
+        assert r.overall_confidence is None
         # Not defaulted: an unassessed report and one assessed as harmless
         # are different findings.
         assert r.severity is None
