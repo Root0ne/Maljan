@@ -132,20 +132,19 @@ class GeminiConfig(BaseModel):
     judge_model: str = "gemini-2.5-pro"
 
 
-class AgentLLMConfig(BaseModel):
-    """Per-agent LLM override for heterogeneous model ensemble.
+class ModelChoice(BaseModel):
+    """One model an agent may call: provider, model, and where it is served.
 
-    When populated for a specific agent name, ServiceContainer will build a
-    dedicated LLM instance for that agent instead of reusing the global expert
-    LLM. This breaks the single-model echo chamber by ensuring each expert
-    uses a different model family.
+    The shape a per-agent override has always had, named on its own so the
+    models an agent falls back to are written exactly the way its first model
+    is. ``temperature`` left at ``None`` takes the entry's own, and ``0.1``
+    when neither sets one.
 
     Attributes:
-        provider:    LLM provider name ("openai", "anthropic", "ollama").
-                     Overrides the global LLMConfig.provider for this agent.
+        provider:    LLM provider name ("openai", "anthropic", "ollama", "gemini").
         model:       Model identifier (e.g. "gpt-4o", "claude-3-5-sonnet",
-                     "llama3.1:8b"). Required when provider is set.
-        temperature: Optional temperature override. Defaults to 0.1 when None.
+                     "llama3.1:8b").
+        temperature: Optional temperature override.
         base_url:    Optional per-agent endpoint, so two agents can sit on two
                      different OpenAI-compatible servers (llama.cpp /
                      ik_llama.cpp) or two different Ollama servers instead of
@@ -161,7 +160,7 @@ class AgentLLMConfig(BaseModel):
     base_url: str | None = None
 
     @model_validator(mode="after")
-    def _base_url_belongs_to_an_endpoint_provider(self) -> "AgentLLMConfig":
+    def _base_url_belongs_to_an_endpoint_provider(self) -> "ModelChoice":
         """Reject a per-agent endpoint the provider has nowhere to send.
 
         Anthropic and Gemini are vendor APIs here, with no per-agent endpoint
@@ -176,6 +175,52 @@ class AgentLLMConfig(BaseModel):
                 f"not '{self.provider}'; those providers have no per-agent endpoint."
             )
         return self
+
+    def same_call(self, other: "ModelChoice") -> bool:
+        """Whether two choices would send a call to the same model at the same place."""
+        return (self.provider, self.model, self.base_url or None) == (
+            other.provider,
+            other.model,
+            other.base_url or None,
+        )
+
+
+class AgentLLMConfig(ModelChoice):
+    """Per-agent LLM override for heterogeneous model ensemble.
+
+    When populated for a specific agent name, ServiceContainer will build a
+    dedicated LLM instance for that agent instead of reusing the global expert
+    LLM. This breaks the single-model echo chamber by ensuring each expert
+    uses a different model family.
+
+    ``fallbacks`` is the rest of the agent's ordered model list: the models
+    tried, in order, when the one before them fails *as a provider* — a
+    connection error, a timeout, an HTTP 5xx, a model the server does not
+    have, a refusal the provider reports as an error. Never on what a model
+    said: an answer the platform's validation rejects goes back to the model
+    that wrote it, because asking another model instead would be the platform
+    choosing a different answer. Empty keeps the single-model form, which is
+    every entry written before the list existed.
+    """
+
+    fallbacks: list[ModelChoice] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _each_model_once(self) -> "AgentLLMConfig":
+        """A model named twice in one list would only be asked twice."""
+        seen: list[ModelChoice] = [self]
+        for choice in self.fallbacks:
+            if any(choice.same_call(earlier) for earlier in seen):
+                raise ValueError(
+                    f"fallback {choice.provider}/{choice.model} is already in this agent's "
+                    "model list; name each model once."
+                )
+            seen.append(choice)
+        return self
+
+    def chain(self) -> list[ModelChoice]:
+        """The agent's models in the order they are tried, first model first."""
+        return [self, *self.fallbacks]
 
 
 class FrontierArm(BaseModel):
@@ -280,6 +325,13 @@ class LLMConfig(BaseModel):
     frontier: FrontierConfig = Field(default_factory=FrontierConfig)
     # Per-agent overrides: {"static": AgentLLMConfig(...), "dynamic": ...}
     agents: dict[str, AgentLLMConfig] = Field(default_factory=dict)
+    # How much of an agent's loop budget one model on its fallback list may
+    # spend on a turn before it is treated as stalled and the next model is
+    # asked (``maljan.llm.fallback``). A share of the loop rather than a fixed
+    # number of seconds, because the loop budget is what would otherwise
+    # cancel the stall first: at a half, a first model that stops answering
+    # leaves the other half of the loop to the model that stays for it.
+    fallback_turn_share: Annotated[float, Field(gt=0.0, lt=1.0)] = 0.5
 
     # Whether a job is refused when an agent names a model no probe has
     # reached. A model name is the one part of a definition nothing validates
@@ -921,6 +973,36 @@ def builtin_env_allow(key: str, configured: Iterable[str]) -> list[str]:
     return list(dict.fromkeys([*REQUIRED_ENV_ALLOW.get(key, ()), *configured]))
 
 
+class MCPBreakerConfig(BaseModel):
+    """A tool server that keeps failing is rested; a slow one is not piled onto.
+
+    ``failures_to_open`` calls in a row the server did not answer — a timeout,
+    a refused connection, the server's process gone, or a call that did not
+    finish within its caller's budget — open the server's breaker for
+    ``cooldown_seconds``. A call in that time is answered by the platform with
+    an authored tool error naming the server, that it is resting and when it
+    will be tried again; after it, one call is let through and a success
+    closes the breaker. A tool that answers with its own error has answered and
+    never counts.
+
+    ``max_concurrent_calls`` is how many calls one server may have in flight
+    for one job at once, so parallel analysts queue rather than pile onto one
+    slow sidecar. ``0`` leaves the calls uncapped.
+
+    ``call_timeout_seconds`` is how long a call may go unanswered before it is
+    a timeout, which the breaker counts.
+    """
+
+    failures_to_open: Annotated[int, Field(ge=1)] = 3
+    cooldown_seconds: Annotated[float, Field(ge=0.0)] = 60.0
+    max_concurrent_calls: Annotated[int, Field(ge=0)] = 4
+    # The budget every tool call gets at least before it counts as a server
+    # that did not answer (a tool whose server declares a longer budget gets
+    # that, and thirty seconds of grace are added either way). Zero derives
+    # it from the longest tool budget the deployment configures — capa's.
+    call_timeout_seconds: Annotated[float, Field(ge=0.0)] = 0.0
+
+
 class MCPConfig(BaseModel):
     """The operator-visible registry of tool servers.
 
@@ -935,6 +1017,10 @@ class MCPConfig(BaseModel):
     # entries are re-seeded on load, so "delete" in the UI means enabled=False
     # for them and a real removal for a custom key.
     servers: dict[str, MCPServerConfig] = Field(default_factory=_builtin_servers)
+    # How a job treats a tool server that keeps failing at the transport, and
+    # how many calls it may have in flight at once. Per job and per server;
+    # see ``maljan.providers.server_guard``.
+    breaker: MCPBreakerConfig = Field(default_factory=lambda: MCPBreakerConfig())
 
     @model_validator(mode="after")
     def _reseed_builtins(self) -> "MCPConfig":

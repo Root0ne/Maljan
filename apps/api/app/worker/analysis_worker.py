@@ -796,6 +796,7 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
         args=entry.get("args") or {},
         args_repaired=bool(entry.get("args_repaired", False)),
         args_raw=(str(entry["args_raw"]) if entry.get("args_raw") else None),
+        model=(str(entry["model"])[:300] if entry.get("model") else None),
         output=str(entry.get("output", "") or ""),
         structured=entry.get("structured"),
         # Why the output is empty, what the call was answered from, what it

@@ -15,12 +15,17 @@
  */
 
 import { rosterNames } from "@/lib/rosterNames";
+import { progressTone } from "@/lib/status";
 import type { JobRoster } from "@/types/events";
 import { formatStageDuration, type StageTimelineRow } from "./stageTimeline";
 
+const tone = (state: string) =>
+  `${progressTone(state).border} ${progressTone(state).bg} ${progressTone(state).text}`;
+
+/* Running and done are the run's own colours (`lib/status.ts`). */
 const STATUS_STYLE: Record<string, string> = {
-  running: "border-status-blue/30 bg-status-blue/10 text-status-blue",
-  done: "border-status-green/30 bg-status-green/10 text-status-green",
+  running: tone("running"),
+  done: tone("done"),
   skipped: "border-border bg-bg-surface text-text-muted",
   pending: "border-border bg-bg-surface text-text-disabled",
 };

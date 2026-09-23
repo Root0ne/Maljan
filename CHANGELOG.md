@@ -579,6 +579,69 @@ change landed on `main`.
   touches `docs/**` or `mkdocs.yml` and deploys it to GitHub Pages on a push to
   `main`; a `docs` dependency group keeps MkDocs Material out of the product's
   own dependencies.
+- **The dashboard answers at a glance.** Each of the latest runs carries its
+  verdict as a chip, in the shared verdict colours and in words; a run with no
+  verdict yet shows its status. A "Tools used" list draws the tools the
+  caller's last 20 completed runs called as flat bars with the counts printed,
+  from the new authenticated `GET /api/v1/dashboard/tools?limit=` (default 20,
+  at most 100), which sums each run's `run_summary.evidence.by_tool`. Its
+  `runs` counts only the runs whose report carries that per-tool record, and
+  `read` every completed run it looked at, so a report older than the record
+  is said on the dashboard rather than counted as a run that called nothing.
+- **Copy a row's SHA-256 and job id.** Every row of the analyses list copies
+  its sample's SHA-256 and its job id in one press each, with the confirmation
+  announced to a screen reader. The IDENTITY hash rows and the DETECTION rule
+  cards use the same control and now announce it too.
+- **Time per stage on the Summary.** Each stage that took time is listed with
+  its duration and a bar against the run's total elapsed, from the same rows
+  and formatter as the header's stage strip.
+- **A per-tool table for a tool server.** Settings → tool servers draws a
+  tested server's tools as a table with a search, "Select all" / "Select none"
+  over the rows shown, a live "enabled N of M" and, where the capability
+  manifest marks a tool unavailable, its reason and remedy on its own row. It
+  edits the existing per-server tick list; there is no new setting.
+
+- **An agent may name models to fall back to, tried only when a provider
+  fails.** `llm.agents.<key>.fallbacks` is an ordered list of models, each
+  written like the entry's first one (provider, model, optional temperature and
+  — for `openai` and `ollama` — base URL). The next model answers a turn only
+  when the one before failed as a provider: a refused or dropped connection, a
+  timeout, HTTP 5xx, 408 or 429, a model the server does not have, a refused
+  credential, or a refusal the provider reports as an error. An answer the
+  validation loop rejects is still sent back to the model that wrote it, and a
+  guard case in `tests/unit/test_no_silent_overrides.py` proves it is never
+  asked of another model. Every turn records which model gave it: the ledger
+  entry of each call it asked for carries `model` (revision `20260928000000`),
+  `agent_message_delta` carries `model` and `tokens`, a new `model_fallback`
+  event names the switch with its reason in words (whether or not deltas
+  stream), and `run_summary.models` counts turns per agent and model with every
+  fallback's reason. Each fallback passes the probe gate the first model does — the
+  `agent` probe asks every model on the list, the `llm` probe the ones its
+  provider serves, and the gate names a missing one as the model the agent
+  *falls back to* — and the context-window budget counts every model on every
+  list, the smallest window governing. The Agents page edits the list (add,
+  remove, move up and down).
+- **What a run spent, in tokens.** `run_summary.tokens` sums the usage every
+  provider reported — prompt and completion tokens, and the cost an
+  OpenAI-compatible router reports where it reports one — for the run and per
+  agent (`per_agent`), counts the calls whose provider reported nothing as
+  `unreported_calls`, and carries the `sentence` the report prints. The
+  report's run summary and the console's "What the run spent" gain that
+  tokens line. There is no price table.
+- **A tool server that keeps failing is rested, and says so.** Per job and per
+  server, `core.mcp.breaker.failures_to_open` (3) transport failures in a row —
+  a timeout, a refused connection, the server's process gone — rest the server
+  for `core.mcp.breaker.cooldown_seconds` (60). A call made while it rests is
+  answered by the platform with a structured tool error (`server_resting`)
+  naming the server, that it is resting and when it will be tried again; after
+  the cooldown one call is let through and a success ends the rest. A tool
+  that answers with its own error never counts.
+  `core.mcp.breaker.max_concurrent_calls` (4) caps how many calls one server
+  has in flight for one job. Each rest is published as `tool_server_rested`,
+  drawn in the conversation, and kept in `run_summary.server_rests`, which the
+  report and the console print. Every default's origin is written beside it
+  in `docs/configuration.md`; all three are judgements, because no recorded
+  live run had a tool server fail at the transport.
 
 ### Changed
 
@@ -1309,6 +1372,65 @@ change landed on `main`.
   reads `1837` where it read `1842` and five category shares move by one
   rounding place; no Linux rule's rate moves at all. No behaviour category was
   renamed or removed, so a consumer reading `category` alone is unaffected.
+- **One severity ladder in the console.** Severity order and colour live in
+  `apps/web/src/lib/severity.ts`, and the Summary, DETECTION, DYNAMIC and the
+  header's verdict-against-severity rule read it. A guard fails the unit suite
+  on a severity coloured, compared by its spelling (either way round or in a
+  `switch`) or sorted by its label anywhere else.
+- **DETECTION shows the rules a current run fired, with each Sigma rule's own
+  level.** DETECTION read only the old deterministic layers' claims, which no
+  current run writes, and turned their confidence — the rule's maturity status
+  as a number — into "High" or "Medium". It now reads the `yara_matches` and
+  `sigma_matches` report sections the rule tools build, shows each Sigma rule's
+  declared level labelled as the rule's level, and sorts and dots the rows by
+  it on the severity ladder. The two sections moved from STATIC to DETECTION;
+  STATIC links there. A run stored before those tools is still read from its
+  layer claims, which say "level not recorded", and their confidence is printed
+  as the number it is. `SigmaMatch` also carries the rule's `level` as a field;
+  its claim text is unchanged.
+- **DYNAMIC colours a signature's number only where its scale is known.** The
+  run's recorded sandbox provider says which scale the number is on: CAPEv2's
+  1 to 3 or Triage's 1 to 10 signature score, each drawn on the ladder by what
+  it means, printed in words beside the number ("High, 8/10"). An uploaded,
+  REST or unknown provider's number, and one outside its scale, is drawn in
+  one neutral tone as it came, beside the word "unrated".
+- **One colour per run status.** `apps/web/src/lib/status.ts` colours
+  completed, running, pending, failed and cancelled for the dashboard, the
+  analyses list, the search palette and the analysis header, and a stage's or
+  participant's running and done; the search palette's running job is blue like
+  everywhere else, not orange. A dashboard run that has a report but did not
+  complete shows its status beside the verdict chip.
+- **A tested tool server's unavailable tools are said on their own rows.** The
+  separate list above the Tools section is drawn only where the tool table is
+  not, and a tick list the table writes keeps the manifest's order rather than
+  the order the boxes were ticked in.
+- **The console's style guard covers charts.** `styleRules.test.ts` also fails
+  on an SVG gradient, on Tailwind's bare `transition` class, and on a colour
+  transition written as an arbitrary `transition-[…]` class, an inline style or
+  a stylesheet declaration.
+- **A token count is what a provider reported, and nothing else.** A call
+  whose provider reported no usage used to be counted with a
+  four-characters-per-token estimate folded into the same sums, flagged only by
+  `run_summary.tokens.estimated_calls`. It is now counted as a call and as
+  `unreported_calls`, adds no tokens, and the report and the console say "not
+  reported" for it. `estimated_calls` is no longer written. A consumer reading
+  `run_summary.tokens` should read `unreported_calls` where it read
+  `estimated_calls`, and treat `input_tokens` / `output_tokens` as the reported
+  figures alone.
+
+- **Every tool server is driven with at most four calls in flight per job.**
+  `core.mcp.breaker.max_concurrent_calls` (4) queues a job's fifth concurrent
+  call to one server until one of the four answers; set it to `0` to drive
+  every server uncapped as before.
+- **A model on a fallback list has a turn deadline, and every provider a
+  request timeout.** A model that is not the last on its agent's list is
+  treated as stalled after `core.llm.fallback_turn_share` (0.5) of the agent's
+  loop budget, and the list moves on; the model that answered then stays for
+  the rest of that loop. The Ollama client is now built with the same 1800 s
+  request timeout the OpenAI client always had, and Anthropic's is named rather
+  than left to its SDK. A tool call is sent with a deadline
+  (`core.mcp.breaker.call_timeout_seconds`, derived from capa's budget by
+  default) and a call that passes it is a transport failure the breaker counts.
 
 - **The exported STIX bundle names its producer, in STIX's vocabulary.** The
   platform's `identity` was `identity_class: "software"` under a new random id
@@ -1336,6 +1458,7 @@ change landed on `main`.
   more often in the severity rationale than in the report's unmapped-behaviour
   list, and an indicator's `valid_from` is the analysis time rather than a
   date copied out of the STIX documentation.
+
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was
@@ -3483,6 +3606,22 @@ The same applies to an export carrying the judgement-layer settings —
 and `core.preprocessing.category_inference_backend`. `core.analysis.sigma_rules_dir`
 is not dropped but moved: it becomes `MALJAN_SIGMA_RULES_DIR` in the `analysis`
 tool server's `env`, and the migration moves a stored value across for you.
+
+The evidence ledger gains a `model` column (revision `20260928000000`); run
+`make migrate` before starting a worker on this release. Rows written before it
+name no model, and read as such. `llm.agents` entries need no migration: an
+entry without `fallbacks` is the single-model form it always was. A stored run
+summary written before this release still carries `tokens.estimated_calls`, and
+the console says such a run's figures had estimates mixed in rather than
+printing them as a count. `core.mcp.breaker.*` are new settings with defaults;
+set `core.mcp.breaker.max_concurrent_calls` to `0` to drive every tool server
+uncapped as before.
+
+`core.llm.fallback_turn_share` and `core.mcp.breaker.call_timeout_seconds` are
+new settings with defaults. A tool server that legitimately takes longer than
+the longest tool budget configured for this deployment (capa's, 300 s by
+default) needs `core.mcp.breaker.call_timeout_seconds` set, or its tools to
+declare their budget in the server's `capabilities` manifest.
 
 A consumer of the exported STIX bundle that filters on the platform's own
 words should update the filter: the producer identity is now

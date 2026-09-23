@@ -170,6 +170,13 @@ class LedgerEntry(BaseModel):
         default=None,
         description="The arguments as the model wrote them, kept when they were repaired.",
     )
+    model: str | None = Field(
+        default=None,
+        description=(
+            "The model whose turn asked for this call, as provider/model; None where "
+            "nothing named it."
+        ),
+    )
     started_at: float = Field(default=0.0, description="Unix timestamp the call started at.")
     duration_ms: int = Field(default=0, description="Wall-clock duration of the call.")
     seq: int = Field(default=0, description="Call order within the job, 1-based.")
@@ -225,6 +232,7 @@ def build_entry(
     remediation: str | None = None,
     args_repaired: bool = False,
     args_raw: str | None = None,
+    model: str | None = None,
 ) -> LedgerEntry:
     """One entry, with the output trimmed and parsed the same way every time.
 
@@ -287,6 +295,7 @@ def build_entry(
         repeated_of=repeated_of,
         args_repaired=bool(args_repaired),
         args_raw=args_raw if args_repaired else None,
+        model=model or None,
         started_at=started_at,
         duration_ms=max(0, int(duration_ms)),
         seq=seq,

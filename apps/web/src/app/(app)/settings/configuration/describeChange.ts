@@ -431,9 +431,11 @@ function describeProfilesMap(before: unknown, after: unknown): {
 function formatOverride(o: AgentLLMOverride): string {
   let base = `${o.provider}/${o.model}`;
   if (o.base_url) base = `${base} @ ${o.base_url}`;
-  return o.temperature === null || o.temperature === undefined
-    ? base
-    : `${base} (temp ${o.temperature})`;
+  if (o.temperature !== null && o.temperature !== undefined) {
+    base = `${base} (temp ${o.temperature})`;
+  }
+  const fallbacks = (o.fallbacks ?? []).map((f) => `${f.provider}/${f.model}`);
+  return fallbacks.length ? `${base}, then ${fallbacks.join(", then ")}` : base;
 }
 
 function describeLlmAgentsMap(before: unknown, after: unknown): {

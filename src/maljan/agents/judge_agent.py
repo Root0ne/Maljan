@@ -46,7 +46,7 @@ from maljan.agents.base_agent import (
 from maljan.agents.judge_postprocess import ASSESSMENT_RELOCATED_CODE
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
-from maljan.core.token_ledger import TokenLedger, record_response_usage
+from maljan.core.token_ledger import TokenLedger
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
 from maljan.pipeline.events import emit_judge_question, scrub
 from maljan.pipeline.mediation_models import MediatorVerdict
@@ -345,6 +345,9 @@ class JudgeAgent(BudgetMeter):
         bundle = judge.give_verdict(reports, history, attck_validator=validator)
     """
 
+    # With no entry of its own the judge runs on the judge model.
+    _model_role = "judge"
+
     def __init__(
         self,
         llm: BaseChatModel,
@@ -533,6 +536,8 @@ class JudgeAgent(BudgetMeter):
         from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
         from langgraph.prebuilt import create_react_agent
 
+        from maljan.llm.fallback import restart_models
+
         messages_pre: list[BaseMessage] = []
         for role, content in prompt_messages:
             if role == "system":
@@ -546,6 +551,8 @@ class JudgeAgent(BudgetMeter):
             # same hard timeout used by the tools path so a stalled / queued
             # llama-server cannot freeze the judge node.
             no_tools_timeout = loop_limits("judge")[0]
+            # Sticky for this call only, with a deadline shorter than its clock.
+            restart_models(self.llm, loop_seconds=float(no_tools_timeout), share=self._turn_share())
             response = await asyncio.wait_for(
                 retry_on_connection_error(
                     lambda: self.llm.ainvoke(messages_pre),
@@ -554,7 +561,7 @@ class JudgeAgent(BudgetMeter):
                 ),
                 timeout=float(no_tools_timeout),
             )
-            record_response_usage(self.token_ledger, response, prompt_text=str(messages_pre))
+            self._record_usage(response)
             record_judge_response(
                 getattr(self, "truncation_ledger", None),
                 response,
@@ -588,6 +595,9 @@ class JudgeAgent(BudgetMeter):
 
         settings = get_settings()
         timeout = settings.react_agent_timeout
+        # Sticky for this loop only, with a turn deadline shorter than its clock;
+        # the judge's next loop starts at its first model.
+        restart_models(self.llm, loop_seconds=float(timeout), share=self._turn_share())
         max_steps = int(settings.react_agent_max_steps)
         # The judge is an agent by every other measure here — its ledger
         # entries carry its name, it binds servers by role, the console draws
@@ -654,7 +664,7 @@ class JudgeAgent(BudgetMeter):
             # the no-tools fallback above did).
             for _m in _msgs:
                 if getattr(_m, "type", "") == "ai":
-                    record_response_usage(self.token_ledger, _m)
+                    self._record_usage(_m)
             return str(_msgs[-1].content)
         except TimeoutError:
             self.logger.error("JudgeAgent ReAct timed out after %ds.", timeout)

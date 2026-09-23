@@ -244,3 +244,68 @@ export function corpusHeldSentence(truncation: TruncationCounts | null): string 
   if (!partial && !(ceiling > 0 && held > ceiling * CORPUS_LOUD_SHARE)) return null;
   return `The grounding corpus held ${countLabel(answers, "answer")}, ${held} of ${ceiling} bytes.`;
 }
+
+/** The part of `run_summary.tokens` the spend sentence reads. */
+export interface TokenCounts {
+  llm_calls?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  unreported_calls?: number;
+  cost?: number;
+  cost_calls?: number;
+  sentence?: string;
+  estimated_calls?: number;
+}
+
+/**
+ * What the run's model calls spent, as one sentence, or null with no calls.
+ *
+ * The sentence the report printed (`analysis/run_summary.tokens_sentence`)
+ * when the summary carries it, so the two say the same words. A summary
+ * stored before it existed is worked out the same way — except one whose
+ * figures had estimates mixed in, which is said rather than printed as a
+ * count.
+ */
+export function tokensSentence(tokens: TokenCounts | null | undefined): string | null {
+  if (!tokens) return null;
+  if (tokens.sentence) return tokens.sentence;
+  const calls = Number(tokens.llm_calls ?? 0) || 0;
+  if (calls <= 0) return null;
+  const noun = calls === 1 ? "call" : "calls";
+  if ((tokens.estimated_calls ?? 0) > 0) {
+    return `Tokens: this run was recorded with estimates mixed into its ${calls} model ${noun}, so no count is shown.`;
+  }
+  const unreported = Number(tokens.unreported_calls ?? 0) || 0;
+  if (calls - unreported <= 0) {
+    return `Tokens: not reported by the provider for any of ${calls} model ${noun}.`;
+  }
+  let text =
+    `Tokens: ${(tokens.input_tokens ?? 0).toLocaleString("en-US")} in and ` +
+    `${(tokens.output_tokens ?? 0).toLocaleString("en-US")} out over ${calls} model ${noun}`;
+  if (unreported) text += `; not reported for ${unreported} of them`;
+  const costCalls = tokens.cost_calls ?? 0;
+  if (typeof tokens.cost === "number" && costCalls > 0) {
+    text += `; a cost of ${tokens.cost.toFixed(4)} USD as the provider reported it for ${costCalls} ${
+      costCalls === 1 ? "call" : "calls"
+    }`;
+  }
+  return `${text}.`;
+}
+
+/** One tool server the run rested, in the words the report prints
+ *  (`analysis/run_summary.server_rest_sentence`). */
+export function serverRestSentence(row: {
+  server?: string;
+  failures?: number;
+  cooldown_s?: number;
+  reason?: string;
+}): string {
+  const failures = Number(row.failures ?? 0) || 0;
+  const reason = (row.reason ?? "").trim();
+  return (
+    `Tool server ${row.server ?? ""} was rested for ${Math.round(Number(row.cooldown_s ?? 0) || 0)} s ` +
+    `after ${failures} ${failures === 1 ? "call" : "calls"} in a row it did not answer` +
+    (reason ? ` (the last: ${reason})` : "") +
+    "."
+  );
+}
