@@ -206,6 +206,20 @@ describe("a changed row", () => {
   });
 });
 
+describe("a field shown but not compared", () => {
+  const newRating: DiffRow = {
+    ...row("severity", "changed"),
+    a: { value: "High", stated_by: null },
+    b: { value: "Low", stated_by: "judge" },
+    changes: [{ field: "value", a: "High", b: "Low" }],
+  };
+
+  it("is never marked the same in both when the runs hold it differently", () => {
+    expect(sideLines(newRating, "a")).toEqual(["value: High", "who stated it: not recorded"]);
+    expect(sideLines(newRating, "b")).toEqual(["value: Low", "who stated it: judge"]);
+  });
+});
+
 describe("a capped section on paper", () => {
   it("says how many rows it holds of how many", () => {
     expect(cappedNote(200, 350)).toBe(

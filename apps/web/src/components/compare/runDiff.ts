@@ -108,12 +108,18 @@ export function sideLines(row: DiffRow, side: "a" | "b"): string[] {
   const fields = row[side];
   if (!fields) return [];
   if (row.status !== "changed") return fieldLines(fields);
-  const changed = new Set(row.changes.map((c) => c.field));
-  return Object.entries(fields).map(([name, value]) =>
-    changed.has(name)
-      ? `${fieldLabel(name)}: ${formatValue(value)}`
-      : `${fieldLabel(name)}: ${formatValue(value)} (same in both)`,
-  );
+  // "(same in both)" only where the other run holds the field with the same
+  // value; a field shown but not compared can differ without being a change.
+  const other = side === "a" ? row.b : row.a;
+  return Object.entries(fields).map(([name, value]) => {
+    const same =
+      other != null &&
+      Object.prototype.hasOwnProperty.call(other, name) &&
+      JSON.stringify(other[name]) === JSON.stringify(value);
+    return same
+      ? `${fieldLabel(name)}: ${formatValue(value)} (same in both)`
+      : `${fieldLabel(name)}: ${formatValue(value)}`;
+  });
 }
 
 /** What a printed section says when it holds fewer rows than the section has. */
