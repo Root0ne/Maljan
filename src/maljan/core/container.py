@@ -130,7 +130,7 @@ def _drop_llm_caches_on_retirement(loop: object) -> None:
     clear_shared_httpx_clients()
 
 
-def composer_output_cap(config: Settings) -> int:
+def composer_output_cap(config: Settings, provider: str | None = None) -> int:
     """What a composer section may generate, reasoning included.
 
     Ollama's ``num_predict`` and llama.cpp's ``n_predict`` count the reasoning
@@ -144,10 +144,14 @@ def composer_output_cap(config: Settings) -> int:
     the section's budget, rather than asking the model not to reason: a
     ``think: false`` a model does not understand is an error on Ollama, and
     the setting that sends it is the operator's.
+
+    Decided per provider: each model of the reporter's list is capped by its
+    own provider's switch. With no provider named, the reporter's first.
     """
     section = int(config.reporting.composer_section_max_tokens)
-    agent = config.llm.agents.get(REPORTER_AGENT_KEY)
-    provider = str(getattr(agent, "provider", "") or config.llm.provider)
+    if provider is None:
+        agent = config.llm.agents.get(REPORTER_AGENT_KEY)
+        provider = str(getattr(agent, "provider", "") or config.llm.provider)
     block = getattr(config.llm, provider, None)
     if provider not in ("ollama", "openai") or bool(getattr(block, "disable_thinking", False)):
         return section
@@ -1179,11 +1183,19 @@ class ServiceContainer:
                 # what a section may generate, and a wait sized from it over a
                 # call allowed ``judge_max_tokens`` would say something untrue.
                 # Held by the composer, which is dropped with the loop it ran on.
-                output_cap = composer_output_cap(self.config)
+                from maljan.core.model_assignments import assignment_chain_for
+
+                config = self.config
+                caps = {
+                    a.label: composer_output_cap(config, a.provider)
+                    for a in assignment_chain_for(config, REPORTER_AGENT_KEY, role="judge")
+                }
+                # The wait is sized for the most a model of the list may write.
+                output_cap = max(caps.values(), default=composer_output_cap(config))
                 composer_llm = registry.build_model_for_agent(
                     REPORTER_AGENT_KEY,
                     fallback_role="judge",
-                    max_tokens=output_cap,
+                    max_tokens_for=lambda provider: composer_output_cap(config, provider),
                 )
                 attach_rate_meter(composer_llm, getattr(self, "_generation_rates", None))
                 self._report_composer_cache = ReportComposer(
@@ -1193,6 +1205,8 @@ class ServiceContainer:
                     token_ledger=getattr(self, "_token_ledger", None),
                     generation_rates=getattr(self, "_generation_rates", None),
                     output_cap=output_cap,
+                    caps_by_model=caps,
+                    turn_share=float(config.llm.fallback_turn_share),
                 )
                 self._report_composer_cache.event_sink = self.event_sink
             return self._report_composer_cache

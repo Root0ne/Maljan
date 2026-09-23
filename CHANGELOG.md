@@ -1504,8 +1504,11 @@ change landed on `main`.
   validation retry. With no rate yet the configured value stands. Rates are
   kept per model and server, and each answer of a model list counts against
   the model that gave it. The 1,800 s ceiling is the providers' shared request
-  timeout. Each sized call starts its model list on its own wait, so a slow
-  primary is not declared stalled at a share of an older clock.
+  timeout. The verdict call starts its model list on its own wait; the report
+  stage starts the reporter's list once and each section measures its turn
+  deadline against the section's wait with the job's share, so a switch holds
+  for the whole report stage and a stalled first model is not waited out again
+  in every section.
   `run_summary.generation` records each model's rate and source and each sized
   call's configured, derived and applied seconds, and the report's Run Summary
   and the run summary's markdown print them.
@@ -1520,8 +1523,9 @@ change landed on `main`.
   reporter's model, built with `judge_max_tokens` (8,192), so a section could
   generate nine times the 900 tokens its setting names; its model is now built
   with `core.reporting.composer_section_max_tokens` as its output cap, plus
-  `judge_max_tokens` of room for reasoning where the reporter's provider has
-  not been told to keep reasoning out (`disable_thinking`). And `ChatOllama`
+  `judge_max_tokens` of room for reasoning where the model's provider has not
+  been told to keep reasoning out (`disable_thinking`), each model of the
+  reporter's list by its own provider. And `ChatOllama`
   drops a `max_tokens` it is handed, so on Ollama no cap reached the server at
   all — not the judge's, the analysts' or a section's; the Ollama provider now
   passes it as `num_predict`. A section the cap cut is recorded as cut at that
@@ -3573,7 +3577,9 @@ change landed on `main`.
   what was gathered. At that pace with one 240 s turn and 3.8 tokens a second,
   the reserve is about 395 s and the tool phase ends once under 635 s are left.
   The last turn's calls that never ran are taken off the transcript the final
-  answer is sent (hosted providers refuse an unanswered call), its text kept
+  answer is sent — from `tool_calls`, from `additional_kwargs` (OpenAI's
+  `tool_calls`, Gemini's `function_call`) and from the content's `tool_use`
+  blocks, since hosted providers refuse an unanswered call — its text kept
   and the record saying they did not run; a model list's deadline is held at
   the reserve for that turn; the answer asked for after it gets only what that
   turn left. A turn longer than any measured that still reaches the budget

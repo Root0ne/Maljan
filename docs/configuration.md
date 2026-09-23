@@ -750,13 +750,20 @@ the request timeout still ends any single call at 1,800 s. At 3.8 tokens a
 second the judge's budget needs 8,192 / 3.8 × 1.5 ≈ 3,234 s, so the verdict
 call is held at 1,800 s and can receive about 6,840 tokens (3.8 × 1,800) where
 600 s allowed about 2,280. A composer section is its answer and the one retry
-its validation allows, so its wait holds two calls: 2 × 900 / 3.8 × 1.5 ≈ 710 s
-where the section's cap is 900. A fast model's derived time falls under its
+its validation allows, so its wait holds two calls of its output cap. At 3.8
+tokens a second that is 2 × 900 / 3.8 × 1.5 ≈ 710 s with the reporter's
+`disable_thinking` on (cap 900), and 2 × min(9,092 / 3.8 × 1.5, 1,800) =
+3,600 s with the shipped default, which leaves thinking on (cap 900 + 8,192,
+below). A fast model's derived time falls under its
 configured one, which then stands. Until a model has answered once, and for a
 call with no output budget, the configured value stands. Rates are kept per
 model and per server, so one tag served by a local and a remote Ollama is two
-paces. The verdict call and each section start their model list on that wait,
-so a slow primary is not declared stalled at a share of an older clock.
+paces. The verdict call starts its model list on its sized wait. The report
+stage starts the reporter's list once; each section then measures the list's
+turn deadline against its own wait, with the job's `llm.fallback_turn_share`,
+without putting the list back on its first model — a model that failed as a
+provider in one section is not waited out again in the next, and a switch
+holds for the rest of the report stage.
 
 The section budget is also the section's real cap, and a model's reasoning
 counts against it: Ollama's `num_predict` and llama.cpp's `n_predict` include
@@ -764,7 +771,8 @@ the thinking channel. Where the reporter's provider has been told to keep
 reasoning out (`llm.ollama.disable_thinking` or `llm.openai.disable_thinking`),
 the composer's model is capped at `composer_section_max_tokens` alone. Where it
 has not, the cap is that budget plus `judge_max_tokens` — the reporter's own
-room — for the reasoning, and the wait is sized from that cap: the platform
+room — for the reasoning. Each model of the reporter's list is capped by its
+own provider's switch, and the wait is sized from the largest cap: the platform
 cannot tell a reasoning tag from its name, and sending `think: false` to a
 model that does not reason is an error on Ollama. A section the cap cut is
 recorded as cut at that cap, not as a schema failure. On Ollama every output

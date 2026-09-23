@@ -236,6 +236,8 @@ class ReportComposer:
         token_ledger: Any | None = None,
         generation_rates: Any | None = None,
         output_cap: int | None = None,
+        caps_by_model: dict[str, int] | None = None,
+        turn_share: float | None = None,
     ) -> None:
         self.llm = llm
         self.section_max_tokens = section_max_tokens
@@ -244,6 +246,13 @@ class ReportComposer:
         # asked to keep reasoning out (the container decides). The wait and the
         # cut are both judged against this, because it is what the server caps.
         self.output_cap = int(output_cap or section_max_tokens)
+        # Each model of the reporter's list, by the label its answers carry,
+        # and the cap its own provider was given: what "cut" means for the
+        # model that answered.
+        self.caps_by_model = dict(caps_by_model or {})
+        # The job's share of a section's clock a model of the list may take
+        # before the next one is asked.
+        self.turn_share = turn_share
         self.per_section_timeout = per_section_timeout
         self.token_ledger = token_ledger
         # The job's event sink, set by the container, so a switch of the
@@ -398,11 +407,7 @@ class ReportComposer:
             HumanMessage(content=human),
         ]
         timeout = self._section_timeout()
-        # A model list's turn deadline is a share of the clock it was last
-        # started on; a section is its own clock, sized from the model's pace.
-        from maljan.llm.fallback import restart_models
-
-        restart_models(getattr(self, "llm", None), loop_seconds=timeout)
+        self._start_the_section_clock(timeout)
         try:
             return await asyncio.wait_for(
                 self._invoke(messages, schema, section=section),
@@ -423,6 +428,33 @@ class ReportComposer:
                 f"report section '{section}' is missing: the round failed ({type(exc).__name__})"
             )
             return None
+
+    def _start_the_section_clock(self, seconds: float) -> None:
+        """Measure the model list's turn deadline against this section's clock.
+
+        Not a restart: the report node starts the list once, at the start of
+        the report stage, and a model that failed as a provider in one section
+        has failed for the next as well. Restarting per section waited out a
+        stalled first model's deadline in every section.
+        """
+        enter = getattr(getattr(self, "llm", None), "enter_loop", None)
+        if not callable(enter) or seconds <= 0:
+            return
+        share = getattr(self, "turn_share", None)
+        if not isinstance(share, int | float):
+            from maljan.llm.fallback import _configured_share
+
+            share = _configured_share()
+        if share > 0:
+            enter(float(seconds), float(share))
+
+    def _cap_of(self, answer: Any) -> int:
+        """The output cap of the model that gave ``answer``."""
+        from maljan.llm.fallback import turn_model
+
+        model, _switched = turn_model(answer)
+        caps = getattr(self, "caps_by_model", None) or {}
+        return int(caps.get(model) or getattr(self, "output_cap", 0) or 0)
 
     def _section_timeout(self) -> float:
         """One section's wait: configured, or what its calls need at the model's pace.
@@ -484,13 +516,15 @@ class ReportComposer:
         # when told which field broke which rule.
         declined = False
         cut = False
+        cut_at = 0
 
         async def _run(turns: list[BaseMessage]) -> Any:
-            nonlocal cut
+            nonlocal cut, cut_at
             raw = await retry_on_connection_error(
                 lambda: self.llm.ainvoke(turns), what="ReportComposer raw"
             )
-            cut = cut or _reached_the_cap(raw, int(getattr(self, "output_cap", 0) or 0))
+            if _reached_the_cap(raw, self._cap_of(raw)):
+                cut, cut_at = True, self._cap_of(raw)
             if self.token_ledger is not None:
                 try:
                     from maljan.core.token_ledger import record_response_usage
@@ -583,7 +617,7 @@ class ReportComposer:
                 # failed because the JSON was cut off. Said as what it was.
                 self._note_degradation(
                     f"report section '{section or schema.__name__}' is missing: its answer "
-                    f"reached the output cap of {self.output_cap} tokens and was cut off "
+                    f"reached the output cap of {cut_at} tokens and was cut off "
                     "(composer_section_max_tokens; a model's reasoning counts against it)"
                 )
                 return None

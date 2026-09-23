@@ -358,31 +358,64 @@ class TestTheSectionCapBoundsTheCall:
         container._llm_registry = registry  # type: ignore[assignment]
         return container.get_report_composer(), registry
 
+    @staticmethod
+    def _cap_for(registry: Any, provider: str) -> int:
+        _args, kwargs = registry.build_model_for_agent.call_args
+        return int(kwargs["max_tokens_for"](provider))
+
     @pytest.mark.parametrize("provider", ["ollama", "openai"])
     def test_a_model_told_not_to_reason_is_capped_at_the_section_budget(
         self, provider: str
     ) -> None:
-        from maljan.core.config import REPORTER_AGENT_KEY
-
         composer, registry = self._composer(provider, thinking_off=True)
 
         assert composer is not None
-        registry.build_model_for_agent.assert_called_once_with(
-            REPORTER_AGENT_KEY, fallback_role="judge", max_tokens=900
-        )
+        assert self._cap_for(registry, provider) == 900
         assert composer.output_cap == 900
 
     @pytest.mark.parametrize("provider", ["ollama", "openai"])
     def test_a_model_left_reasoning_is_given_room_for_it(self, provider: str) -> None:
-        from maljan.core.config import REPORTER_AGENT_KEY
-
         composer, registry = self._composer(provider, thinking_off=False)
 
-        registry.build_model_for_agent.assert_called_once_with(
-            REPORTER_AGENT_KEY, fallback_role="judge", max_tokens=900 + 8192
-        )
+        assert self._cap_for(registry, provider) == 900 + 8192
         assert composer.section_max_tokens == 900
         assert composer.output_cap == 900 + 8192
+
+    def test_each_model_of_the_list_is_capped_by_its_own_provider_s_switch(self) -> None:
+        from unittest.mock import MagicMock
+
+        from maljan.core.config import REPORTER_AGENT_KEY, AgentLLMConfig, ModelChoice, Settings
+        from maljan.core.container import ServiceContainer
+        from maljan.llm.registry import _cap_for_provider
+
+        settings = Settings(_env_file=None)  # type: ignore[call-arg]
+        settings.llm.ollama.disable_thinking = True
+        settings.llm.openai.disable_thinking = False
+        settings.llm.agents[REPORTER_AGENT_KEY] = AgentLLMConfig(
+            provider="ollama",
+            model="qwen3.8:27b",
+            fallbacks=[
+                ModelChoice(provider="openai", model="qwen", base_url="http://127.0.0.1:8080/v1")
+            ],
+        )
+        settings.reporting.composer_enabled = True
+        settings.reporting.composer_section_max_tokens = 900
+        settings.llm.judge_max_tokens = 8192
+        container = ServiceContainer(settings, mock=False)
+        registry = MagicMock()
+        registry.build_model_for_agent.return_value = FakeMessagesListChatModel(responses=[])
+        container._llm_registry = registry  # type: ignore[assignment]
+
+        composer = container.get_report_composer()
+
+        assert composer is not None
+        assert sorted(composer.caps_by_model.values()) == [900, 900 + 8192]
+        assert composer.output_cap == 900 + 8192, "the wait is sized for the larger cap"
+        kwargs: dict[str, Any] = {
+            "max_tokens_for": registry.build_model_for_agent.call_args.kwargs["max_tokens_for"]
+        }
+        _cap_for_provider(kwargs, "ollama")
+        assert kwargs == {"max_tokens": 900}
 
     def test_an_ollama_model_takes_the_cap_as_num_predict(self) -> None:
         from maljan.core.config import Settings
@@ -397,26 +430,31 @@ class TestTheSectionCapBoundsTheCall:
 
 
 class TestAComposerSectionOnItsOwnClock:
-    def test_the_list_starts_on_the_section_s_sized_wait(self) -> None:
+    def test_the_list_measures_its_deadline_on_the_section_s_sized_wait(self) -> None:
         from unittest.mock import patch
 
         from maljan.reporting.composer import ReportComposer
         from maljan.reporting.models import MalwareReport
 
+        seen: list[tuple[float, float]] = []
+
+        class _List(_Named):
+            def enter_loop(self, seconds: float, share: float) -> None:
+                seen.append((seconds, share))
+
         composer = ReportComposer(
-            llm=_Named(),  # type: ignore[arg-type]
+            llm=_List(),  # type: ignore[arg-type]
             section_max_tokens=900,
             per_section_timeout=120,
             generation_rates=_measured(),
+            turn_share=0.4,
         )
-        seen: list[dict[str, Any]] = []
 
         async def _never(*_a: Any, **_k: Any) -> None:
             return None
 
         composer._invoke = _never  # type: ignore[method-assign]
         with (
-            patch("maljan.llm.fallback.restart_models", lambda _m, **k: seen.append(k)),
             patch("maljan.reporting.composer.is_empty", lambda _b: False),
             patch("maljan.reporting.composer.bundle_for", lambda *_a, **_k: {}),
             patch("maljan.reporting.composer._bundle_text", lambda *_a, **_k: ""),
@@ -425,7 +463,8 @@ class TestAComposerSectionOnItsOwnClock:
                 composer._author("conclusion", MalwareReport.model_construct(), {}, Any, "x")
             )
 
-        assert seen and seen[0]["loop_seconds"] == pytest.approx(2 * 900 / 3.8 * TIMEOUT_MARGIN)
+        # The job's share, on the section's own wait; the list is not restarted.
+        assert seen == [(pytest.approx(2 * 900 / 3.8 * TIMEOUT_MARGIN), 0.4)]
 
     def test_a_section_the_cap_cut_says_so(self) -> None:
         from maljan.reporting.composer import ReportComposer, _ProseOut
@@ -464,3 +503,76 @@ def test_one_tag_on_two_servers_is_two_paces() -> None:
 
     assert model_name_of(local) == "qwen3.8:27b @ http://127.0.0.1:11434"
     assert model_name_of(remote) == "qwen3.8:27b @ http://gpu.example.org:11434"
+
+
+class TestAModelListSwitchSticksForTheReportStage:
+    """A first model that stalled in one section is not waited out again in the next."""
+
+    def test_sections_after_the_first_go_straight_to_the_fallback(self) -> None:
+        from unittest.mock import patch
+
+        from langchain_core.language_models.chat_models import BaseChatModel
+        from langchain_core.outputs import ChatGeneration, ChatResult
+
+        from maljan.llm.fallback import FallbackChatModel, restart_models
+        from maljan.reporting.composer import ReportComposer, _ProseOut
+        from maljan.reporting.models import MalwareReport
+
+        class _Stalls(BaseChatModel):
+            calls: list[int] = []
+
+            def _generate(self, *_a: Any, **_k: Any) -> Any:  # pragma: no cover
+                raise NotImplementedError
+
+            async def _agenerate(self, *_a: Any, **_k: Any) -> Any:
+                self.calls.append(1)
+                await asyncio.sleep(1_000)
+
+            @property
+            def _llm_type(self) -> str:
+                return "stalls"
+
+        class _Answers(BaseChatModel):
+            calls: list[int] = []
+
+            def _generate(self, *_a: Any, **_k: Any) -> Any:  # pragma: no cover
+                raise NotImplementedError
+
+            async def _agenerate(self, *_a: Any, **_k: Any) -> Any:
+                self.calls.append(1)
+                body = '{"body": "The sample reads its own strings.", "evidence_refs": []}'
+                return ChatResult(generations=[ChatGeneration(message=AIMessage(content=body))])
+
+            @property
+            def _llm_type(self) -> str:
+                return "answers"
+
+        primary, fallback = _Stalls(calls=[]), _Answers(calls=[])
+        llm = FallbackChatModel(
+            models=[primary, fallback], labels=["primary", "fallback"], agent="reporter"
+        )
+        composer = ReportComposer(llm=llm, per_section_timeout=4, turn_share=0.25)
+        # The report node starts the list once, at the start of the stage.
+        restart_models(llm)
+
+        async def _four_sections() -> list[Any]:
+            return [
+                await composer._author(
+                    "conclusion", MalwareReport.model_construct(), {}, _ProseOut, "x"
+                )
+                for _ in range(4)
+            ]
+
+        with (
+            patch("maljan.reporting.composer.is_empty", lambda _b: False),
+            patch("maljan.reporting.composer.bundle_for", lambda *_a, **_k: {}),
+            patch("maljan.reporting.composer._bundle_text", lambda *_a, **_k: ""),
+            patch(
+                "maljan.reporting.composer.structured_output_supported_for_llm", lambda _l: False
+            ),
+        ):
+            authored = asyncio.run(_four_sections())
+
+        assert all(section is not None for section in authored), composer.degradations
+        assert len(primary.calls) == 1, "the stalled first model was waited out once"
+        assert len(fallback.calls) == 4

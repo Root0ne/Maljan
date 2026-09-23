@@ -54,9 +54,13 @@ class UnansweredToolCall(ValueError):
 
 
 def _refuse_unanswered_calls(sent: list[BaseMessage]) -> None:
-    answered = {getattr(m, "tool_call_id", "") for m in sent if isinstance(m, ToolMessage)}
-    for message in sent:
-        for call in getattr(message, "tool_calls", None) or []:
+    """What reaches the wire, through the OpenAI client's own message formatter."""
+    from langchain_openai.chat_models.base import _convert_message_to_dict
+
+    wire = [_convert_message_to_dict(message) for message in sent]
+    answered = {m.get("tool_call_id") for m in wire if m.get("role") == "tool"}
+    for message in wire:
+        for call in message.get("tool_calls") or []:
             if call.get("id") not in answered:
                 raise UnansweredToolCall(f"HTTP 400: tool call {call.get('id')} has no result")
 
@@ -93,9 +97,20 @@ class _SlowModel(BaseChatModel):
             seconds = 1_000.0
         else:
             seconds = self.turn * (30 if turn == self.slow_turn else 1)
+        # Shaped as the OpenAI client returns a tool-calling answer: the call
+        # in ``tool_calls`` and again, raw, in ``additional_kwargs``.
         asked = AIMessage(
             content="Let me read a few more strings.",
             tool_calls=[{"name": "strings", "args": {"offset": turn}, "id": f"call_{turn}"}],
+            additional_kwargs={
+                "tool_calls": [
+                    {
+                        "id": f"call_{turn}",
+                        "type": "function",
+                        "function": {"name": "strings", "arguments": f'{{"offset": {turn}}}'},
+                    }
+                ]
+            },
         )
         return seconds, asked
 

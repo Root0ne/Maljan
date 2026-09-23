@@ -507,6 +507,13 @@ def without_unanswered_calls(messages: list) -> tuple[list, int]:
     with no answer to them, and Anthropic, OpenAI and Gemini refuse such a
     transcript outright. The model's own text of that turn stays; only the
     calls that never ran go. Returns the conversation and how many calls went.
+
+    A call is carried in more places than ``tool_calls``, and each provider's
+    formatter reads its own: OpenAI's (and llama.cpp's) falls back to
+    ``additional_kwargs["tool_calls"]`` once ``tool_calls`` is empty,
+    Anthropic's re-emits a ``tool_use`` block from the content list, Gemini's
+    sends ``additional_kwargs["function_call"]``. Every one of them goes for a
+    call that never ran.
     """
     answered = {
         str(getattr(message, "tool_call_id", "") or "")
@@ -525,8 +532,55 @@ def without_unanswered_calls(messages: list) -> tuple[list, int]:
             kept.append(message)
             continue
         dropped += len(calls) - len(ran)
-        kept.append(message.model_copy(update={"tool_calls": ran, "invalid_tool_calls": []}))
+        unrun = {str(call.get("id") or "") for call in calls} - answered
+        kept.append(
+            message.model_copy(
+                update={
+                    "tool_calls": ran,
+                    "invalid_tool_calls": [],
+                    "additional_kwargs": _kwargs_without(message, unrun, bool(ran)),
+                    "content": _content_without(message.content, unrun, bool(ran)),
+                }
+            )
+        )
     return kept, dropped
+
+
+# The content-block types a provider writes a call as.
+_CALL_BLOCK_TYPES = frozenset({"tool_use", "tool_call", "function_call", "server_tool_use"})
+
+
+def _kwargs_without(message: Any, unrun: set[str], any_ran: bool) -> dict[str, Any]:
+    """``additional_kwargs`` with the provider-shaped copies of unrun calls gone."""
+    extra = dict(getattr(message, "additional_kwargs", None) or {})
+    raw_calls = extra.get("tool_calls")
+    if isinstance(raw_calls, list):
+        kept = [
+            c for c in raw_calls if not (isinstance(c, dict) and str(c.get("id") or "") in unrun)
+        ]
+        if kept:
+            extra["tool_calls"] = kept
+        else:
+            extra.pop("tool_calls", None)
+    # Gemini's single ``function_call`` carries no id: it is one of the turn's
+    # calls, and it goes when none of them ran.
+    if not any_ran:
+        extra.pop("function_call", None)
+    return extra
+
+
+def _content_without(content: Any, unrun: set[str], any_ran: bool) -> Any:
+    """The turn's content with the blocks of unrun calls gone and its text kept."""
+    if not isinstance(content, list):
+        return content
+    kept: list = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") in _CALL_BLOCK_TYPES:
+            block_id = str(block.get("id") or "")
+            if block_id in unrun or (not block_id and not any_ran):
+                continue
+        kept.append(block)
+    return kept
 
 
 def _model_label(llm: Any) -> str:
