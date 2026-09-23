@@ -1785,6 +1785,22 @@ longer run of hexadecimal, because a truncated digest is not "present in the
 evidence" however the substring search answers. An algorithm the table does not
 name is left alone.
 
+Before any of that, the object type. A pattern compares a property of a STIX
+Cyber-observable (`schemas.stix_pattern.CYBER_OBSERVABLE_TYPES`) or of a custom
+`x-` type; one live export carried `[ipv-addr:value = '82.157.13.47']`, a type
+no consumer holds objects of, and because the endpoint table above lists only
+the paths it knows, the address was never asked the host question either — the
+same misspelling around `127.0.0.1` would have exported a loopback. The judge
+is asked `stix.unknown_observable_type`, with the type the value is named when
+the value or the spelling says (`82.157.13.47` is an `ipv4-addr`) and the list
+of types when neither does; nothing rewrites the pattern. An indicator that
+keeps the type is declined as `stix.unpublishable_observable_type`. Its
+`indicator_types` is asked about under `stix.indicator_type_vocabulary` when a
+value is outside STIX's vocabulary — the same run typed the address `ip-addr`
+and a file name `file`, the kind of value where the vocabulary says what the
+value indicates — and, the vocabulary being open, what the judge keeps is
+published as written.
+
 **What the corpus is.** The grounding checks search what the run *saw*, not
 what its ledger kept. `reporting.evidence_budget_bytes` blanks an entry's
 output once an agent's answers pass it — after the model has read them — so a

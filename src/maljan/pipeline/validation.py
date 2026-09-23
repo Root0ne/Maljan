@@ -1413,6 +1413,101 @@ def indicator_type_contradicts_verdict(
     ]
 
 
+UNKNOWN_OBSERVABLE_TYPE_CODE = "stix.unknown_observable_type"
+INDICATOR_TYPE_VOCABULARY_CODE = "stix.indicator_type_vocabulary"
+
+# STIX 2.1's indicator-type vocabulary. Open, so a value outside it is legal
+# and published as written; it is asked about because a value outside it is
+# almost always the kind of the value (``ip-addr``, ``file``) written where the
+# vocabulary says what the value indicates.
+INDICATOR_TYPES = (
+    "malicious-activity",
+    "anomalous-activity",
+    "benign",
+    "compromised",
+    "anonymization",
+    "attribution",
+    "unknown",
+)
+
+
+def unknown_observable_type_violations(obj: Any, *, path: str) -> list[Violation]:
+    """A judge indicator whose pattern names an object type STIX does not have.
+
+    Asked, never rewritten: the sentence says which type the value is when the
+    value or the spelling answers that, and lists the types when neither does.
+    An indicator that keeps the type is left out of the export, which records
+    why (``reporting.renderers.stix_renderer``).
+    """
+    from maljan.schemas.stix_pattern import (
+        CYBER_OBSERVABLE_TYPES,
+        is_observable_type,
+        observable_type_for,
+    )
+
+    pattern = str(getattr(obj, "pattern", "") or "")
+    named = str(getattr(obj, "name", "") or "").strip() or pattern
+    out: list[Violation] = []
+    seen: set[str] = set()
+    for comparison in read_comparisons(pattern):
+        written = comparison.object_type
+        if not written or written in seen or is_observable_type(written):
+            continue
+        seen.add(written)
+        meant = observable_type_for(written, comparison.literal)
+        if meant:
+            answer = (
+                f"{safe_finding_value(comparison.literal)!r} is an {meant}: write the "
+                f"comparison over {meant}:{comparison.prop}, or drop the indicator."
+            )
+        else:
+            answer = (
+                "The types a pattern can name are "
+                f"{', '.join(sorted(CYBER_OBSERVABLE_TYPES))}, or a custom type whose name "
+                "starts with x-: write the comparison over the one the value is, or drop "
+                "the indicator."
+            )
+        out.append(
+            Violation(
+                code=UNKNOWN_OBSERVABLE_TYPE_CODE,
+                message=(
+                    f"the indicator {safe_finding_value(named)!r} compares "
+                    f"{safe_finding_value(written)!r}, which is not a STIX Cyber-observable "
+                    "type, so no consumer holds an object this pattern could match. "
+                    f"{answer} An indicator that keeps it is not exported."
+                ),
+                path=path,
+            )
+        )
+    return out
+
+
+def indicator_type_vocabulary_violations(obj: Any, *, path: str) -> list[Violation]:
+    """A judge indicator typed with a word outside STIX's indicator-type vocabulary.
+
+    Asked once and published as answered: the vocabulary is open, and a value
+    the judge keeps is a legal one.
+    """
+    written = [str(t).strip() for t in (getattr(obj, "indicator_types", None) or [])]
+    outside = [t for t in written if t.lower() not in INDICATOR_TYPES]
+    if not outside:
+        return []
+    named = str(getattr(obj, "name", "") or "").strip() or str(getattr(obj, "pattern", ""))
+    return [
+        Violation(
+            code=INDICATOR_TYPE_VOCABULARY_CODE,
+            message=(
+                f"the indicator {safe_finding_value(named)!r} is typed "
+                f"{', '.join(repr(safe_finding_value(t)) for t in outside)}; indicator_types "
+                "says what the value indicates, not what kind of value it is, and STIX's "
+                f"vocabulary for it is {', '.join(INDICATOR_TYPES)}. Use one of those, or "
+                "keep the type — whichever you answer is what this run publishes."
+            ),
+            path=path,
+        )
+    ]
+
+
 def validate_verdict_bundle(
     bundle: Any,
     evidence_corpus: set[str] | None = None,
@@ -1501,6 +1596,8 @@ def validate_verdict_bundle(
                     path=f"objects[{index}]",
                 )
             )
+            violations.extend(unknown_observable_type_violations(obj, path=f"objects[{index}]"))
+            violations.extend(indicator_type_vocabulary_violations(obj, path=f"objects[{index}]"))
             problem = _indicator_problem(pattern, haystack, runtime_paths, identity)
             if problem:
                 absent = _is_an_absence(problem)

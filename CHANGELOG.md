@@ -3216,6 +3216,21 @@ change landed on `main`.
   published id under the object's own type and rewrites every reference to
   match.
 
+- **An indicator over an object type STIX does not have is asked about, and
+  not exported unasked.** A live export carried
+  `[ipv-addr:value = '82.157.13.47']` — the type is `ipv4-addr` — which no
+  consumer can match, and because the export's endpoint question reads only the
+  paths it knows, the address was never asked it: the same misspelling around
+  `127.0.0.1` would have published a loopback. The judge is now asked
+  `stix.unknown_observable_type`, with the type the value is named where the
+  value or the spelling says; the pattern is never rewritten, and one it keeps
+  is declined from the export as `stix.unpublishable_observable_type`, which the
+  console draws as the export's decision. `indicator_types` outside STIX's
+  vocabulary (`ip-addr`, `file` — the kind of value where the vocabulary says
+  what it indicates) is asked about under `stix.indicator_type_vocabulary` and
+  published as the judge answers. The prompt names the Cyber-observable types
+  and the vocabulary, which it never did.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**

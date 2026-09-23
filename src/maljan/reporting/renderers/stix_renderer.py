@@ -67,7 +67,7 @@ from maljan.schemas.stix_models import (
     Report,
     get_utcnow,
 )
-from maljan.schemas.stix_pattern import read_comparisons
+from maljan.schemas.stix_pattern import read_comparisons, unknown_object_types
 
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
@@ -95,6 +95,10 @@ LEGACY_UNPUBLISHABLE_CODES = ("stix.unpublishable_url", "stix.unpublishable_doma
 UNPUBLISHABLE_ARTEFACT_CODE = "stix.unpublishable_artefact"
 # A digest literal that is not a digest of the algorithm it is written under.
 MALFORMED_HASH_CODE = "stix.malformed_hash"
+# A pattern over an object type STIX does not have, which the judge was asked
+# about under ``stix.unknown_observable_type`` and kept. This row is the
+# export's decision rather than the judge's answer, so it has a code of its own.
+UNPUBLISHABLE_OBSERVABLE_TYPE_CODE = "stix.unpublishable_observable_type"
 
 # The sources whose rows are worth a recorded decline. Something a sandbox
 # watched, an agent wrote down or the judge asserted is an observation, and a
@@ -151,9 +155,11 @@ _UNREADABLE_OPERATORS = ("matches", "like", "issubset", "issuperset")
 
 # The object paths whose value this export can ask a validity question about:
 # the four endpoints a consumer would act on, the mailbox and the file name. A
-# pattern over anything else is carried as the judge wrote it — there is no
-# true question to ask of it, and inventing one would decline an object for a
-# reason that is not so.
+# pattern over any other STIX type is carried as the judge wrote it — there is
+# no true question to ask of it, and inventing one would decline an object for
+# a reason that is not so. A pattern over a type STIX does not have is a
+# different case and is declined before this table is read: ``ipv-addr`` is
+# not an unasked path, it is an address the endpoint question never saw.
 _DIRECT_PATHS = {
     "url:value": "url",
     "domain-name:value": "domain-name",
@@ -323,6 +329,17 @@ def malformed_hash_sentence(algorithm: str, value: str) -> str:
     )
 
 
+def unknown_observable_type_sentence(pattern: str, types: list[str]) -> str:
+    """The recorded sentence for a pattern over a type STIX does not have."""
+    named = ", ".join(repr(safe_finding_value(t)) for t in types)
+    return (
+        f"the indicator {safe_finding_value(pattern)!r} is not in the exported bundle: it "
+        f"compares {named}, which is not a STIX Cyber-observable type, so no consumer holds "
+        "an object it could match and this export could not ask whether it may carry the "
+        "value. It is unchanged in the judge's own bundle."
+    )
+
+
 def unpublishable_domain_sentence(fqdn: str) -> str:
     """The recorded sentence for a name somebody watched that no export may carry."""
     return (
@@ -465,6 +482,12 @@ def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
     every indicator the judge writes.
     """
     pattern = indicator.pattern or ""
+    unknown = unknown_object_types(pattern)
+    if unknown:
+        return (
+            UNPUBLISHABLE_OBSERVABLE_TYPE_CODE,
+            unknown_observable_type_sentence(pattern, unknown),
+        )
     malformed = malformed_hash_in(pattern)
     if malformed is not None:
         algorithm, literal = malformed

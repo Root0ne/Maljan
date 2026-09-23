@@ -36,6 +36,8 @@ costs a thousand steps rather than a thousand squared.
 
 from __future__ import annotations
 
+import difflib
+import ipaddress
 import re
 from dataclasses import dataclass
 
@@ -172,3 +174,72 @@ def _read_quoted(text: str, start: int) -> tuple[str, int, bool]:
         value.append(char)
         index += 1
     return "".join(value), len(text), False
+
+
+# The Cyber-observable object types STIX 2.1 defines. A pattern compares a
+# property of one of these, or of a custom type a producer declared under the
+# ``x-`` prefix; a pattern over any other type names objects no consumer has,
+# and so matches nothing anybody will ever hold.
+CYBER_OBSERVABLE_TYPES: frozenset[str] = frozenset(
+    {
+        "artifact",
+        "autonomous-system",
+        "directory",
+        "domain-name",
+        "email-addr",
+        "email-message",
+        "file",
+        "ipv4-addr",
+        "ipv6-addr",
+        "mac-addr",
+        "mutex",
+        "network-traffic",
+        "process",
+        "software",
+        "url",
+        "user-account",
+        "windows-registry-key",
+        "x509-certificate",
+    }
+)
+
+
+def is_observable_type(object_type: str) -> bool:
+    """Whether a pattern may name this type: a STIX one, or a custom ``x-`` one."""
+    name = str(object_type or "").strip().lower()
+    return name in CYBER_OBSERVABLE_TYPES or name.startswith("x-")
+
+
+def unknown_object_types(pattern: str) -> list[str]:
+    """The object types ``pattern`` compares against that STIX does not have.
+
+    Each named once, in the order written. A comparison the reader could not
+    place names no type and is not counted here: it is declined for being
+    unreadable, which is a different answer.
+    """
+    found: list[str] = []
+    for comparison in read_comparisons(pattern):
+        name = comparison.object_type
+        if name and not is_observable_type(name) and name not in found:
+            found.append(name)
+    return found
+
+
+def observable_type_for(object_type: str, literal: str) -> str:
+    """The STIX type a misnamed comparison most likely meant, or ``""``.
+
+    An address is answered from the value itself, because the value says which
+    family it is and the misspelt name rarely does. Anything else is answered
+    only when the written name is close to one type and to no other, or is the
+    start of the type it is closest to: a guess between two is not an answer,
+    and the sentence then lists the types instead.
+    """
+    try:
+        return f"ipv{ipaddress.ip_address(str(literal).strip()).version}-addr"
+    except ValueError:
+        pass
+    name = str(object_type or "").strip().lower()
+    close = difflib.get_close_matches(name, sorted(CYBER_OBSERVABLE_TYPES), n=2, cutoff=0.6)
+    if len(close) == 1 or (close and close[0].startswith(name)):
+        return close[0]
+    return ""
