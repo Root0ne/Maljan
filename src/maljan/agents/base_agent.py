@@ -1247,17 +1247,7 @@ def evidence_ref_width() -> int:
     )
 
 
-class _EvidenceWidth:
-    """``evidence_ref_width()`` read at the moment of each cut, usable as a slice bound."""
-
-    def __index__(self) -> int:
-        return evidence_ref_width()
-
-
-# The width of the evidence field as the ISR stores it — derived from the
-# window each time it is read — and how many dropped ids are written back
-# after the cut.
-_EVIDENCE_REF_CHARS = _EvidenceWidth()
+# How many dropped ids are written back after the evidence field's cut.
 _EVIDENCE_REF_IDS = 3
 
 # The start of an id the cut sliced through, at the end of the kept text: any
@@ -1269,15 +1259,16 @@ _PARTIAL_ID_AT_END_RE = re.compile(r"\s*(?:\[(?:e(?:v(?:_\d{0,4})?)?)?)?$", re.I
 def evidence_ref_text(evidence_text: str) -> str:
     """The evidence line as the ISR stores it, with its ledger ids kept.
 
-    The field is cut to a fixed width, and the claim format asks for the id at
+    The field is cut to the width the window allows one answer
+    (``evidence_ref_width``), and the claim format asks for the id at
     the end of a line whose front is prose, so on a long line the cut lands on
     the one part the run can check. Any id the cut dropped is written back
     after it, in the order the model wrote it, up to a few: the field is what
-    the report prints and what long-term memory embeds, and a constant named
-    for a width should bound it. An id the cut sliced through is removed from
+    the report prints and what long-term memory embeds, and the width should
+    bound it. An id the cut sliced through is removed from
     the kept text, since the whole id follows.
     """
-    kept = evidence_text[:_EVIDENCE_REF_CHARS]
+    kept = evidence_text[: evidence_ref_width()]
     if len(kept) == len(evidence_text):
         return kept
     kept = _PARTIAL_ID_AT_END_RE.sub("", kept)
