@@ -1987,6 +1987,18 @@ class BudgetMeter:
         if announce:
             self._announce_fallback(response)
 
+    def _record_turns_taken(self, latest: Mapping[str, Any], sent: int) -> None:
+        """The model turns of a loop that did not come back, onto the run's ledger.
+
+        ``latest`` is the conversation as the stream last left it and ``sent``
+        how many of its messages the loop started with. A loop the hard cap
+        stopped, or one that failed, was still answered for every turn it
+        took; a finished loop records its turns from its result instead.
+        """
+        for message in list(latest.get("messages") or [])[sent:]:
+            if getattr(message, "type", "") == "ai":
+                self._record_usage(message, announce=False)
+
     def _announce_fallback(self, message: Any) -> None:
         """Publish ``model_fallback`` when ``message`` is the turn its model list moved on.
 
@@ -2901,6 +2913,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Whether the server, rather than the budget, said the window was full.
         window_full = False
 
+        # The conversation as the stream last left it. Out here rather than in
+        # the coroutine so a loop the hard cap stops still hands over the turns
+        # it took: they were answered and spent.
+        latest: dict = {"messages": list(messages)}
+
         # Run the ReAct coroutine on the shared, never-closing agent
         # loop (see ``_get_agent_loop``) instead of a throwaway per-call loop.
         async def _invoke() -> dict:
@@ -2922,9 +2939,6 @@ class BaseAnalyst(BudgetMeter, ABC):
             # asyncio.TimeoutError from the wait_for below and is NOT
             # retried — the anti-storm intent is preserved.
             from openai import APIConnectionError
-
-            # The conversation as the stream last left it.
-            latest: dict = {"messages": list(messages)}
 
             async def _until_it_answers_or_repeats() -> dict:
                 """The ReAct loop, ended early once it is only repeating itself.
@@ -3082,10 +3096,12 @@ class BaseAnalyst(BudgetMeter, ABC):
                     "time",
                     detail=f"the loop exceeded its {int(hard_timeout)}s hard cap",
                 )
+                self._record_turns_taken(latest, len(messages))
                 raise
             except AnalystError:
                 raise
             except Exception as exc:
+                self._record_turns_taken(latest, len(messages))
                 # A server that refused the request for its length is telling
                 # us the window it serves is not the one we learned; the
                 # learned figure is dropped so the next question is asked.

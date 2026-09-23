@@ -265,7 +265,7 @@ class TestNarrativeAgentSuccess:
         out = await agent.generate(report)
         assert out is not None
         assert out.executive_summary == expected.executive_summary
-        llm.with_structured_output.assert_called_once_with(NarrativeOutput)
+        llm.with_structured_output.assert_called_once_with(NarrativeOutput, include_raw=True)
 
 
 class TestNarrativeAgentManualParseFallback:

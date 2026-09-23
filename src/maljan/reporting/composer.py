@@ -26,7 +26,9 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.agents.base_agent import retry_on_connection_error
+from maljan.core.config import REPORTER_AGENT_KEY
 from maljan.core.logger import logger
+from maljan.core.token_ledger import structured_answer
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
     UNGROUNDED_CAPABILITY_CODE,
@@ -219,11 +221,15 @@ class ReportComposer:
         section_max_tokens: int = 900,
         per_section_timeout: int = 120,
         token_ledger: Any | None = None,
+        model_label: str = "",
     ) -> None:
         self.llm = llm
         self.section_max_tokens = section_max_tokens
         self.per_section_timeout = per_section_timeout
         self.token_ledger = token_ledger
+        # The label of the model the sections call first, so a call is
+        # recorded under a model even when the answer does not name one.
+        self.model_label = model_label
         # The job's event sink, set by the container, so a switch of the
         # reporter's model list is said in the conversation like any agent's.
         self.event_sink: Any | None = None
@@ -403,9 +409,14 @@ class ReportComposer:
         try:
             if not structured_output_supported_for_llm(self.llm):
                 raise _StructuredOutputUnavailable
-            structured = self.llm.with_structured_output(schema)
-            result = await retry_on_connection_error(
-                lambda: structured.ainvoke(messages), what="ReportComposer structured"
+            structured = self.llm.with_structured_output(schema, include_raw=True)
+            result = structured_answer(
+                await retry_on_connection_error(
+                    lambda: structured.ainvoke(messages), what="ReportComposer structured"
+                ),
+                self.token_ledger,
+                agent=REPORTER_AGENT_KEY,
+                model=self.model_label,
             )
             if isinstance(result, dict):
                 result = schema.model_validate(result)
@@ -434,7 +445,9 @@ class ReportComposer:
                 try:
                     from maljan.core.token_ledger import record_response_usage
 
-                    record_response_usage(self.token_ledger, raw, agent="reporter")
+                    record_response_usage(
+                        self.token_ledger, raw, agent=REPORTER_AGENT_KEY, model=self.model_label
+                    )
                     from maljan.pipeline.events import announce_model_fallback
 
                     announce_model_fallback(

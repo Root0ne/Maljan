@@ -57,7 +57,7 @@ class _FakeLLM:
         self.by_schema = by_schema
         self.seen: list[str] = []
 
-    def with_structured_output(self, schema: type) -> _StructuredStub:
+    def with_structured_output(self, schema: type, **_: Any) -> _StructuredStub:
         self.seen.append(schema.__name__)
         return _StructuredStub(schema, self.by_schema.get(schema.__name__))
 
@@ -170,7 +170,7 @@ class TestComposer:
 
     def test_timeout_skips_section(self) -> None:
         class _SlowLLM:
-            def with_structured_output(self, schema: type) -> Any:
+            def with_structured_output(self, schema: type, **_: Any) -> Any:
                 class _S:
                     async def ainvoke(self, messages: Any) -> Any:
                         await asyncio.sleep(2)
@@ -189,7 +189,7 @@ class TestComposer:
 
     def test_compose_never_raises_on_llm_error(self) -> None:
         class _BoomLLM:
-            def with_structured_output(self, schema: type) -> Any:
+            def with_structured_output(self, schema: type, **_: Any) -> Any:
                 raise RuntimeError("boom")
 
             async def ainvoke(self, messages: Any) -> Any:
@@ -306,7 +306,7 @@ class TestTheManualPathGetsOneTurnToFixItsShape:
             self._answers = list(answers)
             self.sent: list[Any] = []
 
-        def with_structured_output(self, schema: type) -> Any:  # pragma: no cover - unused
+        def with_structured_output(self, schema: type, **_: Any) -> Any:  # pragma: no cover
             raise RuntimeError("structured output is unavailable")
 
         async def ainvoke(self, messages: Any) -> Any:

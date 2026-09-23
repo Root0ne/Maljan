@@ -1168,7 +1168,17 @@ smallest window governs.
 **What a run spent.** Every model call's usage, as the provider reported it —
 prompt and completion tokens, and the cost an OpenAI-compatible router reports
 where it reports one — is added to the run's `TokenLedger` under the agent that
-made the call and the model that answered. `run_summary.tokens` holds the sums
+made the call and the model that answered. Every path that asks a model
+records: an analyst's tool loop (including the turns of a loop its hard cap or
+a failure stopped), its revision rounds, a delegated ask, the forced synthesis
+and the final-answer nudge under the analyst; the mediator's fast path, tool
+loop, reasoning salvage and structured extraction, and the verdict with its
+retry, under `judge` (the mediator's against the expert model it runs on); the
+narrative and every composer section, on the structured path as well as the
+manual one, under `reporter`; and the function summariser under `summarizer`.
+A structured call asks for the raw turn beside the parsed answer, because the
+parser hides the usage. A call whose answer names no model is recorded under
+the model its caller was built on. `run_summary.tokens` holds the sums
 for the run and per agent, and `run_summary.models` the per-agent model count
 and the fallbacks with their reasons. A call whose provider reported no usage
 is counted as *not reported*: its tokens are not estimated, and a figure the

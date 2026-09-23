@@ -1512,6 +1512,22 @@ change landed on `main`.
 
 ### Fixed
 
+- **The run's token total counts every model call.** A smoke run counted 20
+  calls while the model server served 22. The mediator's fast path, the
+  mediator's structured extraction and the judge's verdict (and its retry)
+  recorded nothing, nor did the three built-in analysts' revision rounds, the
+  function summariser, or the turns of a tool loop its hard cap or a failure
+  stopped; the narrative's and the composer's calls were recorded under no
+  model, and their structured paths not at all. Each path now records its usage
+  under its agent and the model that answered: the mediator's against the
+  expert model, the report's against the reporter's, the summariser's under
+  `summarizer`. A structured call asks for the raw turn beside the parsed
+  answer (`with_structured_output(..., include_raw=True)`).
+  **Upgrading:** `run_summary.tokens.llm_calls` and the per-agent figures rise
+  for the same work, `per_agent` gains `judge` and, when the summariser is on,
+  `summarizer`, and `run_summary.models.reporter` names the reporter's model;
+  a comparison across this release compares different counts.
+
 - **A sandbox capture belongs to the job it was fetched for.** The capture was
   written into one directory under the system temp directory, shared by every
   job and every worker on the host, world-readable, named as a readable
