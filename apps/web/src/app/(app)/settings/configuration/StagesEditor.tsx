@@ -122,6 +122,7 @@ export default function StagesEditor({
   const newKeyRef = useRef<HTMLInputElement | null>(null);
   const [lint, setLint] = useState<TeamLintResult | null>(null);
   const [checking, setChecking] = useState(false);
+  const [lintFailed, setLintFailed] = useState(false);
 
   // One string for everything the lint reads, so an edit that changes nothing
   // the lint can see does not ask it again, and the effect reads its inputs
@@ -138,11 +139,15 @@ export default function StagesEditor({
       setChecking(true);
       api
         .lintTeams(profiles, defs, active, { signal: controller.signal })
-        .then((result) => setLint(result))
+        .then((result) => {
+          setLint(result);
+          setLintFailed(false);
+        })
         .catch(() => {
           // Apply still refuses what the lint would have found, so a lint the
-          // browser could not reach keeps the last picture rather than
-          // pretending the team is clean.
+          // browser could not reach keeps the last picture, and says it is
+          // the last one, rather than pretending the team is clean.
+          if (!controller.signal.aborted) setLintFailed(true);
         })
         .finally(() => {
           if (!controller.signal.aborted) setChecking(false);
@@ -155,7 +160,7 @@ export default function StagesEditor({
   }, [lintKey]);
 
   const findings: TeamFinding[] = lint?.findings ?? [];
-  const acrossTeams = findings.filter((f) => f.team === "");
+  const acrossTeams = findings.filter((f) => f.team === null);
 
   const selectStage = (team: string, stage: string) => {
     const card = document.getElementById(stageCardId(team, stage));
@@ -374,6 +379,7 @@ export default function StagesEditor({
                 graph={lint?.graphs[key]}
                 findings={findings}
                 checking={checking}
+                failed={lintFailed}
                 onSelectStage={(stage) => selectStage(key, stage)}
               />
             </div>
@@ -808,9 +814,9 @@ function StageCard({
         <ul className="mt-2 space-y-0.5" aria-label={`Checks on ${stage.key}`}>
           {findings
             .filter((f) => f.message !== error && f.message !== warning)
-            .map((f) => (
+            .map((f, index) => (
               <li
-                key={`${f.code}:${f.message}`}
+                key={`${f.code}:${f.field ?? ""}:${index}`}
                 className={`text-[11px] ${f.severity === "error" ? "text-status-red" : "text-status-orange"}`}
               >
                 {f.severity === "error" ? "Apply will refuse: " : "Warning: "}

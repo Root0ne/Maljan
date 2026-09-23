@@ -210,7 +210,8 @@ export interface TeamFinding {
   severity: "error" | "warning";
   code: string;
   message: string;
-  team: string;
+  /** Null for a finding about the agent map rather than one team. */
+  team: string | null;
   stage: string | null;
   field: string | null;
   agent: string | null;

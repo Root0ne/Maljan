@@ -49,6 +49,7 @@ export default function TeamGraph({
   graph,
   findings,
   checking,
+  failed,
   onSelectStage,
 }: {
   team: string;
@@ -56,6 +57,8 @@ export default function TeamGraph({
   findings: TeamFinding[];
   /** A check of the current edit is in flight; the picture is the last one. */
   checking: boolean;
+  /** The last check could not be made; what is drawn is from an earlier edit. */
+  failed: boolean;
   onSelectStage: (stage: string) => void;
 }) {
   const [focused, setFocused] = useState<string | null>(null);
@@ -77,7 +80,7 @@ export default function TeamGraph({
   const placed = placeGraph(graph, findings, team);
   const summary =
     errors + warnings === 0
-      ? "No problems found. Apply will accept this team."
+      ? "No problems with this team."
       : [
           errors ? `${errors} ${errors === 1 ? "error" : "errors"} apply will refuse` : "",
           warnings ? `${warnings} ${warnings === 1 ? "warning" : "warnings"}` : "",
@@ -90,7 +93,7 @@ export default function TeamGraph({
       <div className="flex items-center justify-between gap-2">
         <h4 className="text-[11px] uppercase tracking-wider text-text-muted">Stage graph</h4>
         <span className="text-[10px] text-text-muted" role="status" aria-live="polite">
-          {checking ? "Checking…" : ""}
+          {checking ? "Checking…" : failed ? "Could not check the latest edit; apply still will." : ""}
         </span>
       </div>
       <div className="overflow-x-auto rounded border border-border bg-bg-deep">
@@ -207,7 +210,10 @@ export default function TeamGraph({
         </svg>
       </div>
 
-      <p className={`text-[11px] ${errors ? "text-status-red" : warnings ? "text-status-orange" : "text-status-green"}`}>
+      <p
+        role="status"
+        className={`text-[11px] ${errors ? "text-status-red" : warnings ? "text-status-orange" : "text-status-green"}`}
+      >
         {summary}
       </p>
       {listed.length > 0 && (
