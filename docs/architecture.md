@@ -298,6 +298,17 @@ agent was shown the pack, the pack's ids are citable by every agent:
 empty when a pack is present — only a run with nothing citable at all (the
 measurement baseline) is exempt.
 
+The reputation line states the labels the answer carries. VirusTotal's own
+MCP server answers with `detections`, one result label per engine that
+detected the file, and no popular threat classification; the line counts those
+labels exactly as written and names them with how many engines gave each,
+most first and then in the answer's order, at most twenty, with the number of
+distinct labels left out — `VirusTotal 52/75 malicious, 52 detection labels,
+47 distinct (engines per label, most first, 20 shown): Gen:Variant.… ×4, …
+(+27 more distinct labels)`. Nothing is merged or normalised and no family is
+read out of them; an answer that does carry a popular classification still has
+its suggested label and names listed as `labels …`.
+
 **The run-state block.** `pipeline/run_state.py` derives a dozen lines from the
 state — the sample, the identity, hashes, signature and reputation lines out
 of the pack, which stages ran or were skipped and why, how many ledger entries
@@ -983,7 +994,7 @@ reached over HTTP and off until an operator registers an agent token.
 
 | Server | Bound to | How | Offers |
 | :-- | :-- | :-- | :-- |
-| `analysis` | `static` | definition `tools` | Identity and hashes, strings and typed IOCs, PE/ELF/Mach-O/APK structure, archive and document inspection, payload carving, YARA, Sigma and capa. |
+| `analysis` | `static` | definition `tools` | Identity and hashes, strings and typed IOCs, PE/ELF/Mach-O/APK structure, archive and document inspection, payload carving, YARA, Sigma, capa and emulated string decoding (FLOSS). |
 | `knowledge` | every analyst and the judge | definition `tools` | ATT&CK lookup, validation and ranking, the API-behaviour catalog, the LOLBin table, family and prior-case retrieval. |
 | `network` | `network` | role binding | DNS, HTTP and packet views of a capture, plus the whole-capture summary. |
 | `threatintel` | `judge` | role binding | VirusTotal and AbuseIPDB reputation lookups over their REST APIs. |
@@ -1062,10 +1073,11 @@ string's digest is not the sample's.
 sample's path would otherwise have taken the carved payloads with it:
 `carve_payloads` writes each embedded payload under the staging directory and
 returns the paths, and with `path` gone there was nothing left to pass one to.
-`carved_path` is the qualified argument that gives that back, on the fourteen
+`carved_path` is the qualified argument that gives that back, on the fifteen
 analysis tools that read a file — `identify_file`, `hashes`, `signing_info`,
 `strings`, `iocs_from_file`, `pe_info`, `elf_info`, `macho_info`, `apk_info`,
-`carve_payloads`, `archive_list`, `document_info`, `yara_scan` and `capa`. It
+`carve_payloads`, `archive_list`, `document_info`, `yara_scan`, `capa` and
+`floss`. It
 is held to **the carved tree of the file this call is pinned to, and that file
 itself** — `<staging>/job-<id>/carved/<the sample's sha256>/`, which is exactly
 the key `carve_payloads` writes under and which the sidecar derives from the
@@ -1099,6 +1111,23 @@ sentence, because a reader that opened a FIFO with no writer would wait for one
 forever. Given, the file is read in place of the sample and the answer carries
 `read_path` saying which; left out, the sample is read.
 
+**A quoted search is the same search.** A model writes a search the way a
+person types one, between quotes, and a quoted needle matches nothing the bare
+one would. Every argument a sidecar tool searches for or looks up by is read
+without the pair of `"`, `'` or `` ` `` that encloses the whole value (the same
+character at both ends and nowhere between) — `pattern` on `strings` and
+`floss`; `text`, `technique_id`, `ids`, `api_names` and `query` on the
+knowledge lookups; `ip_address`, `domain` and `file_hash` on `threatintel` —
+by `maljan.tools.arguments`, with nothing else rewritten and a value without a
+surrounding pair passed through exactly. The repair is recorded the way
+`carved_path`'s is: the ledger keeps the arguments as the model wrote them, and
+a structured answer carries `read_as` first, the value each argument was read
+as (a `threatintel` answer is prose and names the value it looked up). Each
+such tool's description says the argument is the raw text or pattern,
+unquoted. Content arguments — the text `iocs_from_text` and `yara_scan` scan,
+the command lines `lolbin_lookup` matches — are left as they arrive, because a
+command line can begin and end with a quote that belongs to it.
+
 `pin_paths` needs no rule for it — a qualified name is not in
 `SAMPLE_ARG_NAMES`, which is what the naming rule was built for. A payload
 carved out of a carved payload nests under the sample's own tree rather than
@@ -1126,6 +1155,24 @@ each class of external tool, so the choice is configuration rather than code.
 - **Tool servers (MCP)** — additional servers declared in the settings store,
   each with the tools it is allowed to expose and the agents allowed to call
   it.
+
+**No sandbox observation where no sandbox ran.** `mock` executes nothing: it
+returns a recorded fixture for a sample it has one for (marked
+`recorded_fixture`), and an empty stand-in marked `synthetic` for any other.
+`pipeline.sandbox_status` reads the run's report once — no report or a
+stand-in is *not run*, a fixture is *recorded fixture*, anything else is
+*observed* — and every reader says the same thing. Where no sandbox ran, the
+triage pack writes one `sandbox_status` entry with the sentence that says so
+(`[ev_0010] sandbox: No sandbox ran for this sample: …`) and none of the
+sandbox views, `sigma_match_sandbox` or `lolbin_lookup`, so a stand-in's empty
+sections are never rendered as "0 processes"; the in-process sandbox tools
+answer the stand-in with the same sentence; the dynamic and network analysts
+are skipped; the run carries the degradation reason `no sandbox ran …` (or,
+with no report at all, the reason it always had); `run_summary.sandbox` holds
+`{status, statement}` and the report's run summary prints it; and the entry
+becomes the report's *Sandbox* section, which the console files on the dynamic
+tab. A recorded fixture is said to be one — the same entry, then the sandbox
+views as before. A live sandbox's report is read as it always was.
 
 Every provider that can be reached over the network has a probe behind a Test
 button in the console; see [configuration.md](configuration.md).

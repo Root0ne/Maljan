@@ -45,6 +45,12 @@ from maljan.analysis.technique_ids import technique_ids_in
 from maljan.core.logger import logger
 from maljan.extractors.sample_identity import ARCHIVE_FILE_TYPES, DOCUMENT_FILE_TYPES
 from maljan.pipeline.conditions import TriageFacts
+from maljan.pipeline.sandbox_status import (
+    OBSERVED,
+    STATUS_TOOL,
+    observed_report,
+    sandbox_status,
+)
 from maljan.providers import sandbox_tools
 from maljan.schemas.evidence import LedgerEntry, apply_budget
 from maljan.tools import binary, identify, knowledge, pcap, rules, strings
@@ -545,7 +551,7 @@ class _Pack:
         )
         if found is not None:
             self.capa_hits = len(found.get("capabilities") or [])
-        report = self.inputs.sandbox_report
+        report = observed_report(self.inputs.sandbox_report)
         if report:
             self.record(
                 "sigma_match_sandbox",
@@ -574,7 +580,7 @@ class _Pack:
                 {"api_names": names, "platform": platform},
                 lambda: knowledge.api_capability(names, platform=platform),
             )
-        report = self.inputs.sandbox_report
+        report = observed_report(self.inputs.sandbox_report)
         if report:
             commands = _command_lines(report)
             self.record(
@@ -584,7 +590,18 @@ class _Pack:
             )
 
     def _sandbox_summary(self) -> None:
-        report = self.inputs.sandbox_report
+        """The sandbox views, after the one sentence that says what the report is.
+
+        Where no sandbox ran — no report, or the mock sandbox's empty stand-in
+        — that sentence is all there is: a stand-in's empty sections rendered
+        as "0 processes" and "no network activity recorded" read as a
+        detonation that did nothing. A recorded fixture is said to be one
+        before its contents. A live sandbox's report needs no sentence.
+        """
+        found = sandbox_status(self.inputs.sandbox_report)
+        if found.status != OBSERVED:
+            self.record(STATUS_TOOL, {}, found.as_entry)
+        report = observed_report(self.inputs.sandbox_report)
         if not report:
             return
         for tool, call in (
@@ -1220,10 +1237,56 @@ def _reputation_facts(entry: LedgerEntry) -> str:
                             labels.append(str(value))
             if labels:
                 parts.append(f"labels {_names(labels)}")
+            detections = _detection_labels(data)
+            if detections:
+                parts.append(detections)
             return ", ".join(parts)
     count = malicious_count(entry.output)
     text = _short(entry.output)
     return f"{service} {count} malicious ({text})" if count is not None else f"{service}: {text}"
+
+
+# How many distinct detection labels the reputation line names. Enough that a
+# family named by several engines under several spellings is on the line,
+# short enough that the line stays one line in every model's prompt; the
+# count of the rest is stated beside them.
+_DETECTION_LABELS_SHOWN = 20
+# How much of one label the line prints. Engine labels run to a few dozen
+# characters; the answer is a service's, and a label as long as the answer is
+# not something a single line should carry whole.
+_DETECTION_LABEL_CHARS = 80
+
+
+def _detection_labels(data: dict[str, Any]) -> str:
+    """The answer's detection labels, with how many engines gave each.
+
+    VirusTotal's answer through its own MCP server carries ``detections``, one
+    result label per engine that detected the file, and no popular threat
+    classification. The labels are counted exactly as written, most engines
+    first and then in the order the answer lists them, and each is printed to
+    at most ``_DETECTION_LABEL_CHARS`` characters; nothing is merged,
+    normalised or read for a family, which is the reader's to decide.
+    """
+    rows = _find_key(data, "detections")
+    if not isinstance(rows, list):
+        return ""
+    labels = [" ".join(str(row).split()) for row in rows if isinstance(row, str) and row.strip()]
+    if not labels:
+        return ""
+    counts: dict[str, int] = {}
+    for label in labels:
+        counts[label] = counts.get(label, 0) + 1
+    ranked = sorted(counts, key=lambda label: -counts[label])
+    shown = ranked[:_DETECTION_LABELS_SHOWN]
+    bound = f", {len(shown)} shown" if len(ranked) > len(shown) else ""
+    text = (
+        f"{len(labels)} detection labels, {len(ranked)} distinct "
+        f"(engines per label, most first{bound}): "
+        + ", ".join(f"{_short(label, _DETECTION_LABEL_CHARS)} ×{counts[label]}" for label in shown)
+    )
+    if len(ranked) > len(shown):
+        text += f" (+{len(ranked) - len(shown)} more distinct labels)"
+    return text
 
 
 def _find_key(value: Any, key: str, depth: int = _WALK_DEPTH) -> Any:
@@ -1278,6 +1341,7 @@ _GROUP_LABELS: dict[str, str] = {
     "sandbox_signatures": "sandbox signatures",
     "sandbox_dropped_files": "sandbox dropped files",
     "sandbox_channels": "sandbox channels",
+    STATUS_TOOL: "sandbox",
     "pcap_summary": "pcap",
     "reputation": "reputation",
     "get_file_report": "reputation",
@@ -1307,6 +1371,7 @@ _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "sandbox_signatures": _sandbox_signatures,
     "sandbox_dropped_files": _sandbox_dropped,
     "sandbox_channels": _sandbox_channels,
+    STATUS_TOOL: lambda data: str(data.get("statement") or ""),
     "pcap_summary": _pcap,
     "function_matches": _function_matches,
 }

@@ -35,6 +35,16 @@
       "carved_path",
       "path"
     ],
+    "floss": [
+      "carved_path",
+      "kinds",
+      "limit",
+      "min_len",
+      "offset",
+      "path",
+      "pattern",
+      "timeout_s"
+    ],
     "hashes": [
       "carved_path",
       "path"
@@ -126,6 +136,7 @@
     "carve_payloads",
     "document_info",
     "elf_info",
+    "floss",
     "hashes",
     "identify_file",
     "iocs_from_file",

@@ -135,6 +135,7 @@ class TestTheOrderAndTheIds:
             "yara_scan",
             "capa",
             "api_capability",
+            "sandbox_status",
         ]
         assert [entry.id for entry in result.entries] == [
             f"ev_{index:04d}" for index in range(1, len(result.entries) + 1)
@@ -311,7 +312,7 @@ class TestFailures:
     def test_the_counts_the_run_summary_reports(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setattr(rules, "capa", lambda path, **_: {"error": "no", "tool": "capa"})
         state = _pack(_write(tmp_path, "s.exe", _pe()), "pe").to_state()
-        assert state["entries"] == 9
+        assert state["entries"] == 10
         assert state["failed"] == 1
         assert state["duration_ms"] >= 0
         assert state["degradation_reasons"] == ["triage.capa_failed"]
@@ -363,7 +364,8 @@ class TestTheSandboxSteps:
 
     def test_no_report_means_none_of_them(self, tmp_path: Path) -> None:
         tools = _tools(_pack(_write(tmp_path, "s.exe", _pe()), "pe"))
-        assert not any(tool.startswith("sandbox_") for tool in tools)
+        # One sentence saying no sandbox ran, and no view of a report there is not.
+        assert [tool for tool in tools if tool.startswith("sandbox_")] == ["sandbox_status"]
         assert "sigma_match_sandbox" not in tools
         assert "lolbin_lookup" not in tools
 
@@ -574,6 +576,7 @@ class TestTheNode:
             "yara_scan",
             "capa",
             "api_capability",
+            "sandbox_status",
             "reputation",
         ]
         assert [row["id"] for row in ledger][:2] == ["ev_0001", "ev_0002"]
@@ -582,7 +585,7 @@ class TestTheNode:
         assert "tool_evidence" not in update
 
         facts = update["triage_facts"]
-        assert facts["entries"] == 10
+        assert facts["entries"] == 11
         assert facts["failed"] == 0
         assert facts["has_signature"] is False
         assert facts["capa_hits"] == 1

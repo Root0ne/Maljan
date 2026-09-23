@@ -115,6 +115,7 @@ class TestAPathOutsideEveryRootIsRefused:
             ("document_info", "path"),
             ("carve_payloads", "path"),
             ("capa", "path"),
+            ("floss", "path"),
             ("yara_scan", "path"),
         ],
     )
@@ -478,6 +479,22 @@ class TestAnArgumentIsBoundedBeforeItIsRead:
         declared = {tool["name"]: tool.get("timeout_s") for tool in analysis.CAPABILITIES["tools"]}
         assert declared["yara_scan"] == analysis.YARA_TIMEOUT_S
         assert declared["capa"] == analysis.CAPA_TIMEOUT_S
+        assert declared["floss"] == analysis.FLOSS_TIMEOUT_S
+
+    def test_a_floss_timeout_cannot_exceed_the_declared_one(
+        self, analysis: Any, staging: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        asked: list[int] = []
+
+        def _fake_floss(**kwargs: Any) -> dict[str, Any]:
+            asked.append(int(kwargs["timeout_s"]))
+            return {"strings": []}
+
+        monkeypatch.setattr(analysis.emulated_strings, "floss", _fake_floss)
+
+        analysis.floss(_pe(staging / "s.bin"), timeout_s=86_400)
+
+        assert asked == [analysis.FLOSS_TIMEOUT_S]
 
     def test_carving_never_holds_the_whole_sample_in_memory(
         self, analysis: Any, staging: Path
