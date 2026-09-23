@@ -564,6 +564,8 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     from maljan.extractors.network_extractor import url_host
     from maljan.reporting.renderers.stix_renderer import (
         corroborating_values,
+        emulation_kwargs,
+        emulation_record,
         path_names_a_file,
         publish_answer,
     )
@@ -571,6 +573,9 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     rows: list[ConsolidatedIOC] = []
     seen: set[tuple[str, str]] = set()
     corroborating = corroborating_values(report)
+    # What the run's FLOSS entry recovered by emulation: a network value it
+    # holds is a source of its own under the one rule.
+    emulated = emulation_record(report)
 
     def _add(
         ioc_type: str,
@@ -603,7 +608,13 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
         )
 
     def _from_strings(kind: str, value: str) -> str:
-        return publish_answer(kind, value, "strings", corroborating=corroborating)
+        return publish_answer(
+            kind,
+            value,
+            "strings",
+            corroborating=corroborating,
+            **emulation_kwargs(report, kind, value, emulated),
+        )
 
     h = report.identity.hashes
     # The sample's own identity, established by the router: `/iocs` serves
@@ -704,7 +715,13 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 d.fqdn,
                 d.source,
                 _domain_context(d),
-                published=publish_answer("domain", d.fqdn, d.source, d.reputation),
+                published=publish_answer(
+                    "domain",
+                    d.fqdn,
+                    d.source,
+                    d.reputation,
+                    **emulation_kwargs(report, "domain", d.fqdn, emulated),
+                ),
                 is_network=True,
             )
         for ip in net.ips:
@@ -715,7 +732,13 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 ip.address,
                 ip.source,
                 "; ".join(part for part in [*where, ip.geo or ""] if part),
-                published=publish_answer("ip", ip.address, ip.source, ip.reputation),
+                published=publish_answer(
+                    "ip",
+                    ip.address,
+                    ip.source,
+                    ip.reputation,
+                    **emulation_kwargs(report, "ip", ip.address, emulated),
+                ),
                 is_network=True,
             )
         for u in net.urls:
@@ -730,7 +753,13 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 "; ".join(
                     part for part in (u.method, f"HTTP {u.status}" if u.status else "") if part
                 ),
-                published=publish_answer("url", u.url, source, reputations.get(url_host(u.url))),
+                published=publish_answer(
+                    "url",
+                    u.url,
+                    source,
+                    reputations.get(url_host(u.url)),
+                    **emulation_kwargs(report, "url", u.url, emulated),
+                ),
                 is_network=True,
             )
         for ua in net.user_agents:

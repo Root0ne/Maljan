@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from arq import ArqRedis
 from maljan.reporting.renderers.stix_renderer import (
+    emulation_kwargs,
+    emulation_record,
     indicator_publish_reason,
     judge_indicator_rows,
 )
@@ -77,7 +79,9 @@ def _shorten_hash_like(stem: str) -> str:
     return f"{short}.{ext}" if ext else short
 
 
-def _publishable(kind: str, value: Any, source: Any, reputation: Any) -> bool:
+def _publishable(
+    kind: str, value: Any, source: Any, reputation: Any, emulated: dict[str, Any] | None = None
+) -> bool:
     """Whether the platform's own publish rule would publish this row.
 
     The one rule, asked from a second place rather than copied into it: the
@@ -94,7 +98,10 @@ def _publishable(kind: str, value: Any, source: Any, reputation: Any) -> bool:
     operator notices and can work around with ``include=all``.
     """
     try:
-        return indicator_publish_reason(kind, str(value or ""), source, reputation) is not None
+        return (
+            indicator_publish_reason(kind, str(value or ""), source, reputation, **(emulated or {}))
+            is not None
+        )
     except Exception as exc:  # noqa: BLE001 — a feed answers, and says what broke
         logger.error(
             "the publish rule could not answer for a %s row; it is withheld from the "
@@ -541,6 +548,9 @@ class ReportService:
             if isinstance(dom, dict)
         }
         out: list[dict] = []
+        # What the run's FLOSS entry recovered by emulation, read from the
+        # stored report the way the report's own table reads it.
+        emulated = emulation_record(mr)
         identity = mr.get("identity") or {}
         hashes = identity.get("hashes") or {}
         for algo, value in hashes.items():
@@ -562,7 +572,11 @@ class ReportService:
                         # presented them identically.
                         "source": dom.get("source"),
                         "published": _publishable(
-                            "domain", dom.get("fqdn"), dom.get("source"), dom.get("reputation")
+                            "domain",
+                            dom.get("fqdn"),
+                            dom.get("source"),
+                            dom.get("reputation"),
+                            emulation_kwargs(mr, "domain", str(dom.get("fqdn") or ""), emulated),
                         ),
                     }
                 )
@@ -575,7 +589,11 @@ class ReportService:
                         "is_suspicious": bool(ip.get("is_suspicious")),
                         "source": ip.get("source"),
                         "published": _publishable(
-                            "ip", ip.get("address"), ip.get("source"), ip.get("reputation")
+                            "ip",
+                            ip.get("address"),
+                            ip.get("source"),
+                            ip.get("reputation"),
+                            emulation_kwargs(mr, "ip", str(ip.get("address") or ""), emulated),
                         ),
                     }
                 )
@@ -596,6 +614,7 @@ class ReportService:
                             url.get("url"),
                             url.get("source") or "strings",
                             reputations.get(host),
+                            emulation_kwargs(mr, "url", str(url.get("url") or ""), emulated),
                         ),
                     }
                 )

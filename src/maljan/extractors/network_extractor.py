@@ -52,6 +52,13 @@ _BENIGN_DOMAINS: frozenset[str] = frozenset(
     }
 )
 
+
+def is_well_known_benign_host(host: str) -> bool:
+    """Whether ``host`` sits under a registered name of the benign-infrastructure list."""
+    parts = str(host or "").strip().lower().rstrip(".").split(".")
+    return len(parts) >= 2 and ".".join(parts[-2:]) in _BENIGN_DOMAINS
+
+
 # RFC 6761/6762 reserved suffixes that must never be emitted as network IOCs.
 _RESERVED_DOMAIN_SUFFIXES: tuple[str, ...] = (
     ".local",

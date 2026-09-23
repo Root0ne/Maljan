@@ -45,6 +45,7 @@ from maljan.extractors.network_extractor import (
     corroboration_reason,
     host_is_public,
     ip_corroboration_reason,
+    is_well_known_benign_host,
     url_corroboration_reason,
     url_host,
 )
@@ -934,7 +935,7 @@ class ExtendedSTIXRenderer:
         #    keeping is the one that carries the observation.
         if report.network is not None:
             for ip in report.network.ips[:40]:
-                ip_ind = _indicator_for_ip(ip, report.verdict)
+                ip_ind = _indicator_for_ip(ip, report.verdict, report)
                 if ip_ind is not None:
                     _queue(ip_ind, _BAND_NETWORK, ip.source)
             for url in report.network.urls[:40]:
@@ -958,7 +959,7 @@ class ExtendedSTIXRenderer:
                         )
                     )
             for domain in report.network.domains[:40]:
-                dom_ind = _indicator_for_domain(domain, report.verdict)
+                dom_ind = _indicator_for_domain(domain, report.verdict, report)
                 if dom_ind is not None:
                     _queue(dom_ind, _BAND_NETWORK, domain.source)
                     continue
@@ -1000,7 +1001,7 @@ class ExtendedSTIXRenderer:
                 if pattern is None:
                     continue
                 if not _accept_string_ioc(
-                    ioc, pattern, file_name_kept, publishable_domains, corroborating
+                    ioc, pattern, file_name_kept, publishable_domains, corroborating, report
                 ):
                     continue
                 if pattern.lstrip().startswith("[file:name"):
@@ -1589,6 +1590,8 @@ def indicator_publish_reason(
     reputation: Any = None,
     *,
     corroborated_by: str = "",
+    recovered: str = "",
+    verdict: Any = None,
 ) -> str | None:
     """Why this run may publish one indicator of ``kind``, or ``None``.
 
@@ -1605,15 +1608,37 @@ def indicator_publish_reason(
     claim citing evidence that holds it, a reputation record. ``source`` is who
     recorded the row, and ``corroborated_by`` is what a caller found for a row
     whose source is by construction the string sweep.
+
+    A network value the sample hid and only emulation recovered — a decoded,
+    stack or tight string in the run's FLOSS entry — is a source of its own
+    (``recovered``: "recovered by emulation (decoded strings), ev_NNNN"). Hiding
+    a host behind encoding is a deliberate act benign software rarely performs,
+    where a plain string in a binary is routinely benign. It admits a domain,
+    an address or a URL that passes every other question here — the host
+    question, the address classes, the reputation half — and is not a
+    well-known benign host or a denied URL host. It admits nothing under a
+    Benign ``verdict``: a Benign run publishes no malicious indicator, and the
+    refusal says so. A value only the string sweep read stays unpublished.
     """
     if kind == "domain":
         if not host_is_public(value):
             return None
-        return corroboration_reason(source, reputation, value)
+        return corroboration_reason(source, reputation, value) or _emulation_admits(
+            value, recovered, verdict
+        )
     if kind == "ip":
-        return ip_corroboration_reason(value, source, reputation)
+        admitted = ip_corroboration_reason(value, source, reputation)
+        if admitted or not address_is_publishable(value, source):
+            return admitted
+        return _emulation_admits(value, recovered, verdict)
     if kind == "url":
-        return url_corroboration_reason(value, source, reputation)
+        admitted = url_corroboration_reason(value, source, reputation)
+        host = url_host(value)
+        if admitted or not host_is_public(host):
+            return admitted
+        if any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
+            return None
+        return _emulation_admits(host, recovered, verdict)
     if kind == "email":
         if not email_is_publishable(value):
             return None
@@ -1649,6 +1674,81 @@ def indicator_publish_reason(
     return corroborated_by or None
 
 
+# What the rule writes for a value emulation recovered, before the entry id.
+RECOVERED_BY_EMULATION = "recovered by emulation (decoded strings)"
+
+# The FLOSS string kinds that are text the sample hid: a decoded string, a
+# stack string, a tight string. A static string FLOSS also lists is not.
+_EMULATED_KINDS = frozenset({"decoded", "stack", "tight"})
+
+
+def _emulation_admits(host: str, recovered: str, verdict: Any) -> str | None:
+    """``recovered`` when emulation may stand as this value's source, else ``None``."""
+    if not recovered or _is_benign_verdict(verdict) or is_well_known_benign_host(host):
+        return None
+    return recovered
+
+
+def _is_benign_verdict(verdict: Any) -> bool:
+    return str(verdict or "").strip().lower() == "benign"
+
+
+def _field(obj: Any, name: str) -> Any:
+    """``obj.name`` or ``obj[name]``: a report as a model or as its stored dict."""
+    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+
+
+def emulation_record(report: Any) -> dict[str, str]:
+    """``{value: ledger id}`` for every string the run's FLOSS entry recovered by emulation.
+
+    Folded to lower case; a URL adds its host too. The id is the entry's own:
+    the pack's FLOSS entry where the section names it, else the first entry the
+    section cites. Read from the report's ``tool_floss_strings`` section, so a
+    stored report answers the same way a fresh one does.
+    """
+    index = {
+        str(_field(row, "id") or ""): str(_field(row, "agent") or "")
+        for row in (_field(report, "evidence_index") or [])
+    }
+    record: dict[str, str] = {}
+    for section in _field(report, "sections") or []:
+        if str(_field(section, "key") or "") != "tool_floss_strings":
+            continue
+        columns = [str(c) for c in (_field(section, "columns") or [])]
+        if "kind" not in columns or "string" not in columns:
+            continue
+        ids = [str(i) for i in (_field(section, "evidence_ids") or [])]
+        if not ids:
+            continue
+        entry = next((i for i in ids if index.get(i) == "pipeline"), ids[0])
+        at_kind, at_string = columns.index("kind"), columns.index("string")
+        for row in _field(section, "rows") or []:
+            if len(row) <= max(at_kind, at_string):
+                continue
+            if str(row[at_kind]).strip().lower() not in _EMULATED_KINDS:
+                continue
+            text = str(row[at_string] or "").strip().lower()
+            if not text:
+                continue
+            record.setdefault(text.rstrip("."), entry)
+            host = url_host(text)
+            if host:
+                record.setdefault(host, entry)
+    return record
+
+
+def emulation_kwargs(report: Any, kind: str, value: str, record: Any = None) -> dict[str, Any]:
+    """The rule's ``recovered`` and ``verdict`` arguments for one value of one report."""
+    if kind not in ("domain", "ip", "url"):
+        return {}
+    found = emulation_record(report) if record is None else record
+    key = str(value or "").strip().lower().rstrip(".")
+    entry = found.get(key)
+    if not entry:
+        return {}
+    return {"recovered": f"{RECOVERED_BY_EMULATION}, {entry}", "verdict": _field(report, "verdict")}
+
+
 _WHOLE_DIGEST_RE = re.compile(r"^[0-9a-fA-F]+$")
 _DIGEST_HEX_LENGTHS = frozenset({32, 40, 56, 64, 96, 128})
 
@@ -1666,6 +1766,8 @@ def publish_answer(
     reputation: Any = None,
     *,
     corroborating: str = "",
+    recovered: str = "",
+    verdict: Any = None,
 ) -> str:
     """The publish rule's answer for one row, as the report prints it.
 
@@ -1683,7 +1785,15 @@ def publish_answer(
         if from_strings and text and corroborating and whole_value_in(text, corroborating)
         else ""
     )
-    if indicator_publish_reason(kind, text, source, reputation, corroborated_by=corroborated):
+    if indicator_publish_reason(
+        kind,
+        text,
+        source,
+        reputation,
+        corroborated_by=corroborated,
+        recovered=recovered,
+        verdict=verdict,
+    ):
         return "yes"
     if kind == "domain" and not host_is_public(text):
         return "no: not a name that resolves outside the analysed network"
@@ -1703,6 +1813,10 @@ def publish_answer(
         return "no: names a directory or a root, not a file"
     if kind == "hash" and not _is_a_whole_digest(text):
         return "no: not a whole digest"
+    if recovered and _is_benign_verdict(verdict):
+        return f"no: {recovered}, but the verdict is Benign, which publishes no malicious indicator"
+    if recovered and is_well_known_benign_host(url_host(text) if kind == "url" else text):
+        return f"no: {recovered}, but it is a well-known benign host"
     if kind == "command":
         return "no: a command line is not an indicator this run publishes"
     if kind != "hash" and (kind not in STRING_IOC_KINDS or indicator_pattern(kind, text) is None):
@@ -1730,14 +1844,15 @@ def judge_value_answer(report: Any, kind: str, value: str, corroborating: str) -
     """
     text = str(value or "").strip()
     network = getattr(report, "network", None)
+    emulated = emulation_kwargs(report, kind, text)
     if kind == "domain" and network is not None:
         for row in network.domains:
             if row.fqdn.strip().lower().rstrip(".") == text.lower().rstrip("."):
-                return publish_answer("domain", text, row.source, row.reputation)
+                return publish_answer("domain", text, row.source, row.reputation, **emulated)
     if kind == "ip" and network is not None:
         for ip_row in network.ips:
             if ip_row.address.strip() == text:
-                return publish_answer("ip", text, ip_row.source, ip_row.reputation)
+                return publish_answer("ip", text, ip_row.source, ip_row.reputation, **emulated)
     if kind == "url" and network is not None:
         for url_row in network.urls:
             if url_row.url.strip() == text:
@@ -1746,6 +1861,7 @@ def judge_value_answer(report: Any, kind: str, value: str, corroborating: str) -
                     text,
                     url_row.source or "strings",
                     _host_reputation(report, url_host(text)),
+                    **emulated,
                 )
     if kind == "hash":
         hashes = getattr(getattr(report, "identity", None), "hashes", None)
@@ -1756,7 +1872,9 @@ def judge_value_answer(report: Any, kind: str, value: str, corroborating: str) -
         if text.lower() in own:
             return publish_answer("hash", text, "identity")
     reputation = _host_reputation(report, url_host(text)) if kind == "url" else None
-    return publish_answer(kind, text, "strings", reputation, corroborating=corroborating)
+    return publish_answer(
+        kind, text, "strings", reputation, corroborating=corroborating, **emulated
+    )
 
 
 def judge_indicator_rows(report: Any, corpus: Any = None) -> list[tuple[Any, str]]:
@@ -1863,11 +1981,18 @@ def _publishable_domains(report: Any) -> frozenset[str]:
     network = getattr(report, "network", None)
     if network is None:
         return frozenset()
+    record = emulation_record(report)
     return frozenset(
         domain.fqdn.strip().lower().rstrip(".")
         for domain in network.domains
         if domain.fqdn
-        and indicator_publish_reason("domain", domain.fqdn, domain.source, domain.reputation)
+        and indicator_publish_reason(
+            "domain",
+            domain.fqdn,
+            domain.source,
+            domain.reputation,
+            **emulation_kwargs(report, "domain", domain.fqdn, record),
+        )
         is not None
     )
 
@@ -1987,6 +2112,7 @@ def _accept_string_ioc(
     file_name_kept: int,
     publishable_domains: frozenset[str] = frozenset(),
     corroborating: str = "",
+    report: Any = None,
 ) -> bool:
     """Gate StringIOC → Indicator emission.
 
@@ -2041,7 +2167,13 @@ def _accept_string_ioc(
         else ""
     )
     return (
-        indicator_publish_reason(ioc.kind, value, "strings", corroborated_by=corroborated)
+        indicator_publish_reason(
+            ioc.kind,
+            value,
+            "strings",
+            corroborated_by=corroborated,
+            **(emulation_kwargs(report, ioc.kind, value) if report is not None else {}),
+        )
         is not None
     )
 
@@ -2071,7 +2203,9 @@ def _looks_like_real_path(value: str) -> bool:
     return False
 
 
-def _indicator_for_domain(domain: NetworkDomain, verdict: Any = "") -> Indicator | None:
+def _indicator_for_domain(
+    domain: NetworkDomain, verdict: Any = "", report: Any = None
+) -> Indicator | None:
     """The name as an indicator, or ``None`` when this run may not publish it.
 
     Two ways to be refused, and they are different facts: a name nothing but
@@ -2083,7 +2217,13 @@ def _indicator_for_domain(domain: NetworkDomain, verdict: Any = "") -> Indicator
     fqdn = domain.fqdn.strip()
     if not fqdn:
         return None
-    admitted = indicator_publish_reason("domain", fqdn, domain.source, domain.reputation)
+    admitted = indicator_publish_reason(
+        "domain",
+        fqdn,
+        domain.source,
+        domain.reputation,
+        **(emulation_kwargs(report, "domain", fqdn) if report is not None else {}),
+    )
     if admitted is None:
         # A run of bytes that has the shape of a hostname is not an
         # observation of infrastructure. One PE's string sweep put fifteen
@@ -2116,7 +2256,7 @@ def _indicator_for_domain(domain: NetworkDomain, verdict: Any = "") -> Indicator
     )
 
 
-def _indicator_for_ip(ip: NetworkIP, verdict: Any = "") -> Indicator | None:
+def _indicator_for_ip(ip: NetworkIP, verdict: Any = "", report: Any = None) -> Indicator | None:
     """The address as an indicator, or ``None`` when this run may not publish it.
 
     The same rule the domains and the URLs go through. The addresses were the
@@ -2128,7 +2268,13 @@ def _indicator_for_ip(ip: NetworkIP, verdict: Any = "") -> Indicator | None:
     address = ip.address.strip()
     if not address:
         return None
-    admitted = indicator_publish_reason("ip", address, ip.source, ip.reputation)
+    admitted = indicator_publish_reason(
+        "ip",
+        address,
+        ip.source,
+        ip.reputation,
+        **(emulation_kwargs(report, "ip", address) if report is not None else {}),
+    )
     if admitted is None:
         return None
     pattern = indicator_pattern("ip", address)
@@ -2163,7 +2309,13 @@ def _indicator_for_url(url: NetworkURL, report: Any = None) -> Indicator | None:
     # "unrecorded" is how one of them ends up publishing what the other ranks
     # as noise. Only a row persisted before the field existed reaches this.
     source = url.source or "strings"
-    admitted = indicator_publish_reason("url", url.url, source, _host_reputation(report, host))
+    admitted = indicator_publish_reason(
+        "url",
+        url.url,
+        source,
+        _host_reputation(report, host),
+        **(emulation_kwargs(report, "url", url.url) if report is not None else {}),
+    )
     if admitted is None:
         return None
     pattern = indicator_pattern("url", url.url)
