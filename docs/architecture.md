@@ -267,6 +267,14 @@ summary's `negotiation.termination_reason` is `not_applicable` with no
 `final_confidence` and no `converged_early`, the report prints one sentence
 saying so, and the loop goes to the judge without a revision round.
 
+A mediation that raised or timed out measured no agreement either. Its round
+is recorded with `is_consensus: null` beside `consensus_applicable: true`,
+nothing in the confidence series, the mediator's argument carrying no
+confidence and its `status` (`failed` or `timeout`); the run summary's
+`termination_reason` is `mediation_failed` with no `final_confidence`, and the
+loop goes to the judge. It used to record 0.0, which the run summary then
+published as the negotiation's final confidence.
+
 Sequential is the default because a single local model server has one slot, and
 fanning out three analysts onto it produces queue thrash rather than speed. Set
 `parallel_analysts` when each request gets its own slot, as with a hosted API.

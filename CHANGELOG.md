@@ -1750,6 +1750,10 @@ change landed on `main`.
   still blocked in a call that cannot be cancelled is left after 10 s, named,
   with status 1; nothing happens when nothing is blocked, and calling the
   shutdown hook does not end the calling process.
+- **A mediation that failed states no agreement.** Its round recorded a
+  consensus of 0.0 that the run summary published as the final confidence; it
+  now records none, with the failure on the mediator's argument, and the run
+  summary's `termination_reason` is `mediation_failed`.
 - **The validation turn keeps to the loop's time.** It was given the loop's
   whole timeout again after the loop; it now gets what the loop left, and is
   not asked, with a record, when that cannot hold one answer at the loop's
@@ -4242,7 +4246,10 @@ matched sections under `evidence`; capa's `technique_hits` and
 `api_technique_hits` rows carry no `confidence`; a YARA rule's `confidence` is
 `null` where its author wrote none; `overall_confidence` defaults to `null`;
 `run_summary.budget.<agent>.validation_not_asked` lists validation turns a
-loop's time could not hold. Reports stored before keep what they recorded.
+loop's time could not hold; a failed mediation round has `is_consensus: null`,
+an empty confidence series and `termination_reason: mediation_failed`, with no
+`final_confidence`, and the report projection no longer borrows the verdict's
+confidence or a 0.0 for a negotiation that stated none. Reports stored before keep what they recorded.
 
 A stored STIX bundle keeps the shape it was stored with: `x_maljan_evidence_refs`
 appears only in exports rendered after this change, so the relationship graph

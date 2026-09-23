@@ -68,11 +68,41 @@ def test_negotiation_isolates_mediation_failure(exc: BaseException) -> None:
     """A failed mediation round degrades gracefully instead of propagating."""
     result = _run_node(_container_with_failing_judge(exc))
 
-    assert result["is_consensus"] is False
+    # No agreement was measured: consensus is neither reached nor refused,
+    # and no number stands in for the one the mediator never stated.
+    assert result["is_consensus"] is None
     assert result["iteration_count"] == 2  # iteration advanced, loop not aborted
-    assert result["confidence_history"] == [0.0]
-    finding = result["discussion_history"][0].finding
-    assert finding.startswith("[ERROR] Mediation")
+    assert result["confidence_history"] == []
+    argument = result["discussion_history"][0]
+    assert argument.finding.startswith("[ERROR] Mediation")
+    assert argument.confidence_score is None
+    assert argument.status in ("failed", "timeout")
+
+
+def test_a_failed_mediation_publishes_no_agreement_anywhere() -> None:
+    """The run summary, the report projection and the router read the failure, not a 0.0."""
+    from maljan.analysis.run_summary import MEDIATION_FAILED, RunSummaryBuilder
+    from maljan.pipeline.routing import ConsensusRouter
+    from maljan.reporting.builder import MalwareReportBuilder
+
+    result = _run_node(_container_with_failing_judge(RuntimeError("Connection error.")))
+    state = {**result, "consensus_applicable": result.get("consensus_applicable", True)}
+
+    summary = (
+        RunSummaryBuilder(start_time=0.0).set_negotiation(state, max_iterations=3).build().to_dict()
+    )
+    negotiation = summary["negotiation"]
+    assert negotiation["termination_reason"] == MEDIATION_FAILED
+    assert "final_confidence" not in negotiation
+    assert negotiation["confidence_history"] == []
+
+    projected = MalwareReportBuilder._negotiation_summary(summary, overall_confidence=0.9)
+    assert "final_confidence" not in projected
+    assert projected["termination_reason"] == MEDIATION_FAILED
+
+    from maljan.core.config import get_settings
+
+    assert ConsensusRouter(get_settings()).should_continue(state) == "judge"
 
 
 def test_negotiation_labels_timeout_distinctly() -> None:

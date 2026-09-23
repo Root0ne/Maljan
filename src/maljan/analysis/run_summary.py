@@ -43,6 +43,10 @@ from maljan.analysis.corroboration import (
 # The termination reason of a debate that measured no agreement: fewer than
 # two analysts produced claims, or the stage did not run.
 NOT_APPLICABLE = "not_applicable"
+# The termination reason of a debate whose last mediation raised or timed out:
+# no agreement was measured, and the reason says the mediation failed rather
+# than that the round limit was reached.
+MEDIATION_FAILED = "mediation_failed"
 
 # What every surface says for it. The record does not say which of the two
 # causes held, so the words name neither.
@@ -58,13 +62,16 @@ class NegotiationMetrics:
         rounds_completed:    Number of negotiation rounds actually executed.
         max_rounds:          Hard limit configured at startup.
         termination_reason:  Why the loop stopped (consensus / hard_limit /
-                             convergence / sycophancy / not_applicable).
+                             convergence / sycophancy / not_applicable /
+                             mediation_failed).
         sycophancy_events:   Number of rounds where sycophancy was detected.
         confidence_history:  Per-round mediator confidence scores.
         final_confidence:    Last recorded confidence value; ``None`` when
                              consensus did not apply, because fewer than two
                              analysts produced claims or the debate did not
-                             run. No agreement was measured, so none is stated.
+                             run, and when no round measured one — a
+                             mediation that failed. No agreement was
+                             measured, so none is stated.
     """
 
     rounds_completed: int
@@ -1474,8 +1481,19 @@ class RunSummaryBuilder:
             sycophancy_events = 1
 
         applicable = state.get("consensus_applicable", True) is not False
+        last_mediator = next(
+            (
+                arg
+                for arg in reversed(discussion_history)
+                if getattr(arg, "agent_name", "") == "Mediator"
+            ),
+            None,
+        )
+        mediation_failed = getattr(last_mediator, "status", "complete") in ("failed", "timeout")
         if not applicable:
             termination_reason = NOT_APPLICABLE
+        elif mediation_failed:
+            termination_reason = MEDIATION_FAILED
         elif is_consensus:
             termination_reason = "consensus"
         elif len(confidence_history) >= 3:
@@ -1495,8 +1513,10 @@ class RunSummaryBuilder:
             termination_reason=termination_reason,
             sycophancy_events=sycophancy_events,
             confidence_history=confidence_history,
+            # The last agreement the mediator stated, or none: a series with
+            # nothing in it measured nothing, and 0.0 would say it had.
             final_confidence=(
-                None if not applicable else confidence_history[-1] if confidence_history else 0.0
+                confidence_history[-1] if applicable and confidence_history else None
             ),
         )
         return self

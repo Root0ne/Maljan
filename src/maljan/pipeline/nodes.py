@@ -2862,13 +2862,16 @@ def make_negotiation_node(
             )
             return {
                 "iteration_count": iteration + 1,
-                # A failed round among analysts that produced claims is "no
-                # consensus"; among fewer than two there was none to fail at.
+                # A failed round measured no agreement: consensus applied but
+                # is neither reached nor refused, and the series gets nothing.
+                # It used to record 0.0, a number the mediator never stated,
+                # which the run summary then published as the final confidence.
+                # The failure itself is the argument's ``status``.
                 **(
                     {
-                        "is_consensus": False,
+                        "is_consensus": None,
                         "consensus_applicable": True,
-                        "confidence_history": [0.0],
+                        "confidence_history": [],
                     }
                     if applies
                     else _NO_CONSENSUS_MEASURED
@@ -2878,7 +2881,7 @@ def make_negotiation_node(
                     AgentArgument(
                         agent_name="Mediator",
                         finding=f"[ERROR] Mediation {label}: {describe_exception(e)}",
-                        confidence_score=0.0 if applies else None,
+                        confidence_score=None,
                         # The structured signal. The "[ERROR] Mediation " prefix
                         # above stays for old stored state, but nothing new
                         # should have to parse prose to learn this.
