@@ -178,16 +178,73 @@ def lift_misplaced_extensions(bundle_dict: dict[str, Any]) -> list[Violation]:
     return found
 
 
+DUPLICATE_LABEL_CODE = "stix.duplicate_label"
+
+
+def _shared_labels(objects: list[Any]) -> set[str]:
+    """The ids the judge wrote on more than one object."""
+    seen: set[str] = set()
+    shared: set[str] = set()
+    for obj in objects:
+        label = obj.get("id") if isinstance(obj, dict) else None
+        if isinstance(label, str):
+            (shared if label in seen else seen).add(label)
+    return shared
+
+
+def duplicate_label_violations(bundle_dict: dict[str, Any]) -> list[Violation]:
+    """One question per id the judge gave to more than one object.
+
+    Asked before any id is minted, with the positions as the judge wrote them,
+    so the sentence names the objects the judge can find in its own answer.
+    """
+    from maljan.pipeline.events import safe_finding_value
+    from maljan.pipeline.validation import Violation
+
+    objects = bundle_dict.get("objects")
+    if not isinstance(objects, list):
+        return []
+    shared = _shared_labels(objects)
+    out: list[Violation] = []
+    for label in sorted(shared):
+        where = [
+            f"objects[{index}] (a {safe_finding_value(_object_type(obj))})"
+            for index, obj in enumerate(objects)
+            if isinstance(obj, dict) and obj.get("id") == label
+        ]
+        first = next(
+            index
+            for index, obj in enumerate(objects)
+            if isinstance(obj, dict) and obj.get("id") == label
+        )
+        out.append(
+            Violation(
+                code=DUPLICATE_LABEL_CODE,
+                message=(
+                    f"{' and '.join(where)} share the id {safe_finding_value(label)!r}, so a "
+                    "reference to it could mean either and none is read as meaning one. Give "
+                    "each object its own id and name, in every reference, the one it means."
+                ),
+                path=f"objects[{first}]",
+            )
+        )
+    return out
+
+
 def postprocess_judge_bundle(
     bundle_dict: dict[str, Any],
     *,
     ledger: Any | None = None,
+    labels: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Apply the defensive bundle fixes in place; return the same dict.
 
     ``bundle_dict`` is the parsed JSON Bundle returned by the verdict LLM,
     exactly as the judge wrote it; the technique check reports what is wrong
-    with its ids, it does not filter them.
+    with its ids, it does not filter them. ``labels``, when given, is filled
+    with ``{the judge's label: the published id}`` for every label that names
+    one object, which is the record that lets a reader find the judge's object
+    in the export.
     Everything done here is a shape repair — the published ids, a missing
     MITRE reference, a relationship pointing at an object that is not
     in the bundle. None of it changes what the judge decided.
@@ -204,6 +261,14 @@ def postprocess_judge_bundle(
     # merging on id would fold those analyses into one object, and the OASIS
     # validator refused every object that carried or named it. The labels are
     # read once, to rewire the references, and replaced.
+    #
+    # A label two objects share says nothing about which one a reference
+    # means, so no reference naming it is rewired onto either: each object gets
+    # its own id, the references keep the label and point at nothing, and
+    # ``duplicate_label_violations`` has already asked the judge which it meant.
+    # Choosing the first rewired the second object's edges onto it, and the
+    # integrity pass then folded them away as duplicates.
+    shared = _shared_labels(objects)
     id_remap: dict[str, str] = {}
     for obj in objects:
         if not isinstance(obj, dict):
@@ -212,8 +277,11 @@ def postprocess_judge_bundle(
         if not isinstance(old_id, str):
             continue
         new_id = _mint_id(obj, old_id)
-        id_remap.setdefault(old_id, new_id)
+        if old_id not in shared:
+            id_remap[old_id] = new_id
         obj["id"] = new_id
+    if labels is not None:
+        labels.update(id_remap)
     if id_remap:
         logger.info("judge_postprocess: minted the published ids of %d object(s).", len(id_remap))
         _rewrite_references(objects, id_remap)

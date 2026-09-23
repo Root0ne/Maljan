@@ -225,9 +225,6 @@ CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
     ),
     # The field names of this repository's own schema.
     ("pipeline/validation.py", "_schema_message"): frozenset({"keys"}),
-    # The position of the relationship in the bundle, counted by this loop.
-    ("pipeline/validation.py", "credit_without_claim_violations"): frozenset({"index"}),
-    ("pipeline/validation.py", "annotation_out_of_schema_violations"): frozenset({"index"}),
     # How many hexadecimal characters a digest of a named algorithm has, read
     # out of this codebase's own table.
     ("pipeline/validation.py", "_indicator_problem"): frozenset({"expected"}),
@@ -261,7 +258,9 @@ BUILTIN_NAMES: frozenset[str] = BUILTIN_ANSWERS | frozenset(
 
 # Functions whose *answer* this codebase owns, whatever they are asked about: a
 # catalogue lookup returns the catalogue's words, not the question's.
-CODE_OWNED_CALLS: frozenset[str] = frozenset({"_retired_note"}) | BUILTIN_ANSWERS
+# ``_object_path`` answers with a position this codebase counted and the
+# judge's label, which it passes through ``safe_finding_value`` itself.
+CODE_OWNED_CALLS: frozenset[str] = frozenset({"_retired_note", "_object_path"}) | BUILTIN_ANSWERS
 
 # The functions that build a message for somebody else to put in a Violation.
 # Their own f-strings are walked by the same rule, so a ``message=mismatch`` is

@@ -163,6 +163,9 @@ class JudgeVerdict(NamedTuple):
     # Every violation the judge was shown, by code — including the ones the
     # retry fixed, which nothing else in the run records.
     fed_back: dict[str, int] = {}
+    # ``{the judge's label: the published id}`` for the answer this verdict
+    # stands on, so the judge's own bundle and the export can be read together.
+    labels: dict[str, str] = {}
 
 
 # The judge's system prompt. A module constant so that
@@ -1064,12 +1067,19 @@ class JudgeAgent(BudgetMeter):
         # cannot hold set aside. Refilled per parse, because the retry's answer
         # is a different answer and the previous one's findings are spent.
         shape: list[Violation] = []
+        # Where each parsed object sits in the answer as the judge wrote it,
+        # and the label it gave it: feedback names the judge's own positions,
+        # not the ones left after set-aside objects and folded duplicates.
+        where: list[tuple[int | None, str]] = []
+        labels: dict[str, str] = {}
         tally = ValidationTally()
 
         def _parse(answer: Any) -> Bundle:
             nonlocal not_json, attempts
             attempts += 1
             shape.clear()
+            where.clear()
+            labels.clear()
             if timed_out:
                 not_json = False
                 return self._fallback_bundle_from_text(
@@ -1085,7 +1095,9 @@ class JudgeAgent(BudgetMeter):
                 if attempts <= _VERDICT_RETRIES:
                     # A retry is coming and this bundle would be thrown away.
                     return Bundle(objects=[])
-            parsed = self._bundle_from_response(answer, reports, isr_reports, record=shape)
+            parsed = self._bundle_from_response(
+                answer, reports, isr_reports, record=shape, origins=where, labels=labels
+            )
             # The relocation is done and nothing is left to ask about, so it is
             # published as settled and counted where the round's other codes
             # are, rather than spending the one retry this round has.
@@ -1168,6 +1180,7 @@ class JudgeAgent(BudgetMeter):
                     searched=searched,
                     corpus_state=corpus_state,
                     technique_sources=technique_sources,
+                    origins=where,
                 ),
                 *assessment_violations(bundle),
                 *assessment_conflict_violations(bundle),
@@ -1229,7 +1242,7 @@ class JudgeAgent(BudgetMeter):
             violations=[v for v in violations if v not in _from_the_loop],
             retry_index=retries,
         )
-        dropped = drop_ungrounded_indicators(bundle, violations)
+        dropped = drop_ungrounded_indicators(bundle, violations, origins=where)
         if dropped:
             self.logger.warning(
                 "Judge verdict: %d indicator(s) stayed ungrounded after the retry and were "
@@ -1237,7 +1250,11 @@ class JudgeAgent(BudgetMeter):
                 dropped,
             )
         return JudgeVerdict(
-            bundle=bundle, violations=violations, retries=retries, fed_back=dict(tally.by_code)
+            bundle=bundle,
+            violations=violations,
+            retries=retries,
+            fed_back=dict(tally.by_code),
+            labels=dict(labels),
         )
 
     def _bundle_from_response(
@@ -1246,6 +1263,8 @@ class JudgeAgent(BudgetMeter):
         reports: dict[str, str],
         isr_reports: dict[str, AgentISR] | None,
         record: list[Violation] | None = None,
+        origins: list[tuple[int | None, str]] | None = None,
+        labels: dict[str, str] | None = None,
     ) -> Bundle:
         """The model's raw answer as a Bundle, or the text fallback.
 
@@ -1273,6 +1292,7 @@ class JudgeAgent(BudgetMeter):
             # attack-pattern with nothing saying why. ``pipeline.validation`` is
             # the single place that decides an id is wrong, and it says so.
             from maljan.agents.judge_postprocess import (
+                duplicate_label_violations,
                 lift_misplaced_extensions,
                 postprocess_judge_bundle,
             )
@@ -1280,11 +1300,25 @@ class JudgeAgent(BudgetMeter):
             # Before the schema, and before anything that walks the objects: an
             # item the Bundle cannot hold fails the whole model, and the judge's
             # other twenty-four objects are not the model's to lose.
+            # Positions and labels as the judge wrote them, before anything is
+            # set aside or folded: the dicts are the same objects after both.
+            written = {
+                id(obj): (index, str(obj.get("id") or ""))
+                for index, obj in enumerate(data.get("objects") or [])
+                if isinstance(obj, dict)
+            }
             lifted = lift_misplaced_extensions(data)
             if record is not None:
                 record.extend(lifted)
-            data = postprocess_judge_bundle(data, ledger=getattr(self, "truncation_ledger", None))
-            return Bundle.model_validate(data)
+            if record is not None:
+                record.extend(duplicate_label_violations(data))
+            data = postprocess_judge_bundle(
+                data, ledger=getattr(self, "truncation_ledger", None), labels=labels
+            )
+            bundle = Bundle.model_validate(data)
+            if origins is not None:
+                origins[:] = [written.get(id(obj), (None, "")) for obj in data["objects"]]
+            return bundle
         except Exception as exc:  # noqa: BLE001 — a malformed bundle degrades to the fallback
             self.logger.warning(
                 "LLM did not return a valid Bundle: %s. Attempting text-based fallback.", exc

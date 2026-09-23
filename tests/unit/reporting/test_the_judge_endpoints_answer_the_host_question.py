@@ -440,6 +440,7 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
             "stix.credit_without_claim",
             "stix.is_family_missing",
             "stix.annotation_out_of_schema",
+            "stix.duplicate_label",
         }
     )
 

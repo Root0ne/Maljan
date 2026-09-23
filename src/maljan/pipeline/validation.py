@@ -1512,7 +1512,9 @@ def indicator_type_vocabulary_violations(obj: Any, *, path: str) -> list[Violati
 ANNOTATION_OUT_OF_SCHEMA_CODE = "stix.annotation_out_of_schema"
 
 
-def annotation_out_of_schema_violations(bundle: Any) -> list[Violation]:
+def annotation_out_of_schema_violations(
+    bundle: Any, origins: Sequence[tuple[int | None, str]] | None = None
+) -> list[Violation]:
     """A relationship annotation the schema does not describe, asked about as written.
 
     A confidence that is not a number from 0.0 to 1.0, a basis outside the
@@ -1526,6 +1528,7 @@ def annotation_out_of_schema_violations(bundle: Any) -> list[Violation]:
     bases = get_args(EvidenceBasis)
     out: list[Violation] = []
     for index, obj in enumerate(list(getattr(bundle, "objects", None) or [])):
+        where = _object_path(index, origins)
         if str(getattr(obj, "type", "") or "") != "relationship":
             continue
         problems: list[str] = []
@@ -1552,11 +1555,11 @@ def annotation_out_of_schema_violations(bundle: Any) -> list[Violation]:
                 Violation(
                     code=ANNOTATION_OUT_OF_SCHEMA_CODE,
                     message=(
-                        f"the relationship at objects[{index}]: {'; '.join(problems)}. Write "
+                        f"the relationship at {where}: {'; '.join(problems)}. Write "
                         "it that way, or leave the property out; a value you keep is published "
                         "as written and read as no number."
                     ),
-                    path=f"objects[{index}]",
+                    path=where,
                 )
             )
     return out
@@ -1605,7 +1608,9 @@ def _related_ids(tid: str) -> set[str]:
 
 
 def credit_without_claim_violations(
-    bundle: Any, technique_sources: Mapping[str, Sequence[str]] | None
+    bundle: Any,
+    technique_sources: Mapping[str, Sequence[str]] | None,
+    origins: Sequence[tuple[int | None, str]] | None = None,
 ) -> list[Violation]:
     """A judge relationship crediting an agent with a technique it never named.
 
@@ -1635,6 +1640,7 @@ def credit_without_claim_violations(
     for index, obj in enumerate(objects):
         if str(getattr(obj, "type", "") or "") != "relationship":
             continue
+        where = _object_path(index, origins)
         credited = credited_agents(obj)
         if not credited:
             continue
@@ -1665,7 +1671,7 @@ def credit_without_claim_violations(
             Violation(
                 code=CREDIT_WITHOUT_CLAIM_CODE,
                 message=(
-                    f"the relationship at objects[{index}] credits "
+                    f"the relationship at {where} credits "
                     f"{', '.join(repr(safe_finding_value(n)) for n in uncredited)} with "
                     f"{safe_finding_value(tid)}, "
                     f"and {who} — the evidence summary lists who named each technique. "
@@ -1673,7 +1679,7 @@ def credit_without_claim_violations(
                     "or leave x_maljan_contributing_agents empty; whichever you answer is "
                     "published."
                 ),
-                path=f"objects[{index}]",
+                path=where,
             )
         )
     return out
@@ -1689,6 +1695,7 @@ def validate_verdict_bundle(
     searched: Iterable[str] = (),
     corpus_state: CorpusState | None = None,
     technique_sources: Mapping[str, Sequence[str]] | None = None,
+    origins: Sequence[tuple[int | None, str]] | None = None,
 ) -> list[Violation]:
     """What is wrong with the judge's answer, in the judge's own terms.
 
@@ -1762,6 +1769,7 @@ def validate_verdict_bundle(
         how_whole = both_searched(how_whole, NOTHING_SEARCHED)
     not_searched = partial_evidence_note(how_whole)
     for index, obj in enumerate(objects):
+        where = _object_path(index, origins)
         kind = str(getattr(obj, "type", "") or "")
         if kind == "indicator":
             pattern = str(getattr(obj, "pattern", "") or "")
@@ -1770,11 +1778,11 @@ def validate_verdict_bundle(
                     obj,
                     verdict=stated_verdict,
                     identity=identity,
-                    path=f"objects[{index}]",
+                    path=where,
                 )
             )
-            violations.extend(unknown_observable_type_violations(obj, path=f"objects[{index}]"))
-            violations.extend(indicator_type_vocabulary_violations(obj, path=f"objects[{index}]"))
+            violations.extend(unknown_observable_type_violations(obj, path=where))
+            violations.extend(indicator_type_vocabulary_violations(obj, path=where))
             problem = _indicator_problem(pattern, haystack, runtime_paths, identity)
             if problem:
                 absent = _is_an_absence(problem)
@@ -1787,7 +1795,7 @@ def validate_verdict_bundle(
                             "tool in this run actually saw, and prefer zero indicators to an "
                             f"invented one.{caveat}"
                         ),
-                        path=f"objects[{index}]",
+                        path=where,
                         # Only an absence goes advisory, and only when the
                         # evidence searched was partial. A denylisted host or a
                         # malformed digest is refused on its own account and no
@@ -1806,7 +1814,7 @@ def validate_verdict_bundle(
                         "this one sample, true when it stands for a family. Nothing is "
                         "filled in for you."
                     ),
-                    path=f"objects[{index}]",
+                    path=where,
                 )
             )
         elif kind == "attack-pattern":
@@ -1831,7 +1839,7 @@ def validate_verdict_bundle(
                             "what was observed in the assessment: a behaviour with no "
                             "technique id is reported as a behaviour, not as a technique."
                         ),
-                        path=f"objects[{index}]",
+                        path=where,
                     )
                 )
                 continue
@@ -1843,7 +1851,7 @@ def validate_verdict_bundle(
                             f"the attack-pattern names {safe_finding_value(tid)}, which is "
                             "not shaped like a MITRE ATT&CK technique id (T#### or T####.###)."
                         ),
-                        path=f"objects[{index}]",
+                        path=where,
                     )
                 )
             elif attck is not None and not _technique_is_known(tid, attck):
@@ -1856,7 +1864,7 @@ def validate_verdict_bundle(
                             f"{_retired_note(tid, attck)}. Use a real technique id or "
                             "drop the attack-pattern."
                         ),
-                        path=f"objects[{index}]",
+                        path=where,
                     )
                 )
             elif attck is not None:
@@ -1866,7 +1874,7 @@ def validate_verdict_bundle(
                         Violation(
                             code=PLATFORM_MISMATCH_CODE,
                             message=mismatch,
-                            path=f"objects[{index}]",
+                            path=where,
                         )
                     )
 
@@ -1899,8 +1907,8 @@ def validate_verdict_bundle(
                 )
             )
 
-    violations.extend(annotation_out_of_schema_violations(bundle))
-    violations.extend(credit_without_claim_violations(bundle, technique_sources))
+    violations.extend(annotation_out_of_schema_violations(bundle, origins))
+    violations.extend(credit_without_claim_violations(bundle, technique_sources, origins))
     return violations
 
 
@@ -2759,7 +2767,12 @@ def _attack_pattern_technique_id(obj: Any) -> str:
     return first if first.startswith("T") else ""
 
 
-def drop_ungrounded_indicators(bundle: Any, violations: Sequence[Violation]) -> int:
+def drop_ungrounded_indicators(
+    bundle: Any,
+    violations: Sequence[Violation],
+    *,
+    origins: Sequence[tuple[int | None, str]] | None = None,
+) -> int:
     """Remove the indicators still ungrounded after the retry; return how many.
 
     An unresolved technique id can stay on a claim and be labelled; an
@@ -2787,6 +2800,13 @@ def drop_ungrounded_indicators(bundle: Any, violations: Sequence[Violation]) -> 
     }
     if not indices:
         return 0
+    if origins:
+        # The paths name the judge's own positions; the drop is over the
+        # checked bundle's.
+        written_at = {
+            written: here for here, (written, _label) in enumerate(origins) if written is not None
+        }
+        indices = {written_at[i] for i in indices if i in written_at}
     objects = list(getattr(bundle, "objects", None) or [])
     kept = [obj for index, obj in enumerate(objects) if index not in indices]
     dropped = len(objects) - len(kept)
@@ -2799,6 +2819,26 @@ def drop_ungrounded_indicators(bundle: Any, violations: Sequence[Violation]) -> 
 def _object_index(path: str) -> int | None:
     match = re.search(r"objects\[(\d+)\]", path or "")
     return int(match.group(1)) if match else None
+
+
+def _object_path(index: int, origins: Sequence[tuple[int | None, str]] | None) -> str:
+    """Where an object sits in the answer as the judge wrote it, and its label.
+
+    The bundle a check reads has lost what the post-processor set aside and
+    folded, so its own positions name other objects than the judge's list
+    holds at the same place. ``origins`` carries, per object checked, the
+    judge's position and the id the judge wrote; without it the checked
+    bundle's position is all there is.
+    """
+    if origins is not None and index < len(origins):
+        written, label = origins[index]
+        if written is not None:
+            return (
+                f"objects[{written}] {safe_finding_value(label)!r}"
+                if label
+                else f"objects[{written}]"
+            )
+    return f"objects[{index}]"
 
 
 # ---------------------------------------------------------------------------
