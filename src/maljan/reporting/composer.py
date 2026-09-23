@@ -31,10 +31,13 @@ from maljan.core.logger import logger
 from maljan.core.token_ledger import structured_answer
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
+    CITATION_NOT_EVIDENCE_CODE,
     UNGROUNDED_CAPABILITY_CODE,
     CapabilityGrounding,
     ValidationTally,
     Violation,
+    citable_ids_in,
+    citation_violations,
     keep_known_keys,
     retry_with_feedback,
     schema_violations,
@@ -108,6 +111,11 @@ _SYSTEM = (
     "string, tool output) where possible.\n"
     "6. Output MUST conform to the provided JSON schema."
 )
+
+# What a section may still be published with once its retry is spent: an
+# over-claim and a citation that is not an evidence id are kept as written and
+# recorded unresolved; anything else is a shape the report cannot print.
+_KEPT_AS_WRITTEN = frozenset({UNGROUNDED_CAPABILITY_CODE, CITATION_NOT_EVIDENCE_CODE})
 
 # How many invented keys a degradation reason names. A model that invents
 # forty writes forty names into the report header otherwise, and the sentence
@@ -406,6 +414,8 @@ class ReportComposer:
         # — see ``structured_output_supported``. The per-section timeout below
         # bounds the damage here, unlike the narrative round, but paying it on
         # every one of eight sections is still eight timeouts nobody needs.
+        # The ids this section may cite are the ones its prompt showed it.
+        citable = citable_ids_in("\n".join(_message_text(m) for m in messages))
         try:
             if not structured_output_supported_for_llm(self.llm):
                 raise _StructuredOutputUnavailable
@@ -425,7 +435,10 @@ class ReportComposer:
                 # conversation and there is no turn to add one to — but the
                 # answer is still checked: a section that over-claims is no
                 # better for having come from the path that usually works.
-                found = section_capability_violations(result.model_dump(), self._grounding)
+                found = [
+                    *section_capability_violations(result.model_dump(), self._grounding),
+                    *citation_violations(result.model_dump(), citable),
+                ]
                 self.validation_tally.count(found)
                 self._record_ungrounded(section or schema.__name__, found)
                 return result
@@ -496,6 +509,7 @@ class ReportComposer:
             return [
                 *schema_violations(schema, payload, code="composer.schema"),
                 *section_capability_violations(payload, self._grounding),
+                *citation_violations(payload, citable),
             ]
 
         payload, violations, retries = await retry_with_feedback(
@@ -516,11 +530,12 @@ class ReportComposer:
             )
             return None
         # A section whose shape is wrong cannot be published; a section that
-        # over-claims can, and dropping it would leave the report with neither
-        # the claim nor the record of it. The terms are kept on the record and
-        # the prose is left exactly as the model wrote it.
-        broken = [v for v in violations if v.code != UNGROUNDED_CAPABILITY_CODE]
-        ungrounded = [v for v in violations if v.code == UNGROUNDED_CAPABILITY_CODE]
+        # over-claims, or cites something that is not an evidence id, can, and
+        # dropping it would leave the report with neither the sentence nor the
+        # record of it. What is wrong is kept on the record and the prose is
+        # left exactly as the model wrote it.
+        broken = [v for v in violations if v.code not in _KEPT_AS_WRITTEN]
+        ungrounded = [v for v in violations if v.code in _KEPT_AS_WRITTEN]
         if broken:
             logger.error(
                 "ReportComposer: section '%s' still breaks its schema after %d retr%s (%s); "
@@ -545,7 +560,7 @@ class ReportComposer:
             self.degradations.append(reason)
 
     def _record_ungrounded(self, section: str, violations: list[Violation]) -> None:
-        """Keep a section's over-claims on the record, without editing its prose.
+        """Keep a section's over-claims and stray citations on the record, prose untouched.
 
         Records only. The manual path has already counted these as leftovers of
         its retry loop, and counting them twice would say the model was told
@@ -554,9 +569,9 @@ class ReportComposer:
         if not violations:
             return
         logger.warning(
-            "ReportComposer: section '%s' claims %s, which this run does not establish; "
-            "kept and recorded unresolved.",
+            "ReportComposer: section '%s' is kept as written with %s unresolved (%s).",
             section,
+            ", ".join(sorted({v.code for v in violations})),
             ", ".join(v.path for v in violations),
         )
         self.validation_tally.record_unresolved(f"composer:{section}", violations)

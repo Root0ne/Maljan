@@ -1533,6 +1533,15 @@ change landed on `main`.
   for the same work, `per_agent` gains `judge` and, when the summariser is on,
   `summarizer`, and `run_summary.models.reporter` names the reporter's model;
   a comparison across this release compares different counts.
+- **A citation is an evidence id or it is asked about.** The composer cited
+  "[BINARY FACTS]" and "[DETERMINISTIC FACTS]" — its own prompt's block
+  headings — beside real evidence ids, and nothing checked a citation. The
+  narrative and every composer section now get `report.citation_not_evidence`
+  for each bracketed item that is not an evidence id the answer's prompt
+  carried, with a sentence naming the ids it may cite; ATT&CK and MBC ids in
+  brackets and markdown links are left alone. The citation is never rewritten:
+  one the retry does not fix prints as written and is recorded unresolved, and
+  the section is kept.
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was
   written into one directory under the system temp directory, shared by every

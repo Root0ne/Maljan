@@ -20,6 +20,7 @@ familiar to anyone debugging existing agents.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -32,10 +33,13 @@ from maljan.core.logger import logger
 from maljan.core.token_ledger import structured_answer
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
+    CITATION_NOT_EVIDENCE_CODE,
     UNGROUNDED_CAPABILITY_CODE,
     CapabilityGrounding,
     ValidationTally,
     Violation,
+    citable_ids_in,
+    citation_violations,
     narrative_capability_violations,
     retry_with_feedback,
     schema_violations,
@@ -382,6 +386,8 @@ class NarrativeAgent:
         # the ISRs, a capability an analyst stated in a claim would be a
         # violation here and a pass there, on one run.
         grounding = CapabilityGrounding.from_report(report, isr_reports)
+        # The ids the summary may cite are the ones its prompt showed it.
+        citable = citable_ids_in("\n".join(_message_text(m) for m in messages))
 
         # Skip the structured path entirely on endpoints where it does not
         # work. Measured live 2026-08-07: against llama-server this call hung
@@ -401,11 +407,11 @@ class NarrativeAgent:
                     model=self.model_label,
                 )
                 if isinstance(result, NarrativeOutput):
-                    return self._kept_with_ungrounded_recorded(result, grounding)
+                    return self._kept_with_ungrounded_recorded(result, grounding, citable)
                 # Some providers return a dict — coerce defensively.
                 if isinstance(result, dict):
                     return self._kept_with_ungrounded_recorded(
-                        NarrativeOutput.model_validate(result), grounding
+                        NarrativeOutput.model_validate(result), grounding, citable
                     )
                 logger.warning(
                     "NarrativeAgent: unexpected structured-output type %s; "
@@ -454,6 +460,7 @@ class NarrativeAgent:
                 [
                     lambda p: schema_violations(NarrativeOutput, p, code="narrative.schema"),
                     lambda p: narrative_capability_violations(p, grounding),
+                    lambda p: citation_violations(p, citable),
                 ],
                 parse=_narrative_payload,
                 on_feedback=self.validation_tally.count,
@@ -470,9 +477,11 @@ class NarrativeAgent:
         # template. The second leaves a summary that says more than the run
         # found, and dropping it would replace one wrong summary with none —
         # so it is kept and the terms are recorded, which is what a reader can
-        # act on. Nothing rewrites the prose.
-        broken = [v for v in violations if v.code != UNGROUNDED_CAPABILITY_CODE]
-        ungrounded = [v for v in violations if v.code == UNGROUNDED_CAPABILITY_CODE]
+        # act on. A citation that is not an evidence id is kept the same way.
+        # Nothing rewrites the prose.
+        kept = (UNGROUNDED_CAPABILITY_CODE, CITATION_NOT_EVIDENCE_CODE)
+        broken = [v for v in violations if v.code not in kept]
+        ungrounded = [v for v in violations if v.code in kept]
         if broken:
             # ``error``: reaching here means the report ships with no narrative
             # at all, which is a visible hole rather than a degraded detail.
@@ -492,28 +501,35 @@ class NarrativeAgent:
             return None
 
     def _record_ungrounded(self, violations: list[Violation]) -> None:
-        """Keep the over-claims on the record, without touching the prose."""
+        """Keep the over-claims and stray citations on the record, without touching the prose."""
         if not violations:
             return
         logger.warning(
-            "NarrativeAgent: %d capability claim(s) the run does not establish survived the "
-            "retry and are recorded unresolved (%s).",
+            "NarrativeAgent: %d finding(s) survived the retry and are recorded unresolved "
+            "(%s: %s).",
             len(violations),
+            ", ".join(sorted({v.code for v in violations})),
             ", ".join(v.path for v in violations),
         )
         self.validation_tally.record_unresolved("narrative", violations)
 
     def _kept_with_ungrounded_recorded(
-        self, output: NarrativeOutput, grounding: CapabilityGrounding
+        self,
+        output: NarrativeOutput,
+        grounding: CapabilityGrounding,
+        citable: Sequence[str] = (),
     ) -> NarrativeOutput:
-        """The structured path's answer, with its over-claims recorded.
+        """The structured path's answer, with its over-claims and stray citations recorded.
 
         No retry here: ``with_structured_output`` owns the conversation and
         there is no turn to add one to. The answer is still checked, because a
         report that over-claims is no better for having been produced by the
         path that usually works.
         """
-        found = narrative_capability_violations(output.model_dump(), grounding)
+        found = [
+            *narrative_capability_violations(output.model_dump(), grounding),
+            *citation_violations(output.model_dump(), citable),
+        ]
         self.validation_tally.count(found)
         self._record_ungrounded(found)
         return output

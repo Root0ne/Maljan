@@ -389,6 +389,18 @@ Two producers use it:
   is asked again and what they find is recorded in `run_summary.validation`
   beside the verdict it describes, once each.
 
+* **The report's prose** (`reporting/narrative_agent.py`, `reporting/composer.py`)
+  — the shape of the answer, a capability the run does not establish
+  (`narrative.ungrounded_capability`), and a bracketed citation that is not an
+  evidence id the answer was shown (`report.citation_not_evidence`): a prompt
+  block's heading such as `[BINARY FACTS]`, a source's name, or an `ev_` id
+  that was not in its prompt. The citable ids are the ones the prompt carries
+  (the pack's, the ids in the analysts' claims), and the question's sentence
+  names them. An ATT&CK or MBC id in brackets (`[T1027]`, `[C0027.009]`) is an
+  identifier, not a citation, and a markdown link is neither. A citation or an
+  over-claim that survives the retry is printed as written and recorded
+  unresolved; only a broken shape costs the section.
+
 * **A judge that did not answer with a bundle** — the pipeline builds one from
   whatever text there was, and that bundle states its verdict in
   `x_maljan_fallback_verdict` rather than implying it through its objects. The

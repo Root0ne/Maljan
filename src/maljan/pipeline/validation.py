@@ -43,7 +43,7 @@ from maljan.pipeline.events import (
     emit_validation_feedback,
     safe_finding_value,
 )
-from maljan.schemas.evidence import entry_ids_in
+from maljan.schemas.evidence import ENTRY_ID_RE, entry_ids_in
 from maljan.schemas.judgement import BENIGN_VERDICT, SEVERITY_RATINGS, VERDICT_VALUES
 from maljan.schemas.stix_pattern import read_comparisons
 
@@ -1330,6 +1330,92 @@ def section_capability_violations(payload: Any, grounding: CapabilityGrounding) 
 
     _walk(payload)
     return ungrounded_capabilities("\n".join(parts), grounding, code=UNGROUNDED_CAPABILITY_CODE)
+
+
+CITATION_NOT_EVIDENCE_CODE = "report.citation_not_evidence"
+
+# A bracketed group in prose: not the index of an expression (``key[i]``) and
+# not the text of a markdown link, whose target follows in parentheses.
+_BRACKETED_RE = re.compile(r"(?<![\w\]])\[([^\[\]\n]{1,200})\](?!\()")
+_EVIDENCE_ID_RE = re.compile(r"ev_\d{3,}", re.IGNORECASE)
+# An ATT&CK technique or an MBC behaviour in brackets is an identifier, the
+# way the report's own tables print one, not a claim about where a fact came
+# from; so is a CVE.
+_IDENTIFIER_RE = re.compile(r"[A-Z]\d{4}(?:\.[A-Z]?\d{3})?|CVE-\d{4}-\d{4,}", re.IGNORECASE)
+# How many ids the sentence names before it says how many more there are.
+_CITABLE_SHOWN = 12
+
+
+def citable_ids_in(text: str) -> list[str]:
+    """The evidence ids ``text`` carries, lower-cased, once each, in the order they appear.
+
+    A section may cite what its prompt showed it: the pack's ids, the ids in
+    the analysts' claims, the ids beside the captured tool output.
+    """
+    return list(dict.fromkeys(found.lower() for found in ENTRY_ID_RE.findall(text or "")))
+
+
+def _strings_of(value: Any, depth: int = 0) -> list[str]:
+    if depth > 4:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [s for item in value.values() for s in _strings_of(item, depth + 1)]
+    if isinstance(value, list | tuple):
+        return [s for item in value for s in _strings_of(item, depth + 1)]
+    return []
+
+
+def citation_violations(payload: Any, citable: Sequence[str]) -> list[Violation]:
+    """Each bracketed citation item in ``payload``'s prose that is not an id it may cite.
+
+    ``citable`` is the evidence ids the producer was shown. An item that is an
+    ATT&CK or MBC identifier is left alone; any other item — a prompt block's
+    heading, a source's name, an id the producer was not shown — is one
+    violation, once however often it appears, with a sentence naming the ids
+    it may cite. The prose is never edited: a citation the retry does not fix
+    prints as written, and the unresolved row is what tells a reader.
+    """
+    if payload is None:
+        return []
+    known = [str(i).strip().lower() for i in citable if str(i).strip()]
+    allowed = set(known)
+    offered = ", ".join(known[:_CITABLE_SHOWN])
+    if len(known) > _CITABLE_SHOWN:
+        offered += f" and {len(known) - _CITABLE_SHOWN} more"
+    remedy = (
+        f"Cite an entry by its evidence id in brackets — this answer may cite {offered} — "
+        "or write the sentence without a bracketed citation."
+        if known
+        else "This answer was shown no evidence ids, so write the sentence without a "
+        "bracketed citation."
+    )
+    seen: set[str] = set()
+    violations: list[Violation] = []
+    for text in _strings_of(payload):
+        for group in _BRACKETED_RE.finditer(text):
+            for raw in re.split(r"[,;]", group.group(1)):
+                item = raw.strip()
+                if not item or item.lower() in seen:
+                    continue
+                if _EVIDENCE_ID_RE.fullmatch(item):
+                    if item.lower() in allowed:
+                        continue
+                    why = f"[{safe_finding_value(item)}] is not an entry this answer was shown."
+                elif _IDENTIFIER_RE.fullmatch(item):
+                    continue
+                else:
+                    why = f"[{safe_finding_value(item)}] is cited, and it is not an evidence id."
+                seen.add(item.lower())
+                violations.append(
+                    Violation(
+                        code=CITATION_NOT_EVIDENCE_CODE,
+                        message=f"{why} {remedy}",
+                        path="citation",
+                    )
+                )
+    return violations
 
 
 # ---------------------------------------------------------------------------
