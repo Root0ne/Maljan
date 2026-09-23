@@ -1220,10 +1220,53 @@ def _reputation_facts(entry: LedgerEntry) -> str:
                             labels.append(str(value))
             if labels:
                 parts.append(f"labels {_names(labels)}")
+            detections = _detection_labels(data)
+            if detections:
+                parts.append(detections)
             return ", ".join(parts)
     count = malicious_count(entry.output)
     text = _short(entry.output)
     return f"{service} {count} malicious ({text})" if count is not None else f"{service}: {text}"
+
+
+# How many distinct detection labels the reputation line names. Enough that a
+# family named by several engines under several spellings is on the line,
+# short enough that the line stays one line in every model's prompt; the
+# count of the rest is stated beside them.
+_DETECTION_LABELS_SHOWN = 20
+
+
+def _detection_labels(data: dict[str, Any]) -> str:
+    """The answer's detection labels, with how many engines gave each.
+
+    VirusTotal's answer through its own MCP server carries ``detections``, one
+    result label per engine that detected the file, and no popular threat
+    classification — so a pack that read only the classification told every
+    model "52/75 malicious" and nothing else. The labels are counted exactly
+    as written, most engines first and then in the order the answer lists
+    them; nothing is merged, normalised or read for a family, which is the
+    reader's to decide.
+    """
+    rows = _find_key(data, "detections")
+    if not isinstance(rows, list):
+        return ""
+    labels = [" ".join(str(row).split()) for row in rows if isinstance(row, str) and row.strip()]
+    if not labels:
+        return ""
+    counts: dict[str, int] = {}
+    for label in labels:
+        counts[label] = counts.get(label, 0) + 1
+    ranked = sorted(counts, key=lambda label: -counts[label])
+    shown = ranked[:_DETECTION_LABELS_SHOWN]
+    bound = f", {len(shown)} shown" if len(ranked) > len(shown) else ""
+    text = (
+        f"{len(labels)} detection labels, {len(ranked)} distinct "
+        f"(engines per label, most first{bound}): "
+        + ", ".join(f"{label} ×{counts[label]}" for label in shown)
+    )
+    if len(ranked) > len(shown):
+        text += f" (+{len(ranked) - len(shown)} more distinct labels)"
+    return text
 
 
 def _find_key(value: Any, key: str, depth: int = _WALK_DEPTH) -> Any:

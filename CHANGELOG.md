@@ -1334,6 +1334,17 @@ change landed on `main`.
   **Upgrading:** a consumer that reads the first key of a `strings`, `floss` or
   knowledge answer will find `read_as` there when a quoted argument was read;
   an unquoted call's answer is unchanged.
+- **The triage pack's reputation line states the detection labels.** A
+  VirusTotal answer that carries `detections` (one result label per engine,
+  as VirusTotal's own MCP server answers) and no popular threat classification
+  used to render as `VirusTotal 52/75 malicious` and nothing else, although
+  the labels named a family eight times. The line now counts the labels
+  exactly as written and names up to twenty with how many engines gave each,
+  most first, with the number of distinct labels it left out. Nothing is
+  merged, normalised or read for a family.
+  **Upgrading:** the reputation line of a pack is longer (about 700 characters
+  for 50 labels) and counts against `reporting.upstream_findings_max_chars`
+  like every other line.
 ### Fixed
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was

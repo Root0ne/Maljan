@@ -174,6 +174,46 @@ class TestTheLines:
             "[ev_0001] reputation: VirusTotal 31/75 malicious, labels trojan.filisto/agent, Filisto"
         )
 
+    def test_the_detection_labels_the_answer_carries_are_stated_with_their_counts(
+        self,
+    ) -> None:
+        """The recorded answer of a scored run carries no popular classification.
+
+        It carries ``detections``, one result label per engine that detected
+        the file, and every model of that run read "52/75 malicious" and
+        nothing else although eight of the labels named the same family. The
+        line now states the labels with how many engines gave each, most first
+        and then in the order the answer lists them, bounded, and says how
+        many distinct labels it left out. It counts; it does not decide.
+        """
+        entry = _entry("get_file_report", seq=17, server="virustotal")
+
+        line = render_pack([entry], 0)
+
+        assert line.startswith(
+            "[ev_0017] reputation: VirusTotal 52/75 malicious, 52 detection labels, "
+            "47 distinct (engines per label, most first, 20 shown): "
+            "Gen:Variant.Ulise.482338 ×4, Trojan ( 005ef6721 ) ×2, Troj/Loader-CB ×2, "
+            "W32.Malware.D0BC8737 ×1, Trojan.Win32.Latrodectus.m!c ×1, "
+        )
+        assert line.endswith("(+27 more distinct labels)")
+        shown = line.split(": ", 2)[2].rsplit(" (+", 1)[0]
+        assert len(shown.split(" ×")) - 1 == 20
+
+    def test_every_label_is_shown_when_they_fit_the_bound(self) -> None:
+        answer = {
+            "data": {
+                "detections": ["Trojan.Example", "Trojan.Example", "Other.Label"],
+                "last_analysis_stats": {"malicious": 3, "undetected": 7},
+            }
+        }
+        entry = _entry("get_file_report", answer, server="virustotal")
+
+        assert render_pack([entry], 0) == (
+            "[ev_0001] reputation: VirusTotal 3/10 malicious, 3 detection labels, "
+            "2 distinct (engines per label, most first): Trojan.Example ×2, Other.Label ×1"
+        )
+
     def test_the_threat_intel_prose_is_read_for_its_count(self) -> None:
         entry = _entry(
             "check_hash",

@@ -298,6 +298,17 @@ agent was shown the pack, the pack's ids are citable by every agent:
 empty when a pack is present — only a run with nothing citable at all (the
 measurement baseline) is exempt.
 
+The reputation line states the labels the answer carries. VirusTotal's own
+MCP server answers with `detections`, one result label per engine that
+detected the file, and no popular threat classification; the line counts those
+labels exactly as written and names them with how many engines gave each,
+most first and then in the answer's order, at most twenty, with the number of
+distinct labels left out — `VirusTotal 52/75 malicious, 52 detection labels,
+47 distinct (engines per label, most first, 20 shown): Gen:Variant.… ×4, …
+(+27 more distinct labels)`. Nothing is merged or normalised and no family is
+read out of them; an answer that does carry a popular classification still has
+its suggested label and names listed as `labels …`.
+
 **The run-state block.** `pipeline/run_state.py` derives a dozen lines from the
 state — the sample, the identity, hashes, signature and reputation lines out
 of the pack, which stages ran or were skipped and why, how many ledger entries
