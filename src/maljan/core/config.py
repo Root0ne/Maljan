@@ -3081,6 +3081,13 @@ class TriageConfig(BaseModel):
     # its own, and nothing else in the pack did; a step that would start after
     # this many seconds is recorded as not run instead.
     budget_seconds: Annotated[int, Field(ge=1)] = 1200
+    # What running FLOSS beside capa must leave of the host's available memory
+    # (MiB). The pack runs the two together only when what is available, less
+    # capa's measured peak and FLOSS's own address-space bound, stays at or
+    # above this — and when the worker's own memory limit, where it has one,
+    # holds both. 10,240 is the machine rule this project runs its models
+    # under: ten gigabytes free before heavy work. 0 checks only that both fit.
+    memory_floor_mb: Annotated[int, Field(ge=0)] = 10240
 
 
 class EventsConfig(BaseModel):

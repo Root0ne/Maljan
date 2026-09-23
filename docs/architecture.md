@@ -306,13 +306,22 @@ are the ids they were before it existed. Without a build the entry says so,
 with the remedy, and is not a failure; a run stopped by its wall clock or its
 memory limit is a failed entry whose line says which. FLOSS reads the file and
 nothing the pack writes, so it starts as soon as the routed format says PE and
-runs beside the rest of the pack, capa included — when the host reports at
-least twice its 4 GiB address-space bound available (`MemAvailable`), because
-running beside capa adds its own memory to the pack's peak. Below that, as on a
-host with a local model loaded beside the worker, the two run in turn. Its
-entry is written last either way, with its own clock, and a run it began within
-the pack's budget is recorded whatever the clock says by then. Measured on
-PuTTY: 312 s in turn, 183 s beside capa; the pack's process tree peaked at
+runs beside the rest of the pack, capa included — when there is room for both.
+Running them together adds FLOSS to capa's peak, so what they need is capa's
+peak as this worker measured it (the capa child reports its own peak resident
+memory before its answer, and the largest one seen is kept) plus FLOSS's 4 GiB
+address-space bound. The host's `MemAvailable` less that must stay at or above
+`triage.memory_floor_mb` (10,240 MiB), and the worker's own cgroup limit, where
+it has one (`memory.max` less `memory.current`, or cgroup v1's
+`memory.limit_in_bytes` less `memory.usage_in_bytes`), must hold both: inside a
+container `MemAvailable` is the host's figure, and the container's limit is what
+an allocation meets first. Otherwise — the first capa run of a worker, which
+has nothing measured yet, a host with a local model loaded beside the worker, a
+container with its 8 GB limit — the two run in turn, and
+`run_summary.triage.floss` says which and why ("beside capa", or "in turn: …").
+Its entry is written last either way, with its own clock, and a run it began
+within the pack's budget is recorded whatever the clock says by then. Measured
+on PuTTY: 312 s in turn, 183 s beside capa; the pack's process tree peaked at
 1.6 GB and 2.3 GB resident.
 
 The pack states facts and draws no conclusion, and it never fails a job: a

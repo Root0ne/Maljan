@@ -1204,6 +1204,7 @@ def make_triage_node(
             sandbox_report=state.get("sandbox_report"),
             evidence_budget_bytes=int(getattr(cfg.reporting, "evidence_budget_bytes", 0) or 0),
             budget_s=float(cfg.triage.budget_seconds),
+            memory_floor_bytes=int(cfg.triage.memory_floor_mb) * 1024 * 1024,
             floss=FlossSettings(
                 environ=_analysis_server_environ(container), job_id=container.job_key()
             ),

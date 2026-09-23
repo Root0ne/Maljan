@@ -745,11 +745,13 @@ change landed on `main`.
 
 ### Changed
 
-- **FLOSS runs beside capa in the triage pack** when the host reports at least
-  twice FLOSS's 4 GiB address-space bound available; otherwise the two run in
-  turn as before. Its entry is still last, with its own clock. On PuTTY:
-  312 s → 183 s, peak resident memory of the pack's process tree 1.6 GB →
-  2.3 GB.
+- **FLOSS runs beside capa in the triage pack** when the host's available
+  memory, less capa's peak as this worker measured it and FLOSS's 4 GiB bound,
+  stays at or above the new `triage.memory_floor_mb` (10,240 MiB), and the
+  worker's cgroup limit, where it has one, holds both; otherwise the two run
+  in turn as before, and `run_summary.triage.floss` says which and why. Its
+  entry is still last, with its own clock. On PuTTY: 312 s → 183 s, peak
+  resident memory of the pack's process tree 1.6 GB → 2.3 GB.
 - **The prompt reading rate is measured** beside the generation rate, from
   Ollama's `prompt_eval_count`/`prompt_eval_duration` and llama.cpp's
   `timings.prompt_n`/`prompt_ms`, and recorded in `run_summary.generation`.
@@ -4202,7 +4204,8 @@ Operators see these changes in a run's record, and nothing needs migrating:
 `run_summary.budget.<agent>.salvages` lists each salvage (what it sent, what it
 was sized by, how it ended); `run_summary.generation.models.<model>` gains
 `prompt_tokens_per_second`, `prompt_tokens`, `prompt_seconds` and
-`prompt_sources`; `validation.by_code` can carry `isr.unparsed_answer`,
+`prompt_sources`; `run_summary.triage` gains `floss`; a new setting,
+`triage.memory_floor_mb` (10,240), needs no action; `validation.by_code` can carry `isr.unparsed_answer`,
 `isr.claim_without_confidence`, `verdict.cut_at_output_cap` and
 `tool.argument_names_its_parameter`; the degradation reasons can name
 "analyst answers kept as prose"; a stage's `agent_reasons` says when an

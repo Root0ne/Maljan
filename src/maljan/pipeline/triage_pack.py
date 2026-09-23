@@ -117,20 +117,86 @@ def available_memory_bytes() -> int | None:
     return None
 
 
-def floss_fits_beside_capa(available: int | None) -> bool:
-    """Whether FLOSS may run while capa does, for what the host has available now.
+def _read_int(path: Path) -> int | None:
+    try:
+        text = path.read_text(encoding="ascii").strip()
+    except OSError:
+        return None
+    if not text or text == "max":
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
 
-    FLOSS runs under an address-space bound of its own
-    (``emulated_strings.FLOSS_ADDRESS_SPACE_BYTES``, 4 GiB; about 1.6 GB
-    resident measured on PuTTY), so running it beside capa adds at most that
-    much to the pack's peak. It does so only while the host has that bound
-    twice over available: FLOSS's worst case, and the same again left for capa
-    and everything else. Below that — a local model loaded beside the worker,
-    as on the benchmark host — the two run one after the other, which is the
-    peak the pack always had. A host that does not say is treated as one
-    without the room.
+
+# A cgroup v1 limit this large is the kernel's way of writing "none".
+_V1_NO_LIMIT = 1 << 60
+
+
+def cgroup_headroom_bytes(root: Path = Path("/sys/fs/cgroup")) -> int | None:
+    """What this process's memory cgroup has left under its limit, or ``None`` without one.
+
+    Inside a container ``MemAvailable`` is the host's figure, and the worker's
+    own limit (``mem_limit`` in the compose file) is what an allocation meets
+    first. cgroup v2: ``memory.max`` less ``memory.current`` of the cgroup
+    ``/proc/self/cgroup`` names; v1: ``memory.limit_in_bytes`` less
+    ``memory.usage_in_bytes``.
     """
-    return available is not None and available >= 2 * emulated_strings.FLOSS_ADDRESS_SPACE_BYTES
+    group = ""
+    try:
+        for line in Path("/proc/self/cgroup").read_text(encoding="ascii").splitlines():
+            if line.startswith("0::"):
+                group = line[3:].strip().lstrip("/")
+                break
+    except OSError:
+        group = ""
+    for directory in (root / group, root) if group else (root,):
+        limit = _read_int(directory / "memory.max")
+        used = _read_int(directory / "memory.current")
+        if limit is not None and used is not None:
+            return max(0, limit - used)
+    limit = _read_int(root / "memory" / "memory.limit_in_bytes")
+    used = _read_int(root / "memory" / "memory.usage_in_bytes")
+    if limit is not None and used is not None and limit < _V1_NO_LIMIT:
+        return max(0, limit - used)
+    return None
+
+
+def floss_beside_capa(
+    *,
+    host_available: int | None,
+    cgroup_left: int | None,
+    capa_peak: int | None,
+    floor: int,
+) -> str:
+    """``""`` when FLOSS may run while capa does, else why the two run in turn.
+
+    Running them together adds FLOSS to capa's peak, so what is needed is
+    capa's peak as this worker measured it and FLOSS's own address-space bound
+    (``emulated_strings.FLOSS_ADDRESS_SPACE_BYTES``). The host must still have
+    ``floor`` available after both, and the worker's cgroup, where it has a
+    limit, must hold both. A worker that has not run capa yet has nothing to
+    size from and runs them in turn, measuring capa as it does.
+    """
+    mib = 1024 * 1024
+    if capa_peak is None:
+        return "capa's memory has not been measured in this worker yet"
+    need = capa_peak + emulated_strings.FLOSS_ADDRESS_SPACE_BYTES
+    if host_available is None:
+        return "the host does not report its available memory"
+    if host_available - need < floor:
+        return (
+            f"{host_available // mib} MiB available, less capa's measured {capa_peak // mib} MiB "
+            f"and FLOSS's {emulated_strings.FLOSS_ADDRESS_SPACE_BYTES // mib} MiB bound, "
+            f"is under the {floor // mib} MiB floor"
+        )
+    if cgroup_left is not None and cgroup_left < need:
+        return (
+            f"the worker's memory limit leaves {cgroup_left // mib} MiB, under the "
+            f"{need // mib} MiB capa and FLOSS need together"
+        )
+    return ""
 
 
 # The format tool for each routed file type. A type this table does not name
@@ -320,6 +386,8 @@ class PackInputs:
     evidence_budget_bytes: int = 0
     budget_s: float = 0.0
     floss: FlossSettings = field(default_factory=FlossSettings)
+    # What running FLOSS beside capa must leave of the host's memory.
+    memory_floor_bytes: int = 10240 * 1024 * 1024
 
 
 # The one reputation call, made by the node through the tool server. It takes
@@ -346,6 +414,9 @@ class PackResult:
     stopped_by_budget: list[str] = field(default_factory=list)
     # The reasons of tools that answered a smaller set than they wanted to.
     degraded: list[str] = field(default_factory=list)
+    # How FLOSS was run: "beside capa", or "in turn: <why>". Empty when it did
+    # not run at all.
+    floss_schedule: str = ""
 
     @property
     def degradation_reasons(self) -> list[str]:
@@ -359,6 +430,7 @@ class PackResult:
             "failed": len(self.failed),
             "duration_ms": self.duration_ms,
             "degradation_reasons": self.degradation_reasons,
+            **({"floss": self.floss_schedule} if self.floss_schedule else {}),
         }
 
 
@@ -802,14 +874,17 @@ class _Pack:
             return
         if emulated_strings.floss_unavailable(self.inputs.floss.environ):
             return
-        available = available_memory_bytes()
-        if not floss_fits_beside_capa(available):
-            logger.info(
-                "triage pack: FLOSS runs after capa; %s available, and running beside it "
-                "needs twice its %d MiB bound.",
-                "no figure" if available is None else f"{available // (1024 * 1024)} MiB",
-                emulated_strings.FLOSS_ADDRESS_SPACE_BYTES // (1024 * 1024),
-            )
+        from maljan.providers.static.capa_yara import measured_capa_peak_bytes
+
+        why = floss_beside_capa(
+            host_available=available_memory_bytes(),
+            cgroup_left=cgroup_headroom_bytes(),
+            capa_peak=measured_capa_peak_bytes(),
+            floor=int(self.inputs.memory_floor_bytes),
+        )
+        if why:
+            self.result.floss_schedule = f"in turn: {why}"
+            logger.info("triage pack: FLOSS runs after capa; %s.", why)
             return
         self._floss_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="triage-floss")
         call = self._floss_call()
@@ -822,11 +897,8 @@ class _Pack:
                 return None, exc, time.monotonic() - began
 
         self._floss = (self._floss_pool.submit(timed), time.monotonic())
-        logger.info(
-            "triage pack: FLOSS started beside capa (%d MiB available, its bound %d MiB).",
-            (available or 0) // (1024 * 1024),
-            emulated_strings.FLOSS_ADDRESS_SPACE_BYTES // (1024 * 1024),
-        )
+        self.result.floss_schedule = "beside capa"
+        logger.info("triage pack: FLOSS started beside capa.")
 
     def _decoded_strings(self, routed: str) -> None:
         """FLOSS over a PE, or the entry that says why it did not run.
@@ -875,6 +947,8 @@ class _Pack:
             logger.info("triage pack: %s", message)
             return
 
+        if not self.result.floss_schedule:
+            self.result.floss_schedule = "in turn"
         self.record("floss", args, self._floss_call())
 
 

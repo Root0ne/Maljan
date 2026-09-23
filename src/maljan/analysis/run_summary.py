@@ -1260,6 +1260,8 @@ class RunSummaryBuilder:
                 "entries": int(facts.get("entries") or 0),
                 "failed": int(facts.get("failed") or 0),
                 "duration_ms": int(facts.get("duration_ms") or 0),
+                # How FLOSS ran: beside capa, or in turn and why.
+                **({"floss": str(facts["floss"])} if facts.get("floss") else {}),
             }
         return self
 

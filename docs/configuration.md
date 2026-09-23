@@ -1068,14 +1068,17 @@ deterministic tools over the sample and writing each result to the evidence
 ledger before any analyst starts (see *The triage pack* in
 [architecture.md](architecture.md)). Every team but `measurement` ships with
 it first, a team written by hand may leave it out, and a stored team gains it
-on upgrade (`make migrate`). Its three settings sit in the Analysis layers
+on upgrade (`make migrate`). Its five settings sit in the Analysis layers
 group: `triage.enabled` (off leaves the stage in place and makes it decline
 with that reason), `triage.strings_head` (how many printable runs the strings
 entry keeps; 300), `triage.reputation` (`auto` asks the enabled reputation
 server once for the sample hash — VirusTotal's own server when enabled, else
 the threat-intel sidecar, never one the team lists in `exclude_servers` — and
-`off` records a skipped entry instead) and `triage.budget_seconds` (1200; a
-step that would start after the budget is spent is recorded as not run). The
+`off` records a skipped entry instead), `triage.budget_seconds` (1200; a
+step that would start after the budget is spent is recorded as not run) and
+`triage.memory_floor_mb` (10,240: what the host must still have available
+after capa's measured peak and FLOSS's 4 GiB bound for the two to run together;
+0 checks only that both fit, and the worker's cgroup limit is always checked). The
 pack runs the real tools in mock mode too, so a local observation run with a
 reputation server enabled makes that one outbound call; a team that withholds
 the server, or `triage.reputation = off`, keeps such a run offline.
