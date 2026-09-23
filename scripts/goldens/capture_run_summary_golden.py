@@ -111,6 +111,8 @@ def default_profile_summary() -> dict[str, Any]:
         ]
     )
     builder.set_triage({"entries": 11, "failed": 1, "duration_ms": 900, "yara_hits": 2})
+    # The mock sandbox's stand-in, so the key is pinned with its shape.
+    builder.set_sandbox({"synthetic": True})
     builder.set_nudge({"static": "invalid_tool_calls_dropped"})
     builder.set_budget(
         {

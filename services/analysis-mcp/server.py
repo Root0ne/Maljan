@@ -32,12 +32,13 @@ from mcp.server.fastmcp import FastMCP
 
 from maljan.core.paths import resolve_data
 from maljan.tools import binary as binary_tools
+from maljan.tools import emulated_strings, staging
 from maljan.tools import identify as identify_tools
 from maljan.tools import rules as rule_tools
-from maljan.tools import staging
 from maljan.tools import strings as string_tools
+from maljan.tools.arguments import SURROUNDING_QUOTES, read_unquoted, says_unquoted, with_read_as
 from maljan.tools.binary import carved_name_prefix
-from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest, module
+from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, binary, manifest, module
 from maljan.tools.errors import (
     BAD_ARGUMENT,
     NO_SUCH_FILE,
@@ -59,6 +60,7 @@ mcp = FastMCP("AnalysisMCP")
 # something untrue by the structure whose premise is that it was computed.
 YARA_TIMEOUT_S = 60
 CAPA_TIMEOUT_S = 300
+FLOSS_TIMEOUT_S = emulated_strings.FLOSS_TIMEOUT_S
 
 TOOL_NEEDS: list[ToolNeeds] = [
     ToolNeeds("identify_file"),
@@ -83,6 +85,12 @@ TOOL_NEEDS: list[ToolNeeds] = [
     ToolNeeds("sigma_match", (module("sigma"),)),
     ToolNeeds("sigma_match_sandbox", (module("sigma"),)),
     ToolNeeds("capa", (module("capa"),), timeout_s=CAPA_TIMEOUT_S),
+    ToolNeeds(
+        "floss",
+        (binary("floss", emulated_strings.floss_unavailable),),
+        timeout_s=FLOSS_TIMEOUT_S,
+        remediation=emulated_strings.FLOSS_REMEDIATION,
+    ),
     ToolNeeds("put_sample"),
     ToolNeeds("put_sample_begin"),
     ToolNeeds("put_sample_chunk"),
@@ -257,7 +265,12 @@ _ECHOED_VALUE_CHARS = 80
 # JSON it read. One matching pair is removed and nothing else is: no
 # unescaping, no globbing, no case folding, because anything more would be
 # guessing at what was meant rather than reading what was written.
-_SURROUNDING_QUOTES = ('"', "'", "`")
+_SURROUNDING_QUOTES = SURROUNDING_QUOTES
+
+# The arguments a tool here searches by. Each is read in ``_guard`` without
+# the pair of quotes that encloses it, the way ``carved_path`` is, so a quoted
+# ``CreateMutex`` finds ``CreateMutexW``; the answer says what each was read as.
+SEARCH_ARGUMENTS = ("pattern",)
 
 # How many sample digests are remembered at once. One per sample a long-lived
 # server sees, and a digest is sixty-four characters: the bound is against a
@@ -397,7 +410,7 @@ def _carved_tree(digest: str) -> Path:
     return _staging_root() / CARVED_DIRECTORY / digest
 
 
-# What every tool that takes it says about it, appended once so the fourteen
+# What every tool that takes it says about it, appended once so the fifteen
 # descriptions cannot come to disagree.
 CARVED_NOTE = (
     "Give ``carved_path`` to read a file an earlier call in this run wrote instead of the "
@@ -419,7 +432,7 @@ def reads_a_carved_file(fn: Any) -> Any:
 
     Applied under ``@mcp.tool()`` so the decorator that publishes the
     description reads the amended one. The sentence is written in a single
-    place because fourteen copies of it would drift.
+    place because fifteen copies of it would drift.
     """
     fn.__doc__ = f"{(fn.__doc__ or '').rstrip()}\n\n{CARVED_NOTE}"
     return fn
@@ -547,7 +560,10 @@ def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
     may have been written by the sample's author.
     """
     try:
-        asked = _confined(_read_absent_words(call, kwargs))
+        # The quotes come off before the absence words are read, as they do for
+        # ``carved_path``: "null" between quotes is still no filter.
+        searched = read_unquoted(kwargs, SEARCH_ARGUMENTS)
+        asked = _confined(_read_absent_words(call, searched.values))
         answer = dict(normalise_error(dict(call(**asked))))
         # Which file was read, when it was not the sample. The ledger stores
         # the answer, so a run that analysed a carved payload says which one
@@ -562,7 +578,11 @@ def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
         # part of the answer every reader keeps.
         if _asked_for_a_carved_file(kwargs):
             answer = {"read_path": answer.get("read_path") or asked.get("path", ""), **answer}
-        return answer
+        # What a quoted search argument was read as, first for the same reason.
+        # A value the absence words then turned into no filter is recorded as
+        # what it became.
+        read_as = {name: asked.get(name) for name in searched.read_as}
+        return dict(with_read_as(answer, read_as))
     except PathOutsideRoots as refusal:
         # A ``carved_path`` refusal is answered in that argument's own words:
         # the general remediation names the sample path, which is a parameter
@@ -645,6 +665,7 @@ def signing_info(path: str, file_type: str = "", carved_path: str = "") -> dict[
 
 
 @mcp.tool()
+@says_unquoted("pattern")
 @reads_a_carved_file
 def strings(
     path: str,
@@ -907,6 +928,49 @@ def capa(
         carved_path=carved_path,
         timeout_s=_within(timeout_s, CAPA_TIMEOUT_S),
         backend=backend,
+    )
+
+
+@mcp.tool()
+@says_unquoted("pattern")
+@reads_a_carved_file
+def floss(
+    path: str,
+    carved_path: str = "",
+    min_len: int = emulated_strings.DEFAULT_MIN_LENGTH,
+    kinds: list[str] | None = None,
+    limit: int = DEFAULT_STRINGS_LIMIT,
+    offset: int = 0,
+    pattern: str | None = None,
+    timeout_s: int = FLOSS_TIMEOUT_S,
+) -> dict[str, Any]:
+    """Recover the strings a PE only builds at run time: decoded, stack and tight strings.
+
+    FLOSS emulates the sample's own decoding routines and string-building
+    functions under vivisect; the sample is never executed. Use it when
+    ``strings`` shows little but noise — encrypted strings (mutex names, file
+    paths, URLs, User-Agents, commands) only appear here. Each row carries the
+    ``kind``, the ``string``, the ``function`` that decoded or built it (a
+    virtual address, and ``function_rva`` relative to the image base, which is
+    the address to look at in a disassembler) and, for a decoded string, the
+    ``called_at`` call site. The first call emulates and takes up to a few
+    minutes; later pages of the same answer are immediate.
+
+    Paged like ``strings``: read ``next_offset`` and pass it as ``offset``.
+    ``kinds`` keeps some of "decoded", "stack", "tight"; ``pattern`` keeps the
+    rows containing a marker (case-insensitive substring, or ``re:<expression>``).
+    """
+    return _guard(
+        "floss",
+        emulated_strings.floss,
+        path=path,
+        carved_path=carved_path,
+        min_len=min_len,
+        kinds=kinds,
+        limit=limit,
+        offset=offset,
+        pattern=pattern,
+        timeout_s=_within(timeout_s, FLOSS_TIMEOUT_S),
     )
 
 

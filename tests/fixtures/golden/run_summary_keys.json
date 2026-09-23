@@ -75,6 +75,10 @@
     "custom": [],
     "name": null
   },
+  "sandbox": {
+    "statement": null,
+    "status": null
+  },
   "sections_without_evidence": null,
   "server_rests": [
     {
