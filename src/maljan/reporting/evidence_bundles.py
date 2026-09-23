@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Any
 
 from maljan.reporting.models import MalwareReport
+from maljan.utils.marked_cut import marked_cut
 
 # Section keys the Composer authors. Kept as plain strings (not an enum) so the
 # Composer can iterate a config-driven subset per malware type.
@@ -206,7 +207,7 @@ def _filter_tool_outputs(
                     {
                         "tool": name,
                         "symbol": str(o.get("symbol") or ""),
-                        "output": str(o.get("output") or "")[:2500],
+                        "output": marked_cut(str(o.get("output") or ""), 2500),
                     }
                 )
     return picked

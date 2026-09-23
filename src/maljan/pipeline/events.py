@@ -30,6 +30,7 @@ from collections.abc import Callable
 from typing import Any
 
 from maljan.core.logger import logger
+from maljan.utils.marked_cut import marked_cut
 
 # (event_type, payload) -> None. Must be safe to call from any thread.
 EventSink = Callable[[str, dict[str, Any]], None]
@@ -349,8 +350,8 @@ def claims_to_payload(claims: Any, limit: int = 12) -> list[dict[str, Any]]:
         try:
             out.append(
                 {
-                    "claim": str(getattr(claim, "claim", "") or "")[:400],
-                    "evidence_ref": str(getattr(claim, "evidence_ref", "") or "")[:300],
+                    "claim": marked_cut(str(getattr(claim, "claim", "") or ""), 400),
+                    "evidence_ref": marked_cut(str(getattr(claim, "evidence_ref", "") or ""), 300),
                     "confidence": round(float(getattr(claim, "confidence", 0.0) or 0.0), 4),
                     "technique_id": getattr(claim, "technique_id", None),
                 }

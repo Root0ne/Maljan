@@ -66,6 +66,7 @@ from maljan.reporting.models import (
     TechnicalSubsection,
 )
 from maljan.utils.json_cleaner import safe_parse_json
+from maljan.utils.marked_cut import marked_cut
 
 # ---------------------------------------------------------------------------
 # Per-section output schemas
@@ -412,7 +413,7 @@ def _bundle_text(section: str, bundle: dict[str, Any], entries: EntryTexts | Non
         lines.append("CAPTURED TOOL OUTPUT:")
         for t in tools[:6]:
             sym = f" [{t.get('symbol')}]" if t.get("symbol") else ""
-            lines.append(f"- {t.get('tool', '')}{sym}: {t.get('output', '')[:1200]}")
+            lines.append(f"- {t.get('tool', '')}{sym}: {marked_cut(t.get('output', ''), 1200)}")
         lines.append("")
     return "\n".join(lines)
 

@@ -243,7 +243,8 @@ class TestTheEvidenceLineKeepsItsId:
         for pad in range(188, 201):
             stored = evidence_ref_text("y" * pad + "[ev_0007] [ev_0008] [ev_0009] [ev_0010]")
 
-            assert re.fullmatch(r"y+ ?\[ev_\d{4}\]( \[ev_\d{4}\])*", stored), (pad, stored)
+            # The cut is marked where the kept text ends, before the ids written back.
+            assert re.fullmatch(r"y+(\[ev_\d{4}\])?…( \[ev_\d{4}\])*", stored), (pad, stored)
             assert stored.count("ev_0007") == 1, (pad, stored)
 
     def test_the_ids_written_back_are_bounded(self) -> None:
