@@ -274,3 +274,116 @@ class TestWhatTheStandardRequiresIsNeverPublishedAbsent:
         assert [o for o in bundle.objects if o.type == "file"] == []
         assert [code for code, _why in declined] == [UNPUBLISHABLE_OBJECT_CODE]
         assert _errors(bundle) == []
+
+
+def _declined_malware_with_edges() -> tuple[Bundle, MalwareReport]:
+    """The judge's malware kept without is_family, with a numbered technique and an indicator."""
+    judge = _judge(
+        {
+            "type": "bundle",
+            "objects": [
+                {"type": "malware", "id": "malware--1", "name": "loader"},
+                {
+                    "type": "attack-pattern",
+                    "id": "attack-pattern--1",
+                    "name": "Inhibit System Recovery",
+                    "external_references": [
+                        {"source_name": "mitre-attack", "external_id": "T1490"}
+                    ],
+                },
+                {
+                    "type": "indicator",
+                    "id": "indicator--1",
+                    "name": "C2 address",
+                    "pattern": f"[ipv4-addr:value = '{C2}']",
+                    "pattern_type": "stix",
+                    "indicator_types": ["malicious-activity"],
+                },
+                {
+                    "type": "relationship",
+                    "id": "relationship--1",
+                    "relationship_type": "uses",
+                    "source_ref": "malware--1",
+                    "target_ref": "attack-pattern--1",
+                    "x_maljan_confidence": 0.95,
+                    "x_maljan_evidence_basis": "static",
+                    "x_maljan_contributing_agents": ["static"],
+                },
+                {
+                    "type": "relationship",
+                    "id": "relationship--2",
+                    "relationship_type": "indicates",
+                    "source_ref": "indicator--1",
+                    "target_ref": "malware--1",
+                },
+            ],
+        }
+    )
+    report = _report("Malware", judge)
+    return ExtendedSTIXRenderer().render(report, judge), report
+
+
+def _malware_exports() -> list[tuple[str, Bundle]]:
+    return [
+        ("rich", _rich()),
+        ("sandbox", _sandbox()),
+        ("judge observables", _judge_observables()),
+        ("declined malware", _declined_malware_with_edges()[0]),
+        ("platform only", ExtendedSTIXRenderer().render(_report("Malware"), None)),
+    ]
+
+
+class TestEveryMalwareExportHangsTogether:
+    """In a Malware export every technique is used by a malware object and every
+    indicator indicates one, and the export publishes the techniques the report
+    does. A declined judge malware object used to leave its technique unrelated
+    and its indicator indicating nothing, while the report still published the
+    technique at the judge's number."""
+
+    def test_every_attack_pattern_is_used_by_a_malware_object(self) -> None:
+        for name, bundle in _malware_exports():
+            by_id = {o.id: o for o in bundle.objects}
+            used = {
+                o.target_ref
+                for o in bundle.objects
+                if o.type == "relationship"
+                and o.relationship_type == "uses"
+                and getattr(by_id.get(o.source_ref), "type", "") == "malware"
+            }
+            patterns = {o.id for o in bundle.objects if o.type == "attack-pattern"}
+            assert patterns <= used, name
+
+    def test_every_indicator_indicates_a_malware_object(self) -> None:
+        for name, bundle in _malware_exports():
+            by_id = {o.id: o for o in bundle.objects}
+            indicating = {
+                o.source_ref
+                for o in bundle.objects
+                if o.type == "relationship"
+                and o.relationship_type == "indicates"
+                and getattr(by_id.get(o.target_ref), "type", "") == "malware"
+            }
+            indicators = {o.id for o in bundle.objects if o.type == "indicator"}
+            assert indicators <= indicating, name
+
+    def test_the_export_and_the_report_publish_the_same_techniques_with_the_same_numbers(
+        self,
+    ) -> None:
+        bundle, report = _declined_malware_with_edges()
+        by_id = {o.id: o for o in bundle.objects}
+        exported: dict[str, object] = {}
+        for o in bundle.objects:
+            if o.type == "relationship" and o.relationship_type == "uses":
+                target = by_id[o.target_ref]
+                tid = target.external_references[0]["external_id"]
+                exported[tid] = getattr(o, "x_maljan_confidence", None)
+
+        assert exported == {m.technique_id: m.confidence for m in report.ttp_mappings}
+        assert exported == {"T1490": 0.95}
+
+    def test_the_moved_edges_keep_the_judges_annotation(self) -> None:
+        bundle, _report_ = _declined_malware_with_edges()
+
+        (uses,) = [o for o in bundle.objects if getattr(o, "relationship_type", "") == "uses"]
+        assert uses.x_maljan_evidence_basis == "static"
+        assert uses.x_maljan_contributing_agents == ["static"]

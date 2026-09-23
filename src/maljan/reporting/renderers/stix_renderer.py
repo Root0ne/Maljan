@@ -413,7 +413,8 @@ def _missing_what_the_standard_requires(obj: Any) -> str:
             f"the malware object {label!r} is not in the exported bundle: it does not say "
             "is_family, which STIX requires, and the judge kept it absent when asked. The "
             "export stands the platform's own sample object in for it, and the judge's "
-            "relationships from it go with it. It is unchanged in the judge's own bundle."
+            "relationships that named it move onto that object unchanged. It is unchanged "
+            "in the judge's own bundle."
         )
     if kind == "file" and not getattr(obj, "hashes", None) and not getattr(obj, "name", None):
         return (
@@ -422,6 +423,23 @@ def _missing_what_the_standard_requires(obj: Any) -> str:
             "judge's own bundle."
         )
     return ""
+
+
+def _names_any(obj: Any, ids: set[str]) -> bool:
+    """Whether a relationship names one of ``ids`` at either end."""
+    if not ids or getattr(obj, "type", "") != "relationship":
+        return False
+    return str(getattr(obj, "source_ref", "")) in ids or str(getattr(obj, "target_ref", "")) in ids
+
+
+def _onto(edge: Any, stood_in: set[str], stand_in: str) -> Any:
+    """A copy of a judge relationship naming the stand-in where it named a declined object."""
+    update = {
+        key: stand_in
+        for key in ("source_ref", "target_ref")
+        if str(getattr(edge, key, "")) in stood_in
+    }
+    return edge.model_copy(update=update)
 
 
 def replaced_producer_sentence(obj: Any, named: str) -> str:
@@ -682,6 +700,21 @@ class ExtendedSTIXRenderer:
         # report's own linter said so.
         linked: set[str] = set()
         carried: list[Indicator] = []
+        # The judge's malware objects the export declines for a property the
+        # standard requires, and the judge's relationships that name them. The
+        # platform's own sample object stands in for such an object, and the
+        # relationships move onto it unchanged — confidence, basis and credits
+        # as the judge wrote them — so the export's malware object uses what the
+        # judge said the sample uses and the judge's number is published.
+        stood_in: set[str] = set()
+        awaiting_stand_in: list[Any] = []
+        if base_bundle is not None and not benign:
+            stood_in = {
+                str(obj.id)
+                for obj in base_bundle.objects
+                if getattr(obj, "type", "") == "malware"
+                and _missing_what_the_standard_requires(obj)
+            }
         if base_bundle is not None:
             self._normalize_judge_timestamps(base_bundle.objects)
             remap = _technique_remap(report, base_bundle)
@@ -725,6 +758,12 @@ class ExtendedSTIXRenderer:
                 moved, technique = _relinked(obj, remap)
                 if technique:
                     linked.add(technique)
+                if _names_any(moved, stood_in):
+                    # The judge's edge from a malware object the export
+                    # declined: it moves to the platform's stand-in, unchanged,
+                    # once that object exists (below).
+                    awaiting_stand_in.append(moved)
+                    continue
                 if isinstance(moved, Indicator):
                     declined = _judge_indicator_problem(moved)
                     if declined:
@@ -762,6 +801,8 @@ class ExtendedSTIXRenderer:
             )
             objects.append(malware_obj)
             malware_id = malware_obj.id
+        if malware_id is not None:
+            objects.extend(_onto(edge, stood_in, malware_id) for edge in awaiting_stand_in)
 
         # 3.5) One attack-pattern per published technique, with a stable id and
         #      an ATT&CK reference, related to the malware object. The judge's
@@ -923,6 +964,31 @@ class ExtendedSTIXRenderer:
         #      observes, and the order says which is which.
         for carried_indicator in carried:
             _queue(carried_indicator, _indicator_band(carried_indicator.pattern), "judge")
+
+        # 6.9) Every indicator this Malware export carries indicates its
+        #      malware object. The judge's own ``indicates`` edges are carried
+        #      as written; an indicator with none — the network and string rows
+        #      this renderer mints, a judge indicator the judge related to
+        #      nothing — is given a plain one, because the run concluded the
+        #      sample is malware and every indicator published beside that
+        #      verdict is evidence of it. An indicator published under any other
+        #      verdict indicates nothing: there is no malware object to point at.
+        if malware_id is not None and str(getattr(report, "verdict", "")) == "Malware":
+            indicating = {
+                str(getattr(obj, "source_ref", ""))
+                for obj in objects
+                if getattr(obj, "type", "") == "relationship"
+                and getattr(obj, "relationship_type", "") == "indicates"
+            }
+            for obj in list(objects):
+                if getattr(obj, "type", "") == "indicator" and obj.id not in indicating:
+                    objects.append(
+                        Relationship(
+                            relationship_type="indicates",
+                            source_ref=obj.id,
+                            target_ref=malware_id,
+                        )
+                    )
 
         # 7) ObservedData for the process tree roots.
         #    The processes and their images are objects of the bundle, named by
