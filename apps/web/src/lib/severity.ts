@@ -49,6 +49,12 @@ export function sortBySeverity<T>(items: readonly T[], severityOf: (item: T) => 
   return [...items].sort((a, b) => bySeverityDesc(severityOf(a), severityOf(b)));
 }
 
+/** One dot per rung from Informational up (1 to 5); none for a word that is
+ *  not a rung, which has no place on the ladder to draw. */
+export function ladderDots(label: string | null | undefined): number {
+  return severityRung(label) === null ? 0 : severityRank(label) + 1;
+}
+
 /** Whether `label` sits at or above `floor` on the ladder. A word that is not
  *  a rung is at or above nothing. */
 export function atLeast(label: string | null | undefined, floor: SeverityRating): boolean {
@@ -109,13 +115,18 @@ export function severityWord(label: string | null | undefined): string {
 /**
  * How a sandbox signature's numeric severity is coloured.
  *
- * The number is the sandbox's own and is printed as it is; this only picks
- * the colour it is drawn in, from the same ladder, with the thresholds the
- * DYNAMIC tab has always used: 7 and above as Critical, 4 and above as High,
- * anything lower as Informational.
+ * The scale is CAPEv2's (inherited from Cuckoo): a signature declares a
+ * severity from 1, the least, to 3, the most. The fixtures in the tree hold
+ * only 1, 2 and 3, and so did all but two of the stored reports on the dev
+ * database. So 1 is drawn as Low, 2 as Medium and 3 as High. A number above 3
+ * is off that scale: it keeps the scale's top colour rather than being
+ * promoted to Critical, which no sandbox signature claims. Zero or less says
+ * nothing and is drawn as Informational. The number itself is printed as the
+ * sandbox gave it; this only picks its colour.
  */
 export function scoreTone(score: number): SeverityTone {
-  if (score >= 7) return TONES.Critical;
-  if (score >= 4) return TONES.High;
+  if (score >= 3) return TONES.High;
+  if (score >= 2) return TONES.Medium;
+  if (score >= 1) return TONES.Low;
   return TONES.Informational;
 }

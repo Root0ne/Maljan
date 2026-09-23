@@ -14,6 +14,7 @@
  */
 
 import type { AgentFinding } from "@/types";
+import { sortBySeverity } from "@/lib/severity";
 
 /** One claim of a deterministic layer, in the shape the parsers read. */
 export interface ClaimRecord {
@@ -21,6 +22,8 @@ export interface ClaimRecord {
   confidence: number;
   evidence_ref: string;
   technique_id: string;
+  /** The rule author's `level` when the claim object carries one as a field. */
+  level?: string;
 }
 
 export interface YaraMatch {
@@ -37,7 +40,13 @@ export interface SigmaMatch {
   source: string;
   evidence: string;
   confidence: number;
-  severity: "critical" | "high" | "medium" | "low";
+  /**
+   * The rule author's own `level`, lower-cased as the rule states it, or null
+   * when the stored row does not record one — every run recorded before the
+   * layer carried it. The confidence is the rule's maturity status turned into
+   * a number, not a severity, and nothing here derives one from it.
+   */
+  level: string | null;
 }
 
 /** What the layers are recorded under. */
@@ -65,6 +74,7 @@ export function findingsByName(
       confidence: Number(c.confidence ?? 0),
       evidence_ref: String(c.evidence_ref ?? ""),
       technique_id: String(c.technique_id ?? ""),
+      ...(typeof c.level === "string" && c.level.trim() ? { level: c.level } : {}),
     }));
 }
 
@@ -76,10 +86,11 @@ export function findingsByName(
  *    evasion (rule: sandbox_evasion, 1 pattern(s) found)"
  *
  *   "Sigma rule detection: Suspicious DNS Z Flag Bit Set (technique
- *    T1095, source=generic)"
+ *    T1095, source=generic, level=high)"
  *
  * The shape is stable enough to extract rule_name + pattern_count /
- * source via regex without a schema change.
+ * source via regex without a schema change. `level=` is the rule author's
+ * level and is absent from every claim stored before the layer wrote it.
  */
 export function parseYara(c: ClaimRecord): YaraMatch {
   const ruleMatch = /rule:\s*([^,)\s]+)/i.exec(c.claim);
@@ -94,27 +105,38 @@ export function parseYara(c: ClaimRecord): YaraMatch {
 }
 
 export function parseSigma(c: ClaimRecord): SigmaMatch {
-  const nameMatch = /Sigma rule detection:\s*(.+?)\s*\(technique\s+([^,)]+)(?:,\s*source=([^)]+))?\)/i.exec(
-    c.claim,
-  );
+  const nameMatch =
+    /Sigma rule detection:\s*(.+?)\s*\(technique\s+([^,)]+)(?:,\s*source=([^,)]+))?(?:,\s*level=([^,)]+))?\)/i.exec(
+      c.claim,
+    );
   const ruleName = nameMatch?.[1] ?? c.claim;
   const technique = nameMatch?.[2] ?? c.technique_id ?? "";
   const source = nameMatch?.[3] ?? "";
-  // The deterministic Sigma layer doesn't surface a severity per match,
-  // so derive a rough one from confidence. >=0.9 critical, >=0.7 high,
-  // >=0.5 medium, else low. Real Sigma severity would live in claim
-  // payload once the layer plumbs it through.
-  const conf = c.confidence ?? 0;
-  const severity: SigmaMatch["severity"] =
-    conf >= 0.9 ? "critical" : conf >= 0.7 ? "high" : conf >= 0.5 ? "medium" : "low";
+  // The level the layer wrote into the claim, or a field of the claim object;
+  // a row recorded before the layer carried it has neither.
+  const level = (c.level ?? nameMatch?.[4] ?? "").trim().toLowerCase();
   return {
     rule_name: ruleName.trim(),
     technique_id: technique.trim(),
     source: source.trim(),
     evidence: c.evidence_ref || "",
-    confidence: conf,
-    severity,
+    confidence: c.confidence ?? 0,
+    level: level || null,
   };
+}
+
+/**
+ * The Sigma rows in the order DETECTION draws them.
+ *
+ * Rows whose rule level was recorded come first, highest rung of the ladder
+ * first; rows on one rung keep the order the layer recorded them in. A row
+ * with no recorded level takes no part in that sort — it has no place on the
+ * ladder to be sorted by — and follows in its recorded order.
+ */
+export function orderByLevel(rows: readonly SigmaMatch[]): SigmaMatch[] {
+  const recorded = rows.filter((row) => row.level !== null);
+  const unrecorded = rows.filter((row) => row.level === null);
+  return [...sortBySeverity(recorded, (row) => row.level ?? ""), ...unrecorded];
 }
 
 export interface RuleMatches {

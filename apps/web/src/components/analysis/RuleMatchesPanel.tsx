@@ -3,8 +3,11 @@
 import { useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { useReport } from "@/app/(app)/analysis/[id]/layout";
-import { SEVERITY_LADDER, severityRank, severityTone, severityWord, sortBySeverity } from "@/lib/severity";
-import { ruleMatches } from "./ruleMatches";
+import { SEVERITY_LADDER, ladderDots, severityRung, severityTone, severityWord } from "@/lib/severity";
+import { orderByLevel, ruleMatches } from "./ruleMatches";
+
+/** The legend's word for rows whose rule level was never recorded. */
+const NOT_RECORDED = "level not recorded";
 
 function Section({
   title,
@@ -43,19 +46,18 @@ export default function RulesTab() {
     () => ruleMatches(report?.agent_findings),
     [report?.agent_findings],
   );
-  /* Highest rung first, by the ladder's rank; matches on one rung keep the
-   * order the layer recorded them in. */
-  const sigmaMatches = useMemo(
-    () => sortBySeverity(unsortedSigma, (r) => r.severity),
-    [unsortedSigma],
-  );
+  /* By the rule's own level, highest rung first; a row whose level was not
+   * recorded takes no part in that order and follows as recorded. */
+  const sigmaMatches = useMemo(() => orderByLevel(unsortedSigma), [unsortedSigma]);
 
-  const severityCounts = useMemo(
+  /* The legend counts the rungs the rules declared, and says how many rows
+   * recorded none rather than filing them under a rung. */
+  const levelCounts = useMemo(
     () =>
       sigmaMatches.reduce(
         (acc, r) => {
-          const word = severityWord(r.severity);
-          acc[word] = (acc[word] || 0) + 1;
+          const key = r.level === null ? NOT_RECORDED : severityWord(r.level);
+          acc[key] = (acc[key] || 0) + 1;
           return acc;
         },
         {} as Record<string, number>,
@@ -131,36 +133,48 @@ export default function RulesTab() {
               Sigma Rules
             </span>
             <div className="flex items-center gap-3">
-              {/* The ladder's rungs in its order, each that has a match. A
+              {/* The ladder's rungs in its order, each some rule declared; a
                   rung at zero says nothing the rows below do not. */}
-              {SEVERITY_LADDER.filter((sev) => severityCounts[sev]).map((sev) => (
-                <span key={sev} className="flex items-center gap-1 text-xs text-text-secondary">
-                  <span>{sev}</span>
-                  <span className="text-text-muted">({severityCounts[sev]})</span>
-                </span>
-              ))}
+              <span className="text-xs text-text-muted">Rule level:</span>
+              {[...SEVERITY_LADDER, NOT_RECORDED]
+                .filter((key) => levelCounts[key])
+                .map((key) => (
+                  <span key={key} className="flex items-center gap-1 text-xs text-text-secondary">
+                    <span>{key}</span>
+                    <span className="text-text-muted">({levelCounts[key]})</span>
+                  </span>
+                ))}
             </div>
           </div>
           <div className="divide-y divide-border-light">
             {sigmaMatches.map((rule, i) => {
-              const style = severityTone(rule.severity);
+              const onLadder = rule.level !== null && severityRung(rule.level) !== null;
+              const style = severityTone(rule.level);
               return (
                 <div
                   key={`${rule.rule_name}-${i}`}
                   className="flex items-start gap-3 px-4 py-3 hover:bg-bg-hover"
                 >
-                  <div className="flex items-center gap-1 mt-0.5 shrink-0 w-20">
-                    {/* One dot per rung above the floor: the rank, drawn. */}
-                    <div className="flex gap-0.5" aria-hidden="true">
-                      {Array.from({ length: Math.max(1, severityRank(rule.severity)) }).map(
-                        (_, j) => (
+                  <div className="flex items-center gap-1 mt-0.5 shrink-0 w-28" data-rule-level>
+                    {/* One dot per rung from Informational up, so Low and
+                        Informational differ. A level that is not a rung, and a
+                        row that recorded none, draw no dots: there is nothing
+                        on the ladder to draw. */}
+                    {onLadder && (
+                      <div className="flex gap-0.5" aria-hidden="true">
+                        {Array.from({ length: ladderDots(rule.level) }).map((_, j) => (
                           <span key={j} className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
-                        ),
-                      )}
-                    </div>
-                    <span className={`text-xs ml-1 ${style.text}`}>
-                      {severityWord(rule.severity)}
-                    </span>
+                        ))}
+                      </div>
+                    )}
+                    {rule.level === null ? (
+                      <span className="text-xs text-text-muted">level not recorded</span>
+                    ) : (
+                      <span className={`text-xs ml-1 ${onLadder ? style.text : "text-text-secondary"}`}>
+                        <span className="sr-only">Rule level </span>
+                        {severityWord(rule.level)}
+                      </span>
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs text-accent">{rule.rule_name}</p>
@@ -179,8 +193,10 @@ export default function RulesTab() {
                       <p className="text-xs text-text-muted mt-1 truncate">{rule.evidence}</p>
                     )}
                   </div>
-                  <span className="text-xs text-text-muted shrink-0">
-                    {Math.round(rule.confidence * 100)}%
+                  {/* The layer's confidence in the match, from the rule's
+                      maturity status. A number, and never a severity. */}
+                  <span className="text-xs text-text-muted shrink-0 font-mono">
+                    confidence {rule.confidence.toFixed(2)}
                   </span>
                 </div>
               );

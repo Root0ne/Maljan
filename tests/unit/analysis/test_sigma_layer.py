@@ -160,6 +160,38 @@ class TestScanEvents:
         assert match.confidence == 0.88
         assert "TargetImage" in match.matched_fields
 
+    def test_a_match_carries_the_rules_own_level_into_its_claim(self, tmp_rules_dir: Path) -> None:
+        _write_rule(tmp_rules_dir, "rule.yml", VALID_RULE_CONTENT)
+        layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
+        events = [
+            {
+                "EventID": "10",
+                "TargetImage": "C:\\Windows\\System32\\lsass.exe",
+                "GrantedAccess": "0x1010",
+            }
+        ]
+        (match,) = layer.scan_events(events, log_source="sysmon")
+        assert match.level == "high"
+        assert match.claim_text.endswith("source=sysmon, level=high)")
+
+    def test_a_rule_that_declares_no_level_says_none(self, tmp_rules_dir: Path) -> None:
+        _write_rule(
+            tmp_rules_dir,
+            "rule.yml",
+            VALID_RULE_CONTENT.replace("level: high\n", ""),
+        )
+        layer = SigmaLayer.from_rules_dir(tmp_rules_dir)
+        events = [
+            {
+                "EventID": "10",
+                "TargetImage": "C:\\Windows\\System32\\lsass.exe",
+                "GrantedAccess": "0x1010",
+            }
+        ]
+        (match,) = layer.scan_events(events, log_source="sysmon")
+        assert match.level == ""
+        assert "level=" not in match.claim_text
+
     def test_scan_no_match_returns_empty(self, tmp_rules_dir: Path) -> None:
         _write_rule(tmp_rules_dir, "rule.yml", VALID_RULE_CONTENT)
         layer = SigmaLayer.from_rules_dir(tmp_rules_dir)

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentFinding } from "@/types";
-import { hasRuleMatches, ruleMatches } from "../ruleMatches";
+import { hasRuleMatches, orderByLevel, ruleMatches } from "../ruleMatches";
 
 function layer(name: string, claims: unknown[]): AgentFinding {
   return {
@@ -41,13 +41,60 @@ describe("what the panel draws", () => {
     expect(yara[0].evidence).toBe("ev_0007");
   });
 
-  it("reads a Sigma claim for its rule, its technique, its source and its severity", () => {
+  it("reads a stored Sigma claim for its rule, technique and source, and records no level", () => {
+    // The shape every run before the layer carried the rule's level stored.
+    // Its 0.95 is the rule's maturity status as a number; it is not read as a
+    // severity, so no level is invented from it.
     const { sigma } = ruleMatches([layer("sigma_layer", [SIGMA_CLAIM])]);
     expect(sigma).toHaveLength(1);
     expect(sigma[0].rule_name).toBe("Suspicious DNS Z Flag Bit Set");
     expect(sigma[0].technique_id).toBe("T1095");
     expect(sigma[0].source).toBe("generic");
-    expect(sigma[0].severity).toBe("critical");
+    expect(sigma[0].confidence).toBeCloseTo(0.95);
+    expect(sigma[0].level).toBeNull();
+  });
+
+  it("reads the rule's own level from a claim the layer now writes", () => {
+    const { sigma } = ruleMatches([
+      layer("sigma_layer", [
+        {
+          ...SIGMA_CLAIM,
+          claim:
+            "Sigma rule detection: Suspicious DNS Z Flag Bit Set " +
+            "(technique T1095, source=generic, level=high)",
+        },
+      ]),
+    ]);
+    expect(sigma[0].source).toBe("generic");
+    expect(sigma[0].level).toBe("high");
+  });
+
+  it("takes a level the claim object carries as a field", () => {
+    const { sigma } = ruleMatches([layer("sigma_layer", [{ ...SIGMA_CLAIM, level: "Critical" }])]);
+    expect(sigma[0].level).toBe("critical");
+  });
+
+  it("orders recorded levels by the ladder and leaves unrecorded rows out of that sort", () => {
+    const claim = (name: string, level?: string) => ({
+      ...SIGMA_CLAIM,
+      claim: `Sigma rule detection: ${name} (technique T1095, source=generic${level ? `, level=${level}` : ""})`,
+    });
+    const { sigma } = ruleMatches([
+      layer("sigma_layer", [
+        claim("stored-a"),
+        claim("low-one", "low"),
+        claim("stored-b"),
+        claim("critical-one", "critical"),
+        claim("medium-one", "medium"),
+      ]),
+    ]);
+    expect(orderByLevel(sigma).map((r) => r.rule_name)).toEqual([
+      "critical-one",
+      "medium-one",
+      "low-one",
+      "stored-a",
+      "stored-b",
+    ]);
   });
 
   it("takes the first finding of a layer and not a second recording of it", () => {

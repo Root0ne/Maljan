@@ -76,6 +76,12 @@ class SigmaMatch:
     declared via ``logsource.product``. Empty when the rule is generic.
     Reported with the match so the agent reading it can weigh a Windows-only
     rule that fired on a Linux sample for itself.
+
+    ``level`` is the rule author's own ``level`` (``informational``, ``low``,
+    ``medium``, ``high``, ``critical``), lower-cased, or empty for a rule that
+    declares none. It is the only severity a match has: ``confidence`` is the
+    rule's maturity status turned into a number and says nothing about how bad
+    the behaviour is.
     """
 
     rule_id: str
@@ -85,6 +91,7 @@ class SigmaMatch:
     log_source: str
     matched_fields: dict[str, str] = field(default_factory=dict)
     rule_platforms: tuple[str, ...] = ()
+    level: str = ""
 
     @property
     def evidence_ref(self) -> str:
@@ -100,14 +107,23 @@ class SigmaMatch:
     def claim_text(self) -> str:
         """Description used as ISR ClaimEvidence.claim."""
         tech = self.technique_id if self.technique_id else "unmapped"
+        level = f", level={self.level}" if self.level else ""
         return (
-            f"Sigma rule detection: {self.rule_title} (technique {tech}, source={self.log_source})"
+            f"Sigma rule detection: {self.rule_title} "
+            f"(technique {tech}, source={self.log_source}{level})"
         )
 
 
 # ---------------------------------------------------------------------------
 # In-Memory AST Evaluator
 # ---------------------------------------------------------------------------
+
+
+def _rule_level(rule: SigmaRule) -> str:
+    """The rule author's ``level``, lower-cased, or empty when it declares none."""
+    level = getattr(rule, "level", None)
+    name = getattr(level, "name", None) if level is not None else None
+    return str(name).lower() if name else ""
 
 
 class SigmaMemoryEvaluator:
@@ -453,6 +469,7 @@ class SigmaLayer:
                             log_source=canonical_src,
                             matched_fields=matched_fields,
                             rule_platforms=_rule_platforms_tuple(product),
+                            level=_rule_level(rule),
                         )
                     )
                     break  # Each rule fires at most once per event batch.
@@ -497,6 +514,7 @@ class SigmaLayer:
                             log_source=canonical_src,
                             matched_fields=matched_fields,
                             rule_platforms=_rule_platforms_tuple(product),
+                            level=_rule_level(rule),
                         )
                     )
                     break  # Each rule fires at most once per log batch.

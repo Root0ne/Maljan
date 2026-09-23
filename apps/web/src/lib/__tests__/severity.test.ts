@@ -15,6 +15,7 @@ import {
   SEVERITY_LADDER,
   atLeast,
   bySeverityDesc,
+  ladderDots,
   scoreTone,
   severityRank,
   severityRung,
@@ -58,6 +59,13 @@ describe("the severity ladder", () => {
     expect(sortBySeverity(rows, (r) => r.severity).map((r) => r.id)).toEqual(["c", "a", "d", "b"]);
   });
 
+  it("draws one dot per rung from Informational up, and none off the ladder", () => {
+    expect(SEVERITY_LADDER.map(ladderDots)).toEqual([5, 4, 3, 2, 1]);
+    expect(ladderDots("low")).not.toBe(ladderDots("informational"));
+    expect(ladderDots("unrated")).toBe(0);
+    expect(ladderDots(null)).toBe(0);
+  });
+
   it("answers at-or-above against the ladder", () => {
     expect(atLeast("Critical", "High")).toBe(true);
     expect(atLeast("high", "High")).toBe(true);
@@ -78,11 +86,15 @@ describe("the severity ladder", () => {
     expect(severityWord("unrated")).toBe("unrated");
   });
 
-  it("colours a sandbox score from the same ladder, at the thresholds DYNAMIC used", () => {
-    expect(scoreTone(8)).toEqual(severityTone("Critical"));
-    expect(scoreTone(7)).toEqual(severityTone("Critical"));
-    expect(scoreTone(4)).toEqual(severityTone("High"));
-    expect(scoreTone(3)).toEqual(severityTone("Informational"));
+  it("colours a sandbox score by the sandbox's own 1 to 3 scale", () => {
+    expect(scoreTone(1)).toEqual(severityTone("Low"));
+    expect(scoreTone(2)).toEqual(severityTone("Medium"));
+    expect(scoreTone(3)).toEqual(severityTone("High"));
+    expect(scoreTone(0)).toEqual(severityTone("Informational"));
+  });
+
+  it("keeps a score above that scale at its top rather than calling it Critical", () => {
+    expect(scoreTone(8)).toEqual(severityTone("High"));
   });
 });
 
@@ -111,16 +123,53 @@ const GUARDS: { what: string; pattern: RegExp }[] = [
     pattern: new RegExp(`\\b${RUNG}\\s*:\\s*(?:\\{[^}]*?)?["'\`][^"'\`\\n]*\\b(?:text|bg|border)-status-`, "g"),
   },
   {
-    // `rule.severity === "critical"`: a rung compared by its spelling, which
-    // is how a ladder gets a second, private order.
+    // `rule.severity === "critical"`, `level !== "High"`: a rung compared by
+    // its spelling, which is how a ladder gets a second, private order.
     what: "a severity rung compared by its label",
-    pattern: new RegExp(`(?:severity|rating)[\\w.?]*\\s*[!=]==?\\s*["']${RUNG}["']`, "g"),
+    pattern: new RegExp(
+      `(?:severity|rating|level|sev)[\\w.?\\]\\[]*\\s*[!=]==?\\s*["']${RUNG}["']`,
+      "gi",
+    ),
+  },
+  {
+    // The same comparison written the other way round.
+    what: "a severity rung compared by its label, reversed",
+    pattern: new RegExp(`["']${RUNG}["']\\s*[!=]==?\\s*[\\w.?]*(?:severity|rating|level|sev)`, "gi"),
+  },
+  {
+    // `switch (sev) { case "Critical": … }`: a colour or an order per rung,
+    // kept outside the ladder.
+    what: "a severity rung switched on",
+    pattern: new RegExp(`\\bcase\\s+["']${RUNG}["']\\s*:`, "g"),
   },
   {
     what: "a severity sorted by its label",
-    pattern: /(?:severity|rating)[^\n]*localeCompare/g,
+    pattern: /(?:severity|rating|level)[^\n]*localeCompare/gi,
+  },
+  {
+    // `a.rating > b.rating`: the alphabet again, through a comparison sort.
+    what: "a severity sorted by comparing labels",
+    pattern: /\.(?:severity|rating|level)\s*[<>]=?\s*\w+\.(?:severity|rating|level)\b/gi,
   },
 ];
+
+describe("the severity guard's own reach", () => {
+  const hits = (what: string, text: string) =>
+    [...text.matchAll(GUARDS.find((g) => g.what === what)!.pattern)].length;
+
+  it("catches the shapes a second ladder is written in", () => {
+    expect(hits("a severity rung compared by its label", 'if (level === "High")')).toBe(1);
+    expect(hits("a severity rung compared by its label", 'rule.severity !== "critical"')).toBe(1);
+    expect(hits("a severity rung compared by its label, reversed", '"Low" === item.rating')).toBe(1);
+    expect(hits("a severity rung switched on", 'switch (sev) { case "Critical": return "x"; }')).toBe(1);
+    expect(hits("a severity sorted by comparing labels", "(a, b) => (a.rating > b.rating ? 1 : -1)")).toBe(1);
+  });
+
+  it("leaves a word that is not a rung, and a numeric score, alone", () => {
+    expect(hits("a severity rung compared by its label", 'w.severity === "error"')).toBe(0);
+    expect(hits("a severity sorted by comparing labels", "b.severity - a.severity")).toBe(0);
+  });
+});
 
 describe("severity is compared and coloured in one place", () => {
   const files = sourceFiles(SRC);
