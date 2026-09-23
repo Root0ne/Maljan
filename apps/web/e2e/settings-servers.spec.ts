@@ -71,6 +71,71 @@ test.describe("tool servers and the REST sandbox", () => {
     expect(sent.agents).toEqual(["static"]);
   });
 
+  test("the tool table searches, selects in bulk, counts live and says why a tool cannot run", async ({
+    authenticatedPage: page,
+  }) => {
+    const tools = ["open_file", "analyze", "list_imports", "decompile"];
+    await page.route("**/api/v1/settings/test/mcp?**", (route) =>
+      route.fulfill({
+        json: {
+          ok: true,
+          latency_ms: 12,
+          detail: `${tools.length} tools: ${tools.join(", ")}`,
+          models: null,
+          tools,
+          details: {
+            capabilities: {
+              server: "r2custom",
+              version: "1",
+              tools: [
+                {
+                  name: "decompile",
+                  optional_dependency: "decompiler-plugin",
+                  available: false,
+                  reason: "the decompiler plugin is not installed",
+                  timeout_s: null,
+                  remediation: "install the plugin on the sidecar host",
+                },
+              ],
+            },
+          },
+        },
+      })
+    );
+    await page.goto(MCP_PATH);
+    await page.getByLabel("new server name").fill("r2custom");
+    await page.getByRole("button", { name: "Add server" }).click();
+    const detail = page.locator('[data-server-detail="r2custom"]');
+    await detail.getByRole("button", { name: "Load tool list" }).click();
+
+    const count = detail.getByRole("status").filter({ hasText: /^enabled/ });
+    await expect(count).toHaveText("enabled 0 of 4");
+
+    // The reason sits on the tool's own row, and only there.
+    const decompile = detail.locator('[data-tool-row="decompile"]');
+    await expect(decompile).toContainText("unavailable: the decompiler plugin is not installed; install the plugin on the sidecar host");
+    await expect(detail.getByRole("list", { name: "unavailable tools" })).toHaveCount(0);
+
+    await detail.getByRole("button", { name: "Select all", exact: true }).click();
+    await expect(count).toHaveText("enabled 4 of 4");
+
+    // A search narrows the rows, and the bulk buttons act on what it left.
+    await detail.getByRole("searchbox", { name: "Search the tools of r2custom" }).fill("i");
+    await expect(detail.locator("[data-tool-row]")).toHaveCount(3);
+    await detail.getByRole("button", { name: "Select none shown" }).click();
+    await expect(count).toHaveText("enabled 1 of 4 · 3 shown");
+    await expect(detail.getByLabel("r2custom tool analyze")).toHaveCount(0);
+
+    await detail.getByRole("searchbox", { name: "Search the tools of r2custom" }).fill("");
+    await expect(detail.getByLabel("r2custom tool analyze")).toBeChecked();
+    await expect(detail.getByLabel("r2custom tool open_file")).not.toBeChecked();
+
+    // Keyboard alone reaches a box and ticks it.
+    await detail.getByLabel("r2custom tool open_file").focus();
+    await page.keyboard.press("Space");
+    await expect(count).toHaveText("enabled 2 of 4");
+  });
+
   /* Task 14: selecting a server was never anything more than reading a
    * `<section>` that was always mounted, but the master–detail rewrite
    * (task 11) makes the detail pane conditional on which row is picked —
