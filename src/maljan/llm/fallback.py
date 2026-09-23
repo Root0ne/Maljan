@@ -199,7 +199,13 @@ def _duration(seconds: float) -> str:
     """A deadline as a reader reads it: milliseconds under a second, seconds above."""
     if seconds < 1:
         return f"{seconds * 1000:.0f} ms"
-    return f"{seconds:.0f} s"
+    return f"{seconds:.1f}".removesuffix(".0") + " s"
+
+
+# The shortest a turn deadline measured against what is left of a loop gets:
+# one second, so a model near the end of a loop is still given a turn to
+# answer in rather than none.
+MIN_TURN_DEADLINE_SECONDS = 1.0
 
 
 class FallbackChatModel(BaseChatModel):
@@ -237,6 +243,11 @@ class FallbackChatModel(BaseChatModel):
 
     _start: int = PrivateAttr(default=0)
     _lock: Any = PrivateAttr(default_factory=threading.Lock)
+    # The loop this list is in: when it ends on the monotonic clock, and the
+    # share of what is left of it one turn may take. ``None`` outside a loop,
+    # where ``turn_deadline`` is the fixed deadline the list was built with.
+    _loop_ends: float | None = PrivateAttr(default=None)
+    _share: float = PrivateAttr(default=0.0)
 
     @property
     def _llm_type(self) -> str:
@@ -282,8 +293,32 @@ class FallbackChatModel(BaseChatModel):
             return model.bind_tools(tools, **tool_kwargs)
         return model
 
+    def enter_loop(self, loop_seconds: float, share: float) -> None:
+        """Measure every turn's deadline against a loop of ``loop_seconds`` starting now."""
+        with self._lock:
+            self._loop_ends = time.monotonic() + float(loop_seconds)
+            self._share = float(share)
+        self.turn_deadline = float(loop_seconds) * float(share)
+
     def _deadline(self, index: int) -> float | None:
-        if self.turn_deadline > 0 and index + 1 < len(self.models):
+        """This turn's deadline, or ``None`` for the last model on the list.
+
+        Inside a loop it is the share of what is *left* of the loop, worked
+        out now: a first model that stalls late in a loop is still replaced
+        before the loop's own clock cancels it, which a share of the whole
+        budget fixed at the start could not do past the loop's midpoint. It
+        never falls below :data:`MIN_TURN_DEADLINE_SECONDS` (or the share of
+        the whole loop, for a loop shorter than that), because a deadline of
+        nothing would move every turn at the end of a loop to the next model.
+        """
+        if index + 1 >= len(self.models):
+            return None
+        with self._lock:
+            ends, share = self._loop_ends, self._share
+        if ends is not None and share > 0:
+            floor = min(MIN_TURN_DEADLINE_SECONDS, self.turn_deadline)
+            return max(floor, share * max(0.0, ends - time.monotonic()))
+        if self.turn_deadline > 0:
             return self.turn_deadline
         return None
 
@@ -430,8 +465,9 @@ def restart_models(
     """Start a loop on a model list: its first model again, and a deadline for this loop.
 
     ``loop_seconds`` is the budget *this* loop runs under — the one the loop
-    itself read, a caller's ask ceiling included — so the turn deadline is a
-    share of the limit that would otherwise cancel a stalled model first. An
+    itself read, a caller's ask ceiling included — and each turn's deadline is
+    then a share of what is left of it at that turn, so a stall is replaced
+    before the limit that would otherwise cancel it. An
     agent asked for help runs under the ask's clock, which can be far shorter
     than its own; a deadline fixed from its own budget let the ask cancel the
     stall before the list ever moved. A no-op for any other model.
@@ -444,7 +480,7 @@ def restart_models(
     if share is None:
         share = _configured_share()
     if share > 0:
-        model.turn_deadline = float(loop_seconds) * float(share)
+        model.enter_loop(float(loop_seconds), float(share))
 
 
 def _configured_share() -> float:

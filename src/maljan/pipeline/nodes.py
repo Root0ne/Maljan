@@ -116,21 +116,15 @@ if TYPE_CHECKING:
 _NARRATIVE_TIMEOUT_SECONDS = 600
 
 
-def _restart_reporter(container: Any, narrative_agent: Any) -> None:
-    """Start the reporter's model list for this report stage. Never raises."""
+def _restart_reporter(llm: Any, seconds: Any, container: Any) -> None:
+    """Start the reporter's model list for one round, against that round's clock. Never raises."""
     try:
         from maljan.llm.fallback import restart_models
 
-        llm = getattr(narrative_agent, "llm", None)
-        if llm is None:
-            composer = container.get_report_composer()
-            llm = getattr(composer, "llm", None)
-        reporting = getattr(getattr(container, "config", None), "reporting", None)
-        section = getattr(reporting, "composer_per_section_timeout", None)
         share = getattr(getattr(container.config, "llm", None), "fallback_turn_share", None)
         restart_models(
             llm,
-            loop_seconds=float(section) if isinstance(section, int | float) else None,
+            loop_seconds=float(seconds) if isinstance(seconds, int | float) else None,
             share=float(share) if isinstance(share, int | float) else None,
         )
     except Exception as exc:  # noqa: BLE001 — a restart never costs the report
@@ -4005,11 +3999,12 @@ def make_report_node(
             logger.warning("report_node: NarrativeAgent unavailable (%s); using fallback.", exc)
             narrative_agent = None
 
-        # The report stage is the reporter's loop: its model list starts at its
-        # first model again here, and each model's turn deadline is a share of
-        # ``reporting.composer_per_section_timeout`` — the shortest limit any of
-        # its calls runs under (the narrative round's is the 600 s above it).
-        _restart_reporter(container, narrative_agent)
+        # The narrative round is the reporter's first loop: its model list
+        # starts at its first model again, with turn deadlines measured against
+        # the narrative's own 600 s clock.
+        _restart_reporter(
+            getattr(narrative_agent, "llm", None), _NARRATIVE_TIMEOUT_SECONDS, container
+        )
 
         if narrative_agent is not None:
             try:
@@ -4067,6 +4062,14 @@ def make_report_node(
             logger.warning("report_node: ReportComposer unavailable (%s); skipping spine.", exc)
             composer = None
         if composer is not None:
+            # The composer sections are its second: the list starts over, and
+            # each turn is measured against one section's clock. A slow
+            # narrative that moved the list does not decide the sections.
+            _restart_reporter(
+                getattr(composer, "llm", None),
+                getattr(container.config.reporting, "composer_per_section_timeout", None),
+                container,
+            )
             try:
                 await composer.compose(
                     report,

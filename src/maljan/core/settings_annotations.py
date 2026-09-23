@@ -215,12 +215,13 @@ ANNOTATIONS: dict[str, Annotation] = {
     "llm.fallback_turn_share": {
         "title": "Turn deadline for a model on a fallback list (share of the loop)",
         "description": (
-            "How much of the current loop's budget one model on its fallback list may spend "
-            "on a turn before it is treated as stalled and the next model is asked; the "
-            "model that answers then stays for the rest of that loop. Set at every loop "
-            "start from the budget that loop runs under, so an agent answering an ask gets "
-            "a share of the ask's clock; the reporter's is a share of "
-            "reporting.composer_per_section_timeout. A share of the "
+            "How much of what is left of the current loop one model on its fallback list "
+            "may spend on a turn before it is treated as stalled and the next model is "
+            "asked (never less than one second); the model that answers then stays for the "
+            "rest of that loop. Worked out per turn from the budget that loop runs under, so "
+            "an agent answering an ask gets a share of the ask's clock and a late stall is "
+            "still replaced; the reporter's narrative round and composer sections are each "
+            "measured against their own clock. A share of the "
             "loop, because the loop budget is what would otherwise cancel a stalled model "
             "before any timeout inside it: the default of a half leaves the other half of "
             "the loop to the model that took over. The last model on a list has no "
@@ -1650,12 +1651,14 @@ ANNOTATIONS.update(
             "order": -1,
         },
         "mcp.breaker.failures_to_open": {
-            "title": "Transport failures before a server rests",
+            "title": "Unanswered calls before a server rests",
             "description": (
-                "How many transport failures in a row — a timeout, a refused connection, "
-                "the server's process gone — rest a tool server for the rest of its "
-                "cooldown, per job. A tool that answers with its own error (a bad "
-                "argument, a missing file) is not a transport failure and never counts. "
+                "How many calls in a row a tool server does not answer before it rests for "
+                "its cooldown, per job. A call is unanswered when it fails at the transport "
+                "— a timeout, a refused connection, the server's process gone — or does not "
+                "finish within its caller's own budget while it waits on the server. A tool "
+                "that answers with its own error (a bad argument, a missing file) has "
+                "answered and never counts. "
                 "The default is the number of attempts the platform already gives a "
                 "model call that drops its connection before calling it a failure; no "
                 "recorded live run had a tool server fail at the transport, so it is a "

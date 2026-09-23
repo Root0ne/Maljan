@@ -166,9 +166,13 @@ class TestTheReporter:
         container = MagicMock()
         container.config.reporting.composer_per_section_timeout = 120
         container.config.llm.fallback_turn_share = 0.5
-        _restart_reporter(container, MagicMock(llm=chain))
+        _restart_reporter(chain, 600, container)
         assert chain.answering == 0
-        assert chain.turn_deadline == 60.0, "a share of the limit its calls run under"
+        assert chain.turn_deadline == 300.0, "the narrative round's own clock"
+        chain._stick(1)
+        _restart_reporter(chain, 120, container)
+        assert chain.answering == 0, "the composer sections start over"
+        assert chain.turn_deadline == 60.0, "one section's clock"
 
     def test_its_switch_is_announced(self) -> None:
         from maljan.pipeline.events import announce_model_fallback

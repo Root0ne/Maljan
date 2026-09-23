@@ -601,7 +601,7 @@ class RunSummary:
     # another model answered because the one before it failed as a provider,
     # with that failure in words. ``None`` on a run that recorded no turn.
     models: dict[str, Any] | None = None
-    # The tool servers this run rested after a run of transport failures:
+    # The tool servers this run rested after a run of calls they did not answer:
     # ``[{server, failures, cooldown_s, reason}]`` in the order they opened.
     # ``None`` when no server was rested.
     server_rests: list[dict[str, Any]] | None = None

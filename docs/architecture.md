@@ -1073,12 +1073,14 @@ name an ordered list of models (`fallbacks`), held as one model object
 the one before failed *as a provider* — a refused or dropped connection, a
 timeout, an HTTP 5xx, 408 or 429, a model the server does not have, a refused
 credential, or a refusal the provider reports as an error. A timeout is real
-because every model on a list but the last has its own turn deadline, set at
-the start of every loop to `core.llm.fallback_turn_share` (a half by default)
-of the budget *that loop* runs under — an ask's ceiling included, so an agent
-asked for help under a shorter clock gets a shorter deadline — and for the
-reporter, which runs no loop, of `core.reporting.composer_per_section_timeout`,
-the shortest limit its calls run under. A model that stops answering raises
+because every model on a list but the last has its own turn deadline:
+`core.llm.fallback_turn_share` (a half by default) of what is *left*, at that
+turn, of the budget the loop runs under — an ask's ceiling included, so an
+agent asked for help under a shorter clock gets a shorter deadline — never less
+than one second. Worked out per turn, so a model that stalls late in a loop is
+still replaced before the loop's clock cancels it. The reporter's list starts
+over twice per report stage, measured against the narrative round's 600 s and
+then against one composer section's `core.reporting.composer_per_section_timeout`. A model that stops answering raises
 inside the list rather than being cancelled with the whole loop (on the
 blocking path the abandoned call is left in a daemon thread, so it never holds
 up the process's exit); and every provider's client has a request

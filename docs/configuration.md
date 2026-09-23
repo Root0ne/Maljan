@@ -142,12 +142,13 @@ Never on what a model said: an answer the validation loop rejects is sent back
 to the model that wrote it, and a parse or validation error a model's answer
 raises reaches the loop rather than the next model. A timeout is a provider
 failure because every model on a list but the last has its own turn deadline —
-`core.llm.fallback_turn_share` (0.5) of the budget the current loop runs under,
-set when the loop starts, so inside an ask it is a share of the ask's clock; a
-share of the loop because the loop is what would otherwise cancel a stalled
-model first. The reporter's is a share of
-`core.reporting.composer_per_section_timeout`, restarted where the report
-stage starts —
+`core.llm.fallback_turn_share` (0.5) of what is left, at that turn, of the
+budget the current loop runs under (never less than one second), so inside an
+ask it is a share of the ask's clock and a stall late in a loop is still
+replaced before the loop cancels it; a share of the loop because the loop is
+what would otherwise cancel a stalled model first. The reporter's list starts
+over before the narrative round, against its 600 s, and again before the
+composer sections, against `core.reporting.composer_per_section_timeout` —
 and every provider's client has a 1800 s request timeout. A 429 or 503 whose
 `Retry-After` (seconds or an HTTP date) asks for at most thirty seconds is waited out on the same model
 once before the list moves on. Once the list has moved, the model that answered
@@ -1361,7 +1362,7 @@ in the structured shape —
 ```json
 {"error": {"code": "server_resting",
            "message": "tool server 'analysis' is resting after 3 calls in a row it did not answer; it will be tried again in 60 s",
-           "remediation": "this server failed at the transport several times in a row and is not being called for now; use another tool, or call this one again after the time the message names"},
+           "remediation": "this server did not answer several calls in a row and is not being called for now; use another tool, or call this one again after the time the message names"},
  "tool": "pe_info"}
 ```
 

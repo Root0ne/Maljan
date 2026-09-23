@@ -8,6 +8,7 @@ turn it answered: what a model said is not a reason to ask another one.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from typing import Any
 
@@ -490,7 +491,10 @@ class TestTheDeadlineIsTheLoopsOwn:
         assert time.monotonic() - started < 2.0
         (switch,) = agent.token_ledger.snapshot()["fallbacks"]
         assert switch["model"] == "ollama/answers"
-        assert "openai/stalls: did not answer within its turn deadline of 1 s" in switch["reason"]
+        assert re.search(
+            r"openai/stalls: did not answer within its turn deadline of (9\d\d ms|1 s)",
+            switch["reason"],
+        ), switch["reason"]
 
     def test_a_loop_start_sets_the_deadline_from_that_loops_budget(self) -> None:
         chain, _models = _chain(["a"], ["b"])
@@ -498,6 +502,36 @@ class TestTheDeadlineIsTheLoopsOwn:
         assert chain.turn_deadline == 150.0
         restart_models(chain, loop_seconds=None)
         assert chain.turn_deadline == 150.0, "no budget named leaves the deadline as it was"
+
+    def test_a_stall_late_in_a_loop_is_replaced_before_the_loop_ends(self) -> None:
+        """A share of what is left, not of the whole: a stall at 70 % of the loop."""
+        second = _Scripted(script=["second says"], bound=[])
+        chain = FallbackChatModel(
+            models=[_Stalling(script=["never"], bound=[]), second],
+            labels=["openai/stalls", "ollama/answers"],
+            agent="static",
+        )
+        loop = 4.0
+        restart_models(chain, loop_seconds=loop, share=0.5)
+        started = time.monotonic()
+        time.sleep(0.7 * loop)
+        answer = asyncio.run(chain.ainvoke([HumanMessage(content="late")]))
+        assert answer.content == "second says"
+        assert time.monotonic() - started < loop, "the loop would have cancelled it first"
+
+    def test_the_deadline_never_falls_below_its_floor(self) -> None:
+        chain, _models = _chain(["a"], ["b"])
+        restart_models(chain, loop_seconds=10.0, share=0.5)
+        chain._loop_ends = time.monotonic() - 5
+        assert chain._deadline(0) == 1.0
+        assert chain._deadline(1) is None, "the last model is bounded by the loop"
+
+    def test_a_deadline_with_a_fraction_prints_it(self) -> None:
+        from maljan.llm.fallback import _duration
+
+        assert _duration(1.5) == "1.5 s"
+        assert _duration(90.0) == "90 s"
+        assert _duration(0.2) == "200 ms"
 
 
 def test_an_abandoned_stall_does_not_hold_up_the_process_exit() -> None:

@@ -73,8 +73,8 @@ REMEDIATIONS: dict[str, str] = {
         "set the credential or setting this tool needs in Settings and run the probe again"
     ),
     SERVER_RESTING: (
-        "this server failed at the transport several times in a row and is not being called "
-        "for now; use another tool, or call this one again after the time the message names"
+        "this server did not answer several calls in a row and is not being called for now; "
+        "use another tool, or call this one again after the time the message names"
     ),
     TOOL_FAILED: (
         "read the message; if it names nothing you can change, report it with the server log"

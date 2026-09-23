@@ -115,8 +115,8 @@ def emit(sink: EventSink | None, event_type: str, data: dict[str, Any]) -> None:
 # changes what a model said.
 BUDGET_TICK = "budget_tick"
 STAGE_ENDED_AT_CAP = "stage_ended_at_cap"
-# A tool server this job stopped calling for a while, after a run of
-# transport failures (``maljan.providers.server_guard``).
+# A tool server this job stopped calling for a while, after a run of calls it
+# did not answer (``maljan.providers.server_guard``).
 TOOL_SERVER_RESTED = "tool_server_rested"
 # An agent's model list moved on to its next model because the one before it
 # failed as a provider (``maljan.llm.fallback``). Once per switch.

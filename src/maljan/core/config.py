@@ -976,20 +976,21 @@ def builtin_env_allow(key: str, configured: Iterable[str]) -> list[str]:
 class MCPBreakerConfig(BaseModel):
     """A tool server that keeps failing is rested; a slow one is not piled onto.
 
-    ``failures_to_open`` transport failures in a row — a timeout, a refused
-    connection, the server's process gone — open the server's breaker for
+    ``failures_to_open`` calls in a row the server did not answer — a timeout,
+    a refused connection, the server's process gone, or a call that did not
+    finish within its caller's budget — open the server's breaker for
     ``cooldown_seconds``. A call in that time is answered by the platform with
     an authored tool error naming the server, that it is resting and when it
     will be tried again; after it, one call is let through and a success
-    closes the breaker. A tool that answers with its own error is not a
-    transport failure and never counts.
+    closes the breaker. A tool that answers with its own error has answered and
+    never counts.
 
     ``max_concurrent_calls`` is how many calls one server may have in flight
     for one job at once, so parallel analysts queue rather than pile onto one
     slow sidecar. ``0`` leaves the calls uncapped.
 
     ``call_timeout_seconds`` is how long a call may go unanswered before it is
-    a timeout — a transport failure the breaker counts.
+    a timeout, which the breaker counts.
     """
 
     failures_to_open: Annotated[int, Field(ge=1)] = 3
