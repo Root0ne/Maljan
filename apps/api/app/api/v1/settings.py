@@ -39,6 +39,10 @@ from app.schemas.settings import (
     ProbeResponse,
     ResetResponse,
     SchemaResponse,
+    TeamFindingDTO,
+    TeamGraphDTO,
+    TeamLintRequest,
+    TeamLintResponse,
     ValueDTO,
     ValuesResponse,
     VirustotalRegisterResponse,
@@ -742,6 +746,33 @@ async def validate_stage_condition(
             extra={"expression": log_safe(body.expression)},
         )
     return ConditionValidateResponse(valid=not problems, problems=problems)
+
+
+@router.post("/lint-teams", response_model=TeamLintResponse)
+async def lint_teams_route(
+    body: TeamLintRequest,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> TeamLintResponse:
+    """Check every team as the editor has staged it, and lay each one out.
+
+    Nothing is stored. The console calls this as a team is edited, debounced,
+    and draws the preview and the findings from the answer. The errors are the
+    ones the apply path refuses from, in the same words, so a team the preview
+    passes is a team apply accepts; a warning never blocks apply.
+    """
+    from app.services.agent_map import lint_team_map
+
+    stored = await SettingsService(db).load_overrides()
+    findings, graphs = lint_team_map(
+        stored, profiles=body.profiles, definitions=body.definitions, active=body.profile
+    )
+    order = {"error": 0, "warning": 1}
+    findings.sort(key=lambda f: order.get(str(f["severity"]), 2))
+    return TeamLintResponse(
+        findings=[TeamFindingDTO(**f) for f in findings],
+        graphs={name: TeamGraphDTO(**graph) for name, graph in graphs.items()},
+    )
 
 
 @router.post("/sandbox-rest/preview", response_model=MappingPreviewResponse)

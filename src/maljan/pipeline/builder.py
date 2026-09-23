@@ -57,6 +57,7 @@ from maljan.pipeline.topology import (
     JUDGE_NODE,
     REPORT_NODE,
     StageNodes,
+    adopted_roots,
     analyst_node,
     debate_nodes,
     dependents,
@@ -117,9 +118,9 @@ def build_graph(container: ServiceContainer) -> CompiledStateGraph:
     #    is why its ``exit`` is empty. A triage stage with no dependency stands
     #    in for START for every other root: the facts it writes come before
     #    anything that reads them.
-    roots = [entry for entry in staged if not any(k in by_key for k in entry.stage.depends_on)]
-    first = next((entry for entry in roots if entry.stage.kind == "triage"), None)
-    adopted = [entry for entry in roots if first is not None and entry is not first]
+    first_key, adopted_keys = adopted_roots([entry.stage for entry in staged])
+    first = by_key[first_key] if first_key is not None else None
+    adopted = [by_key[key] for key in adopted_keys]
     for entry in staged:
         stage = entry.stage
         upstream = [by_key[key] for key in stage.depends_on if key in by_key]

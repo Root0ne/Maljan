@@ -96,6 +96,23 @@ def dependents(profile: ProfileDefinition, key: str) -> list[StageDefinition]:
     return [s for s in profile.stages if key in s.depends_on]
 
 
+def adopted_roots(stages: list[StageDefinition]) -> tuple[str | None, list[str]]:
+    """The triage stage that stands in for START, and the roots it adopts.
+
+    A stage with no dependency among ``stages`` is a root and would start at
+    START. When the first such root is a triage stage, every other root starts
+    after it instead: the facts it writes come before anything that reads
+    them. Returned as stage keys, so the builder that wires the edges and the
+    team preview that draws them read the one rule.
+    """
+    keys = {stage.key for stage in stages}
+    roots = [stage for stage in stages if not any(k in keys for k in stage.depends_on)]
+    first = next((stage for stage in roots if stage.kind == "triage"), None)
+    if first is None:
+        return None, []
+    return first.key, [stage.key for stage in roots if stage is not first]
+
+
 def plan(profile: ProfileDefinition, *, reporting_enabled: bool = True) -> list[StageNodes]:
     """Every stage of ``profile`` as the nodes it becomes, in declaration order.
 
