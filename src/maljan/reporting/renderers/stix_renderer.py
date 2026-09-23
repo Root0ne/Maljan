@@ -1024,8 +1024,7 @@ class ExtendedSTIXRenderer:
                     description=(
                         f"Verdict: {report.verdict}. "
                         + (
-                            f"Severity {report.severity.overall_score}/10 "
-                            f"({report.severity.rating})."
+                            f"Severity {report.severity.rating}."
                             if report.severity
                             else "Severity not assessed."
                         )
@@ -1485,6 +1484,58 @@ def indicator_publish_reason(
     if str(source or "").strip().lower() not in ("", "strings"):
         return str(source)
     return corroborated_by or None
+
+
+def publish_answer(
+    kind: str,
+    value: str,
+    source: Any,
+    reputation: Any = None,
+    *,
+    corroborating: str = "",
+) -> str:
+    """The publish rule's answer for one row, as the report prints it.
+
+    ``yes``, or ``no: <reason>`` naming the half of :func:`indicator_publish_reason`
+    that refused it. The decision is that function's and nothing here decides
+    anything: the reason is read back from the same questions it asks, in the
+    same order. ``corroborating`` is the run's second-source record
+    (:func:`corroborating_values`), asked whole-value for a string row the way
+    the export asks it.
+    """
+    text = str(value or "").strip()
+    from_strings = str(source or "").strip().lower() in ("", "strings")
+    corroborated = (
+        "a second source in this run records it"
+        if from_strings and text and corroborating and whole_value_in(text, corroborating)
+        else ""
+    )
+    if indicator_publish_reason(kind, text, source, reputation, corroborated_by=corroborated):
+        return "yes"
+    if kind == "domain" and not host_is_public(text):
+        return "no: not a name that resolves outside the analysed network"
+    if kind == "url" and not host_is_public(url_host(text)):
+        return "no: its host does not resolve outside the analysed network"
+    if kind == "ip" and not address_is_publishable(text, source):
+        return "no: not an address this run may publish"
+    if kind == "email" and not email_is_publishable(text):
+        return "no: not a mailbox at a host that could exist"
+    if (
+        kind == "email"
+        and from_strings
+        and not reads_as_a_host_in_the_bytes(text.rsplit("@", 1)[-1])
+    ):
+        return "no: its domain part reads as code in the file, not as a host"
+    if kind == "path" and not path_names_a_file(text):
+        return "no: names a directory or a root, not a file"
+    if kind not in STRING_IOC_KINDS or indicator_pattern(kind, text) is None:
+        return "no: the export has no object for this kind"
+    return "no: seen only in the file's strings"
+
+
+def corroborating_values(report: Any, corpus: Any = None) -> str:
+    """The run's second-source record, as :func:`publish_answer` asks it."""
+    return _corroborating_values(report, corpus)
 
 
 def _stix_pattern_for_string_ioc(ioc: StringIOC) -> str | None:

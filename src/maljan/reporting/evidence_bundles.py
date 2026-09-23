@@ -25,17 +25,26 @@ from maljan.reporting.models import MalwareReport
 SECTIONS = (
     "executive_summary",
     "introduction",
+    "execution_flow",
     "packing_obfuscation",
+    "string_resolution",
+    "configuration",
+    "commands",
     "cli_flags",
     "encryption_scheme",
     "discovery",
     "persistence_detail",
     "evasion_antiforensics",
+    "command_and_control",
+    "payloads",
     "ransom_note",
     "communications",
-    "conclusion",
     "mitigations",
 )
+
+# The ledger tools a sandbox answers through. An execution step the report
+# model marks ``observed`` has to cite one of their entries.
+SANDBOX_TOOL_PREFIXES = ("sandbox_", "pcap_summary")
 
 # Tool names whose captured output is relevant to each technical section. Used
 # to filter ``technical_evidence`` so e.g. the encryption bundle never sees
@@ -58,6 +67,29 @@ _SECTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     ),
     "ransom_note": ("list_strings", "extract_iocs_with_context"),
     "communications": ("list_strings", "extract_iocs_with_context", "analyze_api_call_chains"),
+    "command_and_control": (
+        "list_strings",
+        "extract_iocs_with_context",
+        "analyze_api_call_chains",
+        "decompile_function",
+    ),
+    "string_resolution": (
+        "emulate_hash_batch",
+        "emulate_function",
+        "analyze_api_call_chains",
+        "decompile_function",
+        "list_strings",
+    ),
+    "configuration": (
+        "emulate_function",
+        "emulate_hash_batch",
+        "analyze_dataflow",
+        "detect_crypto_constants",
+        "extract_iocs_with_context",
+        "decompile_function",
+    ),
+    "commands": ("decompile_function", "analyze_function_complete", "analyze_api_call_chains"),
+    "payloads": ("list_segments", "decompile_function", "extract_iocs_with_context"),
 }
 
 # Keyword hints to pull the relevant ISR claims into a technical section.
@@ -78,6 +110,44 @@ _SECTION_CLAIM_KEYWORDS: dict[str, tuple[str, ...]] = {
         "http",
         "connect",
     ),
+    "command_and_control": (
+        "c2",
+        "command and control",
+        "beacon",
+        "exfil",
+        "network",
+        "http",
+        "connect",
+        "user-agent",
+        "user agent",
+    ),
+    "string_resolution": (
+        "hash",
+        "resolve",
+        "peb",
+        "getprocaddress",
+        "loadlibrary",
+        "decrypt",
+        "string",
+        "import",
+    ),
+    "configuration": (
+        "config",
+        "campaign",
+        "group",
+        "key",
+        "version",
+        "sleep",
+        "interval",
+        "c2",
+        "domain",
+        "url",
+        "rc4",
+        "xor",
+        "decrypt",
+    ),
+    "commands": ("command", "handler", "opcode", "instruction", "dispatch", "switch", "task id"),
+    "payloads": ("payload", "drop", "carve", "embedded", "stage", "download", "inject", "overlay"),
 }
 
 
@@ -258,20 +328,24 @@ def bundle_for(
                 "family": report.attribution.family if report.attribution else None,
             },
         }
-    if section == "conclusion":
+    if section == "execution_flow":
+        dynamic = report.dynamic
+        sandbox_ids = set(sandbox_entry_ids(report))
+        tree: list[str] = []
+        for root in dynamic.process_tree if dynamic else []:
+            tree.extend(_process_lines(root, 0))
         return {
-            "claims": all_claims[:10],
+            "claims": all_claims[:14],
             "tool_outputs": [],
             "binary": base,
             "facts": {
-                "verdict": report.verdict,
-                "severity": report.severity.rating if report.severity else None,
-                "confidence": (
-                    None
-                    if report.overall_confidence is None
-                    else round(report.overall_confidence, 2)
-                ),
-                "degraded": report.degraded_mode,
+                "process_tree": tree[:20],
+                "sandbox_entries": [
+                    f"{row.id} ({row.tool})"
+                    for row in report.evidence_index
+                    if row.id in sandbox_ids
+                ][:20],
+                "exports": list(report.static.exports[:10]) if report.static else [],
             },
         }
     if section == "mitigations":
@@ -287,11 +361,11 @@ def bundle_for(
                 ),
             },
         }
-    if section == "communications":
+    if section in ("communications", "command_and_control"):
         net = report.network
         return {
-            "claims": _filter_claims(all_claims, _SECTION_CLAIM_KEYWORDS["communications"]),
-            "tool_outputs": _filter_tool_outputs(tech_ev, _SECTION_TOOL_HINTS["communications"]),
+            "claims": _filter_claims(all_claims, _SECTION_CLAIM_KEYWORDS[section]),
+            "tool_outputs": _filter_tool_outputs(tech_ev, _SECTION_TOOL_HINTS[section]),
             "binary": base,
             "facts": {
                 "domains": [d.fqdn for d in (net.domains if net else [])][:20],
@@ -315,6 +389,57 @@ def bundle_for(
     }
 
 
+def sandbox_entry_ids(report: MalwareReport) -> list[str]:
+    """The ledger ids of the sandbox answers that recorded something, in issue order.
+
+    A sandbox answer with nothing in it — a mock with no fixture, a call that
+    returned empty lists — is not an observation, so a step citing only such
+    an entry has not been observed. An answer recorded something when the
+    section built from it holds a value: the section builders credit an entry
+    only when it added a row, and the generic block's rows are read for a
+    value that is not empty.
+    """
+    # The pack's sandbox-status entry states what the sandbox report is; it
+    # records no behaviour and is never an observation to cite.
+    sandbox = {
+        row.id
+        for row in report.evidence_index
+        if str(row.tool or "").startswith(SANDBOX_TOOL_PREFIXES) and row.tool != "sandbox_status"
+    }
+    holding: set[str] = set()
+    for section in report.sections:
+        cited = sandbox.intersection(section.evidence_ids)
+        if cited and section_holds_something(section):
+            holding.update(cited)
+    return [row.id for row in report.evidence_index if row.id in holding]
+
+
+_EMPTY_VALUES = frozenset({"", "[]", "{}", "0", "none", "null", "-", "false", "no"})
+
+
+def section_holds_something(section: Any) -> bool:
+    """Whether an evidence section carries a value rather than an empty answer."""
+    values: list[str] = []
+    for row in getattr(section, "rows", None) or []:
+        cells = [str(cell) for cell in row]
+        # A key/value block's first cell is the field's name, not a value.
+        values.extend(cells[1:] if getattr(section, "kind", "") == "kv" else cells)
+    values.extend(str(item) for item in getattr(section, "items", None) or [])
+    values.append(str(getattr(section, "text", "") or ""))
+    return any(value.strip().lower() not in _EMPTY_VALUES for value in values)
+
+
+def _process_lines(node: Any, depth: int) -> list[str]:
+    """One line per process: pid, name and command line, children indented."""
+    line = f"{'  ' * depth}pid {node.pid} {node.name}".rstrip()
+    if node.command_line:
+        line += f": {node.command_line[:200]}"
+    out = [line]
+    for child in node.children:
+        out.extend(_process_lines(child, depth + 1))
+    return out
+
+
 def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     """Deterministic measurements for one technical-spine section.
 
@@ -322,6 +447,20 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
     already carries identity, and a bundle that grows past roughly a thousand
     tokens is the long-prompt regime the per-section design exists to avoid.
     """
+    if section == "payloads":
+        return _payload_facts(report)
+    if section == "configuration":
+        net = report.network
+        return {
+            "urls": [u.url for u in (net.urls if net else [])][:10],
+            "domains": [d.fqdn for d in (net.domains if net else [])][:10],
+            "user_agents": (net.user_agents if net else [])[:3],
+        }
+    if section == "commands":
+        # Nothing measured says what an operator can ask for; the section runs
+        # only when an analyst claim or a captured tool output speaks to it.
+        return {}
+
     static = report.static
     if static is None:
         return {}
@@ -385,6 +524,7 @@ def _technical_facts(section: str, report: MalwareReport) -> dict[str, Any]:
         return {"capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1])[:8])}
     if section == "string_resolution":
         return {
+            "static_import_count": len(static.imports),
             "interesting_string_count": len(static.interesting_strings),
             "capability_profile": dict(sorted(caps.items(), key=lambda kv: -kv[1])[:8]),
         }
@@ -429,6 +569,22 @@ _EVASION_TECHNIQUES = frozenset(
         "T1564.003",
     }
 )
+
+
+def _payload_facts(report: MalwareReport) -> dict[str, Any]:
+    """The carved payloads and the dropped files, as the tools stated them."""
+    carved = [
+        f"{res.get('id')} ({res.get('type') or '?'}, {res.get('size', 0)} bytes, "
+        f"sha256 {str(res.get('sha256') or '')[:16]})"
+        for res in (report.static.embedded_resources if report.static else [])
+        if res.get("carved")
+    ]
+    dropped = [
+        str(op.get("path") or op.get("name") or "")
+        for op in (report.dynamic.file_operations if report.dynamic else [])
+        if isinstance(op, dict) and op.get("operation") == "write"
+    ]
+    return {"carved_payloads": carved[:10], "dropped_files": [d for d in dropped if d][:10]}
 
 
 def is_empty(bundle: dict[str, Any]) -> bool:

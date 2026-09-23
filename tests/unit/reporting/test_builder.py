@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting.builder import MalwareReportBuilder
+from maljan.reporting.builder import NO_SUMMARY_REASON, MalwareReportBuilder
 from maljan.reporting.models import MalwareReport
 from maljan.schemas.judgement import FamilyVerdict, JudgeAssessment, SeverityVerdict
 from tests.unit._ledger_helpers import ledger_from_sandbox
@@ -229,9 +229,42 @@ class TestAttributionGrounding:
 
 
 class TestFallbackNarrative:
-    def test_fallback_produces_summary(self) -> None:
-        report = _build()
-        report = MalwareReportBuilder.apply_fallback_narrative(report)
-        assert len(report.executive_summary) > 100
-        assert report.capabilities_narrative  # non-empty
-        assert report.defensive_recommendations  # non-empty
+    """With no narrative, the platform writes none: it says why, once."""
+
+    def test_the_prose_fields_stay_empty(self) -> None:
+        report = MalwareReportBuilder.apply_fallback_narrative(_build(), "the round timed out")
+        assert report.executive_summary == ""
+        assert report.key_findings == []
+        assert report.capabilities_narrative == []
+        assert report.defensive_recommendations == []
+
+    def test_the_reason_is_recorded_once(self) -> None:
+        report = MalwareReportBuilder.apply_fallback_narrative(_build(), "the round timed out")
+        report = MalwareReportBuilder.apply_fallback_narrative(report, "again")
+        reasons = [r for r in report.degradation_reasons if r.startswith(NO_SUMMARY_REASON)]
+        assert reasons == [f"{NO_SUMMARY_REASON}: the round timed out"]
+
+
+class TestTheNarrativeIsAppliedAsWritten:
+    def test_the_category_is_the_model_s_own(self) -> None:
+        rec = {
+            "category": "other",
+            "action": "Block the C2 domain at the firewall.",
+            "rationale": "It beacons out.",
+            "priority": "P0",
+        }
+        report = MalwareReportBuilder.apply_narrative(
+            _build(), {"executive_summary": "x" * 130, "defensive_recommendations": [rec]}
+        )
+        assert report.defensive_recommendations[0].category == "other"
+
+    def test_the_key_findings_are_carried_with_their_ids(self) -> None:
+        report = MalwareReportBuilder.apply_narrative(
+            _build(),
+            {
+                "executive_summary": "x" * 130,
+                "key_findings": [{"text": "It persists.", "evidence_ids": ["ev_0003"]}],
+            },
+        )
+        (finding,) = report.key_findings
+        assert (finding.text, finding.evidence_ids) == ("It persists.", ["ev_0003"])

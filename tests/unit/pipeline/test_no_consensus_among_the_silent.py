@@ -214,13 +214,43 @@ class TestNoSurfacePrintsAnAgreement:
         assert "not applicable" in text
 
     def test_the_report_prints_no_final_confidence(self) -> None:
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
-
-        text = MarkdownRenderer()._section_run_summary(_summary().to_dict())
+        text = _appendix_text(_summary().to_dict())
 
         assert "Final confidence" not in text
         assert "`consensus`" not in text
         assert "not applicable" in text
+
+    def test_the_verdict_section_states_no_agreement(self) -> None:
+        from maljan.reporting.models import MalwareReport
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+        report = MalwareReport.model_validate(
+            {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": _summary().to_dict()}
+        )
+        text = MarkdownRenderer().render(report)
+        agreement = [line for line in text.splitlines() if "**Analyst agreement:**" in line]
+
+        assert len(agreement) == 1
+        assert "not applicable" in agreement[0]
+        assert "not_applicable" not in agreement[0]
+        assert "consensus after" not in agreement[0]
+
+    def test_every_surface_names_no_cause_the_record_does_not_hold(self) -> None:
+        # ``not_applicable`` is recorded both when fewer than two analysts
+        # produced claims and when the debate stage did not run.
+        from maljan.analysis.run_summary import NOT_APPLICABLE_PHRASE, NOT_APPLICABLE_SENTENCE
+        from maljan.reporting.models import MalwareReport
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+        report = MalwareReport.model_validate(
+            {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": _summary().to_dict()}
+        )
+        text = MarkdownRenderer().render(report)
+        agreement = [line for line in text.splitlines() if "**Analyst agreement:**" in line]
+
+        assert NOT_APPLICABLE_PHRASE in agreement[0]
+        assert NOT_APPLICABLE_SENTENCE in text
+        assert "fewer than two" not in text
 
     def test_the_report_s_negotiation_block_does_not_borrow_the_verdict_s_confidence(
         self,
@@ -232,3 +262,14 @@ class TestNoSurfacePrintsAnAgreement:
 
         assert "final_confidence" not in summary
         assert summary["termination_reason"] == "not_applicable"
+
+
+def _appendix_text(run_summary: dict) -> str:
+    """The report's run-summary appendix for a report carrying ``run_summary``."""
+    from maljan.reporting.models import MalwareReport
+    from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+    report = MalwareReport.model_validate(
+        {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": run_summary}
+    )
+    return MarkdownRenderer()._appendix_run(report)

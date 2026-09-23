@@ -9,7 +9,7 @@ import { COMPLETED_JOB, JOB_ID, REPORT, REPORT_ID } from "./report-fixture";
  * boundary anywhere in `src/`** — a TypeError in one of these tabs is not a
  * caught error state, it takes the route down. The Summary tab in particular
  * dereferences `severity.rating`, `identity.hashes.sha256`, `attribution.family`
- * and `capabilities_narrative` with no guards.
+ * and `executive_summary` with no guards.
  *
  * Each test asserts a heading that appears **only in the populated branch**.
  * The tabs all render a static shell plus one of {loading, "Analysis in
@@ -34,7 +34,7 @@ const heading = (name: RegExp | string) => async (page: import("@playwright/test
 };
 
 const TABS: Tab[] = [
-  { path: "", expect: heading(/Executive Summary/i) },
+  { path: "", expect: heading(/Key findings/i) },
   // The typed "Sample Identification" block stands down when a header section
   // covers it, and the fixture has one — so the hashes are what this tab
   // always renders on a populated report, whichever half draws the rest.

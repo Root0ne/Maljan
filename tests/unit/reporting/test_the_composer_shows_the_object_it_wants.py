@@ -128,3 +128,23 @@ class TestWhatIsStillNotAccepted:
         payload = {"introduction": "   "}
 
         assert _section_text_envelope(payload, _IntroOut, "introduction") == payload
+
+
+class TestANestedObjectIsShownWhole:
+    """A step's citations sit two lists deep, and a mark has a closed vocabulary;
+    both are shown as the answer has to write them."""
+
+    def test_the_flow_step_shows_its_vocabulary_and_its_citation_list(self) -> None:
+        from maljan.reporting.composer import _FlowOut
+
+        assert _expected_object(_FlowOut) == (
+            '{"steps": [{"order": 0, "action": "...", "voice": "observed or assessed", '
+            '"evidence_refs": ["..."]}]}'
+        )
+
+    def test_the_configuration_shows_how_a_value_may_be_obtained(self) -> None:
+        from maljan.reporting.composer import _ConfigOut
+
+        assert '"how_obtained": "decrypted or observed or static-string or inferred"' in (
+            _expected_object(_ConfigOut)
+        )

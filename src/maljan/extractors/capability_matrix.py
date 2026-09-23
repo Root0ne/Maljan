@@ -113,6 +113,19 @@ def build_capability_matrix(
         # number — every one it names alone under a verdict with no malware
         # object to hang an edge on — is not a technique at confidence zero.
         confidence = max((float(c) for c in info.get("confidences") or ()), default=None)
+        # Who stated that number: the first source whose number it is. The two
+        # lists are appended together, so a source that stated no number is
+        # never named as the producer of someone else's.
+        stated_by = next(
+            (
+                who
+                for c, who in zip(
+                    info.get("confidences") or (), info.get("stated_by") or (), strict=True
+                )
+                if float(c) == confidence
+            ),
+            "",
+        )
         layers = info.get("layers") or []
         valid = bool(info.get("valid", True))
 
@@ -149,6 +162,7 @@ def build_capability_matrix(
                 technique_name=name,
                 evidence=evidence[:6],
                 confidence=confidence,
+                confidence_source=stated_by,
                 contributing_layers=layers,
                 technique_id_valid=valid,
                 platforms=platforms,
@@ -311,9 +325,17 @@ def _collect_techniques(
         # analyst claim. A finding's technique ids reach the report through a
         # path no check has ever seen, so they leave this false and the caller
         # marks the row unpublished.
+        # ``stated_by`` names the producer of each confidence, index for index.
         return techniques.setdefault(
             tid,
-            {"evidence": [], "confidences": [], "layers": [], "valid": True, "claimed": False},
+            {
+                "evidence": [],
+                "confidences": [],
+                "stated_by": [],
+                "layers": [],
+                "valid": True,
+                "claimed": False,
+            },
         )
 
     # 1. The judge's bundle. An attack-pattern says the technique is in the
@@ -347,6 +369,7 @@ def _collect_techniques(
             row["valid"] = False
         if confidence is not None:
             row["confidences"].append(confidence)
+            row["stated_by"].append("the judge")
         # The relationship is the judge's statement, so the judge is its
         # source. The agents it credits are the judge's words about the
         # evidence and stay on the relationship as written; a layer is a source
@@ -376,6 +399,7 @@ def _collect_techniques(
                     row["valid"] = False
                 row["confidences"].append(float(getattr(claim, "confidence", 0.0) or 0.0))
                 layer = getattr(isr, "domain", None) or agent_name or "agent"
+                row["stated_by"].append(f"the {layer} analyst")
                 if layer and str(layer) not in row["layers"]:
                     row["layers"].append(str(layer))
                 quote = getattr(claim, "claim", None) or getattr(claim, "evidence_ref", None) or ""
@@ -393,7 +417,7 @@ def _collect_techniques(
             # so an id that arrived here and nowhere else is printed as claimed
             # and published nowhere; see ``FINDING_ONLY_REASON``.
             for finding in getattr(isr, "findings", None) or []:
-                confidence = float(getattr(finding, "confidence", 0.0) or 0.0)
+                stated = getattr(finding, "confidence", None)
                 title = str(getattr(finding, "title", "") or "")
                 layer = getattr(isr, "domain", None) or agent_name or "agent"
                 for raw in getattr(finding, "technique_ids", None) or []:
@@ -401,7 +425,11 @@ def _collect_techniques(
                     if not tid:
                         continue
                     row = _row(tid)
-                    row["confidences"].append(confidence)
+                    # A finding with no number adds none, and names no one
+                    # as its producer: the two lists stay index for index.
+                    if isinstance(stated, int | float):
+                        row["confidences"].append(float(stated))
+                        row["stated_by"].append(f"the {layer} analyst, on a finding")
                     if layer and str(layer) not in row["layers"]:
                         row["layers"].append(str(layer))
                     if title and title not in row["evidence"]:

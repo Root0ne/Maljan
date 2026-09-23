@@ -161,9 +161,8 @@ class TestTheSentence:
         assert "120,000" not in text
 
     def test_the_served_markdown_of_an_old_run_prints_no_estimate(self) -> None:
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
 
-        text = MarkdownRenderer()._section_run_summary(
+        text = _run_summary_text(
             {"tokens": {"llm_calls": 40, "estimated_calls": 3, "input_tokens": 120000}}
         )
         assert "120,000" not in text and "no count is shown" in text
@@ -225,3 +224,14 @@ class TestRunSummaryIntegration:
         assert summary.to_dict()["tokens"] is None
         assert summary.to_dict()["models"] is None
         assert "## Token Usage" not in summary.to_markdown()
+
+
+def _run_summary_text(run_summary: dict) -> str:
+    """The report's run-summary appendix for a report carrying ``run_summary``."""
+    from maljan.reporting.models import MalwareReport
+    from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+    report = MalwareReport.model_validate(
+        {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": run_summary}
+    )
+    return MarkdownRenderer()._appendix_run(report)

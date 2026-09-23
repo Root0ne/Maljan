@@ -64,9 +64,10 @@ def test_the_report_and_the_narrative_prompt_print_not_given(verdict: str) -> No
     markdown = MarkdownRenderer().render(report)
     prompt = build_prompt_text(report)
 
-    assert "T1490" in markdown
-    assert "conf=not given" in markdown
-    assert "0.00" not in markdown.split("## MITRE ATT&CK Matrix", 1)[1].split("\n## ", 1)[0]
+    attack = markdown.split("## 8. MITRE ATT&CK mapping", 1)[1].split("\n## ", 1)[0]
+    (row,) = [line for line in attack.splitlines() if "| T1490 |" in line]
+    assert "| judge | not given |" in row
+    assert "0.00" not in attack
     assert "conf=not given" in prompt
 
 
@@ -87,3 +88,55 @@ def test_a_number_somebody_gave_is_still_printed() -> None:
     _cells, mappings = build_capability_matrix(stix_output=bundle, isr_reports=None)
 
     assert [m.confidence for m in mappings] == [0.6]
+
+
+def test_a_relationship_with_no_number_names_no_producer_for_an_analyst_s() -> None:
+    """The judge's edge adds no number and so names no producer; the analyst's
+    0.7 is the cell's number, stated by the analyst."""
+    from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+
+    bundle = _bundle("Malware")
+    bundle["objects"] += [
+        {"type": "malware", "id": "malware--1", "name": "x", "is_family": False},
+        {
+            "type": "relationship",
+            "id": "relationship--1",
+            "relationship_type": "uses",
+            "source_ref": "malware--1",
+            "target_ref": "attack-pattern--1",
+        },
+    ]
+    isr = AgentISR(
+        agent_id="static",
+        domain="static",
+        claims=[
+            ClaimEvidence(
+                claim="deletes shadow copies",
+                evidence_ref="ref",
+                confidence=0.7,
+                technique_id="T1490",
+            )
+        ],
+    )
+    cells, _ = build_capability_matrix(stix_output=bundle, isr_reports={"static": isr})
+    assert cells[0].confidence == 0.7
+    assert cells[0].confidence_source == "the static analyst"
+
+    report = MalwareReportBuilder(
+        file_hash="c" * 64,
+        file_name="sample.exe",
+        sample_path=None,
+        sandbox_report={},
+        reports={},
+        isr_reports={"static": isr},
+        stix_output=bundle,
+        run_summary={},
+        discussion_history=[],
+        final_decision="Malware",
+        overall_confidence=0.7,
+        judge_assessment=None,
+        malware_category="dropper",
+        evidence_ledger=[],
+    ).build_deterministic()
+    attack = MarkdownRenderer().render(report).split("## 8. MITRE ATT&CK mapping", 1)[1]
+    assert "0.70, stated by the static analyst" in attack.split("\n## ", 1)[0]

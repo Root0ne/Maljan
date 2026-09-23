@@ -956,7 +956,7 @@ def schema_violations(model: Any, payload: Any, *, code: str) -> list[Violation]
     """Pydantic's complaints about ``payload``, in words the model can act on.
 
     The narrative and the report composer answer against a schema with real
-    constraints — three to five capability paragraphs, an executive summary
+    constraints — three to six key findings, an executive summary
     between 120 and 1200 characters, six required fields per recommendation —
     and the constraints are exactly the things a model gets wrong. Before this
     the whole answer was discarded on the first one and the report shipped the
@@ -1306,7 +1306,8 @@ def narrative_capability_violations(
         return []
     data = payload if isinstance(payload, dict) else getattr(payload, "__dict__", {}) or {}
     parts: list[str] = [str(data.get("executive_summary") or "")]
-    parts.extend(str(item) for item in (data.get("capabilities_narrative") or []))
+    for item in data.get("key_findings") or []:
+        parts.append(str(item.get("text") or "") if isinstance(item, dict) else str(item))
     return ungrounded_capabilities("\n".join(parts), grounding)
 
 
@@ -1330,6 +1331,141 @@ def section_capability_violations(payload: Any, grounding: CapabilityGrounding) 
 
     _walk(payload)
     return ungrounded_capabilities("\n".join(parts), grounding, code=UNGROUNDED_CAPABILITY_CODE)
+
+
+# The report's own citations. Each of these is shown to the model once and,
+# if it survives, recorded beside the value it is about; none of them removes
+# or rewrites what the model wrote.
+UNGROUNDED_FINDING_CODE = "narrative.ungrounded_finding"
+FLOW_VOICE_CODE = "report.flow_voice"
+UNCITED_CONFIGURATION_CODE = "report.configuration_uncited"
+
+# The codes a report round's answer is kept with. A broken shape leaves nothing
+# to print; each of these leaves a printable answer with a finding beside it.
+KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
+    {
+        UNGROUNDED_CAPABILITY_CODE,
+        UNGROUNDED_FINDING_CODE,
+        FLOW_VOICE_CODE,
+        UNCITED_CONFIGURATION_CODE,
+    }
+)
+
+# How many ids one finding names. A model that cites forty entries is not
+# helped by forty names in its feedback.
+_MAX_NAMED_IDS = 6
+
+
+def _named_ids(ids: Iterable[str]) -> str:
+    listed = [safe_finding_value(value) for value in ids]
+    shown = ", ".join(listed[:_MAX_NAMED_IDS])
+    if len(listed) > _MAX_NAMED_IDS:
+        shown += f" and {len(listed) - _MAX_NAMED_IDS} more"
+    return shown
+
+
+def _rows_of(payload: Any, key: str) -> list[dict[str, Any]]:
+    data = payload if isinstance(payload, dict) else {}
+    return [row for row in (data.get(key) or []) if isinstance(row, dict)]
+
+
+def _cited(row: dict[str, Any], key: str) -> list[str]:
+    return [str(value).strip() for value in (row.get(key) or []) if str(value).strip()]
+
+
+def key_finding_citation_violations(payload: Any, known_ids: Iterable[str]) -> list[Violation]:
+    """Key findings that cite an evidence id this run's ledger does not carry.
+
+    A bullet with no ids is not a finding here: the report prints it with "no
+    evidence cited" beside it and the reader decides. A bullet that names an
+    id nobody issued is pointing a reader at nothing, and that is the one
+    worth one question. With no ledger to compare against, nothing is judged.
+    """
+    known = {str(value) for value in known_ids}
+    if not known:
+        return []
+    out: list[Violation] = []
+    for index, row in enumerate(_rows_of(payload, "key_findings")):
+        unknown = [value for value in _cited(row, "evidence_ids") if value not in known]
+        if unknown:
+            out.append(
+                Violation(
+                    code=UNGROUNDED_FINDING_CODE,
+                    message=(
+                        f"key finding {safe_finding_value(index + 1)} cites "
+                        f"{safe_finding_value(_named_ids(unknown))}, which no entry in "
+                        "this run's evidence carries. Cite the ev_ ids of the entries the "
+                        "finding stands on, or leave evidence_ids empty."
+                    ),
+                    path=f"key_findings.{index}.evidence_ids",
+                )
+            )
+    return out
+
+
+def flow_voice_violations(payload: Any, sandbox_ids: Iterable[str]) -> list[Violation]:
+    """Execution-flow steps marked ``observed`` that cite no sandbox entry.
+
+    ``observed`` tells a reader a sandbox watched the step happen. A step read
+    from the code is ``assessed``, and the mark is the model's to choose; this
+    only asks, once, when the mark and the citations disagree.
+    """
+    sandbox = {str(value) for value in sandbox_ids}
+    out: list[Violation] = []
+    for index, row in enumerate(_rows_of(payload, "steps")):
+        if str(row.get("voice") or "").strip().lower() != "observed":
+            continue
+        if any(value in sandbox for value in _cited(row, "evidence_refs")):
+            continue
+        where = (
+            f"the sandbox answers that recorded something are {_named_ids(sorted(sandbox))}"
+            if sandbox
+            else "no sandbox answer in this run recorded anything"
+        )
+        out.append(
+            Violation(
+                code=FLOW_VOICE_CODE,
+                message=(
+                    f"step {safe_finding_value(row.get('order', index + 1))} is marked observed "
+                    f"but cites no sandbox entry ({safe_finding_value(where)}). Cite the sandbox "
+                    "entry that shows "
+                    "it, or mark the step assessed."
+                ),
+                path=f"steps.{index}.voice",
+            )
+        )
+    return out
+
+
+def configuration_citation_violations(payload: Any, known_ids: Iterable[str]) -> list[Violation]:
+    """Configuration values said to be decrypted or observed that cite no entry.
+
+    A value read off the wire or out of a decryption routine was read from a
+    tool's answer, and that answer is what makes it checkable. Inferred and
+    static-string values are left to their own mark.
+    """
+    known = {str(value) for value in known_ids}
+    out: list[Violation] = []
+    for index, row in enumerate(_rows_of(payload, "items")):
+        how = str(row.get("how_obtained") or "").strip().lower()
+        if how not in ("decrypted", "observed"):
+            continue
+        cited = _cited(row, "evidence_refs")
+        if cited and (not known or any(value in known for value in cited)):
+            continue
+        out.append(
+            Violation(
+                code=UNCITED_CONFIGURATION_CODE,
+                message=(
+                    f"configuration item {safe_finding_value(index + 1)} "
+                    f"({safe_finding_value(row.get('key'))}) is marked {safe_finding_value(how)} "
+                    "but cites no entry in this run's evidence. Cite the entry "
+                    "the value was read from, or mark how it was obtained as inferred."
+                ),
+                path=f"items.{index}.evidence_refs",
+            )
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------

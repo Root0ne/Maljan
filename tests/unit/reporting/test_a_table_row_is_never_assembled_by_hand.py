@@ -39,13 +39,15 @@ RENDERER = (
     / "markdown.py"
 )
 
-# The three functions that may name the separator, each because composing it is
-# their whole job. Nothing else in the file has a reason to write one, and the
-# names are matched against a qualified owner, so a method or a nested function
-# cannot take one of them and write a row under its cover.
+# The functions that may name the separator: three because composing it is
+# their whole job, and one because recognising it in model prose is how a
+# table the model wrote is kept from forming. Nothing else in the file has a
+# reason to write one, and the names are matched against a qualified owner, so
+# a method or a nested function cannot take one of them and write a row under
+# its cover.
 #
 # The rule the check applies is broader than it sounds: no string literal
-# outside these three may contain a ``|`` at all. A regular expression with an
+# outside these four may contain a ``|`` at all. A regular expression with an
 # alternation and a sentence of prose that happens to use the character both
 # trip it. Nothing in the renderer needs either today; the next edit that does
 # has to restructure or widen this list on purpose rather than work around it.
@@ -53,6 +55,8 @@ ALLOWED: dict[str, str] = {
     "_row": "composes a row out of its cells, which is what everything else calls",
     "_divider": "writes the rule under a header row",
     "_cell": "escapes the separator out of one cell, and has to name it to do that",
+    "_is_delimiter_row": "recognises a table's delimiter row inside model prose, so that "
+    "_escape_block can make it text",
 }
 
 
@@ -128,7 +132,9 @@ class TestTheRendererCannotWriteARowByHand:
         tree = ast.parse(RENDERER.read_text(encoding="utf-8"))
         defined = _module_level_functions(tree)
         assert set(ALLOWED) <= defined, sorted(set(ALLOWED) - defined)
-        assert len(ALLOWED) <= 3
+        # Three that write a table and one that recognises a table inside prose
+        # in order to stop it; a fifth has to argue its case here.
+        assert len(ALLOWED) <= 4
         assert all(reason.strip() for reason in ALLOWED.values())
 
     def test_a_borrowed_name_does_not_buy_the_separator(self) -> None:

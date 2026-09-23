@@ -64,6 +64,22 @@ class TestBinaryBuilders:
         assert sections["pe_exports"].items == ["StartService"]
         assert sections["packer_signatures"].rows == [["UPX", ".text"]]
 
+    def test_export_addresses_and_the_export_name_are_carried_when_reported(self) -> None:
+        payload = {
+            "machine": 34404,
+            "exports": ["extra", "run"],
+            "export_rows": [
+                {"name": "extra", "ordinal": 1, "rva": "0x3ce4"},
+                {"name": "run", "ordinal": 2, "rva": "0x3ce4"},
+            ],
+            "export_name": "LibraryTag.dll",
+        }
+        sections = _by_key(build_sections([_entry("pe_info", payload)]))
+        exports = sections["pe_exports"]
+        assert (exports.kind, exports.columns) == ("table", ["Name", "Ordinal", "RVA"])
+        assert exports.rows == [["extra", "1", "0x3ce4"], ["run", "2", "0x3ce4"]]
+        assert dict(sections["pe_header"].rows)["export name"] == "LibraryTag.dll"
+
     def test_elf_info_yields_its_own_tables(self) -> None:
         sections = _by_key(build_sections([_entry("elf_info")]))
         assert dict(sections["elf_header"].rows)["interpreter"].endswith("ld-linux-x86-64.so.2")
@@ -89,6 +105,19 @@ class TestOtherToolBuilders:
     def test_strings(self) -> None:
         sections = _by_key(build_sections([_entry("strings")]))
         assert sections["strings"].rows[0][2].startswith("http://c2.evil.tld")
+
+    def test_a_reputation_lookup_lifts_its_engine_counts_into_rows(self) -> None:
+        payload = {
+            "sha256": "0" * 64,
+            "last_analysis_stats": {"malicious": 52, "undetected": 23},
+            "coverage": {"engines": 75},
+        }
+        sections = _by_key(build_sections([_entry("get_file_report", payload, agent="pipeline")]))
+        rows = dict(sections["tool_get_file_report"].rows)
+        assert rows["engines malicious"] == "52"
+        assert rows["engines undetected"] == "23"
+        assert rows["engines"] == "75"
+        assert sections["tool_get_file_report"].evidence_ids == ["ev_0001"]
 
     def test_yara(self) -> None:
         sections = _by_key(build_sections([_entry("yara_scan")]))
@@ -236,6 +265,17 @@ class TestAgentContributions:
         assert findings.rows[0][1] == "Injects into a remote process"
         assert findings.rows[0][3] == "0.80"
         assert findings.evidence_ids == ["ev_0001"]
+
+    def test_a_finding_with_no_confidence_says_none_was_given(self) -> None:
+        isrs = {
+            "static": AgentISR(
+                agent_id="static",
+                domain="static",
+                findings=[Finding(title="Writes a file", evidence_ids=["ev_0001"])],
+            )
+        }
+        findings = _by_key(build_sections([], isrs))["findings"]
+        assert findings.rows[0][3] == "not given"
 
 
 class TestGroundingContract:

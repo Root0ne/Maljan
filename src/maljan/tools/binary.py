@@ -177,8 +177,19 @@ def pe_info(
         out["delay_imports"] = _import_rows(getattr(pe, "DIRECTORY_ENTRY_DELAY_IMPORT", None))
     if exports:
         out["exports"] = list(_pe_exports(pe))
+        # The same symbols with their ordinal and address, and the name the
+        # export directory gives the library. Several exports sharing one
+        # address, or a DLL whose own name differs from the one it was
+        # submitted under, are header facts a reader should see.
+        out["export_rows"] = _pe_export_rows(pe)
+        export_name = _pe_export_name(pe)
+        if export_name:
+            out["export_name"] = export_name
     if resources:
         out["resources"] = list(_pe_resources(pe))
+        version_info = _pe_version_strings(pe)
+        if version_info:
+            out["version_info"] = version_info
     if pdb:
         out["pdb_path"] = _pe_pdb_path(pe)
     if overlay:
@@ -192,6 +203,61 @@ def pe_info(
         [s.name for s in parsed_sections], packer_catalog
     )
     return out
+
+
+def _decoded(value: Any) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace").strip("\x00").strip()
+    return str(value or "").strip()
+
+
+def _pe_export_rows(pe: Any) -> list[dict[str, Any]]:
+    """One row per exported symbol: its name, ordinal and RVA, as the directory states them."""
+    export_dir = getattr(pe, "DIRECTORY_ENTRY_EXPORT", None)
+    rows: list[dict[str, Any]] = []
+    for sym in getattr(export_dir, "symbols", None) or []:
+        try:
+            address = getattr(sym, "address", None)
+            rows.append(
+                {
+                    "name": _decoded(getattr(sym, "name", None)),
+                    "ordinal": getattr(sym, "ordinal", None),
+                    "rva": f"0x{int(address):x}" if address is not None else None,
+                }
+            )
+        except Exception:  # noqa: BLE001 — one unreadable symbol costs one row
+            continue
+    return rows
+
+
+def _pe_export_name(pe: Any) -> str:
+    """The library name the export directory records, or ``""``."""
+    try:
+        return _decoded(getattr(getattr(pe, "DIRECTORY_ENTRY_EXPORT", None), "name", None))
+    except Exception:  # noqa: BLE001 — an unreadable name is no name
+        return ""
+
+
+# The version-resource strings that name the binary itself.
+_VERSION_NAME_KEYS = ("InternalName", "OriginalFilename", "ProductName", "FileDescription")
+
+
+def _pe_version_strings(pe: Any) -> dict[str, str]:
+    """The naming strings of the version resource, as the resource states them."""
+    found: dict[str, str] = {}
+    try:
+        for group in getattr(pe, "FileInfo", None) or []:
+            for info in group if isinstance(group, list) else [group]:
+                for table in getattr(info, "StringTable", None) or []:
+                    for key, value in (getattr(table, "entries", None) or {}).items():
+                        name = _decoded(key)
+                        if name in _VERSION_NAME_KEYS and name not in found:
+                            text = _decoded(value)
+                            if text:
+                                found[name] = text
+    except Exception:  # noqa: BLE001 — a malformed resource names nothing
+        return found
+    return found
 
 
 def _pe_warnings(pe: Any) -> list[str]:

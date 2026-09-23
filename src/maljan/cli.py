@@ -11,6 +11,7 @@ from typing import Any, cast, get_args
 
 import typer
 
+from maljan.analysis.run_summary import NOT_APPLICABLE_SENTENCE
 from maljan.app import MaljanApp
 from maljan.core.config import LLMConfig, Settings
 from maljan.core.logger import logger
@@ -87,7 +88,7 @@ def analyze(
     typer.echo(f"\n--- VERDICT: {decision} ---")
     typer.echo(f"Negotiation rounds: {iterations}")
     typer.echo(
-        "Consensus: not applicable (fewer than two analysts produced claims)"
+        NOT_APPLICABLE_SENTENCE
         if result.get("consensus_applicable") is False
         else f"Consensus reached: {consensus}"
     )

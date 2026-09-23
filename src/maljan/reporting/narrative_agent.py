@@ -4,9 +4,12 @@ The deterministic ``MalwareReportBuilder`` produces every section of the
 report except the prose:
 
   - ``executive_summary``        — one paragraph SOC-handover style summary
-  - ``capabilities_narrative``   — 3-5 paragraphs describing each kill-chain
-                                   capability with ATT&CK references
+  - ``key_findings``             — 3-6 one-sentence bullets, each with the
+                                   evidence ids it stands on
   - ``defensive_recommendations``— 3-8 P0/P1/P2 actions
+
+The capability paragraphs this round used to write are the technical-analysis
+subsections the composer writes, one subsection per call, each cited.
 
 ``NarrativeAgent.generate()`` runs **once** and falls back gracefully on
 any LLM error. The caller (``report_node``) then dispatches between
@@ -30,15 +33,21 @@ from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.logger import logger
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
-    UNGROUNDED_CAPABILITY_CODE,
+    KEPT_WITH_A_FINDING,
     CapabilityGrounding,
     ValidationTally,
     Violation,
+    key_finding_citation_violations,
     narrative_capability_violations,
     retry_with_feedback,
     schema_violations,
 )
-from maljan.reporting.models import DefensiveRecommendation, MalwareReport, confidence_text
+from maljan.reporting.models import (
+    DefensiveRecommendation,
+    KeyFinding,
+    MalwareReport,
+    confidence_text,
+)
 from maljan.utils.json_cleaner import safe_parse_json
 
 # ---------------------------------------------------------------------------
@@ -54,8 +63,63 @@ class NarrativeOutput(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     executive_summary: str = Field(min_length=120, max_length=1200)
-    capabilities_narrative: list[str] = Field(min_length=3, max_length=5)
+    # The prompt asks for three to six; the schema accepts two, so two good
+    # bullets are kept rather than failing the whole round and losing the
+    # summary with them.
+    key_findings: list[KeyFinding] = Field(min_length=2, max_length=6)
     defensive_recommendations: list[DefensiveRecommendation] = Field(min_length=3, max_length=8)
+
+
+# The exact object the answer has to be, with an example of every field. A model
+# shown the keys answers with them; a model shown a description of the keys
+# answered with its own names on two unrelated models six times out of six.
+EXPECTED_OBJECT = """{
+  "executive_summary": "One paragraph, 120 to 900 characters.",
+  "key_findings": [
+    {"text": "One sentence stating one finding.", "evidence_ids": ["ev_0007"]}
+  ],
+  "defensive_recommendations": [
+    {
+      "category": "edr_hunting",
+      "action": "The concrete step to take.",
+      "rationale": "Why this sample makes it necessary.",
+      "priority": "P1",
+      "technique_id": "T1490",
+      "detection": "The exact observable: API, registry key, event id or rule."
+    }
+  ]
+}"""
+
+EXAMPLE_OBJECT = """{
+  "executive_summary": "The sample is a file-encrypting ransomware executable that we assess \
+with moderate confidence belongs to a known ransomware family. It encrypts documents on local \
+and mapped drives, appends one fixed extension to each file and leaves a note in every folder \
+it touches [ev_0012, ev_0019]. Affected hosts should be isolated and restored \
+from offline backups.",
+  "key_findings": [
+    {"text": "It enumerates fixed and mapped network drives before encrypting.",
+     "evidence_ids": ["ev_0008"]},
+    {"text": "It deletes volume shadow copies with vssadmin before encrypting.",
+     "evidence_ids": ["ev_0014"]},
+    {"text": "It likely uses a separate key for each file; no key material was recovered.",
+     "evidence_ids": []}
+  ],
+  "defensive_recommendations": [
+    {"category": "edr_hunting", "action": "Alert on vssadmin.exe deleting shadow copies.",
+     "rationale": "The sample removes shadow copies before encrypting.", "priority": "P0",
+     "technique_id": "T1490",
+     "detection": "Sysmon event 1 for vssadmin.exe with delete shadows on its command line."},
+    {"category": "other", "action": "Keep offline, versioned backups of file shares.",
+     "rationale": "Encrypted files cannot be recovered without them.", "priority": "P1",
+     "technique_id": "T1486",
+     "detection": "Many renames to one new extension within minutes on a file server."},
+    {"category": "user_awareness",
+     "action": "Warn users not to open unexpected executables from shared folders.",
+     "rationale": "The sample needs a user to start it.", "priority": "P2",
+     "technique_id": "T1204.002",
+     "detection": "Process creation of an unsigned executable from a user share."}
+  ]
+}"""
 
 
 # ---------------------------------------------------------------------------
@@ -68,19 +132,22 @@ _SYSTEM_PROMPT = (
     "Write in calm, technical prose suitable for a SOC handover. "
     "STRICT RULES:\n"
     "1. DO NOT invent capabilities, families, or TTPs. Only describe what the "
-    "deterministic evidence below supports.\n"
+    "deterministic evidence below supports. A sandbox answer with nothing in it is "
+    "not an execution: describe sandbox behaviour, seen or absent, only where a "
+    "sandbox entry above records some.\n"
     "2. Every MITRE ATT&CK technique you cite must appear in parentheses with "
-    "its ID, e.g. 'process injection (T1055)'.\n"
+    "its ID, e.g. 'inhibit system recovery (T1490)'.\n"
     "3. executive_summary: 120-900 characters, one paragraph, no headings. This "
     "is a verdict/impact briefing ONLY — state the classification, the severity, "
     "the single most important risk, and the containment call to action. Do NOT "
-    "enumerate individual techniques or restate the capability narrative here.\n"
-    "4. capabilities_narrative: a JSON ARRAY of 3-5 strings, one string per "
-    "paragraph. Emit the key ONCE with a list value; do not repeat the key. Each "
-    "paragraph covers a single kill-chain phase or capability cluster and its "
-    "supporting evidence. This is the ONLY place technique detail belongs — do "
-    "NOT repeat the executive_summary, and do NOT include defensive/remediation "
-    "advice here (that belongs solely in defensive_recommendations).\n"
+    "enumerate individual techniques here.\n"
+    '4. key_findings: a JSON ARRAY of 3-6 objects, each {"text": one sentence, '
+    '"evidence_ids": [the ev_ ids it stands on]}. Emit the key ONCE with a list '
+    "value. Cover what the sample is, what it does, how it persists, how it talks "
+    "to its C2, how it is detected and what is uncertain. Cite only ev_ ids that "
+    "appear in the evidence above; leave evidence_ids empty rather than invent one. "
+    "A finding may only summarise what the evidence above holds: never introduce a "
+    "fact nothing above states.\n"
     "5. defensive_recommendations: 3-8 entries. Each entry is a JSON object "
     "with EXACTLY these six fields, and the first four are REQUIRED:\n"
     "   - `category`: one of firewall, edr_hunting, registry_hardening, gpo, "
@@ -100,22 +167,29 @@ _SYSTEM_PROMPT = (
     "action already implied by the narrative prose.\n"
     "6. The three fields must NOT restate one another — a reader should be able "
     "to read all three with no repeated sentences.\n"
-    "7. Output MUST conform to the provided JSON schema."
+    "7. State facts plainly and write inferences with estimative words ('likely', "
+    "'we assess'); name a confidence level only for attribution. Cite ev_ ids in "
+    "square brackets where a sentence rests on an entry, e.g. [ev_0007]. No second "
+    "person and no marketing tone.\n"
+    "8. Answer with exactly this JSON object, these keys and no others:\n"
+    + EXPECTED_OBJECT
+    + "\nFor example (the shape only; write what this run's evidence supports):\n"
+    + EXAMPLE_OBJECT
 )
 
 
-_LIST_FIELDS = ("capabilities_narrative", "defensive_recommendations")
+_LIST_FIELDS = ("key_findings", "defensive_recommendations")
 
 
 def _parse_keeping_duplicate_keys(text: str) -> dict[str, Any] | None:
     """Parse the model's JSON without letting a repeated key overwrite the earlier one.
 
-    Measured 2026-08-12: asked for a 3-5 paragraph narrative, this model emits
-    ``capabilities_narrative`` **three times as separate keys of one object**
-    rather than once with an array. JSON says the last duplicate wins, so
-    ``json.loads`` silently reduced a three-paragraph narrative to a single
-    string, which then failed ``list[str]`` validation — and with structured
-    output disabled for local servers there was nothing left to catch it.
+    Measured on a local model: asked for a list of paragraphs, it emitted the
+    list's key **three times as separate keys of one object** rather than once
+    with an array. JSON says the last duplicate wins, so ``json.loads`` silently
+    reduced three items to one, which then failed list validation — and with
+    structured output disabled for local servers there was nothing left to
+    catch it.
 
     Collecting duplicates recovers exactly what the model meant to say. Returns
     ``None`` when the text is not parseable JSON at all, leaving the ordinary
@@ -206,11 +280,7 @@ def build_prompt_text(report: MalwareReport) -> str:
             if report.overall_confidence is None
             else f"Overall confidence: {report.overall_confidence:.2f}"
         ),
-        (
-            f"Severity: {report.severity.rating} ({report.severity.overall_score:.1f}/10)"
-            if report.severity
-            else "Severity: not assessed"
-        ),
+        (f"Severity: {report.severity.rating}" if report.severity else "Severity: not assessed"),
         f"Malware category: {report.malware_category or 'unknown'}",
         (
             f"Attribution family: {report.attribution.family or 'unknown'} "
@@ -317,7 +387,7 @@ def build_prompt_text(report: MalwareReport) -> str:
             "TASK",
             "----",
             "Write the three narrative fields described in the system prompt. "
-            "Return ONLY the JSON object that matches the schema.",
+            "Return ONLY the JSON object shown there, with those keys.",
         ]
     )
     return "\n".join(lines)
@@ -376,6 +446,9 @@ class NarrativeAgent:
         # the ISRs, a capability an analyst stated in a claim would be a
         # violation here and a pass there, on one run.
         grounding = CapabilityGrounding.from_report(report, isr_reports)
+        # The entries a key finding may cite: the ledger's, which the pack's
+        # own entries are part of.
+        known_ids = [row.id for row in report.evidence_index]
 
         # Skip the structured path entirely on endpoints where it does not
         # work. Measured live 2026-08-07: against llama-server this call hung
@@ -390,11 +463,11 @@ class NarrativeAgent:
                     lambda: structured.ainvoke(messages), what="NarrativeAgent structured"
                 )
                 if isinstance(result, NarrativeOutput):
-                    return self._kept_with_ungrounded_recorded(result, grounding)
+                    return self._kept_with_ungrounded_recorded(result, grounding, known_ids)
                 # Some providers return a dict — coerce defensively.
                 if isinstance(result, dict):
                     return self._kept_with_ungrounded_recorded(
-                        NarrativeOutput.model_validate(result), grounding
+                        NarrativeOutput.model_validate(result), grounding, known_ids
                     )
                 logger.warning(
                     "NarrativeAgent: unexpected structured-output type %s; "
@@ -409,8 +482,8 @@ class NarrativeAgent:
 
         # Manual-parse fallback, through the validation loop. Useful for local
         # llama.cpp servers that occasionally return text wrapped in ```json
-        # fences. ``NarrativeOutput`` carries real constraints — three to five
-        # capability paragraphs, six required fields per recommendation — and
+        # fences. ``NarrativeOutput`` carries real constraints — three to six
+        # key findings, six fields per recommendation — and
         # those are what a model gets wrong; before the loop the first breach
         # discarded the whole answer and the report shipped the deterministic
         # template with nothing saying which rule was broken. A dropped socket
@@ -441,6 +514,7 @@ class NarrativeAgent:
                 [
                     lambda p: schema_violations(NarrativeOutput, p, code="narrative.schema"),
                     lambda p: narrative_capability_violations(p, grounding),
+                    lambda p: key_finding_citation_violations(p, known_ids),
                 ],
                 parse=_narrative_payload,
                 on_feedback=self.validation_tally.count,
@@ -458,8 +532,8 @@ class NarrativeAgent:
         # found, and dropping it would replace one wrong summary with none —
         # so it is kept and the terms are recorded, which is what a reader can
         # act on. Nothing rewrites the prose.
-        broken = [v for v in violations if v.code != UNGROUNDED_CAPABILITY_CODE]
-        ungrounded = [v for v in violations if v.code == UNGROUNDED_CAPABILITY_CODE]
+        broken = [v for v in violations if v.code not in KEPT_WITH_A_FINDING]
+        ungrounded = [v for v in violations if v.code in KEPT_WITH_A_FINDING]
         if broken:
             # ``error``: reaching here means the report ships with no narrative
             # at all, which is a visible hole rather than a degraded detail.
@@ -483,15 +557,18 @@ class NarrativeAgent:
         if not violations:
             return
         logger.warning(
-            "NarrativeAgent: %d capability claim(s) the run does not establish survived the "
-            "retry and are recorded unresolved (%s).",
+            "NarrativeAgent: %d finding(s) on the summary survived the retry and are "
+            "recorded unresolved (%s).",
             len(violations),
             ", ".join(v.path for v in violations),
         )
         self.validation_tally.record_unresolved("narrative", violations)
 
     def _kept_with_ungrounded_recorded(
-        self, output: NarrativeOutput, grounding: CapabilityGrounding
+        self,
+        output: NarrativeOutput,
+        grounding: CapabilityGrounding,
+        known_ids: list[str] | None = None,
     ) -> NarrativeOutput:
         """The structured path's answer, with its over-claims recorded.
 
@@ -500,7 +577,11 @@ class NarrativeAgent:
         report that over-claims is no better for having been produced by the
         path that usually works.
         """
-        found = narrative_capability_violations(output.model_dump(), grounding)
+        answer = output.model_dump()
+        found = [
+            *narrative_capability_violations(answer, grounding),
+            *key_finding_citation_violations(answer, known_ids or []),
+        ]
         self.validation_tally.count(found)
         self._record_ungrounded(found)
         return output

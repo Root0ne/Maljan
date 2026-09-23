@@ -138,10 +138,19 @@ class TestEverySurfaceCountsTheSameRows:
         assert "T1027.005: 1 source(s) — capa" in block
 
     def test_the_report_line_counts_two_asserted(self) -> None:
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
-
         rows = corroboration({}, _lookup_heavy_ledger())
-        text = MarkdownRenderer()._section_run_summary({"corroboration": rows})
+        text = _appendix_text({"corroboration": rows})
 
         assert "2 asserted by a deterministic source" in text
         assert "attck_lookup" not in text
+
+
+def _appendix_text(run_summary: dict) -> str:
+    """The report's run-summary appendix for a report carrying ``run_summary``."""
+    from maljan.reporting.models import MalwareReport
+    from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+    report = MalwareReport.model_validate(
+        {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": run_summary}
+    )
+    return MarkdownRenderer()._appendix_run(report)

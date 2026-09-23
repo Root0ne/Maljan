@@ -1754,7 +1754,46 @@ def make_join_node(stage: Any, container: ServiceContainer, finishes: tuple[str,
     return node_fn
 
 
-def note_unavailable_tools(container: ServiceContainer, agent: Any) -> list[str]:
+# The format-specific parsers, and the routed formats each is for. A parser the
+# sample's format never calls on is not something this run lost: a missing
+# Mach-O library on a PE sample said nothing about the PE and still reached
+# the report's first page as a degradation. A tool not named here, or a sample
+# whose format is unknown, keeps its reason.
+_FORMAT_TOOLS: dict[str, frozenset[str]] = {
+    "pe_info": frozenset({"pe"}),
+    "elf_info": frozenset({"elf"}),
+    "macho_info": frozenset({"mach-o", "macho"}),
+    "apk_info": frozenset({"apk", "dex"}),
+    "document_info": frozenset({"ole2", "ooxml", "pdf", "doc", "docx", "xls", "xlsx", "rtf"}),
+}
+
+
+_UNAVAILABLE_TOOL_RE = re.compile(r"^server\.[^.]+\.(?P<tool>[^.(]+)_unavailable\(")
+
+
+def reason_applies_to_format(reason: str, file_type: str) -> bool:
+    """Whether a server's degradation reason costs a sample of this format anything.
+
+    The registry records a withheld tool when it attaches the server, before
+    any sample is known; this is where the reason meets the sample. Only a
+    format-specific parser the routed format never needs is left out.
+    """
+    match = _UNAVAILABLE_TOOL_RE.match(str(reason or ""))
+    return match is None or _needed_for(match.group("tool"), file_type)
+
+
+def _needed_for(tool: str, file_type: str) -> bool:
+    """Whether a missing ``tool`` costs this sample anything, by its routed format."""
+    formats = _FORMAT_TOOLS.get(tool)
+    routed = str(file_type or "").strip().lower()
+    if formats is None or not routed or routed == "unknown":
+        return True
+    return routed in formats
+
+
+def note_unavailable_tools(
+    container: ServiceContainer, agent: Any, file_type: str = ""
+) -> list[str]:
     """Record, once, each bound tool the server's manifest says cannot answer here.
 
     Read at stage start from the capability manifests the registry kept when
@@ -1762,7 +1801,8 @@ def note_unavailable_tools(container: ServiceContainer, agent: Any) -> list[str]
     its library before the analyst spends a step discovering it. The reason
     is ``server.<key>.<tool>_unavailable(<why>)`` with the remedy after it; it
     goes on the registry's list, which the judge reads into the run summary,
-    and is written there once however many agents bind the tool.
+    and is written there once however many agents bind the tool. A
+    format-specific parser the routed ``file_type`` never needs is not recorded.
     """
     from maljan.agents.tool_pinning import server_of
 
@@ -1784,6 +1824,8 @@ def note_unavailable_tools(container: ServiceContainer, agent: Any) -> list[str]
         if manifest is None:
             continue
         for missing in manifest.unavailable(names):
+            if not _needed_for(missing.tool, file_type):
+                continue
             reason = missing.degradation_reason
             noted.append(reason)
             if _record_once(registry.degradation_reasons, reason):
@@ -1921,7 +1963,7 @@ def make_stage_agent_node(
             agent = container.get_agent(agent_name)
             bound_agent = agent
             role = container.agent_role(agent_name)
-            note_unavailable_tools(container, agent)
+            note_unavailable_tools(container, agent, str(state.get("file_type") or ""))
 
             agent.pipeline_stage = stage.key
             # What the pipeline established before this analyst, and the run
@@ -3311,7 +3353,11 @@ def make_judge_node(
             # rests on, so it degrades rather than failing — but the reader of
             # the report is entitled to know the judge ran without its
             # threat-intel lookups.
-            _degradation_reasons.extend(container.server_degradation_reasons())
+            _degradation_reasons.extend(
+                reason
+                for reason in container.server_degradation_reasons()
+                if reason_applies_to_format(reason, str(state.get("file_type") or ""))
+            )
             if _failed_analysts:
                 _degradation_reasons.append(f"analyst failures: {', '.join(_failed_analysts)}")
             if _empty_analysts:
@@ -4093,11 +4139,15 @@ def make_report_node(
         _report_tally = ValidationTally()
 
         narrative_dict: dict[str, Any] | None = None
+        # Why no summary was written, when none is: said where the summary
+        # would have been, because the platform no longer writes one itself.
+        no_summary_because = "no report model ran in this run"
         try:
             narrative_agent = container.get_narrative_agent()
         except Exception as exc:  # noqa: BLE001
             logger.warning("report_node: NarrativeAgent unavailable (%s); using fallback.", exc)
             narrative_agent = None
+            no_summary_because = f"the report model was unavailable ({type(exc).__name__})"
 
         # The narrative round is the reporter's first loop: its model list
         # starts at its first model again, with turn deadlines measured against
@@ -4130,12 +4180,20 @@ def make_report_node(
                     _NARRATIVE_TIMEOUT_SECONDS,
                 )
                 narrative_output = None
+                no_summary_because = (
+                    f"the report model did not answer within {_NARRATIVE_TIMEOUT_SECONDS}s"
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "report_node: NarrativeAgent.generate raised (%s); using fallback.",
                     exc,
                 )
                 narrative_output = None
+                no_summary_because = f"the narrative round failed ({type(exc).__name__})"
+            else:
+                no_summary_because = (
+                    "the report model's answer did not fit its schema after its retry"
+                )
             if narrative_output is not None:
                 narrative_dict = narrative_output.model_dump(mode="json")
             _report_tally.merge(getattr(narrative_agent, "validation_tally", ValidationTally()))
@@ -4144,16 +4202,17 @@ def make_report_node(
             report = MalwareReportBuilder.apply_narrative(report, narrative_dict)
             logger.info(
                 "report_node: narrative LLM round succeeded (summary_chars=%d, "
-                "paragraphs=%d, recs=%d).",
+                "key_findings=%d, recs=%d).",
                 len(report.executive_summary),
-                len(report.capabilities_narrative),
+                len(report.key_findings),
                 len(report.defensive_recommendations),
             )
         else:
-            report = MalwareReportBuilder.apply_fallback_narrative(report)
+            report = MalwareReportBuilder.apply_fallback_narrative(report, no_summary_because)
 
         # Section-wise Composer authors the professional
-        # spine (intro, technical-analysis subsections, C2 channels, conclusion),
+        # spine (background, execution flow, technical-analysis subsections by
+        # capability, configuration, commands, C2 channels),
         # each grounded in its isolated evidence bundle. Best-effort — a Composer
         # failure never blocks the report. None in mock / when composer disabled.
         try:

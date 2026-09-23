@@ -21,7 +21,7 @@ import type { MalwareReport } from "@/types/malware-report";
  *    suppresses its fallback call to `/reports/{id}/mitre`.
  *
  * The Summary tab is the fragile consumer: it dereferences `severity.rating`,
- * `identity.hashes.sha256`, `attribution.family`, `capabilities_narrative` and
+ * `identity.hashes.sha256`, `attribution.family`, `executive_summary` and
  * `stix_bundle_extended` with no guards, and there is no error boundary in the
  * app, so a missing one takes the page down rather than degrading.
  */
@@ -39,7 +39,6 @@ export const MALWARE_REPORT: MalwareReport = {
   overall_confidence: 0.91,
   malware_category: "trojan",
   severity: {
-    overall_score: 8.4,
     rating: "High",
     business_impact: "Credential theft followed by lateral movement.",
     affected_platforms: ["windows"],
@@ -239,9 +238,12 @@ export const MALWARE_REPORT: MalwareReport = {
   },
   executive_summary:
     "The sample injects into a running process, establishes Run-key persistence and beacons to a newly registered domain over HTTPS.",
-  capabilities_narrative: [
-    "Allocates and writes executable memory into an unrelated process.",
-    "Registers itself for execution at user logon.",
+  key_findings: [
+    {
+      text: "Allocates and writes executable memory into an unrelated process.",
+      evidence_ids: [],
+    },
+    { text: "Registers itself for execution at user logon.", evidence_ids: [] },
   ],
   defensive_recommendations: [
     {

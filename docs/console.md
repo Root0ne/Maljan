@@ -12,7 +12,7 @@ The web console in `apps/web`. It talks to the API in `apps/api` over
 /samples                Upload a sample, browse samples, submit an analysis
 /jobs                   Every analysis, filtered by status; cancel a running one
 /analysis/{jobId}
-  ├── SUMMARY           Severity, findings counts, time per stage, executive summary, exports
+  ├── SUMMARY           Severity, findings counts, time per stage, key findings, technical analysis, exports
   ├── CONVERSATION      The run as a group conversation, live and replayed
   ├── IDENTITY          Hashes, file metadata, signatures, reputation
   ├── STATIC            Binary structure, imports, strings, packers
@@ -126,6 +126,33 @@ filters" is information rather than an apology. While a job is still running
 those three are all there is, and the rest appear as the report fills them.
 Inside a tab the same rule applies to every panel, so a run with no observed
 traffic shows no empty Domains table.
+
+**The report model's words, labelled as its words.** SUMMARY draws what the
+report model wrote in the order the exported report prints it: the key
+findings, each bullet with the ledger entries it cites (or *no evidence cited*),
+then the summary paragraph; and a technical-analysis card with the execution
+flow — each step carrying the model's own mark, *observed in sandbox* or
+*assessed* — the configuration it recovered with how each value was obtained,
+the commands the sample accepts and its C2 channels. Both cards say *Written by
+the report model* beside their heading. A run whose report model wrote nothing
+says why, in the words the report records, rather than showing a template: the
+platform writes no prose of its own, and that line is labelled *Measured*, not
+as the report model's. A step or a configuration item the validator kept a
+finding on shows it beside the row (`report.flow_voice`,
+`report.configuration_uncited`), as the exported report does, and a step marked
+observed in a run with no sandbox observation says so. The console is a reading
+surface, so the defanging rule applies to it: a C2 channel's endpoints are
+written `hxxp://`, `[.]` and `[:]`; the machine surfaces keep them live. The
+severity card's platform line reads *Platform (from the file format,
+measured)*, since the builder reads it from the format and the judge did not
+assess it. A report stored before key findings
+existed shows its summary and the capability paragraphs it carried. IDENTITY
+adds the header facts the format tool read — architecture, whether the image is
+a DLL, the export directory's name and the version resource's internal name —
+and STATIC lists the exports with their ordinal and address when the tool
+reported them. ATTRIBUTION says who named the family: the judge, with the
+entries it cited, or the sandbox's own classification when the judge named
+none. None of it is drawn with a gradient.
 
 Older analysis URLs still resolve, from the server: `/ttps` goes to ATT&CK,
 `/rules`, `/signatures` and `/stix` to DETECTION, and `/live`, `/process`,

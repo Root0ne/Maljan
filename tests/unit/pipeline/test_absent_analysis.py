@@ -175,6 +175,7 @@ class TestTheEvidenceTheVerdictStageCouldNotSee:
         from maljan.pipeline.outcome import NO_CLAIMS_REASON
         from maljan.reporting.builder import MalwareReportBuilder
         from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
 
         report = MalwareReportBuilder.apply_fallback_narrative(
             MalwareReport(
@@ -185,7 +186,8 @@ class TestTheEvidenceTheVerdictStageCouldNotSee:
             )
         )
 
-        assert "inconclusive" in report.executive_summary.lower()
+        findings = MarkdownRenderer().render(report).split("## 1. Key findings", 1)[1]
+        assert "This analysis is inconclusive" in findings.split("## 2.", 1)[0]
 
 
 class TestTheWorkerFailsSuchAJob:
@@ -468,17 +470,23 @@ class TestWhatTheReaderIsTold:
             degradation_reasons=[INCONCLUSIVE_REASON],
         )
 
-    def test_the_deterministic_summary_says_inconclusive_rather_than_classified(self) -> None:
+    def test_the_key_findings_say_inconclusive_rather_than_classified(self) -> None:
         from maljan.reporting.builder import MalwareReportBuilder
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
 
         report = MalwareReportBuilder.apply_fallback_narrative(self._inconclusive_report())
+        findings = (
+            MarkdownRenderer().render(report).split("## 1. Key findings", 1)[1].split("## 2.")[0]
+        )
 
-        assert "inconclusive" in report.executive_summary.lower()
-        assert "classified as" not in report.executive_summary.lower()
+        assert "This analysis is inconclusive" in findings
+        assert "classified as" not in findings.lower()
+        assert report.executive_summary == ""
 
-    def test_an_ordinary_run_keeps_the_summary_it_had(self) -> None:
+    def test_an_ordinary_run_says_no_summary_was_written(self) -> None:
         from maljan.reporting.builder import MalwareReportBuilder
         from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
 
         report = MalwareReportBuilder.apply_fallback_narrative(
             MalwareReport(
@@ -487,8 +495,10 @@ class TestWhatTheReaderIsTold:
                 overall_confidence=0.8,
             )
         )
+        findings = MarkdownRenderer().render(report).split("## 1. Key findings", 1)[1]
 
-        assert report.executive_summary.startswith("Sample classified as malware")
+        assert "No summary was written: no report model ran." in findings
+        assert "inconclusive" not in findings.split("## 2.", 1)[0]
 
     def test_the_header_carries_the_reason(self) -> None:
         """The degraded banner is where a reader meets it, not a JSON field."""

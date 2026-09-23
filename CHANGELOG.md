@@ -655,6 +655,26 @@ change landed on `main`.
   scheduled-task name, both C2 URLs, the User-Agent, the beacon format and the
   command words that a plain `strings` pass cannot see.
 
+- **Key findings, an execution flow, a configuration table and a command
+  table, written by the report model.** The narrative round answers two to
+  six key findings, each with the ledger entries it cites; the composer writes
+  the execution flow (each step marked *observed* or *assessed*), the
+  configuration it recovered with how each value was obtained, the commands
+  the sample accepts, prose for API and string resolution, command and control
+  and payloads, and C2 channels with their endpoints. Each is asked for as the
+  exact JSON object with an example and printed as written. New validation
+  codes, fed back once and recorded when they survive: `narrative.ungrounded_finding`,
+  `report.flow_voice`, `report.configuration_uncited`.
+- **`reporting.defang`.** `defang(value, kind)` writes network indicators the
+  way analysts exchange them (`hxxps://`, `[.]`, `[:]`, `[@]`) and leaves every
+  other kind unchanged; `ProseDefanger` applies it to exactly the run's own
+  indicators inside prose.
+- **`pe_info` reports export ordinals and addresses, the export directory's
+  name and the version resource's naming strings** (`export_rows`,
+  `export_name`, `version_info`). The report's identity gains `architecture`,
+  `is_dll`, `export_name` and `internal_name`, and the compile timestamp is
+  read from the header.
+
 ### Changed
 
 - **Staging is per job.** The sidecars' staging directory held every job the
@@ -1518,6 +1538,38 @@ change landed on `main`.
   more often in the severity rationale than in the report's unmapped-behaviour
   list, and an indicator's `valid_from` is the analysis time rather than a
   date copied out of the STIX documentation.
+- **The report reads as a vendor's malware analysis.** The Markdown, HTML and
+  PDF follow one numbered layout — key findings, sample overview, verdict and
+  assessment, execution flow, technical analysis by capability, observed
+  behaviour, static properties, ATT&CK, indicators, detection,
+  recommendations, attribution, limitations and four appendices — and every
+  H2 names its voice: Measured, Observed in sandbox, Assessed by the judge or
+  Written by the report model. A confidence prints as its number, a fixed word
+  for it and its producer. The title names the family and category when the
+  judge named a family. The tool failures and evidence counts move from the
+  header to §13; the header keeps one line pointing there. A reader or a
+  script that finds sections by their old headings (`## Sample
+  Identification`, `## Severity & Impact`, `## Executive Summary`, `##
+  Network IOCs`, `## Evidence`, `## Run Summary`, …) must look for the new
+  numbered ones.
+- **Network indicators in the Markdown, HTML and PDF are defanged by kind**,
+  in tables, in model prose and in the evidence appendix. The JSON report,
+  the STIX bundle, MISP and `/reports/{id}/iocs` stay live.
+- **`consolidated_iocs` stores live values with their kind, source, context
+  and the publish rule's answer** (`published`: `yes` or `no: <reason>`), and
+  the report prints it as its indicator section. A consumer that read the old
+  defanged `value` now reads the live one.
+- **With no narrative, the report writes no prose.** The fallback no longer
+  fills the executive summary, capability paragraphs and a recommendation from
+  a template; the report records `the report model wrote no summary: <why>`
+  among the degradation reasons and says it in §1. A mock run's summary and
+  recommendations are empty.
+- **The recommendation category is the model's own.** It was re-derived from
+  the action's wording and overwrote the model's answer.
+- **The console's SUMMARY tab draws the key findings and the technical
+  analysis**, labelled as the report model's; IDENTITY adds the header facts,
+  STATIC the export ordinals and addresses, ATTRIBUTION who named the family
+  and the entries cited.
 
 - **The judge's verdict call and each composer section wait as long as their
   answer takes at the model's measured pace.** At 3.8 tokens a second a 600 s
@@ -3680,6 +3732,80 @@ change landed on `main`.
   recorded `stix.property_not_carried` row that does not spend the judge's
   retry, `analysis_reports.judge_stix_bundle` stores the judge's JSON as
   written, and a malware object's `sample_refs` is carried into the export.
+- **What a run measured reaches its report, once and from the right source.**
+  The header's timestamp, machine and library flag reach the sample overview —
+  from the identity, or on a stored report from the format tool's own section.
+  One binary read twice (the triage pack's pe_info and the analyst's, capa run
+  twice) is one section table, one import table, one export list and one set of
+  rule rows. A similar sample is named by the id it carries rather than `?`. A
+  technique's source is every producer that named it — the rules that asserted
+  it, the analysts, the judge's verdict — and a confidence no producer stated
+  (a technique whose `confidence` is `None`) prints "not given" or "rule
+  match", never "0.00, judge"; a stated one names its producer, and an
+  unresolved `stix.credit_without_claim` prints beside its row. Every identity hash `/iocs` publishes is in the indicator table.
+- **An empty sandbox answer is not an observation.** The report speaks in the
+  sandbox's voice only over what a sandbox recorded; a sandbox whose tools
+  answered with nothing — a mock with no fixture — gets one sentence in the
+  run's own voice saying nothing shows the sample was executed, with the reason
+  the run recorded. The report models are told the same in their prompts.
+  An execution-flow step marked observed may cite only a sandbox answer that
+  recorded something; one citing an empty answer is asked about, and the report
+  prints the `report.flow_voice` note beside any step marked observed in a run
+  with no observation.
+- **Every numbered section is printed.** A section or a §5, §10 or §12
+  subsection with nothing in the run prints one line in the platform's voice
+  saying whether nothing was found or nothing looked; the table subsections of
+  §6, §7 and §9 are unnumbered headings. A script that looked for `### 6.1
+  Process tree`, `### 7.5 Rule hits`, `### 9.1 File and host indicators` and
+  their siblings must look for the unnumbered titles.
+- **A degraded run's header is one reader sentence.** It is built from the
+  analysts' and the sandbox's states and points to §13, which now lists every
+  degradation reason verbatim with its remedy and each analyst's state; no
+  reason code or install command is on the first screen, and §3 does not claim
+  consensus among analysts that claimed nothing.
+- **Every printed number has an owner.** A technique's confidence prints with
+  its producer (new `CapabilityCell.confidence_source`), or "producer not
+  recorded" on a stored row; an unstated one prints "not given"; a packer,
+  function-hash, similarity or carved-payload field with no value prints "not
+  recorded"; a similar sample with no distance is counted, not listed; §2 states
+  the reputation lookup's engine count ("VirusTotal: 52 of 75 engines flag it as
+  malicious"), which `ledger_report` now lifts into rows.
+- **The measured proof sits beside the prose.** §5.1 and §5.2 print the capa
+  rules that support them with their evidence ids; in §8 a rule naming a
+  technique a row already holds is folded into that row, and a rule-only
+  technique is one row with the catalogue's tactic and name.
+- **Voices name who spoke.** The platform's no-summary fallback, the platform
+  read from the file format (now a §2 row) and a family named by the sandbox
+  are no longer tagged as a model's or the judge's, in the report and in the
+  console; the title names a family only when the judge cited evidence for it;
+  the report model's unresolved findings print under §1.
+- **A value cannot break a line or open a heading.** List items, steps and
+  headings are built by one helper each, prose cannot open a heading or a code
+  fence, and a guard test fails the build on a hand-built bullet. The HTML
+  anchors and contents are the section titles without the voice tag, a model's
+  private address is marked in §5.7, prose never leaves `http://` live before a
+  defanged host, and the console defangs a channel's endpoints.
+- **A model's list is cut only with a record**, and a missing parser degrades a
+  run only for a sample of the format it parses (no Mach-O note on a PE).
+- **The report models' contracts, prompts and instructions carry no evaluation
+  answer.** The narrative contract and its citation rule use the invented
+  class's technique ids, the composer's instructions are module data with a
+  neutral configuration checklist, and the leak test reads all of them.
+- **Model prose cannot open a setext heading or a table**: a line of `=` or `-`
+  and a table delimiter row are escaped like `#` and fences.
+- **`Finding.confidence` is `None` when the analyst gave none** (was 0.0); the
+  findings table prints "not given" and the matrix records no number for it.
+- The degraded header says an analyst was *skipped* when its record says so,
+  from the stage and agent records; an empty capability subsection names the
+  tools that ran over the file; PEB access is listed once; the unscored
+  similarity line reads "No similarity measure was recorded for these
+  samples."
+- **A family-specific section needs its family.** An encryption scheme with no
+  file-encryption field prints beside the anti-analysis prose rather than under
+  a ransomware heading, and a block of placeholder values ("none", "unknown")
+  is not content. A Malware Behavior Catalog id claimed as a technique is listed
+  under the ATT&CK table as a behaviour, not as an unresolved technique row.
+
 - **The Ollama probe loads the model the way the job will.** The `llm` and
   `agent` probes asked Ollama with no `num_ctx` and no `keep_alive`, so the
   model was left loaded at the server's default 4,096-token context and the
@@ -3874,6 +4000,15 @@ change landed on `main`.
   catalogue per domain. Nothing in the tree reads the old path; a deployment or
   a script of your own that reads it by name must be pointed at the new file,
   whose rows are keyed the same way and carry the same two keys.
+- **The severity score** (`severity.overall_score`), the rating read through
+  a fixed table and printed as a number out of ten nobody stated. A stored
+  report's score is ignored on load.
+- **The capability paragraphs and the conclusion as sections.** The narrative
+  round and the composer no longer write `capabilities_narrative` or
+  `conclusion`; a stored report prints its paragraphs under the technical
+  analysis and its sophistication rating beside the verdict.
+- **`reporting.builder.defang`**, replaced by `reporting.defang.defang(value, kind)`.
+
 ### Upgrading
 
 An existing `.env` deployment is not migrated automatically. Move the bootstrap
@@ -3988,3 +4123,13 @@ labels rather than the published ids — read those through `labels`), `false`
 for a record kept as the parsed bundle. A `/reports/{id}/stix?source=judge`
 answer with `"kept": false` now covers a run whose judge produced no bundle
 too. Malware objects may carry `sample_refs`.
+Reports are not migrated. A report stored before the vendor layout renders in
+it with the sections it has: its score is ignored, its capability paragraphs
+print under the technical analysis, its conclusion's rating beside the verdict
+and its indicator table is rebuilt from its own blocks. A consumer reading
+`severity.overall_score`, `capabilities_narrative`, `conclusion` or the old
+defanged `consolidated_iocs[].value` must stop: the score is gone, the two
+prose fields are written by nothing, and the value is live. Scripts that parse
+the Markdown by heading must use the new numbered headings, and a pipeline
+that expected a summary on a mock run must expect `executive_summary` empty
+and read the degradation reason instead.
