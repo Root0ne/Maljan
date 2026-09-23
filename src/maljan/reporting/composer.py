@@ -397,7 +397,7 @@ class ReportComposer:
     def __init__(
         self,
         llm: BaseChatModel,
-        section_max_tokens: int = 900,
+        section_max_tokens: int = 0,
         per_section_timeout: int = 120,
         token_ledger: Any | None = None,
         model_label: str = "",
@@ -405,6 +405,7 @@ class ReportComposer:
         output_cap: int | None = None,
         caps_by_model: dict[str, int] | None = None,
         turn_share: float | None = None,
+        budget_note: str = "",
     ) -> None:
         self.llm = llm
         self.section_max_tokens = section_max_tokens
@@ -413,6 +414,10 @@ class ReportComposer:
         # asked to keep reasoning out (the container decides). The wait and the
         # cut are both judged against this, because it is what the server caps.
         self.output_cap = int(output_cap or section_max_tokens)
+        # How that budget was reached, in one sentence: the configured value,
+        # or the reply room of the model's own context window. Printed beside
+        # the section's wait in the run summary, so the number can be checked.
+        self.budget_note = budget_note
         # Each model of the reporter's list, by the label its answers carry,
         # and the cap its own provider was given: what "cut" means for the
         # model that answered.
@@ -722,6 +727,7 @@ class ReportComposer:
                 model_name_of(self.llm),
                 configured,
                 int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0),
+                budget=str(getattr(self, "budget_note", "") or ""),
             )
         )
         if per_call <= configured:
@@ -891,7 +897,8 @@ class ReportComposer:
                 self._note_degradation(
                     f"report section '{section or schema.__name__}' is missing: its answer "
                     f"reached the output cap of {cut_at} tokens and was cut off "
-                    "(composer_section_max_tokens; a model's reasoning counts against it)"
+                    "(the section's output budget, derived in the run summary; a model's "
+                    "reasoning counts against it)"
                 )
                 return None
             self._note_degradation(

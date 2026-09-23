@@ -1116,7 +1116,11 @@ ANNOTATIONS: dict[str, Annotation] = {
     },
     "reporting.composer_section_max_tokens": {
         "title": "Composer section max tokens",
-        "description": ("Output-token cap per report section when composer_enabled is true."),
+        "description": (
+            "Output-token cap per report section when composer_enabled is true. 0 derives it "
+            "per model from the context window the model serves (the room an analyst's reply "
+            "is given), and the run summary shows the derivation."
+        ),
         "subgroup": "Report content",
     },
     "reporting.default_tlp": {

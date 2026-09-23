@@ -2997,7 +2997,14 @@ class ReportingConfig(BaseModel):
     # legacy single-round NarrativeAgent. Bounded per-section prompts + hard
     # per-section timeout keep the local SWA model from stalling.
     composer_enabled: bool = True
-    composer_section_max_tokens: Annotated[int, Field(ge=1)] = 900
+    # What one report section may generate, in tokens. 0, the default, derives
+    # it per model: the room an analyst's reply is given on that model — the
+    # larger of ``expert_max_tokens`` and ``judge_max_tokens``, at most a
+    # quarter of the context window the model serves — with the derivation
+    # printed in the run summary. A positive value is an operator's own budget
+    # and is used as it always was. A fixed 900 dropped a section of a live
+    # report when the model reasoned past it.
+    composer_section_max_tokens: Annotated[int, Field(ge=0)] = 0
     composer_per_section_timeout: Annotated[int, Field(ge=1)] = 120
     # Server-side HTML→PDF export.
     html_export_enabled: bool = True
