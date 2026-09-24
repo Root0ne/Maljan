@@ -872,8 +872,10 @@ change landed on `main`.
   `n_predict` extras); Ollama, whose client takes no per-call cap, keeps its
   built cap. A prompt larger than the whole window is recorded, because
   Ollama cuts such a prompt from the front, system prompt included, without a
-  word. The 8,192-token fallback window a failed
-  probe leaves sizes nothing. The narrative round's wait is sized from its
+  word. On llama.cpp a cap set for one call now reaches the server's own
+  fields, so a view answer bound to its view's cap is held there where the
+  server used to write on to the built cap. The 8,192-token fallback window a
+  failed probe leaves sizes nothing. The narrative round's wait is sized from its
   budget and the measured pace like a section's, where it was a fixed 600 s
   (`narrative:round` in Appendix B).
   **Upgrading:** a deployment that set `llm.expert_max_tokens` above
