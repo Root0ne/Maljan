@@ -1773,17 +1773,36 @@ UNCITED_CONFIGURATION_CODE = "report.configuration_uncited"
 SECTION_CUT_CODE = "composer.cut_at_output_cap"
 
 
-def section_cut_violation(cap: int) -> Violation:
-    """What a section the cap cut is told, with the cap it ran into."""
+# How much of a cut answer its question shows, as a sample of its shape.
+SECTION_CUT_HEAD_CHARS = 160
+
+
+def section_cut_violation(cap: int, *, chars: int = 0, begun: int = 0, head: str = "") -> Violation:
+    """What a section the cap cut is told: the cap, the answer's size, and how it opened.
+
+    The cut answer itself is not sent back (``retry_with_feedback``'s
+    ``drop_answer_for``): it is about a cap's worth of tokens nobody can read,
+    and a retry that carried it had less room to answer in than the first call.
+    """
+    size = (
+        f" It ran to {int(chars):,} characters with {int(begun)} item(s) begun"
+        + (
+            f", and opened with {safe_finding_value(head[:SECTION_CUT_HEAD_CHARS])!r}."
+            if head
+            else "."
+        )
+        if chars
+        else ""
+    )
     return Violation(
         code=SECTION_CUT_CODE,
         message=(
             f"Your previous answer reached the output limit of {int(cap)} tokens and was "
-            "cut off before its JSON closed, so none of it could be read. Any reasoning you "
-            "write counts against the same limit. Answer again with an object that closes "
-            f"well inside {int(cap)} tokens: only the items the evidence supports best, each "
-            "written once, every text a short phrase, the JSON on one line without "
-            "indentation."
+            f"cut off before its JSON closed, so none of it could be read.{size} Any "
+            "reasoning you write counts against the same limit. Answer again with an object "
+            f"that closes well inside {int(cap)} tokens: only the items the evidence supports "
+            "best, each written once, every text a short phrase, the JSON on one line "
+            "without indentation."
         ),
     )
 
@@ -4053,13 +4072,24 @@ def _collect(parsed: Any, validators: Sequence[Validator]) -> list[Violation]:
     return found
 
 
-def _with_feedback(messages: list[Any], answer: Any, violations: Sequence[Violation]) -> list[Any]:
-    """The conversation plus the model's answer plus the correction turn."""
+def _with_feedback(
+    messages: list[Any],
+    answer: Any,
+    violations: Sequence[Violation],
+    *,
+    keep_answer: bool = True,
+) -> list[Any]:
+    """The conversation plus the model's answer plus the correction turn.
+
+    ``keep_answer=False`` leaves the answer out: the correction describes it
+    instead (a cut section answer, see ``section_cut_violation``).
+    """
     from langchain_core.messages import AIMessage, HumanMessage
 
     content = getattr(answer, "content", None)
     turns = list(messages)
-    turns.append(AIMessage(content=str(content if content is not None else answer)))
+    if keep_answer:
+        turns.append(AIMessage(content=str(content if content is not None else answer)))
     turns.append(HumanMessage(content=feedback_text(violations)))
     return turns
 
@@ -4203,6 +4233,8 @@ async def retry_with_feedback[T](
     sink: EventSink | None = None,
     agent: str = "",
     stage: str = "",
+    drop_answer_for: frozenset[str] = frozenset(),
+    can_retry: Callable[[list[Any]], bool] | None = None,
 ) -> tuple[T, list[Violation], int]:
     """Run, validate, and give the model one chance to fix what it got wrong.
 
@@ -4222,6 +4254,11 @@ async def retry_with_feedback[T](
     loop knows which, including for the violations the retry itself introduced.
     A caller with nobody to tell — the CLI, a test, the report composer —
     passes no sink and nothing is emitted.
+
+    ``drop_answer_for`` names the codes whose correction replaces the answer
+    rather than following it, and ``can_retry`` is asked about the retry's
+    whole conversation before it is sent: answered no, the loop ends there
+    with what it has, and the caller records why.
     """
     feed = _feed(sink, agent, stage)
     turns = list(messages)
@@ -4231,9 +4268,13 @@ async def retry_with_feedback[T](
     retries = 0
     shown: list[Violation] = []
     while violations and retries < max_retries:
+        keep = not any(v.code in drop_answer_for for v in violations)
+        following = _with_feedback(turns, answer, violations, keep_answer=keep)
+        if can_retry is not None and not can_retry(following):
+            break
         _announce_feedback(violations, on_feedback, feed, retries + 1)
         shown.extend(violations)
-        turns = _with_feedback(turns, answer, violations)
+        turns = following
         retries += 1
         answer = await run(turns)
         parsed = parse(answer)

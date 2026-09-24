@@ -35,6 +35,7 @@ from maljan.core.token_ledger import structured_answer
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
     KEPT_WITH_A_FINDING,
+    SECTION_CUT_CODE,
     CapabilityGrounding,
     EntryTexts,
     ValidationTally,
@@ -518,6 +519,24 @@ SECTION_ATTEMPTS = 2
 _JSON_STRING_FIELD_RE = re.compile(r'"([A-Za-z_]+)"\s*:\s*"((?:[^"\\]|\\.)*)"')
 
 
+def cut_answer_counts(text: str) -> tuple[int, int, int]:
+    """``(characters, items begun, at most how many distinct)`` of a cut answer.
+
+    The items begun are counted by the string field written most often;
+    "distinct" is the most different values any one string field holds, so
+    items written again and again show as few.
+    """
+    fields = _JSON_STRING_FIELD_RE.findall(text or "")
+    if not fields:
+        return len(text or ""), 0, 0
+    by_key: dict[str, list[str]] = {}
+    for key, value in fields:
+        by_key.setdefault(key, []).append(value)
+    begun = max(len(values) for values in by_key.values())
+    distinct = max(len(set(values)) for values in by_key.values())
+    return len(text or ""), begun, distinct
+
+
 def cut_answer_shape(text: str) -> str:
     """How far a cut answer got, in words: its length, the items begun and how many differ.
 
@@ -527,15 +546,10 @@ def cut_answer_shape(text: str) -> str:
     different values any one string field holds, so items written again and
     again show as few. An answer with no string field says only its length.
     """
-    fields = _JSON_STRING_FIELD_RE.findall(text or "")
-    length = f"{len(text or ''):,} characters"
-    if not fields:
+    chars, begun, distinct = cut_answer_counts(text)
+    length = f"{chars:,} characters"
+    if not begun:
         return length
-    by_key: dict[str, list[str]] = {}
-    for key, value in fields:
-        by_key.setdefault(key, []).append(value)
-    begun = max(len(values) for values in by_key.values())
-    distinct = max(len(set(values)) for values in by_key.values())
     return f"{length}, {begun} item(s) begun, at most {distinct} of them distinct"
 
 
@@ -1016,9 +1030,11 @@ class ReportComposer:
         cut = False
         cut_at = 0
         cut_shapes: list[str] = []
+        cut_text = ""
+        retry_unfit = False
 
         async def _run(turns: list[BaseMessage]) -> Any:
-            nonlocal cut, cut_at
+            nonlocal cut, cut_at, cut_text
             raw = await retry_on_connection_error(
                 lambda: self.llm.ainvoke(turns), what="ReportComposer raw"
             )
@@ -1026,7 +1042,8 @@ class ReportComposer:
             cut = _reached_the_cap(raw, self._cap_of(raw))
             if cut:
                 cut_at = self._cap_of(raw)
-                shape = cut_answer_shape(_message_text(raw))
+                cut_text = _message_text(raw)
+                shape = cut_answer_shape(cut_text)
                 cut_shapes.append(shape)
                 logger.warning(
                     "ReportComposer: section '%s' reached the output cap of %d tokens (%s).",
@@ -1090,7 +1107,10 @@ class ReportComposer:
                 # Whatever a repair made of the text, it is the front of an
                 # answer the cap ended: the model is told why, and asked once
                 # for a shorter one.
-                return [section_cut_violation(cut_at)]
+                chars, begun, _distinct = cut_answer_counts(cut_text)
+                return [
+                    section_cut_violation(cut_at, chars=chars, begun=begun, head=cut_text.strip())
+                ]
             found = [
                 *schema_violations(schema, payload, code="composer.schema"),
                 *section_capability_violations(payload, self._grounding),
@@ -1102,12 +1122,25 @@ class ReportComposer:
                 found.extend(extra(payload))
             return found
 
+        def _fits(turns: list[BaseMessage]) -> bool:
+            # The retry is the first prompt and one short turn; it is sent only
+            # when it leaves the section's output budget free in the window.
+            nonlocal retry_unfit
+            room = self._room_chars()
+            if room is None:
+                return True
+            fits = sum(len(_message_text(turn)) for turn in turns) <= room
+            retry_unfit = not fits
+            return fits
+
         payload, violations, retries = await retry_with_feedback(
             _run,
             list(messages),
             [_validate],
             parse=_parse,
             on_feedback=self.validation_tally.count,
+            drop_answer_for=frozenset({SECTION_CUT_CODE}),
+            can_retry=_fits,
         )
         self.validation_tally.retries += retries
         self.validation_tally.count(violations)
@@ -1138,7 +1171,14 @@ class ReportComposer:
             if cut:
                 # The cap ended the answer, not the model: the schema only
                 # failed because the JSON was cut off. Said as what it was.
-                asked = "; asked once for a shorter answer, which was cut too" if retries else ""
+                asked = (
+                    "; asked once for a shorter answer, which was cut too"
+                    if retries
+                    else "; not asked again: the question would not fit its model's window "
+                    "beside the section's output budget"
+                    if retry_unfit
+                    else ""
+                )
                 self._note_degradation(
                     f"report section '{section or schema.__name__}' is missing: its answer "
                     f"reached the output cap of {cut_at} tokens and was cut off "

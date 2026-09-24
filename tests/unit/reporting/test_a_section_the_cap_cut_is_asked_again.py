@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from maljan.pipeline.validation import SECTION_CUT_CODE, section_cut_violation
+from maljan.pipeline.validation import SECTION_CUT_CODE
 from maljan.reporting.composer import (
     _INSTRUCTIONS,
     ReportComposer,
@@ -77,8 +77,11 @@ class TestTheQuestion:
 
         assert isinstance(result, _HostIdentifiersOut)
         assert [row.value for row in result.identifiers] == ["state.example.bin"]
-        retry_turn = str(llm.seen[1][-1].content)
-        assert retry_turn == _feedback_turn_for(8192)
+        retry = llm.seen[1]
+        assert retry_turn_is_the_question(retry)
+        assert "It ran to 3,550 characters with 40 item(s) begun" in str(retry[-1].content)
+        assert all(_CUT not in str(turn.content) for turn in retry), "the cut answer is not re-sent"
+        assert len(retry) == 2
         assert composer.validation_tally.by_code.get(SECTION_CUT_CODE) == 1
         assert composer.degradations == []
 
@@ -105,10 +108,56 @@ class TestTheQuestion:
         assert SECTION_CUT_CODE not in composer.validation_tally.by_code
 
 
-def _feedback_turn_for(cap: int) -> str:
-    from maljan.pipeline.validation import feedback_text
+def retry_turn_is_the_question(turns: list[Any]) -> bool:
+    return SECTION_CUT_CODE in str(turns[-1].content) and "8192 tokens" in str(turns[-1].content)
 
-    return feedback_text([section_cut_violation(cap)])
+
+def _compose_in_window(llm: _Answers, prompt_chars: int, window: int, cap: int) -> Any:
+    composer = ReportComposer(llm=llm, section_max_tokens=cap)  # type: ignore[arg-type]
+    composer.window_tokens = window
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            "maljan.reporting.composer.structured_output_supported_for_llm", lambda _l: False
+        )
+        result = asyncio.run(
+            composer._invoke(
+                [HumanMessage(content="x" * prompt_chars)],
+                _HostIdentifiersOut,
+                section="host_identifiers",
+            )
+        )
+    return result, composer
+
+
+class TestTheRetryIsSizedToTheWindow:
+    """The retry is the first prompt and one short turn, sent only when it fits."""
+
+    WINDOW = 4000
+    CAP = 1000
+
+    def _cut_at(self, cap: int) -> AIMessage:
+        return AIMessage(content=_CUT, response_metadata={"finish_reason": "length"})
+
+    def test_a_prompt_above_half_the_window_still_gets_its_question(self) -> None:
+        # 2,200 tokens of prompt in a 4,000-token window: above half, and the
+        # cut answer re-sent beside it would not have left the budget free.
+        llm = _Answers(self._cut_at(self.CAP), _whole())
+
+        result, composer = _compose_in_window(llm, 6600, self.WINDOW, self.CAP)
+
+        assert isinstance(result, _HostIdentifiersOut)
+        assert len(llm.seen) == 2
+        assert sum(len(str(t.content)) for t in llm.seen[1]) <= (self.WINDOW - self.CAP) * 3
+
+    def test_a_question_that_would_not_fit_is_not_asked_and_is_recorded(self) -> None:
+        llm = _Answers(self._cut_at(self.CAP))
+
+        result, composer = _compose_in_window(llm, 8900, self.WINDOW, self.CAP)
+
+        assert result is None
+        assert len(llm.seen) == 1
+        (reason,) = composer.degradations
+        assert "not asked again: the question would not fit its model's window" in reason
 
 
 class TestTheShapeOfACutAnswer:
