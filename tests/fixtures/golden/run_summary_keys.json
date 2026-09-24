@@ -54,10 +54,10 @@
     }
   ],
   "generation": {
-    "ceiling_s": null,
     "margin": null,
     "models": "<data-keyed map>",
-    "timeouts": "<data-keyed map>"
+    "timeouts": "<data-keyed map>",
+    "unmeasured_request_timeout_s": null
   },
   "models": "<data-keyed map>",
   "negotiation": {
