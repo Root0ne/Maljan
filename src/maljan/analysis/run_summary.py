@@ -536,7 +536,7 @@ def generation_lines(generation: Any) -> list[str]:
     """Each model's measured generation rate and each call timeout it produced.
 
     One line per model and one per sized call, so a reader can check the
-    arithmetic: the budget, the rate, the margin, the ceiling, and what the
+    arithmetic: the budget, the rate, the margin, and what the
     call was finally given. Nothing measured contributes nothing.
     """
     if not isinstance(generation, dict):
@@ -562,7 +562,6 @@ def generation_lines(generation: Any) -> list[str]:
                 f"{float(row.get('prompt_seconds') or 0.0):.1f}s; from {read_from})"
             )
     margin = generation.get("margin")
-    ceiling = generation.get("ceiling_s")
     for call, row in sorted((generation.get("timeouts") or {}).items()):
         if not isinstance(row, dict):
             continue
@@ -583,14 +582,14 @@ def generation_lines(generation: Any) -> list[str]:
                 f"{float(row['prompt_tokens_per_second']):.2f} tokens/s + "
                 f"{int(row.get('max_tokens') or 0)} tokens written at "
                 f"{float(row.get('tokens_per_second') or 0.0):.2f} tokens/s) × {margin} "
-                f"= {float(row['derived_s']):.0f}s, at most {float(ceiling or 0.0):.0f}s"
+                f"= {float(row['derived_s']):.0f}s"
             )
             continue
         lines.append(
             f"Timeout of `{call}`: {applied:.0f}s — the larger of {configured:.0f}s configured "
             f"and {int(row.get('max_tokens') or 0)} tokens at "
             f"{float(row.get('tokens_per_second') or 0.0):.2f} tokens/s (prompt read included) "
-            f"× {margin} = {float(row['derived_s']):.0f}s, at most {float(ceiling or 0.0):.0f}s"
+            f"× {margin} = {float(row['derived_s']):.0f}s"
         )
     return lines
 

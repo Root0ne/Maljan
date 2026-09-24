@@ -512,7 +512,11 @@ class OpenAIProvider:
             if private is not None:
                 build_kwargs["http_async_client"] = private
 
-        chat_class = with_server_timings(ChatOpenAI)
+        from maljan.llm.generation_rate import with_sized_request_timeout
+
+        # Every request carries a timeout sized for its own output cap once the
+        # model's pace is measured; the client's stands until then.
+        chat_class = with_sized_request_timeout(with_server_timings(ChatOpenAI))
         if compat == "deepseek":
             # DeepSeek's reasoning is kept and sent back on its assistant turn;
             # every other dialect's request is left as langchain builds it.
