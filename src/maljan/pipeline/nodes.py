@@ -36,7 +36,7 @@ from maljan.agents.run_evidence_corpus import (
 )
 from maljan.analysis.corroboration import corroboration_row
 from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, PROMPT_ROLES, ReportingConfig
+from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, PROMPT_ROLES
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError
 from maljan.core.logger import logger
@@ -114,12 +114,27 @@ if TYPE_CHECKING:
 # Helpers
 # ---------------------------------------------------------------------------
 
-# Wall-clock ceiling for the single narrative LLM round in the report node.
-# Generous — the deterministic report is already built by then and the prose is
-# the last thing standing between a finished analysis and the operator — but
-# finite, which it was not. See the call site for the 30-minute silence this
+# The narrative round's configured wait, before the model's pace is known.
+# Once the job has measured the reporter's rate, the round waits as long as
+# its output budget takes at that pace, as a composer section does
+# (``NarrativeAgent.round_timeout``); this is the least it is given. Finite,
+# which the round once was not: see the call site for the 30-minute silence it
 # bounds.
 _NARRATIVE_TIMEOUT_SECONDS = 600
+
+
+def _narrative_timeout(narrative_agent: Any, report: Any, facts: str, run_state: str) -> float:
+    """The narrative round's wait: sized from its output cap and the measured pace."""
+    try:
+        return float(
+            narrative_agent.round_timeout(
+                _NARRATIVE_TIMEOUT_SECONDS,
+                narrative_agent.prompt_chars(report, facts, run_state),
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — a wait that cannot be sized is the configured one
+        logger.debug("report_node: the narrative wait was not sized (%s).", exc)
+        return float(_NARRATIVE_TIMEOUT_SECONDS)
 
 
 def _restart_reporter(llm: Any, seconds: Any, container: Any) -> None:
@@ -1386,15 +1401,36 @@ def _ledger_servers(state: AnalysisState) -> set[str]:
 def pack_text(state: AnalysisState, container: ServiceContainer) -> str:
     """The triage pack as every agent is shown it, or ``""`` on a run without one.
 
-    Cut at ``reporting.upstream_findings_max_chars``, the same bound the
-    upstream findings block has: both are what a stage is told before it
-    starts, and one budget for the two keeps a long pack from spending a
-    late stage's context.
+    Cut at the same bound the upstream findings block has
+    (:func:`upstream_chars`): both are what a stage is told before it starts,
+    and one budget for the two keeps a long pack from spending a late stage's
+    context.
     """
-    limit = int(ReportingConfig.model_fields["upstream_findings_max_chars"].default)
+    return pack_block(pack_entries(state.get("evidence_ledger") or []), upstream_chars(container))
+
+
+def upstream_chars(container: ServiceContainer) -> int:
+    """How many characters the upstream findings block and the triage pack may take.
+
+    ``reporting.upstream_findings_max_chars`` above 0 is the operator's; at 0,
+    the default, it is derived from the window this job's models serve, as a
+    tool answer's cap is (``context_window.upstream_block_chars``), and with no
+    window learned it is the documented fallback.
+    """
+    from maljan.llm.context_window import upstream_block_chars
+
+    configured = 0
     with suppress(AttributeError, TypeError, ValueError):
-        limit = int(container.config.reporting.upstream_findings_max_chars)
-    return pack_block(pack_entries(state.get("evidence_ledger") or []), limit)
+        configured = int(container.config.reporting.upstream_findings_max_chars)
+    budget: Any = None
+    if configured <= 0:
+        try:
+            budget = container.get_context_budget()
+        except Exception as exc:  # noqa: BLE001 — no window is the documented fallback
+            logger.debug("upstream findings: no context budget (%s)", exc)
+    chars, how = upstream_block_chars(configured, budget)
+    logger.debug("Upstream findings block: %s.", how)
+    return chars
 
 
 def ledger_ids(state: AnalysisState) -> list[str]:
@@ -1626,9 +1662,7 @@ def upstream_findings(stage: Any, state: AnalysisState, container: ServiceContai
     if len(lines) <= 2:
         return ""
     block = "\n".join(lines).rstrip()
-    limit = int(ReportingConfig.model_fields["upstream_findings_max_chars"].default)
-    with suppress(AttributeError, TypeError, ValueError):
-        limit = int(container.config.reporting.upstream_findings_max_chars)
+    limit = upstream_chars(container)
     if limit and len(block) > limit:
         block = block[:limit].rstrip() + "\n\n[upstream findings truncated]"
     return block
@@ -4345,10 +4379,16 @@ def make_report_node(
 
         # The narrative round is the reporter's first loop: its model list
         # starts at its first model again, with turn deadlines measured against
-        # the narrative's own 600 s clock.
-        _restart_reporter(
-            getattr(narrative_agent, "llm", None), _NARRATIVE_TIMEOUT_SECONDS, container
+        # the narrative's own clock, sized from its output budget and the
+        # model's measured pace.
+        _narrative_facts = pack_text(state, container)
+        _narrative_state = render_run_state(state)
+        narrative_seconds = (
+            _narrative_timeout(narrative_agent, report, _narrative_facts, _narrative_state)
+            if narrative_agent is not None
+            else float(_NARRATIVE_TIMEOUT_SECONDS)
         )
+        _restart_reporter(getattr(narrative_agent, "llm", None), narrative_seconds, container)
 
         if narrative_agent is not None:
             try:
@@ -4363,21 +4403,21 @@ def make_report_node(
                     narrative_agent.generate(
                         report,
                         state.get("isr_reports"),
-                        facts_block=pack_text(state, container),
-                        run_state=render_run_state(state),
+                        facts_block=_narrative_facts,
+                        run_state=_narrative_state,
                         citable_ids=ledger_ids(state),
                         evidence=_entry_texts,
                     ),
-                    timeout=_NARRATIVE_TIMEOUT_SECONDS,
+                    timeout=narrative_seconds,
                 )
             except TimeoutError:
                 logger.error(
                     "report_node: NarrativeAgent exceeded %ds; using fallback narrative.",
-                    _NARRATIVE_TIMEOUT_SECONDS,
+                    int(narrative_seconds),
                 )
                 narrative_output = None
                 no_summary_because = (
-                    f"the report model did not answer within {_NARRATIVE_TIMEOUT_SECONDS}s"
+                    f"the report model did not answer within {int(narrative_seconds)}s"
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
@@ -4405,6 +4445,11 @@ def make_report_node(
             )
         else:
             report = MalwareReportBuilder.apply_fallback_narrative(report, no_summary_because)
+        # What the narrative's prompt could not hold, said where the report says
+        # what it is missing.
+        for _reason in getattr(narrative_agent, "degradations", None) or []:
+            if isinstance(_reason, str) and _reason not in report.degradation_reasons:
+                report.degradation_reasons.append(_reason)
 
         # Section-wise Composer authors the professional
         # spine (background, execution flow, technical-analysis subsections by

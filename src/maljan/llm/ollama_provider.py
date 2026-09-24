@@ -47,6 +47,9 @@ class OllamaProvider:
         # A request timeout, which the Ollama client has none of by default:
         # a server that stops answering otherwise holds the call until the
         # loop around it is cancelled. Caller-supplied client kwargs win.
+        # ``ChatOllama`` streams every answer, so this bounds the silence
+        # between two pieces of an answer rather than the whole answer: a long
+        # answer is not cut by it, and no per-request sizing is needed here.
         from maljan.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
 
         client_kwargs = dict(kwargs.pop("client_kwargs", None) or {})

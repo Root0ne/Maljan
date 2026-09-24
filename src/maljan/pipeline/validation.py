@@ -1465,8 +1465,8 @@ def schema_violations(model: Any, payload: Any, *, code: str) -> list[Violation]
     """Pydantic's complaints about ``payload``, in words the model can act on.
 
     The narrative and the report composer answer against a schema with real
-    constraints — three to six key findings, an executive summary
-    between 120 and 1200 characters, six required fields per recommendation —
+    constraints — at least two key findings, an executive summary of at
+    least 120 characters, six required fields per recommendation —
     and the constraints are exactly the things a model gets wrong. Before this
     the whole answer was discarded on the first one and the report shipped the
     deterministic template instead, with nothing telling anyone which rule was

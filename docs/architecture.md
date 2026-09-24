@@ -365,7 +365,8 @@ line each — `[ev_0001] identity: pe windows, 4,486,656 bytes, …`,
 `[ev_0003] signature: none`, `[ev_0007] yara: 2 hits of 30 rules (…)`,
 `[ev_0008] capa: 6 capabilities, ATT&CK T1027, T1055 (rule-asserted)`,
 `[ev_0017] reputation: VirusTotal: 31 of 75 engines flag it as malicious, labels Filisto` — cut at
-`reporting.upstream_findings_max_chars` with a last line saying how many
+`reporting.upstream_findings_max_chars` (derived from the served window at
+its default of 0, like a tool answer's cap) with a last line saying how many
 entries were left out and that their full output is a tool call away. The
 decoded strings are one line: the counts, then each string quoted as
 `"string"@offset` (a decoded string's call site, a stack or tight string's
@@ -1687,7 +1688,12 @@ then against one composer section's `core.reporting.composer_per_section_timeout
 inside the list rather than being cancelled with the whole loop (on the
 blocking path the abandoned call is left in a daemon thread, so it never holds
 up the process's exit); and every provider's client has a request
-timeout (1800 s, `PROVIDER_REQUEST_TIMEOUT_SECONDS` — Ollama's had none). A 429
+timeout (1800 s, `PROVIDER_REQUEST_TIMEOUT_SECONDS` — Ollama's had none) until
+the model's pace is measured; then an OpenAI-compatible, Anthropic or Gemini
+request whose output cap takes longer at the measured pace carries that time
+as its own (`generation_rate.with_sized_request_timeout`; Gemini's fixed 90 s
+is gone). httpx reads a client's timeout as the longest silence, so it only
+ever ended an answer on a server that sends nothing until done. A 429
 or 503 that asks, in `Retry-After` (seconds or an HTTP date), for at most thirty seconds is waited out on
 the same model once before the list moves on. The switch is **sticky for the
 loop**: the model that took over answers the rest of that loop, so a stalled
@@ -2520,20 +2526,31 @@ is assembled from what the run gathered rather than recomputed beside it:
   the report. The recommendation's category is the model's own. The Markdown
   prints the host identifiers in §9 under the report model's voice, unpublished,
   and the console draws them in the technical-analysis panel.
-* **A section's output budget is the model's reply room.** At its default of
-  0, `reporting.composer_section_max_tokens` derives each model's budget the
-  way an analyst's reply room is derived (`llm.context_window.reply_budget`):
-  the one rule the analysts' and the judge's derived caps follow
-  (`derived_reply`): the model's declared maximum output bounded by a quarter of
-  its window, a quarter of the window for a runtime we run, and the documented
-  8,192 for a hosted API that declares no maximum — each bounded by the larger
-  of `llm.expert_max_tokens` and `llm.judge_max_tokens` where an operator set
-  them — reasoning included. An unknown window keeps
-  the documented 8,192 and says so. A
-  positive value is the operator's own budget. The derivation is printed in
-  Appendix B beside the section's wait ("Output budget of `composer:section`").
-  A fixed 900 tokens dropped a section of a live report when the model reasoned
-  past it. An answer the cap cuts is told so — `composer.cut_at_output_cap`,
+* **The report stage writes up to the model's own maximum.** A section's and
+  the narrative round's output budget follow the report stage's own order
+  (`core.container.composer_output_budget`, `report_stage_budget`,
+  `llm.context_window.report_output_budget`): the operator's
+  `reporting.composer_section_max_tokens` for a section (plus the reporter's
+  cap as reasoning room where thinking is left on), else the reporter's
+  `llm.judge_max_tokens`, else the model's declared maximum output, else the
+  analysts' derivation (`derived_reply`: a quarter of the window for a runtime
+  we run, the documented 8,192 for a hosted API that declares nothing). Never
+  more than the model's maximum — its declared maximum output, or its window
+  when it declares none — reasoning room included. A section's evidence gets
+  what a learned window leaves after the budget, never below zero (a fallback
+  window sizes nothing); each call is held to what the window leaves after its
+  own prompt when the budget would not fit beside it
+  (`context_window.call_output_bound`); facts that do not fit record a
+  degradation and the section is still asked. The narrative round takes the
+  same budget and its wait is sized like a section's
+  (`NarrativeAgent.round_timeout`, `narrative:round` in Appendix B). Every list
+  a section's model writes is kept whole. The derivation is logged per
+  section and printed in Appendix B beside the section's wait ("Output budget
+  of `composer:section`"). A fixed budget dropped a section of a live report
+  when the model's answer outgrew it, and a quarter of a million-token window
+  held a model that declares 393,216 to 262,144. No section schema and no
+  report prompt sets an upper size: the prose fields, the executive summary,
+  the key findings and the recommendations keep only their lower bounds. An answer the cap cuts is told so — `composer.cut_at_output_cap`,
   naming the cap, the answer's size (characters, items begun, and — when a
   text field holds fewer values than items were begun — how many of them, at
   least, repeat a value in each text field) and its first 160

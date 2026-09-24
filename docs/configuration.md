@@ -150,7 +150,9 @@ replaced before the loop cancels it; a share of the loop because the loop is
 what would otherwise cancel a stalled model first. The reporter's list starts
 over before the narrative round, against its 600 s, and again before the
 composer sections, against `core.reporting.composer_per_section_timeout` —
-and every provider's client has a 1800 s request timeout. A 429 or 503 whose
+and every provider's client has a 1800 s request timeout until the model's
+pace is measured, after which each request is sized for its own output cap
+(see *A call waits as long as its answer takes*). A 429 or 503 whose
 `Retry-After` (seconds or an HTTP date) asks for at most thirty seconds is waited out on the same model
 once before the list moves on. Once the list has moved, the model that answered
 stays for the rest of that loop (a stalled first model costs one deadline, not
@@ -795,7 +797,9 @@ which derives each agent's cap in three cases (`context_window.derived_reply`): 
 output is declared — by the probe's model list (`max_output_tokens`,
 `max_completion_tokens`, OpenRouter's `top_provider.max_completion_tokens`) or
 by a vendored `max_output` row, each carrying the vendor page it is documented
-on (gpt-4o and gpt-4o-mini 16,384, gpt-4.1 32,768) — the smaller of that and a
+on (gpt-4o and gpt-4o-mini 16,384, gpt-4.1 32,768, DeepSeek's `deepseek-flash`
+and `deepseek-v4-pro` 393,216, written 384K on DeepSeek's Models & Pricing page)
+— the smaller of that and a
 quarter of the window; for a runtime we run — one that answered the window
 probe as a runtime: llama.cpp `/props`, Ollama `/api/show` or TGI `/info` — a
 quarter of the window, since no API limits its output (a loopback address alone
@@ -806,32 +810,81 @@ window), which a quarter of a hosted model's window is routinely past.
 On a local 32,768-token window that is 8,192; on a local 131,072, 32,768; on
 the shipped gpt-4o, 16,384.
 A window nothing reported derives nothing: the documented fallback of 8,192
-applies and the sentence says the window is unknown. The reply reserve and the
-composer's section budget follow the same rule, bounded by an operator's
-generation cap where one is set. A value above 0 is
+applies and the sentence says the window is unknown. The reply reserve follows
+the same rule, bounded by an operator's generation cap where one is set; the
+report stage has an order of its own, below. A value above 0 is
 the operator's and is used as set; a stored setting keeps its value. Each
 derivation is logged and recorded in `run_summary.generation.output_caps`
 (`{agent: {tokens, derivation}}`), and the judge's is printed beside the
 verdict wait. 0 no longer means unbounded.
 
-A section's budget is not a fixed number. `composer_section_max_tokens` ships
-at **0**, which derives it for each model of the reporter's list the way an
-analyst's reply room is derived: the larger of `llm.expert_max_tokens` and
-`llm.judge_max_tokens` where an operator set them, and the model's declared
-maximum output where there is one, at most a quarter of the
-context window that model serves (learned as the tool-output cap's window is:
-declared, probed, the vendored table, then the fallback). On a 32,768-token
-window that is 8,192 tokens; on a 16,384-token window, 4,096. Reasoning is
-spent inside it. The run summary prints the derivation beside the section's
-wait ("Output budget of `composer:section`: 8192 tokens — the generation cap of
-8192 tokens …, at most a quarter (8192) of the model's 32768-token context
-window (probed) …"). A positive value is the operator's own budget and behaves
-as the fixed value always did, including the reasoning room below. A fixed 900
-tokens dropped a live report's payloads section when the model reasoned past
-it.
+**The report stage writes up to the model's own maximum.** A report is as
+long as its evidence needs, so the report stage — each composer section and
+the narrative round — does not take the analysts' quarter of the window. For
+each model of the reporter's list, in order:
 
-So each of those calls waits
-`max(configured, min(derived, 1800 s))`. Where the model's reading rate is
+1. the operator's value: `composer_section_max_tokens` above 0 for a section
+   (plus the reporter's own cap for reasoning, below), otherwise
+   `llm.judge_max_tokens` above 0 — the reporter runs on the judge role and
+   has always been built with the judge's cap; `llm.expert_max_tokens` is the
+   analysts' and no longer reaches the report stage;
+2. else the model's declared maximum output (the probe's model list, then the
+   vendored `max_output` row);
+3. else the analysts' derivation above: a quarter of the window for a runtime
+   we run, the documented 8,192 for a hosted API that declares nothing.
+
+It is never more than the model's maximum — its declared maximum output, or
+the window it serves when it declares none — and a value held at it says so;
+the reasoning room is inside that bound too. With thinking left on and no
+`llm.judge_max_tokens`, the reasoning room is the model's whole maximum, so
+any positive `composer_section_max_tokens` resolves to the model's maximum.
+On DeepSeek's `deepseek-flash` with nothing set, a section may write 393,216
+tokens, and the 1,048,576-token window leaves the remaining 655,360 for the
+section's evidence.
+
+A section's evidence is sized against the window only when the window was
+learned. The 8,192-token fallback a failed probe leaves is a number printed
+beside the word `fallback`, not a fact: the section's claims and tool answers
+are then shown whole, and its budget is the operator's value, else the
+model's declared maximum, else the documented 8,192. Where the window is
+known, the evidence room is the window less the budget, never below zero,
+and each call is held to what the window leaves after that call's own prompt
+(at three characters a token) when its budget would not fit beside it — a
+hosted API refuses a request whose prompt and `max_tokens` pass the window.
+The call's cap is lowered for that call alone, under the field each server
+reads — `max_completion_tokens` for OpenAI, `max_tokens` for DeepSeek and
+Anthropic, `max_tokens` and `n_predict` in llama.cpp's request extras,
+`max_output_tokens` for Gemini — and the worker log says so. An Ollama model
+keeps the cap it was built with, since its client takes no per-call cap; a
+model the llama.cpp self-heal rebuilt without the extras is sent the cap only
+as `max_completion_tokens`, which ik_llama.cpp does not read. A prompt larger
+than the whole window is recorded as a degradation: Ollama fits such a prompt
+to `num_ctx` by cutting it from the front, which can drop the system prompt
+and the round's rules, and says nothing. A budget that fills the
+window — a gateway that declares its window as its maximum output, a local
+`llm.judge_max_tokens` at or past the window — so leaves the section no room
+for claims and tool answers. A section whose facts do not fit what the window
+leaves records the degradation "the section's prompt without its claims and
+tool answers … exceeds the … its model's context window leaves after the
+reply", its claims and tool answers are shown as the no-room sentence, and
+the section is still asked.
+
+Every list a section's model writes — flow steps, configuration items,
+commands, flags, C2 channels, citations — is kept whole; no count cuts it.
+
+The narrative round (the executive summary, key findings and recommendations)
+takes the same budget, is held per call the same way, and waits the way a
+composer section does: 600 s until the reporter's pace is measured, then the
+time its budget takes at that pace for each call it may make (its answer, the
+one retry, and the structured attempt where the endpoint supports one).
+Appendix B prints it as `narrative:round`. The worker log prints one line per section ("ReportComposer: section
+'…' output budget: …"), and the run summary prints the derivation beside the
+section's wait ("Output budget of `composer:section`: 393216 tokens — the
+model's declared maximum output of 393216 (the vendored table's
+'deepseek-flash' row, from …)"). A fixed budget dropped a live report's
+section when the model's answer outgrew it.
+
+So each of those calls waits `max(configured, derived)`. Where the model's reading rate is
 measured and the call gives its prompt size (a composer section, the verdict),
 `derived = (prompt_tokens / reading rate + max_tokens / generation rate) × 1.5`;
 otherwise `derived = max_tokens / rate × 1.5` with the rate that includes the
@@ -846,17 +899,36 @@ rate is lower than the server's and the wait longer). The reading rate is
 Ollama's `prompt_eval_count` over `prompt_eval_duration` or llama.cpp's
 `timings.prompt_n` over `prompt_ms`. The margin, 1.5, covers the spread between
 turns, and the prompt read where it is not timed on its own.
-The ceiling, 1,800 s, is the HTTP request timeout every provider's client is
-built with (`PROVIDER_REQUEST_TIMEOUT_SECONDS`), so no derived wait outlives the
-request carrying it. A configured value above the ceiling is not lowered, but
-the request timeout still ends any single call at 1,800 s. At 3.8 tokens a
-second the judge's budget needs 8,192 / 3.8 × 1.5 ≈ 3,234 s, so the verdict
-call is held at 1,800 s and can receive about 6,840 tokens (3.8 × 1,800) where
-600 s allowed about 2,280. A composer section is its answer and the one retry
-its validation allows, so its wait holds two calls of its output cap. At 3.8
-tokens a second the derived budget of 8,192 tokens on a 32,768-token window
-needs 2 × min(8,192 / 3.8 × 1.5, 1,800) = 3,600 s; an operator's budget of 900
-with the reporter's `disable_thinking` on needs 2 × 900 / 3.8 × 1.5 ≈ 710 s.
+The HTTP request carrying a call is sized the same way. Every provider's
+client is built with a 1,800 s request timeout
+(`PROVIDER_REQUEST_TIMEOUT_SECONDS`; Gemini's was a fixed 90 s and is now the
+same). httpx reads it as the longest silence it waits through, not as a
+deadline for the whole answer, so it ended an answer only on a server that
+sends nothing until it has finished — a non-streaming llama.cpp server, whose
+answers it held to about 1,800 s of generation. A streamed answer, and
+DeepSeek's, which sends keep-alive lines while it generates, were not ended
+by it. Once the model's pace is measured, an OpenAI-compatible (chat
+completions or Responses API), Anthropic or Gemini request whose output cap
+takes longer at that pace than its client allows carries its own timeout, the
+SDK's per-request option: that time, by the same arithmetic and margin, its
+prompt counted at three characters a token. Any other request keeps its
+client's timeout. So no derived wait is held under 1,800 s any more: at 3.8
+tokens a second the judge's 8,192 tokens need 8,192 / 3.8 × 1.5 ≈ 3,234 s and
+get it, where 600 s allowed about 2,280 of them, and a 393,216-token section
+at 40 tokens a second gets 393,216 / 40 × 1.5 ≈ 14,746 s. The Ollama client
+streams every answer, so its 1,800 s bounds the silence between two pieces of
+an answer. The function summariser's wait follows its request's.
+
+These waits have no upper bound of their own. A server that stays connected
+but stops generating, or a call left running on a single-slot llama.cpp
+server after its loop gave up on it, is held for the whole derived time — at
+3.8 tokens a second 32,768 tokens take about 12,900 s — where 1,800 s used to
+release it. The last resort is the analysis job's own arq timeout, 8 hours
+(`job_timeout` in `apps/api/app/worker/analysis_worker.py`). A composer section is its answer and the one retry its validation
+allows, so its wait holds two calls of its output cap: at 3.8 tokens a second
+a budget of 8,192 needs 2 × 8,192 / 3.8 × 1.5 ≈ 6,467 s; an operator's budget
+of 900 with the reporter's `disable_thinking` on needs 2 × 900 / 3.8 × 1.5 ≈
+710 s.
 A fast model's derived time falls under its
 configured one, which then stands. Until a model has answered once, and for a
 call with no output budget, the configured value stands. Rates are kept per
@@ -870,13 +942,14 @@ holds for the rest of the report stage.
 
 The section budget is also the section's real cap, and a model's reasoning
 counts against it: Ollama's `num_predict` and llama.cpp's `n_predict` include
-the thinking channel. The derived budget already is the model's whole reply
+the thinking channel. The budget at 0 already is the model's whole reply
 room. With an operator's own `composer_section_max_tokens`, where the
 reporter's provider has been told to keep reasoning out
 (`llm.ollama.disable_thinking` or `llm.openai.disable_thinking`), the
 composer's model is capped at that value alone; where it has not, the cap is
-that value plus the reporter's own output cap (`judge_max_tokens`, or derived) for the
-reasoning. Each model of the reporter's list is capped by its
+that value plus the reporter's own output cap (`judge_max_tokens`, else the
+model's declared maximum, else derived) for the reasoning, and the sum is held
+at the model's maximum. Each model of the reporter's list is capped by its
 own provider's switch, and the wait is sized from the largest cap: the platform
 cannot tell a reasoning tag from its name, and sending `think: false` to a
 model that does not reason is an error on Ollama. A section the cap cut is
@@ -1431,8 +1504,13 @@ not triage.has_signature and triage.reputation_malicious != None and triage.repu
 have never seen each other's work before the debate. `findings` gives it each
 upstream agent's claims with their technique, confidence and evidence id.
 `full` adds each upstream agent's prose report. Both are capped by
-`core.reporting.upstream_findings_max_chars` (6000 by default), and a block
-that is cut says so.
+`core.reporting.upstream_findings_max_chars`, and a block that is cut says so.
+It ships at **0**, which derives the cap from the window this job's models
+serve the way a tool answer's cap is: the share one answer may take (an
+eighth) of what the window leaves after the reply room, at three characters a
+token — 294,912 characters on a 1,048,576-token window with a 262,144-token
+reply room. A window nothing reported derives nothing, and the documented
+6,000 applies. A positive value is the operator's, used whatever the window.
 
 The block arrives as an `upstream_findings` field inside the stage's first
 chunk when that chunk is a JSON document, and in front of it when it is not. A

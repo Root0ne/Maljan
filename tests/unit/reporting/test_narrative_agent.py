@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
@@ -143,8 +143,38 @@ class TestNarrativeOutputSchema:
         assert rebuilt.executive_summary == out.executive_summary
         assert len(rebuilt.key_findings) == 3
 
+    def test_no_upper_bound_cuts_what_the_evidence_supports(self) -> None:
+        good = _valid_narrative()
+        out = NarrativeOutput(
+            executive_summary="The sample encrypts documents on local drives. " * 100,
+            key_findings=good.key_findings * 5,
+            defensive_recommendations=good.defensive_recommendations * 5,
+        )
+
+        assert len(out.executive_summary) > 4000
+        assert len(out.key_findings) == 15
+        assert len(out.defensive_recommendations) == 15
+
+    def test_the_prompt_sets_no_upper_size(self) -> None:
+        import re
+
+        from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXPECTED_OBJECT
+
+        for text in (_SYSTEM_PROMPT, EXPECTED_OBJECT):
+            assert not re.search(r"\d+\s*(-|to)\s*\d+", text)
+            assert not re.search(r"\b(at most|no more than|up to)\b", text)
+
+    def test_the_prompt_states_the_minimums_the_schema_holds(self) -> None:
+        from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXPECTED_OBJECT
+
+        assert NarrativeOutput.model_fields["executive_summary"].metadata[0].min_length == 120
+        assert "at least 120 characters" in _SYSTEM_PROMPT
+        assert "at least 120 characters" in EXPECTED_OBJECT
+        assert "at least two objects" in _SYSTEM_PROMPT
+        assert "at least three entries" in _SYSTEM_PROMPT
+
     def test_two_good_key_findings_are_kept(self) -> None:
-        """Three to six are asked for; two do not cost the round its summary."""
+        """Two findings are a whole answer; the lower bound is what the schema keeps."""
         out = NarrativeOutput(
             executive_summary="A" * 200,
             key_findings=_valid_narrative().key_findings[:2],
@@ -208,35 +238,60 @@ class TestPromptBuilder:
     def test_prompt_contains_attack_techniques(self) -> None:
         report = _make_report()
         text = build_prompt_text(report)
-        assert "Top ATT&CK techniques" in text
+        assert "Published ATT&CK techniques" in text
 
-    def test_prompt_truncates_evidence_quotes(self) -> None:
+    def test_an_evidence_quote_is_shown_whole(self) -> None:
         report = _make_report()
         long_quote = "x" * 500
         report.ttp_mappings = [
             TTPMapping(
                 technique_id="T1547.001",
                 technique_name="Registry Run Keys",
-                evidence_quotes=[long_quote],
+                evidence_quotes=[long_quote, "second quote"],
                 confidence=0.9,
             )
         ]
         text = build_prompt_text(report)
-        assert long_quote not in text  # truncated
-        assert "x" * 119 in text  # head preserved
+        assert long_quote in text
+        assert "second quote" in text
 
-    def test_prompt_caps_lists(self) -> None:
+    def test_every_published_fact_is_shown(self) -> None:
+        from maljan.reporting.models import (
+            DynamicBehavior,
+            NetworkDomain,
+            NetworkIOCs,
+            NetworkIP,
+            PersistenceMechanism,
+            SandboxSignature,
+            TTPMapping,
+        )
+
         report = _make_report()
-        # Generate fake TTPs above the 8 cap.
-        from maljan.reporting.models import TTPMapping
-
         report.ttp_mappings = [
             TTPMapping(technique_id=f"T999{i}", technique_name=f"Fake-{i}") for i in range(20)
         ]
+        report.dynamic = DynamicBehavior(
+            sandbox_signatures=[SandboxSignature(name=f"sig-{i}", severity=1) for i in range(9)]
+        )
+        report.network = NetworkIOCs(
+            domains=[
+                NetworkDomain(fqdn=f"relay{i}.example.net", source="sandbox") for i in range(7)
+            ],
+            ips=[NetworkIP(address=f"192.0.2.{i}", source="sandbox") for i in range(7)],
+        )
+        report.persistence = [
+            PersistenceMechanism(kind="registry_run", target=f"HKCU\\Example\\{i}" + "y" * 150)
+            for i in range(6)
+        ]
+
         text = build_prompt_text(report)
-        assert "T9990" in text  # first one
-        assert "T9997" in text  # 8th index 7
-        assert "T9998" not in text  # over the cap
+
+        assert all(f"T999{i} " in text for i in range(20))
+        assert all(f"sig-{i} " in text for i in range(9))
+        assert all(f"relay{i}.example.net" in text for i in range(7))
+        assert all(f"192.0.2.{i} " in text for i in range(7))
+        assert all(f"HKCU\\Example\\{i}" + "y" * 150 in text for i in range(6))
+        assert "top " not in text.lower() and "max " not in text.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -562,3 +617,75 @@ class TestAKeyFindingCitesOnlyWhatTheLedgerHolds:
 
         assert await NarrativeAgent(llm=llm).generate(self._report_with_index()) is not None
         assert llm.ainvoke.await_count == 1
+
+
+class TestTheRoundIsSizedFromItsBudget:
+    """The narrative round waits as long as its output budget takes at the model's pace."""
+
+    MODEL = "narrative-model"
+
+    class _Named:
+        model_name = "narrative-model"
+
+        async def ainvoke(self, messages: Any, **_: Any) -> Any:  # pragma: no cover
+            raise RuntimeError("not called")
+
+    def _agent(self, rates: Any, cap: int = 393216, window: int = 0) -> NarrativeAgent:
+        return NarrativeAgent(
+            llm=self._Named(),  # type: ignore[arg-type]
+            output_cap=cap,
+            budget_note=f"{cap} tokens — the model's declared maximum output",
+            generation_rates=rates,
+            window_tokens=window,
+        )
+
+    def test_with_no_rate_the_configured_wait_stands(self) -> None:
+        from maljan.llm.generation_rate import GenerationRates
+
+        assert self._agent(GenerationRates()).round_timeout(600.0) == 600.0
+
+    def test_a_measured_pace_sizes_every_attempt(self) -> None:
+        from maljan.llm.generation_rate import TIMEOUT_MARGIN, GenerationRates
+        from maljan.reporting.narrative_agent import NARRATIVE_ATTEMPTS
+
+        rates = GenerationRates()
+        rates.observe(self.MODEL, 4000, 100.0, "output tokens over the call's wall clock")
+        agent = self._agent(rates)
+        with patch(
+            "maljan.reporting.narrative_agent.structured_output_supported_for_llm",
+            return_value=False,
+        ):
+            seconds = agent.round_timeout(600.0)
+
+        assert seconds == pytest.approx(NARRATIVE_ATTEMPTS * 393216 / 40 * TIMEOUT_MARGIN)
+        row = rates.snapshot()["timeouts"]["narrative:round"]
+        assert row["max_tokens"] == 393216
+        assert row["budget"].startswith("393216 tokens")
+
+    def test_the_report_node_uses_the_sized_wait(self) -> None:
+        from maljan.llm.generation_rate import GenerationRates
+        from maljan.pipeline.nodes import _narrative_timeout
+
+        rates = GenerationRates()
+        rates.observe(self.MODEL, 4000, 100.0, "output tokens over the call's wall clock")
+        agent = self._agent(rates)
+
+        assert _narrative_timeout(agent, _make_report(), "", "") > 1800
+
+    def test_a_call_past_its_window_is_held_to_what_the_window_leaves(self) -> None:
+        from langchain_core.messages import HumanMessage
+
+        agent = self._agent(None, cap=16384, window=16384)
+
+        assert agent._call_bound([HumanMessage(content="x" * 3000)]) == 16384 - 1000
+        assert self._agent(None, cap=16384, window=0)._call_bound([]) is None
+
+    def test_a_prompt_past_the_room_is_recorded_not_trimmed(self) -> None:
+        agent = self._agent(None, cap=4096, window=8192)
+
+        agent._note_room(20000)
+        agent._note_room(20000)
+
+        (reason,) = agent.degradations
+        assert "prompt (20000 characters) exceeds the 12288" in reason
+        assert self._agent(None, cap=4096, window=0).degradations == []

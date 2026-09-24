@@ -28,9 +28,11 @@ from maljan.core.logger import logger
 # static analyst's per-chunk 1500 s plus its 30 s hard-cap grace, on a
 # cold-cache local 35B), because a request cut shorter than its loop truncates
 # an answer that was still decoding. A model on a fallback list is cut much
-# sooner, by its own turn deadline (``llm.fallback_turn_share``); this is the
-# ceiling under everything else, and every provider has one — the Ollama
-# client used to have none at all.
+# sooner, by its own turn deadline (``llm.fallback_turn_share``). It is the
+# timeout a request is sent with until its model's pace is measured; after
+# that each request is given the larger of this and the time its own output
+# cap takes at that pace (``generation_rate.with_sized_request_timeout``).
+# Every provider has one — the Ollama client used to have none at all.
 PROVIDER_REQUEST_TIMEOUT_SECONDS = 1800
 
 # Module-level registry dict: provider_name -> class

@@ -630,7 +630,7 @@ def _collect_signature_names(report: MalwareReport) -> list[str]:
 def _sigma_tags(report: MalwareReport) -> list[str]:
     tags: list[str] = []
     seen: set[str] = set()
-    for mapping in report.ttp_mappings[:10]:
+    for mapping in report.ttp_mappings:
         tid = mapping.technique_id
         if not tid:
             continue
@@ -638,7 +638,7 @@ def _sigma_tags(report: MalwareReport) -> list[str]:
         if tag not in seen:
             seen.add(tag)
             tags.append(tag)
-    for cell in report.capability_matrix[:10]:
+    for cell in report.capability_matrix:
         name = cell.tactic_name.lower().replace(" ", "_").replace("&", "and")
         tag = f"attack.{name}" if name else ""
         if tag and tag not in seen:

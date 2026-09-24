@@ -467,7 +467,7 @@ class MalwareReportBuilder:
         # the techniques, plus deduped per-technique links keyed by technique id.
         seen_tids: set[str] = set()
         tech_notes: list[str] = []
-        for mapping in mappings[:10]:
+        for mapping in mappings:
             tid = mapping.technique_id
             if not tid or tid in seen_tids:
                 continue

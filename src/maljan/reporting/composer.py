@@ -86,13 +86,13 @@ class _StructuredOutputUnavailable(Exception):
 
 class _ProseOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    body: str = Field("", max_length=2500)
+    body: str = Field("")
     evidence_refs: list[str] = Field(default_factory=list)
 
 
 class _IntroOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    text: str = Field("", max_length=1800)
+    text: str = Field("")
 
 
 class _CliFlagsOut(BaseModel):
@@ -162,7 +162,7 @@ _SYSTEM = (
     "3. A fact marked 'complete list' is exhaustive. Anything absent from it is "
     "absent from the binary, and a claim that relies on it is false.\n"
     "4. If the evidence does not support a field, leave it empty/null. Never guess.\n"
-    "5. Be concise and technical; cite concrete artifacts (function name, API, "
+    "5. Write technically; cite concrete artifacts (function name, API, "
     "string, tool output) where possible.\n"
     "6. Cite the ev_ ids of the entries a statement rests on: in the evidence_refs "
     "list where the object has one, and in square brackets in prose, e.g. [ev_0007]. "
@@ -195,7 +195,7 @@ _MAX_NAMED_KEYS = 6
 # model is shown: a checklist of the evaluation key's own items ("campaign id",
 # "sleep interval") is a hint as surely as an example is.
 _INSTRUCTIONS: dict[str, str] = {
-    "introduction": "Write a 2-4 sentence intro.",
+    "introduction": "Write the introduction.",
     "execution_flow": (
         "List what the sample does from its entry point to its steady state, in order."
     ),
@@ -212,7 +212,7 @@ _INSTRUCTIONS: dict[str, str] = {
         "value is: a registry key or value only when it is written under a registry hive "
         "or from one of its top keys (Software\\, System\\) or the entry records it as a "
         "registry access, and 'String' when the entry does "
-        "not show what the value is. Give its purpose in a short phrase where the evidence "
+        "not show what the value is. Give its purpose where the evidence "
         "says, and leave the purpose empty where it does not."
     ),
     "commands": "Extract the commands the sample accepts from its operator.",
@@ -732,7 +732,7 @@ class ReportComposer:
             validators=[lambda p: flow_voice_violations(p, sandbox_ids)],
         )
         if flow and isinstance(flow, _FlowOut) and flow.steps:
-            ta.execution_flow = self._kept("execution_flow", flow.steps, 20)
+            ta.execution_flow = list(flow.steps)
             authored += 1
 
         # 3. Free-prose technical subsections (only when evidence exists).
@@ -746,7 +746,7 @@ class ReportComposer:
             )
             if out and isinstance(out, _ProseOut) and out.body.strip():
                 sub = TechnicalSubsection(
-                    title=title, body=out.body.strip(), evidence_refs=out.evidence_refs[:8]
+                    title=title, body=out.body.strip(), evidence_refs=list(out.evidence_refs)
                 )
                 setattr(ta, section, sub)
                 authored += 1
@@ -762,7 +762,7 @@ class ReportComposer:
             validators=[lambda p: configuration_citation_violations(p, known_ids)],
         )
         if config and isinstance(config, _ConfigOut) and config.items:
-            ta.configuration = self._kept("configuration", config.items, 30)
+            ta.configuration = list(config.items)
             authored += 1
 
         identifiers = await self._author(
@@ -786,7 +786,7 @@ class ReportComposer:
             _INSTRUCTIONS["commands"],
         )
         if commands and isinstance(commands, _CommandsOut) and commands.commands:
-            ta.commands = self._kept("commands", commands.commands, 40)
+            ta.commands = list(commands.commands)
             authored += 1
 
         enc = await self._author(
@@ -804,7 +804,7 @@ class ReportComposer:
             "cli_flags", report, isr_reports, _CliFlagsOut, _INSTRUCTIONS["cli_flags"]
         )
         if cli and isinstance(cli, _CliFlagsOut) and cli.flags:
-            ta.cli_flags = self._kept("cli_flags", cli.flags, 30)
+            ta.cli_flags = list(cli.flags)
             authored += 1
 
         note = await self._author(
@@ -819,7 +819,7 @@ class ReportComposer:
             "communications", report, isr_reports, _C2Out, _INSTRUCTIONS["communications"]
         )
         if c2 and isinstance(c2, _C2Out) and c2.channels:
-            report.c2_channels = self._kept("communications", c2.channels, 6)
+            report.c2_channels = list(c2.channels)
             authored += 1
 
         if _has_content(ta):
@@ -873,6 +873,12 @@ class ReportComposer:
             [*head, instruction, contract, _bundle_text(section, bundle, entries, item_chars=-1)]
         )
         prompt_chars = len(_SYSTEM) + len(without)
+        logger.info(
+            "ReportComposer: section '%s' output budget: %s.",
+            section,
+            str(getattr(self, "budget_note", "") or "")
+            or f"{int(getattr(self, 'output_cap', 0) or 0)} tokens",
+        )
         room = self._room_chars()
         if room is not None and prompt_chars > room:
             # The facts enter whole: a section that cannot hold them says so.
@@ -934,7 +940,9 @@ class ReportComposer:
     def _room_chars(self) -> int | None:
         """The characters a section's whole prompt may take, or ``None`` with no window known.
 
-        ``(window − output budget) × chars per token``.
+        ``(window − output budget) × chars per token``, and never below zero: a
+        budget that takes the whole window leaves no room, not a debt. A window
+        nothing reported is passed as 0 and sizes nothing.
         """
         window = int(getattr(self, "window_tokens", 0) or 0)
         if window <= 0:
@@ -942,7 +950,32 @@ class ReportComposer:
         from maljan.llm.context_window import CHARS_PER_TOKEN
 
         reply = int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0)
-        return (window - reply) * CHARS_PER_TOKEN
+        return max(0, (window - reply) * CHARS_PER_TOKEN)
+
+    def _call_bound(self, turns: Sequence[BaseMessage]) -> int | None:
+        """The ``max_tokens`` one call of this section is held to, or ``None``.
+
+        Where the window is known and the section's budget would not fit
+        beside the prompt, the call may write what the window leaves after it
+        (``context_window.call_output_bound``): a longer answer would be refused
+        by a hosted API, and cut by a runtime we run.
+        """
+        from maljan.llm.context_window import (
+            accepts_output_bound,
+            call_output_bound,
+            prompt_overflow_sentence,
+        )
+
+        cap = int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0)
+        chars = sum(len(_message_text(message)) for message in turns)
+        window = int(getattr(self, "window_tokens", 0) or 0)
+        overflow = prompt_overflow_sentence("report section's", chars, window)
+        if overflow is not None:
+            self._note_degradation(overflow)
+        bound = call_output_bound(cap, window, chars)
+        if bound is None or not accepts_output_bound(self.llm):
+            return None
+        return bound
 
     def _start_the_section_clock(self, seconds: float) -> None:
         """Measure the model list's turn deadline against this section's clock.
@@ -1021,7 +1054,9 @@ class ReportComposer:
         prose = _PROSE_FIELDS.get(schema, ())
         entries = getattr(self, "_entries", None)
         try:
-            if not structured_output_supported_for_llm(self.llm):
+            # A call that has to be held under its budget goes by the manual
+            # path, where the hold can be passed with the call.
+            if not structured_output_supported_for_llm(self.llm) or self._call_bound(messages):
                 raise _StructuredOutputUnavailable
             structured = self.llm.with_structured_output(schema, include_raw=True)
             result = structured_answer(
@@ -1065,15 +1100,31 @@ class ReportComposer:
         cut_text = ""
         retry_unfit = False
 
+        from maljan.llm.context_window import output_bound_kwargs
+
         async def _run(turns: list[BaseMessage]) -> Any:
             nonlocal cut, cut_at, cut_text
+            bound = self._call_bound(turns)
+            if bound is not None:
+                logger.info(
+                    "ReportComposer: section '%s' may write %d tokens on this call — what "
+                    "its %d-token window leaves after the prompt, under its budget of %d.",
+                    section or schema.__name__,
+                    bound,
+                    int(self.window_tokens),
+                    int(self.output_cap),
+                )
             raw = await retry_on_connection_error(
-                lambda: self.llm.ainvoke(turns), what="ReportComposer raw"
+                (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))
+                if bound is not None
+                else (lambda: self.llm.ainvoke(turns)),
+                what="ReportComposer raw",
             )
             # Per answer: a retry that closes inside the cap is not a cut one.
-            cut = _reached_the_cap(raw, self._cap_of(raw))
+            held = self._cap_of(raw) if bound is None else min(self._cap_of(raw), bound)
+            cut = _reached_the_cap(raw, held)
             if cut:
-                cut_at = self._cap_of(raw)
+                cut_at = held
                 cut_text = _message_text(raw)
                 shape = cut_answer_shape(cut_text)
                 cut_shapes.append(shape)
@@ -1271,20 +1322,6 @@ class ReportComposer:
             asked=False,
         )
         return schema.model_validate(payload)
-
-    def _kept[T](self, section: str, rows: list[T], limit: int) -> list[T]:
-        """The first ``limit`` of a model's list, and a record when that cut any.
-
-        A list the report prints is capped so one runaway answer cannot fill
-        it; a reader is told the cap applied rather than shown a page of the
-        answer as if it were the whole.
-        """
-        if len(rows) > limit:
-            self._note_degradation(
-                f"report section '{section}' was trimmed: the report keeps the first "
-                f"{limit} of the {len(rows)} items the report model wrote"
-            )
-        return list(rows[:limit])
 
     def _note_degradation(self, reason: str) -> None:
         """One sentence about what this report lost, once."""

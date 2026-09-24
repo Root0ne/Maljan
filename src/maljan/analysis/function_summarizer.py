@@ -153,20 +153,32 @@ class FunctionSummarizer:
     def _ask(self, messages: list[Any]) -> Any:
         """One summariser call, on the agent loop so a cancelled job cancels it in flight.
 
-        Held to the provider's own request timeout, the longest a call could
-        have taken before. A model that has only a synchronous ``invoke`` is
-        called as before.
+        Held to what the call's own request is given: the provider's request
+        timeout, or, where the model's pace is measured and its output cap
+        takes longer at that pace, that time
+        (``generation_rate.sized_request_timeout``), so the wait never ends
+        before the request would. A model that has only a synchronous
+        ``invoke`` is called as before.
         """
         import inspect
 
         from maljan.agents.base_agent import run_coro_blocking
+        from maljan.llm.generation_rate import sized_request_timeout
         from maljan.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
 
         if not inspect.iscoroutinefunction(getattr(type(self._llm), "ainvoke", None)):
             return self._llm.invoke(messages)
+        cap = 0
+        for attr in ("max_tokens", "num_predict", "max_output_tokens"):
+            value = getattr(self._llm, attr, None)
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                cap = value
+                break
+        chars = sum(len(str(getattr(message, "content", message))) for message in messages)
+        seconds = sized_request_timeout(self._llm, cap, chars)
         return run_coro_blocking(
             self._llm.ainvoke(messages),
-            float(PROVIDER_REQUEST_TIMEOUT_SECONDS),
+            float(seconds if seconds is not None else PROVIDER_REQUEST_TIMEOUT_SECONDS),
             label="function-summarizer",
         )
 

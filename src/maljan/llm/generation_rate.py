@@ -5,8 +5,10 @@ pace. A model a tenth as fast is given a tenth of the answer: at 3.8 tokens a
 second a 600 s judge call can receive about 2,280 of its 8,192 tokens, and a
 120 s composer section about 456 of its 900. So each call that has an output
 budget is given the larger of its configured timeout and the time that budget
-takes at the rate this job has measured for the model, times a margin, never
-above a ceiling.
+takes at the rate this job has measured for the model, times a margin. The
+HTTP request carrying the call is given the same time
+(:meth:`GenerationRates.request_timeout`), so a long answer at a measured pace
+is not cut by the client before the wait around it ends.
 
 The rate costs nothing to learn: every answer already says how many tokens it
 generated and how long that took, and ``RateMeter`` reads it off each call as
@@ -53,14 +55,17 @@ from maljan.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
 # includes the prompt read (the wall clock's, or Ollama's), as before.
 TIMEOUT_MARGIN = 1.5
 
-# No derived timeout goes above this. It is the HTTP request timeout every
-# provider builds its client with (``registry.PROVIDER_REQUEST_TIMEOUT_SECONDS``,
-# 1,800 s), because a wait longer than that is cut by the client before this
-# one would fire. At 3.8 tokens a second the judge's 8,192-token budget needs
-# 8,192 / 3.8 × 1.5 ≈ 3,234 s; held at 1,800 s it receives about 6,840 tokens,
-# against the 2,280 its configured 600 s allowed. A configured value above the
-# ceiling is the operator's and is kept.
-TIMEOUT_CEILING_SECONDS = float(PROVIDER_REQUEST_TIMEOUT_SECONDS)
+# The HTTP request timeout a call is sent with until its model has a measured
+# rate: the one every provider builds its client with
+# (``registry.PROVIDER_REQUEST_TIMEOUT_SECONDS``). httpx reads it as the
+# longest silence it waits through, so it ended an answer only on a server that
+# sends nothing until it has finished — a non-streaming llama.cpp server; a
+# streamed answer, or DeepSeek's, which sends keep-alive lines while it
+# generates, was not ended by it. Once a rate is measured a request whose
+# output cap takes longer at that pace is given that time instead
+# (``with_sized_request_timeout``), and the derived waits above are no longer
+# held under it.
+UNMEASURED_REQUEST_TIMEOUT_SECONDS = float(PROVIDER_REQUEST_TIMEOUT_SECONDS)
 
 OLLAMA_SOURCE = "ollama eval_count/eval_duration"
 LLAMA_CPP_SOURCE = "llama.cpp timings.predicted_n/predicted_ms"
@@ -239,31 +244,16 @@ class GenerationRates:
         size given: ``(prompt_tokens / prompt_rate + max_tokens / rate) ×
         TIMEOUT_MARGIN``. Otherwise ``max_tokens / whole_rate × TIMEOUT_MARGIN``,
         the rate that includes the prompt read (the server's rate where no
-        whole one was measured). Never shorter than configured, never raised
-        past the ceiling. With no rate or no output budget the configured value
-        stands. ``budget`` is how the caller reached ``max_tokens``, kept with
-        the row so the record says where both numbers came from.
+        whole one was measured). Never shorter than configured. With no rate
+        or no output budget the configured value stands. ``budget`` is how the
+        caller reached ``max_tokens``, kept with the row so the record says
+        where both numbers came from.
         """
         configured = float(configured)
-        with self._lock:
-            row = self._models.get(str(model))
-            rate = row.rate() if row is not None else None
-            prompt_rate = row.prompt_rate() if row is not None else None
-            whole = row.whole_rate() if row is not None else None
-        derived: float | None = None
-        applied = configured
-        used_rate = rate
-        read_rate: float | None = None
         tokens = int(max_tokens or 0)
         prompt = int(prompt_tokens or 0)
-        if rate is not None and tokens > 0:
-            if prompt > 0 and prompt_rate is not None:
-                read_rate = prompt_rate
-                derived = (prompt / prompt_rate + tokens / rate) * TIMEOUT_MARGIN
-            else:
-                used_rate = whole or rate
-                derived = tokens / used_rate * TIMEOUT_MARGIN
-            applied = max(configured, min(derived, TIMEOUT_CEILING_SECONDS))
+        derived, used_rate, read_rate = self._derived(model, tokens, prompt)
+        applied = configured if derived is None else max(configured, derived)
         with self._lock:
             record: dict[str, Any] = {
                 "model": str(model),
@@ -281,12 +271,48 @@ class GenerationRates:
                 self._timeouts[call]["budget"] = budget
         return applied
 
+    def _derived(
+        self, model: str, tokens: int, prompt: int
+    ) -> tuple[float | None, float | None, float | None]:
+        """``(seconds, generation rate used, reading rate used)`` for one call, or no seconds.
+
+        With both of the model's server rates measured and the prompt size
+        given, the prompt read and the answer each at its own rate; otherwise
+        the answer at the rate that includes the prompt read. ``None`` seconds
+        with no rate measured or no output budget.
+        """
+        with self._lock:
+            row = self._models.get(str(model))
+            rate = row.rate() if row is not None else None
+            prompt_rate = row.prompt_rate() if row is not None else None
+            whole = row.whole_rate() if row is not None else None
+        if rate is None or tokens <= 0:
+            return None, rate, None
+        if prompt > 0 and prompt_rate is not None:
+            return (prompt / prompt_rate + tokens / rate) * TIMEOUT_MARGIN, rate, prompt_rate
+        used = whole or rate
+        return tokens / used * TIMEOUT_MARGIN, used, None
+
+    def request_timeout(self, model: str, max_tokens: int, prompt_tokens: int = 0) -> float:
+        """The HTTP request timeout one call of ``model`` is sent with, in seconds.
+
+        The larger of :data:`UNMEASURED_REQUEST_TIMEOUT_SECONDS` and the time
+        the call's output cap takes at the model's measured pace, by the same
+        arithmetic and margin as :meth:`call_timeout`: a request is never cut
+        before the wait around it would end. With no rate measured yet, or no
+        output cap, the unmeasured timeout.
+        """
+        derived, _rate, _read = self._derived(model, int(max_tokens or 0), int(prompt_tokens or 0))
+        if derived is None:
+            return UNMEASURED_REQUEST_TIMEOUT_SECONDS
+        return max(UNMEASURED_REQUEST_TIMEOUT_SECONDS, derived)
+
     def snapshot(self) -> dict[str, Any]:
         """Every measured rate and every timeout it produced, with the stated constants."""
         with self._lock:
             return {
                 "margin": TIMEOUT_MARGIN,
-                "ceiling_s": TIMEOUT_CEILING_SECONDS,
+                "unmeasured_request_timeout_s": UNMEASURED_REQUEST_TIMEOUT_SECONDS,
                 "models": {
                     name: {
                         "tokens_per_second": (
@@ -445,3 +471,163 @@ def attach_rate_meter(llm: Any, rates: GenerationRates | None, model: str | None
     except Exception:  # noqa: BLE001 — measurement must never break a model
         return llm
     return llm
+
+
+# The payload fields an output cap is sent under, in the order they are read:
+# chat completions' two and the Responses API's.
+_PAYLOAD_CAP_KEYS = ("max_completion_tokens", "max_tokens", "max_output_tokens")
+
+# Where a built model keeps the request timeout its client was given.
+_CLIENT_TIMEOUT_ATTRS = ("request_timeout", "default_request_timeout", "timeout")
+
+
+def _meter_of(llm: Any) -> RateMeter | None:
+    """The ``RateMeter`` attached to ``llm``, or ``None``."""
+    return next(
+        (cb for cb in (getattr(llm, "callbacks", None) or []) if isinstance(cb, RateMeter)),
+        None,
+    )
+
+
+def carry_rate_meter(source: Any, target: Any) -> Any:
+    """Attach ``source``'s meter to ``target`` as well, when it has one; returns ``target``.
+
+    For a model rebuilt in place of another — the llama.cpp self-heal — so the
+    replacement's answers are measured, and its requests sized, as the
+    original's were.
+    """
+    meter = _meter_of(source)
+    if meter is None:
+        return target
+    return attach_rate_meter(target, meter.rates, meter.model)
+
+
+def _client_timeout(llm: Any) -> float:
+    """The request timeout ``llm``'s client was built with, or the unmeasured one."""
+    for attr in _CLIENT_TIMEOUT_ATTRS:
+        value = getattr(llm, attr, None)
+        if isinstance(value, int | float) and not isinstance(value, bool) and value > 0:
+            return float(value)
+    return UNMEASURED_REQUEST_TIMEOUT_SECONDS
+
+
+def sized_request_timeout(llm: Any, cap: int, prompt_chars: int = 0) -> float | None:
+    """The timeout one request of ``llm`` needs beyond its client's, or ``None``.
+
+    The time the request's output cap takes at the model's measured pace, by
+    :meth:`GenerationRates.request_timeout`'s arithmetic, with its prompt at
+    ``CHARS_PER_TOKEN`` characters a token. ``None`` — the client's own timeout
+    stands — for a model with no meter, no measured rate yet, a request with no
+    cap, or one whose derived time is within what its client already allows.
+    Never raises.
+    """
+    try:
+        meter = _meter_of(llm)
+        if meter is None or int(cap or 0) <= 0:
+            return None
+        if meter.rates.rate(meter.model) is None:
+            return None
+        from maljan.llm.context_window import CHARS_PER_TOKEN
+
+        seconds = meter.rates.request_timeout(
+            meter.model, int(cap), -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+        )
+        return seconds if seconds > _client_timeout(llm) else None
+    except Exception:  # noqa: BLE001 — a timeout that cannot be sized keeps the client's
+        return None
+
+
+def _content_chars(entries: Any) -> int:
+    """The characters of a request's messages (chat completions) or input items (Responses)."""
+    if isinstance(entries, str):
+        return len(entries)
+    total = 0
+    for entry in entries or []:
+        if isinstance(entry, dict):
+            total += len(str(entry.get("content") or ""))
+        else:
+            total += len(str(getattr(entry, "content", "") or ""))
+    return total
+
+
+def request_timeout_for(llm: Any, payload: dict[str, Any]) -> float | None:
+    """The HTTP request timeout one request of ``llm`` is sent with, or ``None``.
+
+    Read from the request itself: its output cap (``max_completion_tokens``,
+    ``max_tokens`` or the Responses API's ``max_output_tokens``) and its prompt
+    (``messages``, or the Responses API's ``input``), sized by
+    :func:`sized_request_timeout`. Never raises.
+    """
+    try:
+        cap = 0
+        for key in _PAYLOAD_CAP_KEYS:
+            value = payload.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                cap = value
+                break
+        chars = _content_chars(payload.get("messages")) + _content_chars(payload.get("input"))
+        return sized_request_timeout(llm, cap, chars)
+    except Exception:  # noqa: BLE001 — a timeout that cannot be sized keeps the client's
+        return None
+
+
+# One subclass per chat class seen, so pydantic builds each schema once.
+_SIZED_CLASSES: dict[type, type] = {}
+
+
+def with_sized_request_timeout(chat_class: Any) -> Any:
+    """``chat_class`` sending each request with a timeout sized for its answer.
+
+    The client is built with ``PROVIDER_REQUEST_TIMEOUT_SECONDS``. httpx reads
+    that as the longest silence it waits through, not as a deadline for the
+    whole answer, so it ended a request only where the server sent nothing
+    until it had finished — a non-streaming llama.cpp server, which kept a
+    long answer to about 1,800 s of generation. Each request now carries its
+    own ``timeout`` where the model's pace is measured and its output cap takes
+    longer than the client allows: the SDK's per-request option, which
+    overrides the client's (:func:`request_timeout_for`). Anything else is sent
+    as it was.
+
+    Chat classes that build an OpenAI-style payload (``_get_request_payload``)
+    get the timeout in the payload; Gemini's (``_prepare_request``) gets it as
+    the ``timeout`` argument that method reads.
+    """
+    if not isinstance(chat_class, type):
+        return chat_class
+    cached = _SIZED_CLASSES.get(chat_class)
+    if cached is not None:
+        return cached
+    base: Any = chat_class
+    members: dict[str, Any] = {}
+
+    if hasattr(chat_class, "_get_request_payload"):
+
+        def _get_request_payload(self: Any, input_: Any, *, stop: Any = None, **kwargs: Any) -> Any:
+            payload = base._get_request_payload(self, input_, stop=stop, **kwargs)
+            if isinstance(payload, dict) and "timeout" not in payload:
+                seconds = request_timeout_for(self, payload)
+                if seconds is not None:
+                    payload["timeout"] = seconds
+            return payload
+
+        members["_get_request_payload"] = _get_request_payload
+    elif hasattr(chat_class, "_prepare_request"):
+
+        def _prepare_request(self: Any, messages: Any, **kwargs: Any) -> Any:
+            if kwargs.get("timeout") is None:
+                cap = kwargs.get("max_output_tokens") or getattr(self, "max_output_tokens", 0)
+                seconds = sized_request_timeout(self, int(cap or 0), _content_chars(messages))
+                if seconds is not None:
+                    kwargs["timeout"] = seconds
+            return base._prepare_request(self, messages, **kwargs)
+
+        members["_prepare_request"] = _prepare_request
+    else:
+        return chat_class
+
+    sized = type(chat_class.__name__, (chat_class,), members)
+    # Named where it is made, so a log line or a repr says whose class it is.
+    sized.__module__ = __name__
+    sized.__qualname__ = chat_class.__qualname__
+    _SIZED_CLASSES[chat_class] = sized
+    return sized

@@ -1154,9 +1154,13 @@ ANNOTATIONS: dict[str, Annotation] = {
     "reporting.composer_section_max_tokens": {
         "title": "Composer section max tokens",
         "description": (
-            "Output-token cap per report section when composer_enabled is true. 0 derives it "
-            "per model from the context window the model serves (the room an analyst's reply "
-            "is given), and the run summary shows the derivation."
+            "Output-token cap per report section when composer_enabled is true. 0 takes the "
+            "judge's max tokens where set, else the model's declared maximum output, else a "
+            "quarter of the context window the model serves; never more than the model's "
+            "maximum. A positive value gets the reporter's own cap on top for reasoning where "
+            "thinking is left on, held at the model's maximum; with no judge's max tokens set "
+            "that resolves to the model's maximum. The run summary and the worker log show "
+            "the derivation."
         ),
         "subgroup": "Report content",
     },
@@ -1218,21 +1222,16 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Report content",
     },
-    "reporting.narrative_max_tokens": {
-        "title": "Narrative max tokens",
-        "description": (
-            "Hard output-token cap for the NarrativeAgent's LLM round, keeping "
-            "report-generation tail latency predictable."
-        ),
-        "subgroup": "Report content",
-    },
     "reporting.upstream_findings_max_chars": {
         "title": "Upstream findings budget",
         "description": (
             "How many characters of the upstream stages' findings a stage is given "
-            "in its prompt, when its 'inject upstream' setting asks for them. Past "
-            "this the block is cut and says so, so a long pipeline cannot spend a "
-            "late stage's whole context on a summary of the stages before it."
+            "in its prompt, when its 'inject upstream' setting asks for them, and of "
+            "the triage pack every agent reads. 0 derives it from the context window "
+            "the served models were found to have, as the tool-output cap is; with no "
+            "window learned, 6,000. A positive value is used whatever the window. Past "
+            "it the block is cut and says so, so a long pipeline cannot spend a late "
+            "stage's whole context on a summary of the stages before it."
         ),
         "subgroup": "Report content",
     },

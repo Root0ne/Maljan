@@ -8,6 +8,9 @@ change landed on `main`.
 
 ### Added
 
+- **DeepSeek's declared maximum output.** `deepseek-flash` and
+  `deepseek-v4-pro` have `max_output` rows of 393,216 (384K on
+  https://api-docs.deepseek.com/quick_start/pricing) in the vendored table.
 - **`llm.openai.reasoning_effort`**: sent as the request's `reasoning_effort`
   field, exactly as written, so each API's own levels work (DeepSeek: `low`,
   `high`, `max`). Empty, the shipped value, sends nothing. The `llm` connection
@@ -853,6 +856,79 @@ change landed on `main`.
 
 ### Changed
 
+- **The report stage writes up to the model's own maximum.** A composer section
+  and the narrative round take, in order, the operator's
+  `reporting.composer_section_max_tokens` (sections) or `llm.judge_max_tokens`
+  (the reporter's cap; `llm.expert_max_tokens` no longer reaches the report
+  stage), else the model's declared maximum output, else the analysts'
+  quarter-of-the-window derivation — never more than the model's maximum, the
+  reasoning room included. On a 1,048,576-token model that declares 393,216 a
+  section was held at 262,144; it now gets 393,216 and the rest of the window
+  for its evidence. Each section logs its budget and where it came from.
+  A learned window is never overrun: a section's evidence room is the window
+  less the budget, never below zero, and a call whose budget would not fit
+  beside its prompt is sent with what the window leaves, under the field each
+  server reads (`max_output_tokens` on Gemini, llama.cpp's `max_tokens` and
+  `n_predict` extras); Ollama, whose client takes no per-call cap, keeps its
+  built cap. A prompt larger than the whole window is recorded, because
+  Ollama cuts such a prompt from the front, system prompt included, without a
+  word. On llama.cpp a cap set for one call now reaches the server's own
+  fields, so a view answer bound to its view's cap is held there where the
+  server used to write on to the built cap. The 8,192-token fallback window a
+  failed probe leaves sizes nothing. The narrative round's wait is sized from its
+  budget and the measured pace like a section's, where it was a fixed 600 s
+  (`narrative:round` in Appendix B).
+  **Upgrading:** a deployment that set `llm.expert_max_tokens` above
+  `llm.judge_max_tokens` and relied on the larger for report sections now gets
+  the judge's. A local deployment that sets `llm.judge_max_tokens` now gives
+  each section that whole cap rather than a quarter of the window, so a
+  section's evidence room shrinks — on a 16,384-token window with 8,192 set,
+  from 36,864 to 24,576 characters, and to none once the cap reaches the
+  window.
+- **No report schema or prompt sets an upper size.** A section's prose
+  (`_ProseOut.body`, 2,500 characters) and introduction (`_IntroOut.text`,
+  1,800), and the narrative's executive summary (1,200), key findings (six) and
+  recommendations (eight) lose their upper bounds; the lower bounds stay. The
+  prompts no longer ask for a number of sentences, characters or entries, nor
+  to be concise; the narrative prompt states the lower bounds the schema
+  holds ("at least 120 characters", "at least two", "at least three"). A live
+  run's evasion section was dropped for running past 2,500 characters after
+  its one retry.
+- **Every list a report model writes is kept whole.** The composer kept the
+  first 20 flow steps, 30 configuration items, 40 commands, 30 flags and 6 C2
+  channels, and silently the first 8 citations of a prose subsection; the
+  report's ATT&CK external references and the Sigma drafts' tags took the
+  first 10 techniques. None of them cuts anything now.
+- **The report models see every published fact.** The narrative round was shown
+  at most 8 techniques (each with its first quote cut to 120 characters), 5
+  sandbox signatures, 8 import categories, 5 capability rules of 4 APIs each, 3
+  domains, 3 IPs, 3 persistence entries (cut to 100 characters) and 5
+  obfuscation indicators; a composer section at most 24 imported DLLs. Each is
+  shown whole now, and the DLL list is always the complete list. The run-state
+  block names every failed tool rather than eight. A narrative prompt larger
+  than what the window leaves after its budget is recorded in the report's
+  degradation reasons, and its calls are held to what the window leaves.
+- **A request's timeout is sized from its output cap and the measured pace.**
+  Every derived wait was held under 1,800 s, the client's request timeout, and
+  that timeout — which httpx reads as the longest silence, not a deadline for
+  the whole answer — ended an answer on a server that sends nothing until it
+  has finished, such as a non-streaming llama.cpp server; streamed answers and
+  DeepSeek's keep-alive'd ones were not ended by it. Once a model's rate is
+  measured, an OpenAI-compatible (chat completions or Responses API),
+  Anthropic or Gemini request whose output cap takes longer at that pace than
+  its client allows carries that time as its own timeout, with the existing
+  margin; any other request keeps its client's. The derived waits are no
+  longer capped: the analysis job's 8-hour arq timeout is the last resort.
+  Gemini's client timeout was a fixed 90 s and is now the 1,800 s every
+  provider has. The function summariser's wait follows its request's, and a
+  model rebuilt by the llama.cpp self-heal keeps the job's rate meter.
+  `run_summary.generation` reports `unmeasured_request_timeout_s` in place of
+  `ceiling_s`, and Appendix B no longer prints "at most 1800s".
+- **`reporting.upstream_findings_max_chars` ships at 0, derived from the served
+  window** like the tool-answer cap, for the upstream findings block and the
+  triage pack; the documented 6,000 applies only when no window was learned. A
+  positive value is the operator's. **Upgrading:** a stored 0 used to mean
+  "no cut" and now means "derived".
 - **The run-state block rides at the end of the last message, so a request's
   front stays the same.** A tool loop's block, with the budget line that counts
   down every turn, used to be rewritten at the end of the system turn, and a
@@ -4534,6 +4610,13 @@ change landed on `main`.
 
 ### Removed
 
+- **`reporting.narrative_max_tokens`.** It was described as a hard output cap
+  for the narrative round, but its value only reached a constructor argument
+  (`NarrativeAgent.max_input_tokens`) that nothing read; both are gone. The
+  round's budget is the report stage's (see Changed). Alembic revision
+  `20260930000000` deletes a stored row. **Upgrading:** nothing to do; a
+  stored value is ignored when the settings are built, and the migration
+  removes it so an import does not refuse it as an unknown key.
 - **The static analyst's case-prior hint and its settings.**
   `StaticAnalyst._compute_attck_case_hint`, `analysis.attck_case_rag` and the
   five `preprocessing.attck_case_*` settings; alembic revision

@@ -1497,8 +1497,9 @@ def _pcap(data: dict[str, Any]) -> str:
 
 
 # The decoded-strings line. The pack is one block every agent reads, cut at
-# ``reporting.upstream_findings_max_chars`` (6,000 characters by default) as a
-# whole, and on a PE the rest of the pack takes about a third of that. The
+# ``reporting.upstream_findings_max_chars`` as a whole (derived from the served
+# window by default, 6,000 characters when no window is known), and on a PE
+# the rest of the pack takes about 2,000 characters. The
 # ledger entry keeps up to ``DECODED_STRINGS_ROWS`` rows and the line shows up
 # to ``DECODED_STRINGS_SHOWN`` of them in ``DECODED_STRINGS_LINE_CHARS``, each
 # printed to ``DECODED_STRING_CHARS``: on the reference loader that is every one

@@ -203,11 +203,7 @@ def _lines(
         if _get(row, "ok") is False and not _was_not_made(row)
     ]
     if failed:
-        lines.append(
-            "tools failed: "
-            + ", ".join(failed[:8])
-            + (f" (+{len(failed) - 8} more)" if len(failed) > 8 else "")
-        )
+        lines.append("tools failed: " + ", ".join(failed))
 
     budget = []
     if steps_left is not None:

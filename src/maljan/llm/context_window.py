@@ -1317,6 +1317,152 @@ def reply_budget(settings: Any, assignment: Any, *, probe: bool = True) -> Outpu
     return OutputBudget(tokens=tokens, window=window, generation_cap=cap, derivation=sentence)
 
 
+def model_maximum_output(window: WindowFact, model: object) -> tuple[int, str]:
+    """``(tokens, where from)`` for the most one answer of ``model`` can be, or ``(0, "")``.
+
+    The maximum output its provider declares (:func:`declared_output`), and no
+    more than the context window it serves, because an answer is written into
+    that window. With neither known, zero: nothing is stated about it.
+    """
+    from maljan.llm.model_output_limits import declared_output
+
+    declared, where = declared_output(model)
+    learned = window.source != FALLBACK and window.tokens > 0
+    if declared > 0 and (not learned or declared <= window.tokens):
+        return declared, f"the model's declared maximum output of {declared} ({where})"
+    if learned:
+        return window.tokens, f"the model's {window.tokens}-token context window ({window.source})"
+    return 0, ""
+
+
+def call_output_bound(cap: int, window_tokens: int, prompt_chars: int) -> int | None:
+    """The ``max_tokens`` one call is sent with when its budget would pass the window, or ``None``.
+
+    A call's answer is written into the window its prompt already fills, so the
+    most it can be is the window less the prompt, at :data:`CHARS_PER_TOKEN`
+    characters a token. ``None`` — the budget stands — when the window is not
+    known (``window_tokens`` 0: nothing to bound by) or the budget already fits.
+    Never below one token: a prompt that fills the window is the caller's
+    degradation to record, not a request for nothing.
+    """
+    if int(window_tokens) <= 0 or int(cap) <= 0:
+        return None
+    left = int(window_tokens) - -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+    if int(cap) <= left:
+        return None
+    return max(1, left)
+
+
+# The field a per-call output cap is passed under, by chat model type. Each
+# client reads its own name: ``ChatOpenAI`` and ``ChatAnthropic`` take
+# ``max_tokens`` (the OpenAI client renames it on the wire, and the provider
+# carries it into DeepSeek's and llama.cpp's own fields), and
+# ``ChatGoogleGenerativeAI`` takes ``max_output_tokens`` — its request config
+# refuses any other name. ``None``: the client takes no per-call cap at all —
+# Ollama's reads its cap only inside ``options`` and refuses an unknown keyword.
+_PER_CALL_CAP_FIELD: dict[str, str | None] = {
+    "ChatOllama": None,
+    "ChatGoogleGenerativeAI": "max_output_tokens",
+}
+_DEFAULT_PER_CALL_CAP_FIELD = "max_tokens"
+
+
+def _per_call_cap_field(llm: Any) -> str | None:
+    """The field ``llm`` takes one call's output cap under, or ``None`` when it takes none.
+
+    Over a fallback list the one field every model takes, since the list hands
+    the same keywords to whichever model answers; ``None`` when they differ.
+    """
+    models = getattr(llm, "models", None)
+    if isinstance(models, list) and models:
+        fields = {_per_call_cap_field(model) for model in models}
+        return fields.pop() if len(fields) == 1 else None
+    for cls in type(llm).__mro__:
+        if cls.__name__ in _PER_CALL_CAP_FIELD:
+            return _PER_CALL_CAP_FIELD[cls.__name__]
+    return _DEFAULT_PER_CALL_CAP_FIELD
+
+
+def accepts_output_bound(llm: Any) -> bool:
+    """Whether one call of ``llm`` can be handed its own output cap (every model of a list)."""
+    return _per_call_cap_field(llm) is not None
+
+
+def output_bound_kwargs(llm: Any, bound: int) -> dict[str, Any]:
+    """The keyword one call of ``llm`` is held to ``bound`` output tokens with, or ``{}``."""
+    field = _per_call_cap_field(llm)
+    return {} if field is None else {field: int(bound)}
+
+
+def prompt_overflow_sentence(what: str, prompt_chars: int, window_tokens: int) -> str | None:
+    """A sentence for a prompt larger than the whole known window, or ``None``.
+
+    Such a prompt is not refused by every server: Ollama cuts it from the front
+    to fit ``num_ctx``, which can drop the system prompt and with it the
+    round's rules, and says nothing. The platform knows the window, so it says
+    it instead.
+    """
+    if int(window_tokens) <= 0:
+        return None
+    tokens = -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+    if tokens <= int(window_tokens):
+        return None
+    return (
+        f"The {what} prompt (about {tokens} tokens at {CHARS_PER_TOKEN} characters a token) "
+        f"is larger than its model's {int(window_tokens)}-token context window; a server "
+        "that fits it by cutting it from the front, as Ollama does, loses its opening, "
+        "the system prompt included."
+    )
+
+
+def report_output_budget(
+    settings: Any,
+    assignment: Any,
+    configured: int,
+    configured_said: str,
+    *,
+    setting: str = "llm.judge_max_tokens",
+    probe: bool = True,
+) -> OutputBudget:
+    """How long one answer of the report stage may run on one model, and why.
+
+    The report stage writes the report, and a report is as long as its
+    evidence needs; a quarter of the window is the analysts' rule, which keeps
+    room in a conversation that is still gathering. So, in this order:
+
+    1. ``configured`` above 0 is the operator's value (``configured_said`` says
+       which setting, and what was added to it), used as set;
+    2. else the model's declared maximum output — the endpoint's model list or
+       the vendored table's sourced row;
+    3. else the analysts' derivation (:func:`derived_reply`), with ``setting``
+       named as the cap that was not set.
+
+    Never more than the model's maximum (:func:`model_maximum_output`); a value
+    held at it says so. The window is still learned: a section's evidence room
+    is what the window leaves after this budget.
+    """
+    from maljan.llm.model_output_limits import declared_output_limit
+
+    window = window_for_assignment(settings, assignment, probe=probe)
+    model = getattr(assignment, "model", "")
+    maximum, maximum_said = model_maximum_output(window, model)
+    configured = int(configured or 0)
+    if configured > 0:
+        tokens = min(configured, maximum) if maximum > 0 else configured
+        sentence = f"{tokens} tokens — {configured_said}"
+        if tokens < configured:
+            sentence += f", held at {maximum_said}"
+    elif declared_output_limit(model) > 0:
+        tokens, sentence = maximum, f"{maximum} tokens — {maximum_said}"
+    else:
+        tokens, sentence = derived_reply(
+            window, 0, model, setting, local=serves_locally(assignment, window)
+        )
+    return OutputBudget(
+        tokens=tokens, window=window, generation_cap=configured, derivation=sentence
+    )
+
+
 @dataclass(frozen=True)
 class OutputCap:
     """One agent's output cap in tokens, and the sentence that says how it was reached."""
@@ -1773,6 +1919,41 @@ def budget_for_settings(settings: Any, agents: list[str], *, probe: bool = True)
     return ContextBudget(
         window_for_settings(settings, agents, probe=probe),
         reply_tokens=generation_reserve(settings),
+    )
+
+
+def upstream_block_chars(configured: int, budget: Any) -> tuple[int, str]:
+    """``(characters, how)`` a stage's upstream findings block and triage pack may take.
+
+    The same three answers as a tool answer's cap (:func:`output_limit`): a
+    positive ``configured`` is the operator's
+    ``core.reporting.upstream_findings_max_chars``, used unchanged; a budget
+    over a measured window derives it — the share one answer may take of what
+    the window leaves after the reply room, measured before the conversation
+    holds anything, because the block is read before a stage starts; and
+    anything else is the documented constant, stated as the fallback.
+    """
+    if int(configured) > 0:
+        chars = int(configured)
+        return chars, f"{chars} characters — reporting.upstream_findings_max_chars is set"
+    if isinstance(budget, ContextBudget) and budget.derives:
+        chars = derive_tool_output_chars(
+            window_tokens=budget.window.tokens,
+            reply_tokens=budget.reply_tokens,
+            chars_per_token=budget.chars_per_token,
+            share=budget.share,
+            floor=budget.floor,
+        )
+        if chars > 0:
+            return chars, (
+                f"{chars} characters — derived from the {budget.window.tokens}-token "
+                f"window ({budget.window.source}) less {budget.reply_tokens} tokens of "
+                f"reply room, at {budget.chars_per_token} characters a token and a "
+                f"share of {budget.share}"
+            )
+    return UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS, (
+        f"{UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS} characters — the documented fallback: no "
+        f"window was learned ({UNKNOWN_WINDOW_REMEDY})"
     )
 
 

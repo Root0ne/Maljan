@@ -14,11 +14,12 @@ import json
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from langchain_core.messages import AIMessage
 
 from maljan.agents.judge_agent import JudgeAgent
 from maljan.core.truncation_ledger import TruncationLedger
-from maljan.llm.generation_rate import TIMEOUT_CEILING_SECONDS, GenerationRates, model_name_of
+from maljan.llm.generation_rate import GenerationRates, model_name_of
 
 BUNDLE = json.dumps(
     {
@@ -72,8 +73,10 @@ def test_the_model_list_starts_on_the_sized_verdict_clock() -> None:
 
     assert restarts, "the list was started for the verdict call"
     applied = rates.snapshot()["timeouts"]["judge:verdict"]["applied_s"]
-    assert applied == TIMEOUT_CEILING_SECONDS
-    assert restarts[-1]["loop_seconds"] == applied
+    # The whole derived wait, no longer held under the client's 1,800 s.
+    derived = rates.snapshot()["timeouts"]["judge:verdict"]["derived_s"]
+    assert derived > 1800 and applied == pytest.approx(derived, abs=0.1)
+    assert restarts[-1]["loop_seconds"] == pytest.approx(applied, abs=0.1)
 
 
 def test_a_verdict_its_cap_cut_is_counted() -> None:

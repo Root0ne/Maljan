@@ -326,8 +326,9 @@ class TestFactsOutrankClaimsInThePrompt:
         assert "BINARY FACTS" not in text
 
 
-# One field, one real constraint: ``_IntroOut.text`` is capped at 1800.
-_OVERLONG_INTRO = json.dumps({"text": "x" * 2000})
+# One field, one real constraint: ``_IntroOut.text`` is one string, and a
+# list of paragraphs is not one.
+_OFF_SCHEMA_INTRO = json.dumps({"text": ["A Windows malware sample.", "It runs."]})
 
 
 class TestTheManualPathGetsOneTurnToFixItsShape:
@@ -368,9 +369,9 @@ class TestTheManualPathGetsOneTurnToFixItsShape:
         return result, llm
 
     def test_an_off_schema_section_is_retried_once_and_then_accepted(self) -> None:
-        # ``_IntroOut.text`` is capped at 1800 characters; the first answer
-        # runs past it, which is the shape of breach a real model produces.
-        result, llm = self._invoke(_OVERLONG_INTRO, '{"text": "A Windows malware sample."}')
+        # ``_IntroOut.text`` is one string; the first answer is a list of
+        # them, which is the shape of breach a real model produces.
+        result, llm = self._invoke(_OFF_SCHEMA_INTRO, '{"text": "A Windows malware sample."}')
 
         assert result is not None and result.text == "A Windows malware sample."
         feedback = str(llm.sent[1][-1].content)
@@ -392,10 +393,18 @@ class TestTheManualPathGetsOneTurnToFixItsShape:
         assert len(llm.sent) == 1
 
     def test_a_section_that_stays_off_schema_is_skipped(self) -> None:
-        result, llm = self._invoke(_OVERLONG_INTRO, _OVERLONG_INTRO)
+        result, llm = self._invoke(_OFF_SCHEMA_INTRO, _OFF_SCHEMA_INTRO)
 
         assert result is None
         assert len(llm.sent) == 2
+
+    def test_a_long_answer_is_kept_whole(self) -> None:
+        """No upper bound on a section's prose: the model decides its length."""
+        text = "The sample reads its settings from a resource. " * 400
+        result, llm = self._invoke(json.dumps({"text": text}))
+
+        assert result is not None and result.text == text
+        assert len(llm.sent) == 1
 
 
 class TestASectionWithKeysItsSchemaDoesNotDeclare:
@@ -611,17 +620,54 @@ class TestEachSectionIsShownAnExampleOfItsShape:
         assert module._EXAMPLES["execution_flow"] in human
 
 
-class TestAModelListIsCutOnlyWithARecord:
-    def test_a_list_past_its_cap_is_kept_to_the_cap_and_recorded(self) -> None:
-        comp = ReportComposer(llm=None, per_section_timeout=5)  # type: ignore[arg-type]
-        kept = comp._kept("execution_flow", list(range(25)), 20)
-        assert kept == list(range(20))
-        assert comp.degradations == [
-            "report section 'execution_flow' was trimmed: the report keeps the first 20 of "
-            "the 25 items the report model wrote"
-        ]
+class TestAModelListIsKeptWhole:
+    """No count cuts what the report model wrote: every item it lists is kept."""
 
-    def test_a_list_within_its_cap_is_kept_whole_and_says_nothing(self) -> None:
-        comp = ReportComposer(llm=None, per_section_timeout=5)  # type: ignore[arg-type]
-        assert comp._kept("commands", [1, 2], 40) == [1, 2]
-        assert comp.degradations == []
+    @staticmethod
+    def _isr() -> dict[str, Any]:
+        return {
+            "static": AgentISR(
+                agent_id="static",
+                domain="static",
+                claims=[
+                    ClaimEvidence(
+                        claim="Resolves APIs by CRC32 hash", evidence_ref="ev_0009", confidence=0.8
+                    )
+                ],
+            )
+        }
+
+    def test_every_flow_step_is_kept(self) -> None:
+        steps = [
+            {"order": i, "action": f"Step {i}", "voice": "assessed", "evidence_refs": ["ev_0009"]}
+            for i in range(1, 36)
+        ]
+        r = _report()
+        _compose(r, by_schema={"_FlowOut": {"steps": steps}}, isr=self._isr())
+
+        assert r.technical_analysis is not None
+        assert len(r.technical_analysis.execution_flow) == 35
+        assert not any("trimmed" in reason for reason in r.degradation_reasons or [])
+
+    def test_the_composer_has_no_list_cap(self) -> None:
+        assert not hasattr(ReportComposer, "_kept")
+
+
+class TestTheModelDecidesTheLength:
+    """No section's schema or prompt sets an upper size; the evidence decides."""
+
+    def test_no_prose_field_has_an_upper_bound(self) -> None:
+        from maljan.reporting.composer import _IntroOut, _ProseOut
+
+        for schema in (_ProseOut, _IntroOut):
+            for field in schema.model_fields.values():
+                assert not any(hasattr(rule, "max_length") for rule in field.metadata)
+
+    def test_no_instruction_asks_for_a_length(self) -> None:
+        import re
+
+        from maljan.reporting.composer import _INSTRUCTIONS, _SYSTEM
+
+        for text in (_SYSTEM, *_INSTRUCTIONS.values()):
+            assert "concise" not in text.lower()
+            assert not re.search(r"\d+\s*(-|to)\s*\d+\s*sentence", text)

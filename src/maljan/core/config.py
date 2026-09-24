@@ -2981,32 +2981,28 @@ class ReportingConfig(BaseModel):
     - ``include_extended_stix``: emit the extended Bundle (Identity / Note /
       Report SDOs). Disable to halve serialization cost when consumers only
       need the minimal judge bundle.
-    - ``narrative_max_tokens``: hard cap for the NarrativeAgent LLM round.
-      Keeps tail latency predictable.
     - ``auto_generate_detection_rules``: template-based YARA/Sigma/Suricata
       generation.
     """
 
     enabled: bool = True
     include_extended_stix: bool = True
-    narrative_max_tokens: Annotated[int, Field(ge=1)] = 1500
     # How much of the upstream stages' findings a stage is handed. A pipeline
     # of six stages would otherwise put the whole run into every prompt after
     # the second one, and the last stage would spend its context on a summary
     # of a summary instead of on the sample.
     #
-    # The third copy of the six thousand the tool-output cap used to be, and it
-    # is the one that stays. The two it is not: the guardrail's number bounded
-    # a prompt and is now derived from the served window; the evidence ledger's
-    # bounded a *record* silently and is gone, because a stored prefix that
-    # does not say it is one cannot be cited. This bounds a prompt, like the
-    # first, and it announces itself — the block a stage reads ends in
-    # "[upstream findings truncated]" — and nothing is lost, because the whole
-    # findings stay in the run state, the transcript and the report. What it
-    # shares with the first is being a constant where the served window is
-    # knowable, and deriving it belongs with that cap rather than bolted on
-    # here.
-    upstream_findings_max_chars: Annotated[int, Field(ge=0)] = 6000
+    # Zero, the default, derives it from the window this job's models serve,
+    # the way the tool-answer cap is (``preprocessing.max_tool_output_chars``):
+    # the share one answer may take of what the window leaves after the reply
+    # room (``context_window.upstream_block_chars``). A window nothing reported
+    # derives nothing and the documented fallback of 6,000 applies. A positive
+    # value is the operator's own, used as set. The cut announces itself — the
+    # block a stage reads ends in "[upstream findings truncated]" — and nothing
+    # is lost, because the whole findings stay in the run state, the
+    # transcript and the report. The triage pack every agent reads is cut at
+    # the same bound.
+    upstream_findings_max_chars: Annotated[int, Field(ge=0)] = 0
     auto_generate_detection_rules: bool = True
 
     # --- Report-reshaping (professional-report front-matter + Composer) ---
@@ -3020,13 +3016,15 @@ class ReportingConfig(BaseModel):
     # legacy single-round NarrativeAgent. Bounded per-section prompts + hard
     # per-section timeout keep the local SWA model from stalling.
     composer_enabled: bool = True
-    # What one report section may generate, in tokens. 0, the default, derives
-    # it per model: the room an analyst's reply is given on that model — the
-    # larger of ``expert_max_tokens`` and ``judge_max_tokens``, at most a
-    # quarter of the context window the model serves — with the derivation
-    # printed in the run summary. A positive value is an operator's own budget
-    # and is used as it always was. A fixed 900 dropped a section of a live
-    # report when the model reasoned past it.
+    # What one report section may generate, in tokens. 0, the default, takes
+    # the report stage's own order per model: the reporter's
+    # ``judge_max_tokens`` where the operator set it, else the model's
+    # declared maximum output, else a quarter of the context window the model
+    # serves; never more than the model's maximum, with the derivation printed
+    # in the run summary and the worker log. A positive value is an operator's
+    # own budget, plus the reporter's cap as reasoning room where thinking is
+    # left on, held at the model's maximum. A fixed budget dropped a section of
+    # a live report when the model's answer outgrew it.
     composer_section_max_tokens: Annotated[int, Field(ge=0)] = 0
     composer_per_section_timeout: Annotated[int, Field(ge=1)] = 120
     # Server-side HTML→PDF export.
