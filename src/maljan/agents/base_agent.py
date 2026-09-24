@@ -4998,6 +4998,30 @@ class BaseAnalyst(BudgetMeter, ABC):
             text = str(getattr(answer, "content", answer))
             return self._text_to_isr(self._capture_findings(text), isr.revision_round)
 
+        def _keep(first_answer: AgentISR, retried: AgentISR) -> AgentISR:
+            # A retry that came back with fewer claims than it started with
+            # lost work. ``_text_to_isr`` over a garbled second answer parses
+            # to an empty ISR just as happily as over a good one, and taking it
+            # would delete the analyst's original findings with nothing
+            # recording that it happened. The first answer is kept and what is
+            # wrong with it is recorded — and published: the loop checks the
+            # kept answer again before it says what became of each finding.
+            # An answer that is still prose after being asked keeps the loop's
+            # own prose, which is what the analyst wrote from everything it
+            # gathered; the retry was asked over the evidence text alone.
+            if not retried.claims and first_answer.unparsed_answer:
+                return first_answer
+            if len(retried.claims) < len(first_answer.claims):
+                self.logger.warning(
+                    "Validation: the retry for '%s' returned %d claim(s) against %d; "
+                    "keeping the first answer and recording what is wrong with it.",
+                    self.name,
+                    len(retried.claims),
+                    len(first_answer.claims),
+                )
+                return first_answer
+            return retried
+
         try:
             tally = ValidationTally()
             revised, violations, retries = retry_with_feedback_sync(
@@ -5009,6 +5033,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 sink=self._event_sink(),
                 agent=str(self.name),
                 stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
+                keep=_keep,
             )
         except Exception as exc:  # noqa: BLE001 — a retry that fails keeps the first answer
             self.logger.warning("Validation retry failed (%s); keeping the first answer.", exc)
@@ -5017,28 +5042,6 @@ class BaseAnalyst(BudgetMeter, ABC):
         self.validation_retries += retries
         for code, count in tally.by_code.items():
             self.validation_fed_back[code] = self.validation_fed_back.get(code, 0) + count
-
-        # A retry that came back with fewer claims than it started with lost
-        # work. ``_text_to_isr`` over a garbled second answer parses to an empty
-        # ISR just as happily as over a good one, and taking it would delete the
-        # analyst's original findings with nothing recording that it happened —
-        # the exact silence this whole phase is about. Keep the first answer and
-        # label whatever was wrong with it.
-        # An answer that is still prose after being asked keeps the loop's own
-        # prose, which is what the analyst wrote from everything it gathered;
-        # the retry was asked over the evidence text alone.
-        if retries and not revised.claims and isr.unparsed_answer:
-            revised = isr
-        if retries and len(revised.claims) < len(isr.claims):
-            self.logger.warning(
-                "Validation: the retry for '%s' returned %d claim(s) against %d; "
-                "keeping the first answer and recording what is wrong with it.",
-                self.name,
-                len(revised.claims),
-                len(isr.claims),
-            )
-            revised = isr
-            violations = self._revalidate(isr, _validator)
 
         if violations:
             mark_invalid_technique_ids(revised, violations)
@@ -5062,16 +5065,6 @@ class BaseAnalyst(BudgetMeter, ABC):
         codes = list(getattr(self, "validation_not_run", None) or [])
         self.validation_not_run = []
         return codes
-
-    def _revalidate(
-        self, isr: AgentISR, validator: Callable[[AgentISR], list[Violation]]
-    ) -> list[Violation]:
-        """What is wrong with the answer being kept, re-asked. Never raises."""
-        try:
-            return validator(isr)
-        except Exception as exc:  # noqa: BLE001 — a metric is never worth a lost run
-            self.logger.warning("Validation: re-check skipped (%s).", exc)
-            return []
 
     def drain_validation_findings(self) -> tuple[list[dict[str, str]], int, dict[str, int]]:
         """What this analyst was told, what it did not fix, and what that cost.

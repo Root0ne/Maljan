@@ -4367,6 +4367,7 @@ def retry_with_feedback_sync[T](
     sink: EventSink | None = None,
     agent: str = "",
     stage: str = "",
+    keep: Callable[[T, T], T] | None = None,
 ) -> tuple[T, list[Violation], int]:
     """:func:`retry_with_feedback` for the analysts, whose loop is synchronous.
 
@@ -4374,11 +4375,19 @@ def retry_with_feedback_sync[T](
     to the shared agent loop itself), so an async-only helper would force every
     analyst call site through a second bridge for no gain. The two functions
     share the feedback turn and the collection rule and differ only in the await.
+
+    ``keep`` is the caller's choice between the first answer and the last,
+    made here, before anything is published: an analyst keeps its first answer
+    when the retry lost claims. The violations returned and the outcome every
+    one of them is published with are then the kept answer's. Chosen after the
+    outcome, the conversation said "resolved" for four findings the run kept
+    and recorded unresolved.
     """
     feed = _feed(sink, agent, stage)
     turns = list(messages)
     answer = run(turns)
     parsed = parse(answer)
+    first = parsed
     violations = _collect(parsed, validators)
     retries = 0
     shown: list[Violation] = []
@@ -4390,6 +4399,11 @@ def retry_with_feedback_sync[T](
         answer = run(turns)
         parsed = parse(answer)
         violations = _collect(parsed, validators)
+    if retries and keep is not None:
+        kept = keep(first, parsed)
+        if kept is not parsed:
+            parsed = kept
+            violations = _collect(parsed, validators)
     if feed is not None:
         feed.outcome(shown, violations, retries)
     return parsed, violations, retries
