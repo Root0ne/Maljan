@@ -497,3 +497,15 @@ class TestAWindowTheBudgetFills:
         from maljan.llm.context_window import accepts_output_bound
 
         assert not accepts_output_bound(ChatOllama(model="m"))
+
+    def test_a_prompt_larger_than_the_window_is_recorded(self) -> None:
+        composer = ReportComposer(
+            llm=None,  # type: ignore[arg-type]
+            per_section_timeout=5,
+            output_cap=1000,
+            window_tokens=4000,
+        )
+
+        composer._call_bound([HumanMessage(content="x" * 30000)])
+
+        assert any("larger than its model" in reason for reason in composer.degradations)

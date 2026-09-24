@@ -867,8 +867,12 @@ change landed on `main`.
   for its evidence. Each section logs its budget and where it came from.
   A learned window is never overrun: a section's evidence room is the window
   less the budget, never below zero, and a call whose budget would not fit
-  beside its prompt is sent with what the window leaves (Ollama excepted,
-  which stops at its own context). The 8,192-token fallback window a failed
+  beside its prompt is sent with what the window leaves, under the field each
+  server reads (`max_output_tokens` on Gemini, llama.cpp's `max_tokens` and
+  `n_predict` extras); Ollama, whose client takes no per-call cap, keeps its
+  built cap. A prompt larger than the whole window is recorded, because
+  Ollama cuts such a prompt from the front, system prompt included, without a
+  word. The 8,192-token fallback window a failed
   probe leaves sizes nothing. The narrative round's wait is sized from its
   budget and the measured pace like a section's, where it was a fixed 600 s
   (`narrative:round` in Appendix B).

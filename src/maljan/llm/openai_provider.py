@@ -316,6 +316,60 @@ def _cap_as_max_tokens(payload: dict[str, Any]) -> None:
         payload["extra_body"] = extra
 
 
+# The llama.cpp extras that carry the output cap (``_add_llama_cpp_extras``).
+_LLAMA_CAP_KEYS = ("max_tokens", "n_predict")
+
+# One subclass per chat class seen, as for ``_TIMED_CLASSES``.
+_LLAMA_CAPPED_CLASSES: dict[type, type] = {}
+
+
+def with_per_request_llama_cap(chat_class: Any) -> Any:
+    """``chat_class`` sending each request's own cap in llama.cpp's extras.
+
+    ik_llama.cpp ignores ``max_completion_tokens``, the field the client sends
+    a cap under, and reads ``max_tokens``/``n_predict`` from ``extra_body``,
+    which the provider fills once, from the cap the model was built with. A
+    cap bound for one call (``llm.ainvoke(…, max_tokens=n)``) therefore never
+    reached the server. The subclass copies the request's own cap into those
+    extras, per request; a request without a cap, or a model without the
+    extras, is sent as it was.
+    """
+    if not isinstance(chat_class, type) or not hasattr(chat_class, "_get_request_payload"):
+        return chat_class
+    cached = _LLAMA_CAPPED_CLASSES.get(chat_class)
+    if cached is not None:
+        return cached
+    base: Any = chat_class
+
+    def _get_request_payload(self: Any, input_: Any, *, stop: Any = None, **kwargs: Any) -> Any:
+        payload = base._get_request_payload(self, input_, stop=stop, **kwargs)
+        if not isinstance(payload, dict):
+            return payload
+        cap = payload.get("max_completion_tokens", payload.get("max_tokens"))
+        extra = payload.get("extra_body")
+        if (
+            isinstance(cap, int)
+            and not isinstance(cap, bool)
+            and cap > 0
+            and isinstance(extra, dict)
+            and any(key in extra for key in _LLAMA_CAP_KEYS)
+        ):
+            extra = dict(extra)
+            for key in _LLAMA_CAP_KEYS:
+                if key in extra:
+                    extra[key] = cap
+            payload["extra_body"] = extra
+        return payload
+
+    capped = type(
+        chat_class.__name__, (chat_class,), {"_get_request_payload": _get_request_payload}
+    )
+    capped.__module__ = __name__
+    capped.__qualname__ = chat_class.__qualname__
+    _LLAMA_CAPPED_CLASSES[chat_class] = capped
+    return capped
+
+
 def with_reasoning_passback(chat_class: Any) -> Any:
     """``chat_class`` keeping DeepSeek's ``reasoning_content`` and sending it back.
 
@@ -521,6 +575,10 @@ class OpenAIProvider:
             # DeepSeek's reasoning is kept and sent back on its assistant turn;
             # every other dialect's request is left as langchain builds it.
             chat_class = with_reasoning_passback(chat_class)
+        elif local:
+            # llama.cpp reads its cap from the extras; a cap bound for one call
+            # reaches them the way the model's own does.
+            chat_class = with_per_request_llama_cap(chat_class)
         built: BaseChatModel = chat_class(**build_kwargs)
         if not local:
             return built

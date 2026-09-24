@@ -470,7 +470,12 @@ class NarrativeAgent:
 
     def attempts(self) -> int:
         """The calls this round may make: its answer and one validation retry,
-        plus the structured attempt first where the endpoint supports one."""
+        plus the structured attempt first where the endpoint supports one.
+
+        The structured attempt is counted even for a round whose calls are held
+        to the window and so go by the manual path: the wait is then one call
+        longer than needed, which errs on the side of waiting.
+        """
         return NARRATIVE_ATTEMPTS + (1 if structured_output_supported_for_llm(self.llm) else 0)
 
     def round_timeout(self, configured: float, prompt_chars: int = 0) -> float:
@@ -512,14 +517,18 @@ class NarrativeAgent:
         window is known and the budget would not fit beside the prompt, the
         call may write what the window leaves after it.
         """
-        from maljan.llm.context_window import accepts_output_bound, call_output_bound
+        from maljan.llm.context_window import (
+            accepts_output_bound,
+            call_output_bound,
+            prompt_overflow_sentence,
+        )
 
         chars = sum(len(str(getattr(message, "content", "") or "")) for message in turns)
-        bound = call_output_bound(
-            int(getattr(self, "output_cap", 0) or 0),
-            int(getattr(self, "window_tokens", 0) or 0),
-            chars,
-        )
+        window = int(getattr(self, "window_tokens", 0) or 0)
+        overflow = prompt_overflow_sentence("narrative round's", chars, window)
+        if overflow is not None and overflow not in self.degradations:
+            self.degradations.append(overflow)
+        bound = call_output_bound(int(getattr(self, "output_cap", 0) or 0), window, chars)
         if bound is None or not accepts_output_bound(self.llm):
             return None
         return bound
@@ -653,6 +662,8 @@ class NarrativeAgent:
         # discarded the whole answer and the report shipped the deterministic
         # template with nothing saying which rule was broken. A dropped socket
         # is still retried separately (``retry_on_connection_error``).
+        from maljan.llm.context_window import output_bound_kwargs
+
         async def _run(turns: list[BaseMessage]) -> Any:
             bound = self._call_bound(turns)
             if bound is not None:
@@ -664,7 +675,7 @@ class NarrativeAgent:
                     self.output_cap,
                 )
             raw = await retry_on_connection_error(
-                (lambda: self.llm.ainvoke(turns, max_tokens=bound))
+                (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))
                 if bound is not None
                 else (lambda: self.llm.ainvoke(turns)),
                 what="NarrativeAgent raw",

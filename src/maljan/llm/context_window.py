@@ -1353,19 +1353,66 @@ def call_output_bound(cap: int, window_tokens: int, prompt_chars: int) -> int | 
     return max(1, left)
 
 
-# The chat model types a per-call ``max_tokens`` cannot be handed to: Ollama's
-# client takes its cap only inside ``options`` and refuses an unknown keyword.
-# A runtime we run stops at its own context rather than refusing the request,
-# so leaving its cap as built costs no call.
-_NO_PER_CALL_CAP = ("ChatOllama",)
+# The field a per-call output cap is passed under, by chat model type. Each
+# client reads its own name: ``ChatOpenAI`` and ``ChatAnthropic`` take
+# ``max_tokens`` (the OpenAI client renames it on the wire, and the provider
+# carries it into DeepSeek's and llama.cpp's own fields), and
+# ``ChatGoogleGenerativeAI`` takes ``max_output_tokens`` — its request config
+# refuses any other name. ``None``: the client takes no per-call cap at all —
+# Ollama's reads its cap only inside ``options`` and refuses an unknown keyword.
+_PER_CALL_CAP_FIELD: dict[str, str | None] = {
+    "ChatOllama": None,
+    "ChatGoogleGenerativeAI": "max_output_tokens",
+}
+_DEFAULT_PER_CALL_CAP_FIELD = "max_tokens"
+
+
+def _per_call_cap_field(llm: Any) -> str | None:
+    """The field ``llm`` takes one call's output cap under, or ``None`` when it takes none.
+
+    Over a fallback list the one field every model takes, since the list hands
+    the same keywords to whichever model answers; ``None`` when they differ.
+    """
+    models = getattr(llm, "models", None)
+    if isinstance(models, list) and models:
+        fields = {_per_call_cap_field(model) for model in models}
+        return fields.pop() if len(fields) == 1 else None
+    for cls in type(llm).__mro__:
+        if cls.__name__ in _PER_CALL_CAP_FIELD:
+            return _PER_CALL_CAP_FIELD[cls.__name__]
+    return _DEFAULT_PER_CALL_CAP_FIELD
 
 
 def accepts_output_bound(llm: Any) -> bool:
-    """Whether ``max_tokens`` may be passed to one call of ``llm`` (every model of a list)."""
-    models = getattr(llm, "models", None)
-    if isinstance(models, list) and models:
-        return all(accepts_output_bound(model) for model in models)
-    return not any(cls.__name__ in _NO_PER_CALL_CAP for cls in type(llm).__mro__)
+    """Whether one call of ``llm`` can be handed its own output cap (every model of a list)."""
+    return _per_call_cap_field(llm) is not None
+
+
+def output_bound_kwargs(llm: Any, bound: int) -> dict[str, Any]:
+    """The keyword one call of ``llm`` is held to ``bound`` output tokens with, or ``{}``."""
+    field = _per_call_cap_field(llm)
+    return {} if field is None else {field: int(bound)}
+
+
+def prompt_overflow_sentence(what: str, prompt_chars: int, window_tokens: int) -> str | None:
+    """A sentence for a prompt larger than the whole known window, or ``None``.
+
+    Such a prompt is not refused by every server: Ollama cuts it from the front
+    to fit ``num_ctx``, which can drop the system prompt and with it the
+    round's rules, and says nothing. The platform knows the window, so it says
+    it instead.
+    """
+    if int(window_tokens) <= 0:
+        return None
+    tokens = -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+    if tokens <= int(window_tokens):
+        return None
+    return (
+        f"The {what} prompt (about {tokens} tokens at {CHARS_PER_TOKEN} characters a token) "
+        f"is larger than its model's {int(window_tokens)}-token context window; a server "
+        "that fits it by cutting it from the front, as Ollama does, loses its opening, "
+        "the system prompt included."
+    )
 
 
 def report_output_budget(

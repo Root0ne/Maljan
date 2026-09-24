@@ -626,5 +626,8 @@ def with_sized_request_timeout(chat_class: Any) -> Any:
         return chat_class
 
     sized = type(chat_class.__name__, (chat_class,), members)
+    # Named where it is made, so a log line or a repr says whose class it is.
+    sized.__module__ = __name__
+    sized.__qualname__ = chat_class.__qualname__
     _SIZED_CLASSES[chat_class] = sized
     return sized

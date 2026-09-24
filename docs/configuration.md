@@ -851,9 +851,16 @@ known, the evidence room is the window less the budget, never below zero,
 and each call is held to what the window leaves after that call's own prompt
 (at three characters a token) when its budget would not fit beside it — a
 hosted API refuses a request whose prompt and `max_tokens` pass the window.
-The call's `max_tokens` is lowered for that call alone and the worker log says
-so; an Ollama model keeps the cap it was built with, since its client takes no
-per-call cap and the runtime stops at its own context. A budget that fills the
+The call's cap is lowered for that call alone, under the field each server
+reads — `max_completion_tokens` for OpenAI, `max_tokens` for DeepSeek and
+Anthropic, `max_tokens` and `n_predict` in llama.cpp's request extras,
+`max_output_tokens` for Gemini — and the worker log says so. An Ollama model
+keeps the cap it was built with, since its client takes no per-call cap; a
+model the llama.cpp self-heal rebuilt without the extras is sent the cap only
+as `max_completion_tokens`, which ik_llama.cpp does not read. A prompt larger
+than the whole window is recorded as a degradation: Ollama fits such a prompt
+to `num_ctx` by cutting it from the front, which can drop the system prompt
+and the round's rules, and says nothing. A budget that fills the
 window — a gateway that declares its window as its maximum output, a local
 `llm.judge_max_tokens` at or past the window — so leaves the section no room
 for claims and tool answers. A section whose facts do not fit what the window

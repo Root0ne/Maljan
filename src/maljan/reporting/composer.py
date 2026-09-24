@@ -960,11 +960,19 @@ class ReportComposer:
         (``context_window.call_output_bound``): a longer answer would be refused
         by a hosted API, and cut by a runtime we run.
         """
-        from maljan.llm.context_window import accepts_output_bound, call_output_bound
+        from maljan.llm.context_window import (
+            accepts_output_bound,
+            call_output_bound,
+            prompt_overflow_sentence,
+        )
 
         cap = int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0)
         chars = sum(len(_message_text(message)) for message in turns)
-        bound = call_output_bound(cap, int(getattr(self, "window_tokens", 0) or 0), chars)
+        window = int(getattr(self, "window_tokens", 0) or 0)
+        overflow = prompt_overflow_sentence("report section's", chars, window)
+        if overflow is not None:
+            self._note_degradation(overflow)
+        bound = call_output_bound(cap, window, chars)
         if bound is None or not accepts_output_bound(self.llm):
             return None
         return bound
@@ -1092,6 +1100,8 @@ class ReportComposer:
         cut_text = ""
         retry_unfit = False
 
+        from maljan.llm.context_window import output_bound_kwargs
+
         async def _run(turns: list[BaseMessage]) -> Any:
             nonlocal cut, cut_at, cut_text
             bound = self._call_bound(turns)
@@ -1105,7 +1115,7 @@ class ReportComposer:
                     int(self.output_cap),
                 )
             raw = await retry_on_connection_error(
-                (lambda: self.llm.ainvoke(turns, max_tokens=bound))
+                (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))
                 if bound is not None
                 else (lambda: self.llm.ainvoke(turns)),
                 what="ReportComposer raw",
