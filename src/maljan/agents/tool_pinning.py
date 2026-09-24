@@ -63,7 +63,9 @@ _PATH_ARG_NAMES = frozenset({"binary", "sample", "target", "program"})
 #
 # A *qualified* path name is not here and stays the model's to give:
 # ``pcap_path`` names a capture, ``rule_path`` a rule file, ``member_path`` a
-# member inside an archive or an APK. Those are choices, and the sample is not.
+# member inside an archive or an APK. Those are choices, and the sample is not
+# — except a capture when the job has exactly one, which leaves nothing to
+# choose and is filled the same way (``CAPTURE_ARG_NAMES``).
 SAMPLE_ARG_NAMES = frozenset(
     {
         "path",
@@ -159,37 +161,64 @@ def pin_paths(
     default_path: str | None,
     path_by_server: dict[str, str] | None = None,
     agent_name: str = "",
+    captures: tuple[str, ...] | list[str] = (),
 ) -> list[BaseTool]:
     """Every tool, each guarded against a path argument this sample's own name.
 
-    With no pinned path and no per-server map the tools are returned exactly as
-    they are, unwrapped: the guard costs nothing when there is nothing to
-    correct, and an unwrapped tool is one less thing between the model and the
-    server.
+    ``captures`` is the job's packet captures. With exactly one, a built-in
+    server's capture argument is hidden from the model and filled with it, the
+    way the sample's own path is: the network analyst of one live run spent
+    eight of its twenty calls on capture names it had to invent, because
+    nothing it was shown named the capture. With several the argument stays
+    the model's to give, and a refusal lists them.
+
+    With no pinned path, no per-server map and no single capture the tools are
+    returned exactly as they are, unwrapped: the guard costs nothing when there
+    is nothing to correct, and an unwrapped tool is one less thing between the
+    model and the server.
     """
     per_server = dict(path_by_server or {})
+    capture = captures[0] if len(captures) == 1 else ""
     offered = [tool for tool in tools if getattr(tool, "name", "") not in DELIVERY_TOOLS]
-    if not default_path and not per_server:
+    if not default_path and not per_server and not capture:
         return list(offered)
     out: list[Any] = []
     for tool in offered:
         server = server_of(tool)
-        target = per_server.get(server) or default_path
-        if not target:
+        target = per_server.get(server) or default_path or ""
+        pinned_server = server in PINNED_SERVERS
+        hidden = _sample_arguments(tool) if pinned_server and target else ()
+        filled = (
+            dict.fromkeys(_capture_arguments(tool), capture) if pinned_server and capture else {}
+        )
+        if not target and not filled:
             out.append(tool)
             continue
-        hidden = _sample_arguments(tool) if server in PINNED_SERVERS else ()
         out.append(
             _pin_tool(
                 tool,
                 target,
-                _spellings(default_path, target),
-                _basenames(default_path, target),
+                _spellings(default_path, target) if target else frozenset(),
+                _basenames(default_path, target) if target else frozenset(),
                 agent_name,
                 hidden,
+                filled,
             )
         )
     return out
+
+
+# The argument names that mean "the job's packet capture". Qualified, so they
+# are never the sample; hidden and filled only when the job has one capture.
+CAPTURE_ARG_NAMES = frozenset({"pcap_path"})
+
+
+def _capture_arguments(tool: Any) -> tuple[str, ...]:
+    """The arguments of ``tool`` that name a packet capture, in its declared order."""
+    fields = getattr(getattr(tool, "args_schema", None), "model_fields", None)
+    if not isinstance(fields, dict):
+        return ()
+    return tuple(name for name in fields if name.strip().lower() in CAPTURE_ARG_NAMES)
 
 
 def _sample_arguments(tool: Any) -> tuple[str, ...]:
@@ -228,13 +257,16 @@ def _pin_tool(
     basenames: frozenset[str],
     agent_name: str,
     hidden: tuple[str, ...] = (),
+    filled: dict[str, str] | None = None,
 ) -> Any:
     """Rebuild one tool with its path arguments corrected.
 
-    ``hidden`` is the arguments that name the sample on a built-in server.
-    They are taken out of the schema the model binds to and filled here, so the
-    model neither sees nor types them; everything else keeps the narrow
-    correction below, which is all a tool naming some other file needs.
+    ``hidden`` is the arguments that name the sample on a built-in server, and
+    ``filled`` the other arguments the platform supplies, each with its value
+    (the job's one capture). Both are taken out of the schema the model binds
+    to and filled here, so the model neither sees nor types them; everything
+    else keeps the narrow correction below, which is all a tool naming some
+    other file needs.
 
     A fresh tool is built rather than mutating the original: the resolved tool
     object is shared with the server registry, and an in-place wrap would leak
@@ -256,13 +288,16 @@ def _pin_tool(
         return tool
 
     name = getattr(tool, "name", "")
+    supplied = dict(filled or {})
     # The schema the model binds to, minus the arguments it has no business
     # naming. A schema that cannot be rebuilt leaves the arguments where they
     # are and falls back to the correction alone, which is what this did for
     # every tool before.
-    narrowed = _schema_without(args_schema, hidden) if hidden else None
-    if hidden and narrowed is None:
+    taken = (*hidden, *supplied)
+    narrowed = _schema_without(args_schema, taken) if taken else None
+    if taken and narrowed is None:
         hidden = ()
+        supplied = {}
     args_schema = narrowed or args_schema
 
     def _means_this_sample(value: str) -> bool:
@@ -274,6 +309,8 @@ def _pin_tool(
         elsewhere named a real file, and only a path that leads nowhere is
         worth second-guessing.
         """
+        if not pinned:
+            return False
         if value in spellings:
             return True
         if value == pinned or os.path.basename(value) not in basenames:
@@ -285,7 +322,11 @@ def _pin_tool(
         # The sample's own path, supplied rather than asked for.
         for key in hidden:
             out[key] = pinned
+        # And the job's one capture, the same way.
+        out.update(supplied)
         for key, value in kwargs.items():
+            if key in supplied:
+                continue
             if isinstance(value, str) and is_path_argument(key) and _means_this_sample(value):
                 logger.warning(
                     "%s: tool '%s' was called with %r for argument '%s'; "

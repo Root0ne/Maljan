@@ -99,7 +99,21 @@ def sandbox_report_section(report: dict[str, Any] | None, section: str) -> dict[
     value = report[key]
     if isinstance(value, list):
         return {"section": key, "rows": value[:_ROW_LIMIT], "total": len(value)}
-    return {"section": key, "value": value}
+    return {"section": key, "value": _without_host_paths(value)}
+
+
+# Where the platform recorded the capture it fetched beside the report. A host
+# path, written by the platform and not by the sandbox, and a section answer is
+# read by a model: it is named the way the job's capture tools take it back.
+_CAPTURE_KEY = "pcap_local_path"
+
+
+def _without_host_paths(value: Any) -> Any:
+    if not isinstance(value, dict) or not value.get(_CAPTURE_KEY):
+        return value
+    from maljan.tools.staging import job_relative
+
+    return {**value, _CAPTURE_KEY: job_relative(str(value[_CAPTURE_KEY]))}
 
 
 def sandbox_processes(report: dict[str, Any] | None) -> dict[str, Any]:

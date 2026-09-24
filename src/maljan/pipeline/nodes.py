@@ -1463,6 +1463,37 @@ def brief_agent(agent: Any, state: AnalysisState, container: ServiceContainer) -
         str(state.get("file_type") or "unknown"),
         str(state.get("platform") or "unknown"),
     )
+    # The job's packet captures, for the tool layer: with exactly one, a
+    # capture argument is filled rather than asked for (``agents.tool_pinning``).
+    agent._captures = job_captures(state)
+
+
+def job_captures(state: AnalysisState) -> tuple[str, ...]:
+    """The packet captures the sandbox provider fetched for this job, as host paths.
+
+    Every file in the job's capture directory, which is where the fetch writes
+    (``tools.staging.open_capture_dir``); the one the report names when that
+    directory holds nothing else it can list. Host paths are the tool layer's
+    to fill in and never a prompt's to show.
+    """
+    report = state.get("sandbox_report")
+    network = report.get("network") if isinstance(report, dict) else None
+    named = network.get("pcap_local_path") if isinstance(network, dict) else None
+    if not isinstance(named, str) or not named:
+        return ()
+    from pathlib import Path
+
+    from maljan.tools import staging
+
+    target = Path(named)
+    if target.parent.name == staging.CAPTURES_DIRECTORY:
+        try:
+            found = sorted(str(entry) for entry in target.parent.iterdir() if entry.is_file())
+        except OSError:
+            found = []
+        if found:
+            return tuple(found)
+    return (named,) if target.is_file() else ()
 
 
 def stage_context(state: AnalysisState) -> StageContext:
