@@ -106,10 +106,14 @@ STATIC_EVIDENCE_INSTRUCTIONS = (
 )
 
 
-def absent_provider_fragment(label: str) -> str:
-    """The static fragment for a provider none of whose tools reached the request."""
+def absent_provider_fragment(label: str, guidance: str = STATIC_EVIDENCE_INSTRUCTIONS) -> str:
+    """The static fragment for a provider none of whose tools reached the request.
+
+    The provider's tool-independent ``guidance`` — what a claim cites, the
+    confidence discipline — and the sentence saying it is not attached.
+    """
     return (
-        STATIC_EVIDENCE_INSTRUCTIONS
+        guidance.rstrip()
         + "\n\n"
         + f"The {label} static provider is configured, but none of its tools is "
         "attached to this request, so no disassembler or decompiler comes with it."
@@ -163,7 +167,15 @@ class StaticProvider(ABC):
         provider is and that it is not attached; what the request does carry is
         said by the tool statement beside it.
         """
-        return absent_provider_fragment(self.label)
+        return absent_provider_fragment(self.label, self.guidance_fragment())
+
+    def guidance_fragment(self) -> str:
+        """What this provider's fragment says about claims, whatever the tools.
+
+        The part of ``prompt_fragment`` that is not a tool workflow: every
+        call on a run with this provider carries it, the tools-free ones too.
+        """
+        return STATIC_EVIDENCE_INSTRUCTIONS
 
     def collect_evidence(self, sample_path: str) -> StaticEvidenceBundle | None:
         return None

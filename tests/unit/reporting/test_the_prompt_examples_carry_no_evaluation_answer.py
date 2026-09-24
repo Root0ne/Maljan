@@ -29,10 +29,27 @@ import pytest
 from maljan.agents.base_agent import FINAL_ANSWER_NUDGE
 from maljan.agents.judge_agent import COMPACT_BUNDLE_RULES, verdict_cut_violation
 from maljan.agents.network_analyst import NO_PACKET_TOOL_LINE, OTHER_TOOLS_THEN_ANALYZE
-from maljan.agents.prompt_fragments import NO_TOOLS_STATEMENT, tools_statement
-from maljan.agents.prompts import LEAD_PROMPT, REVERSER_PROMPT
-from maljan.agents.static_analyst import _extract_load_hint, _tool_use_line
-from maljan.pipeline.nodes import NO_SANDBOX_DATA_REASON, skipped_analysts_reason
+from maljan.agents.prompt_fragments import (
+    NO_TOOLS_STATEMENT,
+    TOOL_FREE_TURN_STATEMENT,
+    tools_statement,
+)
+from maljan.agents.prompts import (
+    ANDROID_STATIC_PROMPT,
+    LEAD_PROMPT,
+    REVERSER_PROMPT,
+    TRIAGE_PROMPT,
+)
+from maljan.agents.static_analyst import (
+    _extract_load_hint,
+    _reframe_static_raw_data,
+    _tool_use_line,
+)
+from maljan.pipeline.nodes import (
+    NO_SANDBOX_DATA_REASON,
+    NO_STATIC_FIXTURE_NOTE,
+    skipped_analysts_reason,
+)
 from maljan.pipeline.validation import (
     CapabilityGrounding,
     absence_claim_violation,
@@ -44,6 +61,7 @@ from maljan.pipeline.validation import (
     validate_verdict_bundle,
 )
 from maljan.providers.base import STATIC_EVIDENCE_INSTRUCTIONS, absent_provider_fragment
+from maljan.providers.static.ghidra import GHIDRA_GUIDANCE
 from maljan.providers.static.null import NullStaticProvider
 from maljan.reporting.composer import (
     _EXAMPLES,
@@ -329,7 +347,24 @@ PROMPTS: dict[str, str] = {
     "skipped-analyst degradation reason": skipped_analysts_reason(
         NO_SANDBOX_DATA_REASON, ["dynamic", "network"]
     ),
-    "seeded reverser and lead prompts": f"{REVERSER_PROMPT} {LEAD_PROMPT}",
+    "seeded prompts": f"{REVERSER_PROMPT} {LEAD_PROMPT} {TRIAGE_PROMPT} {ANDROID_STATIC_PROMPT}",
+    "static placeholder note": NO_STATIC_FIXTURE_NOTE,
+    "static revision's reframed placeholder": _reframe_static_raw_data(
+        "No static data available for sample ab.", has_tools=True
+    ),
+    "tool families' labels": " ".join(
+        [
+            tools_statement([_StampedTool("x")]),
+            tools_statement(
+                [_StampedTool("x")], provider_label="the cape2 sandbox's own tool server"
+            ),
+            tools_statement([_StampedTool("x")], provider_label="the CAPEv2 tool server"),
+        ]
+    ),
+    "tool-free turn sentence": TOOL_FREE_TURN_STATEMENT,
+    "ghidra guidance reworded for a call with no tool": GHIDRA_GUIDANCE[
+        GHIDRA_GUIDANCE.index("FALSIFIED it first") : GHIDRA_GUIDANCE.index("- A claim is High")
+    ],
     "judge questions about a shape naming a value and a pattern the grammar refuses": " ".join(
         v.message
         for v in validate_verdict_bundle(

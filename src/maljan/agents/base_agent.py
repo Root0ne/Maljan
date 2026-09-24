@@ -896,6 +896,28 @@ def unparsed_answers_reason(names: Sequence[str]) -> str:
     )
 
 
+def tool_free_turns(messages: Sequence[Any]) -> list[Any]:
+    """``messages`` with each system turn's sentence about tools saying none can be called.
+
+    For the turns that resend a loop's conversation with no tool callable —
+    the final-answer nudge and the forced synthesis. Only the sentence
+    changes; the rest of the system turn, and every other message, is sent as
+    the loop sent it.
+    """
+    from langchain_core.messages import SystemMessage
+
+    from maljan.agents.prompt_fragments import for_a_tool_free_turn
+
+    out: list[Any] = []
+    for message in messages:
+        if isinstance(message, SystemMessage) and isinstance(message.content, str):
+            text = for_a_tool_free_turn(message.content)
+            if text != message.content:
+                message = message.model_copy(update={"content": text})
+        out.append(message)
+    return out
+
+
 def answer_is_isr(text: str) -> bool:
     """Whether an answer carries a report at all.
 
@@ -2750,7 +2772,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         container: a test, a script, the CLI. It is the neutral assembly,
         which is the honest answer when nothing has said what the sample is.
         """
-        sent = list(getattr(self, "tools", None) or []) if tools is None else list(tools)
+        # By default the list the loop binds: ``pinned_tools`` is what
+        # ``execute_tool_loop`` hands the model, without the delivery tools.
+        if tools is not None:
+            sent = list(tools)
+        else:
+            try:
+                sent = list(self.pinned_tools())
+            except AttributeError:  # a stand-in built without ``__init__``
+                sent = list(getattr(self, "tools", None) or [])
         resolved = getattr(self, "_resolved", None)
         container = getattr(self, "_container", None)
         if resolved is not None and container is not None and bool(getattr(resolved, "key", "")):
@@ -2970,9 +3000,10 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         if active_profile(container.config).exclude_sandbox_tools:
             return []
+        from maljan.agents.prompt_fragments import SANDBOX_FAMILY, stamp_source
         from maljan.providers.sandbox_tools import sandbox_tools
 
-        return list(sandbox_tools(container))
+        return stamp_source(sandbox_tools(container), SANDBOX_FAMILY)
 
     def _profile_excluded_servers(self) -> str:
         """The servers the active profile withholds, as ``for_agent``'s argument."""
@@ -3907,7 +3938,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.logger.warning(
                 "%s: the nudge leaves out a tool call whose arguments never parsed.", self.name
             )
-        turns = [*sendable, HumanMessage(content=FINAL_ANSWER_NUDGE)]
+        turns = [*tool_free_turns(sendable), HumanMessage(content=FINAL_ANSWER_NUDGE)]
         budget = min(remaining_time, float(timeout))
 
         def _ask_with(model: Any, label: str) -> Any:
@@ -4197,7 +4228,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             "sized_by": "window" if paced is None or window_budget <= paced else "pace",
         }
         try:
-            answer = self._invoke_llm_with_timeout([*trimmed, directive], remaining)
+            answer = self._invoke_llm_with_timeout(
+                [*tool_free_turns(trimmed), directive], remaining
+            )
         except Exception as exc:  # noqa: BLE001 - best-effort salvage
             self.logger.error(
                 "%s forced synthesis failed: %s (%s)",

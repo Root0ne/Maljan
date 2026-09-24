@@ -105,6 +105,19 @@ _FAMILY_MARKERS: tuple[tuple[str, tuple[str, ...], Any], ...] = (
 
 _SERVER_RE = re.compile(r"the `([^`]+)` server")
 
+# Generic tool-use imperatives: a prompt that says any of these promises some
+# tool, so the list must hold at least one. The shipped seeded prompts said
+# "Use the tools to establish its format" and "cite the tool call it came
+# from" beside a list a stage could leave empty.
+_TOOL_USE_RE = re.compile(
+    r"\buse (?:the|your) tools\b"
+    r"|\bcall (?:the|your) tools\b"
+    r"|\bcall (?:a|any|one) tools?\b"
+    r"|\binvoke (?:the |a |your )?tools?\b"
+    r"|\btool call (?:it came from|behind)",
+    re.IGNORECASE,
+)
+
 
 class _Tool:
     """A tool as the registry hands it over: a name, stamped with its server."""
@@ -206,6 +219,8 @@ def _violations(prompt: str, tools: Sequence[Any], *, statement_expected: bool) 
         named = [phrase for phrase in phrases if phrase in prompt]
         if named and not holds(tools):
             found.append(f"names {family} ({named[0]!r})")
+    if not tools:
+        found += [f"promises a tool ({m.group(0)!r})" for m in _TOOL_USE_RE.finditer(prompt)]
     families = set(tool_families(tools))
     for server in _SERVER_RE.findall(prompt):
         if server not in families:
@@ -326,8 +341,8 @@ def _turns(agent: Any, method: str, *args: Any) -> dict[str, str]:
     return sent
 
 
-def _static_agent(tools: list[Any]) -> Any:
-    agent = _container("none", "mock", "default").get_agent("static")
+def _static_agent(tools: list[Any], provider: str = "none") -> Any:
+    agent = _container(provider, "mock", "default").get_agent("static")
     agent.tools = tools
     for hint in (
         "_compute_sink_priority_hint",
@@ -353,11 +368,20 @@ class TestTheHumanTurnSaysWhatTheListHolds:
         assert NO_TOOLS_STATEMENT not in turns["system"]
 
     def test_the_static_turn_names_the_decompiler_it_has(self) -> None:
-        agent = _static_agent([_Tool("load_program"), _Tool("decompile_function")])
+        agent = _static_agent(
+            [_Tool("load_program"), _Tool("decompile_function"), _Tool("get_xrefs_to")]
+        )
         turns = _turns(agent, "analyze_isr", _CHUNK)
 
         assert "decompile, xrefs" in turns["human"]
         assert "LOAD THIS BINARY FIRST" in turns["human"]
+
+    def test_a_decompiler_without_an_xref_tool_is_not_promised_xrefs(self) -> None:
+        agent = _static_agent([_Tool("decompile_function")])
+        turns = _turns(agent, "analyze_isr", _CHUNK)
+
+        assert "(decompile, etc.)" in turns["human"]
+        assert "xrefs" not in turns["human"]
 
     def test_a_static_turn_with_no_tools_says_nothing_about_them(self) -> None:
         agent = _static_agent([])
@@ -452,3 +476,188 @@ def test_what_a_clone_copies_carries_no_sentence_about_the_source_tools(key: str
     assert "The tools attached to this request" not in resolved.authored_prompt
     assert NO_TOOLS_STATEMENT not in resolved.authored_prompt
     assert "The tools attached to this request" in resolved.prompt
+    # Nor the provider's fragment: the clone is resolved with its own provider.
+    for provider_text in ("VERIFICATION DISCIPLINE", "TOOL USAGE WORKFLOW", "static provider"):
+        assert provider_text not in resolved.authored_prompt
+
+
+class TestTheGuardCatchesAGenericPromise:
+    def test_the_old_triage_text_is_flagged_beside_an_empty_list(self) -> None:
+        old = (
+            "1. Identify the sample. Use the tools to establish its format.\n"
+            "Report every fact with the tool call it came from."
+        )
+        found = _violations(old + "\n\n" + NO_TOOLS_STATEMENT, [], statement_expected=True)
+        assert any("Use the tools" in issue for issue in found)
+        assert any("tool call it came from" in issue for issue in found)
+
+    def test_the_same_text_beside_a_tool_list_is_not(self) -> None:
+        old = "Use the tools to establish its format."
+        assert not _violations(old, [_Tool("x", "analysis")], statement_expected=False)
+
+    def test_a_script_fragment_naming_invoke_expression_is_not_a_promise(self) -> None:
+        from maljan.agents.prompt_fragments import format_fragment
+
+        assert not _violations(format_fragment("ps1", "windows"), [], statement_expected=False)
+
+
+@pytest.mark.parametrize("key", ["triage", "android_static", "reverser", "lead"])
+def test_a_seeded_agent_with_its_tools_withheld_is_promised_none(key: str) -> None:
+    """A stage with ``builtin_tools=False``, or ``*`` excluded, leaves the list empty."""
+    container = _container("none", "mock", "measurement")
+    resolved = asyncio.run(aresolve_agent(key, container))
+
+    assert resolved.tools == []
+    assert _violations(resolved.prompt, [], statement_expected=True) == []
+
+
+class TestAToolsFreeCallKeepsTheProvidersGuidance:
+    """Ghidra's verification discipline is about claims, not tools."""
+
+    def test_a_ghidra_revision_keeps_the_discipline_and_drops_the_workflow(self) -> None:
+        from unittest.mock import patch
+
+        agent = _static_agent([_Tool("x", "knowledge")], provider="ghidra")
+        seen: list[str] = []
+
+        def _ask(messages: Any, **_kw: Any) -> str:
+            seen.extend(str(getattr(m, "content", "")) for m in messages if m.type == "system")
+            return "CLAIM: c\nEVIDENCE: e\nCONFIDENCE: 0.1\nTECHNIQUE: NONE\nDISPUTES: NONE"
+
+        with patch.object(agent, "ask_the_model", side_effect=_ask):
+            agent.revise_isr("data", "own", {"peer": "report"}, "feedback")
+
+        assert "VERIFICATION DISCIPLINE" in seen[0]
+        assert "LoadLibrary" in seen[0]
+        assert "cap CONFIDENCE at 0.7" in seen[0]
+        assert "TOOL USAGE WORKFLOW" not in seen[0]
+        assert "`load_program" not in seen[0]
+        assert NO_TOOLS_STATEMENT in seen[0]
+
+    def test_a_ghidra_validation_retry_keeps_the_discipline_and_drops_the_workflow(
+        self, monkeypatch: Any
+    ) -> None:
+        from langchain_core.messages import AIMessage
+
+        from maljan.agents import base_agent
+        from maljan.pipeline.validation import Violation
+        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+
+        told = [Violation(code="isr.ungrounded_technique", message="cite ev_0001")]
+        answers = iter([told, told, []])
+        monkeypatch.setattr(base_agent, "validate_isr", lambda *_a, **_k: next(answers, []))
+        agent = _static_agent([_Tool("x", "knowledge")], provider="ghidra")
+        sent: list[list[Any]] = []
+
+        def _capture(turns: list[Any], timeout: float) -> AIMessage:
+            sent.append(list(turns))
+            return AIMessage(
+                content="CLAIM: c\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.5\nTECHNIQUE: T1055"
+            )
+
+        agent._invoke_llm_with_timeout = _capture  # type: ignore[method-assign]
+        isr = AgentISR(
+            agent_id="static",
+            domain="static",
+            claims=[
+                ClaimEvidence(claim="c", evidence_ref="x", confidence=0.5, technique_id="T1055")
+            ],
+        )
+        agent._validate_isr(isr, "the raw data")
+
+        system = str(sent[0][0].content)
+        assert "VERIFICATION DISCIPLINE" in system
+        assert "TOOL USAGE WORKFLOW" not in system
+        assert NO_TOOLS_STATEMENT in system
+
+    def test_the_attached_fragment_carries_the_same_guidance(self) -> None:
+        from maljan.providers.static.ghidra import GHIDRA_GUIDANCE, GHIDRA_PROMPT_FRAGMENT
+
+        assert GHIDRA_GUIDANCE in GHIDRA_PROMPT_FRAGMENT
+        assert "TOOL USAGE WORKFLOW" not in GHIDRA_GUIDANCE
+
+
+def _real_turns(agent: Any, method: str, *args: Any) -> dict[str, str]:
+    """Run an entry point with the analyst's own attach, and return what it sent."""
+    from unittest.mock import patch
+
+    sent: dict[str, str] = {}
+
+    def _capture(messages: Any, *_a: Any, **_kw: Any) -> str:
+        for role, text in messages:
+            sent.setdefault(role, text)
+        return "CLAIM: none\nEVIDENCE: none\nCONFIDENCE: 0.1\nTECHNIQUE: NONE\n"
+
+    def _ask(messages: Any, **_kw: Any) -> str:
+        for m in messages:
+            sent.setdefault(m.type if m.type != "ai" else "ai", str(m.content))
+        sent["tools_free"] = "yes"
+        return "CLAIM: none\nEVIDENCE: none\nCONFIDENCE: 0.1\nTECHNIQUE: NONE\n"
+
+    with (
+        patch.object(agent, "execute_tool_loop", side_effect=_capture),
+        patch.object(agent, "ask_the_model", side_effect=_ask),
+        patch.object(agent, "_validate_isr", side_effect=lambda isr, _evidence: isr),
+    ):
+        getattr(agent, method)(*args)
+    return sent
+
+
+class TestThePromptIsBuiltAfterTheToolsAttach:
+    """Through each analyst's own ``_try_initialize_mcp``, not a stand-in list."""
+
+    def test_the_static_analyst(self) -> None:
+        agent = _static_agent([])
+        turns = _real_turns(agent, "analyze_isr", _CHUNK)
+
+        assert agent.tools, "the analyst attached nothing"
+        assert "the `analysis` server" in turns["system"]
+        assert NO_TOOLS_STATEMENT not in turns["system"]
+
+    def test_the_network_analyst_in_text_mode(self) -> None:
+        agent = _container("none", "mock", "default").get_agent("network")
+        turns = _real_turns(agent, "analyze_isr", "dns: one.example")
+
+        assert agent.tools, "the analyst attached nothing"
+        assert "the `network` server" in turns["system"]
+
+    def test_the_dynamic_analyst(self) -> None:
+        agent = _container("none", "mock", "default").get_agent("dynamic")
+        turns = _real_turns(agent, "analyze_isr", '{"processes": []}')
+
+        assert "the `knowledge` server" in turns["system"]
+        assert "get_cuckoo_status" not in turns["system"]
+
+
+class TestTheListIsTheOneTheLoopBinds:
+    def test_a_server_that_offers_only_delivery_tools_is_not_named(self) -> None:
+        from maljan.agents.prompt_fragments import tools_statement
+
+        sent = [_Tool("put_sample", "remote"), _Tool("x", "knowledge")]
+        assert "`remote`" not in tools_statement(sent)
+        assert "`knowledge`" in tools_statement(sent)
+
+    def test_a_stamped_provider_tool_is_the_providers_whatever_its_name(self) -> None:
+        from langchain_core.tools import StructuredTool
+
+        from maljan.agents.prompt_fragments import stamp_source, tool_family
+
+        tool = StructuredTool.from_function(func=lambda: "", name="sandbox_like", description="d")
+        (stamped,) = stamp_source([tool], PROVIDER_FAMILY)
+        assert tool_family(stamped) == PROVIDER_FAMILY
+
+
+class TestATurnThatCanCallNoToolSaysSo:
+    def test_the_nudge_and_synthesis_system_turn_drops_the_loops_sentence(self) -> None:
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        from maljan.agents.base_agent import tool_free_turns
+        from maljan.agents.prompt_fragments import TOOL_FREE_TURN_STATEMENT, tools_statement
+
+        system = "HEAD\n\n" + tools_statement([_Tool("x", "knowledge")]) + "\n\nTAIL"
+        out = tool_free_turns([SystemMessage(content=system), HumanMessage(content="h")])
+
+        assert "The tools attached to this request" not in out[0].content
+        assert TOOL_FREE_TURN_STATEMENT in out[0].content
+        assert out[0].content.startswith("HEAD") and out[0].content.endswith("TAIL")
+        assert out[1].content == "h"

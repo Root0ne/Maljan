@@ -18,6 +18,7 @@ from maljan.agents.prompt_fragments import (
     FINDINGS_BLOCK_FRAGMENT,
     PROVIDER_FAMILY,
     format_fragment,
+    stamp_source,
     tool_families,
     tools_statement,
 )
@@ -54,7 +55,7 @@ def assemble_dynamic_prompt(
     provider_fragment: str = "",
     provider_label: str = "",
     provider_expected: bool = False,
-    with_statement: bool = True,
+    for_a_clone: bool = False,
 ) -> str:
     """The dynamic system prompt, true of the tool list ``tools``.
 
@@ -65,6 +66,10 @@ def assemble_dynamic_prompt(
     sandbox with only the report tools was walked through calls to a server
     it did not have.
     """
+    if for_a_clone:
+        # What a clone is seeded with: no sandbox workflow and no sentence
+        # about tools, both of which it gets for its own list when resolved.
+        return _DYN_HEAD + fragment + _DYN_TAIL
     attached = provider_expected or PROVIDER_FAMILY in tool_families(tools)
     workflow = provider_fragment.strip() if attached else ""
     statement = tools_statement(
@@ -72,8 +77,8 @@ def assemble_dynamic_prompt(
         provider_label=provider_label or "the sandbox's own tool server",
         provider_expected=attached,
     )
-    middle = "\n\n".join(part for part in (workflow, statement if with_statement else "") if part)
-    return _DYN_HEAD + fragment + ("\n\n" + middle if middle else "") + _DYN_TAIL
+    middle = "\n\n".join(part for part in (workflow, statement) if part)
+    return _DYN_HEAD + fragment + "\n\n" + middle + _DYN_TAIL
 
 
 def _dynamic_prompt(tools: Sequence[Any] = ()) -> str:
@@ -127,7 +132,7 @@ class DynamicAnalyst(BaseAnalyst):
         provider = self._sandbox_provider()
         sandbox_tools: list[Any] = []
         if provider.capabilities.provides_tools:
-            sandbox_tools = list(provider.dynamic_tools())
+            sandbox_tools = stamp_source(provider.dynamic_tools(), PROVIDER_FAMILY)
             self.toolkit = getattr(provider, "_toolkit", None)
         else:
             self.logger.info("Sandbox provider '%s' exposes no tools.", provider.id)

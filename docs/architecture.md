@@ -1206,14 +1206,20 @@ Every statement a prompt makes about tools is built from the list the request
 carries (`agents.prompt_fragments.tools_statement`): the families the tools
 come from — a registry server by its key, the team's `ask_<agent>` tools, the
 sandbox report's tools, the tools of the provider the role attaches itself —
-or, for an empty list, that there are none. A provider's fragment says what
-the provider is and walks the model through its own tools only when those
-tools are in the list; `none` says no disassembler or decompiler comes with
+or, for an empty list, that there are none. A provider's fragment has two
+parts: its guidance about claims (what a claim cites, the ATT&CK focus,
+Ghidra's verification discipline and confidence caps), sent with every call
+on that provider, and its tool workflow, sent only when its tools are in the
+list; `none` says no disassembler or decompiler comes with
 the analyst, and a configured provider whose tools did not attach says so.
 Resolution builds the prompt for the list it resolved, describing a built-in
 role's own provider as expected; the analyst builds it again, through the same
 composition (`composition.prompt_for`), for the list each request carries —
 the tool loop's, or none for a revision, the validation turn or a synthesis.
+The final-answer nudge and the forced synthesis resend the loop's
+conversation with no tool callable, and their system turn says so. The list is
+the one the loop binds, without the sample-delivery tools, and the tools an
+in-process source attaches are marked with it (provider or sandbox report).
 An operator's prompt is kept as written and the sentence follows it. Nothing
 forces a call: an analyst that answers from the evidence it was handed is a
 recorded outcome.

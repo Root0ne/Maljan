@@ -26,6 +26,9 @@ from maljan.agents.prompt_fragments import (
     PROVIDER_FAMILY,
     REPUTATION_LOOKUP_FRAGMENT,
     has_decompiler,
+    has_xrefs,
+    offered,
+    stamp_source,
     tool_families,
     tool_names,
     tools_statement,
@@ -63,7 +66,7 @@ def assemble_static_prompt(
     tools: Sequence[Any],
     *,
     provider_expected: bool = False,
-    with_statement: bool = True,
+    for_a_clone: bool = False,
 ) -> str:
     """The static system prompt for ``provider``, true of the tool list ``tools``.
 
@@ -72,9 +75,15 @@ def assemble_static_prompt(
     the provider's own tools, so it is the prompt only when those tools are in
     the list (or, for a prompt resolved before the analyst attaches them,
     ``provider_expected``); otherwise the provider says what it is and that it
-    is not attached. The sentence about tools is built from ``tools`` alone;
-    ``with_statement=False`` leaves it out, for a text an operator copies.
+    is not attached; either way its tool-independent guidance is there. The
+    sentence about tools is built from ``tools`` alone.
+
+    ``for_a_clone`` leaves out both the provider's fragment and the sentence:
+    the text a clone is seeded with, which is resolved with its own provider
+    and its own tool list.
     """
+    if for_a_clone:
+        return _ISR_HEAD + fragment + _ISR_TAIL
     attached = provider_expected or PROVIDER_FAMILY in tool_families(tools)
     label = str(getattr(provider, "label", "") or getattr(provider, "id", "") or "static")
     offers_tools = bool(getattr(getattr(provider, "capabilities", None), "provides_tools", True))
@@ -85,14 +94,18 @@ def assemble_static_prompt(
     elif hasattr(provider, "absent_fragment"):
         body = str(provider.absent_fragment())
     else:
-        body = absent_provider_fragment(label)
+        guidance = getattr(provider, "guidance_fragment", None)
+        body = (
+            absent_provider_fragment(label, str(guidance()))
+            if callable(guidance)
+            else absent_provider_fragment(label)
+        )
     statement = tools_statement(
         tools,
         provider_label=f"the {label} static provider",
         provider_expected=attached,
     )
-    middle = body.rstrip() + ("\n\n" + statement if with_statement else "")
-    return _ISR_HEAD + fragment + "\n\n" + middle + _ISR_TAIL
+    return _ISR_HEAD + fragment + "\n\n" + body.rstrip() + "\n\n" + statement + _ISR_TAIL
 
 
 def _static_prompt(provider: Any | None = None, tools: Sequence[Any] = ()) -> str:
@@ -202,7 +215,9 @@ class StaticAnalyst(BaseAnalyst):
             self.tools = self._attach_registry_tools("static")
             return
         provider.open(self._job_context())
-        pool = provider.get_tools()
+        # Marked as the provider's, so the prompt names them as such rather
+        # than inferring it from the absence of a server key.
+        pool = stamp_source(provider.get_tools(), PROVIDER_FAMILY)
         # No ``self.toolkit`` assignment here: the provider holds its own client
         # privately and closes it itself (``ServiceContainer.aclose`` calls
         # ``get_static_provider().close()``), so there is nothing for this
@@ -810,10 +825,15 @@ def _tool_use_line(tools: Sequence[Any]) -> str:
     its list could. With no tools at all the turn says nothing about them; the
     system prompt already says there are none.
     """
-    if not tools:
+    if not offered(tools):
         return ""
-    if has_decompiler(tools):
-        return "You may use tools to gather more information (decompile, xrefs, etc.).\n"
+    examples = [
+        what
+        for what, present in (("decompile", has_decompiler(tools)), ("xrefs", has_xrefs(tools)))
+        if present
+    ]
+    if examples:
+        return f"You may use tools to gather more information ({', '.join(examples)}, etc.).\n"
     return "You may use the tools in your tool list to gather more information.\n"
 
 

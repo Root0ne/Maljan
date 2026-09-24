@@ -14,7 +14,9 @@ neutral default, which asks for concrete artefacts without naming any OS.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
+from typing import Any
 
 # Keyed by platform, since the artefacts follow the operating system rather
 # than the container the code arrived in: a DEX and an APK look for the same
@@ -228,21 +230,67 @@ NO_TOOLS_STATEMENT = (
 )
 
 
+# Where an in-process tool says it came from: ``provider`` for the tools a
+# role's own provider attached, ``sandbox`` for the sandbox report's. A
+# registry server's tools carry their server key instead, and the team's
+# ``ask_`` tools carry ``team`` there.
+SOURCE_METADATA_KEY = "maljan_source"
+
+
+def stamp_source(tools: Sequence[Any], source: str) -> list[Any]:
+    """``tools``, each marked as coming from ``source``, so its family is read, not guessed.
+
+    A tool that cannot be copied is kept as it is; its family is then inferred.
+    """
+    out: list[Any] = []
+    for tool in tools:
+        copy = getattr(tool, "model_copy", None)
+        if not callable(copy):
+            out.append(tool)
+            continue
+        metadata = {**(getattr(tool, "metadata", None) or {}), SOURCE_METADATA_KEY: source}
+        try:
+            out.append(copy(update={"metadata": metadata}))
+        except Exception:  # noqa: BLE001 — a mark is never worth a tool
+            out.append(tool)
+    return out
+
+
 def tool_family(tool: object) -> str:
-    """The family one tool belongs to: its server key, or an in-process source."""
+    """The family one tool belongs to: its server key, or its in-process source.
+
+    A tool that carries neither is inferred from its name, the way the sandbox
+    report's tools are named, and is otherwise a provider's.
+    """
     from maljan.agents.tool_pinning import server_of
 
     server = server_of(tool)
     if server:
         return server
+    source = str((getattr(tool, "metadata", None) or {}).get(SOURCE_METADATA_KEY, "") or "")
+    if source in (SANDBOX_FAMILY, PROVIDER_FAMILY):
+        return source
     if str(getattr(tool, "name", "")).startswith("sandbox_"):
         return SANDBOX_FAMILY
     return PROVIDER_FAMILY
 
 
+def offered(tools: Sequence[Any]) -> list[Any]:
+    """The tools a loop binds: the list without the delivery tools.
+
+    The ``put_sample*`` tools are how the platform hands a remote server the
+    sample, and ``tool_pinning.pin_paths`` keeps them from the model; a
+    sentence built from a list that still held them would name a server none
+    of whose tools the request carries.
+    """
+    from maljan.agents.tool_pinning import DELIVERY_TOOLS
+
+    return [tool for tool in tools if str(getattr(tool, "name", "")) not in DELIVERY_TOOLS]
+
+
 def tool_families(tools: Sequence[object]) -> list[str]:
     """Every family in ``tools``, in the order the list first names it."""
-    return list(dict.fromkeys(tool_family(tool) for tool in tools))
+    return list(dict.fromkeys(tool_family(tool) for tool in offered(tools)))
 
 
 def _family_label(family: str, provider_label: str) -> str:
@@ -284,9 +332,41 @@ def tools_statement(
 
 def has_decompiler(tools: Sequence[object]) -> bool:
     """Whether any tool in ``tools`` decompiles, by the name it is offered under."""
-    return any("decompile" in str(getattr(tool, "name", "")).lower() for tool in tools)
+    return any("decompile" in name.lower() for name in tool_names(tools))
+
+
+def has_xrefs(tools: Sequence[object]) -> bool:
+    """Whether any tool in ``tools`` reads cross-references, by the name it is offered under."""
+    return any("xref" in name.lower() for name in tool_names(tools))
 
 
 def tool_names(tools: Sequence[object]) -> frozenset[str]:
     """The names ``tools`` are offered under."""
-    return frozenset(str(getattr(tool, "name", "")) for tool in tools)
+    return frozenset(str(getattr(tool, "name", "")) for tool in offered(tools))
+
+
+# What a turn that can call no tool says in place of the loop's sentence. The
+# final-answer nudge and the forced synthesis resend the loop's conversation,
+# system turn included, with no tool callable; the sentence that described the
+# loop's tools is replaced so the system turn agrees with the turn's own words.
+TOOL_FREE_TURN_STATEMENT = (
+    "No tool can be called in this turn, so answer from the evidence and the tool "
+    "results already in front of you."
+)
+
+_TOOLS_STATEMENT_RE = re.compile(
+    re.escape("The tools attached to this request come from")
+    + r".*?"
+    + re.escape("cite each result by the evidence id it carries."),
+    re.DOTALL,
+)
+
+
+def for_a_tool_free_turn(system_text: str) -> str:
+    """``system_text`` with its sentence about tools replaced by ``TOOL_FREE_TURN_STATEMENT``.
+
+    A text with no such sentence — a stand-in, an operator's prompt from
+    before the sentence existed — is returned as it is.
+    """
+    text = _TOOLS_STATEMENT_RE.sub(TOOL_FREE_TURN_STATEMENT, system_text, count=1)
+    return text.replace(NO_TOOLS_STATEMENT, TOOL_FREE_TURN_STATEMENT)

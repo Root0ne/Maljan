@@ -69,9 +69,10 @@ class ResolvedAgent:
     # worker does. An analyst passes this to ``pin_paths`` so a tool call goes
     # out with the path its own server can open.
     path_by_server: dict[str, str] = field(default_factory=dict)
-    # ``prompt`` without the platform's sentence about tools: the agent's own
-    # text, or its role's assembly. What a clone is seeded with, so a copy
-    # never carries a sentence about a tool list that is not its own.
+    # What a clone is seeded with: the agent's own text, or its role's assembly
+    # without the provider fragment and the sentence about tools. A copy is
+    # resolved with its own provider and its own list, so it never carries a
+    # sentence about tools that are not its own.
     authored_prompt: str = ""
 
 
@@ -180,7 +181,7 @@ def builtin_prompt(
     tools: Sequence[Any] = (),
     *,
     provider_expected: bool = False,
-    with_statement: bool = True,
+    for_a_clone: bool = False,
 ) -> str:
     """The prompt a built-in role sends for this job's sample, with ``tools``.
 
@@ -203,9 +204,9 @@ def builtin_prompt(
     tools at all. The analyst builds its prompt again from the list it sends
     (``BaseAnalyst._system_prompt``), where an attach that failed shows.
 
-    ``with_statement=False`` leaves the sentence about tools out: the text a
-    clone of the role is seeded with, which gets its own sentence, for its own
-    list, when it is resolved.
+    ``for_a_clone`` leaves out the provider fragment and the sentence about
+    tools: the text a clone of the role is seeded with, which gets both, for
+    its own provider and its own list, when it is resolved.
 
     ``static`` reads the *agent's own* static provider, which is what makes a
     clone on radare2 meaningful. ``dynamic`` reads the job's sandbox provider
@@ -223,7 +224,7 @@ def builtin_prompt(
             fragment,
             tools,
             provider_expected=provider_expected and bool(provider.capabilities.provides_tools),
-            with_statement=with_statement,
+            for_a_clone=for_a_clone,
         )
     if role == "dynamic":
         from maljan.agents.dynamic_analyst import assemble_dynamic_prompt
@@ -238,12 +239,12 @@ def builtin_prompt(
             provider_fragment=workflow,
             provider_label=label,
             provider_expected=provider_expected and offers_tools,
-            with_statement=with_statement,
+            for_a_clone=for_a_clone,
         )
     if role == "network":
         from maljan.agents.network_analyst import assemble_network_prompt
 
-        return assemble_network_prompt(fragment, tools, with_statement=with_statement)
+        return assemble_network_prompt(fragment, tools, for_a_clone=for_a_clone)
     if role == "judge":
         # The verdict prompt names no tool, and the judge's own turns say what
         # it may call where it may call it; nothing is appended here.
@@ -260,7 +261,7 @@ def _agent_prompt(
     tools: Sequence[Any],
     *,
     provider_expected: bool = False,
-    with_statement: bool = True,
+    for_a_clone: bool = False,
 ) -> str:
     """An agent's prompt for ``tools``: its own text, or its role's built-in one.
 
@@ -276,9 +277,9 @@ def _agent_prompt(
             provider_id,
             tools,
             provider_expected=provider_expected,
-            with_statement=with_statement,
+            for_a_clone=for_a_clone,
         )
-    if definition.role == "judge" or not with_statement:
+    if definition.role == "judge" or for_a_clone:
         return definition.prompt
     from maljan.agents.prompt_fragments import tools_statement
 
@@ -370,7 +371,9 @@ def _provider_tools(container: Any, definition: AgentDefinition, provider_id: st
             context_budget=container.get_context_budget(),
         )
     )
-    return list(provider.get_tools())
+    from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
+
+    return stamp_source(provider.get_tools(), PROVIDER_FAMILY)
 
 
 def _sandbox_tools(container: Any, definition: AgentDefinition) -> list[Any]:
@@ -387,9 +390,10 @@ def _sandbox_tools(container: Any, definition: AgentDefinition) -> list[Any]:
         return []
     if active_profile(container.config).exclude_sandbox_tools:
         return []
+    from maljan.agents.prompt_fragments import SANDBOX_FAMILY, stamp_source
     from maljan.providers.sandbox_tools import sandbox_tools
 
-    return list(sandbox_tools(container))
+    return stamp_source(sandbox_tools(container), SANDBOX_FAMILY)
 
 
 def _agent_tools(container: Any, definition: AgentDefinition, key: str) -> list[Any]:
@@ -707,7 +711,7 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
             provider_id,
             deduped,
             provider_expected=True,
-            with_statement=False,
+            for_a_clone=True,
         ),
         tools=deduped,
         static_provider_id=provider_id,
@@ -777,7 +781,7 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
             provider_id,
             deduped,
             provider_expected=True,
-            with_statement=False,
+            for_a_clone=True,
         ),
         tools=deduped,
         static_provider_id=provider_id,

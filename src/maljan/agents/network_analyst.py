@@ -57,10 +57,10 @@ _NET_TAIL = FINDINGS_BLOCK_FRAGMENT
 
 
 def assemble_network_prompt(
-    fragment: str, tools: Sequence[Any], *, with_statement: bool = True
+    fragment: str, tools: Sequence[Any], *, for_a_clone: bool = False
 ) -> str:
     """HEAD, the sample's format fragment, the sentence about ``tools``, then TAIL."""
-    statement = "\n\n" + tools_statement(tools) if with_statement else ""
+    statement = "\n\n" + tools_statement(tools) if not for_a_clone else ""
     return _NET_HEAD + fragment + statement + _NET_TAIL
 
 

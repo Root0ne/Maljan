@@ -1925,8 +1925,10 @@ change landed on `main`.
   the list the request carries — the servers and in-process sources it names,
   or that there are none. Every built-in analyst, the generic and lead
   agents and the mediator's tool turn build it the same way, and a
-  tools-free call — a revision, the validation turn, a synthesis, the
-  final-answer nudge — is told it carries none. The static human turn offers
+  tools-free call — a revision, the validation turn, a lead's synthesis — is
+  told it carries none, and the final-answer nudge and the forced synthesis,
+  which resend the loop's conversation, say in the system turn that no tool
+  can be called in this turn. The static human turn offers
   "decompile, xrefs" only when a decompiling tool is in the list and names
   `load_program` only when that tool is; the dynamic prompt carries the CAPE
   workflow only when the sandbox's own server attached; the network PCAP turn
@@ -1936,7 +1938,15 @@ change landed on `main`.
   recorded outcome. A guard test resolves every built-in agent under every
   static and sandbox provider, in the default and measurement teams, through
   `aresolve_agent` and the analyst's own prompt builder, and fails on a "no
-  tools" sentence beside a tool list or a tool family the list does not hold.
+  tools" sentence beside a tool list, a tool family the list does not hold, or
+  a generic tool-use instruction ("use the tools") beside an empty list. A
+  provider's fragment is in two parts: its tool workflow, sent only with its
+  tools, and its guidance about claims, sent with every call — a Ghidra
+  revision or validation retry keeps the verification discipline and its
+  confidence caps. The seeded triage and Android prompts no longer say "use
+  the tools"; every seeded prompt asks for the evidence id a fact came from.
+  The sentence is built from the list the loop binds, so a server offering
+  only the sample-delivery tools is not named.
 - **The validation turn stays tools-free, and says so.** It is one call over
   the evidence text that asks for a fix to an answer — its time is what the
   loop left, measured against one answer's pace, and the answer it gets is
@@ -4620,6 +4630,25 @@ change landed on `main`.
   benign PuTTY control after its verdict fell back.
 
 ### Upgrading
+
+**Degradation reasons for claimless analysts.** An analyst skipped for want of
+input is now named under `analysts skipped (no sandbox data): <names>` (or
+`analysts skipped (no input data): <names>` for a sample-fed role), and
+`analysts produced no claims: <names>` names only analysts that ran. A run
+used to carry `analysts produced no claims: dynamic, network` for the two
+analysts a static-only run skipped; it now carries `analysts skipped (no
+sandbox data): dynamic, network`. `run_summary.agent_stats[*].no_data` is
+unchanged. A reader that partitions degradation reasons on the old prefix —
+to set skipped analysts apart from failed ones — needs to read the new one
+too.
+
+**An operator's prompt gains the platform's sentence about tools.** An
+operator-written prompt (a generic or lead agent, or any definition with its
+own prompt) is now sent with one sentence appended: the tools the request
+carries, or that there are none. The agent probe's `prompt`, `prompt_chars`
+and `prompt_sha256` include it; the new `authored_prompt` is the operator's
+text alone (for a built-in role, its assembly without the provider fragment
+and the sentence), and the console seeds a clone from it.
 
 `llm.expert_max_tokens` and `llm.judge_max_tokens` ship at 0, which now means
 "derived from the window" — no longer "unbounded". A stored setting keeps its

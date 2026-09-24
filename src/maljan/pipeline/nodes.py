@@ -295,6 +295,15 @@ def _is_placeholder_only(chunks: list, role: str = "") -> bool:
 # The reason a sandbox-fed analyst is skipped when nothing was detonated.
 SYNTHETIC_SANDBOX_REASON = "no sandbox fixture for this sample"
 
+# The note a static analyst's head chunk carries when no static fixture exists.
+NO_STATIC_FIXTURE_NOTE = (
+    "Live analysis run: no pre-extracted static fixture exists "
+    "for this sample. Nothing about the binary is pasted here on "
+    "purpose — where your tool list offers them, call tools for the "
+    "section table, the imports and the strings, and cite the ids "
+    "their results carry."
+)
+
 # What a skipped analyst's log line and degradation reason say it lacked.
 NO_SANDBOX_DATA_REASON = "no sandbox data"
 NO_INPUT_DATA_REASON = "no input data"
@@ -779,13 +788,7 @@ def _augment_static_chunks_with_path(
             # Legacy raw (non-JSON, non-placeholder) chunk — pass through.
             return chunks
         parsed = {
-            "note": (
-                "Live analysis run: no pre-extracted static fixture exists "
-                "for this sample. Nothing about the binary is pasted here on "
-                "purpose — where your tool list offers them, call tools for the "
-                "section table, the imports and the strings, and cite the ids "
-                "their results carry."
-            ),
+            "note": NO_STATIC_FIXTURE_NOTE,
             "sha256": state.get("file_hash") or "",
         }
 
@@ -2141,7 +2144,7 @@ def make_stage_agent_node(
                 logger.info(
                     "Agent '%s' skipped: %s — emitting an empty ISR (no-data path).",
                     agent_name,
-                    NO_SANDBOX_DATA_REASON if synthetic else "no input data for this agent",
+                    NO_SANDBOX_DATA_REASON if synthetic else NO_INPUT_DATA_REASON,
                 )
                 no_data_text = (
                     f"[WARN] {agent_name}: {SYNTHETIC_SANDBOX_REASON} — analyst skipped."

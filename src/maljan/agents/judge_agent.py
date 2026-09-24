@@ -484,6 +484,11 @@ COMPACT_BUNDLE_RULES = (
 )
 
 
+# What the mediator's fast path says when it needs no tool; replaced by the
+# sentence about the tools that attached if the fast path falls back to a loop.
+_NO_TOOLS_NEEDED = "No Threat Intelligence tools are needed for this run.\n"
+
+
 # The judge's system prompt. A module constant so that
 # ``composition.builtin_prompt("judge")`` and ``give_verdict`` cannot disagree
 # about what the judge is told.
@@ -1334,7 +1339,7 @@ class JudgeAgent(BudgetMeter):
                     if needs_tools and lookup_attached
                     else tools_statement(self.tools) + "\n"
                     if needs_tools
-                    else "No Threat Intelligence tools are needed for this run.\n"
+                    else _NO_TOOLS_NEEDED
                 ),
             ),
             (
@@ -1381,6 +1386,13 @@ class JudgeAgent(BudgetMeter):
             except TimeoutError:
                 self.logger.error("Mediator fast-path timed out. Falling back to tool loop.")
                 await self._initialize_mcp_client()
+                # The fast path's prompt was written for a call with no tools;
+                # the loop carries whatever attached, and its prompt says so.
+                statement = tools_statement(self.tools) + "\n"
+                prompt_messages = [
+                    (role, text.replace(_NO_TOOLS_NEEDED, statement) if role == "system" else text)
+                    for role, text in prompt_messages
+                ]
                 reasoning_text = await self.execute_tool_loop(prompt_messages)
             else:
                 self._record_usage(response)
