@@ -872,6 +872,21 @@ class EmulatedStrings(BaseModel):
     partial: str = ""
 
 
+class FlaggedStatement(BaseModel):
+    """A sentence of the report model's that a check asked about and that survived the retry.
+
+    The sentence as the model wrote it, the finding's code, and what the check
+    found in a few words (``credential theft``, ``T1003``). The renderers mark
+    the sentence where it stands; the words are never changed.
+    """
+
+    model_config = _STRICT_CONFIG
+
+    sentence: str
+    code: str
+    label: str = ""
+
+
 class JudgeIndicator(BaseModel):
     """One value a judge indicator names: its IOC kind, the value, a hash's algorithm."""
 
@@ -1101,6 +1116,10 @@ class MalwareReport(BaseModel):
     # which ask the one publish rule of each exactly as the export does; empty
     # on a report stored before the field existed.
     judge_indicators: list[JudgeIndicator] = Field(default_factory=list)
+    # The report model's sentences a capability or rule-match check asked
+    # about and the retry left standing, marked in place by the renderers;
+    # empty on a report stored before the field existed.
+    flagged_statements: list[FlaggedStatement] = Field(default_factory=list)
     # For each technique a YARA rule of this run asserted, the rules and how
     # many of each rule's own strings matched (``{"rule", "strings"}``), as the
     # scan answered. Read by the ATT&CK table's "rule match only" note and by

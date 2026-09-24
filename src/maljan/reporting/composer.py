@@ -47,6 +47,7 @@ from maljan.pipeline.validation import (
     keep_known_keys,
     pack_line_ids,
     quoted_values,
+    record_flagged_statements,
     retry_with_feedback,
     schema_violations,
     section_capability_violations,
@@ -461,6 +462,12 @@ PUBLISHED_TECHNIQUES_HEADING = (
     "TECHNIQUES THIS REPORT PUBLISHES (its ATT&CK table; the name beside each id is the "
     "catalogue's):"
 )
+# Said under the list when a published technique stands on a rule match alone.
+RULE_ONLY_NOTE = (
+    "A technique marked 'rule match only' was matched by a rule and claimed by no "
+    "analyst: write that the rule matched and what it matched, never that the sample "
+    "does what the technique names."
+)
 WHERE_QUOTED_LEAD = "the run's evidence: "
 
 
@@ -486,14 +493,20 @@ def _where_quoted(line: str, entries: EntryTexts | None) -> str:
 
 def _published_techniques(report: MalwareReport) -> str:
     """The techniques the report publishes, one line each, for every section's prompt."""
+    from maljan.analysis.corroboration import rule_match_only
+
+    rule_only = rule_match_only(report)
     rows = [
         f"- {m.technique_id} {m.technique_name}".rstrip()
+        + (f" — {rule_only[m.technique_id]}" if m.technique_id in rule_only else "")
         for m in (getattr(report, "ttp_mappings", None) or [])
         if getattr(m, "technique_id", "")
     ]
     if not rows:
         return ""
-    return "\n".join([PUBLISHED_TECHNIQUES_HEADING, *rows])
+    return "\n".join(
+        [PUBLISHED_TECHNIQUES_HEADING, *rows, *([RULE_ONLY_NOTE] if rule_only else [])]
+    )
 
 
 # The calls one section may take: its answer and the one retry the validation
@@ -636,6 +649,9 @@ class ReportComposer:
         """
         ta = report.technical_analysis or TechnicalAnalysis()
         authored = 0
+        # Where the sentences a check leaves standing are recorded, to be
+        # marked where they stand.
+        self._report = report
         self._facts_block = facts_block
         self._run_state = run_state
         # The ids a section may cite: the ones the run's ledger issued, or,
@@ -1168,6 +1184,7 @@ class ReportComposer:
             ", ".join(v.path for v in violations),
         )
         self.validation_tally.record_unresolved(f"composer:{section}", violations)
+        record_flagged_statements(getattr(self, "_report", None), violations)
 
 
 def _section_declined(payload: Any, schema: type[BaseModel]) -> bool:

@@ -45,6 +45,7 @@ from maljan.pipeline.validation import (
     key_finding_citation_violations,
     narrative_capability_violations,
     pack_line_ids,
+    record_flagged_statements,
     retry_with_feedback,
     schema_violations,
     technique_name_violations,
@@ -306,14 +307,23 @@ def build_prompt_text(report: MalwareReport) -> str:
     if not report.ttp_mappings:
         lines.append("  (none mapped)")
     else:
+        from maljan.analysis.corroboration import rule_match_only
+        from maljan.reporting.composer import RULE_ONLY_NOTE
+
+        rule_only = rule_match_only(report)
         for mapping in report.ttp_mappings[:8]:
             quote = mapping.evidence_quotes[0] if mapping.evidence_quotes else ""
             layers = ",".join(mapping.contributing_layers) or "-"
+            rule_note = (
+                f" — {rule_only[mapping.technique_id]}" if mapping.technique_id in rule_only else ""
+            )
             lines.append(
                 f"  - {mapping.technique_id} {mapping.technique_name} "
-                f"(conf={confidence_text(mapping.confidence)}, layers={layers}): "
+                f"(conf={confidence_text(mapping.confidence)}, layers={layers}){rule_note}: "
                 f"{_truncate(quote, 120)}"
             )
+        if any(m.technique_id in rule_only for m in report.ttp_mappings[:8]):
+            lines.append(f"  {RULE_ONLY_NOTE}")
     lines.append("")
 
     # --- Sandbox signatures (top 5 by severity) -----------------------
@@ -458,6 +468,9 @@ class NarrativeAgent:
         always rely on the fallback narrative.
         """
         messages = self._build_prompt(report, facts_block, run_state)
+        # Where the sentences a check leaves standing are recorded, to be
+        # marked where they stand.
+        self._report = report
 
         # What this run actually established, so a summary cannot be the first
         # place "command-and-control" or "data exfiltration" appears. Run 3's
@@ -611,6 +624,7 @@ class NarrativeAgent:
             ", ".join(v.path for v in violations),
         )
         self.validation_tally.record_unresolved("narrative", violations)
+        record_flagged_statements(getattr(self, "_report", None), violations)
 
     def _kept_with_ungrounded_recorded(
         self,

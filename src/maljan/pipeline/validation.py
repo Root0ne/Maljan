@@ -101,6 +101,10 @@ class Violation:
     # Carried apart, the bound can only ever shorten the route.
     route: tuple[str, ...] = ()
     sentence: str = ""
+    # The sentences of the checked text this row is about, as written, for a
+    # renderer to mark where they stand. Never shown to the producer and never
+    # stored on the channel: the text they come from is.
+    quoted: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         # A row written by a validator has no route, and its message is its
@@ -1147,6 +1151,10 @@ class CapabilityGrounding:
     technique_ids: frozenset[str] = frozenset()
     evidence_keys: frozenset[str] = frozenset()
     evidence_text: str = ""
+    # The published techniques only a rule match stands behind:
+    # ``(technique id, catalogue name, note)``, the note as the ATT&CK table
+    # prints it (``corroboration.rule_match_only``).
+    rule_only: tuple[tuple[str, str, str], ...] = ()
 
     def grounds(
         self, techniques: Sequence[str], keys: Sequence[str], pattern: re.Pattern[str]
@@ -1184,6 +1192,7 @@ class CapabilityGrounding:
         techniques: set[str] = set()
         keys: set[str] = set()
         words: list[str] = []
+        rule_rows: list[tuple[str, str, str]] = []
         try:
             # A technique only a rule match stands behind — one string of a
             # YARA rule in a large file, with no analyst claiming it — grounds
@@ -1192,7 +1201,15 @@ class CapabilityGrounding:
             # row in the evidence counts.
             from maljan.analysis.corroboration import rule_match_only
 
-            rule_only = set(rule_match_only(report))
+            rule_notes = rule_match_only(report)
+            rule_only = set(rule_notes)
+            names = {
+                str(getattr(m, "technique_id", "") or ""): str(
+                    getattr(m, "technique_name", "") or ""
+                )
+                for m in getattr(report, "ttp_mappings", None) or []
+            }
+            rule_rows = [(tid, names.get(tid, ""), note) for tid, note in rule_notes.items()]
             rule_only_rules = {
                 str(hit.get("rule") or "").lower()
                 for tid in rule_only
@@ -1245,6 +1262,7 @@ class CapabilityGrounding:
             technique_ids=frozenset(techniques),
             evidence_keys=frozenset(keys),
             evidence_text=" ".join(w for w in words if w).lower(),
+            rule_only=tuple(rule_rows),
         )
 
 
@@ -1313,7 +1331,54 @@ _NOT_A_NEGATION = ("no doubt", "not only")
 _NEGATION_WINDOW = 40
 
 
-def _is_negated(text: str, start: int) -> bool:
+# A negation that governs a list: "no evidence of A, B such as C or D". It
+# reaches every item of its list, however long, up to the end of its clause or
+# to a new statement joined on after it. A benchmark summary's "No evidence of
+# malicious command and control infrastructure, such as C2 callbacks or
+# exfiltration endpoints" was read as claiming exfiltration, the last item
+# lying past the window below.
+_LIST_NEGATION_RE = re.compile(
+    r"\b(?:no|without(?:\s+any)?)\s+(?:evidence|indication|sign|signs|trace|traces)\s+of\b",
+    re.IGNORECASE,
+)
+# What starts a new statement inside one clause: its own subject after "and".
+_NEW_STATEMENT_RE = re.compile(
+    r",\s*and\b|\band\s+(?:the|it|this|that|its)\b|\bwhile\b", re.IGNORECASE
+)
+
+
+def _in_a_negated_list(text: str, start: int) -> bool:
+    """Whether the term at ``start`` is an item of a list a noun negation governs."""
+    head = text[:start]
+    breaks = list(_CLAUSE_BREAK_RE.finditer(head))
+    clause = head[breaks[-1].end() :] if breaks else head
+    cues = list(_LIST_NEGATION_RE.finditer(clause))
+    if not cues:
+        return False
+    return _NEW_STATEMENT_RE.search(clause[cues[-1].end() :]) is None
+
+
+# What says, after a term, that it was not found: "confirmation of lateral
+# movement is absent", "persistence was not observed". Read to the end of the
+# term's clause.
+_ABSENCE_AFTER_RE = re.compile(
+    r"\b(?:is|are|was|were|remains?)\s+(?:absent|missing|"
+    r"not\s+(?:observed|found|seen|recorded|present|established|confirmed))\b",
+    re.IGNORECASE,
+)
+# A purpose the text gives for a defender's action: "isolate the host to
+# prevent lateral movement" says nothing of what the sample does.
+_PURPOSE_RE = re.compile(r"\bto\s+(?:prevent|stop|block|contain|limit|avoid)\b", re.IGNORECASE)
+
+
+def _absent_after(text: str, end: int) -> bool:
+    """Whether the rest of the term's clause says the term was not found."""
+    rest = text[end:]
+    stop = _CLAUSE_BREAK_RE.search(rest)
+    return _ABSENCE_AFTER_RE.search(rest[: stop.start()] if stop else rest) is not None
+
+
+def _is_negated(text: str, start: int, end: int | None = None) -> bool:
     """Whether the term at ``start`` sits inside a statement of absence.
 
     Read backwards from the match through at most ``_NEGATION_WINDOW``
@@ -1323,15 +1388,48 @@ def _is_negated(text: str, start: int) -> bool:
     negates only the first, because the semicolon ends the clause the cue was
     in.
     """
+    if _in_a_negated_list(text, start):
+        return True
+    if end is not None and _absent_after(text, end):
+        return True
     window = text[max(0, start - _NEGATION_WINDOW) : start]
     breaks = list(_CLAUSE_BREAK_RE.finditer(window))
     if breaks:
         window = window[breaks[-1].end() :]
+    if _PURPOSE_RE.search(window):
+        return True
     lowered = window.lower()
     return any(
         not lowered.startswith(_NOT_A_NEGATION, cue.start())
         for cue in _NEGATION_RE.finditer(window)
     )
+
+
+# Where one sentence of checked text ends: a stop, a bang or a question mark
+# before a space, or a line break.
+_STATEMENT_END_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def _sentence_around(text: str, position: int) -> str:
+    """The sentence of ``text`` that holds ``position``, as written."""
+    begin = 0
+    for end in _STATEMENT_END_RE.finditer(text):
+        if end.start() >= position:
+            return text[begin : end.start()].strip()
+        begin = end.end()
+    return text[begin:].strip()
+
+
+def _claiming_sentences(pattern: re.Pattern[str], text: str) -> list[str]:
+    """The sentences in which ``pattern`` is claimed rather than reported absent, once each."""
+    found: list[str] = []
+    for match in pattern.finditer(text):
+        if _is_negated(text, match.start(), match.end()):
+            continue
+        sentence = _sentence_around(text, match.start())
+        if sentence and sentence not in found:
+            found.append(sentence)
+    return found
 
 
 def _claimed(pattern: re.Pattern[str], text: str) -> bool:
@@ -1341,7 +1439,9 @@ def _claimed(pattern: re.Pattern[str], text: str) -> bool:
     exfiltrate data in one sentence and does exfiltrate it in another has made
     the claim, and it is the claim that has to be grounded.
     """
-    return any(not _is_negated(text, match.start()) for match in pattern.finditer(text))
+    return any(
+        not _is_negated(text, match.start(), match.end()) for match in pattern.finditer(text)
+    )
 
 
 def _base_technique(technique_id: Any) -> str:
@@ -1373,42 +1473,123 @@ def ungrounded_capabilities(
         # communication was observed" is the prose a thin run should produce,
         # and flagging it spends the one retry arguing against the honest
         # sentence this validator exists to encourage.
-        if not _claimed(pattern, text):
+        sentences = _claiming_sentences(pattern, text)
+        if not sentences:
             continue
         if grounding.grounds(techniques, keys, pattern):
             continue
+        rule_matched = [
+            f"{safe_finding_value(tid)} {safe_finding_value(name)} is published on a "
+            f"{safe_finding_value(note)}"
+            for tid, name, note in grounding.rule_only
+            if _base_technique(tid) in techniques
+        ]
+        rule_line = (
+            f" {'; '.join(rule_matched)}: say that a rule matched, not that the sample does it."
+            if rule_matched
+            else ""
+        )
         violations.append(
             Violation(
                 code=code,
                 message=(
                     f"the text claims {label}, which nothing in this run establishes — "
                     f"no {', '.join(techniques[:3])} technique, no matching evidence "
-                    f"section, and no analyst said it. {grounding.summary()} "
-                    "Describe what was found, or drop the claim."
+                    f"section, and no analyst said it"
+                    f" (in: {safe_finding_value(sentences[0])!r}).{rule_line} "
+                    f"{grounding.summary()} Describe what was found, or drop the claim."
                 ),
                 path=label.replace(" ", "_"),
+                quoted=tuple(sentences),
             )
         )
     return violations
 
 
-def narrative_capability_violations(
-    payload: Any, grounding: CapabilityGrounding
-) -> list[Violation]:
-    """:func:`ungrounded_capabilities` over a narrative answer's prose fields."""
-    if payload is None:
-        return []
-    data = payload if isinstance(payload, dict) else getattr(payload, "__dict__", {}) or {}
-    parts: list[str] = [str(data.get("executive_summary") or "")]
-    for item in data.get("key_findings") or []:
-        parts.append(str(item.get("text") or "") if isinstance(item, dict) else str(item))
-    return ungrounded_capabilities("\n".join(parts), grounding)
+RULE_MATCH_AS_ACTION_CODE = "report.rule_match_as_action"
+
+# The words that make a sentence about a rule match, or an estimate, rather
+# than a statement that the sample does something.
+_RULE_OR_ESTIMATE_RE = re.compile(
+    r"\b(?:rules?|yara|capa|signatures?|match(?:es|ed|ing)?|may|might|could|possibl[ey]|"
+    r"potential(?:ly)?|likely|suggests?|consistent\s+with|indicat\w*|associated\s+with)\b",
+    re.IGNORECASE,
+)
 
 
-def section_capability_violations(payload: Any, grounding: CapabilityGrounding) -> list[Violation]:
-    """:func:`ungrounded_capabilities` over every string a section answer carries."""
-    if payload is None:
+def rule_match_statement_violations(text: str, grounding: CapabilityGrounding) -> list[Violation]:
+    """Sentences that state a technique only a rule match stands behind as an action.
+
+    A technique published on one matched string of a YARA rule, with no
+    analyst claiming it, is a rule match: a benchmark report wrote "The sample
+    dumps credentials from the target system" for one. A sentence that names
+    such a technique — its id or its catalogue name — and says nothing of a
+    rule or an estimate is asked about once. The publish rule is unchanged,
+    and the sentence is never edited. A capability word behind the same
+    technique is the capability check's (:func:`ungrounded_capabilities`).
+    """
+    if not text or not text.strip() or not grounding.rule_only:
         return []
+    violations: list[Violation] = []
+    for tid, name, note in grounding.rule_only:
+        spellings = [re.escape(tid)]
+        if len(name.strip()) >= 4:
+            spellings.append(r"\s+".join(re.escape(word) for word in name.split()))
+        pattern = re.compile(r"(?<![\w.])(?:" + "|".join(spellings) + r")(?![\w])", re.I)
+        sentences = [
+            sentence
+            for sentence in _claiming_sentences(pattern, text)
+            if not _RULE_OR_ESTIMATE_RE.search(sentence)
+        ]
+        if not sentences:
+            continue
+        violations.append(
+            Violation(
+                code=RULE_MATCH_AS_ACTION_CODE,
+                message=(
+                    f"{safe_finding_value(sentences[0])!r} states {safe_finding_value(tid)} "
+                    f"{safe_finding_value(name)} as something the sample does; this run "
+                    f"publishes it on a {safe_finding_value(note)}. Say that a rule matched "
+                    "and what it matched, or drop the sentence."
+                ),
+                path=tid,
+                quoted=tuple(sentences),
+            )
+        )
+    return violations
+
+
+def record_flagged_statements(report: Any, violations: Sequence[Violation]) -> None:
+    """Put the sentences of the surviving marked-in-place findings on the report. Never raises.
+
+    What a renderer marks where the sentence stands (``MARKED_IN_PLACE``). The
+    sentence is kept as written; the label is the finding's path, the term or
+    the technique the check was about.
+    """
+    rows = getattr(report, "flagged_statements", None)
+    if not isinstance(rows, list):
+        return
+    try:
+        from maljan.reporting.models import FlaggedStatement
+
+        seen = {(row.sentence, row.code, row.label) for row in rows}
+        for violation in violations:
+            if violation.code not in MARKED_IN_PLACE:
+                continue
+            label = violation.path.replace("_", " ")
+            for sentence in violation.quoted:
+                key = (sentence, violation.code, label)
+                if key not in seen:
+                    seen.add(key)
+                    rows.append(
+                        FlaggedStatement(sentence=sentence, code=violation.code, label=label)
+                    )
+    except Exception as exc:  # noqa: BLE001 — a mark is never worth a report
+        logger.debug("validation: flagged sentences were not recorded (%s).", exc)
+
+
+def prose_of(payload: Any) -> str:
+    """Every string an answer carries, one per line, for the checks that read prose."""
     parts: list[str] = []
 
     def _walk(value: Any, depth: int = 0) -> None:
@@ -1424,7 +1605,35 @@ def section_capability_violations(payload: Any, grounding: CapabilityGrounding) 
                 _walk(item, depth + 1)
 
     _walk(payload)
-    return ungrounded_capabilities("\n".join(parts), grounding, code=UNGROUNDED_CAPABILITY_CODE)
+    return "\n".join(parts)
+
+
+def narrative_capability_violations(
+    payload: Any, grounding: CapabilityGrounding
+) -> list[Violation]:
+    """:func:`ungrounded_capabilities` over a narrative answer's prose fields."""
+    if payload is None:
+        return []
+    data = payload if isinstance(payload, dict) else getattr(payload, "__dict__", {}) or {}
+    parts: list[str] = [str(data.get("executive_summary") or "")]
+    for item in data.get("key_findings") or []:
+        parts.append(str(item.get("text") or "") if isinstance(item, dict) else str(item))
+    text = "\n".join(parts)
+    return [
+        *ungrounded_capabilities(text, grounding),
+        *rule_match_statement_violations(text, grounding),
+    ]
+
+
+def section_capability_violations(payload: Any, grounding: CapabilityGrounding) -> list[Violation]:
+    """:func:`ungrounded_capabilities` and the rule-match check over a section answer's strings."""
+    if payload is None:
+        return []
+    text = prose_of(payload)
+    return [
+        *ungrounded_capabilities(text, grounding, code=UNGROUNDED_CAPABILITY_CODE),
+        *rule_match_statement_violations(text, grounding),
+    ]
 
 
 CITATION_NOT_EVIDENCE_CODE = "report.citation_not_evidence"
@@ -1599,6 +1808,9 @@ TECHNIQUE_NAME_CODE = "report.technique_name"
 
 # The codes a report round's answer is kept with. A broken shape leaves nothing
 # to print; each of these leaves a printable answer with a finding beside it.
+# The findings whose sentences survive marked where they stand in the report.
+MARKED_IN_PLACE: frozenset[str] = frozenset({UNGROUNDED_CAPABILITY_CODE, RULE_MATCH_AS_ACTION_CODE})
+
 KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
     {
         UNGROUNDED_CAPABILITY_CODE,
@@ -1609,6 +1821,7 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         CITATION_WRONG_ENTRY_CODE,
         UNCITED_IDENTIFIER_CODE,
         TECHNIQUE_NAME_CODE,
+        RULE_MATCH_AS_ACTION_CODE,
     }
 )
 

@@ -2031,6 +2031,17 @@ class _Context:
         self.indicators = indicators
         self._defang = ProseDefanger(indicators)
         self.reputations = _reputations(report)
+        # The report model's sentences a check asked about and the retry left
+        # standing, each with the mark printed after it. Longest first, so a
+        # sentence that holds another is marked as itself.
+        self.flagged = sorted(
+            (
+                (row.sentence, _flag_mark(row.code, row.label))
+                for row in getattr(report, "flagged_statements", None) or []
+                if row.sentence.strip()
+            ),
+            key=lambda pair: -len(pair[0]),
+        )
 
     def source_of(self, evidence_id: str) -> str:
         """Who recorded one ledger entry: its agent and its tool, or that it is unknown."""
@@ -2081,7 +2092,14 @@ class _Context:
         heading or a code fence, which would re-section the report or swallow
         everything after it.
         """
-        return _escape_block(self._defang(text))
+        return _escape_block(self._defang(self.marked(text)))
+
+    def marked(self, text: str) -> str:
+        """``text`` with each flagged sentence followed by its mark; the words are unchanged."""
+        for sentence, mark in self.flagged:
+            if sentence in text and mark not in text:
+                text = text.replace(sentence, f"{sentence} {mark}")
+        return text
 
     def plain(self, text: str) -> str:
         """A value with the run's network indicators defanged and nothing else changed."""
@@ -2089,7 +2107,7 @@ class _Context:
 
     def line(self, text: Any) -> str:
         """Model prose that has to stay on one line: a list item, a step."""
-        return _one_line(self._defang(str(text or "")))
+        return _one_line(self._defang(self.marked(str(text or ""))))
 
     def cell(self, text: Any) -> str:
         """A model-written table cell: defanged like prose, cut like every cell."""
@@ -2292,6 +2310,19 @@ def _degraded_sentence(report: MalwareReport, ctx: _Context) -> str:
         f"{said[0].upper()}{said[1:]}; the verdict above is tentative. See §13 for what this "
         "run could not examine."
     )
+
+
+# The words of the mark a flagged sentence carries, by the finding's code.
+_FLAG_WORDS = {
+    "narrative.ungrounded_capability": "not established by this run",
+    "report.rule_match_as_action": "a rule match only, stated as an action",
+}
+
+
+def _flag_mark(code: str, label: str) -> str:
+    """The mark printed after a sentence a check left standing, in the platform's voice."""
+    words = _FLAG_WORDS.get(code, "asked about and kept")
+    return f"**[{words}: {label}]**" if label else f"**[{words}]**"
 
 
 def _findings_beside(rows: list[dict[str, str]]) -> list[str]:
