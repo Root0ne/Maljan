@@ -488,10 +488,20 @@ Two producers use it:
   exfiltration), where "no evidence that …" and "such as" end nothing; a noun
   negation ("no evidence of") also reaches through a ", such as …" list it
   names to the end of its clause; "to prevent|avoid|stop|
-  block X" negates X only when X is the verb's object; "is absent", "is
-  missing from", "is not present" and "was not observed" (a category noun such
-  as "mechanisms" may stand between) count only with the term as the clause's
-  subject.
+  block X" negates X only when X is the verb's object; "rather than", "instead
+  of" and "prevents confirmation of" are cues too. The absence question's own
+  readings count as well, one reading for both: "is absent", "is missing
+  from", "is not present", "was not observed", "is not supported" and their
+  like (a category noun such as "mechanisms" may stand between) with the term
+  opening its clause or ending the subject's noun phrase ("the specific APIs
+  required for persistence are absent"); an item of a negated noun list; and
+  the term ending the object of a negated verb ("does not import the registry
+  APIs required for persistence"). No word inside a value is read: a code
+  span, a quoted string, a path or registry key, a record's `value` or
+  `endpoints`, and the words of that value its other fields restate ("Configuration path
+  for SSH authentication credentials" beside `/SSH/Auth/Credentials`); nor a
+  section's heading. A sentence that says a rule matched ("capa matched …") is
+  not a claim that the sample does what the rule names.
 
   What grounds a capability word is what the run found: a published technique
   that is not a rule match only, an evidence section's key, and a word said —
@@ -502,14 +512,20 @@ Two producers use it:
   behaviour ground nothing, by the negation reader. Three things ground
   nothing: a matrix row the run did not publish, a
   reference table (`tool:api_capability`, which says what a catalogue lists an
-  import under), and the words of the sample's own strings (`tool:strings`,
-  `tool:iocs_from_file`, `tool:floss`), which count by their section's key. A
+  import under), the words of the sample's own strings (`tool:strings`,
+  `tool:iocs_from_file`, `tool:floss`), and the rule names of a rule matcher
+  (`tool:capa`, `tool:yara_scan`) — a rule's name is its author's word for a
+  pattern, not a finding that the sample does it — which count by their
+  section's key. A benign control's "performs keylogging" and "attempts to
+  evade detection and debuggers" had been grounded by capa's "log keystrokes via
+  polling" and "check for time delay via GetTickCount". A
   benign control report's "likely uses these registry APIs to establish
   persistence" had been grounded by an id published from "does not contain any
   obvious persistence mechanisms" and by the catalogue row "CreateMutexA |
   persistence"; its "credential harvesting" by the sample's settings path
-  `/SSH/Auth/Credentials`. The terms include anti-analysis and anti-forensics,
-  and a capability question names two of its term's technique ids as examples.
+  `/SSH/Auth/Credentials`. The terms include anti-analysis (with evading
+  detection or analysis, and packing) and anti-forensics, and a capability
+  question names two of its term's technique ids as examples.
 
   Two more questions are asked where they can be decided. **A value cited to
   the wrong entry** (`report.citation_wrong_entry`): a value a sentence states
@@ -905,6 +921,21 @@ decides.
    conversation is the kept answer's: an analyst whose retry lost claims keeps
    its first answer, and the loop checks that answer again before it says what
    became of each finding (`retry_with_feedback_sync(keep=)`).
+   **A claim that does not describe its technique**
+   (`attck.claim_does_not_describe`). A claim whose sentence shares no term
+   with the technique it carries — no capability term listing the id, no word
+   of its catalogue name or its parent's (compared with common endings off:
+   "obfuscation" and "Obfuscated Files or Information" share one), no tactic
+   as a category phrase — is asked once to keep the technique only if the
+   sample does it, and then to say what it does. Decided only where the
+   catalogue gives the id's name, and not asked of an absence claim or a
+   platform mismatch, which get their own question. The answer stands; a kept
+   id is published as stated and nothing is noted on the claim. A reference
+   run had published OS Credential Dumping on "accesses the PEB … to bypass
+   sandboxing". On the stored claims of every benchmark run (123 claims with a
+   technique id) it asks 18, three of them true claims whose sentences used
+   none of the technique's words (Ingress Tool Transfer on "downloads and
+   writes a file", Native API on "the raw syscall() entry point").
 2. **Domain and platform consistency** (`attck.platform_mismatch`, exact). The
    catalogue's domain and platforms for the id against the routed sample —
    a Windows PE is `enterprise`/Windows, an APK `mobile`/Android, an ELF
@@ -1018,16 +1049,33 @@ other than a bundle has already filed `verdict.fallback` or `verdict.timeout`
 itself, so the summary carries one row and not two.
 
 The verdict prompt states its output budget (`judge_max_tokens`, reasoning
-included), and an answer that stopped at it is told so —
-`verdict.cut_at_output_cap`, with the cap and how far it got — rather than that
-it was not JSON, which made a judge whose bundle was too large write the same
-bundle again. When the retry is still not a bundle, the fallback reads the
+included) and asks only for what the judge alone decides: no `malware uses
+attack-pattern` and no `indicator indicates malware` relationship, which the
+platform writes for every attack-pattern and indicator from the bundle's one
+malware object (`judge_postprocess.relate_to_the_sample`), moving the
+`x_maljan_confidence`, `x_maljan_evidence_basis` and
+`x_maljan_contributing_agents` the judge wrote on the object onto it
+unchanged; an object the judge related itself gets no second edge, and a
+bundle with no malware object, or two, gets none. An attack-pattern carries at
+most one short sentence of description and the JSON is written on one line. A
+reference judge's bundle — pretty-printed, a third of it those relationships —
+was cut at 8,192 tokens twice; for the objects it wrote, the compact contract
+measures about 14,000 characters, some 5,100 tokens at the answer's own rate.
+An answer that stopped at the budget is told so — `verdict.cut_at_output_cap`,
+with the cap, the answer's characters, the objects it began by type and its
+indented lines, asking for the compact bundle — rather than that it was not
+JSON, which made a judge whose bundle was too large write the same bundle
+again. When the retry is still not a bundle, the fallback reads the
 `x_maljan_assessment` object the answer wrote whole, if it did, through the
 reader a whole answer goes through and `JudgeAssessment`, and keeps it only
 when its verdict is one of the three words. The run then publishes that
 verdict with the judge's own confidence, severity and family, still read as
-`fallback` and still filed under `verdict.fallback`. Nothing is read out of
-prose.
+`fallback` and still filed under `verdict.fallback`. The indicator objects the
+answer wrote whole are kept too, as written with minted ids, asked what a
+bundle's indicator is asked — findings recorded, an ungrounded one dropped —
+and put to the one publish rule like any judge indicator, so decoded C2 hosts
+an answer wrote before the cut are published exactly as they would have been
+from an answer that closed. Nothing is read out of prose.
 
 Two metrics record the outcome:
 
@@ -2389,6 +2437,11 @@ is assembled from what the run gathered rather than recomputed beside it:
   key and value, a command's id and name, a flag, a channel's name and
   endpoints, and a whole flow step — its `order` included, so a loop that
   numbers each repeat anew is not caught.
+  The one retry asks every finding of the first answer together, in one
+  question. A finding only the retry's answer raises was never put to the
+  model: it is recorded with "Not asked: it first appeared in the answer to the
+  section's one retry …" (`composer.ONLY_IN_THE_RETRY`), and its marks say not
+  asked.
   The host-identifier contract asks for the kind by what the entry shows the
   value is: a registry key or value only under a registry hive, from one of its
   top keys (`Software\`, `System\`) or where the entry records a registry

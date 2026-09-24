@@ -8,6 +8,18 @@ change landed on `main`.
 
 ### Added
 
+- **A claim whose sentence does not describe its technique is asked about.**
+  A claim carrying a technique id whose sentence shares no term with that
+  technique — no capability term listing the id, no word of its catalogue
+  name (compared with common endings off, so "obfuscation" shares a term with
+  "Obfuscated Files or Information"), no tactic as a category phrase — is
+  asked once (`attck.claim_does_not_describe`) to keep the technique only if
+  the sample does it. The analyst's answer stands and a kept id is published
+  as stated. An absence claim and a platform mismatch are asked their own
+  question instead. A reference run had published OS Credential Dumping on
+  "accesses the PEB … to bypass sandboxing" and Valid Accounts on "a
+  Trojan/Backdoor that performs system reconnaissance".
+
 - **A claim that reads as absence is asked about its technique id.** A claim
   carrying a technique id is asked once (`attck.absence_claim`) whether the
   behaviour is absent (`TECHNIQUE: NONE`) or the sample does it when every
@@ -804,6 +816,19 @@ change landed on `main`.
   read from the header.
 
 ### Changed
+
+- **The judge is asked only for what it alone decides.** The verdict contract
+  asks for no `malware uses attack-pattern` and no `indicator indicates
+  malware` relationship: the platform writes both for every attack-pattern and
+  indicator from the bundle's one malware object
+  (`judge_postprocess.relate_to_the_sample`), carrying the confidence, basis and
+  credits the judge writes on the object, unchanged. The judge writes an
+  attack-pattern with at most one short sentence of description and the JSON
+  on one line. The question after a cut names the answer's characters, the
+  objects it began by type and its indented lines, and asks for the compact
+  bundle. A reference judge's pretty-printed bundle, a third of it those
+  relationships, was cut at its 8,192-token output cap twice and the verdict
+  fell back to text extraction; the output cap is unchanged.
 
 - **A composer section's output budget is derived, not fixed.**
   `reporting.composer_section_max_tokens` ships at 0, which gives each model
@@ -1857,6 +1882,34 @@ change landed on `main`.
   `MALJAN_FLOSS_PATH` to a missing file unless a test names a build.
 
 ### Fixed
+
+- **A fallback verdict keeps the indicators its answer wrote whole.** After
+  the judge's answer was cut twice the fallback bundle carried no indicator,
+  so the decoded C2 hosts the answer had written whole were never put to the
+  publish rule and `/iocs` and STIX held only the hashes. Each indicator the
+  answer wrote whole (read as written, no repair) is kept with a minted id,
+  asked what a bundle's indicator is asked — the findings recorded, an
+  ungrounded one dropped — and the export, the IOC table and `/iocs` read the
+  one publish rule's answer for it, emulation record and verdict included.
+- **The capability check marks claims, not values or absences.** It reads no
+  word inside a value — a code span, a quoted string, a path, a registry key,
+  or the words of a record's own value that its other fields restate — and no
+  section heading. A term ending the subject of "are absent" or "is not
+  supported", or the object of a negated verb ("does not import the registry
+  APIs required for persistence"), and a term after "rather than", "instead
+  of" or "prevents confirmation of", is read as absence, by the absence
+  question and the mark alike. capa's and YARA's rule names no longer ground a
+  capability word (their sections still count by key), and a sentence that
+  says a rule matched is not a claim. The anti-analysis term reads evading
+  detection or analysis and packing. A benign control's four marks had sat on
+  a configuration path row and two absence sentences, while its keylogging,
+  evasion, anti-debugging and "repacked" over-claims went unmarked.
+- **A finding the retry's answer first raised is recorded as not asked.** A
+  report section's one retry asks every finding of its first answer in one
+  question; a finding only the retry's answer raises is recorded with "Not
+  asked: it first appeared in the answer to the section's one retry …" and its
+  marks say not asked, instead of reading as a question the model left
+  unfixed.
 
 - **Techniques are no longer published from absence claims without the
   analyst being asked.** A benign control run published thirteen ATT&CK
@@ -4437,6 +4490,21 @@ change landed on `main`.
 - **`reporting.builder.defang`**, replaced by `reporting.defang.defang(value, kind)`.
 
 ### Upgrading
+
+A judge bundle's `uses` edges to its attack-patterns and `indicates` edges from
+its indicators may now be the platform's, written from the malware object
+with the judge's `x_maljan_confidence`, `x_maljan_evidence_basis` and
+`x_maljan_contributing_agents` moved from the object; the judge's bundle as
+written (`JudgeVerdict.written`) keeps them where the judge put them. A
+fallback bundle may carry indicator objects. `attck.claim_does_not_describe`
+is a new validation code, counted in `run_summary.validation`; the not-asked
+path appends "Not asked: …" to it as to `attck.absence_claim`. The
+`verdict.cut_at_output_cap` question states the answer's size by characters,
+objects and indented lines. The capability check asks about more report
+sentences where only capa's or YARA's rule names had grounded a word, and about
+fewer where a value, a heading or an absence had been read as a claim. A
+section's findings first raised by its retry are recorded ending
+`composer.ONLY_IN_THE_RETRY`.
 
 An analyst claim carries `kept_after_absence_question` (false on a stored ISR,
 which is read as before), and a capability matrix cell carries `note` (empty
