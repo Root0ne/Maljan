@@ -1051,7 +1051,7 @@ class ReportComposer:
                 shape = cut_answer_shape(cut_text)
                 cut_shapes.append(shape)
                 logger.warning(
-                    "ReportComposer: section '%s' reached the output cap of %d tokens (%s).",
+                    "ReportComposer: section '%s' was cut at its output cap (%d) — %s.",
                     section or schema.__name__,
                     cut_at,
                     shape,
