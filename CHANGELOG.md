@@ -8,15 +8,23 @@ change landed on `main`.
 
 ### Added
 
-- **A claim that reads as absence is asked about its technique id.** "The
-  binary does not contain any obvious persistence mechanisms" with `T1547` is
-  asked once (`attck.absence_claim`) whether the behaviour is absent
-  (`TECHNIQUE: NONE`) or the sample does it, read with the capability check's
-  own negation reader, held to a stricter reading of which cue governs the
-  behaviour. The claim and its id are never edited, and the platform never
-  withholds a technique the analyst keeps: it is published with a note
-  ("the claim naming it reads as absence; the analyst kept the technique when
-  asked") in the ATT&CK table and the judge's summary.
+- **A claim that reads as absence is asked about its technique id.** A claim
+  carrying a technique id is asked once (`attck.absence_claim`) whether the
+  behaviour is absent (`TECHNIQUE: NONE`) or the sample does it when every
+  place it names the technique's behaviour — a capability term listing the
+  id, the catalogue name, or a tactic name followed by a word such as
+  "mechanisms" — is read as absence: a negation cue in the same clause with no
+  comma or coordinator ("and", "instead", "only", "but") between them and not
+  one that opens an assertion ("no longer", "not merely", "never stops"); an
+  item of a noun list such a cue negates, the list ending at its head noun
+  ("does not contain persistence, lateral movement, or exfiltration
+  mechanisms"); or the subject of "is absent", "is not present" or "was not
+  observed". A text that never names the behaviour is not asked. The claim and
+  its id are never edited, and the platform never withholds a technique the
+  analyst keeps: it is published with a note ("the claim naming it reads as
+  absence; the analyst kept the technique when asked") in the ATT&CK table and
+  the judge's summary. The capability check also reads "is not present" and
+  "was not observed" after the term as absence.
 - **A section answer with alike rows is asked once whether they are repeats**
   (`composer.repeated_items`), compared on the fields that tell items apart,
   and kept as written if it stands; it is never told to remove a row. The

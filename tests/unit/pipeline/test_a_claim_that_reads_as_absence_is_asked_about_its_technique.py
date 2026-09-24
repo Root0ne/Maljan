@@ -80,6 +80,21 @@ PUTTY_ABSENCE_CLAIMS: tuple[tuple[str, str], ...] = (
     ("The binary does not exhibit obvious persistence mechanisms in its static imports.", "T1547"),
 )
 
+# A review's two shapes of absence the stricter reading first missed: a negated
+# noun list ending at its head noun, and the behaviour as the subject of "is
+# absent", "is not present" or "was not observed".
+_LIST = "The binary does not contain persistence, lateral movement, or exfiltration mechanisms."
+REVIEW_ABSENCE_CLAIMS: tuple[tuple[str, str], ...] = (
+    (_LIST, "T1547"),
+    (_LIST, "T1021"),
+    (_LIST, "T1048"),
+    ("The binary shows no persistence, credential theft and exfiltration capabilities.", "T1555"),
+    ("Persistence is absent from the static artifacts.", "T1547"),
+    ("Lateral movement is not present in the imports.", "T1021"),
+    ("Persistence mechanisms were not observed.", "T1547"),
+    ("Exfiltration was not observed in any string.", "T1048"),
+)
+
 # Claims that assert, and must go on asserting: the same run's hedged positive
 # claims, positive claims that carry a negation about something else, and every
 # sentence a review found the first reading asked wrongly.
@@ -162,6 +177,16 @@ class TestTheQuestion:
         assert text in found[0].message
         assert "TECHNIQUE: NONE" in found[0].message
         assert found[0].path == "static.claims[0]"
+
+    @pytest.mark.parametrize(("text", "technique_id"), REVIEW_ABSENCE_CLAIMS)
+    def test_a_negated_noun_list_and_an_absent_subject_are_asked_about(
+        self, text: str, technique_id: str
+    ) -> None:
+        found = validate_isr(
+            _isr(_claim(text, technique_id)), attck=knowledge, ledger_ids=["ev_0006"]
+        )
+
+        assert [v.code for v in found] == [ABSENCE_CLAIM_CODE]
 
     @pytest.mark.parametrize(("text", "technique_id"), POSITIVE_CLAIMS)
     def test_a_claim_that_asserts_is_not_asked(self, text: str, technique_id: str) -> None:

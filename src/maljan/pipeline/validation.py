@@ -563,6 +563,52 @@ def _governed_absence(text: str, start: int) -> bool:
     return False
 
 
+# A negated noun list: items joined by commas and a final "or"/"and", ending at
+# the list's head noun — "does not contain persistence, lateral movement, or
+# exfiltration mechanisms". Determiners and hedges may open it. Each item is up
+# to four words, so a list never swallows a clause that has its own verb and
+# object before any head noun.
+_LIST_ITEM = r"[A-Za-z][\w-]*(?:\s+[A-Za-z(][\w()-]*){0,3}"
+_NEGATED_NOUN_LIST_RE = re.compile(
+    r"^\s*(?:(?:any|obvious|apparent|clear|signs?\s+of|evidence\s+of|indications?\s+of)\s+)*"
+    rf"(?P<items>{_LIST_ITEM}(?:\s*,\s*{_LIST_ITEM})*\s*,?\s+(?:or|and)\s+{_LIST_ITEM})"
+    r"\s+(?:mechanisms?|techniques?|capabilit(?:y|ies)|behaviou?rs?|activit(?:y|ies)"
+    r"|functionality|methods?|patterns?)\b",
+    re.IGNORECASE,
+)
+
+
+def _absent_by_its_own_statement(text: str, start: int, end: int) -> bool:
+    """The two readings of absence that do not rest on a cue next to the mention.
+
+    The mention is the subject of "is absent", "is not present" or "was not
+    observed" and opens its clause; or it is an item of a noun list a cue in
+    its own clause negates, the list ending at its head noun ("does not contain
+    persistence, lateral movement, or exfiltration mechanisms"). The same cue
+    words and clause breaks as the capability check's reader, and a cue that
+    opens an assertion ("no longer") negates no list.
+    """
+    if _SUBJECT_ABSENT_RE.match(text[end:]) and _starts_its_clause(text, start):
+        return True
+    head = text[:start]
+    breaks = list(_CLAUSE_BREAK_RE.finditer(head))
+    clause_start = breaks[-1].end() if breaks else 0
+    tail_break = _CLAUSE_BREAK_RE.search(text, end)
+    clause = text[clause_start : tail_break.start() if tail_break else len(text)]
+    at = start - clause_start
+    lowered = clause.lower()
+    for cue in _NEGATION_RE.finditer(clause[:at]):
+        if lowered.startswith(_NOT_A_NEGATION, cue.start()):
+            continue
+        rest = clause[cue.end() :]
+        if _CUE_THAT_ASSERTS_RE.match(rest):
+            continue
+        listed = _NEGATED_NOUN_LIST_RE.match(rest)
+        if listed and cue.end() + listed.start("items") <= at < cue.end() + listed.end("items"):
+            return True
+    return False
+
+
 def states_absence(text: str, pattern: re.Pattern[str] | None) -> bool:
     """Whether ``text`` names the behaviour only to say it is absent.
 
@@ -585,7 +631,9 @@ def states_absence(text: str, pattern: re.Pattern[str] | None) -> bool:
         return False
     negated_to: int | None = None
     for match in matches:
-        if _is_negated(text, match.start(), match.end()) and _governed_absence(text, match.start()):
+        if (
+            _is_negated(text, match.start(), match.end()) and _governed_absence(text, match.start())
+        ) or _absent_by_its_own_statement(text, match.start(), match.end()):
             negated_to = match.end()
             continue
         if negated_to is not None:
@@ -1652,8 +1700,14 @@ _PURPOSE_OBJECT_RE = re.compile(
 )
 # An absence said of the term as the subject: "Lateral movement is absent from
 # the evidence". "Persistence is missing a cleanup routine" is not one.
+# A category noun may stand between the term and its verb: "Persistence
+# mechanisms were not observed".
 _SUBJECT_ABSENT_RE = re.compile(
-    r"^\s+(?:is|was|are|were|remains?)\s+(?:absent\b|missing\s+from\b)", re.IGNORECASE
+    r"^(?:\s+(?:mechanisms?|techniques?|capabilit(?:y|ies)|behaviou?rs?|activit(?:y|ies)"
+    r"|functionality|methods?|patterns?))?"
+    r"\s+(?:is|was|are|were|remains?)\s+"
+    r"(?:absent\b|missing\s+from\b|not\s+(?:present|observed|seen|found|detected)\b)",
+    re.IGNORECASE,
 )
 
 

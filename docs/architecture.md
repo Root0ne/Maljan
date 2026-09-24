@@ -488,8 +488,10 @@ Two producers use it:
   exfiltration), where "no evidence that …" and "such as" end nothing; a noun
   negation ("no evidence of") also reaches through a ", such as …" list it
   names to the end of its clause; "to prevent|avoid|stop|
-  block X" negates X only when X is the verb's object; "is absent" and "is
-  missing from" count only with the term as the clause's subject.
+  block X" negates X only when X is the verb's object; "is absent", "is
+  missing from", "is not present" and "was not observed" (a category noun such
+  as "mechanisms" may stand between) count only with the term as the clause's
+  subject.
 
   What grounds a capability word is what the run found: a published technique
   that is not a rule match only, an evidence section's key, and a word said —
@@ -879,7 +881,13 @@ decides.
    stricter than the capability check's about which cue governs a mention: no
    comma and no coordinator ("and", "instead", "only", "but") between them,
    and not a cue that opens an assertion ("no longer", "not merely", "never
-   stops"). A later mention in the same phrase shares the reading of the first
+   stops"). Two more readings of absence do not need the cue next to the
+   mention: an item of a noun list a cue in the clause negates, the list
+   joined by commas and a final "or"/"and" and ending at its head noun ("does
+   not contain persistence, lateral movement, or exfiltration mechanisms"), and
+   the behaviour as the subject of "is absent", "is not present" or "was not
+   observed" (which the capability check also reads as absence). A later
+   mention in the same phrase shares the reading of the first
    ("command and control (C2)"); any other mention is an assertion. An analyst
    that drops the id has removed it. An id kept after the question is
    published as usual, and the claim is noted
