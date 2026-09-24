@@ -335,6 +335,28 @@ class TestAShapeIsNotAValue:
 
         assert [v for v in found if v.code == "stix.ungrounded_indicator"] == []
 
+    def test_a_matches_is_grounded_by_its_text_not_read_as_a_literal(self) -> None:
+        """A regular expression is not a URL, and was told it appeared nowhere as one."""
+        bundle = Bundle.model_validate(
+            {
+                "type": "bundle",
+                "objects": [
+                    _indicator("[url:value MATCHES '^https://gate9\\\\.example\\\\.org/live$']")
+                ],
+            }
+        )
+
+        found = validate_verdict_bundle(bundle, {"seen https://gate9.example.org/live"})
+
+        assert [v for v in found if v.code == "stix.ungrounded_indicator"] == []
+
+    def test_a_url_with_no_scheme_is_declined_as_not_a_url(self) -> None:
+        exported, renderer = _export("[url:value = 'gate9.example.org']")
+
+        (why,) = [why for _code, why in renderer.declined]
+        assert "it is not a URL — it has no scheme" in why
+        assert "could exist outside" not in why
+
     def test_a_fixed_text_too_short_to_say_anything_grounds_nothing(self) -> None:
         bundle = Bundle.model_validate(
             {"type": "bundle", "objects": [_indicator("[file:name LIKE '%.ex%']")]}

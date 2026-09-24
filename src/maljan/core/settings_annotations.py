@@ -255,11 +255,12 @@ ANNOTATIONS: dict[str, Annotation] = {
     "llm.expert_max_tokens": {
         "title": "Analyst max output tokens",
         "description": (
-            "Per-call output-token budget for the analyst LLM. 0, the default, derives it "
-            "from the context window the analyst's model serves: a quarter of it, at most "
-            "8,192 tokens, printed in the run summary. A value above 0 is used as set; it "
-            "caps a runaway decode and sizes the split budget when view_decomposition_views "
-            "is set."
+            "Per-call output-token budget for the analyst LLM. 0, the default, derives it: "
+            "the model's declared maximum output where one is declared (bounded by a quarter "
+            "of its context window), a quarter of the window for a runtime you run "
+            "(llama.cpp or Ollama), and 8,192 for a hosted API that declares no maximum; "
+            "printed in the run summary. A value above 0 is used as set; it caps a runaway "
+            "decode and sizes the split budget when view_decomposition_views is set."
         ),
     },
     "llm.frontier.active_params_b": {
@@ -424,9 +425,10 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Hard output-token cap for the judge's final verdict generation. Bounds a "
             "rambling or degenerate decode on a slow local model to a predictable "
             "wall-clock cost instead of relying only on the timeout. 0, the default, "
-            "derives it from the context window the judge's model serves: a quarter of "
-            "it, at most 8,192 tokens, printed in the run summary. A value above 0 is used "
-            "as set."
+            "derives it: the model's declared maximum output where one is declared (bounded "
+            "by a quarter of its context window), a quarter of the window for a runtime you "
+            "run (llama.cpp or Ollama), and 8,192 for a hosted API that declares no maximum; "
+            "printed in the run summary. A value above 0 is used as set."
         ),
     },
     "llm.ollama.base_url": {

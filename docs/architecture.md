@@ -2474,11 +2474,12 @@ is assembled from what the run gathered rather than recomputed beside it:
 * **A section's output budget is the model's reply room.** At its default of
   0, `reporting.composer_section_max_tokens` derives each model's budget the
   way an analyst's reply room is derived (`llm.context_window.reply_budget`):
-  a quarter of the context window that model serves, with no fixed ceiling,
-  bounded by the larger of `llm.expert_max_tokens` and `llm.judge_max_tokens`
-  where an operator set them and by the model's declared maximum output where
-  its provider states one — the one rule the analysts' and the judge's derived
-  caps follow (`derived_reply`) — reasoning included. An unknown window keeps
+  the one rule the analysts' and the judge's derived caps follow
+  (`derived_reply`): the model's declared maximum output bounded by a quarter of
+  its window, a quarter of the window for a runtime we run, and the documented
+  8,192 for a hosted API that declares no maximum — each bounded by the larger
+  of `llm.expert_max_tokens` and `llm.judge_max_tokens` where an operator set
+  them — reasoning included. An unknown window keeps
   the documented 8,192 and says so. A
   positive value is the operator's own budget. The derivation is printed in
   Appendix B beside the section's wait ("Output budget of `composer:section`").
@@ -2796,11 +2797,13 @@ pattern is one the official validator accepts is
 the one reader's quoted values — observation expressions, `AND`/`OR`/
 `FOLLOWEDBY`, the three qualifiers, every comparison operator, `IN` lists,
 `EXISTS`, the typed literals — and the official validator
-(`stix2-patterns`, pinned in the runtime dependencies) as the last word. The
-validator decides wherever it is installed, which is every install from the
-lock; the grammar is the fallback where it is not, and agrees with it on
+(`stix2-patterns`, pinned in the runtime dependencies). Where the validator can
+be imported, which is every install from the lock, its verdict is the whole
+answer, acceptance and refusal — `[file:name == 'x']` and
+`[NOT EXISTS file:name]` are the grammar's own. The grammar reader answers only
+where the package cannot be imported, and agrees with the validator on
 acceptance for every pattern the tests hold it to except a digest of the wrong
-length written as a hex literal (`h'…'`), which only the validator sees. A pattern the grammar refuses — cut short, `[file:name]`,
+length written as a hex literal (`h'…'`). A pattern the grammar refuses — cut short, `[file:name]`,
 `[file:name =]`, a value in double quotes, text after the expression closed —
 is asked once (`stix.pattern_refused`, in the grammar's words, when no more
 specific pattern question named it) and, kept, declined as
@@ -2819,7 +2822,13 @@ text — the text between a `LIKE`'s wildcards, or a `MATCHES` expression that i
 only its text (`matches_fixed_text`) — is one run the evidence holds as a value
 of its own, or one another of the judge's indicators writes with `=`, is asked
 once (`stix.shape_names_a_value`) whether the judge means that value: "write
-`domain-name:value = 'host'`, or keep the LIKE and it is not exported". What
+`domain-name:value = 'host'`, or keep the LIKE and it is not exported". The
+suggestion names a form the one publish rule answers for: a host a `url` shape
+was written around is suggested as `domain-name:value` (an address as its
+family), because `url:value = 'host'` is not a URL and the export declines it as
+one before the rule is asked; a whole URL stays `url:value`. A `MATCHES` is
+grounded by its text where it is only that, and otherwise neither grounds nor
+refuses; a URL with no scheme is declined as not a URL. What
 the judge keeps is declined with the record, as before. The grounding check reads a `LIKE` value for the text between its
 wildcards (`like_fixed_text`): each run of it must appear in the evidence, and
 an absence names that text, never the wildcards; fixed text shorter than four

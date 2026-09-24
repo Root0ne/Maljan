@@ -741,11 +741,18 @@ judge's tokens fit in 600 s.
 
 **The analysts' and the judge's output caps are derived too.**
 `core.llm.expert_max_tokens` and `core.llm.judge_max_tokens` ship at **0**,
-which derives each agent's cap from the window its model serves: a quarter of
-it, with no fixed figure above it, and the smaller of that and the model's own
-maximum output where its provider declares one (a model list entry's
-`max_output_tokens`/`max_completion_tokens`, or the vendored table's
-`max_output` rows). On a 32,768-token window that is 8,192; on 131,072, 32,768.
+which derives each agent's cap in three cases (`context_window.derived_reply`): where the model's maximum
+output is declared — by the probe's model list (`max_output_tokens`,
+`max_completion_tokens`, OpenRouter's `top_provider.max_completion_tokens`) or
+by a vendored `max_output` row, each carrying the vendor page it is documented
+on (gpt-4o and gpt-4o-mini 16,384, gpt-4.1 32,768) — the smaller of that and a
+quarter of the window; for a runtime we run (llama.cpp or Ollama on loopback,
+or a server the probe read from `/props`, `/api/show` or `/info`), a quarter of
+the window, since no API limits its output; and for a hosted API that declares
+no maximum, the documented fallback of 8,192 (never above a quarter of the
+window), which a quarter of a hosted model's window is routinely past.
+On a local 32,768-token window that is 8,192; on a local 131,072, 32,768; on
+the shipped gpt-4o, 16,384.
 A window nothing reported derives nothing: the documented fallback of 8,192
 applies and the sentence says the window is unknown. The reply reserve and the
 composer's section budget follow the same rule, bounded by an operator's

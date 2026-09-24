@@ -327,7 +327,18 @@ class Declined(tuple[str, str]):
 
 
 def impossible_host_sentence(value: str, whose: str) -> str:
-    """The recorded sentence for a URL no host could ever answer for."""
+    """The recorded sentence for a URL no host could ever answer for.
+
+    A value with no scheme is not a URL at all, and is said to be that rather
+    than to name a host that could not exist.
+    """
+    if "://" not in str(value):
+        return (
+            f"the URL indicator for {safe_finding_value(value)!r} is not in the exported bundle: "
+            "it is not a URL — it has no scheme — so there is no host in it to ask about; a "
+            "host is written as domain-name:value. It is unchanged in "
+            f"{whose}."
+        )
     return (
         f"the URL indicator for {safe_finding_value(value)!r} is not in the exported bundle: its "
         f"host is not a name or address that could exist outside the analysed network. It is "

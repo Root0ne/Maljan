@@ -4902,14 +4902,27 @@ def _indicator_problem(
     # evidence is asked for, each run of it; the wildcards themselves appear in
     # no tool's answer, and asking for them told the judge that a host it read
     # in the decoded strings was nowhere in the evidence.
-    from maljan.schemas.stix_pattern import like_fixed_text
+    from maljan.schemas.stix_pattern import like_fixed_text, matches_fixed_text
 
     shapes = {
-        (comparison.path, comparison.literal.strip())
+        (comparison.path, comparison.literal.strip()): comparison.operator
         for comparison in read_comparisons(pattern)
-        if comparison.operator == "like"
+        if comparison.operator in ("like", "matches")
     }
     for path, literal in comparisons:
+        if shapes.get((path, literal)) == "matches":
+            # A regular expression is not a value. One that is only its text is
+            # asked for that text; any other says nothing about which value
+            # the evidence holds, and neither grounds nor refuses the pattern.
+            fixed = matches_fixed_text(literal)
+            if fixed and not _found(fixed[0]):
+                return _an_absence(
+                    f"the text {safe_finding_value(fixed[0])!r}, which the pattern's MATCHES "
+                    f"{safe_finding_value(literal)!r} is written for, appears nowhere in this "
+                    "run's evidence."
+                )
+            grounded = grounded or bool(fixed)
+            continue
         if (path, literal) in shapes:
             fixed = like_fixed_text(literal)
             missing = next((part for part in fixed if not _found(part)), None)

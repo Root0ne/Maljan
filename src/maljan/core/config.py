@@ -355,9 +355,10 @@ class LLMConfig(BaseModel):
     # guard (in the spirit of the §3.3 degenerate-loop damper), not a quality
     # fix — focus comes from the §7.1 hint.
     #
-    # 0, the default, derives it from the window the judge's model serves: a
-    # quarter of it, at most 8,192 tokens (``context_window.output_cap_for``),
-    # the room the composer's section budget is derived the same way. A value
+    # 0, the default, derives it (``context_window.derived_reply``): the model's
+    # declared maximum output, bounded by a quarter of its window; a quarter of
+    # the window for a runtime we run; 8,192 for a hosted API that declares no
+    # maximum. The composer's section budget follows the same rule. A value
     # above 0 is the operator's and is used as set.
     judge_max_tokens: Annotated[int, Field(ge=0)] = 0
 
@@ -417,9 +418,9 @@ class LLMConfig(BaseModel):
     # any legitimate analyst answer (~2-4k tokens observed), so it bounds the
     # tail without truncating real output.
     #
-    # 0, the default, derives it from the window each analyst's model serves: a
-    # quarter of it, at most 8,192 tokens (``context_window.output_cap_for``).
-    # A value above 0 is the operator's and is used as set.
+    # 0, the default, derives it as ``judge_max_tokens`` is derived
+    # (``context_window.derived_reply``), per analyst model. A value above 0 is
+    # the operator's and is used as set.
     expert_max_tokens: Annotated[int, Field(ge=0)] = 0
 
     # View-decomposition strategy when ``view_decomposition_views >= 2``
