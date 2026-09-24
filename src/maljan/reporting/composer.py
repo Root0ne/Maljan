@@ -847,7 +847,7 @@ class ReportComposer:
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=human),
         ]
-        timeout = self._section_timeout()
+        timeout = self._section_timeout(sum(len(str(message.content)) for message in messages))
         self._start_the_section_clock(timeout)
         try:
             return await asyncio.wait_for(
@@ -926,8 +926,12 @@ class ReportComposer:
         caps = getattr(self, "caps_by_model", None) or {}
         return int(caps.get(model) or getattr(self, "output_cap", 0) or 0)
 
-    def _section_timeout(self) -> float:
+    def _section_timeout(self, prompt_chars: int = 0) -> float:
         """One section's wait: configured, or what its calls need at the model's pace.
+
+        ``prompt_chars`` is the section's prompt, read at the model's measured
+        reading rate where one is measured (``CHARS_PER_TOKEN`` characters a
+        token).
 
         A section is its answer and, when the answer breaks its schema, the one
         retry the validation loop allows: ``SECTION_ATTEMPTS`` calls. Where a
@@ -939,6 +943,7 @@ class ReportComposer:
         rates = getattr(self, "generation_rates", None)
         if rates is None:
             return configured
+        from maljan.llm.context_window import CHARS_PER_TOKEN
         from maljan.llm.generation_rate import model_name_of
 
         per_call = float(
@@ -948,6 +953,7 @@ class ReportComposer:
                 configured,
                 int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0),
                 budget=str(getattr(self, "budget_note", "") or ""),
+                prompt_tokens=-(-int(prompt_chars) // CHARS_PER_TOKEN),
             )
         )
         if per_call <= configured:

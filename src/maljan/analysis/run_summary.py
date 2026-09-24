@@ -547,11 +547,21 @@ def generation_lines(generation: Any) -> list[str]:
                 "(no rate measured for its model yet, or no output budget)"
             )
             continue
+        if row.get("prompt_tokens_per_second") is not None:
+            lines.append(
+                f"Timeout of `{call}`: {applied:.0f}s — the larger of {configured:.0f}s "
+                f"configured and ({int(row.get('prompt_tokens') or 0)} prompt tokens read at "
+                f"{float(row['prompt_tokens_per_second']):.2f} tokens/s + "
+                f"{int(row.get('max_tokens') or 0)} tokens written at "
+                f"{float(row.get('tokens_per_second') or 0.0):.2f} tokens/s) × {margin} "
+                f"= {float(row['derived_s']):.0f}s, at most {float(ceiling or 0.0):.0f}s"
+            )
+            continue
         lines.append(
             f"Timeout of `{call}`: {applied:.0f}s — the larger of {configured:.0f}s configured "
             f"and {int(row.get('max_tokens') or 0)} tokens at "
-            f"{float(row.get('tokens_per_second') or 0.0):.2f} tokens/s × {margin} "
-            f"= {float(row['derived_s']):.0f}s, at most {float(ceiling or 0.0):.0f}s"
+            f"{float(row.get('tokens_per_second') or 0.0):.2f} tokens/s (prompt read included) "
+            f"× {margin} = {float(row['derived_s']):.0f}s, at most {float(ceiling or 0.0):.0f}s"
         )
     return lines
 
