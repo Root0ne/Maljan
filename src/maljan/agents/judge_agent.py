@@ -57,6 +57,7 @@ from maljan.agents.judge_postprocess import (
     ASSESSMENT_RELOCATED_CODE,
     PROPERTY_NOT_CARRIED_CODE,
 )
+from maljan.agents.prompt_fragments import tools_statement
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger, structured_answer
@@ -481,6 +482,11 @@ COMPACT_BUNDLE_RULES = (
     "which is always stix and is filled in; and write the JSON on one line "
     "without indentation.\n"
 )
+
+
+# What the mediator's fast path says when it needs no tool; replaced by the
+# sentence about the tools that attached if the fast path falls back to a loop.
+_NO_TOOLS_NEEDED = "No Threat Intelligence tools are needed for this run.\n"
 
 
 # The judge's system prompt. A module constant so that
@@ -1188,6 +1194,18 @@ class JudgeAgent(BudgetMeter):
         referenced = {str(ref.server) for ref in self._definition_tool_refs()}
         return bool((attached | referenced) & set(REPUTATION_SERVER_KEYS))
 
+    def _holds_attached_lookup_tool(self) -> bool:
+        """Whether a reputation server's tools are in this judge's attached list.
+
+        Unlike ``_holds_a_lookup_tool``, a reference that did not attach does
+        not count: this answers what the mediator's prompt may say it has.
+        """
+        from maljan.agents.tool_pinning import server_of
+        from maljan.core.config import REPUTATION_SERVER_KEYS
+
+        attached = {server_of(tool) for tool in (getattr(self, "tools", None) or [])}
+        return bool(attached & set(REPUTATION_SERVER_KEYS))
+
     def _can_ask_an_identity_question(self, ledger_servers: Iterable[str] | None) -> bool:
         """Whether the judge should open its tool loop to ask who this sample is.
 
@@ -1248,6 +1266,12 @@ class JudgeAgent(BudgetMeter):
         needs_tools = self._has_explicit_dissent(isr_reports)
         identity_unanswered = not needs_tools and self._can_ask_an_identity_question(ledger_servers)
         needs_tools = needs_tools or identity_unanswered
+        # Attached before the prompt is written: the sentence about tools below
+        # says what this request carries, and a server that would not attach is
+        # not a tool the mediator has.
+        if needs_tools:
+            await self._initialize_mcp_client()
+        lookup_attached = self._holds_attached_lookup_tool()
 
         # Build a human-readable summary of all reports
         reports_text = "\n\n".join(
@@ -1304,16 +1328,18 @@ class JudgeAgent(BudgetMeter):
                     "and it is in the sample identity block below — cite what comes back "
                     "as evidence, and treat a reputation label as one source rather than "
                     "as the verdict.\n"
-                    if identity_unanswered and _sha256_of(sample)
+                    if identity_unanswered and lookup_attached and _sha256_of(sample)
                     else "You have reputation tools and no analyst has consulted one. "
                     "Look the sample up once to settle its identity, cite what comes "
                     "back as evidence, and treat a reputation label as one source "
                     "rather than as the verdict.\n"
-                    if identity_unanswered
+                    if identity_unanswered and lookup_attached
                     else "You have Threat Intelligence tools to verify disputed "
                     "IPs/domains/hashes — use them only to resolve contradictions.\n"
+                    if needs_tools and lookup_attached
+                    else tools_statement(self.tools) + "\n"
                     if needs_tools
-                    else "No Threat Intelligence tools are needed for this run.\n"
+                    else _NO_TOOLS_NEEDED
                 ),
             ),
             (
@@ -1360,6 +1386,13 @@ class JudgeAgent(BudgetMeter):
             except TimeoutError:
                 self.logger.error("Mediator fast-path timed out. Falling back to tool loop.")
                 await self._initialize_mcp_client()
+                # The fast path's prompt was written for a call with no tools;
+                # the loop carries whatever attached, and its prompt says so.
+                statement = tools_statement(self.tools) + "\n"
+                prompt_messages = [
+                    (role, text.replace(_NO_TOOLS_NEEDED, statement) if role == "system" else text)
+                    for role, text in prompt_messages
+                ]
                 reasoning_text = await self.execute_tool_loop(prompt_messages)
             else:
                 self._record_usage(response)

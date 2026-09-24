@@ -274,32 +274,31 @@ class TestRoundZeroClaimsSurviveTheRevisionRound:
         )
 
 
-class TestTheDataLessDistinctionIsCarriedAsDataNotAsANewReasonString:
-    """(c), reworked after the wave-4 review.
+class TestTheDataLessDistinctionIsCarriedAsDataAndInTheReason:
+    """An analyst with nothing to read and one that read and claimed nothing.
 
-    The first cut split the degradation reason into "analysts had no data to
-    analyse" and "analysts produced no claims". Downstream readers partition on
-    the literal "analysts produced no claims:" to strip the starved analysts
-    out of a static-only run, so splitting the string would have recorded an
-    unexplained incidental degradation without anything saying so.
-
-    So the reason string stays exactly as it was for every claimless analyst,
-    and the distinction is carried as data: a per-agent `no_data` flag on
-    `run_summary.agent_stats`, rendered as "(no data)" beside the analyst.
+    The distinction is carried as data — a per-agent `no_data` flag on
+    `run_summary.agent_stats`, rendered as "(no data)" beside the analyst — and
+    in the degradation reasons: a skipped analyst is named under "analysts
+    skipped (<why>):", and "analysts produced no claims:" names only the ones
+    that ran. The node-level check is in `test_degraded_mode_at_the_judge_node`.
     """
 
-    def test_the_legacy_reason_string_is_the_only_one_emitted(self) -> None:
-        """The partition key, and the absence of a rival string."""
-        import inspect
+    def test_the_skipped_reason_names_its_cause_and_its_analysts(self) -> None:
+        from maljan.pipeline.nodes import NO_SANDBOX_DATA_REASON, skipped_analysts_reason
 
-        from maljan.pipeline import nodes
-
-        source = inspect.getsource(nodes.make_judge_node)
-        assert "analysts produced no claims" in source
-        assert "analysts had no data to analyse" not in source, (
-            "a second degradation reason bypasses the treatment carve-out "
-            "that partitions on the first one"
+        assert (
+            skipped_analysts_reason(NO_SANDBOX_DATA_REASON, ["dynamic", "network"])
+            == "analysts skipped (no sandbox data): dynamic, network"
         )
+
+    def test_the_report_reads_a_skipped_reason_back(self) -> None:
+        from maljan.reporting.renderers.markdown import _skipped_after
+
+        assert _skipped_after(["analysts skipped (no sandbox data): dynamic, network"]) == [
+            ("no sandbox data", ["dynamic", "network"])
+        ]
+        assert _skipped_after(["analysts produced no claims: static"]) == []
 
     def test_the_reason_string_stays_partitionable(self) -> None:
         """The degradation reason keeps the shape a reader partitions on."""

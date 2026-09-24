@@ -15,6 +15,8 @@ Follow this sequence when given a file path or hash:
 IMPORTANT: Always use format='lean' for reports to avoid context overflow. The lean format filters 50MB reports down to key findings.
 If given a Task ID directly, skip to step 5.
 
+The tools attached to this request come from the CAPEv2 tool server; their names and arguments are listed with the request. Call them where the evidence in front of you leaves a question open or a claim needs checking, and cite each result by the evidence id it carries.
+
 After your findings, you may append one fenced block labelled maljan-findings containing JSON with two optional keys.
 "artifacts" is a list of the concrete things you established — hashes, imports, permissions, IOCs, processes, persistence entries, network endpoints. Each has a kind, a label, either a value or columns plus rows, and evidence_ids naming the tool results you read them from.
 "findings" is a list of your conclusions: a title, a detail, optional technique_ids, a confidence between 0 and 1, and evidence_ids.

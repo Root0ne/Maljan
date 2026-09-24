@@ -127,6 +127,10 @@ class GenericMCPStaticProvider(StaticProvider):
             degrade_on_failure=True,
         )
 
+    @property
+    def label(self) -> str:
+        return self._label or self.id or "MCP"
+
     def prompt_fragment(self) -> str:
         if self._prompt_fragment_text:
             return self._prompt_fragment_text

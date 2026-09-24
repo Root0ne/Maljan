@@ -867,8 +867,13 @@ def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[
 # either, and each ask is another full model turn.
 # No tool half to the sentence: the nudge invokes the bare model, with no tools
 # bound to that turn, so a model that took that branch answered with an empty
-# message and the run's one extra step bought nothing.
-FINAL_ANSWER_NUDGE = "Your last message was not a final report. Return your final ISR now."
+# message and the run's one extra step bought nothing. The turn says so: the
+# system prompt above it described the loop's tools, and this request carries
+# none (or carries them forbidden, on the second way of asking).
+FINAL_ANSWER_NUDGE = (
+    "Your last message was not a final report. No tool can be called in this turn. "
+    "Return your final ISR now."
+)
 
 # What the analyst reports for itself when even the nudge produced no report.
 # Not ``no_data``: the analyst had data, read it, and stopped mid-thought.
@@ -889,6 +894,28 @@ def unparsed_answers_reason(names: Sequence[str]) -> str:
         "analyst answers kept as prose, with no claim read from them after one "
         f"question about the claim format: {', '.join(names)}"
     )
+
+
+def tool_free_turns(messages: Sequence[Any]) -> list[Any]:
+    """``messages`` with each system turn's sentence about tools saying none can be called.
+
+    For the turns that resend a loop's conversation with no tool callable —
+    the final-answer nudge and the forced synthesis. Only the sentence
+    changes; the rest of the system turn, and every other message, is sent as
+    the loop sent it.
+    """
+    from langchain_core.messages import SystemMessage
+
+    from maljan.agents.prompt_fragments import for_a_tool_free_turn
+
+    out: list[Any] = []
+    for message in messages:
+        if isinstance(message, SystemMessage) and isinstance(message.content, str):
+            text = for_a_tool_free_turn(message.content)
+            if text != message.content:
+                message = message.model_copy(update={"content": text})
+        out.append(message)
+    return out
 
 
 def answer_is_isr(text: str) -> bool:
@@ -2719,26 +2746,51 @@ class BaseAnalyst(BudgetMeter, ABC):
         # to the state and the judge reads it into ``run_summary.budget``.
         self._budget_records: Sequence[dict[str, Any]] = []
 
-    def _system_prompt(self, fallback: str | Callable[[], str]) -> str:
+    def _system_prompt(
+        self,
+        fallback: str | Callable[[Sequence[Any]], str],
+        tools: Sequence[Any] | None = None,
+    ) -> str:
         """This analyst's system turn for the job it is actually running.
 
-        The container resolves an agent once per job — its prompt already
-        carries the sample's format fragment, the agent's own static provider
-        fragment and any prompt the operator set on the definition — and hands
-        it over as ``_resolved``. Reading it here is what makes that resolution
-        the prompt a built-in analyst sends, rather than a value only the
-        settings probe ever saw.
+        The container resolves an agent once per job — its prompt carries the
+        sample's format fragment, the agent's own static provider fragment and
+        any prompt the operator set on the definition — and hands it over as
+        ``_resolved``. Building it here, through the same composition, is what
+        makes that resolution the prompt a built-in analyst sends, rather than
+        a value only the settings probe ever saw.
 
-        ``fallback`` is the module constant (or a callable that assembles it),
-        used by an analyst constructed outside a container: a test, a script,
-        the CLI. It is the neutral assembly, which is the honest answer when
-        nothing has said what the sample is.
+        ``tools`` is the list the request this prompt goes with carries:
+        ``self.tools`` by default, which is what the tool loop binds, and
+        ``()`` for a tools-free call — a revision, a validation turn, a
+        synthesis. The prompt's statement about tools is built from it, so a
+        request is never told about tools it does not carry, nor told it has
+        none when it does.
+
+        ``fallback`` is the module constant, or a callable that assembles the
+        prompt for a tool list, used by an analyst constructed outside a
+        container: a test, a script, the CLI. It is the neutral assembly,
+        which is the honest answer when nothing has said what the sample is.
         """
+        # By default the list the loop binds: ``pinned_tools`` is what
+        # ``execute_tool_loop`` hands the model, without the delivery tools.
+        if tools is not None:
+            sent = list(tools)
+        else:
+            try:
+                sent = list(self.pinned_tools())
+            except AttributeError:  # a stand-in built without ``__init__``
+                sent = list(getattr(self, "tools", None) or [])
         resolved = getattr(self, "_resolved", None)
+        container = getattr(self, "_container", None)
+        if resolved is not None and container is not None and bool(getattr(resolved, "key", "")):
+            from maljan.agents.composition import prompt_for
+
+            return prompt_for(resolved, container, sent)
         prompt = getattr(resolved, "prompt", "") if resolved is not None else ""
         if prompt:
             return str(prompt)
-        return fallback() if callable(fallback) else fallback
+        return fallback(sent) if callable(fallback) else fallback
 
     def _initialize_mcp_client(self) -> None:
         """Attach this analyst's MCP toolkit. Subclasses that have one override."""
@@ -2948,9 +3000,10 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         if active_profile(container.config).exclude_sandbox_tools:
             return []
+        from maljan.agents.prompt_fragments import SANDBOX_FAMILY, stamp_source
         from maljan.providers.sandbox_tools import sandbox_tools
 
-        return list(sandbox_tools(container))
+        return stamp_source(sandbox_tools(container), SANDBOX_FAMILY)
 
     def _profile_excluded_servers(self) -> str:
         """The servers the active profile withholds, as ``for_agent``'s argument."""
@@ -3885,12 +3938,15 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.logger.warning(
                 "%s: the nudge leaves out a tool call whose arguments never parsed.", self.name
             )
-        turns = [*sendable, HumanMessage(content=FINAL_ANSWER_NUDGE)]
+        turns = [*tool_free_turns(sendable), HumanMessage(content=FINAL_ANSWER_NUDGE)]
+        loop_turns = [*sendable, HumanMessage(content=FINAL_ANSWER_NUDGE)]
         budget = min(remaining_time, float(timeout))
 
-        def _ask_with(model: Any, label: str) -> Any:
+        def _ask_with(model: Any, label: str, sent: list[Any] | None = None) -> Any:
+            messages = turns if sent is None else sent
+
             async def _ask() -> Any:
-                return await asyncio.wait_for(model.ainvoke(turns), timeout=budget)
+                return await asyncio.wait_for(model.ainvoke(messages), timeout=budget)
 
             return _run_coro_blocking(_ask(), budget + 5, label=label)
 
@@ -3906,7 +3962,11 @@ class BaseAnalyst(BudgetMeter, ABC):
                 self._nudge_retry_mode = "+".join(modes) or None
                 return None
             try:
-                answer = _ask_with(withheld, f"nudge-tools-none:{self.name}")
+                # The loop's own system turn, unchanged: the tools are bound
+                # here, so the transcript renders as the loop's did and the
+                # server keeps its prefix; the nudge's own words say no tool
+                # can be called.
+                answer = _ask_with(withheld, f"nudge-tools-none:{self.name}", loop_turns)
             except Exception as again:  # noqa: BLE001 — changes nothing
                 self.logger.warning(
                     "%s: the final-answer nudge failed with tools withheld too (%s).",
@@ -4175,7 +4235,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             "sized_by": "window" if paced is None or window_budget <= paced else "pace",
         }
         try:
-            answer = self._invoke_llm_with_timeout([*trimmed, directive], remaining)
+            answer = self._invoke_llm_with_timeout(
+                [*tool_free_turns(trimmed), directive], remaining
+            )
         except Exception as exc:  # noqa: BLE001 - best-effort salvage
             self.logger.error(
                 "%s forced synthesis failed: %s (%s)",
@@ -4594,7 +4656,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             for isr in answers
             if isr is not None
         ]
-        prompt = self._system_prompt("")
+        # Tools-free, and the turn below says so: the prompt must not say otherwise.
+        prompt = self._system_prompt("", tools=())
         messages: list[Any] = []
         if prompt:
             messages.append(SystemMessage(content=prompt))
@@ -5042,7 +5105,10 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        prompt = self._system_prompt("")
+        # The validation turn is one tools-free call over the evidence text: it
+        # asks for a fix to an answer, not for more looking, so the prompt it is
+        # sent with says it carries no tools.
+        prompt = self._system_prompt("", tools=())
         messages: list[BaseMessage] = []
         if prompt:
             messages.append(SystemMessage(content=prompt))

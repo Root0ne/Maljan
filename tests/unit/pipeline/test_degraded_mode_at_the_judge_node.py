@@ -139,3 +139,49 @@ class TestTheZeroCorroborationNoteCountsClaims:
         assert "zero cross-layer corroboration (1 claimed technique)" in reasons
         assert "2 rule matches carry technique tags no analyst claimed" in reasons
         assert not any("single-layer" in r for r in reasons)
+
+
+class _TeamContainer(_Container):
+    """The paper's three analysts, each a role of its own name."""
+
+    def analyst_keys(self) -> list[str]:
+        return ["static", "dynamic", "network"]
+
+    def active_profile(self) -> Any:
+        return paper_profile(["static", "dynamic", "network"])
+
+    def agent_role(self, key: str) -> str:
+        return key
+
+
+class TestASkippedAnalystIsSaidToBeSkipped:
+    """An analyst skipped for want of sandbox data did not run, and the reason says so."""
+
+    def _reasons(self, dynamic_claims: bool) -> list[str]:
+        state = _state([])
+        claimed = state["isr_reports"]["static"]
+        dynamic = AgentISR(agent_id="dynamic", domain="dynamic", claims=[])
+        if dynamic_claims:
+            dynamic = AgentISR(agent_id="dynamic", domain="dynamic", claims=list(claimed.claims))
+        network = AgentISR(agent_id="network", domain="network", claims=[])
+        state["isr_reports"] = {"static": claimed, "dynamic": dynamic, "network": network}
+        state["reports"] = {**state["reports"], "dynamic": "", "network": ""}
+        # The mock sandbox's stand-in for a detonation that never ran.
+        state["sandbox_report"] = {"synthetic": True, "signatures": []}
+        container = _TeamContainer(EvidenceCounter())
+        judge = container.get_judge_agent(role="judge")
+        judge.give_verdict = AsyncMock(
+            return_value=JudgeVerdict(
+                bundle=Bundle(objects=[]), violations=[], retries=0, fed_back={}
+            )
+        )
+        return list(asyncio.run(make_judge_node(container)(state))["degradation_reasons"])
+
+    def test_the_reason_names_them_skipped_for_no_sandbox_data(self) -> None:
+        reasons = self._reasons(dynamic_claims=False)
+        assert "analysts skipped (no sandbox data): dynamic, network" in reasons
+        assert not any(r.startswith("analysts produced no claims:") for r in reasons)
+
+    def test_an_analyst_that_claimed_is_not_named(self) -> None:
+        reasons = self._reasons(dynamic_claims=True)
+        assert "analysts skipped (no sandbox data): network" in reasons

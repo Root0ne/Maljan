@@ -302,7 +302,7 @@ class TestTheAnalystIsAskedOnce:
             LedgerEntry(id=entry, agent="static", tool="pe_info") for entry in entries
         ]
         agent._answers = answers
-        agent._system_prompt = lambda _evidence: "you are a static analyst"  # type: ignore[method-assign]
+        agent._system_prompt = lambda _evidence, tools=None: "you are a static analyst"  # type: ignore[method-assign]
         agent._truncate_input = lambda text, *a, **k: text  # type: ignore[method-assign]
         agent._capture_findings = lambda text: text  # type: ignore[method-assign]
 

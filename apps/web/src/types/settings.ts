@@ -256,10 +256,14 @@ export interface TeamLintResult {
 export interface AgentProbeDetails {
   prompt_chars: number;
   prompt_sha256: string;
-  /** The full resolved prompt. Operator text, not a secret (spec §11) — the
-   *  settings UI shows it read-only on a built-in card and a clone seeds its
-   *  copy from it. */
+  /** The full resolved prompt, with the platform's sentence about the
+   *  agent's tools. Operator text, not a secret (spec §11) — the settings UI
+   *  shows it read-only on a built-in card. */
   prompt: string;
+  /** The same prompt without the sentence about tools: what a clone seeds its
+   *  copy from, since the clone gets a sentence of its own for its own tool
+   *  list. Absent from a probe taken before the field existed. */
+  authored_prompt?: string;
   llm: { provider: string; model: string };
   static_provider: string;
   servers: { key: string; tools: string[]; status: string }[];

@@ -1200,6 +1200,30 @@ analyst — the static provider it reads through. The judge and the reporter are
 not analysts: a team names them from its verdict and report stages, and no
 analysis stage may hold either.
 
+### What an agent is told about its tools
+
+Every statement a prompt makes about tools is built from the list the request
+carries (`agents.prompt_fragments.tools_statement`): the families the tools
+come from — a registry server by its key, the team's `ask_<agent>` tools, the
+sandbox report's tools, the tools of the provider the role attaches itself —
+or, for an empty list, that there are none. A provider's fragment has two
+parts: its guidance about claims (what a claim cites, the ATT&CK focus,
+Ghidra's verification discipline and confidence caps), sent with every call
+on that provider, and its tool workflow, sent only when its tools are in the
+list; `none` says no disassembler or decompiler comes with
+the analyst, and a configured provider whose tools did not attach says so.
+Resolution builds the prompt for the list it resolved, describing a built-in
+role's own provider as expected; the analyst builds it again, through the same
+composition (`composition.prompt_for`), for the list each request carries —
+the tool loop's, or none for a revision, the validation turn or a synthesis.
+The final-answer nudge and the forced synthesis resend the loop's
+conversation with no tool callable, and their system turn says so. The list is
+the one the loop binds, without the sample-delivery tools, and the tools an
+in-process source attaches are marked with it (provider or sandbox report).
+An operator's prompt is kept as written and the sentence follows it. Nothing
+forces a call: an analyst that answers from the evidence it was handed is a
+recorded outcome.
+
 A team (`agents.profiles.<key>`) is an ordered list of **stages**, which is how
 a human analysis team works: triage, then static, then dynamic if the sample is
 worth detonating, then reversing, then the network and threat-intel pass, then
@@ -1249,7 +1273,8 @@ shows what the team chose not to do rather than nothing at all.
 **`deep_static`** is a team that reads the code. The pack, `triage`, then the
 built-in `static` stage, then `reversing` — a generic `reverser` agent that is handed
 the static stage's findings and asked to confirm or refute each of them at
-function level, with the tools of whichever static provider is configured — and
+function level, with the tools of whichever static provider is configured, and
+told to mark a finding unresolved when none of its tools decompiles — and
 then `network`, conditional on there being a capture or a sandbox report to
 read.
 

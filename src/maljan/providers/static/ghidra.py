@@ -27,18 +27,41 @@ if TYPE_CHECKING:
     from maljan.core.config import MCPServerConfig, MemoryConfig, PreprocessingConfig, Settings
 
 
-# The tool-facing body of the static system prompt: verbatim lines 23-85 of
-# the old ``_ISR_SYSTEM`` in the analyst, moved rather than retyped so a
-# golden test can pin the assembled prompt byte for byte. ``_ISR_HEAD`` in
-# the analyst supplies the provider-independent opening line this fragment
-# completes.
-GHIDRA_PROMPT_FRAGMENT: str = (
-    "Analyze binary files (e.g. PE, ELF) utilizing Ghidra through your available tools. "
-    "You can decompile functions, find cross-references, extract strings, and more. "
+# The Ghidra fragment in two parts. The guidance is about claims — what a
+# claim cites, which techniques to look for, and the verification discipline
+# with its confidence caps — and goes with every call the analyst makes on a
+# Ghidra run, tools or none: a revision or a validation retry that lost it
+# could raise an unverified claim past the caps the first turn was held to.
+# The workflow is the tool calls, and goes only where Ghidra's tools do.
+GHIDRA_GUIDANCE: str = (
     "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "
     "string offset (.data+0xNN), API import, or hex pattern. "
     "Focus on MITRE ATT&CK: T1027 (Obfuscation), T1106 (Native API), "
     "T1055 (Process Injection), T1140 (Deobfuscation).\n\n"
+    "=== VERIFICATION DISCIPLINE (suppresses confidently-wrong attribution) ===\n"
+    "- A SPECIFIC claim (a named algorithm like RC4/djb2/ROR13, a constant or XOR\n"
+    "  key, or a hash-resolved API) may reach CONFIDENCE >= 0.8 only if you\n"
+    "  FALSIFIED it first: an emulation with a known input against the expected\n"
+    "  output, OR a backward data-flow trace confirming its origin. If no such\n"
+    "  check ran — the code is non-leaf or has syscall/heap side effects, or no\n"
+    "  tool that runs one is attached to this request — cap CONFIDENCE at 0.7.\n"
+    "- A hash-resolution result: read the FULL list of matches. If more than one\n"
+    "  API name collides, do NOT blindly take the best match — disambiguate via\n"
+    "  the likely source DLL, or emit CONFIDENCE <= 0.5.\n"
+    "- A claim is High (>= 0.8) only with >= 2 independent evidence loci (e.g. an\n"
+    "  import AND its call-site). A single locus caps at 0.7. Reconcile any\n"
+    "  contradictory signals before emitting.\n"
+    "- Dynamic API resolution (LoadLibrary + GetProcAddress) is by itself the\n"
+    "  ORDINARY Windows idiom for optional/delay-loaded DLLs — it is NOT evidence\n"
+    "  of packing or obfuscation (T1027) on its own. Only claim T1027 when you\n"
+    "  observe a REAL obfuscation mechanism: a hashing/decrypt loop over API\n"
+    "  names, a high-entropy/packed section, an unpacking stub, or a sparse\n"
+    "  import table that hides the real APIs. A rich, fully-named import table\n"
+    "  (dozens of imports across several DLLs) argues AGAINST packing. Do not\n"
+    "  inflate a plain LoadLibrary/GetProcAddress pair into an obfuscation claim."
+)
+
+GHIDRA_WORKFLOW: str = (
     "=== TOOL USAGE WORKFLOW ===\n"
     "Follow this reverse engineering sequence. Prefer the malware-specific\n"
     "analyzers first — they return pre-digested triage signals in one call,\n"
@@ -66,28 +89,9 @@ GHIDRA_PROMPT_FRAGMENT: str = (
     "  `analyze_dataflow(address=<addr>, direction=backward|forward)`.\n"
     "- Run a small hash / decode routine to see its output: `emulate_function`.\n"
     "- Packed binary with few functions: `find_code_gaps` to surface missed code.\n"
-    "- Record `get_function_hash` on the core malicious function for attribution.\n\n"
-    "=== VERIFICATION DISCIPLINE (suppresses confidently-wrong attribution) ===\n"
-    "- A SPECIFIC claim (a named algorithm like RC4/djb2/ROR13, a constant or XOR\n"
-    "  key, or a hash-resolved API) may reach CONFIDENCE >= 0.8 only if you\n"
-    "  FALSIFY it first: `emulate_function` with a known input vs the expected\n"
-    "  output, OR `analyze_dataflow(direction=backward)` to confirm its origin.\n"
-    "  If you cannot run the check (non-leaf, syscall/heap side effects), cap\n"
-    "  CONFIDENCE at 0.7.\n"
-    "- `emulate_hash_batch`: read the FULL `matches` list. If more than one API\n"
-    "  name collides, do NOT blindly take `best_match` — disambiguate via the\n"
-    "  likely source DLL, or emit CONFIDENCE <= 0.5.\n"
-    "- A claim is High (>= 0.8) only with >= 2 independent evidence loci (e.g. an\n"
-    "  import AND its call-site). A single locus caps at 0.7. Reconcile any\n"
-    "  contradictory signals before emitting.\n"
-    "- Dynamic API resolution (LoadLibrary + GetProcAddress) is by itself the\n"
-    "  ORDINARY Windows idiom for optional/delay-loaded DLLs — it is NOT evidence\n"
-    "  of packing or obfuscation (T1027) on its own. Only claim T1027 when you\n"
-    "  observe a REAL obfuscation mechanism: a hashing/decrypt loop over API\n"
-    "  names, a high-entropy/packed section, an unpacking stub, or a sparse\n"
-    "  import table that hides the real APIs. A rich, fully-named import table\n"
-    "  (dozens of imports across several DLLs) argues AGAINST packing. Do not\n"
-    "  inflate a plain LoadLibrary/GetProcAddress pair into an obfuscation claim.\n\n"
+    "- Record `get_function_hash` on the core malicious function for attribution.\n"
+    "- The falsification the verification discipline asks for is `emulate_function`\n"
+    "  with a known input, or `analyze_dataflow(direction=backward)`.\n\n"
     "IMPORTANT:\n"
     "- Step 1 (load_program) MUST happen before any analysis tool call.\n"
     "- Always prefer the high-level malware analyzers (steps 3–6) before\n"
@@ -96,6 +100,15 @@ GHIDRA_PROMPT_FRAGMENT: str = (
     "- Large binaries may have 1000+ functions. Prioritize entry point, main,\n"
     "  and functions referencing crypto/network/process APIs.\n"
     "- Summarize assembly patterns instead of dumping raw hex."
+)
+
+# The whole fragment, with Ghidra attached: the tools, the guidance, the workflow.
+GHIDRA_PROMPT_FRAGMENT: str = (
+    "Analyze binary files (e.g. PE, ELF) utilizing Ghidra through your available tools. "
+    "You can decompile functions, find cross-references, extract strings, and more. "
+    + GHIDRA_GUIDANCE
+    + "\n\n"
+    + GHIDRA_WORKFLOW
 )
 
 
@@ -150,6 +163,13 @@ class GhidraStaticProvider(StaticProvider):
 
     def prompt_fragment(self) -> str:
         return GHIDRA_PROMPT_FRAGMENT
+
+    def guidance_fragment(self) -> str:
+        return GHIDRA_GUIDANCE
+
+    @property
+    def label(self) -> str:
+        return "Ghidra"
 
     def open(self, job: StaticJobContext) -> None:
         """Attach to Ghidra for ``job``. Idempotent, per the base contract.

@@ -1264,6 +1264,10 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
                 # built-in's resolved prompt read-only, and a clone seeds its
                 # copy from this text rather than guessing it.
                 "prompt": resolved.prompt,
+                # The same text without the platform's sentence about the
+                # agent's tools, which is what a clone copies: the clone gets a
+                # sentence of its own, for its own tool list.
+                "authored_prompt": resolved.authored_prompt or resolved.prompt,
                 "llm": {
                     "provider": llm_provider,
                     "model": llm_model,

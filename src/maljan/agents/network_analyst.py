@@ -22,12 +22,16 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Sequence
+from typing import Any
 
 from maljan.agents.base_agent import BaseAnalyst, prompt_to_messages, revision_messages
 from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_FRAGMENT,
     FINDINGS_BLOCK_FRAGMENT,
     format_fragment,
+    tool_names,
+    tools_statement,
 )
 from maljan.agents.registry import register_agent
 from maljan.agents.static_analyst import _parse_claim_blocks, _parse_disputes
@@ -51,10 +55,48 @@ _NET_HEAD = (
 # last thing the analyst reads before it answers.
 _NET_TAIL = FINDINGS_BLOCK_FRAGMENT
 
-# Back-compat, and the fallback for an analyst built outside a container: the
-# neutral assembly. A running job sends the container's resolved prompt
-# (``composition.builtin_prompt`` and ``BaseAnalyst._system_prompt``).
-_ISR_SYSTEM = _NET_HEAD + format_fragment("unknown", "unknown") + _NET_TAIL
+
+def assemble_network_prompt(
+    fragment: str, tools: Sequence[Any], *, for_a_clone: bool = False
+) -> str:
+    """HEAD, the sample's format fragment, the sentence about ``tools``, then TAIL."""
+    statement = "\n\n" + tools_statement(tools) if not for_a_clone else ""
+    return _NET_HEAD + fragment + statement + _NET_TAIL
+
+
+def _network_prompt(tools: Sequence[Any] = ()) -> str:
+    """The neutral network prompt, for an analyst built outside a container.
+
+    A running job sends the container's resolved prompt for the tools the
+    request carries (``composition.builtin_prompt`` and
+    ``BaseAnalyst._system_prompt``).
+    """
+    return assemble_network_prompt(format_fragment("unknown", "unknown"), tools)
+
+
+# Back-compat: the neutral assembly with no tools.
+_ISR_SYSTEM = _network_prompt()
+
+# The packet tools the PCAP turns walk through, in the order they are named.
+_PCAP_TOOLS: tuple[tuple[str, str], ...] = (
+    ("read_pcap_summary", "get packet overview"),
+    ("extract_dns", "extract all DNS queries"),
+    ("extract_http", "extract HTTP request headers"),
+)
+
+
+# What a PCAP turn says when its request carries none of the packet tools.
+NO_PACKET_TOOL_LINE = (
+    "No packet tool is in your tool list, so base your findings on the structured flows above."
+)
+OTHER_TOOLS_THEN_ANALYZE = "Use the tools in your tool list where they help, then analyze"
+
+
+def _pcap_tools_in(tools: Sequence[Any]) -> list[tuple[str, str]]:
+    """The packet tools of ``_PCAP_TOOLS`` the request actually carries."""
+    offered = tool_names(tools)
+    return [(name, what) for name, what in _PCAP_TOOLS if name in offered]
+
 
 # The text revision path's own system prompt. It is not ``_ISR_SYSTEM`` plus a
 # suffix — it is a different prompt, and it was inline in ``revise`` until the
@@ -138,17 +180,23 @@ class NetworkAnalyst(BaseAnalyst):
             mcp_ready = self._try_initialize_mcp()
 
             if mcp_ready:
+                packet_tools = _pcap_tools_in(self.tools)
+                steps = (
+                    "Use the available tools to:\n"
+                    + "".join(
+                        f"{i}. {name} — {what}\n" for i, (name, what) in enumerate(packet_tools, 1)
+                    )
+                    + "\nThen analyze"
+                    if packet_tools
+                    else OTHER_TOOLS_THEN_ANALYZE
+                )
                 prompt_messages = [
-                    ("system", self._system_prompt(_ISR_SYSTEM)),
+                    ("system", self._system_prompt(_network_prompt)),
                     (
                         "human",
                         "A PCAP capture file is available for analysis.\n\n"
                         f"PCAP file path: {pcap_path}\n\n"
-                        "Use the available tools to:\n"
-                        "1. read_pcap_summary — get packet overview\n"
-                        "2. extract_dns — extract all DNS queries\n"
-                        "3. extract_http — extract HTTP request headers\n\n"
-                        "Then analyze the results for C2 beaconing, DGA domains, "
+                        f"{steps} the results for C2 beaconing, DGA domains, "
                         "data exfiltration, and protocol tunneling.",
                     ),
                 ]
@@ -162,8 +210,12 @@ class NetworkAnalyst(BaseAnalyst):
             f"Target PCAP: {data}" if len(data.strip()) < 512 else f"Network output:\n{data}"
         )
 
+        # Try MCP for text mode too (agent might extract useful patterns).
+        # Attached before the prompt is built: the prompt says what the
+        # request carries, and it carries what this call attached.
+        mcp_ready = self._try_initialize_mcp()
         prompt_messages = [
-            ("system", self._system_prompt(_ISR_SYSTEM)),
+            ("system", self._system_prompt(_network_prompt)),
             (
                 "human",
                 "Analyze DNS queries, HTTPS SSL flows, and potential C2 beacons "
@@ -173,8 +225,6 @@ class NetworkAnalyst(BaseAnalyst):
             ),
         ]
 
-        # Try MCP for text mode too (agent might extract useful patterns)
-        mcp_ready = self._try_initialize_mcp()
         if mcp_ready:
             content = self.execute_tool_loop(prompt_messages)
         else:
@@ -242,8 +292,18 @@ class NetworkAnalyst(BaseAnalyst):
                 # read_pcap_summary loop over-ran the 330s analyst budget and
                 # aborted, so we hand the analyst the structured evidence up front
                 # and cap the PCAP peek (react_agent_max_steps_overrides.network).
+                packet_tools = _pcap_tools_in(self.tools)
+                peek = (
+                    "You MAY make at most one or two PCAP tool calls "
+                    f"({' / '.join(name for name, _what in packet_tools)}) to confirm "
+                    "packet-level beaconing or tunnelling — but base your findings "
+                    "primarily on the structured flows above and do NOT block on the "
+                    "PCAP.\n\n"
+                    if packet_tools
+                    else NO_PACKET_TOOL_LINE + "\n\n"
+                )
                 prompt_messages = [
-                    ("system", self._system_prompt(_ISR_SYSTEM)),
+                    ("system", self._system_prompt(_network_prompt)),
                     (
                         "human",
                         "Analyze the network activity below and return a structured "
@@ -253,11 +313,7 @@ class NetworkAnalyst(BaseAnalyst):
                         "VirusTotal permalinks):\n"
                         f"{data}\n\n"
                         f"A raw packet capture is ALSO available at: {pcap_path}\n"
-                        "You MAY make at most one or two PCAP tool calls "
-                        "(read_pcap_summary / extract_dns / extract_http) to confirm "
-                        "packet-level beaconing or tunnelling — but base your findings "
-                        "primarily on the structured flows above and do NOT block on the "
-                        "PCAP.\n\n"
+                        f"{peek}"
                         "For each finding state: the claim, the exact artifact reference "
                         "(e.g. 'TCP dst=185.220.101.5:443', 'DNS query: rnd7x.evil.com'), "
                         "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID.\n\n"
@@ -277,8 +333,10 @@ class NetworkAnalyst(BaseAnalyst):
             f"Target PCAP: {data}" if len(data.strip()) < 512 else f"Network output:\n{data}"
         )
 
+        # Try MCP for text mode, before the prompt that says what it attached.
+        mcp_ready = self._try_initialize_mcp()
         prompt_messages = [
-            ("system", self._system_prompt(_ISR_SYSTEM)),
+            ("system", self._system_prompt(_network_prompt)),
             (
                 "human",
                 "Analyze the network data and return a structured list of findings.\n"
@@ -290,8 +348,6 @@ class NetworkAnalyst(BaseAnalyst):
             ),
         ]
 
-        # Try MCP for text mode
-        mcp_ready = self._try_initialize_mcp()
         if mcp_ready:
             content = self.execute_tool_loop(prompt_messages)
         else:
@@ -323,7 +379,8 @@ class NetworkAnalyst(BaseAnalyst):
         self.logger.info("Executing network ISR revision (round %d)...", revision_round)
 
         messages = revision_messages(
-            self._system_prompt(_ISR_SYSTEM),
+            # A revision is one tools-free call: the prompt says so.
+            self._system_prompt(_network_prompt, tools=()),
             original_data,
             own_report,
             peer_reports,
