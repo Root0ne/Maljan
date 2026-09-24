@@ -873,6 +873,12 @@ class ReportComposer:
             [*head, instruction, contract, _bundle_text(section, bundle, entries, item_chars=-1)]
         )
         prompt_chars = len(_SYSTEM) + len(without)
+        logger.info(
+            "ReportComposer: section '%s' output budget: %s.",
+            section,
+            str(getattr(self, "budget_note", "") or "")
+            or f"{int(getattr(self, 'output_cap', 0) or 0)} tokens",
+        )
         room = self._room_chars()
         if room is not None and prompt_chars > room:
             # The facts enter whole: a section that cannot hold them says so.

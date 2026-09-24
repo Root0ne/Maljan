@@ -50,7 +50,15 @@
     "qwen3": 32768
   },
   "max_output": {
-    "_comment": "The maximum output each model's vendor documents, with the page it is documented on. A model is listed only when its vendor's own documentation states the figure; a model not listed that a hosted API serves takes the documented fallback.",
+    "_comment": "The maximum output each model's vendor documents, with the page it is documented on. A model is listed only when its vendor's own documentation states the figure; a model not listed that a hosted API serves takes the documented fallback. DeepSeek's Models & Pricing page writes its figure as 384K, which is 393,216 tokens.",
+    "deepseek-flash": {
+      "tokens": 393216,
+      "source": "https://api-docs.deepseek.com/quick_start/pricing"
+    },
+    "deepseek-v4-pro": {
+      "tokens": 393216,
+      "source": "https://api-docs.deepseek.com/quick_start/pricing"
+    },
     "gpt-4.1": {
       "tokens": 32768,
       "source": "https://developers.openai.com/api/docs/models/gpt-4.1"

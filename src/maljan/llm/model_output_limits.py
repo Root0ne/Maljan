@@ -21,7 +21,7 @@ from maljan.core.logger import logger
 _lock = threading.Lock()
 # Learned from model list answers, keyed by the model id as asked, lower-cased.
 _learned: dict[str, int] = {}
-_table: dict[str, int] | None = None
+_table: dict[str, tuple[int, str]] | None = None
 
 # The fields a model list entry states its own maximum output under: on the
 # entry itself, or under OpenRouter's ``top_provider``.
@@ -74,20 +74,33 @@ def declared_output_limit(model: object) -> int:
     family, as the table's windows are keyed): a snapshot or a sibling the
     vendor documents apart is not assumed to share its limit.
     """
+    return declared_output(model)[0]
+
+
+def declared_output(model: object) -> tuple[int, str]:
+    """``(tokens, where it is declared)`` for ``model``'s maximum output, or ``(0, "")``.
+
+    The same answer :func:`declared_output_limit` gives, with the place it was
+    read from in words, so a budget built on it can say where it came from.
+    """
     from maljan.llm.context_window import model_family
 
     name = str(model or "").strip().lower()
     if not name:
-        return 0
+        return 0, ""
     with _lock:
         learned = _learned.get(name, 0)
     if learned > 0:
-        return learned
-    return _table_rows().get(model_family(name), 0)
+        return learned, "the endpoint's model list"
+    family = model_family(name)
+    tokens, source = _table_rows().get(family, (0, ""))
+    if tokens <= 0:
+        return 0, ""
+    return tokens, f"the vendored table's {family!r} row, from {source}"
 
 
-def _table_rows() -> dict[str, int]:
-    """The vendored table's ``max_output`` rows, read once. Unreadable is empty."""
+def _table_rows() -> dict[str, tuple[int, str]]:
+    """The vendored table's ``max_output`` rows and their sources, read once."""
     global _table
     from maljan.core.paths import resolve_data
     from maljan.llm.context_window import TABLE_PATH
@@ -95,13 +108,14 @@ def _table_rows() -> dict[str, int]:
     with _lock:
         if _table is not None:
             return _table
-        rows: dict[str, int] = {}
+        rows: dict[str, tuple[int, str]] = {}
         try:
             raw = json.loads(Path(resolve_data(TABLE_PATH)).read_text(encoding="utf-8"))
             for key, row in (raw.get("max_output") or {}).items():
                 tokens = row.get("tokens") if isinstance(row, dict) else None
-                if isinstance(tokens, int) and tokens > 0 and str(row.get("source") or ""):
-                    rows[str(key).lower()] = tokens
+                source = str(row.get("source") or "") if isinstance(row, dict) else ""
+                if isinstance(tokens, int) and tokens > 0 and source:
+                    rows[str(key).lower()] = (tokens, source)
         except Exception as exc:  # noqa: BLE001 — a fallback table never fails a run
             logger.debug("the vendored output-limit table could not be read: %s", exc)
         _table = rows

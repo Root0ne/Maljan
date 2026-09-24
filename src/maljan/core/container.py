@@ -132,10 +132,12 @@ def _drop_llm_caches_on_retirement(loop: object) -> None:
 
 
 def composer_output_cap(config: Settings, provider: str | None = None) -> int:
-    """What a composer section may generate under a configured section budget.
+    """What a composer section may generate under a configured section budget, for any model.
 
-    Only asked when ``reporting.composer_section_max_tokens`` is set; at its
-    default of 0 the budget is derived per model (:func:`composer_output_budget`).
+    Only asked when ``reporting.composer_section_max_tokens`` is set, and only
+    for a provider no model of the reporter's list names; each model of the
+    list is budgeted, and held at its maximum output, by
+    :func:`composer_output_budget`.
 
     Ollama's ``num_predict`` and llama.cpp's ``n_predict`` count the reasoning
     channel with the answer, and a reasoning model left thinking spends its
@@ -158,8 +160,7 @@ def composer_output_cap(config: Settings, provider: str | None = None) -> int:
     if provider is None:
         agent = config.llm.agents.get(REPORTER_AGENT_KEY)
         provider = str(getattr(agent, "provider", "") or config.llm.provider)
-    block = getattr(config.llm, provider, None)
-    if provider not in ("ollama", "openai") or bool(getattr(block, "disable_thinking", False)):
+    if not _reporter_reasons(config, provider):
         return section
     from maljan.llm.context_window import output_cap_for
 
@@ -169,36 +170,66 @@ def composer_output_cap(config: Settings, provider: str | None = None) -> int:
     )
 
 
+def _reporter_reasons(config: Settings, provider: str) -> bool:
+    """Whether the reporter's ``provider`` was left free to reason inside its cap.
+
+    Ollama's ``num_predict`` and llama.cpp's ``n_predict`` count the reasoning
+    channel with the answer; what the platform knows is whether it asked the
+    provider to keep reasoning out (``llm.<provider>.disable_thinking``).
+    """
+    block = getattr(config.llm, provider, None)
+    return provider in ("ollama", "openai") and not bool(getattr(block, "disable_thinking", False))
+
+
+def report_stage_budget(config: Settings, assignment: Any, *, probe: bool = True) -> Any:
+    """What one answer of the report stage's narrative round may run to on one model.
+
+    The report stage runs on the reporter, which is built on the judge role, so
+    the operator's cap it follows is ``llm.judge_max_tokens`` — the cap
+    :meth:`ServiceContainer.get_reporter_llm` has always been built with; the
+    analysts' ``llm.expert_max_tokens`` is not the reporter's. Above 0 it is
+    used as set; at 0 the model's declared maximum output; with none declared,
+    the analysts' derivation (``context_window.report_output_budget``). Never
+    more than the model's maximum.
+    """
+    from maljan.llm.context_window import report_output_budget
+
+    judge = int(config.llm.judge_max_tokens or 0)
+    return report_output_budget(
+        config, assignment, judge, f"llm.judge_max_tokens is set to {judge}", probe=probe
+    )
+
+
 def composer_output_budget(config: Settings, assignment: Any) -> tuple[int, str, int]:
     """What one model of the reporter's list may generate for a section, and why.
 
-    ``reporting.composer_section_max_tokens`` above 0 is the operator's own
-    budget, used as it always was (:func:`composer_output_cap`). At 0, the
-    default, nothing is fixed: the budget is the room an analyst's reply is
-    given on the same model — the deployment's generation cap, at most a
-    quarter of the context window that model serves
-    (``llm.context_window.reply_budget``) — and a model's reasoning is spent
-    inside it. A fixed 900 tokens dropped a section of a live report when the
-    model reasoned past it.
+    In order: ``reporting.composer_section_max_tokens`` above 0, the operator's
+    section budget, plus the reporter's own cap as room for reasoning where the
+    provider was not asked to keep reasoning out (:func:`composer_output_cap`);
+    else the operator's ``llm.judge_max_tokens``, the reporter's cap; else the
+    model's declared maximum output; else the analysts' derivation, a quarter
+    of the window. Never more than the model's maximum output, the reasoning
+    room included (``context_window.report_output_budget``). A section was
+    dropped from a live report when its answer outgrew a fixed budget.
 
     Returns the tokens, the sentence that says how they were reached, which
-    the run summary prints beside the section's wait, and the model's context
-    window in tokens, which a section's tool answers are sized against
-    whichever way the budget was set.
+    the run summary prints beside the section's wait and the worker log prints
+    per section, and the model's context window in tokens, which a section's
+    evidence is sized against: the window less this budget.
     """
-    from maljan.llm.context_window import reply_budget, window_for_assignment
+    from maljan.llm.context_window import report_output_budget
 
-    configured = int(config.reporting.composer_section_max_tokens)
-    if configured > 0:
-        cap = composer_output_cap(config, str(assignment.provider))
-        extra = "" if cap == configured else f", plus {cap - configured} for its reasoning"
-        window = window_for_assignment(config, assignment)
-        return (
-            cap,
-            f"{cap} tokens — reporting.composer_section_max_tokens is set to {configured}{extra}",
-            window.tokens,
-        )
-    budget = reply_budget(config, assignment)
+    section = int(config.reporting.composer_section_max_tokens)
+    if section <= 0:
+        budget = report_stage_budget(config, assignment)
+        return budget.tokens, budget.sentence(), budget.window.tokens
+    said = f"reporting.composer_section_max_tokens is set to {section}"
+    total = section
+    if _reporter_reasons(config, str(assignment.provider)):
+        reasoning = report_stage_budget(config, assignment)
+        total += reasoning.tokens
+        said += f", plus {reasoning.tokens} for its reasoning ({reasoning.sentence()})"
+    budget = report_output_budget(config, assignment, total, said)
     return budget.tokens, budget.sentence(), budget.window.tokens
 
 
@@ -533,6 +564,32 @@ class ServiceContainer:
         logger.info("Output cap for %s: %s.", agent, cap.sentence)
         return cap.tokens
 
+    def _report_output_cap(self) -> int:
+        """The output cap the reporter's model is built with, its derivation logged and recorded.
+
+        The report stage's own order (:func:`report_stage_budget`): the
+        operator's ``llm.judge_max_tokens``, else the model's declared maximum
+        output, else the analysts' derivation. Over a fallback list, the
+        smallest of its models, as every other agent's cap is.
+        """
+        from maljan.core.model_assignments import assignment_chain_for
+
+        best: Any | None = None
+        try:
+            for assignment in assignment_chain_for(self.config, REPORTER_AGENT_KEY, role="judge"):
+                budget = report_stage_budget(self.config, assignment, probe=not self.mock)
+                if best is None or budget.tokens < best.tokens:
+                    best = budget
+        except Exception as exc:  # noqa: BLE001 — an unreadable assignment takes the derived cap
+            logger.debug("report stage: no budget for the reporter's list (%s)", exc)
+        if best is None:
+            return self._output_cap("judge_max_tokens", REPORTER_AGENT_KEY, role="judge")
+        rates = getattr(self, "_generation_rates", None)
+        if rates is not None:
+            rates.note_output_cap(REPORTER_AGENT_KEY, best.tokens, best.sentence())
+        logger.info("Output cap for %s: %s.", REPORTER_AGENT_KEY, best.sentence())
+        return int(best.tokens)
+
     def get_expert_llm(self) -> BaseChatModel:
         if self._llm_registry is None:
             raise ConfigurationError("Cannot build LLM in mock mode.")
@@ -586,11 +643,7 @@ class ServiceContainer:
         with self._lock:
             cached = self._reporter_llm_cache.lookup(loop)
             if cached is None:
-                extra: dict[str, Any] = {
-                    "max_tokens": self._output_cap(
-                        "judge_max_tokens", REPORTER_AGENT_KEY, role="judge"
-                    )
-                }
+                extra: dict[str, Any] = {"max_tokens": self._report_output_cap()}
                 cached = self._llm_registry.build_model_for_agent(
                     REPORTER_AGENT_KEY, fallback_role="judge", **extra
                 )

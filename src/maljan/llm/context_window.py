@@ -1317,6 +1317,72 @@ def reply_budget(settings: Any, assignment: Any, *, probe: bool = True) -> Outpu
     return OutputBudget(tokens=tokens, window=window, generation_cap=cap, derivation=sentence)
 
 
+def model_maximum_output(window: WindowFact, model: object) -> tuple[int, str]:
+    """``(tokens, where from)`` for the most one answer of ``model`` can be, or ``(0, "")``.
+
+    The maximum output its provider declares (:func:`declared_output`), and no
+    more than the context window it serves, because an answer is written into
+    that window. With neither known, zero: nothing is stated about it.
+    """
+    from maljan.llm.model_output_limits import declared_output
+
+    declared, where = declared_output(model)
+    learned = window.source != FALLBACK and window.tokens > 0
+    if declared > 0 and (not learned or declared <= window.tokens):
+        return declared, f"the model's declared maximum output of {declared} ({where})"
+    if learned:
+        return window.tokens, f"the model's {window.tokens}-token context window ({window.source})"
+    return 0, ""
+
+
+def report_output_budget(
+    settings: Any,
+    assignment: Any,
+    configured: int,
+    configured_said: str,
+    *,
+    setting: str = "llm.judge_max_tokens",
+    probe: bool = True,
+) -> OutputBudget:
+    """How long one answer of the report stage may run on one model, and why.
+
+    The report stage writes the report, and a report is as long as its
+    evidence needs; a quarter of the window is the analysts' rule, which keeps
+    room in a conversation that is still gathering. So, in this order:
+
+    1. ``configured`` above 0 is the operator's value (``configured_said`` says
+       which setting, and what was added to it), used as set;
+    2. else the model's declared maximum output — the endpoint's model list or
+       the vendored table's sourced row;
+    3. else the analysts' derivation (:func:`derived_reply`), with ``setting``
+       named as the cap that was not set.
+
+    Never more than the model's maximum (:func:`model_maximum_output`); a value
+    held at it says so. The window is still learned: a section's evidence room
+    is what the window leaves after this budget.
+    """
+    from maljan.llm.model_output_limits import declared_output_limit
+
+    window = window_for_assignment(settings, assignment, probe=probe)
+    model = getattr(assignment, "model", "")
+    maximum, maximum_said = model_maximum_output(window, model)
+    configured = int(configured or 0)
+    if configured > 0:
+        tokens = min(configured, maximum) if maximum > 0 else configured
+        sentence = f"{tokens} tokens — {configured_said}"
+        if tokens < configured:
+            sentence += f", held at {maximum_said}"
+    elif declared_output_limit(model) > 0:
+        tokens, sentence = maximum, f"{maximum} tokens — {maximum_said}"
+    else:
+        tokens, sentence = derived_reply(
+            window, 0, model, setting, local=serves_locally(assignment, window)
+        )
+    return OutputBudget(
+        tokens=tokens, window=window, generation_cap=configured, derivation=sentence
+    )
+
+
 @dataclass(frozen=True)
 class OutputCap:
     """One agent's output cap in tokens, and the sentence that says how it was reached."""
