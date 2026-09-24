@@ -8,6 +8,9 @@ change landed on `main`.
 
 ### Added
 
+- **DeepSeek's declared maximum output.** `deepseek-flash` and
+  `deepseek-v4-pro` have `max_output` rows of 393,216 (384K on
+  https://api-docs.deepseek.com/quick_start/pricing) in the vendored table.
 - **`llm.openai.reasoning_effort`**: sent as the request's `reasoning_effort`
   field, exactly as written, so each API's own levels work (DeepSeek: `low`,
   `high`, `max`). Empty, the shipped value, sends nothing. The `llm` connection
@@ -853,6 +856,38 @@ change landed on `main`.
 
 ### Changed
 
+- **The report stage writes up to the model's own maximum.** A composer section
+  and the narrative round take, in order, the operator's
+  `reporting.composer_section_max_tokens` (sections) or `llm.judge_max_tokens`
+  (the reporter's cap; `llm.expert_max_tokens` no longer reaches the report
+  stage), else the model's declared maximum output, else the analysts'
+  quarter-of-the-window derivation — never more than the model's maximum, the
+  reasoning room included. On a 1,048,576-token model that declares 393,216 a
+  section was held at 262,144; it now gets 393,216 and the rest of the window
+  for its evidence. Each section logs its budget and where it came from.
+  **Upgrading:** a deployment that set `llm.expert_max_tokens` above
+  `llm.judge_max_tokens` and relied on the larger for report sections now gets
+  the judge's.
+- **No report schema or prompt sets an upper size.** A section's prose
+  (`_ProseOut.body`, 2,500 characters) and introduction (`_IntroOut.text`,
+  1,800), and the narrative's executive summary (1,200), key findings (six) and
+  recommendations (eight) lose their upper bounds; the lower bounds stay. The
+  prompts no longer ask for a number of sentences, characters or entries, nor
+  to be concise. A live run's evasion section was dropped for running past
+  2,500 characters after its one retry.
+- **A request's timeout is sized from its output cap and the measured pace.**
+  Every request used to end at the client's 1,800 s and every derived wait was
+  held under it. Once a model's rate is measured, each OpenAI-compatible and
+  Anthropic request carries its own timeout, the larger of 1,800 s and the time
+  its output cap takes at that pace with the existing margin, and the derived
+  waits are no longer capped. `run_summary.generation` reports
+  `unmeasured_request_timeout_s` in place of `ceiling_s`, and Appendix B no
+  longer prints "at most 1800s".
+- **`reporting.upstream_findings_max_chars` ships at 0, derived from the served
+  window** like the tool-answer cap, for the upstream findings block and the
+  triage pack; the documented 6,000 applies only when no window was learned. A
+  positive value is the operator's. **Upgrading:** a stored 0 used to mean
+  "no cut" and now means "derived".
 - **The run-state block rides at the end of the last message, so a request's
   front stays the same.** A tool loop's block, with the budget line that counts
   down every turn, used to be rewritten at the end of the system turn, and a
