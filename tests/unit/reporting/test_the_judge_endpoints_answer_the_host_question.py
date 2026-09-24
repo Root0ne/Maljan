@@ -303,7 +303,8 @@ class TestAPatternIsNotOneComparison:
 
         assert exported == []
         assert declined[0][0] == UNPUBLISHABLE_ENDPOINT_CODE
-        assert "could not read the pattern's endpoint" in declined[0][1]
+        assert "compares with MATCHES" in declined[0][1]
+        assert "names every endpoint that fits it rather than one" in declined[0][1]
 
     def test_the_same_holds_for_a_wildcard_and_for_a_subnet(self) -> None:
         for pattern in (
@@ -313,7 +314,7 @@ class TestAPatternIsNotOneComparison:
             exported, declined = _render(pattern)
 
             assert exported == [], pattern
-            assert "could not read the pattern's endpoint" in declined[0][1], pattern
+            assert "names every endpoint that fits it rather than one" in declined[0][1], pattern
 
     def test_an_endpoint_reached_through_a_reference_is_asked_the_same_question(self) -> None:
         """``network-traffic:dst_ref.value`` carries an endpoint like any other.
@@ -466,6 +467,7 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
             "stix.annotation_out_of_schema",
             "stix.duplicate_label",
             "stix.unknown_object_path",
+            "stix.unescaped_backslash",
             "stix.file_unidentified",
         }
     )

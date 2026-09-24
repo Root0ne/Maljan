@@ -594,15 +594,19 @@ def _remap_refs_poly(objects: list[Any], remap: dict[str, str]) -> None:
 
 
 def _is_wellformed_pattern(indicator: Any) -> bool:
-    """Conservative STIX 2.1 pattern shape check for an indicator object.
+    """Whether an indicator's pattern is written whole, by the one pattern reader.
 
-    Returns True only when the pattern is a bracketed comparison expression
-    (``[ <path> <op> '<value>' ]``). Keeps all patterns Maljan emits; rejects
-    empty/whitespace and truncated/garbage LLM output — a ``[file:name``
-    comparison cut off before its closing bracket, say.
+    :func:`~maljan.schemas.stix_pattern.reads_whole`: an observation expression
+    that opens, closes every value, bracket and parenthesis it opens, and names
+    an object path. Empty, whitespace and a pattern a generation cut off — a
+    ``[file:name`` comparison stopped before its closing quote, say — are
+    refused; every comparison operator the grammar has is kept. This used to
+    ask for an ``=`` and dropped every ``LIKE`` a judge wrote as an empty
+    pattern, command-and-control hosts among them.
     """
-    pat = str(_oget(indicator, "pattern", "") or "").strip()
-    return pat.startswith("[") and pat.endswith("]") and "=" in pat
+    from maljan.schemas.stix_pattern import reads_whole
+
+    return reads_whole(str(_oget(indicator, "pattern", "") or ""))
 
 
 def _merge_indicator_sets(kept: Any, duplicate: Any) -> None:
@@ -643,7 +647,7 @@ def enforce_bundle_integrity(
 
     Works on both parsed dicts (judge bundle) and pydantic SDOs (extended
     bundle). Order-preserving. Steps:
-      1. Drop indicators with an empty/whitespace pattern (STIX 2.1 invalid).
+      1. Drop indicators whose pattern is empty or not written whole.
       2. Deduplicate attack-patterns by technique ID (keep first; remap refs).
       3. Deduplicate indicators by (pattern_type, pattern) (keep first; remap refs).
       4. Drop relationships whose source/target is not in the bundle, and
@@ -669,11 +673,11 @@ def enforce_bundle_integrity(
     _objects_in = len(objects)
     _dropped: dict[str, int] = {}
 
-    # 1) drop indicators with an empty or syntactically malformed pattern. The
-    # shape check is deliberately conservative — a STIX comparison expression is
-    # wrapped in brackets and contains a comparator — so it keeps every pattern
-    # this codebase emits and only rejects truncated/garbage LLM output (no full
-    # grammar parser, hence no over-dropping).
+    # 1) drop indicators with an empty pattern or one a generation cut off. The
+    # shape check is the pattern reader's (``_is_wellformed_pattern``): it keeps
+    # every pattern the official validator accepts, whatever its comparison
+    # operator, and rejects only what is not written whole — no grammar, hence
+    # no over-dropping.
     _before = len(objects)
     objects = [o for o in objects if _otype(o) != "indicator" or _is_wellformed_pattern(o)]
     _dropped["empty_pattern"] = _before - len(objects)

@@ -82,6 +82,7 @@ from maljan.schemas.stix_models import (
 from maljan.schemas.stix_pattern import (
     object_path_problems,
     read_comparisons,
+    stray_backslash_values,
     unknown_object_types,
 )
 
@@ -351,6 +352,16 @@ def unreadable_endpoint_sentence(value: str, kind_words: str, whose: str) -> str
     )
 
 
+def shaped_endpoint_sentence(value: str, kind_words: str, operator: str) -> str:
+    """The recorded sentence for an endpoint written as a shape rather than a value."""
+    return (
+        f"the {kind_words} indicator for {safe_finding_value(value)!r} is not in the exported "
+        f"bundle: it compares with {safe_finding_value(operator.upper())}, which names every "
+        "endpoint that fits it rather than one, so this export could not ask whether it may "
+        "carry the endpoint. It is unchanged in the judge's own bundle."
+    )
+
+
 def not_an_address_sentence(value: str) -> str:
     """The recorded sentence for a mailbox that is not one, left where it is."""
     return (
@@ -399,6 +410,17 @@ def unknown_object_path_sentence(pattern: str, problems: list[str]) -> str:
         f"the indicator {safe_finding_value(pattern)!r} is not in the exported bundle: "
         f"{safe_finding_value('; '.join(problems))}, so the pattern matches nothing a consumer "
         "holds. It is unchanged in the judge's own bundle."
+    )
+
+
+def stray_backslash_sentence(pattern: str, values: list[str]) -> str:
+    """The recorded sentence for a pattern whose value writes a backslash the grammar refuses."""
+    named = ", ".join(repr(safe_finding_value(v)) for v in values)
+    return (
+        f"the indicator {safe_finding_value(pattern)!r} is not in the exported bundle: it "
+        f"quotes {named} with a backslash a STIX pattern cannot read — inside a quoted value "
+        "the grammar escapes only the quote and the backslash — so a consumer's parser would "
+        "refuse the whole pattern. It is unchanged in the judge's own bundle."
     )
 
 
@@ -617,6 +639,9 @@ def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
     wrong_paths = object_path_problems(pattern)
     if wrong_paths:
         return (UNPUBLISHABLE_PATTERN_CODE, unknown_object_path_sentence(pattern, wrong_paths))
+    stray = stray_backslash_values(pattern)
+    if stray:
+        return (UNPUBLISHABLE_PATTERN_CODE, stray_backslash_sentence(pattern, stray))
     malformed = malformed_hash_in(pattern)
     if malformed is not None:
         algorithm, literal = malformed
@@ -627,6 +652,11 @@ def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
             continue
         code = _DECLINE_CODES.get(kind, UNPUBLISHABLE_ENDPOINT_CODE)
         words = _OBJECT_TYPE_WORDS.get(kind, "address")
+        if read and not readable:
+            # Read whole, and written as a shape: a ``LIKE`` or ``MATCHES``
+            # names every endpoint that fits it, which is not one the host
+            # question can be asked of.
+            return (code, shaped_endpoint_sentence(literal, words, operator))
         if not readable:
             return (code, unreadable_endpoint_sentence(literal, words, "the judge's own bundle"))
         if kind == "url":
@@ -660,6 +690,25 @@ def _judge_indicator_unpublished(
             f"the judge's indicator {named!r} names {safe_finding_value(value.value)!r}, "
             f"which this run does not publish ({safe_finding_value(answer)}). It is not in "
             "the exported bundle and is unchanged in the judge's own bundle.",
+        )
+    # A comparison of a kind the rule answers for, written as a shape — a
+    # ``LIKE`` with its wildcards, a ``MATCHES`` expression, a range — names
+    # every value that fits it and none in particular. The rule answers for a
+    # value, and ``'%whoami%'`` is not the value ``whoami``: asking it about the
+    # text between the wildcards would publish a match nobody put to it, and
+    # asking nothing would let a shape carry a value the ``=`` form of the same
+    # indicator is refused. It is declined, with the reason, as a refused value is.
+    for comparison in read_comparisons(indicator.pattern or ""):
+        if not _exported_kind(comparison)[0] or _endpoint_is_readable(comparison.operator):
+            continue
+        return (
+            UNPUBLISHED_VALUE_CODE,
+            f"the judge's indicator {named!r} compares {safe_finding_value(comparison.path)} "
+            f"{safe_finding_value(comparison.operator.upper())} "
+            f"{safe_finding_value(comparison.literal)!r}, which names the values that fit it "
+            "rather than one value. The one publish rule answers for a value, so it cannot say "
+            "this run may publish what the pattern matches. It is not in the exported bundle "
+            "and is unchanged in the judge's own bundle.",
         )
     return None
 
@@ -2092,14 +2141,18 @@ def pattern_values(pattern: str) -> list[ExportedValue]:
         if not comparison.readable or comparison.operator != "=":
             continue
         value = comparison.literal.strip()
-        kind = _EXPORTED_KINDS.get((comparison.object_type, comparison.prop), "")
-        algorithm = ""
-        digest = _HASH_PROPERTY_RE.match(comparison.prop)
-        if comparison.object_type == "file" and digest:
-            kind, algorithm = "hash", digest.group(1).upper()
+        kind, algorithm = _exported_kind(comparison)
         if kind and value:
             found.append(ExportedValue(kind=kind, value=value, algorithm=algorithm))
     return found
+
+
+def _exported_kind(comparison: Any) -> tuple[str, str]:
+    """The IOC table's kind for a comparison's path, and a digest's algorithm; ``("", "")``."""
+    digest = _HASH_PROPERTY_RE.match(comparison.prop)
+    if comparison.object_type == "file" and digest:
+        return "hash", digest.group(1).upper()
+    return _EXPORTED_KINDS.get((comparison.object_type, comparison.prop), ""), ""
 
 
 def exported_indicator_values(bundle: Any) -> list[ExportedValue]:

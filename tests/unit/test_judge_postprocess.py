@@ -70,7 +70,7 @@ class TestBundleIntegrity:
         objs = [
             _ind("indicator--1", ""),
             _ind("indicator--2", "   "),
-            _ind("indicator--3", "[x=1]"),
+            _ind("indicator--3", "[file:size = 1]"),
         ]
         out = enforce_bundle_integrity(objs)
         ids = {o["id"] for o in out}

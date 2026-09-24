@@ -55,7 +55,9 @@ _OBJECT_PATH_RE = re.compile(
 # The two characters a STIX literal escapes. A backslash before anything else
 # is a backslash: a judge writes ``'C:\Windows\system32\x.exe'`` unescaped far
 # more often than it writes a path that needed escaping, and reading every
-# backslash as an escape would eat the separators out of it.
+# backslash as an escape would eat the separators out of it. It is read as
+# the backslash it means and marked (``Comparison.stray_backslash``), because
+# the grammar itself refuses it.
 _ESCAPABLE = ("'", "\\")
 
 # What a name is written with, for the bracket question below: a bracket that
@@ -83,6 +85,12 @@ class Comparison:
     # case for the questions that read it; STIX types are lower case, and a
     # capitalised one is a type the grammar refuses.
     written_type: str = ""
+    # Whether the quoted value writes a backslash the grammar has no escape
+    # for. A STIX string escapes two characters, the quote and the backslash
+    # itself, and refuses the whole pattern over any other ``\x``. The reader
+    # still reads such a value — as the backslash it plainly means — so the
+    # questions about it can be asked; this says the pattern is not valid.
+    stray_backslash: bool = False
 
     @property
     def path(self) -> str:
@@ -111,7 +119,7 @@ def read_comparisons(pattern: str) -> list[Comparison]:
         if text[index] != "'":
             index += 1
             continue
-        literal, end, closed = _read_quoted(text, index)
+        literal, end, closed, stray = _read_quoted(text, index)
         if closed and _opens_a_key(text, outside, index):
             # A key continues the path rather than answering it, and the path
             # regex above reads it back out of the text it is written in.
@@ -142,6 +150,7 @@ def read_comparisons(pattern: str) -> list[Comparison]:
                 operator=operator,
                 literal=literal,
                 readable=closed and bool(object_type),
+                stray_backslash=stray,
             )
         )
     return found
@@ -166,9 +175,14 @@ def _opens_a_key(text: str, start: int, quote: int) -> bool:
     return text[index] == "[" and index - 1 >= start and text[index - 1] in _NAME_CHARACTERS
 
 
-def _read_quoted(text: str, start: int) -> tuple[str, int, bool]:
-    """The literal opening at ``text[start]``, where it ends, and whether it closed."""
+def _read_quoted(text: str, start: int) -> tuple[str, int, bool, bool]:
+    """The literal opening at ``text[start]``: its value, its end, whether it closed.
+
+    And whether it wrote a backslash before a character the grammar does not
+    escape, which the value keeps as the backslash it plainly means.
+    """
     value: list[str] = []
+    stray = False
     index = start + 1
     while index < len(text):
         char = text[index]
@@ -176,11 +190,91 @@ def _read_quoted(text: str, start: int) -> tuple[str, int, bool]:
             value.append(text[index + 1])
             index += 2
             continue
+        if char == "\\":
+            stray = True
         if char == "'":
-            return "".join(value), index + 1, True
+            return "".join(value), index + 1, True, stray
         value.append(char)
         index += 1
-    return "".join(value), len(text), False
+    return "".join(value), len(text), False, stray
+
+
+def reads_whole(pattern: str) -> bool:
+    """Whether ``pattern`` is written whole, read the way every value above is read.
+
+    Whole means what a cut answer is not: it opens an observation expression,
+    every quoted value closes, every bracket and parenthesis it opens is
+    closed, and it names at least one object path. The comparison operator is
+    not asked about: the grammar has ``=``, ``!=``, ``<``, ``>``, ``<=``,
+    ``>=``, ``LIKE``, ``MATCHES``, ``IN``, ``ISSUBSET``, ``ISSUPERSET`` and
+    ``EXISTS``, and a shape check that wanted ``=`` threw away every ``LIKE``
+    a judge wrote as an empty pattern.
+
+    Deliberately not a grammar: it keeps every pattern the official validator
+    accepts and refuses what a generation cut short leaves behind, and what it
+    keeps beyond that (an operator with nothing after it) is for the questions
+    the judge is asked, not for a silent drop.
+    """
+    text = str(pattern or "").strip()
+    if not text or text[0] not in "[(":
+        return False
+    brackets = 0
+    parentheses = 0
+    outside: list[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "'":
+            _literal, end, closed, _stray = _read_quoted(text, index)
+            if not closed:
+                return False
+            outside.append(" ")
+            index = end
+            continue
+        if char == "[":
+            brackets += 1
+        elif char == "]":
+            brackets -= 1
+        elif char == "(":
+            parentheses += 1
+        elif char == ")":
+            parentheses -= 1
+        if brackets < 0 or parentheses < 0:
+            return False
+        outside.append(char)
+        index += 1
+    if brackets or parentheses:
+        return False
+    return _OBJECT_PATH_RE.search("".join(outside)) is not None
+
+
+def stray_backslash_values(pattern: str) -> list[str]:
+    """The quoted values of ``pattern`` that write a backslash the grammar cannot read.
+
+    Each once, in the order written. A STIX string escapes the quote and the
+    backslash and nothing else, so ``'C:\\Windows\\x.exe'`` written with single
+    backslashes is a pattern the official validator refuses whole.
+    """
+    found: list[str] = []
+    for comparison in read_comparisons(pattern):
+        if comparison.stray_backslash and comparison.literal not in found:
+            found.append(comparison.literal)
+    return found
+
+
+# The two wildcards of ``LIKE``: any run of characters, and any one.
+_LIKE_WILDCARDS_RE = re.compile(r"[%_]+")
+
+
+def like_fixed_text(literal: str) -> list[str]:
+    """The runs of text a ``LIKE`` value fixes, between its wildcards.
+
+    ``'%skinnyjeanso.com%'`` matches any value that contains
+    ``skinnyjeanso.com``; it is not that value. What a value matching it must
+    contain is these runs, in order, and nothing else is said by it. A value
+    that is all wildcards fixes nothing.
+    """
+    return [part for part in _LIKE_WILDCARDS_RE.split(str(literal or "")) if part]
 
 
 # The Cyber-observable object types STIX 2.1 defines. A pattern compares a

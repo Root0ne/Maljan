@@ -3407,6 +3407,7 @@ UNKNOWN_OBSERVABLE_TYPE_CODE = "stix.unknown_observable_type"
 IS_FAMILY_MISSING_CODE = "stix.is_family_missing"
 FILE_UNIDENTIFIED_CODE = "stix.file_unidentified"
 UNKNOWN_OBJECT_PATH_CODE = "stix.unknown_object_path"
+STRAY_BACKSLASH_CODE = "stix.unescaped_backslash"
 INDICATOR_TYPE_VOCABULARY_CODE = "stix.indicator_type_vocabulary"
 
 # STIX 2.1's indicator-type vocabulary. Open, so a value outside it is legal
@@ -3425,18 +3426,21 @@ INDICATOR_TYPES = (
 
 
 def unknown_observable_type_violations(obj: Any, *, path: str) -> list[Violation]:
-    """A judge indicator whose pattern names an object type STIX does not have.
+    """A judge indicator whose pattern the grammar refuses: its type, its path, its escapes.
 
     Asked, never rewritten: the sentence says which type the value is when the
     value or the spelling answers that, and lists the types when neither does.
-    An indicator that keeps the type is left out of the export, which records
-    why (``reporting.renderers.stix_renderer``).
+    A path the type does not have and a value with a backslash the grammar
+    cannot read are asked the same way. An indicator that keeps any of them is
+    left out of the export, which records why
+    (``reporting.renderers.stix_renderer``).
     """
     from maljan.schemas.stix_pattern import (
         CYBER_OBSERVABLE_TYPES,
         is_observable_type,
         object_path_problems,
         observable_type_for,
+        stray_backslash_values,
     )
 
     pattern = str(getattr(obj, "pattern", "") or "")
@@ -3482,6 +3486,23 @@ def unknown_observable_type_violations(obj: Any, *, path: str) -> list[Violation
                     f"not have: {safe_finding_value(problem)}. A pattern over it matches nothing "
                     "a consumer holds. Write the comparison over a property the type defines, "
                     "or drop the indicator; an indicator that keeps it is not exported."
+                ),
+                path=path,
+            )
+        )
+    stray = stray_backslash_values(pattern)
+    if stray:
+        out.append(
+            Violation(
+                code=STRAY_BACKSLASH_CODE,
+                message=(
+                    f"the indicator {safe_finding_value(named)!r} quotes "
+                    f"{', '.join(repr(safe_finding_value(v)) for v in stray)} with a backslash "
+                    "the pattern grammar cannot read: inside a quoted value a STIX pattern "
+                    "escapes the quote and the backslash and nothing else, so every backslash "
+                    "of the value is written twice in the pattern (four times in the JSON "
+                    "string that carries it). Write it so, or drop the indicator; an indicator "
+                    "that keeps it is not exported."
                 ),
                 path=path,
             )
@@ -4686,7 +4707,30 @@ def _indicator_problem(
     # answered for the whole expression. What one comparison establishes is
     # that *it* raised no problem; the others are still asked.
     grounded = False
+    # A ``LIKE`` value is a shape, not a value: ``'%host.example%'`` matches
+    # whatever contains the text between its wildcards. That text is what the
+    # evidence is asked for, each run of it; the wildcards themselves appear in
+    # no tool's answer, and asking for them told the judge that a host it read
+    # in the decoded strings was nowhere in the evidence.
+    from maljan.schemas.stix_pattern import like_fixed_text
+
+    shapes = {
+        (comparison.path, comparison.literal.strip())
+        for comparison in read_comparisons(pattern)
+        if comparison.operator == "like"
+    }
     for path, literal in comparisons:
+        if (path, literal) in shapes:
+            fixed = like_fixed_text(literal)
+            missing = next((part for part in fixed if not _found(part)), None)
+            if missing is not None:
+                return _an_absence(
+                    f"the text {safe_finding_value(missing)!r}, which the pattern's LIKE "
+                    f"{safe_finding_value(literal)!r} requires of every value it matches, "
+                    "appears nowhere in this run's evidence."
+                )
+            grounded = grounded or bool(fixed)
+            continue
         if path.startswith("file:hashes") or path.endswith("imphash"):
             if _HEX_TOKEN_RE.match(literal) and len(literal) in _DIGEST_LENGTHS:
                 if not _whole_token_in(literal, haystack, own):
