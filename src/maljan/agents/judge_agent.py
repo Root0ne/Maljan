@@ -66,6 +66,7 @@ from maljan.llm.context_window import (
     window_full_error,
 )
 from maljan.llm.generation_rate import GenerationRates, model_name_of
+from maljan.memory.long_term_memory import a_past_case_technique
 from maljan.pipeline.events import emit_judge_question, scrub
 from maljan.pipeline.mediation_models import (
     MediatorVerdict,
@@ -2150,7 +2151,9 @@ class JudgeAgent(BudgetMeter):
                 query_parts.append(claim.claim)
                 if claim.evidence_ref:
                     query_parts.append(claim.evidence_ref)
-                if claim.technique_id:
+                # The same rule the stored case follows: an id that is no
+                # technique of this case does not look for cases that had it.
+                if claim.technique_id and a_past_case_technique(claim):
                     query_parts.append(claim.technique_id)
         query = " ".join(query_parts)
 

@@ -41,6 +41,20 @@ from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 MAX_MERGED_CLAIMS: int = 20
 
 
+def _ranks_above(claim: ClaimEvidence, kept: ClaimEvidence) -> bool:
+    """Whether ``claim`` takes the place of ``kept`` as the one claim for their technique.
+
+    A claim that reads as absence, kept when its analyst was asked, never takes
+    the place of one that does not: the positive claim is what the technique
+    is published from, and the higher number on "does not contain any obvious
+    persistence mechanisms" is not a firmer statement that the sample persists.
+    Otherwise the higher confidence wins, as before.
+    """
+    if claim.kept_after_absence_question != kept.kept_after_absence_question:
+        return not claim.kept_after_absence_question
+    return claim.confidence > kept.confidence
+
+
 def merge_chunk_isrs(chunk_isrs: list[AgentISR]) -> AgentISR:
     """Merge multiple per-chunk AgentISRs into a single consolidated ISR.
 
@@ -87,7 +101,7 @@ def merge_chunk_isrs(chunk_isrs: list[AgentISR]) -> AgentISR:
         for claim in isr.claims:
             if claim.technique_id is not None:
                 existing = technique_claims.get(claim.technique_id)
-                if existing is None or claim.confidence > existing.confidence:
+                if existing is None or _ranks_above(claim, existing):
                     technique_claims[claim.technique_id] = claim
             else:
                 normalized = claim.claim.lower().strip()

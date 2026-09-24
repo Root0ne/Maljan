@@ -45,6 +45,7 @@ from typing import Any
 from maljan.analysis.technique_ids import attack_reference_id, says_no_technique
 from maljan.core.logger import logger
 from maljan.reporting.models import CapabilityCell, TTPMapping
+from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER
 from maljan.schemas.stix_models import stated_confidence
 from maljan.utils.marked_cut import marked_cut
 
@@ -169,6 +170,9 @@ def build_capability_matrix(
                 platforms=platforms,
                 domain=domain,
                 not_published=not_published,
+                # Every analyst claim naming it reads as absence and was kept
+                # when asked. Published all the same: the analyst decided.
+                note=ABSENCE_TECHNIQUE_MARKER if info.get("noted") and all(info["noted"]) else "",
             )
         )
         if not_published:
@@ -392,6 +396,11 @@ def _collect_techniques(
                 # claim's: it was asked the questions, and the finding is a
                 # second mention of an answer that already stands.
                 row["claimed"] = True
+                # Whether each claim naming it reads as absence and was kept
+                # when asked: a note on the row, and nothing else.
+                row.setdefault("noted", []).append(
+                    bool(getattr(claim, "kept_after_absence_question", False))
+                )
                 # An id the catalogue does not have stays in the matrix and is
                 # marked. Dropping it deleted the analyst's answer from the one
                 # surface a reader looks at, which is the behaviour this whole

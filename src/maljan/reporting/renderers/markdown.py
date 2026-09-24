@@ -2945,6 +2945,8 @@ def _attack_row(
         rule_only = ctx.rule_only.get(cell.technique_id)
         if rule_only:
             status += f"; {rule_only}"
+        if cell.note:
+            status += f"; {cell.note}"
     # The platform's unresolved findings about this technique, beside its
     # row: the ATT&CK checks, and the judge crediting a source that never
     # named it.

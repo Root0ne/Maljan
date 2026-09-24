@@ -12,6 +12,8 @@ These are facts the platform states about itself; they are stated right now.
 
 from __future__ import annotations
 
+import pytest
+
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import MalwareReport
 from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
@@ -70,6 +72,14 @@ class TestTheVocabularies:
 
         (report,) = [o for o in bundle.objects if isinstance(o, Report)]
         assert report.report_types == ["malware"]
+
+    @pytest.mark.parametrize("verdict", ["Benign", "Suspicious"])
+    def test_a_report_whose_verdict_is_not_malware_is_not_typed_malware(self, verdict: str) -> None:
+        """A Benign export went out as a characterization of a malware instance."""
+        bundle = ExtendedSTIXRenderer().render(_report(verdict), None)
+
+        (report,) = [o for o in bundle.objects if isinstance(o, Report)]
+        assert report.report_types == ["threat-report"]
 
 
 class TestEveryObjectNamesItsProducer:

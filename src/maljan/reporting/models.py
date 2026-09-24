@@ -518,6 +518,11 @@ class CapabilityCell(BaseModel):
     # after the producer was told and kept it. The row itself stays exactly as
     # the producer wrote it — this says what the report did with it.
     not_published: str = ""
+    # A note on a published row, in words, and empty when there is none: the
+    # analyst claims naming it read as absence and the analyst kept the
+    # technique when asked (``isr_models.ABSENCE_TECHNIQUE_MARKER``). It
+    # changes nothing about the row's publication.
+    note: str = ""
 
 
 class TTPMapping(BaseModel):

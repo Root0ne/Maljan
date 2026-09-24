@@ -225,6 +225,9 @@ CODE_OWNED: dict[tuple[str, str], frozenset[str]] = {
     ),
     # The field names of this repository's own schema.
     ("pipeline/validation.py", "_schema_message"): frozenset({"keys"}),
+    # The repeated values joined by ``_named_ids``, which passes each one
+    # through ``safe_finding_value`` and bounds how many are named.
+    ("pipeline/validation.py", "repeated_item_violations"): frozenset({"named"}),
     # The evidence ids the answer was shown, each one matched as ``ev_`` and
     # digits before this function joins them. The cited item itself is the
     # producer's and is wrapped where it is quoted.

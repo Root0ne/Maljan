@@ -158,6 +158,25 @@ class TestTheAnalystGetsOneTurnToFixIt:
         assert [v.code for v in analyst.validation_findings] == ["attck.unknown_id"]
         assert analyst.validation_retries == 1
 
+    def test_a_kept_first_answer_is_published_as_what_survived(self) -> None:
+        """The conversation and the run summary say one thing about the kept answer.
+
+        The retry lost every claim, so the first answer was kept with its unknown
+        id — and the conversation used to publish that id's finding as
+        resolved, because the retry's empty answer raised nothing.
+        """
+        events: list[tuple[str, dict[str, Any]]] = []
+        analyst = _Analyst(_isr(_claim("T1699"), _claim("T1055")), ["   "])
+        analyst._container = MagicMock(event_sink=lambda kind, data: events.append((kind, data)))
+
+        analyst.safe_analyze_isr("raw data")
+
+        states = [
+            (data["code"], data["state"]) for kind, data in events if kind == "validation_feedback"
+        ]
+        assert states == [("attck.unknown_id", "retried"), ("attck.unknown_id", "survived")]
+        assert [v.code for v in analyst.validation_findings] == ["attck.unknown_id"]
+
     def test_a_retry_that_raises_keeps_the_first_answer(self) -> None:
         class _Broken(_Analyst):
             def _invoke_llm_with_timeout(self, messages: list, timeout: int) -> str:

@@ -488,8 +488,28 @@ Two producers use it:
   exfiltration), where "no evidence that …" and "such as" end nothing; a noun
   negation ("no evidence of") also reaches through a ", such as …" list it
   names to the end of its clause; "to prevent|avoid|stop|
-  block X" negates X only when X is the verb's object; "is absent" and "is
-  missing from" count only with the term as the clause's subject.
+  block X" negates X only when X is the verb's object; "is absent", "is
+  missing from", "is not present" and "was not observed" (a category noun such
+  as "mechanisms" may stand between) count only with the term as the clause's
+  subject.
+
+  What grounds a capability word is what the run found: a published technique
+  that is not a rule match only, an evidence section's key, and a word said —
+  not denied, by the same negation reader — in an analyst's claim, a finding's
+  title or a tool's section, one evidence item a line so a cue never reaches
+  the next item. A technique an analyst kept after the absence question below
+  is published and grounds like any other; the words of a claim that deny a
+  behaviour ground nothing, by the negation reader. Three things ground
+  nothing: a matrix row the run did not publish, a
+  reference table (`tool:api_capability`, which says what a catalogue lists an
+  import under), and the words of the sample's own strings (`tool:strings`,
+  `tool:iocs_from_file`, `tool:floss`), which count by their section's key. A
+  benign control report's "likely uses these registry APIs to establish
+  persistence" had been grounded by an id published from "does not contain any
+  obvious persistence mechanisms" and by the catalogue row "CreateMutexA |
+  persistence"; its "credential harvesting" by the sample's settings path
+  `/SSH/Auth/Credentials`. The terms include anti-analysis and anti-forensics,
+  and a capability question names two of its term's technique ids as examples.
 
   Two more questions are asked where they can be decided. **A value cited to
   the wrong entry** (`report.citation_wrong_entry`): a value a sentence states
@@ -768,7 +788,12 @@ The export names its producer in STIX's own vocabulary: one `identity` for this
 platform, `identity_class: system`, under an id derived once
 (`stix_renderer.PRODUCER_IDENTITY_ID`) so every export carries the same one,
 and `created_by_ref` naming it on every other object — a copy, so the judge's
-own bundle is not edited. The report object is typed `malware`. Every stored
+own bundle is not edited. The report object's type follows the verdict the
+record states (`stix_renderer.report_types_for`): `malware` under a Malware
+verdict, and `threat-report` under Suspicious or Benign — the `report-type-ov`
+vocabulary has no term for a finding of no threat, and its general entry is the
+one that claims no malware instance. A Benign export was once typed `malware`.
+Every stored
 export before this carried `software` and `malware-analysis`, neither of them
 in its vocabulary, and an identity no object named.
 
@@ -843,6 +868,43 @@ decides.
    catalogue. When the catalogue cannot be read the check says so instead of
    answering "nothing unknown": `run_summary.validation.not_run` lists
    `attck.unknown_id` and the run carries a degradation reason.
+   **A claim that reads as absence** (`attck.absence_claim`). A claim whose
+   text names the technique's behaviour only to say it is absent — "The binary
+   does not contain any obvious persistence mechanisms" with `T1547` — is
+   asked once whether the behaviour is absent (then `TECHNIQUE: NONE`) or the
+   sample does it. The reading decides only whether to ask; the platform never
+   withholds a technique the analyst keeps. The behaviour is read with the
+   capability check's own negation reader over the technique's vocabulary: the
+   capability terms that list it, its catalogue name, and its tactic names as
+   a category phrase only ("discovery mechanisms"; Stealth and Defense
+   Impairment also by their pre-19 name, Defense Evasion). The reading is
+   stricter than the capability check's about which cue governs a mention: no
+   comma and no coordinator ("and", "instead", "only", "but") between them,
+   and not a cue that opens an assertion ("no longer", "not merely", "never
+   stops"). Two more readings of absence do not need the cue next to the
+   mention: an item of a noun list a cue in the clause negates, the list
+   joined by commas and a final "or"/"and" and ending at its head noun ("does
+   not contain persistence, lateral movement, or exfiltration mechanisms"), and
+   the behaviour as the subject of "is absent", "is not present" or "was not
+   observed" (which the capability check also reads as absence). A later
+   mention in the same phrase shares the reading of the first
+   ("command and control (C2)"); any other mention is an assertion. An analyst
+   that drops the id has removed it. An id kept after the question is
+   published as usual, and the claim is noted
+   (`ClaimEvidence.kept_after_absence_question`): the ATT&CK table, the
+   judge's summary and a downstream stage's upstream-findings block print
+   "the claim naming it reads as absence; the analyst kept the technique when
+   asked" beside it (the table only when every analyst claim naming it is
+   noted). A question never sent — no time left after the loop — notes
+   nothing, and its finding says it was not asked. Long-term memory stores as
+   a past case's techniques only ids with no such note and a valid catalogue
+   entry, and the judge's memory query follows the same rule; a noted claim
+   never displaces a positive claim for its technique when chunk answers are
+   merged. A benign control run had published thirteen techniques from such
+   claims. The outcome every finding is published with in the
+   conversation is the kept answer's: an analyst whose retry lost claims keeps
+   its first answer, and the loop checks that answer again before it says what
+   became of each finding (`retry_with_feedback_sync(keep=)`).
 2. **Domain and platform consistency** (`attck.platform_mismatch`, exact). The
    catalogue's domain and platforms for the id against the routed sample —
    a Windows PE is `enterprise`/Windows, an APK `mobile`/Android, an ELF
@@ -2307,7 +2369,9 @@ is assembled from what the run gathered rather than recomputed beside it:
   Appendix B beside the section's wait ("Output budget of `composer:section`").
   A fixed 900 tokens dropped a section of a live report when the model reasoned
   past it. An answer the cap cuts is told so — `composer.cut_at_output_cap`,
-  naming the cap, the answer's size (characters, items begun) and its first 160
+  naming the cap, the answer's size (characters, items begun, and — when a
+  text field holds fewer values than items were begun — how many of them, at
+  least, repeat a value in each text field) and its first 160
   characters, and asking for an object that closes well inside it, each item
   once, short phrases, one line — and asked once through the existing loop.
   The question replaces the cut answer rather than following it, so the retry
@@ -2316,7 +2380,15 @@ is assembled from what the run gathered rather than recomputed beside it:
   reason says it was not asked. Only this question is sized so; every other
   question keeps the answer and is sent as before. How far each cut answer got (characters, items begun, how many of them
   distinct) is logged and, when the retry is cut too, carried into the
-  degradation reason. Every list contract asks for each item once on one line.
+  degradation reason. Every list contract asks for each item once on one line,
+  and an answer with rows alike in the fields that tell items apart is asked
+  once (`composer.repeated_items`) to confirm whether they are repeats, with
+  how many rows are alike and which; it is never told to remove a row, and
+  what comes back is kept as written, repeats and all, with the finding
+  recorded. The fields: a host identifier's kind and value, a configuration
+  key and value, a command's id and name, a flag, a channel's name and
+  endpoints, and a whole flow step — its `order` included, so a loop that
+  numbers each repeat anew is not caught.
   The host-identifier contract asks for the kind by what the entry shows the
   value is: a registry key or value only under a registry hive, from one of its
   top keys (`Software\`, `System\`) or where the entry records a registry
