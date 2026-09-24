@@ -85,17 +85,18 @@ class TestWhatGetsReported:
         assert isinstance(dropped, dict)
         assert dropped["empty_pattern"] == 1
 
-    def test_a_truncated_pattern_is_attributed_to_empty_pattern(self) -> None:
-        """The real LLM failure mode: generation stopped mid-pattern. It is the
-        same category as empty because the shape check is what rejects both."""
+    def test_a_truncated_pattern_is_kept_for_the_judge_to_be_asked_about(self) -> None:
+        """Generation stopped mid-pattern: the judge is asked (``stix.pattern_refused``)
+        and the export declines one it keeps. Only an empty pattern is dropped here."""
         ledger = TruncationLedger()
         objects = [_indicator("indicator--1", pattern="[file:name = 'x")]
 
-        enforce_bundle_integrity(objects, ledger=ledger)
+        kept = enforce_bundle_integrity(objects, ledger=ledger)
 
         dropped = ledger.snapshot()["integrity_dropped"]
         assert isinstance(dropped, dict)
-        assert dropped["empty_pattern"] == 1
+        assert dropped["empty_pattern"] == 0
+        assert len(kept) == 1
 
     def test_duplicate_attack_patterns_are_attributed_separately(self) -> None:
         ledger = TruncationLedger()

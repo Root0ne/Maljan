@@ -81,6 +81,7 @@ from maljan.schemas.stix_models import (
 )
 from maljan.schemas.stix_pattern import (
     object_path_problems,
+    pattern_refusal,
     read_comparisons,
     stray_backslash_values,
     unknown_object_types,
@@ -429,12 +430,14 @@ def _unasked_findings(report: Any, code: str) -> list[str]:
 
     Read from ``run_summary.validation.unresolved``, where a finding the answer
     to the judge's only retry raised first is recorded ``"asked": "false"``.
+    Each is its ``subject`` — the technique a credit is for, the malware
+    object's name — and, for a row stored before rows carried one, its message.
     """
     summary = getattr(report, "run_summary", None)
     validation = summary.get("validation") if isinstance(summary, dict) else None
     rows = validation.get("unresolved") if isinstance(validation, dict) else None
     return [
-        str(row.get("message") or "")
+        str(row.get("subject") or row.get("message") or "")
         for row in rows or []
         if isinstance(row, dict)
         and row.get("code") == code
@@ -489,7 +492,10 @@ def _missing_what_the_standard_requires(obj: Any, unasked: Sequence[str] = ()) -
         what_the_judge_did = (
             "the judge was not asked about it: it first appeared in an answer no turn was "
             "left to question"
-            if any(named in sentence for sentence in unasked)
+            if any(
+                said == str(getattr(obj, "name", "") or "").strip() or named in said
+                for said in unasked
+            )
             else "the judge kept it absent when asked"
         )
         return (
@@ -715,6 +721,15 @@ def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
     if stray:
         return (UNPUBLISHABLE_PATTERN_CODE, stray_backslash_sentence(pattern, stray))
     malformed = malformed_hash_in(pattern)
+    refusal = "" if malformed is not None else pattern_refusal(pattern)
+    if refusal:
+        return (
+            UNPUBLISHABLE_PATTERN_CODE,
+            f"the indicator {safe_finding_value(pattern)!r} is not in the exported bundle: the "
+            f"STIX pattern grammar refuses it ({safe_finding_value(refusal)}), so a consumer's "
+            "parser would refuse it whole. It is unchanged in the judge's own bundle.",
+        )
+    malformed = malformed_hash_in(pattern)
     if malformed is not None:
         algorithm, literal = malformed
         return (MALFORMED_HASH_CODE, malformed_hash_sentence(algorithm, literal))
@@ -920,8 +935,9 @@ class ExtendedSTIXRenderer:
                         obj,
                         credit,
                         asked=not any(
-                            _names_the_technique(sentence, str(credit.technique))
-                            for sentence in unasked_credits
+                            said.upper() == str(credit.technique).upper()
+                            or _names_the_technique(said, str(credit.technique))
+                            for said in unasked_credits
                         ),
                     )
                     self.declined.append(row)

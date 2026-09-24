@@ -594,19 +594,18 @@ def _remap_refs_poly(objects: list[Any], remap: dict[str, str]) -> None:
 
 
 def _is_wellformed_pattern(indicator: Any) -> bool:
-    """Whether an indicator's pattern is written whole, by the one pattern reader.
+    """Whether an indicator carries a pattern at all: anything but empty or whitespace.
 
-    :func:`~maljan.schemas.stix_pattern.reads_whole`: an observation expression
-    that opens, closes every value, bracket and parenthesis it opens, and names
-    an object path. Empty, whitespace and a pattern a generation cut off — a
-    ``[file:name`` comparison stopped before its closing quote, say — are
-    refused; every comparison operator the grammar has is kept. This used to
-    ask for an ``=`` and dropped every ``LIKE`` a judge wrote as an empty
-    pattern, command-and-control hosts among them.
+    What a pattern says is not decided here. A pattern the grammar refuses —
+    cut short, a comparison with nothing to compare, a value the grammar cannot
+    read — is the judge's to fix: it is asked once
+    (``stix.pattern_refused`` and the questions beside it), and one it keeps is
+    declined by the export with a record. This pass used to keep only
+    patterns containing ``=``, which dropped every ``LIKE`` a judge wrote as an
+    empty pattern before any question was asked; an empty pattern is the one
+    thing with nothing to ask about.
     """
-    from maljan.schemas.stix_pattern import reads_whole
-
-    return reads_whole(str(_oget(indicator, "pattern", "") or ""))
+    return bool(str(_oget(indicator, "pattern", "") or "").strip())
 
 
 def _merge_indicator_sets(kept: Any, duplicate: Any) -> None:
@@ -647,7 +646,7 @@ def enforce_bundle_integrity(
 
     Works on both parsed dicts (judge bundle) and pydantic SDOs (extended
     bundle). Order-preserving. Steps:
-      1. Drop indicators whose pattern is empty or not written whole.
+      1. Drop indicators whose pattern is empty.
       2. Deduplicate attack-patterns by technique ID (keep first; remap refs).
       3. Deduplicate indicators by (pattern_type, pattern) (keep first; remap refs).
       4. Drop relationships whose source/target is not in the bundle, and
@@ -673,11 +672,9 @@ def enforce_bundle_integrity(
     _objects_in = len(objects)
     _dropped: dict[str, int] = {}
 
-    # 1) drop indicators with an empty pattern or one a generation cut off. The
-    # shape check is the pattern reader's (``_is_wellformed_pattern``): it keeps
-    # every pattern the official validator accepts, whatever its comparison
-    # operator, and rejects only what is not written whole — no grammar, hence
-    # no over-dropping.
+    # 1) drop indicators with no pattern at all. A pattern the grammar refuses
+    # is kept for the judge to be asked about and, kept, declined by the export
+    # (``_is_wellformed_pattern``).
     _before = len(objects)
     objects = [o for o in objects if _otype(o) != "indicator" or _is_wellformed_pattern(o)]
     _dropped["empty_pattern"] = _before - len(objects)

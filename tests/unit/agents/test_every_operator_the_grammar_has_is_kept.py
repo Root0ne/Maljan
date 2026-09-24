@@ -18,13 +18,18 @@ is asked about and, kept, declined — never rewritten.
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from stix2patterns.validator import run_validator
 from stix2validator import ValidationOptions, validate_instance
 
 from maljan.agents.judge_postprocess import enforce_bundle_integrity
-from maljan.pipeline.validation import STRAY_BACKSLASH_CODE, validate_verdict_bundle
+from maljan.pipeline.validation import (
+    PATTERN_REFUSED_CODE,
+    STRAY_BACKSLASH_CODE,
+    validate_verdict_bundle,
+)
 from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
 from maljan.reporting.renderers.stix_renderer import (
     UNPUBLISHABLE_PATTERN_CODE,
@@ -34,7 +39,12 @@ from maljan.reporting.renderers.stix_renderer import (
     pattern_values,
 )
 from maljan.schemas.stix_models import Bundle
-from maljan.schemas.stix_pattern import like_fixed_text, reads_whole, stray_backslash_values
+from maljan.schemas.stix_pattern import (
+    like_fixed_text,
+    pattern_refusal,
+    reads_whole,
+    stray_backslash_values,
+)
 
 SHA256 = "c" * 64
 
@@ -62,16 +72,30 @@ ACCEPTED = (
     f"[file:hashes.'SHA-256' = '{SHA256}']",
 )
 
-# What a generation cut short leaves behind, and what is not a pattern at all.
+# What a generation cut short leaves behind, what is not a pattern at all, and
+# what keeps its brackets balanced and still is not one: a review's examples.
 REFUSED = (
-    "",
-    "   ",
     "[]",
     "[url:value LIKE '%example.org",
     "[file:hashes.'SHA",
     "[file:name = 'a.exe'",
     "file:name = 'a.exe'",
     "([file:name = 'a.exe'] OR [file:name = 'b.exe']",
+    "[file:name]",
+    "[file:name =]",
+    "[file:name LIKE]",
+    "[file:name = 'x' AND]",
+    "[file:name = 'x'] garbage",
+    "[x] file:name",
+    "[file:name = x]",
+    '[file:name = "x"]',
+    "[file:name = 'a''b']",
+    "[directory:path = 'C:\\Users\\Public\\']",
+    "[file:name = 'x' and file:size = 3]",
+    "[file:name IN ('a',)]",
+    "[file:name LIKE 3]",
+    "[file:name = 'a'] REPEATS 1.5 TIMES",
+    "[file:name = 'a'] START '2026-01-01T00:00:00Z' STOP '2026-02-01T00:00:00Z'",
 )
 
 
@@ -104,10 +128,38 @@ class TestWellFormedness:
         assert [o["pattern"] for o in kept] == [pattern]
 
     @pytest.mark.parametrize("pattern", REFUSED)
-    def test_a_pattern_not_written_whole_is_dropped(self, pattern: str) -> None:
+    def test_a_pattern_the_validator_refuses_is_refused_by_the_reader(self, pattern: str) -> None:
         assert _refused(pattern), "the fixture must be refused by the grammar"
 
+        assert not reads_whole(pattern)
+        assert pattern_refusal(pattern)
+
+    @pytest.mark.parametrize("pattern", ACCEPTED + REFUSED)
+    def test_the_grammar_alone_answers_as_the_validator_does(self, pattern: str) -> None:
+        """Where ``stix2-patterns`` is not installed — the image installs no dev group."""
+        with patch("maljan.schemas.stix_pattern._validator_refusal", return_value=""):
+            assert reads_whole(pattern) is not _refused(pattern)
+
+    @pytest.mark.parametrize("pattern", REFUSED)
+    def test_it_is_kept_for_the_judge_to_be_asked(self, pattern: str) -> None:
+        """Only an empty pattern is dropped by the pass; the rest are asked, then declined."""
+        assert [o["pattern"] for o in enforce_bundle_integrity([_indicator(pattern)])] == [pattern]
+
+    @pytest.mark.parametrize("pattern", ["", "   "])
+    def test_an_empty_pattern_is_dropped(self, pattern: str) -> None:
         assert enforce_bundle_integrity([_indicator(pattern)]) == []
+
+    @pytest.mark.parametrize("pattern", REFUSED)
+    def test_the_judge_is_asked_once_and_the_export_declines_it(self, pattern: str) -> None:
+        bundle = Bundle.model_validate({"type": "bundle", "objects": [_indicator(pattern)]})
+
+        codes = [v.code for v in validate_verdict_bundle(bundle, {"x"})]
+        exported, renderer = _export(pattern)
+
+        assert set(codes) & {PATTERN_REFUSED_CODE, STRAY_BACKSLASH_CODE}
+        assert pattern not in [getattr(o, "pattern", "") for o in exported.objects]
+        assert UNPUBLISHABLE_PATTERN_CODE in [code for code, _why in renderer.declined]
+        assert _errors(exported) == []
 
     def test_like_indicators_keep_their_relationships(self) -> None:
         """The run's shape: the domains and their edges reach the rules after the pass."""

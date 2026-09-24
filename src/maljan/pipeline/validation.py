@@ -110,6 +110,12 @@ class Violation:
     # found where no turn was left to ask on. A row that says the producer
     # "kept" something when asked is only true of a row that was asked.
     asked: bool = True
+    # What the finding is about, by a fact that survives the retry: the
+    # technique a credit names, the malware object's name. Two answers of one
+    # judge number their objects afresh, and an answer to a credit question
+    # renames the credited source — so "was this asked" is keyed on this where
+    # a check sets it, never on the words of the message.
+    subject: str = ""
 
     def __post_init__(self) -> None:
         # A row written by a validator has no route, and its message is its
@@ -128,6 +134,7 @@ class Violation:
             "sentence": self.sentence,
             "route": ROUTE_SEPARATOR.join(self.route),
             **({} if self.asked else {"asked": "false"}),
+            **({"subject": self.subject} if self.subject else {}),
         }
 
 
@@ -178,6 +185,7 @@ class ValidationTally:
                 "message": v.message,
                 **({"advisory": "true"} if v.advisory else {}),
                 **({} if asked and v.asked else {"asked": "false"}),
+                **({"subject": v.subject} if v.subject else {}),
             }
             for v in violations
         )
@@ -3455,6 +3463,7 @@ IS_FAMILY_MISSING_CODE = "stix.is_family_missing"
 FILE_UNIDENTIFIED_CODE = "stix.file_unidentified"
 UNKNOWN_OBJECT_PATH_CODE = "stix.unknown_object_path"
 STRAY_BACKSLASH_CODE = "stix.unescaped_backslash"
+PATTERN_REFUSED_CODE = "stix.pattern_refused"
 INDICATOR_TYPE_VOCABULARY_CODE = "stix.indicator_type_vocabulary"
 
 # STIX 2.1's indicator-type vocabulary. Open, so a value outside it is legal
@@ -3487,6 +3496,7 @@ def unknown_observable_type_violations(obj: Any, *, path: str) -> list[Violation
         is_observable_type,
         object_path_problems,
         observable_type_for,
+        pattern_refusal,
         stray_backslash_values,
     )
 
@@ -3551,6 +3561,29 @@ def unknown_observable_type_violations(obj: Any, *, path: str) -> list[Violation
                     "of the value is written twice in the pattern (four times in the JSON "
                     "string that carries it). Write it so, or drop the indicator; an indicator "
                     "that keeps it is not exported."
+                ),
+                path=path,
+            )
+        )
+    # Anything else the grammar refuses, asked in the grammar's own words when
+    # none of the questions above named it: a comparison with nothing to
+    # compare, a value written in double quotes, text after the expression
+    # closed. A digest the wrong length is the grounding check's question.
+    from maljan.agents._indicator_denylists import malformed_hash_in
+
+    refusal = (
+        "" if out or not pattern.strip() or malformed_hash_in(pattern) else pattern_refusal(pattern)
+    )
+    if refusal:
+        out.append(
+            Violation(
+                code=PATTERN_REFUSED_CODE,
+                message=(
+                    f"the indicator {safe_finding_value(named)!r} is not a pattern the STIX "
+                    f"grammar reads: {safe_finding_value(refusal)}. A consumer's parser refuses "
+                    "it whole. Write the comparison whole — an object path, an operator and a "
+                    "quoted value, in brackets — or drop the indicator; an indicator that keeps "
+                    "it is not exported."
                 ),
                 path=path,
             )
@@ -3783,6 +3816,7 @@ def credit_without_claim_violations(
                     "no source is not published."
                 ),
                 path=where,
+                subject=str(credit.technique).strip().upper(),
             )
         )
     return out
@@ -3931,6 +3965,7 @@ def validate_verdict_bundle(
                         "filled in for you."
                     ),
                     path=where,
+                    subject=named or str(getattr(obj, "id", "") or ""),
                 )
             )
         elif kind == "attack-pattern":
@@ -4972,18 +5007,19 @@ _OBJECT_PLACE_RE = re.compile(r"objects\[\d+\](?: '[^']*')?")
 def not_asked(violations: Sequence[Violation], shown: Sequence[Violation]) -> list[Violation]:
     """``violations``, each one the producer was never shown marked ``asked=False``.
 
-    A finding counts as shown when one of the same code said the same thing,
-    whatever position and label the object it is about had in the answer that
-    raised it. The answer to a retry numbers its objects afresh; the question
-    about a credit it kept is still the question it was asked.
+    A finding counts as shown when one of the same code was about the same
+    thing: its ``subject`` where the check names one — the technique a credit
+    is for, whatever source the answer credits it to now — and otherwise the
+    same words, whatever position and label its object had in the answer that
+    raised it. The answer to a retry numbers its objects afresh and renames
+    what the question told it to; the question is still the one it was asked.
     """
-    said = {(v.code, _OBJECT_PLACE_RE.sub("objects[]", v.message)) for v in shown}
-    return [
-        v
-        if (v.code, _OBJECT_PLACE_RE.sub("objects[]", v.message)) in said
-        else replace(v, asked=False)
-        for v in violations
-    ]
+
+    def _about(v: Violation) -> tuple[str, str]:
+        return (v.code, v.subject or _OBJECT_PLACE_RE.sub("objects[]", v.message))
+
+    said = {_about(v) for v in shown}
+    return [v if _about(v) in said else replace(v, asked=False) for v in violations]
 
 
 def _object_index(path: str) -> int | None:
@@ -5333,6 +5369,7 @@ def validation_metrics(
                 # And whether the producer was ever shown it: a finding the
                 # answer to the last retry raised first was never a question.
                 **({} if violation.asked else {"asked": "false"}),
+                **({"subject": violation.subject} if violation.subject else {}),
             }
         )
     return {

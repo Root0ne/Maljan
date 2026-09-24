@@ -127,6 +127,36 @@ class TestWhatTheRecordSays:
         assert row.asked is True
         assert "asked" not in row.to_dict()
 
+    def test_a_credit_the_answer_renamed_as_the_question_invited_was_asked(self) -> None:
+        """Asked about 'static', the judge wrote the summary's 'Static Analyst': still asked."""
+        shown = [
+            Violation(
+                code=CREDIT,
+                message="the relationship at objects[4] credits 'static' with T1003",
+                subject="T1003",
+            )
+        ]
+        left = [
+            Violation(
+                code=CREDIT,
+                message="the relationship at objects[9] credits 'Static Analyst' with T1003",
+                subject="T1003",
+            )
+        ]
+
+        (row,) = not_asked(left, shown)
+
+        assert row.asked is True
+
+    def test_a_credit_for_another_technique_was_not(self) -> None:
+        shown = [Violation(code=CREDIT, message="credits 'static' with T1003", subject="T1003")]
+        left = [Violation(code=CREDIT, message="credits 'static' with T1018", subject="T1018")]
+
+        (row,) = not_asked(left, shown)
+
+        assert row.asked is False
+        assert row.to_dict()["subject"] == "T1018"
+
     def test_the_run_summary_row_carries_it(self) -> None:
         unasked = Violation(code=CREDIT, message="m", asked=False)
 
@@ -155,6 +185,18 @@ class TestTheJudgesRound:
         found = await _verdict(_answer(whole, tokens=900), _answer(whole, tokens=900))
 
         (credit,) = [v for v in found if v.code == CREDIT]
+        assert credit.asked is True
+
+    @pytest.mark.asyncio
+    async def test_a_credit_renamed_in_answer_to_the_question_is_recorded_as_asked(self) -> None:
+        first = _credited_bundle()
+        first["objects"][2]["x_maljan_contributing_agents"] = ["dynamic"]
+        renamed = json.dumps(_credited_bundle())
+
+        found = await _verdict(_answer(json.dumps(first), tokens=900), _answer(renamed, tokens=900))
+
+        (credit,) = [v for v in found if v.code == CREDIT]
+        assert "Static Analyst" in credit.message
         assert credit.asked is True
 
 
