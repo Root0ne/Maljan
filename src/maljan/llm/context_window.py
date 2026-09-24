@@ -127,6 +127,8 @@ __all__ = [
     "probe_plan",
     "probe_window",
     "reply_reserve_tokens",
+    "derived_reply",
+    "output_cap_for",
     "table_window",
     "tool_definition_chars",
     "window_full_error",
@@ -209,9 +211,9 @@ ANSWER_SHARE = 0.125
 # ends with the whole reply reserve unspent, which is what the salvage needs.
 MIN_TOOL_OUTPUT_CHARS = 2000
 
-# What is held back for the model's own reply when nothing configures it, and
-# the most a derived analyst or judge output cap takes (``output_cap_for``): a
-# quarter of the window, never more than this.
+# The documented fallback for a reply when no window was learned for the model:
+# nothing is derived from an unknown window (``derived_reply``). A learned
+# window derives a quarter of itself, with no fixed figure above it.
 DEFAULT_REPLY_TOKENS = 8192
 
 # The reply reserve is never more than this fraction of the window. Without it
@@ -280,18 +282,21 @@ def unknown_window(reason: str = "") -> WindowFact:
     return WindowFact(FALLBACK_WINDOW_TOKENS, FALLBACK, said)
 
 
-def reply_reserve_tokens(window_tokens: int, configured: int = 0) -> int:
-    """What is kept back for the model's own reply, in tokens.
+def reply_reserve_tokens(window_tokens: int, configured: int = 0, declared: int = 0) -> int:
+    """What is kept back for the model's own reply, in tokens: the one rule.
 
-    ``configured`` is the deployment's own generation cap — the larger of the
-    analyst's and the judge's, because one cap serves calls made on behalf of
-    both. Zero means neither is bounded, and :data:`DEFAULT_REPLY_TOKENS`
-    stands in. Never more than a quarter of the window, so a small window is
-    not spent entirely on room for an answer that cannot be that long.
+    A quarter of the window, so a small window is not spent entirely on room
+    for an answer that cannot be that long, and no fixed figure above it: a
+    large window gives a long answer room. ``configured`` is an operator's own
+    generation cap and ``declared`` the model's own maximum output where its
+    provider states one (``model_output_limits.declared_output_limit``); either, when set, is
+    kept if it is smaller.
     """
-    wanted = int(configured) if int(configured) > 0 else DEFAULT_REPLY_TOKENS
-    ceiling = max(1, int(window_tokens) // REPLY_RESERVE_DIVISOR)
-    return max(1, min(wanted, ceiling))
+    tokens = max(1, int(window_tokens) // REPLY_RESERVE_DIVISOR)
+    for bound in (int(configured or 0), int(declared or 0)):
+        if bound > 0:
+            tokens = min(tokens, bound)
+    return max(1, tokens)
 
 
 def derive_tool_output_chars(
@@ -697,6 +702,13 @@ def _read_answer(ask: Ask, answer: httpx.Response, model: str) -> tuple[int, str
         reported = ask.read(payload, model)
     except Exception:  # noqa: BLE001 — a shape nobody anticipated is not a window
         return 0, ""
+    if ask.read is window_from_model_list:
+        try:
+            from maljan.llm.model_output_limits import note_from_model_list
+
+            note_from_model_list(payload, model)
+        except Exception:  # noqa: BLE001 — a limit nobody states is not one
+            logger.debug("context window: no output limit read from %s", ask.what)
     believed = believable(reported)
     if believed > 0 or not isinstance(reported, int) or reported <= 0:
         return believed, ""
@@ -1197,37 +1209,64 @@ class OutputBudget:
     tokens: int
     window: WindowFact
     generation_cap: int
+    derivation: str = ""
 
     def sentence(self) -> str:
         """The derivation in one sentence, so a reader can check the arithmetic."""
-        quarter = max(1, self.window.tokens // REPLY_RESERVE_DIVISOR)
-        wanted = (
-            f"the generation cap of {self.generation_cap} tokens (the larger of "
-            "llm.expert_max_tokens and llm.judge_max_tokens)"
-            if self.generation_cap > 0
-            else f"the default reply room of {DEFAULT_REPLY_TOKENS} tokens (no generation cap "
-            "is set)"
+        return self.derivation
+
+
+def derived_reply(window: WindowFact, configured: int, model: object, what: str) -> tuple[int, str]:
+    """``(tokens, sentence)`` for one reply of a model: the one rule, said out loud.
+
+    A quarter of the learned window; the smaller of that and ``configured``
+    (an operator's cap, named by ``what``) and the model's declared maximum
+    output where they are set. A window nothing reported derives nothing: an
+    operator's cap is used as set, and otherwise the documented fallback of
+    :data:`DEFAULT_REPLY_TOKENS`, and the sentence says the window is unknown.
+    """
+    from maljan.llm.model_output_limits import declared_output_limit
+
+    declared = declared_output_limit(model)
+    if window.source == FALLBACK:
+        if configured > 0:
+            return configured, f"{configured} tokens — {what} is set to {configured}"
+        return DEFAULT_REPLY_TOKENS, (
+            f"{DEFAULT_REPLY_TOKENS} tokens — the documented fallback: no window was learned "
+            f"for the model ({window.detail})"
         )
-        return (
-            f"{self.tokens} tokens — {wanted}, at most a quarter ({quarter}) of the model's "
-            f"{self.window.tokens}-token context window ({self.window.source}), the room an "
-            "analyst's reply is given"
-        )
+    quarter = max(1, window.tokens // REPLY_RESERVE_DIVISOR)
+    tokens = reply_reserve_tokens(window.tokens, configured, declared)
+    parts = [
+        f"a quarter ({quarter}) of the model's {window.tokens}-token context window "
+        f"({window.source})"
+    ]
+    if configured > 0:
+        parts.append(f"{what} of {configured}")
+    if declared > 0:
+        parts.append(f"the model's declared maximum output of {declared}")
+    said = parts[0] if len(parts) == 1 else "the smallest of " + ", ".join(parts)
+    return tokens, f"{tokens} tokens — {said}"
 
 
 def reply_budget(settings: Any, assignment: Any, *, probe: bool = True) -> OutputBudget:
-    """How long one reply of this model may run: the analysts' reply reserve, derived.
+    """How long one reply of this model may run: the one rule (:func:`derived_reply`).
 
-    The same rule the analysts' calls are held to (:func:`reply_reserve_tokens`):
-    the deployment's generation cap, never more than a quarter of the window the
-    model serves. A report section is one such reply, so it gets the same
-    room, and a model's reasoning is spent inside it rather than past it.
+    The same rule the analysts' and the judge's derived caps follow: a quarter
+    of the window the model serves, bounded by an operator's generation cap and
+    the model's declared maximum output where they are set. A report section is
+    one such reply, so it gets the same room, and a model's reasoning is spent
+    inside it rather than past it.
     """
     window = window_for_assignment(settings, assignment, probe=probe)
     cap = generation_reserve(settings)
-    return OutputBudget(
-        tokens=reply_reserve_tokens(window.tokens, cap), window=window, generation_cap=cap
+    tokens, sentence = derived_reply(
+        window,
+        cap,
+        getattr(assignment, "model", ""),
+        "the generation cap (the larger of llm.expert_max_tokens and llm.judge_max_tokens)",
     )
+    return OutputBudget(tokens=tokens, window=window, generation_cap=cap, derivation=sentence)
 
 
 @dataclass(frozen=True)
@@ -1246,10 +1285,11 @@ def output_cap_for(
     ``setting`` is ``expert_max_tokens`` or ``judge_max_tokens``. Above 0 it is
     the operator's value, used as set. At 0, the shipped default, it is derived
     from the smallest window of the models the agent may call — a quarter of
-    it, at most :data:`DEFAULT_REPLY_TOKENS` — the rule the reply reserve and
-    the composer's section budget already follow (:func:`reply_reserve_tokens`).
-    A window nothing reported derives nothing: the reply room this platform
-    shipped with applies, and the sentence says the window is unknown.
+    it, and the model's declared maximum output where its provider states one
+    — the one rule the reply reserve and the composer's section budget follow
+    (:func:`derived_reply`). Over a fallback list, the smallest of its models.
+    A window nothing reported derives nothing: the documented fallback of
+    :data:`DEFAULT_REPLY_TOKENS` applies, and the sentence says so.
 
     ``probe=False`` answers from what is already learned, the table and the
     declared window, without a request.
@@ -1257,31 +1297,23 @@ def output_cap_for(
     configured = int(getattr(getattr(settings, "llm", None), setting, 0) or 0)
     if configured > 0:
         return OutputCap(configured, f"{configured} tokens — llm.{setting} is set to {configured}")
+    best: tuple[int, str] | None = None
     try:
         from maljan.core.model_assignments import assignment_chain_for
 
-        facts = [
-            window_for_assignment(settings, assignment, probe=probe)
-            for assignment in assignment_chain_for(settings, agent, role=role)
-        ]
-        window = min(facts, key=lambda fact: fact.tokens) if facts else unknown_window()
+        for assignment in assignment_chain_for(settings, agent, role=role):
+            window = window_for_assignment(settings, assignment, probe=probe)
+            answer = derived_reply(window, 0, assignment.model, f"llm.{setting}")
+            if best is None or answer[0] < best[0]:
+                best = answer
     except Exception as exc:  # noqa: BLE001 — an unreadable assignment learns no window
         logger.debug("output cap: no window for %r (%s)", agent, exc)
-        window = unknown_window("the model's assignment could not be read")
-    if window.source == FALLBACK:
-        return OutputCap(
-            DEFAULT_REPLY_TOKENS,
-            f"{DEFAULT_REPLY_TOKENS} tokens — llm.{setting} is 0 and no window was learned "
-            f"for the model ({window.detail}), so the reply room this platform ships with "
-            "applies",
+    if best is None:
+        best = derived_reply(
+            unknown_window("the model's assignment could not be read"), 0, "", f"llm.{setting}"
         )
-    tokens = reply_reserve_tokens(window.tokens, 0)
-    return OutputCap(
-        tokens,
-        f"{tokens} tokens — llm.{setting} is 0, so derived: a quarter of the model's "
-        f"{window.tokens}-token context window ({window.source}), at most "
-        f"{DEFAULT_REPLY_TOKENS}",
-    )
+    tokens, said = best
+    return OutputCap(tokens, f"llm.{setting} is 0, so derived: {said}")
 
 
 def _questions(settings: Any, agents: list[str]) -> list[dict[str, Any]]:

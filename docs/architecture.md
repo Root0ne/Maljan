@@ -2474,8 +2474,12 @@ is assembled from what the run gathered rather than recomputed beside it:
 * **A section's output budget is the model's reply room.** At its default of
   0, `reporting.composer_section_max_tokens` derives each model's budget the
   way an analyst's reply room is derived (`llm.context_window.reply_budget`):
-  the larger of `llm.expert_max_tokens` and `llm.judge_max_tokens`, at most a
-  quarter of the context window that model serves, reasoning included. A
+  a quarter of the context window that model serves, with no fixed ceiling,
+  bounded by the larger of `llm.expert_max_tokens` and `llm.judge_max_tokens`
+  where an operator set them and by the model's declared maximum output where
+  its provider states one — the one rule the analysts' and the judge's derived
+  caps follow (`derived_reply`) — reasoning included. An unknown window keeps
+  the documented 8,192 and says so. A
   positive value is the operator's own budget. The derivation is printed in
   Appendix B beside the section's wait ("Output budget of `composer:section`").
   A fixed 900 tokens dropped a section of a live report when the model reasoned
@@ -2791,15 +2795,12 @@ pattern is one the official validator accepts is
 `schemas.stix_pattern.pattern_refusal`: the STIX 2.1 pattern grammar read over
 the one reader's quoted values — observation expressions, `AND`/`OR`/
 `FOLLOWEDBY`, the three qualifiers, every comparison operator, `IN` lists,
-`EXISTS`, the typed literals — and, where the pinned `stix2-patterns` is
-installed, its validator as the last word. It is a development dependency
-(through `stix2-validator`) and the image installs none, so at runtime the
-grammar answers alone; it agrees with the validator on acceptance for every
-pattern the tests hold it to, and the one thing only the validator sees is a
-digest of the wrong length written as a hex literal (`h'…'`), which the
-grounding check's digest question covers for a quoted digest. Moving
-`stix2-patterns` into the runtime dependencies would make the validator the
-answer everywhere. A pattern the grammar refuses — cut short, `[file:name]`,
+`EXISTS`, the typed literals — and the official validator
+(`stix2-patterns`, pinned in the runtime dependencies) as the last word. The
+validator decides wherever it is installed, which is every install from the
+lock; the grammar is the fallback where it is not, and agrees with it on
+acceptance for every pattern the tests hold it to except a digest of the wrong
+length written as a hex literal (`h'…'`), which only the validator sees. A pattern the grammar refuses — cut short, `[file:name]`,
 `[file:name =]`, a value in double quotes, text after the expression closed —
 is asked once (`stix.pattern_refused`, in the grammar's words, when no more
 specific pattern question named it) and, kept, declined as

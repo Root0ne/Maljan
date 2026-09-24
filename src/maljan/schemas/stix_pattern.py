@@ -202,11 +202,10 @@ def _read_quoted(text: str, start: int) -> tuple[str, int, bool, bool]:
 def reads_whole(pattern: str) -> bool:
     """Whether ``pattern`` is a pattern the official validator accepts.
 
-    :func:`pattern_refusal` answers the grammar, and where the pinned
-    ``stix2-patterns`` package is installed its validator has the last word:
+    :func:`pattern_refusal` answers the grammar, and the official validator —
+    ``stix2-patterns``, pinned in the runtime dependencies — has the last word:
     it also refuses what no grammar can see, such as a digest of the wrong
-    length. Where it is not installed — it is a development dependency, and the
-    image installs without them — the grammar answers alone.
+    length. The grammar answers alone only where the package is absent.
     """
     return not pattern_refusal(pattern)
 

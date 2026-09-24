@@ -833,9 +833,15 @@ change landed on `main`.
 
 - **The analysts' and the judge's output caps are derived from the window.**
   `llm.expert_max_tokens` and `llm.judge_max_tokens` ship at 0, which derives
-  each agent's cap from the window its model serves — a quarter of it, at most
-  8,192 tokens, the reply reserve's rule — and records the derivation in
-  `run_summary.generation.output_caps`. A value above 0 is used as set.
+  each agent's cap from the window its model serves — a quarter of it, with no
+  fixed ceiling, and the smaller of that and the model's own maximum output
+  where its provider declares one — and records the derivation in
+  `run_summary.generation.output_caps`. A value above 0 is used as set. The
+  reply reserve and the composer's section budget follow the same one rule; a
+  window nobody reported keeps the documented 8,192 and says so.
+- **The official STIX pattern validator decides at runtime.** `stix2-patterns`
+  2.1.2 moved from the development group into the runtime dependencies; the
+  pattern grammar in `schemas.stix_pattern` is the fallback where it is absent.
 
 - **The judge writes a compact bundle.** The verdict contract asks for the
   JSON on one line, the confidence, basis and credits on the relationship only
@@ -4576,7 +4582,12 @@ change landed on `main`.
 "derived from the window" — no longer "unbounded". A stored setting keeps its
 value; a deployment that relied on 0 for no cap should set a value instead.
 On a 32,768-token window the derived cap is the 8,192 that shipped before; on a
-smaller window it is smaller. `run_summary.generation` may carry
+smaller window it is smaller, and on a larger one larger (32,768 on a
+131,072-token window) unless the model declares a smaller maximum output. The
+composer's derived section budget and the reply reserve follow the same rule,
+so on a large window both grow and the tool budget is correspondingly smaller;
+an unknown window keeps 8,192. `stix2-patterns==2.1.2` is a runtime
+dependency. `run_summary.generation` may carry
 `output_caps`. Three more validation codes: `stix.pattern_refused`,
 `stix.shape_names_a_value` (both counted in `run_summary.validation`), and a
 judge indicator with an empty pattern is the only one the integrity pass drops,

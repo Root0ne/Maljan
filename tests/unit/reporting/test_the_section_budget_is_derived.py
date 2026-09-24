@@ -69,17 +69,17 @@ class TestTheDerivation:
 
         assert composer.output_cap == 12000
 
-    def test_no_generation_cap_takes_the_default_reply_room(self) -> None:
+    def test_no_generation_cap_takes_a_quarter_of_the_window_with_no_ceiling(self) -> None:
         composer, _built = _composer(131072, judge_max_tokens=0, expert_max_tokens=0)
 
-        assert composer.output_cap == 8192
+        assert composer.output_cap == 32768
 
     def test_the_derivation_is_said(self) -> None:
         composer, _built = _composer(16384, judge_max_tokens=8192, expert_max_tokens=8192)
 
         assert composer.budget_note.startswith("4096 tokens — ")
         assert "16384-token context window (probed)" in composer.budget_note
-        assert "8192 tokens" in composer.budget_note
+        assert "of 8192" in composer.budget_note
 
     def test_the_run_summary_prints_it_beside_the_wait(self) -> None:
         composer, _built = _composer(16384, judge_max_tokens=8192, expert_max_tokens=8192)
