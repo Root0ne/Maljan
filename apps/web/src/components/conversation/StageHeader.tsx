@@ -13,6 +13,7 @@ import { CircleCheck, CircleDot, SkipForward } from "lucide-react";
 
 import type { StageState } from "@/lib/conversation";
 import { formatStageDuration } from "@/components/analysis/stageTimeline";
+import { progressTone } from "@/lib/status";
 
 const STATE_ICON = {
   running: CircleDot,
@@ -21,9 +22,11 @@ const STATE_ICON = {
   pending: CircleDot,
 };
 
+/* Running and done are the run's own colours (`lib/status.ts`); a stage that
+ * declined or has not started is muted. */
 const STATE_TEXT: Record<StageState, string> = {
-  running: "text-status-blue",
-  done: "text-status-green",
+  running: progressTone("running").text,
+  done: progressTone("done").text,
   skipped: "text-text-muted",
   pending: "text-text-muted",
 };

@@ -8,6 +8,154 @@ change landed on `main`.
 
 ### Added
 
+- **An analyst answer cut at its output cap is asked for a whole shorter one**
+  (`isr.cut_at_output_cap`), as the judge's and a report section's are: the
+  question states the cap, the characters the answer ran to, the CLAIM blocks
+  it began and the length it was cut at as the bound to stay under. The cut
+  answer is described rather than sent back, the question is asked only when
+  it and an answer of the cap's size fit the model's window, and a whole answer
+  that comes back is kept even with fewer claims. The cap is unchanged. A
+  reference static analyst's 42 claims ended at exactly its 4,096 tokens; its
+  retry spent the cap again, returned no claim, and fourteen questions went
+  unanswered.
+- **A technique only the judge named says why it is published.** Its ATT&CK
+  row carries "stated by the judge and claimed by no analyst; a technique the
+  judge states is published as its own claim" — the rule it is published by.
+
+- **A claim whose sentence does not describe its technique is asked about.**
+  A claim carrying a technique id whose sentence shares no term with that
+  technique — no capability term listing the id, no word of its catalogue
+  name (compared with common endings off, so "obfuscation" shares a term with
+  "Obfuscated Files or Information"), no tactic as a category phrase — is
+  asked once (`attck.claim_does_not_describe`) to keep the technique only if
+  the sample does it. The analyst's answer stands and a kept id is published
+  as stated. An absence claim and a platform mismatch are asked their own
+  question instead. A reference run had published OS Credential Dumping on
+  "accesses the PEB … to bypass sandboxing" and Valid Accounts on "a
+  Trojan/Backdoor that performs system reconnaissance".
+
+- **A claim that reads as absence is asked about its technique id.** A claim
+  carrying a technique id is asked once (`attck.absence_claim`) whether the
+  behaviour is absent (`TECHNIQUE: NONE`) or the sample does it when every
+  place it names the technique's behaviour — a capability term listing the
+  id, the catalogue name, or a tactic name followed by a word such as
+  "mechanisms" — is read as absence: a negation cue in the same clause with no
+  comma or coordinator ("and", "instead", "only", "but") between them and not
+  one that opens an assertion ("no longer", "not merely", "never stops"); an
+  item of a noun list such a cue negates, the list ending at its head noun
+  ("does not contain persistence, lateral movement, or exfiltration
+  mechanisms"); or the subject of "is absent", "is not present" or "was not
+  observed". A text that never names the behaviour is not asked. The claim and
+  its id are never edited, and the platform never withholds a technique the
+  analyst keeps: it is published with a note ("the claim naming it reads as
+  absence; the analyst kept the technique when asked") in the ATT&CK table and
+  the judge's summary. The capability check also reads "is not present" and
+  "was not observed" after the term as absence.
+- **A section answer with alike rows is asked once whether they are repeats**
+  (`composer.repeated_items`), compared on the fields that tell items apart,
+  and kept as written if it stands; it is never told to remove a row. The
+  cut-at-cap question now says, per text field, how many of the items begun at
+  least repeat a value. A host-identifier answer had begun 161 items of which
+  at most 19 differed.
+- **Two capability terms**: anti-analysis and anti-forensics, read by the
+  report's capability check and by the absence reader.
+
+- **A report sentence the checks left standing is marked where it stands.** A
+  sentence the capability check or the rule-match check asked about, and the
+  retry kept, is recorded on the report (`flagged_statements`) and the
+  Markdown and HTML reports print a mark after it; its words are unchanged.
+  One run printed fifteen flagged sentences with nothing on them.
+- **A technique only a rule match stands behind is not written as an
+  action.** Every section's and the summary's list of published techniques
+  carries its rule-match-only note; a sentence naming one as something the
+  sample does is asked about once (`report.rule_match_as_action`). A report
+  had written "The sample dumps credentials from the target system" for a
+  one-string YARA match.
+
+- **The report model states the host identifiers it read.** The report
+  contract gains a composer section, `host_identifiers`
+  (`HostIdentifier{kind, value, purpose, evidence_refs}` on
+  `technical_analysis`): what a responder can search a host for, each value as
+  the entry the model read it in records it, with the entry cited. The model
+  decides what goes in; the platform copies no string in. An identifier citing
+  no entry of the run is asked about once (`report.identifier_uncited`). The
+  Markdown prints the rows in §9 under the report model's voice, unpublished;
+  the console draws them in the technical-analysis panel. A benchmark report
+  had printed nine such items only as raw rows of its decoded-strings dump.
+- **A value cited to the wrong entry is asked about.** A value a report
+  sentence states verbatim — in quotes or backticks, or a record's `value` or
+  `endpoints` — is looked for in the entries the sentence cites, as the run
+  holds them (`validation.EntryTexts`). Held only by another entry, the report
+  model is asked once with that entry named (`report.citation_wrong_entry`);
+  held by none, nothing is said. The id is never rewritten. A benchmark report
+  cited the reputation lookup for strings only the decoded-strings entry held,
+  in four sections.
+- **A technique written with another technique's name is asked about**
+  (`report.technique_name`), from the vendored ATT&CK table, with the
+  catalogue's name and the id the written name belongs to.
+
+- **What changed between two runs.** `GET /api/v1/reports/diff?a=&b=`
+  (`by=job` for job ids) compares two stored analyses section by section:
+  verdict, confidence, severity and family with who stated each; ATT&CK
+  techniques published; indicators by kind and value; key findings, analyst
+  findings, persistence, configuration, commands, C2 channels and the
+  capability profile; YARA, Sigma and capa rule matches; STIX objects by type
+  and an identifying property rather than by id; and run facts — profile,
+  models, token figures, wall time, tools called, degradation reasons. Each
+  section names the key its rows are paired by, and a row the record does not
+  key stably is listed as present in one run, never paired by guess, and rows
+  under one key pair as a multiset, so a run compared with itself shows no
+  difference. Rows cite each run's evidence-ledger ids where the record holds
+  them in an id field, and never an id read out of prose. It is read only from the two
+  stored records, says whether the SHA-256 is the same, and answers 404 unless
+  the caller may read both runs. The console's analysis header gains "Compare
+  with another run", which offers the same sample's runs first and then any
+  run, and a printable compare page. `GET /jobs` takes `sample_id`. The one
+  implementation is `maljan.reporting.run_diff.diff_runs`.
+
+- **A team is checked before it is saved, and shown as the graph it is.** The
+  rules the settings model applies to a team are now problem lists
+  (`stage_list_problems`, `stage_member_problems`, `stage_condition_problem`,
+  `builtin_profile_changed` in `maljan.core.config`): the model raises the
+  first, and the new team lint (`maljan.core.team_lint`) reports all of them,
+  each on the stage it concerns, adding a named cycle and warnings that never
+  block apply — a stage the verdict does not wait for or that runs after it, a
+  condition false for every sample, a condition reading a stage the team lacks
+  or has not run yet, an enabled agent nothing uses. The apply path refuses
+  from the lint, so the preview and apply say the same sentences, and a test
+  holds every model refusal to a lint error word for word.
+  `POST /api/v1/settings/lint-teams` (admin) serves the findings and each
+  team's layout; the team editor calls it as a team is edited and draws the
+  stage graph beside it, findings marked on the stage and listed in words.
+  The layout is `maljan.core.team_layout`, which the architecture-page team
+  diagrams now use too; the triage pack's adoption of a root stage is one rule,
+  `pipeline.topology.adopted_roots`, read by the builder and the layout.
+  A team has no size limit, so every pass over one is linear in its stages
+  and edges and none recurses: loops are found by an iterative Tarjan pass,
+  rows by Kahn's method, and the model's debate checks in one pass each. The
+  lint route and the agent-map half of `PATCH /settings` run in a worker
+  thread. A `when` nested too deeply for Python's parser is refused as a
+  condition error instead of escaping as a server error.
+- **Changed:** apply's team refusals now carry the settings model's own
+  sentences — a member error and a condition error name their stage (and a
+  member error its team), a debate's hand-over error and the verdict-judge
+  error are the model's wording — and a stage's field error is keyed by the
+  stage key rather than its position, like every other stage error. A loop
+  is written out once, as a real dependency path, on its first-declared
+  stage; every other stage on it points to that stage.
+- **The STIX bundle as a relationship graph.** DETECTION's STIX section gains
+  Graph and Table views beside the JSON, all three reading the bundle the
+  `/reports/{id}/stix` export serves. Nodes are the bundle's objects, an
+  unrelated one included; edges are its `relationship` and `sighting` objects
+  labelled with their own type, with a confidence only where the bundle
+  states one. Containers no relationship names and relationships to objects
+  the bundle does not hold are listed in the table with the reason rather
+  than drawn. Flat colour by STIX type from the console tokens, keyboard
+  focusable nodes, a table under the graph for screen readers, the object's
+  JSON and its evidence-ledger ids on selection, SVG and PNG export. A bundle
+  above 300 objects opens on the table. No new dependency: the layout is a
+  small deterministic force layout in `components/analysis/stixGraph.ts`.
+
 - **The live conversation of a run, sequenced, kept and resumable.** Six new
   event types beside `agent_message`: `tool_call_started` /
   `tool_call_finished` (the latter carrying the evidence-ledger id the result
@@ -561,9 +709,247 @@ change landed on `main`.
   The value reaches the knowledge sidecar — the process where the build
   actually happens — as `MALJAN_INDEX_RETRY_SECONDS`, which that server is
   allowed to read and applies once at start-up.
+- **The served context window, learned for free and shown where it matters.**
+  `GET /api/v1/settings/context-window` answers with the window the configured
+  models serve, the four-word source it was learned from (`declared`, `probed`,
+  `table`, `fallback`), the sentence behind that word, the characters-per-token
+  figure, the tokens held back for a reply and the cap one tool answer would
+  get on an empty conversation. It spends no tokens: behind it are the metadata
+  endpoints in `maljan.llm.context_window`, cached per provider, endpoint and
+  model, and an endpoint that says nothing falls to the vendored table and then
+  to the stated fallback rather than to an error. The Settings page prints it
+  beside `core.preprocessing.max_tool_output_chars`, with the source word
+  itself, and says which setting would fix an unknown window.
+- **A documentation site, built from the same pages `docs/` already carries.**
+  `mkdocs.yml` at the repository root builds them with MkDocs Material — light
+  and dark palettes, built-in search, edit links against `dev` — with no page
+  written twice. `.github/workflows/docs.yml` builds it on a pull request that
+  touches `docs/**` or `mkdocs.yml` and deploys it to GitHub Pages on a push to
+  `main`; a `docs` dependency group keeps MkDocs Material out of the product's
+  own dependencies.
+- **The dashboard answers at a glance.** Each of the latest runs carries its
+  verdict as a chip, in the shared verdict colours and in words; a run with no
+  verdict yet shows its status. A "Tools used" list draws the tools the
+  caller's last 20 completed runs called as flat bars with the counts printed,
+  from the new authenticated `GET /api/v1/dashboard/tools?limit=` (default 20,
+  at most 100), which sums each run's `run_summary.evidence.by_tool`. Its
+  `runs` counts only the runs whose report carries that per-tool record, and
+  `read` every completed run it looked at, so a report older than the record
+  is said on the dashboard rather than counted as a run that called nothing.
+- **Copy a row's SHA-256 and job id.** Every row of the analyses list copies
+  its sample's SHA-256 and its job id in one press each, with the confirmation
+  announced to a screen reader. The IDENTITY hash rows and the DETECTION rule
+  cards use the same control and now announce it too.
+- **Time per stage on the Summary.** Each stage that took time is listed with
+  its duration and a bar against the run's total elapsed, from the same rows
+  and formatter as the header's stage strip.
+- **A per-tool table for a tool server.** Settings → tool servers draws a
+  tested server's tools as a table with a search, "Select all" / "Select none"
+  over the rows shown, a live "enabled N of M" and, where the capability
+  manifest marks a tool unavailable, its reason and remedy on its own row. It
+  edits the existing per-server tick list; there is no new setting.
+
+- **An agent may name models to fall back to, tried only when a provider
+  fails.** `llm.agents.<key>.fallbacks` is an ordered list of models, each
+  written like the entry's first one (provider, model, optional temperature and
+  — for `openai` and `ollama` — base URL). The next model answers a turn only
+  when the one before failed as a provider: a refused or dropped connection, a
+  timeout, HTTP 5xx, 408 or 429, a model the server does not have, a refused
+  credential, or a refusal the provider reports as an error. An answer the
+  validation loop rejects is still sent back to the model that wrote it, and a
+  guard case in `tests/unit/test_no_silent_overrides.py` proves it is never
+  asked of another model. Every turn records which model gave it: the ledger
+  entry of each call it asked for carries `model` (revision `20260928000000`),
+  `agent_message_delta` carries `model` and `tokens`, a new `model_fallback`
+  event names the switch with its reason in words (whether or not deltas
+  stream), and `run_summary.models` counts turns per agent and model with every
+  fallback's reason. Each fallback passes the probe gate the first model does — the
+  `agent` probe asks every model on the list, the `llm` probe the ones its
+  provider serves, and the gate names a missing one as the model the agent
+  *falls back to* — and the context-window budget counts every model on every
+  list, the smallest window governing. The Agents page edits the list (add,
+  remove, move up and down).
+- **What a run spent, in tokens.** `run_summary.tokens` sums the usage every
+  provider reported — prompt and completion tokens, and the cost an
+  OpenAI-compatible router reports where it reports one — for the run and per
+  agent (`per_agent`), counts the calls whose provider reported nothing as
+  `unreported_calls`, and carries the `sentence` the report prints. The
+  report's run summary and the console's "What the run spent" gain that
+  tokens line. There is no price table.
+- **A tool server that keeps failing is rested, and says so.** Per job and per
+  server, `core.mcp.breaker.failures_to_open` (3) transport failures in a row —
+  a timeout, a refused connection, the server's process gone — rest the server
+  for `core.mcp.breaker.cooldown_seconds` (60). A call made while it rests is
+  answered by the platform with a structured tool error (`server_resting`)
+  naming the server, that it is resting and when it will be tried again; after
+  the cooldown one call is let through and a success ends the rest. A tool
+  that answers with its own error never counts.
+  `core.mcp.breaker.max_concurrent_calls` (4) caps how many calls one server
+  has in flight for one job. Each rest is published as `tool_server_rested`,
+  drawn in the conversation, and kept in `run_summary.server_rests`, which the
+  report and the console print. Every default's origin is written beside it
+  in `docs/configuration.md`; all three are judgements, because no recorded
+  live run had a tool server fail at the transport.
+- **An emulating string decoder on the analysis server.** `floss` recovers the
+  decoded, stack and tight strings of a PE by emulating the sample's own
+  decoding and string-building functions under vivisect (FLOSS, FLARE's pinned
+  standalone build run as a child process with a 600 s ceiling and a 4 GiB
+  address-space limit; the sample is never executed). Each row names
+  the function that decoded or built the string, as a virtual address and
+  relative to the image base, and a decoded string its call site. The answer is
+  paged like `strings`, with `kinds` and `pattern` filters, and only the first
+  call on a file emulates. On an encrypted-string loader it recovered 81
+  strings in 38 s — the mutex name, the install directory and file names, the
+  scheduled-task name, both C2 URLs, the User-Agent, the beacon format and the
+  command words that a plain `strings` pass cannot see.
+- **The tool-definition size is on the record.** The context budget counted
+  every tool definition with every request and never wrote the figure down,
+  so a run whose answer cap shrank could not show how much of that was the
+  definitions. Each loop's budget record, every `budget_tick` and each agent's
+  `run_summary.budget` row now carry `tool_definition_chars` (the largest of an
+  agent's loops in the summary), for the analysts and the judge alike.
+
+- **Key findings, an execution flow, a configuration table and a command
+  table, written by the report model.** The narrative round answers two to
+  six key findings, each with the ledger entries it cites; the composer writes
+  the execution flow (each step marked *observed* or *assessed*), the
+  configuration it recovered with how each value was obtained, the commands
+  the sample accepts, prose for API and string resolution, command and control
+  and payloads, and C2 channels with their endpoints. Each is asked for as the
+  exact JSON object with an example and printed as written. New validation
+  codes, fed back once and recorded when they survive: `narrative.ungrounded_finding`,
+  `report.flow_voice`, `report.configuration_uncited`.
+- **`reporting.defang`.** `defang(value, kind)` writes network indicators the
+  way analysts exchange them (`hxxps://`, `[.]`, `[:]`, `[@]`) and leaves every
+  other kind unchanged; `ProseDefanger` applies it to exactly the run's own
+  indicators inside prose.
+- **`pe_info` reports export ordinals and addresses, the export directory's
+  name and the version resource's naming strings** (`export_rows`,
+  `export_name`, `version_info`). The report's identity gains `architecture`,
+  `is_dll`, `export_name` and `internal_name`, and the compile timestamp is
+  read from the header.
 
 ### Changed
 
+- **The analysts' and the judge's output caps are derived from the window.**
+  `llm.expert_max_tokens` and `llm.judge_max_tokens` ship at 0, which derives
+  each agent's cap in three cases: the model's declared maximum output (a model
+  list entry, or a vendored `max_output` row sourced from the vendor's page)
+  bounded by a quarter of its window; a quarter of the window for a runtime we
+  run, known by the probe's answer from its own `/props`, `/api/show` or `/info`
+  and never by a loopback address alone; the documented 8,192 for a hosted API that declares no maximum. The
+  derivation is recorded in `run_summary.generation.output_caps`. A value above
+  0 is used as set. The reply reserve and the composer's section budget follow
+  the same rule; a window nobody reported keeps the documented 8,192.
+- **The official STIX pattern validator decides at runtime, alone.** Its
+  verdict is the whole answer where it can be imported; `==` and `NOT EXISTS`
+  are accepted. `stix2-patterns`
+  2.1.2 moved from the development group into the runtime dependencies; the
+  pattern grammar in `schemas.stix_pattern` is the fallback where it is absent.
+
+- **The judge writes a compact bundle.** The verdict contract asks for the
+  JSON on one line, the confidence, basis and credits on the relationship only
+  (never repeated on the indicator or attack-pattern it relates), an
+  attack-pattern with at most one sentence of description, and no
+  `pattern_type` (always `stix`, filled in); created, modified, spec_version
+  and valid_from were already left out. Every relationship is still the
+  judge's own, and an indicator is related only to what it indicates. The
+  question after a cut names the answer's characters, the objects it began by
+  type and its indented lines, and asks for the compact bundle. A reference
+  judge's answer was cut at its 8,192-token output cap twice and the verdict
+  fell back to text extraction; only its first 2,000 characters are stored,
+  pretty-printed, with a relationship's annotations repeated on its indicators.
+  The output cap is unchanged.
+
+- **A composer section's output budget is derived, not fixed.**
+  `reporting.composer_section_max_tokens` ships at 0, which gives each model
+  of the reporter's list the room an analyst's reply is given on it: the
+  larger of `llm.expert_max_tokens` and `llm.judge_max_tokens`, at most a
+  quarter of the context window the model serves
+  (`llm.context_window.reply_budget`). The run summary prints the derivation
+  beside the section's wait. A positive value is an operator's own budget, as
+  before. The fixed 900 dropped a live report's payloads section.
+- **One publish decision for the judge's values.** The export asks every
+  value a judge indicator names the one publish rule, as the report's own row
+  for it is asked, and the judge's assertion is not a second source; a
+  refused value declines the indicator (`stix.indicator_not_published`). The
+  IOC table and `/iocs` ask the same rule of the same values (stored on the
+  report as `judge_indicators`) and print the same answer. The rule now
+  answers a hash (publishable when a whole digest a second source knows) and a
+  command line (never published). `/iocs` may serve `email`, `path`,
+  `registry`, `mutex` and `command` rows, and a `hash` of another file, with
+  source `judge`.
+- **A network value recovered by emulation is its own publish source.** A
+  domain, address or URL the run's FLOSS entry holds as a decoded, stack or
+  tight string is publishable when it passes every other check of the rule
+  and is not a well-known benign host, with the reason "recovered by emulation
+  (decoded strings), ev_NNNN"; never under a Benign verdict or a verdict the
+  judge did not state with a confidence, and a value the static string sweep
+  read — alone, or as a whole value in its plain strings beside a decoded row —
+  stays the sweep's. The record is built from the ledger at build time and
+  stored on the report (`emulated_strings`), and says when it is partial. A
+  benign host is read by its registered name (`*.co.uk`), and a public
+  resolver's address is benign. The export, the IOC table and `/iocs` read it
+  through the one rule.
+- **A draft detection rule matches only what the run publishes.** YARA
+  strings and Suricata alerts are drawn from the IOC table's published rows,
+  and a Sigma selection from published rows and what a sandbox recorded; the
+  drafts are generated after the export. Import names are no longer YARA
+  strings. A Benign verdict gets no draft, and §10.2 says why. A registry key
+  is compared without its hive or value name on both sides, and the
+  twelve-value cap on each Sigma selection is gone. A Sigma registry
+  selection names the key without its hive, so it matches Sysmon's
+  `HKU\<SID>\...` events.
+- **Every analyst claim reaches its composer section.** The fixed claim cuts
+  (ten per prompt; twelve, eight and fourteen in three bundles) are gone; the
+  claims share the window's room with the tool answers. A section's facts
+  enter whole (the fixed cuts on techniques, network values, user agents,
+  process lines, command lines, persistence, capabilities, packers and carved
+  files are gone), and a section whose facts alone exceed the window records a
+  degradation.
+- **A citation check asks about a whole digest and a word spelled with hex
+  letters**; only `0x` hex, a hex run with a digit, or a bare number is
+  undecidable. The version-word check before an address reads a bounded
+  look-back.
+- **A technique only a rule match stands behind is marked** in the ATT&CK
+  table ("rule match only (yara `rule`, N string(s)), no analyst claim") and
+  grounds no capability word. The publish rule is unchanged.
+- **A section's tool answers share the reporter model's window** after the
+  section's output budget and the rest of its prompt, instead of a fixed 1,200
+  characters (and 2,500 before that); the host-identifier section and its
+  bundle carry no fixed row cap.
+- **A composer section is shown the techniques the report publishes and,
+  after each analyst claim, the entries that hold the values the claim
+  quotes.** A section shown only a claim had called it unsupported while a
+  strings entry held the value and the report published the technique.
+- **Every section's contract** (`composer.section_contract`) says a list item
+  is written only with a value, never with nulls, and a value is a JSON
+  string, numbers included; the prompt-leak test now reads every contract.
+- **FLOSS runs beside capa in the triage pack** when the host's available
+  memory, less capa's peak as this worker measured it and FLOSS's 4 GiB bound,
+  stays at or above the new `triage.memory_floor_mb` (10,240 MiB), and the
+  worker's cgroup limit, where it has one, holds both; otherwise the two run
+  in turn as before, and `run_summary.triage.floss` says which and why. Its
+  entry is still last, with its own clock. On PuTTY: 312 s → 183 s, peak
+  resident memory of the pack's process tree 1.6 GB → 2.3 GB.
+- **The prompt reading rate is measured** beside the generation rate, from
+  Ollama's `prompt_eval_count`/`prompt_eval_duration` and llama.cpp's
+  `timings.prompt_n`/`prompt_ms`, and recorded in `run_summary.generation`.
+
+- **The STIX export cites the ledger.** An exported object now carries the
+  ledger entries the run's record ties to it, as `x_maljan_evidence_refs`
+  (`ev_` ids, each once, in ledger order): the sample's `uses` edge to a
+  technique carries the entries an analyst finding naming it cites and the
+  entries of the asserting tools whose structured output names it, and a
+  malware object minted from the family name carries the family's
+  `family_evidence_ids`. Nothing is inferred: no id is read out of a claim's
+  sentence, no object is matched by value, an id the ledger does not hold is
+  left out, and an object the record ties to nothing has no such property.
+  A run with no ledger entries exports no ids, and a family id the ledger
+  does not hold is recorded as `stix.evidence_ref_not_in_ledger`. The property
+  is the platform's: a judge object that writes it is read without it and
+  recorded as `stix.property_not_carried`, with no retry. The console's
+  relationship graph and its table read only this property.
 - **Staging is per job.** The sidecars' staging directory held every job the
   server process ever ran: `put_sample` uploads landed flat in it under
   sixteen hex characters and the original file name, every sample's carved tree
@@ -1071,7 +1457,701 @@ change landed on `main`.
   **Upgrading:** a run with no evidence at all now spends one correction turn
   on an indicator it used to export unquestioned, and carries an advisory row
   for it in `run_summary.validation.unresolved`. Nothing is dropped for it.
+- **How much of a tool answer a model sees is the model's window, not a
+  constant.** `core.preprocessing.max_tool_output_chars` was 6,000 characters,
+  and every argument for that number was an argument about one deployment: a
+  local server started with a 131,072-token window and a forty-step reversing
+  loop. On a model served with 32,768 it does not fit; on one with a million it
+  throws information away for nothing. The setting now defaults to **0**, and 0
+  means the cap is worked out at the moment of each call from the window the
+  served model was found to have, less what the conversation already holds and
+  the room kept back for the model's own reply, converted at three characters
+  per token — measured, from a recorded conversation of 114,000 characters the
+  server reported at 38,868 tokens — and multiplied by the eighth of what is
+  free that one answer may take. An answer is measured against what is free,
+  what it takes is charged as soon as it is handed out — a turn may call
+  several tools at once — and the next one is measured again, so the answers of
+  one conversation sum to less than the room it began with on every window the
+  vendored table ships. **A cap never exceeds the room that is really left:** a
+  floor of 2,000 characters applies while the room affords it, and where what
+  is left cannot hold an answer at all the model is handed no answer and one
+  sentence saying the conversation has no room left, with the whole answer
+  still on the evidence ledger under the call's id and the outcome counted as
+  `tool_output_no_room`. That sentence is said once and charged like any
+  answer, and the agent's tool phase ends there: further calls are not run, the
+  run-state block carries the fact every turn, and the loop is salvaged into an
+  answer from what it already gathered with `no_room` on its budget record.
+  Both notices come out of the tool budget — the window less the room kept back
+  for the model's reply — and are withheld when they would not fit, so the
+  reserve the forced synthesis writes its answer in is never spent on saying
+  that the room ran out. The `[OUTPUT TRUNCATED]` marker is kept back out of
+  the cap rather than appended after it, so what reaches the model from a
+  character cut is the limit, marker included. A positive value is an explicit operator cap and
+  behaves exactly as this setting always did. The window itself is learned free
+  of charge and without asking the operator anything:
+  llama.cpp's `/props`, Ollama's `/api/show`, an OpenAI-compatible
+  `/v1/models` for vLLM and OpenRouter, Text Generation Inference's `/info`,
+  then a vendored table keyed by model family
+  (`data/model_context_windows_v1.json`). A settings-named window short-
+  circuits none of that: where one was also probed the smaller of the two wins,
+  so a model that holds less than `num_ctx` asks for, and a `context_size` left
+  behind by a server restarted smaller, cannot overflow the real window. Where
+  **nothing** answered, nothing is derived — the documented 6,000-character cap
+  applies and every surface says the window is unknown and names the setting
+  that would fix it. A reported window is believed only up to ten million
+  tokens; past that the figure is refused with the reason in words, because a
+  proxy reporting its window in bytes produces a cap larger than any answer
+  there will ever be and switches the guardrail off for a whole run. No
+  generation call is ever made, and a guard test drives both probe entry points
+  themselves through a transport that records every request, refusing any path
+  but the four metadata suffixes and any method but GET except the one metadata
+  POST. `run_summary.truncation` carries the window, where it was learned, the
+  characters-per-token figure and the smallest and largest cap that applied;
+  the report's Bounds Hit section says the same in a sentence; and the Settings
+  page prints the detected window beside the field.
+  **Upgrading:** the default changes behaviour. On a 32,768-token window one
+  answer may now take **9,216** characters where it took 6,000, and on a
+  131,072-token window **46,080** — richer observations, and a conversation
+  that fills faster. A deployment whose window cannot be learned keeps exactly
+  today's 6,000, and the only change it sees is that the run summary and the
+  settings page now say the window is unknown; setting
+  `core.llm.openai.context_size` turns that into a derived cap.
+  `run_summary.truncation` gains four keys (`tool_output_limit_smallest`,
+  `tool_output_limit_largest`, `tool_output_no_room`, `context_window`); a
+  summary stored before this release has none of them.
+- **The two memory ceilings are re-argued against the derived cap, and not
+  scaled with it.** `reporting.evidence_budget_bytes` (512 KiB per agent) and
+  `reporting.evidence_corpus_bytes` (16 MB per run) were both sized against
+  answers of at most 6,000 characters. The replacement arithmetic is the
+  derivation's own property: one loop's answers come to at most
+  `(window - reply reserve) x 3` characters. Half a megabyte therefore holds a
+  loop's whole tool output up to a window of about 183,000 tokens, and 16 MB
+  holds six such loops at 131,072 tokens and about five and a half at a
+  million. Neither number moved: they bound the worker's memory and a JSONB
+  column, not the model's context, and answering a bigger window by holding a
+  proportionally bigger corpus in RAM is how a machine that also runs the model
+  runs out of it. **Upgrading:** nothing to do on any window this platform has
+  been run on. A deployment on a very large window that wants every answer kept
+  whole raises `reporting.evidence_budget_bytes`; one that wants the grounding
+  corpus to hold a whole run raises `reporting.evidence_corpus_bytes`. Past
+  either, what happens is what has always happened and is still said out loud:
+  the ledger entry keeps the call and drops the output and the report says how
+  many, and the corpus reports itself incomplete so an absence measured against
+  it is advisory.
+- **The evidence ledger stores the answer the model was handed, whole.** Every
+  stored output was cut at 6,000 characters on the way in — a trailing ellipsis,
+  no `truncated` flag, nothing counted — which was defensible while the
+  tool-output guardrail handed the model the same 6,000. It no longer does, and
+  for a plain-text answer (a decompilation, a `strings` dump) the stored prefix
+  is the entire durable record: what `GET /api/v1/jobs/{id}/evidence` serves,
+  what the report sections are built from, and what an `ev_0007` citation
+  points at. A model that read 46,080 characters left a record of the first
+  6,000 and nothing said so. `reporting.evidence_budget_bytes` is now the one
+  storage decision, and it announces itself: past it the entry keeps the call,
+  drops the output, sets `truncated` and is counted. A caller that passes a
+  ceiling of its own still gets a cut, and that entry is flagged too.
+  **Upgrading:** stored evidence entries get larger, up to the per-agent byte
+  budget, and that budget now binds where the silent cut used to pre-empt it —
+  so a deep reversing loop on a large window may report trimmed entries where it
+  previously reported none. Measured on a 131,072-token window: an entry can
+  hold 46,080 bytes, so 512 KiB holds 11 entries of 20 where the silent 6,000
+  cut let about 87 through. A trimmed entry loses its parsed `structured`
+  result as well as its text, so the report sections built from `structured`
+  lose data they previously kept — the in-run grounding corpus is unaffected.
+  Raise `reporting.evidence_budget_bytes`, or set it to `0` to keep every
+  output. `reporting.upstream_findings_max_chars` is a
+  third copy of the same constant and is deliberately unchanged: it bounds a
+  prompt rather than a record, the block it cuts says so, and the whole findings
+  stay in the run state and the report.
+- **The Windows import block says what it measured, or it says nothing.** The
+  Linux half of the API catalogue was cut to what a measurement justified; the
+  Windows half never had been. Measured through the production loader over
+  2,730 freely distributed Windows binaries from 25 independent vendors and 201
+  Windows malware samples — 123 distinct import profiles, deduplicated, with
+  every combination chosen on the older half and scored on the newer — the
+  Windows behaviour block labelled **97.73% of ordinary software against 93.50%
+  of malware**. That is not a weak signal; it is no signal, stated as a fact.
+  Its nine labelled categories are informational now and each names in
+  `corroborated_by` what would give it weight; `keylogging` alone keeps a label
+  and carries `flags_with`, so it waits for the input hook, raw-input device or
+  whole-keyboard read that is the capture rather than the key-state poll a game
+  does every frame. The block now labels **2.01% of ordinary software and
+  21.14% of malware**.
+  **Eighteen of the forty-seven technique rules are gone**, against two bars.
+  Fifteen carried no information at all: within the size-matched band their
+  names fired no more often on malware than on ordinary software (T1003, T1016,
+  T1027, T1049, T1053.005, T1071.004, T1087, T1106, T1140, T1222, T1546.003,
+  T1555, T1620 on Windows, and the two rules on the scanning and tracing
+  provider calls that ATT&CK 19.2 folded into T1685). Three more were above 4%
+  of ordinary Windows software with a size-matched lift under 3, which is the
+  shape that gets a rule re-argued rather than a threshold that deletes it —
+  the rate is carried precisely so a common association can ship honestly — and
+  each went on its own argument. **T1083** (6.41%) is the sole row on *zero*
+  malware profiles: every profile it fires on already carries another row, so
+  its 175 benign rows buy a reader nothing. **T1622** (7.51%) is weak on its own
+  numbers, a likelihood ratio of 1.84 over the whole corpus and the sole row on
+  one profile. **T1497.003** (9.56%) fails the same test that decides whether a
+  name may be taken out of a rule, applied to the whole rule: the evasion is the
+  *duration* a program waits and no import carries a duration, so the act its
+  names describe is not the act the technique describes. That one costs
+  something — it is the only one of the three with unique coverage — and it is
+  deleted anyway, because a rule that cannot be made right does not ship.
+  **Fourteen of the twenty-nine that remain keep a narrower combination**, and a
+  name was removed from one only where the act it names is not the act the
+  technique describes — `TerminateProcess` ends a process and not a service,
+  `MoveFileEx` renames a file and does not delete it, `IsProcessorFeaturePresent`
+  is the C runtime asking about the processor at startup. Eight further
+  combinations were written, measured and **not** applied, because the only
+  argument for them was that they happened to separate these two corpora best.
+  T1095 keeps one name: the ten Berkeley and Winsock names label one benign
+  binary in twenty and more than a third of everything that touches a network,
+  and a raw socket and a TCP socket are the same import, so what is left is
+  `IcmpSendEcho`, which is ICMP by construction. Over the same corpora the rule
+  set now fires on **14.40% of ordinary software and 45.53% of malware**,
+  against 25.71% and 63.41% before.
+  **Every surviving association carries the rate it was measured at**, under
+  `measured`: `seen_on_benign_percent` is the share of the named corpus the
+  association fired on, `seen_on_benign_files` the count behind that share, and
+  `held_out_malware_profiles` how many profiles the combination was not chosen
+  on that it fires on — `0` where it fires on none, said rather than left out,
+  because an absent count and a count of zero read the same and mean opposite
+  things. The Linux block carries the same field from its own measurement. The
+  rate reaches the model in the `api_capability` answer, the report's
+  import-technique table and the console's cell, so a reader weighs an
+  association instead of reading it as a finding. Every Windows rule also gains
+  the `rule` label and the `ordinary_use` sentence the two Linux rules already
+  had, and the builder refuses a rule missing either, or missing its held-out
+  count.
+  Read the rates in the one direction they were measured in: they say how often
+  a rule fires on software that is not a sample, and none of them is a
+  probability that a given sample is benign — which is why every key names what
+  was counted. Neither malware corpus carries technique-level ground truth, so
+  what was measured is that a combination separates binaries already known to be
+  bad from binaries already known to be good, never that a sample performs the
+  technique. 29.2% of the malware corpus imports nothing an import rule can see,
+  and the combinations are tuned to this pair of corpora.
+  `scripts/knowledge/measure_api_behaviour_block.py` gains `--platform windows`
+  so the whole measurement is one command: it reads PE import tables with
+  `pefile` exactly as `extractors/pe_extractor.py` does, records an ordinal-only
+  import as `Ordinal_<n>`, deduplicates by content, takes a directory or an
+  inventory file, and `--write-inventory` saves what it read so the same corpus
+  can be measured again after the files are gone.
+  **Upgrading:** eighteen technique ids disappear from the Windows import layer
+  and fourteen more fire on fewer samples, so a saved report and a live run will
+  show fewer rows in the import-derived ATT&CK table and fewer catalogue
+  associations in the corroboration table; a dashboard counting those rows will
+  read lower for the same sample. The three the second bar removed —
+  T1497.003, T1622 and T1083 — are the ones most likely to be missed, because
+  they fired on more samples than anything else in the block; they fired on
+  ordinary software at nearly the same rate, which is why they are gone.
+  `catalog_flags: ["suspicious"]` now appears on a Windows import only where the
+  `keylogging` gate is met, so an `api_capability` consumer that treated the flag
+  as its trigger sees it on roughly one binary in fifty rather than on nearly
+  every one. A generated YARA rule carries fewer import strings for the same
+  sample, because `reporting/detection_signatures.py` draws its `$s` strings
+  from the matched imports of the rules that fired.
+  The `api_capability` answer gains `measured` on a technique row,
+  `behaviour_rates` per category and `corpora` at the top; `api_technique_hits`
+  rows gain `benign_rate`, a sentence carrying the share, the file count and the
+  held-out support, absent on a producer with no measurement — absent means not
+  measured, never "never fires". `StaticAnalysis` gains
+  `api_capability_rates` and `api_capability_corpus`, both empty on a report
+  stored before them, and the profile line then prints the counts alone as it
+  always did. The knowledge sidecar's `api_capability` description is now the
+  in-process docstring verbatim rather than a two-sentence summary, so the
+  caveats reach the model that actually reads it — 2.3 kB, with the
+  field-by-field glossary dropped because every key in the answer names its own
+  direction and `corpora` ships the corpus sentences; what a payload cannot say
+  for itself stays. The tool's name, arguments and answer shape are unchanged.
+  Every row of every Markdown table in the report is now built by one helper
+  that escapes each cell as it composes the separators, and a guard fails the
+  build if anything else in the renderer writes a `|` into a string: an import
+  name and a PE section name are both the sample's own bytes, and a pipe in one
+  used to add a column while a newline cut the row in half. An HTML or PDF
+  export renders the escape back to a plain `|`; only someone reading the raw
+  `.md` sees the backslash, and only on a value that really carries a pipe.
+  A cell whose value was missing used to print Python's `None` into the report
+  and now prints the placeholder the column intends.
+  The Linux block's rates were re-measured after the
+  same change gave the ELF walk content deduplication, so its corpus descriptor
+  reads `1837` where it read `1842` and five category shares move by one
+  rounding place; no Linux rule's rate moves at all. No behaviour category was
+  renamed or removed, so a consumer reading `category` alone is unaffected.
+- **One severity ladder in the console.** Severity order and colour live in
+  `apps/web/src/lib/severity.ts`, and the Summary, DETECTION, DYNAMIC and the
+  header's verdict-against-severity rule read it. A guard fails the unit suite
+  on a severity coloured, compared by its spelling (either way round or in a
+  `switch`) or sorted by its label anywhere else.
+- **DETECTION shows the rules a current run fired, with each Sigma rule's own
+  level.** DETECTION read only the old deterministic layers' claims, which no
+  current run writes, and turned their confidence — the rule's maturity status
+  as a number — into "High" or "Medium". It now reads the `yara_matches` and
+  `sigma_matches` report sections the rule tools build, shows each Sigma rule's
+  declared level labelled as the rule's level, and sorts and dots the rows by
+  it on the severity ladder. The two sections moved from STATIC to DETECTION;
+  STATIC links there. A run stored before those tools is still read from its
+  layer claims, which say "level not recorded", and their confidence is printed
+  as the number it is. `SigmaMatch` also carries the rule's `level` as a field;
+  its claim text is unchanged.
+- **DYNAMIC colours a signature's number only where its scale is known.** The
+  run's recorded sandbox provider says which scale the number is on: CAPEv2's
+  1 to 3 or Triage's 1 to 10 signature score, each drawn on the ladder by what
+  it means, printed in words beside the number ("High, 8/10"). An uploaded,
+  REST or unknown provider's number, and one outside its scale, is drawn in
+  one neutral tone as it came, beside the word "unrated".
+- **One colour per run status.** `apps/web/src/lib/status.ts` colours
+  completed, running, pending, failed and cancelled for the dashboard, the
+  analyses list, the search palette and the analysis header, and a stage's or
+  participant's running and done; the search palette's running job is blue like
+  everywhere else, not orange. A dashboard run that has a report but did not
+  complete shows its status beside the verdict chip.
+- **A tested tool server's unavailable tools are said on their own rows.** The
+  separate list above the Tools section is drawn only where the tool table is
+  not, and a tick list the table writes keeps the manifest's order rather than
+  the order the boxes were ticked in.
+- **The console's style guard covers charts.** `styleRules.test.ts` also fails
+  on an SVG gradient, on Tailwind's bare `transition` class, and on a colour
+  transition written as an arbitrary `transition-[…]` class, an inline style or
+  a stylesheet declaration.
+- **A token count is what a provider reported, and nothing else.** A call
+  whose provider reported no usage used to be counted with a
+  four-characters-per-token estimate folded into the same sums, flagged only by
+  `run_summary.tokens.estimated_calls`. It is now counted as a call and as
+  `unreported_calls`, adds no tokens, and the report and the console say "not
+  reported" for it. `estimated_calls` is no longer written. A consumer reading
+  `run_summary.tokens` should read `unreported_calls` where it read
+  `estimated_calls`, and treat `input_tokens` / `output_tokens` as the reported
+  figures alone.
+
+- **Every tool server is driven with at most four calls in flight per job.**
+  `core.mcp.breaker.max_concurrent_calls` (4) queues a job's fifth concurrent
+  call to one server until one of the four answers; set it to `0` to drive
+  every server uncapped as before.
+- **A model on a fallback list has a turn deadline, and every provider a
+  request timeout.** A model that is not the last on its agent's list is
+  treated as stalled after `core.llm.fallback_turn_share` (0.5) of the agent's
+  loop budget, and the list moves on; the model that answered then stays for
+  the rest of that loop. The Ollama client is now built with the same 1800 s
+  request timeout the OpenAI client always had, and Anthropic's is named rather
+  than left to its SDK. A tool call is sent with a deadline
+  (`core.mcp.breaker.call_timeout_seconds`, derived from capa's budget by
+  default) and a call that passes it is a transport failure the breaker counts.
+- **A quoted search argument searches for what is inside the quotes.** Every
+  argument a sidecar tool searches for or looks up by — `pattern` on `strings`
+  and `floss`; `text`, `technique_id`, `ids`, `api_names` and `query` on the
+  knowledge lookups; `ip_address`, `domain` and `file_hash` on `threatintel` —
+  is read without one matching pair of surrounding quotes, as `carved_path`
+  already was, and each tool's description says the argument is the raw text,
+  unquoted. A pattern sent as `"CreateMutex"` with its quotes used to match
+  nothing although `CreateMutexW` was among the strings. Nothing else is
+  rewritten, and the repair is recorded: the ledger keeps the arguments as the
+  model wrote them and a structured answer carries `read_as` first, the value
+  each argument was read as.
+  **Upgrading:** a consumer that reads the first key of a `strings`, `floss` or
+  knowledge answer will find `read_as` there when a quoted argument was read;
+  an unquoted call's answer is unchanged.
+- **The triage pack's reputation line states the detection labels.** A
+  VirusTotal answer that carries `detections` (one result label per engine,
+  as VirusTotal's own MCP server answers) and no popular threat classification
+  used to render as `VirusTotal 52/75 malicious` and nothing else, although
+  the labels named a family eight times. The line now counts the labels
+  exactly as written and names up to twenty with how many engines gave each,
+  most first, with the number of distinct labels it left out. Nothing is
+  merged, normalised or read for a family.
+  **Upgrading:** the reputation line of a pack is longer (about 700 characters
+  for 50 labels) and counts against `reporting.upstream_findings_max_chars`
+  like every other line.
+- **No sandbox observation is stated where no sandbox ran.** The mock
+  sandbox's empty stand-in for a sample it has no fixture for used to reach
+  the triage pack as "sandbox processes: 0 processes" and "no network activity
+  recorded", and a report built on it spoke of what the sample did during
+  sandbox execution. Where no sandbox ran — no report, or the stand-in — the
+  pack now writes one `sandbox_status` entry that says so in one sentence and
+  none of the sandbox views, `sigma_match_sandbox` or `lolbin_lookup`; the run
+  carries the degradation reason `no sandbox ran …`; `run_summary.sandbox`
+  holds `{status, statement}` and the report's run summary prints it; and the
+  entry becomes the report's *Sandbox* section, on the console's dynamic tab.
+  A report the mock read from a fixture file is marked `recorded_fixture` and
+  said to be a recorded fixture, not a live detonation, before its contents.
+  A live sandbox's report is read as before.
+  **Upgrading:** the pack's ledger ids move, differently per case (a PE's pack
+  as the example). With no sandbox report, `sandbox_status` is added before the
+  reputation lookup, which moves by +1 (`ev_0010` → `ev_0011`). With the mock's
+  stand-in, `sigma_match_sandbox`, `lolbin_lookup` and the five sandbox views
+  (seven entries) give way to the one `sandbox_status`, so the reputation lookup
+  moves by −6 (`ev_0017` → `ev_0011`). With a recorded fixture, `sandbox_status`
+  comes before the sandbox views, so every sandbox view, the capture summary
+  when there is one, and the reputation lookup move by +1. A stand-in run is now
+  marked degraded with its reason, as a run with no report already was;
+  `run_summary` has a `sandbox` key (`null` when a sandbox observed the run).
+
+- **The exported STIX bundle names its producer, in STIX's vocabulary.** The
+  platform's `identity` was `identity_class: "software"` under a new random id
+  every run, the report object was typed `"malware-analysis"`, and no object
+  carried `created_by_ref` — in all forty stored exports, with an OASIS warning
+  for each word. The identity is now `identity_class: "system"` under one
+  derived id, `identity--9f9e2570-073b-5b46-b156-05d12a086911` in every export;
+  every other object carries `created_by_ref` naming it, and the report is
+  typed `"malware"`. **What a consumer does:** a filter on `report_types`
+  containing `malware-analysis` or on `identity_class: software` stops matching
+  new exports; match `malware` and `system`, or the producer's
+  `created_by_ref`.
+
+- **The judge's prompt asks for what the judge decides and agrees with the
+  checks.** It said *"Omit technique ID if unsure"* while `attck.missing_id`
+  asks for the id or for the object to go — the code the judge's one retry was
+  spent on in ten of the twenty-four stored runs that retried. It now says an
+  attack-pattern names its technique in `external_references` and a behaviour
+  with no id belongs in `severity.rationale`. It no longer asks for
+  `created`, `modified`, `spec_version` or `valid_from`, which are stamped after
+  the answer (about a fifth of what the judge wrote for its objects, beside the
+  ids, which are minted now too), names the two relationship types the bundle
+  uses, and says a relationship credits sources by the names the evidence
+  summary gives them. **What changes for a reader:** an unmapped behaviour is
+  more often in the severity rationale than in the report's unmapped-behaviour
+  list, and an indicator's `valid_from` is the analysis time rather than a
+  date copied out of the STIX documentation.
+- **The report reads as a vendor's malware analysis.** The Markdown, HTML and
+  PDF follow one numbered layout — key findings, sample overview, verdict and
+  assessment, execution flow, technical analysis by capability, observed
+  behaviour, static properties, ATT&CK, indicators, detection,
+  recommendations, attribution, limitations and four appendices — and every
+  H2 names its voice: Measured, Observed in sandbox, Assessed by the judge or
+  Written by the report model. A confidence prints as its number, a fixed word
+  for it and its producer. The title names the family and category when the
+  judge named a family. The tool failures and evidence counts move from the
+  header to §13; the header keeps one line pointing there. A reader or a
+  script that finds sections by their old headings (`## Sample
+  Identification`, `## Severity & Impact`, `## Executive Summary`, `##
+  Network IOCs`, `## Evidence`, `## Run Summary`, …) must look for the new
+  numbered ones.
+- **Network indicators in the Markdown, HTML and PDF are defanged by kind**,
+  in tables, in model prose and in the evidence appendix. The JSON report,
+  the STIX bundle, MISP and `/reports/{id}/iocs` stay live.
+- **`consolidated_iocs` stores live values with their kind, source, context
+  and the publish rule's answer** (`published`: `yes` or `no: <reason>`), and
+  the report prints it as its indicator section. A consumer that read the old
+  defanged `value` now reads the live one.
+- **With no narrative, the report writes no prose.** The fallback no longer
+  fills the executive summary, capability paragraphs and a recommendation from
+  a template; the report records `the report model wrote no summary: <why>`
+  among the degradation reasons and says it in §1. A mock run's summary and
+  recommendations are empty.
+- **The recommendation category is the model's own.** It was re-derived from
+  the action's wording and overwrote the model's answer.
+- **The console's SUMMARY tab draws the key findings and the technical
+  analysis**, labelled as the report model's; IDENTITY adds the header facts,
+  STATIC the export ordinals and addresses, ATTRIBUTION who named the family
+  and the entries cited.
+
+- **The judge's verdict call and each composer section wait as long as their
+  answer takes at the model's measured pace.** At 3.8 tokens a second a 600 s
+  verdict call could receive about 2,280 of `judge_max_tokens`' 8,192 and a
+  120 s section about 456 of its 900. Every model the container builds now
+  carries a meter that reads each answer's generation count and time as it
+  returns — Ollama's `eval_count`/`eval_duration`, otherwise the output token
+  count over the call's wall clock — and those two calls wait
+  `max(configured, min(max_tokens / rate × 1.5, 1800 s))`
+  (`llm.generation_rate`), a composer section twice that for its one
+  validation retry. With no rate yet the configured value stands. Rates are
+  kept per model and server, and each answer of a model list counts against
+  the model that gave it. The 1,800 s ceiling is the providers' shared request
+  timeout. The verdict call starts its model list on its own wait; the report
+  stage starts the reporter's list once and each section measures its turn
+  deadline against the section's wait with the job's share, so a switch holds
+  for the whole report stage and a stalled first model is not waited out again
+  in every section.
+  `run_summary.generation` records each model's rate and source and each sized
+  call's configured, derived and applied seconds, and the report's Run Summary
+  and the run summary's markdown print them.
+  **Upgrading:** a slow model's verdict call and composer sections can now run
+  up to 1,800 s each where they were cut at 600 s and 120 s, so a job on such a
+  model can take longer before a section is dropped; a fast model's timeouts
+  do not change. `run_summary.generation` is a new key, absent on a run that
+  measured no answer.
+
+- **A composer section is capped at `composer_section_max_tokens`, and an
+  Ollama model at its configured output cap.** The composer ran on the
+  reporter's model, built with `judge_max_tokens` (8,192), so a section could
+  generate nine times the 900 tokens its setting names; its model is now built
+  with `core.reporting.composer_section_max_tokens` as its output cap, plus
+  `judge_max_tokens` of room for reasoning where the model's provider has not
+  been told to keep reasoning out (`disable_thinking`), each model of the
+  reporter's list by its own provider. And `ChatOllama`
+  drops a `max_tokens` it is handed, so on Ollama no cap reached the server at
+  all — not the judge's, the analysts' or a section's; the Ollama provider now
+  passes it as `num_predict`. A section the cap cut is recorded as cut at that
+  cap, the verdict call records whether it reached `judge_max_tokens`, and
+  Ollama's `done_reason: "length"` counts as a cut.
+  **Upgrading:** a model's reasoning counts against these caps — Ollama's
+  `num_predict` and llama.cpp's `n_predict` include the thinking channel. A
+  composer section longer than its cap is now cut by the model server, and on
+  Ollama the judge's answer at `judge_max_tokens` and an analyst's at
+  `expert_max_tokens`, reasoning included. With a reasoning model, set
+  `disable_thinking` or raise the cap where a section or verdict comes back
+  empty or cut.
+
+- **A PE's decoded strings are in the triage pack.** A static analyst offered
+  `floss` among thirty-six tools never called it, so the configuration an
+  analyst recovers from an encrypted-string loader reached no model. The pack
+  now runs FLOSS once on every PE, last, through the function the sidecar's
+  tool serves (the pinned build, its wall clock and memory limit), with the
+  `analysis` server's environment and a directory in the job's staging
+  directory, and every agent reads one line of it: the counts, then up to 100
+  strings in 3,000 characters, each with the routine that produced it and its
+  offset from the image base, the bound and its reason stated when it cut, and
+  a statement that the strings are the sample's own text: data, not
+  instructions, ledger entries or findings.
+  Without a build the entry says so with the remedy and is not a failure; a run
+  stopped by its clock or its memory is a failed entry that says which. On the
+  reference loader the line carries all 81 strings and adds about 28 s to the
+  pack. The tool's description now says to call it when a PE's strings look
+  encrypted or are missing.
+  **Upgrading:** a PE's pack has one more entry, `floss`, after every other;
+  the pack's own ids do not move, and every id after the pack (the analysts',
+  the judge's) moves by +1 on a PE. A test suite that runs the pack sets
+  `MALJAN_FLOSS_PATH` to a missing file unless a test names a build.
+
 ### Fixed
+
+- **A pattern is kept whatever its comparison operator.** The judge's
+  integrity pass kept only patterns containing `=`, so every `LIKE` a judge
+  wrote was dropped as `empty_pattern` with its relationships — twelve of a
+  reference judge's thirteen indicators, its command-and-control hosts among
+  them. The pass now drops only an empty pattern. Whether a pattern is one the
+  official validator accepts is `stix_pattern.pattern_refusal`, the STIX 2.1
+  pattern grammar over the one reader (and the pinned validator where it is
+  installed); it agrees with the validator on acceptance. A pattern it refuses
+  is asked once (`stix.pattern_refused`) and, kept, declined — never exported
+  invalid. A `LIKE` value is grounded by the text between its wildcards (four
+  characters at least), lists no row in the IOC table or `/iocs`, and is
+  declined from the export with the reason when it names an endpoint or a kind
+  the publish rule answers for; one whose fixed text is a value the run holds
+  is first asked whether the judge means that value
+  (`stix.shape_names_a_value`). A quoted value with a backslash the grammar
+  cannot read is asked about (`stix.unescaped_backslash`) and, kept, declined.
+- **Every value a judge pattern names is put to the one publish rule, whatever
+  the operator.** An `IN` list, a `!=` or a `>` over a kind the rule covers
+  reached the export with nothing asked, so a value refused as `=` was
+  published inside one. Each member and operand is asked now; the IOC table
+  and `/iocs` still read `=` alone.
+- **The fallback's export is valid.** A non-Malware fallback wrote a note with
+  no `object_refs`, which STIX requires, and the report object named the
+  sample's hash indicator twice once the judge's copy was folded into the
+  export's. The note names the objects the fallback bundle holds and is not
+  written when it holds none; each reference is listed once; an object about
+  others that the export leaves naming nothing is declined with a record.
+- **The judge's retry after a cut answer no longer carries the cut answer.**
+  Its prompt grew by exactly the cap, and at temperature 0 a benign control's
+  judge answered with a response one byte shorter than the one it was asked
+  about. The retry is the first prompt and the question, which now states the
+  length the answer was cut at as the bound and the kind of object it began
+  most of.
+- **A record says the judge was asked only when it was.** A finding the judge
+  was never shown — first raised by the answer to its only retry — is recorded
+  `"asked": "false"`, and the export's credit and `is_family` records say "the
+  judge was not asked about it" instead of "kept … when asked". "Asked" is
+  decided by the code and what the finding is about (the technique a credit is
+  for), so a credit renamed in answer to the question counts as asked.
+- **VirusTotal's count is written in words.** The triage pack wrote
+  "VirusTotal 0/75 malicious", and a benign control's summary turned it into
+  "verified clean by 75/75 AV engines". The pack line and the report's network
+  reputation cell say "0 of 75 engines flag it".
+
+- **A fallback verdict keeps the indicators its answer wrote whole.** After
+  the judge's answer was cut twice the fallback bundle carried no indicator,
+  so the decoded C2 hosts the answer had written whole were never put to the
+  publish rule and `/iocs` and STIX held only the hashes. Each indicator the
+  answer's bundle wrote whole among its own top-level `objects` (read as
+  written, no repair; never from reasoning, a string or a nested object) is
+  kept with a minted id,
+  asked what a bundle's indicator is asked — the findings recorded, an
+  ungrounded one dropped — and the export, the IOC table and `/iocs` read the
+  one publish rule's answer for it, emulation record and verdict included.
+- **The capability check marks claims, not values or absences.** It reads no
+  word inside a value — a code span, a quoted string, a path, a registry key,
+  or the words of a record's own value that its other fields restate — and no
+  section heading. A term ending the subject of "are absent" or "is not
+  supported", or the object of a negated verb ("does not import the registry
+  APIs required for persistence"), and a term after "rather than", "instead
+  of" or "prevents confirmation of", is read as absence, by the absence
+  question and the mark alike. capa's and YARA's rule names no longer ground a
+  capability word (their sections still count by key), and a sentence whose
+  assertion is only that a rule matched ("YARA rule X matched", "capa reports
+  the rule Y") is not a claim; one that draws a conclusion from a rule ("Based
+  on YARA results, the sample steals credentials") is checked as before. A
+  slash-joined list of words is read; only a path-shaped run is a value. A
+  negated verb of need ("does not require administrator rights for
+  persistence") claims its purpose. The anti-analysis term reads evading
+  detection or analysis and packing. A benign control's four marks had sat on
+  a configuration path row and two absence sentences, while its keylogging,
+  evasion, anti-debugging and "repacked" over-claims went unmarked.
+- **A finding the retry's answer first raised is recorded as not asked.** A
+  report section's one retry asks every finding of its first answer in one
+  question; a finding only the retry's answer raises is recorded with "Not
+  asked: it first appeared in the answer to the section's one retry …" and its
+  marks say not asked, instead of reading as a question the model left
+  unfixed.
+
+- **Techniques are no longer published from absence claims without the
+  analyst being asked.** A benign control run published thirteen ATT&CK
+  techniques — Rootkit, Credentials from Password Stores, Remote Services
+  among them — from claims that said the behaviour was not there, and no one
+  asked. The analyst is now asked, and decides. Long-term memory stores as a
+  past case's techniques only ids with no absence note and a valid catalogue
+  entry, and a noted claim never displaces a positive one when chunk answers
+  are merged.
+- **The conversation and the run summary agree on a kept answer.** An analyst
+  whose retry lost claims keeps its first answer; the conversation used to
+  publish its findings as `resolved` while §13 listed them unresolved (an
+  unknown id asked four times and kept). The kept answer is checked again
+  before any outcome is published.
+- **A capability word is grounded only by what the run found.** The words of
+  a claim that deny a behaviour, a matrix row the run did not publish, the API catalogue's reference
+  rows and the words of the sample's own strings no longer ground one, and a
+  word in the evidence grounds only where it is said rather than denied. A
+  benign report's "establish persistence", "credential harvesting" and
+  "anti-forensics" sentences had gone neither asked nor marked.
+- **The STIX report object's type follows the verdict.** `malware` under a
+  Malware verdict, `threat-report` under Suspicious or Benign; a Benign export
+  had been typed `malware`.
+- **A job reaches the queue only after its row is committed.** The API
+  enqueued before the request committed; a worker that dequeued first read
+  "Job not found" and the row stayed `pending` for ever. A failed enqueue now
+  commits the row as `failed`; a worker that finds no row reads again over a
+  bounded backoff (about 15 s) and marks a late row `failed` with the reason.
+- **A report section the output cap cut is asked once for a shorter answer**
+  (`composer.cut_at_output_cap`), instead of being told only that its answer
+  was not JSON; how far each cut answer got is recorded. The question
+  replaces the cut answer and is sent only when it fits the window beside the
+  section's output budget. Both host-identifier
+  answers of two benchmark runs ran to exactly 8,192 tokens and the section
+  was dropped. The host-identifier contract asks for each value once and the
+  kind by what the entry shows (configuration-panel paths had been typed as
+  registry keys).
+- **The triage pack prints digests whole.** It printed 16-character prefixes
+  and the judge copied them out as MD5 indicators.
+- **llama.cpp's own timings reach the measured rates.** The OpenAI-compatible
+  client dropped `timings`, so no prompt reading rate was recorded on the
+  default provider and the generation rate came from the wall clock.
+- **An unquoted value cited to the wrong entry is asked about**, where its
+  shape makes it an indicator (a digest, a URL, a path or registry key, a
+  mailbox, a host, a file name); technical vocabulary and a paraphrase stay
+  undecided.
+- **A negation is not read as a claim.** "does not perform lateral movement",
+  "to prevent lateral movement" and "Lateral movement is absent from the
+  evidence", "There is no evidence that the sample exfiltrates data" and "No
+  evidence of … such as C2 callbacks or exfiltration endpoints" no longer raise
+  `narrative.ungrounded_capability`; a negation reaches only the term it
+  governs in its own clause. A mark on a finding the model was never asked
+  about (structured output) ends in "; not asked".
+- **A derived timeout times the prompt read.** Where the reading rate is
+  measured, a composer section's and the verdict's wait is (prompt tokens /
+  reading rate + output budget / generation rate) × 1.5.
+- **A job whose row already ended is not run.** An enqueue that raised after
+  the queue accepted the job leaves the row `failed`; the worker no longer
+  runs it.
+- **A cancelled job is recorded where the pipeline was.** The worker wrote
+  "stopped before any check was reached" for runs cancelled minutes in; the
+  record and the `cancelled` event now name the node that was running (or the
+  check that stopped it) and carry `seconds_into_run`.
+
+- **A value is grounded however the tool's answer spells it.** A tool answers
+  in JSON and the triage pack quotes decoded strings with its own escapes; the
+  grounding search compared the plain value a judge wrote with that text and
+  called a quoted command line and a Windows path the pack had shown it absent
+  from the evidence. `utils.written_forms` names every spelling and the
+  haystack asks each of them.
+- **A STIX pattern the grammar refuses is asked about, then declined.** A key
+  written in brackets (`extensions['windows-pebinary-ext']`) and a property an
+  extension does not define are now path problems: the judge is asked through
+  `stix.unknown_object_path`, and an indicator that keeps the pattern is
+  declined by the export with its record instead of failing the official
+  validator.
+- **A cut text says it was cut.** A claim's stored evidence, a tool answer in
+  a section's bundle, a procedure quote in the ATT&CK table and a claim in the
+  live transcript end in `…` where they are shortened (`utils.marked_cut`); a
+  report had printed "… This suggests" as the model's sentence.
+- **A version number is not an address.** The string sweep read the dotted
+  numbers after a version word (`version="6.0.0.0"`, `FileVersion`, `v…`) as
+  an IPv4 address; a benign tool got a "C2 IP" alert for one.
+- **`NONE` is not an ATT&CK row.** A word for no technique in a finding's or a
+  claim's technique field makes no row; the findings table prints it as
+  written without calling it a claim.
+- **The string sweep's own network rows ground no capability.** A network
+  block of swept hosts and addresses let "lateral movement" through the
+  ungrounded-capability check; a block grounds a capability only when
+  something other than the sweep recorded a row of it.
+- **A configuration section is no longer dropped for nulls the contract
+  allowed.** Its items carried `"value": null`, which the contract's own line
+  permitted and the schema refused twice.
+- **A cancelled job stops.** A cancel reached the pipeline as a task
+  cancellation, the bridge to the agent loop turned it into an ordinary error,
+  a node caught that as a failed mediation, and the graph went on to the judge
+  and the report while the worker held connections to the model server and
+  ignored SIGTERM until SIGKILL. Each job now carries a cancellation
+  (`maljan.core.cancellation`): every graph node checks it on the way in,
+  every model call checks it before anything is sent, every call in flight on
+  the agent loop is cancelled with it, and a check raises `JobCancelled`, which
+  no `except Exception` reads as a failure. The worker sets it on an operator's
+  cancel and on its own shutdown, waits for the pipeline at most 10 s, names in
+  the `cancelled` event where the pipeline stopped. The revision rounds and
+  the view and tier turns now use the model's async call too, so they are
+  cancelled in flight like the tool loop. At the process's own exit a thread
+  still blocked in a call that cannot be cancelled is left after 10 s, named,
+  with status 1; nothing happens when nothing is blocked, and calling the
+  shutdown hook does not end the calling process.
+- **A mediation that failed states no agreement.** Its round recorded a
+  consensus of 0.0 that the run summary published as the final confidence; it
+  now records none, with the failure on the mediator's argument, and the run
+  summary's `termination_reason` is `mediation_failed`.
+- **The validation turn keeps to the loop's time.** It was given the loop's
+  whole timeout again after the loop; it now gets what the loop left, and is
+  not asked, with a record, when that cannot hold one answer at the loop's
+  measured pace.
+- **Right or absent, everywhere a confidence is printed.** A packer match read
+  from `pe_info` carried a flat 0.50 printed under "Measured", capa technique
+  hits carried 0.6 and 0.70, a family the judge named without a number was
+  printed "low confidence, 0.00", a YARA rule with no authored confidence got
+  0.75 and one below 0.70 was raised to it, and the API catalogue clamped
+  authored numbers under 0.65. None of these is stated any more: the packer
+  table shows a confidence column only where a match states one, the family
+  prints "not assessed", the YARA rule keeps what its author wrote or none.
+- **A claim's evidence line is stored at the width the window allows one
+  answer**, instead of a fixed 200 characters.
+- **The time-cap salvage is sized to finish.** It re-sent the whole
+  conversation to a slow model that had to read it all again, and ran into its
+  hard cap on every PE sample of the benchmark's small model, still generating
+  on the server after the worker gave up. It now sends the task, the pack and
+  the latest tool results in what the time left can read and answer at the
+  model's measured generation and prompt reading rates, is not sent when not
+  even the task fits, and cancels its request at its timeout. What it sent and
+  how it ended is in `run_summary.budget.<agent>.salvages`.
+- **A second loop's answer counts.** An analyst with no claim was run again
+  from scratch through the text path with a fresh copy of its whole budget,
+  and what that loop wrote stayed prose. The second loop is now the ISR path,
+  runs only when what is left of the analyst's stage holds a turn and a final
+  answer at the pace its first loop measured, and runs under that remainder;
+  otherwise the stage record's `agent_reasons` says why it did not.
+- **An unparsed analyst answer is prose, not claims at 0.50.** It was cut into
+  sentences — headings included — each a claim at a confidence nobody stated,
+  and the run did not call it a degradation. It is asked once for the claim
+  format (`isr.unparsed_answer`); what is still prose is the analyst's report,
+  the analyst has no claims, and the degradation reasons name it. A CLAIM block
+  with no confidence is counted and asked about
+  (`isr.claim_without_confidence`) instead of being given 0.5.
+- **A verdict the output cap cut off is told so.** The judge wrote a bundle
+  larger than `judge_max_tokens` twice and was told only that the answer was
+  not JSON. The prompt now states the budget, a cut answer is asked about
+  under `verdict.cut_at_output_cap`, and after a failed retry the fallback
+  keeps the assessment the answer stated whole — verdict, confidence,
+  severity, family — read through the bundle's own readers.
+- **A tool argument that names its own parameter is asked about.** A call
+  such as `strings` with `"pattern": "\"pattern\""` is not run; the model is
+  asked for the value it meant, the question is counted under
+  `tool.argument_names_its_parameter`, and a repeat of it counts as a repeat.
+  The unquoted-argument sentence in the tool descriptions no longer reads
+  "the raw text or pattern itself".
 
 - **A sandbox capture belongs to the job it was fetched for.** The capture was
   written into one directory under the system temp directory, shared by every
@@ -2966,6 +4046,407 @@ change landed on `main`.
   `run_summary.validation.unresolved`; a consumer that partitions on validation
   codes should know the name.
 
+- **Out of room, an agent's tool phase now ends where the room did.** Once a
+  conversation had no room left for a tool answer, every later call was refused
+  without running a tool, but nothing stopped the graph: a live analyst that
+  kept asking spent about nineteen more steps and five minutes on refusals, was
+  stopped by the step limit, and its budget record, `stage_ended_at_cap` event
+  and `run_summary.budget` said `steps`. Two causes: the stream loop broke only
+  for a repeating loop, and the no-room mark was read after the loop had
+  forgotten its conversation, which clears the mark. The stream now breaks on
+  the step at which the agent is out of room, exactly as it does for repeated
+  calls, the mark is read before it is cleared, and the three surfaces say
+  `no_room`; the forced synthesis still writes the answer from what was
+  gathered. langgraph's step-limit sentence ("Sorry, need more steps to process
+  this request.") is no longer published as the agent's words in the
+  conversation feed, no longer sent back to a model as the agent's own turn in
+  the salvage or the nudge, and no longer returned as the judge's mediation
+  reasoning. Where a loop a cap ended produced no answer and the salvage wrote
+  none either, the agent's answer is now empty and its status `no_claims`,
+  instead of the graph's sentence or a tool's notice handed on as the agent's
+  answer; why the loop ended is on the budget record and the
+  `stage_ended_at_cap` event. A judge loop that ends the same way returns no
+  reasoning, and mediation reads that as no agreement without asking a model to
+  extract a verdict from nothing. The analysis node no longer runs an analyst
+  that ended `no_room` a second time over the same material.
+
+- **A JSON answer over the cap only because of its indentation is handed over
+  whole.** The document shortener measured an indented answer at its compact
+  size, found it already inside the target, cut nothing and handed back the
+  indented text, which the guardrail then cut as characters: on a live run
+  `elf_info` (8,628 characters indented, 5,577 compact, cap 8,486) and
+  `strings` (8,442 against 7,334) both reached the model ending in
+  `[OUTPUT TRUNCATED]` and the ledger with `structured: null`, so neither
+  reached the report. A JSON answer whose compact form fits the cap is now
+  handed over in that form — every value the tool's, parseable, with no
+  shortening notice — on both the MCP toolkit and the Ghidra HTTP client, and
+  counted as the new `tool_output_compacted` in the truncation ledger,
+  `run_summary.truncation` and the report's Bounds Hit table. When the compact
+  form still does not fit, the structural shortener now acts on it, and every
+  document it returns is written compactly, where an indented answer used to be
+  shortened in the library's spaced form.
+  **Upgrading:** `run_summary.truncation.tool_output_compacted` is new and is
+  one of the outcomes counted under `tool_output_over_limit`; a summary stored
+  before it reads 0. `tool_output_chars_dropped` includes the whitespace a
+  compacted answer lost, though no value was.
+
+- **The context budget counts what a request carries besides its messages, and
+  a full window ends the tool phase instead of the agent.** On a live run the
+  static analyst reached step 36 of 40 with the budget holding 61,762
+  characters — inside the 73,728-character tool budget of a 32,768-token window
+  with 8,192 kept for the reply — when llama answered HTTP 500 "context shift is
+  disabled"; the run said `tool_output_no_room 0` and the analyst's work was
+  lost. The count left out the definitions of the loop's tools, which go with
+  every request: 35 tools, about 20,500 characters, 28% of the tool budget.
+  They are now counted with the conversation, and where the server reported the
+  token count of the last request, that count plus what the conversation gained
+  since is a floor under the measure, so content that tokenises worse than three
+  characters a token cannot hide the room that is gone. A provider's own answer
+  that the window is full ("context shift is disabled", "exceeds the available
+  context size", "maximum context length", "prompt is too long"), met after the
+  loop has gathered at least one tool answer, now ends that agent's tool phase
+  with `no_room` and the detail "the model server reported its context window
+  full", and the forced synthesis writes the answer from what was gathered. The
+  same sentence on the first request, a reply cap at least as large as the
+  window, an error that is not a provider's, and any other server error still
+  fail the agent; vLLM's wording of a full conversation, which names the reply
+  cap beside the input-token count, counts as full. After the server reported
+  the window full the final-answer nudge is no longer sent. The judge's tool loop
+  is now accounted the same way under its own name — its conversation and tool
+  definitions counted, its answers capped from its own room, its loop streamed
+  and ended on `no_room`, and its reasoning then written once from what it
+  gathered — where before every judge answer was capped against whatever
+  conversation happened to be live, usually none. "context shift" also joins the
+  wordings that retire a learned window. The forced synthesis, the analysts' and
+  the judge's, now trims its conversation from the window the budget counts on
+  (the smaller of the declared and the probed one) rather than from the declared
+  size alone, and the judge's gets only what is left of its loop's time.
+  **Upgrading:** a derived cap reaches zero sooner for an agent with many tools,
+  so a run on a small window ends tool phases earlier than before and says
+  `no_room` where it used to overflow; unticking the tools an agent does not
+  need in the Tools step gives the room back.
+
+- **Every id in an exported STIX bundle is a UUID the platform minted.** The
+  judge was asked for random UUIDs, which a model cannot produce, and the id
+  check accepted any eight-four-four-four-twelve hex. The judge copied
+  documentation-shaped runs instead: one malware id appeared in fourteen stored
+  runs of six different samples, so a consumer merging on id folded those
+  analyses into one object, and its version digit is one no RFC 4122 UUID has,
+  so the OASIS validator refused every object that carried or named it — 22 of
+  40 stored exports. The judge now writes `<type>--<label>` ids unique in its
+  bundle, a short label being enough, and the post-processor mints every
+  published id under the object's own type and rewrites every reference to
+  match.
+
+- **An indicator over an object type STIX does not have is asked about, and
+  not exported unasked.** A live export carried
+  `[ipv-addr:value = '82.157.13.47']` — the type is `ipv4-addr` — which no
+  consumer can match, and because the export's endpoint question reads only the
+  paths it knows, the address was never asked it: the same misspelling around
+  `127.0.0.1` would have published a loopback. The judge is now asked
+  `stix.unknown_observable_type`, with the type the value is named where the
+  value or the spelling says; the pattern is never rewritten, and one it keeps
+  is declined from the export as `stix.unpublishable_pattern`, which the
+  console draws as the export's decision. `indicator_types` outside STIX's
+  vocabulary (`ip-addr`, `file` — the kind of value where the vocabulary says
+  what it indicates) is asked about under `stix.indicator_type_vocabulary` and
+  published as the judge answers. The prompt names the Cyber-observable types
+  and the vocabulary, which it never did.
+
+- **A technique the judge named is published with the judge's own number, and
+  the judge's credits are not sources.** The capability matrix read a judge
+  relationship's technique only from `x_maljan_technique_id`, which the prompt
+  never asks for and no stored judge relationship carried, so every number the
+  judge put on a technique was dropped: all twenty judge-only techniques in the
+  stored runs were published at confidence 0.0 in `ttp_mappings`, the
+  report's ATT&CK section and the narrative's prompt — T1490 on the ELF run at
+  0.0, while the bundle's own `uses` edge carried the judge's 0.95.
+  The technique is now read from the attack-pattern the relationship points
+  at. The agents the judge credits (`STATIC ANALYST` for T1490, which the static
+  analyst never claimed) stay on the relationship as written and are no longer
+  counted as contributing layers, which would have made one analyst's claim
+  read as corroborated. Relationship annotations nobody wrote are absent rather
+  than `0.5` / `unknown`, and the text fallback's edges name the agents whose
+  claims they carry instead of stating a 0.5 the judge never gave.
+
+- **A judge relationship that credits an agent with a technique it never named
+  is asked about.** The ELF run published `malware uses T1490` and
+  `uses T1048.001` crediting `STATIC ANALYST`; the static analyst claimed
+  neither and no tool named either, and nothing asked. The judge node now
+  passes the evidence summary as data, and `stix.credit_without_claim` tells
+  the judge which sources did name the technique, by the names the summary
+  gives them (a parent or sub-technique counts). The credit is never
+  rewritten in the judge's own bundle; one the judge keeps is left off the
+  export's copy of the relationship and recorded as
+  `stix.unpublishable_credit`, so no surface prints an agent as having named a
+  technique it never named.
+
+- **Nothing is written into a judge object that the judge did not write.** An
+  indicator with no `indicator_types` was published as `malicious-activity`
+  and, under a Benign verdict, the judge was then asked about that word; it now
+  stays untyped (the property is optional in STIX 2.1). A malware object with
+  no `is_family` was published as `false`; the judge is now asked
+  (`stix.is_family_missing`), and a judge's `is_family: true` is published as
+  written — the renderer used to force it to `false`. A relationship annotation
+  outside the schema — a confidence of `1.5` or `95`, a basis such as
+  `static+dynamic+network` — used to parse as a plain relationship and lose the whole annotation silently; it
+  is now kept as written and asked about (`stix.annotation_out_of_schema`), and
+  no reader puts a number off the 0–1 scale on a technique.
+
+- **A label the judge repeats is asked about, never resolved.** Two objects
+  sharing an id had every reference rewired onto the first, and the integrity
+  pass folded the second object's edges away. The label is now a
+  `stix.duplicate_label` question naming both objects, and no reference naming
+  it is rewired onto either. Feedback names the judge's own positions and
+  labels (`objects[3] 'indicator--2'`) rather than positions in the
+  post-processed list.
+
+- **A technique nobody put a number on is published without one.** The
+  matrix printed `conf=0.00` for a technique no source numbered — every
+  technique the judge names alone under a Suspicious or Benign verdict, where
+  there is no malware object to hang a numbered edge on.
+  `CapabilityCell.confidence` and `TTPMapping.confidence` are now `null` there,
+  and the report and the narrative's prompt print "not given".
+
+- **The export's observed data is STIX 2.1, and the official validator gates
+  every export shape.** The process tree was a deprecated `objects` dictionary
+  of processes with no id and a `name` 2.1 does not define, with the process
+  count in `number_observed`; the OASIS validator crashed on it. It is now
+  `process` and `file` observables named by `object_refs`, with
+  `number_observed: 1`. `stix2-validator` is pinned at 3.2.0 (3.3.1 ships no
+  schemas and validates nothing), and a test renders a rich, a sandbox and a
+  Benign export and fails on any validator error.
+
+- **The judge's own bundle is kept, and the export says who did what.**
+  `analysis_reports.judge_stix_bundle` (migration `20260929000000`) holds the
+  judge's bundle and the map from each label it wrote to the published id,
+  served at `/reports/{id}/stix?source=judge` — the bundle every decline row
+  says an object "is unchanged in". A network-block row the export declines is
+  filed under the source that recorded it rather than under the judge; a
+  text-fallback bundle credits the analysts whose claims it carries rather
+  than the judge; a producer the export names in place of one it cannot hold
+  is recorded (`stix.unpublishable_producer`). A pattern over a path its type
+  does not have, or a type written in the wrong case, is asked
+  (`stix.unknown_object_path`) and declined as `stix.unpublishable_pattern`. A
+  technique id is read only from a MITRE ATT&CK reference, and the judge's
+  bundle and the export derive technique ids in one namespace.
+
+- **A cyber-observable the judge writes never costs the rest of its bundle,
+  and the export never publishes an object the standard refuses.** A judge
+  `file` without a `name` failed the bundle model and sent the judge's whole
+  answer to the text fallback, its verdict read from prose and its confidence
+  lost; a named `file` dropped its `hashes` and a `process` its `name`, with
+  nothing recorded. Every property STIX 2.1 defines for a `file` or a `process`
+  is now kept as written, and every judge object is read on its own first: one
+  carrying a property its type does not define, or a value the model cannot
+  hold, is set aside as `stix.unknown_object` and the rest is read. A file with
+  neither `hashes` nor `name` is asked `stix.file_unidentified`; kept, it and a
+  malware object without `is_family` are declined as `stix.unpublishable_object`
+  and the platform's own sample object stands in.
+
+- **A declined judge malware object's relationships move onto the object that
+  stands in for it.** Declining the judge's malware object dropped its `uses`
+  and `indicates` edges with it, so the technique the judge numbered was
+  published unrelated while the report published it at the judge's
+  confidence, and the judge's indicators indicated nothing. The edges now move
+  onto the platform's sample object unchanged and the decline sentence says
+  so. A test checks over every Malware export shape that each technique is
+  used by a malware object, that every `indicates` edge is the judge's own or
+  the sample hash's (any other indicator is related to nothing and listed in
+  the report's `object_refs`), and that the export and the report publish the
+  same techniques at the same numbers.
+
+- **What the export does not carry of the judge's bundle is recorded, and the
+  judge's own record holds it.** The domain-object models ignore properties
+  they do not declare, so an indicator's `valid_until` and
+  `kill_chain_phases`, a relationship's `description` and a malware object's
+  `aliases` left the judge's bundle with no row, and the stored judge bundle, a
+  model dump, lost them as well. Each object's undeclared keys are now a
+  recorded `stix.property_not_carried` row that does not spend the judge's
+  retry, `analysis_reports.judge_stix_bundle` stores the judge's JSON as
+  written, and a malware object's `sample_refs` is carried into the export.
+- **What a run measured reaches its report, once and from the right source.**
+  The header's timestamp, machine and library flag reach the sample overview —
+  from the identity, or on a stored report from the format tool's own section.
+  One binary read twice (the triage pack's pe_info and the analyst's, capa run
+  twice) is one section table, one import table, one export list and one set of
+  rule rows. A similar sample is named by the id it carries rather than `?`. A
+  technique's source is every producer that named it — the rules that asserted
+  it, the analysts, the judge's verdict — and a confidence no producer stated
+  (a technique whose `confidence` is `None`) prints "not given" or "rule
+  match", never "0.00, judge"; a stated one names its producer, and an
+  unresolved `stix.credit_without_claim` prints beside its row. Every identity hash `/iocs` publishes is in the indicator table.
+- **An empty sandbox answer is not an observation.** The report speaks in the
+  sandbox's voice only over what a sandbox recorded; a sandbox whose tools
+  answered with nothing — a mock with no fixture — gets one sentence in the
+  run's own voice saying nothing shows the sample was executed, with the reason
+  the run recorded. The report models are told the same in their prompts.
+  An execution-flow step marked observed may cite only a sandbox answer that
+  recorded something; one citing an empty answer is asked about, and the report
+  prints the `report.flow_voice` note beside any step marked observed in a run
+  with no observation.
+- **Every numbered section is printed.** A section or a §5, §10 or §12
+  subsection with nothing in the run prints one line in the platform's voice
+  saying whether nothing was found or nothing looked; the table subsections of
+  §6, §7 and §9 are unnumbered headings. A script that looked for `### 6.1
+  Process tree`, `### 7.5 Rule hits`, `### 9.1 File and host indicators` and
+  their siblings must look for the unnumbered titles.
+- **A degraded run's header is one reader sentence.** It is built from the
+  analysts' and the sandbox's states and points to §13, which now lists every
+  degradation reason verbatim with its remedy and each analyst's state; no
+  reason code or install command is on the first screen, and §3 does not claim
+  consensus among analysts that claimed nothing.
+- **Every printed number has an owner.** A technique's confidence prints with
+  its producer (new `CapabilityCell.confidence_source`), or "producer not
+  recorded" on a stored row; an unstated one prints "not given"; a packer,
+  function-hash, similarity or carved-payload field with no value prints "not
+  recorded"; a similar sample with no distance is counted, not listed; §2 states
+  the reputation lookup's engine count ("VirusTotal: 52 of 75 engines flag it as
+  malicious"), which `ledger_report` now lifts into rows.
+- **The measured proof sits beside the prose.** §5.1 and §5.2 print the capa
+  rules that support them with their evidence ids; in §8 a rule naming a
+  technique a row already holds is folded into that row, and a rule-only
+  technique is one row with the catalogue's tactic and name.
+- **Voices name who spoke.** The platform's no-summary fallback, the platform
+  read from the file format (now a §2 row) and a family named by the sandbox
+  are no longer tagged as a model's or the judge's, in the report and in the
+  console; the title names a family only when the judge cited evidence for it;
+  the report model's unresolved findings print under §1.
+- **A value cannot break a line or open a heading.** List items, steps and
+  headings are built by one helper each, prose cannot open a heading or a code
+  fence, and a guard test fails the build on a hand-built bullet. The HTML
+  anchors and contents are the section titles without the voice tag, a model's
+  private address is marked in §5.7, prose never leaves `http://` live before a
+  defanged host, and the console defangs a channel's endpoints.
+- **A model's list is cut only with a record**, and a missing parser degrades a
+  run only for a sample of the format it parses (no Mach-O note on a PE).
+- **The report models' contracts, prompts and instructions carry no evaluation
+  answer.** The narrative contract and its citation rule use the invented
+  class's technique ids, the composer's instructions are module data with a
+  neutral configuration checklist, and the leak test reads all of them.
+- **Model prose cannot open a setext heading or a table**: a line of `=` or `-`
+  and a table delimiter row are escaped like `#` and fences.
+- **`Finding.confidence` is `None` when the analyst gave none** (was 0.0); the
+  findings table prints "not given" and the matrix records no number for it.
+- The degraded header says an analyst was *skipped* when its record says so,
+  from the stage and agent records; an empty capability subsection names the
+  tools that ran over the file; PEB access is listed once; the unscored
+  similarity line reads "No similarity measure was recorded for these
+  samples."
+- **A family-specific section needs its family.** An encryption scheme with no
+  file-encryption field prints beside the anti-analysis prose rather than under
+  a ransomware heading, and a block of placeholder values ("none", "unknown")
+  is not content. A Malware Behavior Catalog id claimed as a technique is listed
+  under the ATT&CK table as a behaviour, not as an unresolved technique row.
+
+- **The Ollama probe loads the model the way the job will.** The `llm` and
+  `agent` probes asked Ollama with no `num_ctx` and no `keep_alive`, so the
+  model was left loaded at the server's default 4,096-token context and the
+  job's first call reloaded it at `core.llm.ollama.num_ctx` (32,768 by default)
+  out of the first analyst's time budget. Both probes now send
+  `options.num_ctx` and `keep_alive` from `core.llm.ollama.num_ctx` and
+  `core.llm.ollama.keep_alive`, staged values included. The other providers'
+  bodies are unchanged.
+
+- **A reference lookup is not an assertion.** The corroboration rows counted
+  any ledger tool that returned a technique id as a deterministic source, so an
+  analyst that looked up twenty ids with `attck_lookup`, and a `similar_cases`
+  call returning other samples' techniques, made a report print "29 asserted by
+  a deterministic source" where capa had asserted two — six of them ids the
+  lookup itself answered `valid: false`. Only capa, Sigma, YARA, `lolbin_lookup`
+  and a sandbox signature assert now (`evidence_summary.ASSERTING_SOURCES`); a
+  lookup adds no row and no count, and an id any ledger entry of the run marks
+  invalid is never counted as asserted. The import rules (`api_capability`)
+  stay a reference association and count for nothing, as before. The report's
+  TTP line, its corroboration table, the run summary's per-source attribution and
+  `techniques_by_layer`, the judge's evidence block and the console's
+  Capabilities page all read the same rows.
+  **Upgrading:** `run_summary.corroboration` on a new run has fewer rows and
+  no `attck_lookup`, `similar_cases`, `resolve_technique` or other lookup name
+  in `asserted_by` or `techniques_by_layer`; a report stored before this keeps
+  the rows it was written with.
+
+- **No consensus among analysts who said nothing.** A run whose only analyst
+  timed out went to the mediator with nothing to compare, the mediator answered
+  "no analyst provided a substantive report … agreement_confidence: 1.0", and
+  the run recorded "Consensus reached (confidence=1.00)", a `consensus`
+  termination and a final confidence of 1.000. Agreement is now measured only
+  when at least two of the debate's analysts produced claims, on the model
+  path, the text fallback, the mock mediator, a failed mediation round and a
+  debate stage that did not run alike. Otherwise the mediator still speaks, but
+  no agreement value is extracted, the confidence series gets nothing, and the
+  router goes to the judge rather than asking the same analysts to revise.
+  **Upgrading:** on such a run the pipeline state and the stored
+  `negotiation_log` carry `is_consensus: null` and `consensus_applicable:
+  false`, a mediator argument's `confidence_score` (and the stored
+  `confidence`) is `null`, `run_summary.negotiation.termination_reason` is
+  `not_applicable` with **no** `final_confidence` or `converged_early` key, the
+  report's `negotiation_summary` has no `final_confidence`, and the negotiation
+  timeline's `reached_consensus` is `null`. The mediator's words are kept
+  whole in the argument's `finding`, and the platform's "not applicable"
+  sentence is in its own `note` field (stored as `note` beside each negotiation
+  entry). A consumer must read an absent or
+  `null` value as "not measured", never as 0.0 or as no consensus. A mock run's
+  analysts file no claims, so a mock run now takes this path too.
+
+- **The time cap salvages, like the step cap and a full window.** A static
+  analyst on a model at about 100 s a turn reached its 1,500 s budget at step 28
+  of 40 and was aborted ("exceeded the 1530s hard cap; aborting this analyst"),
+  and everything it had gathered was lost with no final-answer turn. The soft
+  timeout was reported as the hard cap and handled like it. The loop now times
+  its own turns — answer to answer, tools included — per answering model,
+  leaving out the turn a model list switched on, and ends its tool phase once
+  the time left cannot hold the longest turn plus a final-answer reserve: 1.5 ×
+  the larger of that turn and a 1,000-token answer at the model's measured
+  rate, at least the salvage's 60 s floor. The salvage writes the answer from
+  what was gathered. At that pace with one 240 s turn and 3.8 tokens a second,
+  the reserve is about 395 s and the tool phase ends once under 635 s are left.
+  The last turn's calls that never ran are taken off the transcript the final
+  answer is sent — from `tool_calls`, from `additional_kwargs` (OpenAI's
+  `tool_calls`, Gemini's `function_call`) and from the content's `tool_use`
+  blocks, since hosted providers refuse an unanswered call — its text kept
+  and the record saying they did not run; a model list's deadline is held at
+  the reserve for that turn; the answer asked for after it gets only what that
+  turn left. A turn longer than any measured that still reaches the budget
+  ends the phase there, with what was gathered kept, rather than failing the
+  analyst; a budget that runs out with nothing gathered says so instead of
+  naming the hard cap. The budget record, the `stage_ended_at_cap` event and
+  `run_summary.budget` say `time`, with a detail naming the time left, the
+  answering model's longest turn and the reserve.
+  **Upgrading:** an analyst on a slow model now stops calling tools before its
+  budget and returns claims where it used to fail with a `TimeoutError`, so
+  such a run makes fewer tool calls and has one more analyst reporting; the
+  hard cap is unchanged.
+
+- **The run's token total counts every model call.** A smoke run counted 20
+  calls while the model server served 22. The mediator's fast path, the
+  mediator's structured extraction and the judge's verdict (and its retry)
+  recorded nothing, nor did the three built-in analysts' revision rounds, the
+  function summariser, or the turns of a tool loop its hard cap or a failure
+  stopped (a judge loop's included), or an attempt abandoned on a connection
+  error; the step-cap stop sentence the loop appends was counted as a call; the narrative's and the composer's calls were recorded under no
+  model, and their structured paths not at all. Each path now records its usage
+  under its agent and the model that answered: the mediator's against the
+  expert model, the report's against the reporter's, the summariser's under
+  `summarizer`. A structured call asks for the raw turn beside the parsed
+  answer (`with_structured_output(..., include_raw=True)`).
+  **Upgrading:** `run_summary.tokens.llm_calls` and the per-agent figures rise
+  for the same work, `per_agent` gains `judge` and, when the summariser is on,
+  `summarizer`, and `run_summary.models.reporter` names the reporter's model;
+  a comparison across this release compares different counts.
+- **A citation is an evidence id or it is asked about.** The composer cited
+  "[BINARY FACTS]" and "[DETERMINISTIC FACTS]" — its own prompt's block
+  headings — beside real evidence ids, and nothing checked a citation. The
+  narrative and every composer section now get `report.citation_not_evidence`
+  for each bracketed item in their prose that is not an id the run's ledger
+  issued, with a sentence naming the ids they may cite. Only prose fields are
+  read, never a record field or a code span; ATT&CK and MBC ids, IPv6 literals,
+  markdown links and a bracket that is part of a token are left alone, and a
+  numbered reference such as `[1]` is asked about. An id inside a sample's own
+  decoded string is never citable. The citation is never rewritten:
+  one the retry does not fix prints as written and is recorded unresolved, and
+  the section is kept.
+
 ### Removed
 
 - **The static analyst's case-prior hint and its settings.**
@@ -3081,7 +4562,164 @@ change landed on `main`.
   catalogue per domain. Nothing in the tree reads the old path; a deployment or
   a script of your own that reads it by name must be pointed at the new file,
   whose rows are keyed the same way and carry the same two keys.
+- **The severity score** (`severity.overall_score`), the rating read through
+  a fixed table and printed as a number out of ten nobody stated. A stored
+  report's score is ignored on load.
+- **The capability paragraphs and the conclusion as sections.** The narrative
+  round and the composer no longer write `capabilities_narrative` or
+  `conclusion`; a stored report prints its paragraphs under the technical
+  analysis and its sophistication rating beside the verdict.
+- **`reporting.builder.defang`**, replaced by `reporting.defang.defang(value, kind)`.
+
+### Documentation
+
+- **The benchmark is published** in `docs/benchmark/`: the method (samples,
+  models, the mock sandbox and the scoring key), the default model across four
+  iterations, a small model, the reference sample scored against Bitsight's
+  published Latrodectus analysis, the disassembler run, the PuTTY
+  false-positive control and the limitations, with the five item-by-item score
+  files. The README has a short "How Maljan compares" section that links to it.
+  Iterations 5 and 6 are added to both, with their score files: the reference
+  score plateaued within rerun noise (12–15 found, none wrong), the remaining
+  gap is on the model's side, and iteration 6 published seven techniques on the
+  benign PuTTY control after its verdict fell back.
+
 ### Upgrading
+
+`llm.expert_max_tokens` and `llm.judge_max_tokens` ship at 0, which now means
+"derived from the window" — no longer "unbounded". A stored setting keeps its
+value; a deployment that relied on 0 for no cap should set a value instead.
+On a 32,768-token window the derived cap is the 8,192 that shipped before; on a
+smaller window it is smaller, on a local larger one larger (32,768 on a
+131,072-token window), on a model with a declared maximum at most that (16,384
+on the shipped gpt-4o), and on a hosted model that declares none 8,192. The
+composer's derived section budget and the reply reserve follow the same rule,
+so on a large window both grow and the tool budget is correspondingly smaller;
+an unknown window keeps 8,192. `stix2-patterns==2.1.2` is a runtime
+dependency. `run_summary.generation` may carry
+`output_caps`. Three more validation codes: `stix.pattern_refused`,
+`stix.shape_names_a_value` (both counted in `run_summary.validation`), and a
+judge indicator with an empty pattern is the only one the integrity pass drops,
+so `empty_pattern` no longer counts a cut pattern. An unresolved row may carry
+`subject`. `x_maljan_fallback_verdict` may carry `reasoning`. The network
+reputation cell reads "N of M engines flag it as malicious".
+
+Two validation codes are new, `isr.cut_at_output_cap` and
+`stix.unescaped_backslash`, and `stix.indicator_not_published` also records a
+`LIKE` or `MATCHES` over a kind the publish rule answers for. A judge indicator whose pattern has an operator
+other than `=` now reaches the checks and the export instead of being dropped;
+a `LIKE` endpoint's decline sentence says it names every endpoint that fits it.
+A `run_summary.validation.unresolved` row of the judge's carries `"asked":
+"false"` when the judge was never shown it, and `Violation` has an `asked`
+field. `x_maljan_fallback_verdict` may carry `model_only_technique_ids`; a
+non-Malware fallback bundle with nothing for a note to name carries no note.
+`retry_with_feedback_sync` takes `drop_answer_for`. A capability matrix cell's
+`note` may hold the judge-only marker. The triage pack's reputation line reads
+"VirusTotal: N of M engines flag it as malicious".
+
+The judge is asked to leave `pattern_type` out of an indicator (the model
+fills in `stix`) and to write its annotations on relationships only. A
+fallback bundle may carry indicator objects. `attck.claim_does_not_describe`
+is a new validation code, counted in `run_summary.validation`; the not-asked
+path appends "Not asked: …" to it as to `attck.absence_claim`. The
+`verdict.cut_at_output_cap` question states the answer's size by characters,
+objects and indented lines. The capability check asks about more report
+sentences where only capa's or YARA's rule names had grounded a word, and about
+fewer where a value, a heading or an absence had been read as a claim. A
+section's findings first raised by its retry — a new sentence under a term
+already asked included — are recorded ending `composer.ONLY_IN_THE_RETRY`, and
+a `run_summary.validation.unresolved` row of a finding never shown to its
+producer carries `"asked": "false"`.
+
+An analyst claim carries `kept_after_absence_question` (false on a stored ISR,
+which is read as before), and a capability matrix cell carries `note` (empty
+when there is none). A capability question names two of its term's technique
+ids instead of three. Two validation codes are new, `attck.absence_claim` and
+`composer.repeated_items`, both counted in `run_summary.validation`. The
+exported STIX report object of a Suspicious or Benign run is typed
+`threat-report` instead of `malware`. `retry_with_feedback_sync` takes an
+optional `keep(first, last)` that chooses the answer kept before outcomes are
+published. The capability check asks about more report sentences than before:
+see "A capability word is grounded only by what the run found".
+
+The `cancelled` job event always carries `stopped` now, and a new
+`seconds_into_run`. A report carries `flagged_statements` (empty on a report
+stored before it existed, which renders unmarked). On the `openai` provider
+against llama.cpp, `run_summary.generation` records a prompt reading rate and
+the server's own generation rate (source `llama.cpp timings.predicted_n/
+predicted_ms`) instead of the wall clock's. A call that gives its prompt size
+is timed as its prompt read plus its answer at those two rates; without a
+reading rate the rate that includes the prompt read is used as before. A
+derived timeout is never below the configured value. A queued job whose row
+already ended returns `status: skipped` from the worker.
+
+`reporting.composer_section_max_tokens` now ships at 0, meaning derived from
+each reporter model's context window. A deployment that stored 900 (or any
+positive value) in its settings keeps that value; set it to 0 to take the
+derived budget. The report stage learns each reporter model's window when it
+builds the composer, the way the analysts' tool-output cap does (metadata
+endpoints only, cached per model and endpoint).
+
+A derived section budget can be many times the old 900 tokens, so a section
+on a slow model may wait far longer: its wait holds two calls of the budget at
+the model's measured pace, up to the 1,800 s request ceiling each, and a report
+has about eleven sections. Set `composer_section_max_tokens` to bound it.
+
+`/reports/{id}/iocs` and `consolidated_iocs` may carry rows whose `source` is
+`judge`, of kinds the feed never served before (`email`, `path`, `registry`,
+`mutex`, `command`, and a `hash` of another file). A consumer that switches on
+`kind` should expect them. A judge indicator the publish rule refuses is no
+longer exported: an export may carry fewer judge indicators than before, each
+decline recorded as `stix.indicator_not_published`. A report stored before
+`judge_indicators` existed shows no judge rows.
+
+A report now stores `emulated_strings`. A report stored before it existed
+reads its emulation record from its kept section rows, and a value published
+from it says "(the record is partial: …)"; re-render it from a new run for a
+whole record. A Sigma draft may carry more than twelve values in a selection,
+and its registry selection names keys without a hive (`\Software\...`), not
+`HKCU\Software\...`. A composer section's prompt may be longer, since its
+facts are no longer cut.
+
+Draft detection rules are no longer generated for a Benign verdict, and a
+YARA draft no longer carries import names as strings; a Suricata draft alerts
+only on published network values. `technical_analysis.host_identifiers` is a
+new optional field; a report stored before it renders without the rows.
+`run_summary.validation` may carry `report.citation_wrong_entry`,
+`report.identifier_uncited` and `report.technique_name`. A Sigma draft is no
+longer generated from an analyst's persistence target alone.
+Operators see these changes in a run's record, and nothing needs migrating:
+`run_summary.budget.<agent>.salvages` lists each salvage (what it sent, what it
+was sized by, how it ended); `run_summary.generation.models.<model>` gains
+`prompt_tokens_per_second`, `prompt_tokens`, `prompt_seconds` and
+`prompt_sources`; `run_summary.triage` gains `floss`; a new setting,
+`triage.memory_floor_mb` (10,240), needs no action; `validation.by_code` can carry `isr.unparsed_answer`,
+`isr.claim_without_confidence`, `verdict.cut_at_output_cap` and
+`tool.argument_names_its_parameter`; the degradation reasons can name
+"analyst answers kept as prose"; a stage's `agent_reasons` says when an
+analyst was not given a second loop; and the `cancelled` event can carry
+`stopped`. An analyst answer with no CLAIM block no longer yields claims at
+0.50, so a run that used to show such claims shows none, with the analyst's
+prose as its report; reports stored before this change keep what they
+recorded. A judge fallback whose answer stated its assessment whole now
+publishes that assessment's confidence, severity and family.
+
+Record shapes that change with this: `attribution.family_confidence` and the
+judge's `family.confidence` are `null` where nothing was stated (they were
+`0.0`), and the console's attribution tab prints "not assessed" for it;
+`static.packer_matches` rows from the pack carry no `confidence` and name the
+matched sections under `evidence`; capa's `technique_hits` and
+`api_technique_hits` rows carry no `confidence`; a YARA rule's `confidence` is
+`null` where its author wrote none; `overall_confidence` defaults to `null`;
+`run_summary.budget.<agent>.validation_not_asked` lists validation turns a
+loop's time could not hold; a failed mediation round has `is_consensus: null`,
+an empty confidence series and `termination_reason: mediation_failed`, with no
+`final_confidence`, and the report projection no longer borrows the verdict's
+confidence or a 0.0 for a negotiation that stated none. Reports stored before keep what they recorded.
+
+A stored STIX bundle keeps the shape it was stored with: `x_maljan_evidence_refs`
+appears only in exports rendered after this change, so the relationship graph
+of an older run shows no ledger ids until that run is analysed again.
 
 An existing `.env` deployment is not migrated automatically. Move the bootstrap
 variables into the process environment (or `docker/.env` and `bootstrap.env`),
@@ -3114,3 +4752,100 @@ The same applies to an export carrying the judgement-layer settings —
 and `core.preprocessing.category_inference_backend`. `core.analysis.sigma_rules_dir`
 is not dropped but moved: it becomes `MALJAN_SIGMA_RULES_DIR` in the `analysis`
 tool server's `env`, and the migration moves a stored value across for you.
+
+The evidence ledger gains a `model` column (revision `20260928000000`); run
+`make migrate` before starting a worker on this release. Rows written before it
+name no model, and read as such. `llm.agents` entries need no migration: an
+entry without `fallbacks` is the single-model form it always was. A stored run
+summary written before this release still carries `tokens.estimated_calls`, and
+the console says such a run's figures had estimates mixed in rather than
+printing them as a count. `core.mcp.breaker.*` are new settings with defaults;
+set `core.mcp.breaker.max_concurrent_calls` to `0` to drive every tool server
+uncapped as before.
+
+`core.llm.fallback_turn_share` and `core.mcp.breaker.call_timeout_seconds` are
+new settings with defaults. A tool server that legitimately takes longer than
+the longest tool budget configured for this deployment (capa's, 300 s by
+default) needs `core.mcp.breaker.call_timeout_seconds` set, or its tools to
+declare their budget in the server's `capabilities` manifest.
+
+`floss` runs FLOSS 3.1.1 (Apache-2.0) as FLARE's standalone Linux build, not
+as a Python dependency: the lockfile does not change. The backend image
+downloads the release zip in a build stage, checks it against its pinned sha256
+and installs the executable at `/usr/local/bin/floss`. On a host outside the
+image, run `scripts/install_floss.sh`, which does the same into
+`~/.local/share/maljan/tools/floss-3.1.1/`, or name a copy of
+the pinned build in `MALJAN_FLOSS_PATH` in the `analysis` server's `env`.
+Without it the capability manifest marks `floss` unavailable and the model is
+not offered the tool.
+
+A consumer of the exported STIX bundle that filters on the platform's own
+words should update the filter: the producer identity is now
+`identity_class: system` under the one id
+`identity--9f9e2570-073b-5b46-b156-05d12a086911`, named by `created_by_ref` on
+every other object, and the report object's `report_types` is `malware`. A
+bundle stored before this change keeps `software`, `malware-analysis` and a
+per-run identity id; nothing is rewritten.
+
+A consumer of the exported STIX bundle or of the report's technique rows
+should know what else moved. `x_maljan_confidence` and `x_maljan_evidence_basis`
+are absent on a relationship whose writer gave none, where they used to be
+present as `0.5` and `unknown`; read them as optional, and do not assume a
+number or a list: an annotation outside the schema is kept as the judge wrote
+it (`x_maljan_confidence` may be `95` or `"high"`, `x_maljan_contributing_agents`
+a single string) beside a `stix.annotation_out_of_schema` row. `contributing_layers`
+no longer lists the agents a judge relationship credits, so `is_corroborated`
+is true only when two analysts named the technique themselves — a dashboard
+counting corroborated techniques moves down. A technique's `confidence` in
+`capability_matrix` and `ttp_mappings` is `null` when no source gave one. The
+judge's malware, indicator and relationship ids are fresh per run: the
+documentation-copied ids some runs shared were stable by accident, and a
+consumer that merged on them sees new objects. An untyped judge indicator
+carries no `indicator_types`, and a judge malware object marked
+`is_family: true` keeps it. Observed data carries `object_refs` to `process` and
+`file` objects instead of an `objects` dictionary. New codes in
+`run_summary.validation` and the export's rows, for a consumer that partitions
+on them: `stix.unknown_observable_type`, `stix.unknown_object_path`,
+`stix.indicator_type_vocabulary`, `stix.credit_without_claim`,
+`stix.annotation_out_of_schema`, `stix.duplicate_label`,
+`stix.is_family_missing` (questions the judge is asked) and
+`stix.unpublishable_pattern`, `stix.unpublishable_credit`,
+`stix.unpublishable_producer` (the export's own decisions). Apply migration
+`20260929000000` for `analysis_reports.judge_stix_bundle`; a report stored
+before it has none, and `/reports/{id}/stix?source=judge` answers
+`{"kept": false, "reason": …}` for it (404 only for a report that does not
+exist); a kept record carries `"kept": true`, and a label the judge gave two
+objects maps to a list of ids. Violation paths on the judge's rows now read
+`objects[i] 'label'` — the judge's own position and the id it wrote — where
+they read `objects[i]` over the post-processed list; a consumer parsing `path`
+should read the index up to the closing bracket. Judge-written `file` and
+`process` objects now reach the export with every property the standard
+defines; one carrying a property it does not define is set aside as
+`stix.unknown_object`, a file with neither `hashes` nor `name` is asked
+`stix.file_unidentified`, and a malware object kept without `is_family` or
+such a file is declined as `stix.unpublishable_object`, two more codes for a
+consumer that partitions on them. The judge's relationships from a declined
+malware object name the platform's sample object instead. `stix.property_not_carried` is a new recorded row on the judge's
+findings (an export decision, never fed back). `judge_stix_bundle` records now
+carry `as_written`: `true` when the bundle is the judge's JSON as written (it
+may then carry properties the models do not declare, and the judge's own
+labels rather than the published ids — read those through `labels`), `false`
+for a record kept as the parsed bundle. A `/reports/{id}/stix?source=judge`
+answer with `"kept": false` now covers a run whose judge produced no bundle
+too. Malware objects may carry `sample_refs`.
+
+Reports are not migrated. A report stored before the vendor layout renders in
+it with the sections it has: its score is ignored, its capability paragraphs
+print under the technical analysis, its conclusion's rating beside the verdict
+and its indicator table is rebuilt from its own blocks. A consumer reading
+`severity.overall_score`, `capabilities_narrative`, `conclusion` or the old
+defanged `consolidated_iocs[].value` must stop: the score is gone, the two
+prose fields are written by nothing, and the value is live. Scripts that parse
+the Markdown by heading must use the new numbered headings, and a pipeline
+that expected a summary on a mock run must expect `executive_summary` empty
+and read the degradation reason instead.
+
+The triage pack runs `floss` on every PE, so a worker host needs the pinned
+FLOSS build as the `analysis` server's host does; the backend image has it.
+Without it the pack's entry says the build is missing and names the remedy,
+and the run goes on.

@@ -264,7 +264,7 @@ class TestTheReportRounds:
         composer._facts_block = ""
         seen: list[list[Any]] = []
 
-        async def _invoke(messages: Any, schema: Any, *, section: str) -> Any:
+        async def _invoke(messages: Any, schema: Any, *, section: str, **_: Any) -> Any:
             seen.append(list(messages))
             return None
 

@@ -6,6 +6,7 @@ import { useReport } from "../layout";
 import { copyToClipboard, truncateMiddle } from "@/lib/report-utils";
 import Field from "@/components/ui/Field";
 import { attributionSaysSomething } from "@/components/analysis/analysisTabs";
+import EvidenceChips from "@/components/analysis/EvidenceChips";
 import type { FamilyAttribution } from "@/types/malware-report";
 
 type SimilarSample = {
@@ -38,7 +39,11 @@ export default function AttributionTab() {
     );
   }
 
-  const familyConfidencePct = Math.round(attribution.family_confidence * 100);
+  // Null when the judge put no number on the family: "not assessed", never 0%.
+  const familyConfidencePct =
+    attribution.family_confidence == null
+      ? null
+      : Math.round(attribution.family_confidence * 100);
   const malwareCategory = report?.malware_report?.malware_category;
   const similars = (attribution.similar_samples as SimilarSample[]) ?? [];
   // Absent on every report written before these fields existed, hence the fallbacks.
@@ -85,7 +90,9 @@ export default function AttributionTab() {
             label="Family Confidence"
             value={
               attribution.family && !familyUngrounded
-                ? `${familyConfidencePct}%`
+                ? familyConfidencePct == null
+                  ? "not assessed"
+                  : `${familyConfidencePct}%`
                 : "-"
             }
           />
@@ -111,6 +118,20 @@ export default function AttributionTab() {
             Family was emitted by the verdict LLM but is not corroborated by
             sandbox CTI, sandbox signatures, or analyst claims. Treat as
             unverified.
+          </div>
+        )}
+        {/* Who named the family and what it was read from: the judge's
+            citations, or the sandbox's own classification when the judge
+            named none. Absent on a report stored before either was kept. */}
+        {attribution.family && attribution.family_source === "sandbox" && (
+          <div className="px-4 pb-3 -mt-2 text-[11px] text-text-muted">
+            Named by the sandbox&apos;s own classification; the judge named no family.
+          </div>
+        )}
+        {attribution.family && (attribution.family_evidence_ids ?? []).length > 0 && (
+          <div className="px-4 pb-3 -mt-2 text-[11px] text-text-muted flex items-center gap-2">
+            The judge cited
+            <EvidenceChips ids={attribution.family_evidence_ids} />
           </div>
         )}
       </div>

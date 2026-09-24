@@ -65,7 +65,7 @@ class TestTheLedgerKeepsTheRemedy:
         assert entry.remediation is None
 
 
-class TestTheReportHeaderListsFailuresOnce:
+class TestTheReportListsFailuresOnce:
     def _entries(self) -> list[LedgerEntry]:
         failed = {
             "tool": "document_info",
@@ -97,7 +97,7 @@ class TestTheReportHeaderListsFailuresOnce:
             }
         ]
 
-    def test_the_markdown_header_carries_them(self) -> None:
+    def test_the_limitations_section_carries_them(self) -> None:
         from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
         from maljan.reporting.renderers.markdown import MarkdownRenderer
 
@@ -107,8 +107,8 @@ class TestTheReportHeaderListsFailuresOnce:
                 "evidence": {"entries": 3, "failed": 2, "failures": tool_failures(self._entries())}
             },
         )
-        header = MarkdownRenderer()._section_header(report)
-        assert "**Tool failures**:" in header
+        header = MarkdownRenderer().render(report).split("## 13.", 1)[1]
+        assert "**Tool failures:**" in header
         assert (
             "`document_info` (analysis) ×2: olefile is not installed — uv sync --extra tools"
             in (header)

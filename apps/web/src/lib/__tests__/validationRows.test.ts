@@ -55,6 +55,26 @@ describe("what an unresolved row says", () => {
   it("says the same for an artefact and for a digest the export refused", () => {
     expect(isExportDecision("stix.unpublishable_artefact")).toBe(true);
     expect(isExportDecision("stix.malformed_hash")).toBe(true);
+    expect(isExportDecision("stix.evidence_ref_not_in_ledger")).toBe(true);
+  });
+
+  it("says the same for a pattern over a type STIX does not have", () => {
+    expect(isExportDecision("stix.unpublishable_pattern")).toBe(true);
+    // The question the judge was asked is the judge's row, not the export's.
+    expect(isExportDecision("stix.unknown_observable_type")).toBe(false);
+  });
+
+  it("says the same for a producer the export named in place of one it could not hold", () => {
+    expect(isExportDecision("stix.unpublishable_producer")).toBe(true);
+  });
+
+  it("says the same for an object the judge kept without what the standard requires", () => {
+    expect(isExportDecision("stix.unpublishable_object")).toBe(true);
+    expect(isExportDecision("stix.unpublishable_credit")).toBe(true);
+    expect(isExportDecision("stix.property_not_carried")).toBe(true);
+    // The questions the judge was asked are its own rows.
+    expect(isExportDecision("stix.is_family_missing")).toBe(false);
+    expect(isExportDecision("stix.file_unidentified")).toBe(false);
   });
 
   it("says the same for an annotation that went with a rejected technique", () => {

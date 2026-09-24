@@ -10,9 +10,12 @@ pipeline, streaming progress events via Redis PubSub.
 
 import asyncio
 import gc
+import json
 import os
 import platform
 import signal
+import sys
+import threading
 import time
 import traceback
 import uuid
@@ -24,6 +27,8 @@ from typing import Any
 
 import redis.asyncio as aioredis
 from arq import cron
+from maljan.agents.base_agent import CANCEL_DELIVERY_GRACE
+from maljan.core.cancellation import Cancellation, JobCancelled
 from maljan.core.config import Settings as _CoreSettings
 from maljan.core.settings_catalog import core_catalog
 from maljan.core.settings_overrides import build_settings, public_snapshot
@@ -795,6 +800,7 @@ def _evidence_row(entry: dict[str, Any], *, job_id: uuid.UUID) -> Any:
         args=entry.get("args") or {},
         args_repaired=bool(entry.get("args_repaired", False)),
         args_raw=(str(entry["args_raw"]) if entry.get("args_raw") else None),
+        model=(str(entry["model"])[:300] if entry.get("model") else None),
         output=str(entry.get("output", "") or ""),
         structured=entry.get("structured"),
         # Why the output is empty, what the call was answered from, what it
@@ -914,6 +920,122 @@ def _make_event_sink(
 # name rather than a literal: a test that has to see one poll happen does not
 # have to wait a quarter of a minute for it.
 CANCEL_POLL_SECONDS = 15.0
+
+# How long a pipeline that has been told to stop is waited for before the job
+# goes on without it, and how long the process waits at exit for threads still
+# blocked in a call nothing can cancel — a synchronous model call in flight on a
+# thread — before it leaves them. The grace a cancellation is given to be
+# delivered anywhere else (``base_agent.CANCEL_DELIVERY_GRACE``). SIGTERM ends
+# the worker within these two, the job's teardown (``WORKER_TEARDOWN_TIMEOUT``)
+# and the closing of its two connections, each held to the same grace:
+# 10 s + 60 s + 2 × 10 s + 10 s as shipped.
+PIPELINE_STOP_GRACE = CANCEL_DELIVERY_GRACE
+EXIT_GRACE = CANCEL_DELIVERY_GRACE
+
+
+async def await_the_pipeline(task: asyncio.Task[Any], cancellation: Cancellation) -> Any:
+    """The pipeline task's result, and a stop that reaches all of it when this job is cancelled.
+
+    The job's own task being cancelled — the worker shutting down on SIGTERM,
+    or arq's job timeout — used to reach the pipeline only as a cancellation of
+    the task it awaited, and a pipeline that turned the cancellation into an
+    ordinary error ran on: the worker ignored SIGTERM for three minutes, and
+    arq's shutdown waited on it. Now the job's cancellation is set first, which
+    stops every model call the job has in flight and every one it would make
+    next, the pipeline task is cancelled, and it is waited for at most
+    ``PIPELINE_STOP_GRACE`` before the cancellation carries on.
+    """
+    try:
+        await asyncio.wait({task})
+    except asyncio.CancelledError:
+        cancellation.cancel("the worker is shutting down")
+        task.cancel()
+        await asyncio.wait({task}, timeout=PIPELINE_STOP_GRACE)
+        raise
+    return task.result()
+
+
+# Whether this process has asked to be left by blocked threads at exit.
+_EXIT_GUARD_ARMED = False
+
+
+def blocked_threads() -> list[str]:
+    """The non-daemon threads still alive besides the main thread and the caller."""
+    here = threading.current_thread()
+    return sorted(
+        thread.name
+        for thread in threading.enumerate()
+        if thread.is_alive()
+        and not thread.daemon
+        and thread is not threading.main_thread()
+        and thread is not here
+    )
+
+
+def _leave_blocked_threads_after(grace: float) -> None:
+    """From the interpreter's own exit: end the process after ``grace`` if a thread still holds it.
+
+    Runs when the interpreter begins shutting down, before it joins the
+    threads that are still alive — the one point at which the process is
+    certainly leaving. It starts a daemon thread and returns, so the joins go
+    ahead; a process whose threads all end within the grace exits on its own
+    and the daemon dies with it. What can hold it is a thread blocked in a call
+    that cannot be cancelled — a synchronous model request in flight — which
+    ends only at its provider's request timeout. Such threads are left, the
+    names logged, and the process ends with status 1 so a supervisor sees
+    that it did not end cleanly. Nothing is left when nothing is blocked.
+    """
+
+    def _leave() -> None:
+        time.sleep(grace)
+        held = blocked_threads()
+        if not held:
+            return
+        logger.warning(
+            "Worker exit held %.0fs by %d thread(s) blocked in calls that cannot be "
+            "cancelled (%s); leaving them.",
+            grace,
+            len(held),
+            ", ".join(held),
+            extra={"component": "worker.lifecycle"},
+        )
+        os._exit(1)
+
+    threading.Thread(target=_leave, name="worker-exit-guard", daemon=True).start()
+
+
+def arm_the_exit_guard(grace: float | None = None) -> None:
+    """Have the process's own exit leave threads still blocked after ``grace``. Once per process.
+
+    Registered on the hook the interpreter runs as it starts to shut down,
+    before it joins non-daemon threads (the one ``concurrent.futures`` uses to
+    join its executors, which is what a blocked model call holds). Arming does
+    nothing to the running process: a caller of ``shutdown`` that goes on
+    running — a test — is untouched, and at its own exit the guard acts only
+    if a thread is still blocked.
+    """
+    global _EXIT_GUARD_ARMED
+    if _EXIT_GUARD_ARMED:
+        return
+    wait = EXIT_GRACE if grace is None else float(grace)
+    register = getattr(threading, "_register_atexit", None)
+    if register is None:
+        logger.warning(
+            "Worker exit guard not armed: this interpreter has no threading._register_atexit, "
+            "so a thread blocked in a call that cannot be cancelled can hold the exit open.",
+            extra={"component": "worker.lifecycle"},
+        )
+        return
+    try:
+        register(lambda: _leave_blocked_threads_after(wait))
+    except RuntimeError as exc:
+        logger.warning(
+            "Worker exit guard not armed (%s): the interpreter is already shutting down.",
+            exc,
+            extra={"component": "worker.lifecycle"},
+        )
+        return
+    _EXIT_GUARD_ARMED = True
 
 
 # ── Job ownership ───────────────────────────────────────────────
@@ -1264,6 +1386,91 @@ async def mark_job_failed(
         return False
 
 
+# How long a worker waits for a job row it was handed but cannot read yet, as
+# the pauses between reads. The API commits the row before it enqueues, so the
+# first read finds it; these cover a row whose commit is still reaching the
+# database when the worker dequeues it. About fifteen seconds in all, after
+# which the job is given up with a record of how long was waited.
+JOB_ROW_READ_PAUSES: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0, 8.0)
+
+# What a job the worker could not read says about itself, if its row arrives
+# after the worker gave up on it: it can never start, because the one queued
+# run for it has ended.
+_JOB_ROW_NEVER_READ = (
+    "The worker was handed this job before its row could be read, waited {waited:.1f} s "
+    "over {reads} reads, and gave up; the queued run for it has ended, so it was "
+    "marked failed rather than left pending. Re-submit the sample."
+)
+
+
+async def wait_for_job_row(
+    db_session: async_sessionmaker,
+    job_uuid: uuid.UUID,
+    *,
+    pauses: Iterable[float] | None = None,
+    sleep: Callable[[float], Any] = asyncio.sleep,
+) -> tuple[bool, int, float]:
+    """Read again after each pause until the job's row exists or the pauses run out.
+
+    Called after a first read found nothing. Returns whether the row was found,
+    how many reads this made and how many seconds were spent pausing. Each read
+    is its own short session, so every read sees whatever has been committed by
+    then.
+    """
+    from app.models.job import AnalysisJob
+
+    reads = 0
+    waited = 0.0
+    for pause in JOB_ROW_READ_PAUSES if pauses is None else pauses:
+        if pause:
+            await sleep(pause)
+            waited += pause
+        reads += 1
+        async with db_session() as db:
+            found = (
+                await db.execute(select(AnalysisJob.id).where(AnalysisJob.id == job_uuid))
+            ).scalar_one_or_none()
+            await db.commit()
+        if found is not None:
+            return True, reads, waited
+    return False, reads, waited
+
+
+async def fail_unread_job(
+    db_session: async_sessionmaker, job_uuid: uuid.UUID, reads: int, waited: float
+) -> bool:
+    """Mark a job the worker gave up on as failed, if its row has since arrived.
+
+    Only a ``pending`` row is touched: a row a cancel reached first keeps its
+    own ending. Returns whether a row was marked. Never raises.
+    """
+    from app.models.job import AnalysisJob
+
+    try:
+        async with db_session() as db:
+            result = await db.execute(
+                update(AnalysisJob)
+                .where(AnalysisJob.id == job_uuid, AnalysisJob.status == "pending")
+                .values(
+                    status="failed",
+                    completed_at=func.now(),
+                    error_message=_JOB_ROW_NEVER_READ.format(waited=waited, reads=reads),
+                )
+                .returning(AnalysisJob.id)
+            )
+            marked = result.first() is not None
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001 — the give-up is already logged
+        logger.warning(
+            "Could not mark unread job %s failed (%s).",
+            job_uuid,
+            type(exc).__name__,
+            extra={"job_id": str(job_uuid)},
+        )
+        return False
+    return marked
+
+
 # ── Main analysis task ──────────────────────────────────────────
 
 
@@ -1358,14 +1565,48 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             job = result.scalar_one_or_none()
 
             if not job:
-                logger.error(f"Job not found in database: {job_id}", extra={"job_id": job_id})
-                await _publish_event(redis_conn, job_id, "error", {"message": "Job not found"})
-                return {"status": "error", "message": "Job not found"}
+                # A row not there yet is waited for, a bounded while, before
+                # the job is given up: the queue can hand a job over before
+                # the commit that made its row is visible to this session.
+                # This session's read is ended first, so it is not left idle
+                # in a transaction for the length of the wait.
+                await db.commit()
+                found, reads, waited = await wait_for_job_row(db_session, job_uuid)
+                if found:
+                    result = await db.execute(select(AnalysisJob).where(AnalysisJob.id == job_uuid))
+                    job = result.scalar_one_or_none()
+                if not job:
+                    marked = await fail_unread_job(db_session, job_uuid, reads, waited)
+                    logger.error(
+                        "Job not found in database after %d reads over %.1f s: %s%s",
+                        reads + 1,
+                        waited,
+                        job_id,
+                        "; its row arrived after the last read and was marked failed"
+                        if marked
+                        else "",
+                        extra={"job_id": job_id},
+                    )
+                    await _publish_event(redis_conn, job_id, "error", {"message": "Job not found"})
+                    return {"status": "error", "message": "Job not found"}
 
             if job.status == "cancelled":
                 logger.info(f"Job already cancelled: {job_id}", extra={"job_id": job_id})
                 await _publish_event(redis_conn, job_id, "cancelled", {})
                 return {"status": "cancelled"}
+
+            if job.status in ("failed", "completed"):
+                # Already ended: an enqueue that raised after the queue took the
+                # job commits the row failed and tells the caller so, and
+                # running it anyway would run a job the caller was told was
+                # refused.
+                logger.info(
+                    "Job %s already ended (%s); not run.",
+                    job_id,
+                    job.status,
+                    extra={"job_id": job_id},
+                )
+                return {"status": "skipped", "message": f"job already {job.status}"}
 
             # Read out as plain values rather than carried as ORM objects:
             # the session ends here and an attribute that had to be
@@ -1793,6 +2034,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                                 job_id,
                                 extra={"job_id": job_id, "component": "heartbeat"},
                             )
+                            # The job's own flag first: it stops the model
+                            # calls in flight and refuses the next ones, which
+                            # a task cancellation alone does not reach.
+                            app.container.cancellation.cancel("the operator cancelled the job")
                             if pipeline_task is not None:
                                 pipeline_task.cancel()
                             return
@@ -1830,8 +2075,8 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     started_at=start_time,
                 )
             )
-            pipeline_result = await pipeline_task
-        except asyncio.CancelledError:
+            pipeline_result = await await_the_pipeline(pipeline_task, app.container.cancellation)
+        except (asyncio.CancelledError, JobCancelled):
             # Two things cancel this task and they end differently. An
             # operator's cancel leaves its flag in Redis — the heartbeat may
             # have read it already, or the cancel may have arrived between two
@@ -1844,13 +2089,30 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             if not cancelled_by_user:
                 cancelled_by_user = await cancel_was_requested(redis_conn, job_id)
             if not cancelled_by_user:
+                # arq finishes a job it cancelled only on ``CancelledError``; a
+                # ``JobCancelled`` reaching it would leave the job unfinished in
+                # its bookkeeping, since it is no ``Exception`` either.
+                if not isinstance(sys.exc_info()[1], asyncio.CancelledError):
+                    raise asyncio.CancelledError from sys.exc_info()[1]
                 raise
+            # Worded from where the pipeline was: a check's own record when
+            # one stopped it, otherwise the nodes that were running when the
+            # task was cancelled under them.
+            _stopped = app.container.cancellation.where_stopped()
+            _into = max(0.0, time.time() - start_time)
             logger.info(
-                "Pipeline cancelled by user request: job=%s",
+                "Pipeline cancelled by user request: job=%s (stopped %s, %.0f s into the run)",
                 job_id,
+                _stopped,
+                _into,
                 extra={"job_id": job_id},
             )
-            await _publish_event(redis_conn, job_id, "cancelled", {})
+            await _publish_event(
+                redis_conn,
+                job_id,
+                "cancelled",
+                {"stopped": _stopped, "seconds_into_run": round(_into, 1)},
+            )
             # On a session of its own, like every other outcome this task
             # records: the one it was working through may be the one the
             # cancellation came with.
@@ -2001,6 +2263,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 overall_confidence=_extract_confidence(pipeline_result),
                 malware_category=_extract_category(pipeline_result),
                 stix_bundle=stix_bundle_for_persist,
+                judge_stix_bundle=judge_bundle_record(pipeline_result),
                 mitre_techniques=_extract_mitre(pipeline_result),
                 # The agents' *final* prose. This used to persist only
                 # ``reports`` — the first-pass text — so the report an analyst
@@ -2023,13 +2286,19 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                                 else arg.get("agent_name", "")
                             ),
                             "position": "",  # derived by confidence on frontend
-                            "confidence": (
-                                arg.confidence_score * 100
-                                if hasattr(arg, "confidence_score")
-                                else arg.get("confidence_score", 0) * 100
-                            ),
+                            # ``None`` on a round where consensus did not
+                            # apply: no agreement was measured, so none is
+                            # stored, neither 100 nor 0.
+                            "confidence": _argument_confidence(arg),
                             "argument": (
                                 arg.finding if hasattr(arg, "finding") else arg.get("finding", "")
+                            ),
+                            # The platform's sentence about the round, apart
+                            # from the mediator's own words.
+                            "note": (
+                                getattr(arg, "note", "")
+                                if hasattr(arg, "finding")
+                                else arg.get("note", "")
                             ),
                             # ``complete`` | ``failed`` | ``timeout``. Without
                             # it a mediation that never ran is indistinguishable
@@ -2047,7 +2316,11 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     ],
                     "confidence_history": pipeline_result.get("confidence_history", []),
                     "iteration_count": pipeline_result.get("iteration_count", 0),
+                    # ``None`` beside ``consensus_applicable: false`` when
+                    # fewer than two analysts produced claims.
                     "is_consensus": pipeline_result.get("is_consensus", False),
+                    "consensus_applicable": pipeline_result.get("consensus_applicable", True)
+                    is not False,
                     # True when at least one round failed outright, so consumers
                     # can say "the negotiation did not run" rather than "the
                     # agents did not agree".
@@ -2454,6 +2727,20 @@ def _roster_for(container: Any) -> dict[str, Any]:
         return {"agents": [], "stages": []}
 
 
+def _argument_confidence(arg: Any) -> float | None:
+    """One negotiation argument's confidence as a percentage, or ``None``.
+
+    ``None`` is a mediator round where consensus did not apply; a missing
+    field on an older stored argument reads as zero, as it always did.
+    """
+    value = (
+        getattr(arg, "confidence_score", None)
+        if hasattr(arg, "confidence_score")
+        else arg.get("confidence_score", 0)
+    )
+    return None if value is None else float(value) * 100
+
+
 def _extract_confidence(result: dict) -> float | None:
     """Extract overall confidence from the pipeline result.
 
@@ -2497,6 +2784,43 @@ def _extract_category(result: dict) -> str | None:
         category = run_summary.get("malware_category")
         return str(category) if category is not None else None
     return None
+
+
+def judge_bundle_record(result: dict) -> dict | None:
+    """The judge's own bundle and its label map, as the report stores them.
+
+    The export's decline and not-carried rows say an object or a property "is
+    kept in the judge's own bundle"; this is that bundle, kept beside the
+    export rather than only when there is no export. It is the judge's JSON as
+    the judge wrote it (``as_written``), so a property the platform's models do
+    not declare is still in it. A run recorded without that answer keeps the
+    parsed bundle instead, and says so. ``None`` when the judge produced none.
+    """
+    bundle = result.get("stix_output")
+    if not isinstance(bundle, dict) or not bundle:
+        return None
+    labels = result.get("stix_labels")
+    kept_labels = dict(labels) if isinstance(labels, dict) else {}
+    written = result.get("stix_written")
+    if isinstance(written, dict) and written:
+        return {
+            "bundle": json.loads(json.dumps(written, default=str)),
+            "labels": kept_labels,
+            "as_written": True,
+        }
+    # The pipeline keeps the bundle as a Python dump, timestamps as datetimes;
+    # the column stores JSON, in STIX's own timestamp form.
+    from maljan.schemas.stix_models import Bundle
+
+    try:
+        as_json = Bundle.model_validate(bundle).model_dump(mode="json")
+    except Exception:  # noqa: BLE001 — a record kept in a weaker form, never a failed save
+        as_json = json.loads(json.dumps(bundle, default=str))
+    return {
+        "bundle": {"spec_version": "2.1", **as_json},
+        "labels": kept_labels,
+        "as_written": False,
+    }
 
 
 def _extract_mitre(result: dict) -> list | None:
@@ -2830,21 +3154,26 @@ async def shutdown(ctx: dict) -> None:
             with suppress(asyncio.CancelledError):
                 await task
 
+    # Each close is bounded: a connection that does not close would otherwise
+    # hold the shutdown open before the process ever reaches its exit.
     redis_conn: aioredis.Redis | None = ctx.get("redis")
     if redis_conn:
-        await redis_conn.aclose()
+        with suppress(TimeoutError):
+            await asyncio.wait_for(redis_conn.aclose(), timeout=EXIT_GRACE)
 
     db_session = ctx.get("db_session")
     if db_session:
         # Dispose the engine
         engine = db_session.kw.get("bind")
         if engine:
-            await engine.dispose()
+            with suppress(TimeoutError):
+                await asyncio.wait_for(engine.dispose(), timeout=EXIT_GRACE)
 
     logger.info(
         "Worker shutdown complete",
         extra={"component": "worker.lifecycle"},
     )
+    arm_the_exit_guard()
 
 
 # The enrichment task lives in a sibling module. Importing it at module

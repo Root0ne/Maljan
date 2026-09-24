@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from maljan.pipeline.validation import (
     UNGROUNDED_TECHNIQUE_CODE,
     ungrounded_technique_note,
@@ -205,8 +207,13 @@ class TestWhatIsNot:
 
 class TestTheEvidenceLineKeepsItsId:
     """The format puts the id at the end of a line whose front is prose, and
-    the ISR field is cut at a fixed width: the one shape the format asks for
-    is the one the cut used to break."""
+    the ISR field is cut at a width: the one shape the format asks for is the
+    one the cut used to break. The width is derived from the window; these
+    cases pin it at 200 to drive the cut itself."""
+
+    @pytest.fixture(autouse=True)
+    def _a_narrow_width(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("maljan.agents.base_agent.evidence_ref_width", lambda: 200)
 
     def _parsers(self) -> list[Any]:
         from maljan.agents.base_agent import parse_structured_claims
@@ -243,17 +250,18 @@ class TestTheEvidenceLineKeepsItsId:
         for pad in range(188, 201):
             stored = evidence_ref_text("y" * pad + "[ev_0007] [ev_0008] [ev_0009] [ev_0010]")
 
-            assert re.fullmatch(r"y+ ?\[ev_\d{4}\]( \[ev_\d{4}\])*", stored), (pad, stored)
+            # The cut is marked where the kept text ends, before the ids written back.
+            assert re.fullmatch(r"y+(\[ev_\d{4}\])?…( \[ev_\d{4}\])*", stored), (pad, stored)
             assert stored.count("ev_0007") == 1, (pad, stored)
 
     def test_the_ids_written_back_are_bounded(self) -> None:
-        from maljan.agents.base_agent import _EVIDENCE_REF_CHARS, evidence_ref_text
+        from maljan.agents.base_agent import evidence_ref_text
 
         line = "x" * 200 + " ".join(f"[ev_{n:04d}]" for n in range(1, 60))
 
         stored = evidence_ref_text(line)
 
-        assert len(stored) <= _EVIDENCE_REF_CHARS + 40
+        assert len(stored) <= 200 + 40
         assert "ev_0001" in stored
 
     def test_an_id_before_the_cut_is_not_written_twice(self) -> None:
@@ -377,3 +385,33 @@ class TestWhatTheJudgeIsTold:
         source = inspect.getsource(nodes)
 
         assert 'ungrounded_technique_note(state.get("validation_findings"))' in source
+
+
+class TestTheEvidenceWidthComesFromTheWindow:
+    def test_a_known_window_sizes_it_like_one_answer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from maljan.agents import base_agent
+        from maljan.llm import context_window
+
+        monkeypatch.setattr(
+            context_window,
+            "window_for_settings",
+            lambda *a, **k: context_window.WindowFact(32_768, context_window.DECLARED, "test"),
+        )
+
+        width = base_agent.evidence_ref_width()
+
+        assert width == context_window.derive_tool_output_chars(window_tokens=32_768)
+        assert width > 200
+        assert len(base_agent.evidence_ref_text("x" * 300)) == 300
+
+    def test_an_unknown_window_is_the_documented_fallback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from maljan.agents import base_agent
+        from maljan.llm import context_window
+
+        monkeypatch.setattr(
+            context_window, "window_for_settings", lambda *a, **k: context_window.unknown_window()
+        )
+
+        assert base_agent.evidence_ref_width() == context_window.UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS

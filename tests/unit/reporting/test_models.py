@@ -27,7 +27,7 @@ class TestMinimalConstruction:
         r = _minimal_report()
         assert r.schema_version == "1.0"
         assert r.verdict == "Suspicious"
-        assert r.overall_confidence == 0.0
+        assert r.overall_confidence is None
         # Not defaulted: an unassessed report and one assessed as harmless
         # are different findings.
         assert r.severity is None
@@ -63,11 +63,12 @@ class TestRecursiveProcessNode:
 
 
 class TestSeverity:
-    def test_clamping(self) -> None:
-        with pytest.raises(ValueError):
-            SeverityAssessment(overall_score=15.0)  # type: ignore[call-arg]
-        with pytest.raises(ValueError):
-            SeverityAssessment(overall_score=-1.0)  # type: ignore[call-arg]
+    def test_a_stored_score_is_ignored_on_load(self) -> None:
+        """The score was the rating said again as a number nobody stated; a
+        stored report that carries one still loads."""
+        severity = SeverityAssessment.model_validate({"rating": "High", "overall_score": 7.5})
+        assert severity.rating == "High"
+        assert "overall_score" not in severity.model_dump()
 
 
 class TestDefensiveRecommendation:

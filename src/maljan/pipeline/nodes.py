@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import threading
 import time
@@ -55,7 +56,9 @@ from maljan.pipeline.events import (
     emit_stage_ended_at_cap,
     summarize_claims,
 )
-from maljan.pipeline.evidence_summary import summarise
+from maljan.pipeline.evidence_summary import collect as collect_technique_sources
+from maljan.pipeline.evidence_summary import summarise, technique_evidence
+from maljan.pipeline.mediation_models import consensus_applies
 from maljan.pipeline.outcome import (
     VERDICT_READ_FALLBACK,
     corrected_reasons,
@@ -66,12 +69,15 @@ from maljan.pipeline.outcome import (
     verdict_reading,
 )
 from maljan.pipeline.run_state import render_run_state
+from maljan.pipeline.sandbox_status import NOT_RUN as SANDBOX_NOT_RUN
+from maljan.pipeline.sandbox_status import sandbox_status
 from maljan.pipeline.state import AgentArgument, AnalysisState, _merge_stage_results
 from maljan.pipeline.sycophancy_detector import build_revision_directive, detect_sycophancy
 from maljan.pipeline.triage_pack import (
     NOT_RUN_PREFIX,
     PIPELINE,
     CapaSettings,
+    FlossSettings,
     PackInputs,
     failure_reason,
     pack_block,
@@ -96,7 +102,7 @@ from maljan.pipeline.validation import (
 )
 from maljan.reporting.ledger_report import section_is_grounded
 from maljan.schemas.evidence import LedgerEntry, apply_budget
-from maljan.schemas.isr_models import AgentISR
+from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, AgentISR
 from maljan.schemas.stix_models import Bundle
 from maljan.schemas.tool_evidence import trim_output
 
@@ -114,6 +120,21 @@ if TYPE_CHECKING:
 # finite, which it was not. See the call site for the 30-minute silence this
 # bounds.
 _NARRATIVE_TIMEOUT_SECONDS = 600
+
+
+def _restart_reporter(llm: Any, seconds: Any, container: Any) -> None:
+    """Start the reporter's model list for one round, against that round's clock. Never raises."""
+    try:
+        from maljan.llm.fallback import restart_models
+
+        share = getattr(getattr(container.config, "llm", None), "fallback_turn_share", None)
+        restart_models(
+            llm,
+            loop_seconds=float(seconds) if isinstance(seconds, int | float) else None,
+            share=float(share) if isinstance(share, int | float) else None,
+        )
+    except Exception as exc:  # noqa: BLE001 — a restart never costs the report
+        logger.debug("report_node: the reporter's model list was not restarted (%s).", exc)
 
 
 # What the run summary calls a judge annotation whose technique did not
@@ -170,8 +191,12 @@ def _note_export_findings(report: Any, rows: Sequence[tuple[str, str]]) -> None:
     validation = dict(summary.get("validation") or {})
     unresolved = [dict(row) for row in validation.get("unresolved") or []]
     by_code = dict(validation.get("by_code") or {})
-    for code, message in rows:
-        unresolved.append({"agent": JUDGE_AGENT_KEY, "code": code, "message": message})
+    for row in rows:
+        code, message = row
+        # Who wrote the object down: the judge for its own objects, the source
+        # of a network-block row for one of those.
+        agent = str(getattr(row, "by", "") or JUDGE_AGENT_KEY)
+        unresolved.append({"agent": agent, "code": code, "message": message})
         by_code[code] = by_code.get(code, 0) + 1
     validation["unresolved"] = unresolved
     validation["by_code"] = dict(sorted(by_code.items()))
@@ -290,6 +315,23 @@ def _sandbox_report_is_synthetic(state: AnalysisState) -> bool:
     return isinstance(report, dict) and bool(report.get("synthetic"))
 
 
+def sandbox_degradation_reason(report: Any) -> str | None:
+    """The degradation reason a run whose sandbox never ran carries, or ``None``.
+
+    No report at all keeps the reason it always had. The mock sandbox's empty
+    stand-in is the same absence, said with its cause; a report with contents,
+    a recorded fixture included, carries none.
+    """
+    if not isinstance(report, dict) or not report:
+        return "no sandbox report (dynamic detonation unavailable) — static-only evidence"
+    if sandbox_status(report).status == SANDBOX_NOT_RUN:
+        return (
+            "no sandbox ran (the mock sandbox has no recorded report for this sample) "
+            "— static-only evidence"
+        )
+    return None
+
+
 def _sandbox_fed(role: str) -> bool:
     """Whether this role's input is the sandbox report rather than the sample."""
     return role not in SAMPLE_FED_ROLES
@@ -357,6 +399,27 @@ def _what_the_run_saw(container: Any, ledger: Any) -> tuple[list[str], CorpusSta
         missing_tools=tuple(sorted({str(getattr(e, "tool", "") or "") for e in blanked} - {""})),
     )
     return [e.output for e in entries if e.output], both_searched(corpus_state, stored)
+
+
+def _report_entry_texts(container: Any, ledger: Any) -> Any:
+    """Each ledger entry's text for the report rounds, or ``None`` when none can be read.
+
+    The run's corpus first, which holds every answer as the model received it,
+    and the stored output where the corpus kept nothing. Never raises: without
+    it the rounds judge no citation against an entry, which is what they did
+    before.
+    """
+    try:
+        from maljan.pipeline.validation import EntryTexts
+
+        try:
+            corpus = container.get_evidence_corpus()
+        except Exception:  # noqa: BLE001 — the stored outputs are the fallback
+            corpus = None
+        return EntryTexts.from_ledger(list(ledger or []), corpus)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("report_node: entry texts not read (%s).", exc)
+        return None
 
 
 def _violations_from_rows(rows: Any) -> list[Violation]:
@@ -492,6 +555,18 @@ def mean_claim_confidence(isrs: Any) -> float | None:
         if list(getattr(isr, "claims", None) or [])
     ]
     return sum(values) / len(values) if values else None
+
+
+def the_judge_stated_the_verdict(fallback: Mapping[str, Any] | None) -> bool:
+    """Whether the verdict published is one the judge stated, with its number beside it.
+
+    Every verdict the judge answered as a bundle is. A fallback is only when
+    the unreadable answer had stated its assessment whole before it went wrong
+    — the output cap cuts a bundle after the assessment the prompt puts first —
+    and that assessment's verdict is the one published (``stated`` on the
+    judge node's ``verdict_fallback``).
+    """
+    return not fallback or bool(fallback.get("stated"))
 
 
 def _overall_confidence(assessment: Any, *, judged: bool = True) -> float | None:
@@ -1054,6 +1129,26 @@ def _function_matches_step(container: ServiceContainer, state: AnalysisState) ->
     return step
 
 
+def _analysis_server_environ(container: ServiceContainer) -> dict[str, str]:
+    """This process's environment with the analysis server's own ``env`` map over it.
+
+    What the pack's FLOSS step reads ``MALJAN_FLOSS_PATH`` and the staging base
+    from, so an operator who named the build or the base in the server's
+    settings gets the same build and the same directory from the pack as from
+    the tool. Never raises: a server entry that cannot be read leaves this
+    process's environment.
+    """
+    environ = dict(os.environ)
+    try:
+        server = container.config.mcp.servers.get("analysis")
+        extra = dict(getattr(server, "env", None) or {})
+    except Exception as exc:  # noqa: BLE001 — an unreadable entry adds nothing
+        logger.debug("triage pack: the analysis server's env could not be read (%s).", exc)
+        return environ
+    environ.update({str(k): str(v) for k, v in extra.items()})
+    return environ
+
+
 def _knowledge_module() -> Any:
     """``maljan.tools.knowledge`` when it imports, else ``None``."""
     try:
@@ -1130,6 +1225,10 @@ def make_triage_node(
             sandbox_report=state.get("sandbox_report"),
             evidence_budget_bytes=int(getattr(cfg.reporting, "evidence_budget_bytes", 0) or 0),
             budget_s=float(cfg.triage.budget_seconds),
+            memory_floor_bytes=int(cfg.triage.memory_floor_mb) * 1024 * 1024,
+            floss=FlossSettings(
+                environ=_analysis_server_environ(container), job_id=container.job_key()
+            ),
         )
 
         def _elapsed_ms() -> int:
@@ -1279,6 +1378,16 @@ def pack_text(state: AnalysisState, container: ServiceContainer) -> str:
     return pack_block(pack_entries(state.get("evidence_ledger") or []), limit)
 
 
+def ledger_ids(state: AnalysisState) -> list[str]:
+    """Every id the run's evidence ledger issued, in ledger order: what a report may cite."""
+    ids: list[str] = []
+    for row in state.get("evidence_ledger") or []:
+        value = row.get("id") if isinstance(row, dict) else getattr(row, "id", None)
+        if value and str(value) not in ids:
+            ids.append(str(value))
+    return ids
+
+
 def pack_ledger_ids(state: AnalysisState) -> list[str]:
     """The ids of the pack's entries: what every agent may cite besides its own."""
     return [entry.id for entry in pack_entries(state.get("evidence_ledger") or [])]
@@ -1354,6 +1463,32 @@ def stage_runs(stage: Any, state: AnalysisState) -> tuple[bool, str]:
         logger.warning("stage %s: condition error: %s", getattr(stage, "key", "?"), exc)
         return False, f"condition error: {exc}"
     return False, f"condition not met: {when}"
+
+
+def _stage_seconds_left(agent: Any, started: float) -> float:
+    """What is left of one analyst's stage time: its loop budget less what the node spent."""
+    timeout, _steps = agent._loop_limits()
+    return float(timeout) - (time.monotonic() - started)
+
+
+def _second_loop_decision(agent: Any, started: float) -> str:
+    """``""`` when a second loop fits in what is left of the stage, else why it does not.
+
+    A loop needs one turn and the final answer after it, at the pace this
+    analyst's own first loop measured (``BaseAnalyst.seconds_a_loop_needs``).
+    The second loop used to be given a fresh copy of the whole budget whatever
+    the first had spent: on a model that took 1,100 s over its first loop and
+    400 s over the salvage, it ran another 1,500 s and ended empty again.
+    """
+    left = _stage_seconds_left(agent, started)
+    needs = agent.seconds_a_loop_needs()
+    timeout, _steps = agent._loop_limits()
+    if left >= needs:
+        return ""
+    return (
+        f"not run a second time: {max(0.0, left):.0f}s of its {float(timeout):.0f}s stage "
+        f"were left, and a loop needs {needs:.0f}s at the pace its first loop measured"
+    )
 
 
 def stage_record(
@@ -1452,6 +1587,11 @@ def upstream_findings(stage: Any, state: AnalysisState, container: ServiceContai
         lines.append(f"### {agent}")
         for claim in claims:
             technique = getattr(claim, "technique_id", None) or "—"
+            # The same note the judge's summary carries beside the id.
+            if getattr(claim, "technique_id", None) and getattr(
+                claim, "kept_after_absence_question", False
+            ):
+                technique = f"{technique} — {ABSENCE_TECHNIQUE_MARKER}"
             reference = getattr(claim, "evidence_ref", "") or "—"
             confidence = float(getattr(claim, "confidence", 0.0) or 0.0)
             text = " ".join(str(getattr(claim, "claim", "") or "").split())
@@ -1714,7 +1854,46 @@ def make_join_node(stage: Any, container: ServiceContainer, finishes: tuple[str,
     return node_fn
 
 
-def note_unavailable_tools(container: ServiceContainer, agent: Any) -> list[str]:
+# The format-specific parsers, and the routed formats each is for. A parser the
+# sample's format never calls on is not something this run lost: a missing
+# Mach-O library on a PE sample said nothing about the PE and still reached
+# the report's first page as a degradation. A tool not named here, or a sample
+# whose format is unknown, keeps its reason.
+_FORMAT_TOOLS: dict[str, frozenset[str]] = {
+    "pe_info": frozenset({"pe"}),
+    "elf_info": frozenset({"elf"}),
+    "macho_info": frozenset({"mach-o", "macho"}),
+    "apk_info": frozenset({"apk", "dex"}),
+    "document_info": frozenset({"ole2", "ooxml", "pdf", "doc", "docx", "xls", "xlsx", "rtf"}),
+}
+
+
+_UNAVAILABLE_TOOL_RE = re.compile(r"^server\.[^.]+\.(?P<tool>[^.(]+)_unavailable\(")
+
+
+def reason_applies_to_format(reason: str, file_type: str) -> bool:
+    """Whether a server's degradation reason costs a sample of this format anything.
+
+    The registry records a withheld tool when it attaches the server, before
+    any sample is known; this is where the reason meets the sample. Only a
+    format-specific parser the routed format never needs is left out.
+    """
+    match = _UNAVAILABLE_TOOL_RE.match(str(reason or ""))
+    return match is None or _needed_for(match.group("tool"), file_type)
+
+
+def _needed_for(tool: str, file_type: str) -> bool:
+    """Whether a missing ``tool`` costs this sample anything, by its routed format."""
+    formats = _FORMAT_TOOLS.get(tool)
+    routed = str(file_type or "").strip().lower()
+    if formats is None or not routed or routed == "unknown":
+        return True
+    return routed in formats
+
+
+def note_unavailable_tools(
+    container: ServiceContainer, agent: Any, file_type: str = ""
+) -> list[str]:
     """Record, once, each bound tool the server's manifest says cannot answer here.
 
     Read at stage start from the capability manifests the registry kept when
@@ -1722,7 +1901,8 @@ def note_unavailable_tools(container: ServiceContainer, agent: Any) -> list[str]
     its library before the analyst spends a step discovering it. The reason
     is ``server.<key>.<tool>_unavailable(<why>)`` with the remedy after it; it
     goes on the registry's list, which the judge reads into the run summary,
-    and is written there once however many agents bind the tool.
+    and is written there once however many agents bind the tool. A
+    format-specific parser the routed ``file_type`` never needs is not recorded.
     """
     from maljan.agents.tool_pinning import server_of
 
@@ -1744,6 +1924,8 @@ def note_unavailable_tools(container: ServiceContainer, agent: Any) -> list[str]
         if manifest is None:
             continue
         for missing in manifest.unavailable(names):
+            if not _needed_for(missing.tool, file_type):
+                continue
             reason = missing.degradation_reason
             noted.append(reason)
             if _record_once(registry.degradation_reasons, reason):
@@ -1881,7 +2063,7 @@ def make_stage_agent_node(
             agent = container.get_agent(agent_name)
             bound_agent = agent
             role = container.agent_role(agent_name)
-            note_unavailable_tools(container, agent)
+            note_unavailable_tools(container, agent, str(state.get("file_type") or ""))
 
             agent.pipeline_stage = stage.key
             # What the pipeline established before this analyst, and the run
@@ -1990,7 +2172,11 @@ def make_stage_agent_node(
                 # sub-prompts and merge. Default 0 keeps the monolithic path.
                 _views = int(getattr(container.config.llm, "view_decomposition_views", 0) or 0)
                 if _views >= 2:
-                    _budget = int(getattr(container.config.llm, "expert_max_tokens", 0) or 0)
+                    from maljan.llm.context_window import output_cap_for
+
+                    _budget = output_cap_for(
+                        container.config, "expert_max_tokens", agent_name
+                    ).tokens
                     # Item 3 (LAMD): "tier" reinterprets the N knob as sequential
                     # vertical reasoning tiers; "facet" (default) keeps the §3.6
                     # horizontal concurrent views. Both share the equal budget.
@@ -2040,10 +2226,43 @@ def make_stage_agent_node(
                 # fallback — that would silently drop the rest of the sample.
                 fallback_text = ""
 
+            # An analyst whose loop ended with nothing — no claim and no prose —
+            # is given one more loop over the same material, when what is left
+            # of its stage time can hold one at the pace its first loop
+            # measured. What that loop answers is the analyst's answer, parsed
+            # and validated like the first; a stage that cannot hold it says
+            # why instead. An analyst that answered in prose already answered,
+            # and one whose loop ran out of room would meet the same full
+            # window.
+            second_loop_note = ""
+            if (
+                not isr.claims
+                and not isr.unparsed_answer
+                and fallback_text
+                and getattr(agent, "ended_out_of_room", False) is not True
+            ):
+                second_loop_note = _second_loop_decision(agent, started)
+                if not second_loop_note:
+                    again = agent.safe_analyze_isr_within(
+                        fallback_text, _stage_seconds_left(agent, started)
+                    )
+                    if again.claims or again.unparsed_answer:
+                        isr = again
+                    else:
+                        second_loop_note = "a second loop over the same material ended empty too"
+                if second_loop_note:
+                    logger.info("Agent '%s': %s.", agent_name, second_loop_note)
+
             if isr.claims:
                 report = isr.to_text_summary()
+            elif isr.unparsed_answer:
+                # The analyst's answer in its own words, which is what it
+                # wrote: nothing in it could be read as a claim, and nothing
+                # is made one.
+                report = isr.unparsed_answer
             elif fallback_text:
-                report = agent.safe_analyze(fallback_text)
+                # No prose; why is on the budget record and the stage record.
+                report = ""
             else:
                 report = (
                     f"[WARN] {agent_name}: ISR produced no claims (multi-chunk fallback empty)."
@@ -2087,6 +2306,7 @@ def make_stage_agent_node(
                     stage,
                     ran=True,
                     agents=(agent_name,),
+                    agent_reasons={agent_name: second_loop_note} if second_loop_note else None,
                     claim_count=len(isr.claims),
                     technique_ids=technique_ids,
                     duration_ms=_elapsed_ms(),
@@ -2403,6 +2623,16 @@ def _debate_participants(
     return names
 
 
+# What a debate round writes when no agreement was measured: consensus does
+# not apply, ``is_consensus`` is neither true nor false, and the confidence
+# series gets nothing — never a 1.0 for agreement among nobody, never a 0.0.
+_NO_CONSENSUS_MEASURED: dict[str, Any] = {
+    "is_consensus": None,
+    "consensus_applicable": False,
+    "confidence_history": [],
+}
+
+
 def make_negotiation_node(
     container: ServiceContainer,
     *,
@@ -2421,26 +2651,27 @@ def make_negotiation_node(
             runs, skip_reason = stage_runs(stage, state)
             if not runs:
                 # A debate that does not run leaves the analysts' own ISRs
-                # standing and hands them straight on: ``is_consensus`` is set
-                # so the router's own branch takes the way out rather than
-                # looping a stage the operator asked to skip.
+                # standing and hands them straight on. No agreement was
+                # measured, so none is recorded; ``consensus_applicable`` is
+                # the router's way out rather than looping a stage the
+                # operator asked to skip.
                 if announces:
                     announce_skipped(container, stage, skip_reason)
                 return {
-                    "is_consensus": True,
+                    **_NO_CONSENSUS_MEASURED,
                     **stage_record(stage, ran=False, reason=skip_reason),
                 }
             if not _debate_participants(container, stage, state):
                 # Nothing upstream of it ran, so there is nothing to argue
                 # over. Announced as a skip before the start, because a debate
                 # that announces itself and then declines reads as one that
-                # failed. ``is_consensus`` sends the router straight on.
+                # failed. ``consensus_applicable`` sends the router straight on.
                 reason = "no analysis stage upstream of it ran"
                 logger.info("stage %s skipped: %s", stage.key, reason)
                 if announces:
                     announce_skipped(container, stage, reason)
                 return {
-                    "is_consensus": True,
+                    **_NO_CONSENSUS_MEASURED,
                     **stage_record(stage, ran=False, reason=reason),
                 }
             if announces and first_round:
@@ -2453,13 +2684,31 @@ def make_negotiation_node(
         active_reports = {name: revised.get(name) or original.get(name, "") for name in agent_names}
 
         current_isrs = list((state.get("isr_reports") or {}).values())
+        # Agreement among fewer than two analysts that produced claims measures
+        # nothing: the round is still held, and no agreement value is recorded.
+        applies = consensus_applies(agent_names, state.get("isr_reports") or {})
 
+        if container.is_mock and not applies:
+            return {
+                "iteration_count": iteration + 1,
+                **_NO_CONSENSUS_MEASURED,
+                "sycophancy_detected": False,
+                "discussion_history": [
+                    AgentArgument(
+                        agent_name="Mediator",
+                        finding="MOCK: fewer than two analysts produced claims.",
+                        confidence_score=None,
+                    )
+                ],
+                **_debate_record(stage, started),
+            }
         if container.is_mock:
             is_consensus = iteration >= 1
             mean_conf = 0.95 if is_consensus else 0.4
             return {
                 "iteration_count": iteration + 1,
                 "is_consensus": is_consensus,
+                "consensus_applicable": True,
                 "sycophancy_detected": False,
                 "confidence_history": [mean_conf],
                 "discussion_history": [
@@ -2558,6 +2807,9 @@ def make_negotiation_node(
             # report carried.
             _claimed = mean_claim_confidence(current_isrs)
             mean_conf = _claimed if _claimed is not None else argument.confidence_score
+            # The mediator counted the same claims and said consensus does not
+            # apply; nothing is appended to the confidence series.
+            measured = is_consensus is not None and applies
 
             emit_agent_message(
                 container.event_sink,
@@ -2593,9 +2845,16 @@ def make_negotiation_node(
 
             return {
                 "iteration_count": iteration + 1,
-                "is_consensus": is_consensus,
+                **(
+                    {
+                        "is_consensus": is_consensus,
+                        "consensus_applicable": True,
+                        "confidence_history": [mean_conf],
+                    }
+                    if measured
+                    else _NO_CONSENSUS_MEASURED
+                ),
                 "sycophancy_detected": syco,
-                "confidence_history": [mean_conf],
                 "discussion_history": [argument],
                 # Mediation is the only place a judge agent calls a tool, so
                 # this is where those calls have to leave the agent.
@@ -2633,14 +2892,26 @@ def make_negotiation_node(
             )
             return {
                 "iteration_count": iteration + 1,
-                "is_consensus": False,
+                # A failed round measured no agreement: consensus applied but
+                # is neither reached nor refused, and the series gets nothing.
+                # It used to record 0.0, a number the mediator never stated,
+                # which the run summary then published as the final confidence.
+                # The failure itself is the argument's ``status``.
+                **(
+                    {
+                        "is_consensus": None,
+                        "consensus_applicable": True,
+                        "confidence_history": [],
+                    }
+                    if applies
+                    else _NO_CONSENSUS_MEASURED
+                ),
                 "sycophancy_detected": syco,
-                "confidence_history": [0.0],
                 "discussion_history": [
                     AgentArgument(
                         agent_name="Mediator",
                         finding=f"[ERROR] Mediation {label}: {describe_exception(e)}",
-                        confidence_score=0.0,
+                        confidence_score=None,
                         # The structured signal. The "[ERROR] Mediation " prefix
                         # above stays for old stored state, but nothing new
                         # should have to parse prose to learn this.
@@ -2877,6 +3148,31 @@ def _verdict_record(stage: Any, started: float, *, ran: bool, reason: str = "") 
         agents=tuple(stage.agents),
         duration_ms=int((time.monotonic() - started) * 1000),
     )
+
+
+def _truncation_snapshot(container: ServiceContainer) -> dict[str, Any]:
+    """The bound-hit ledger, with the window its tool-output caps came from.
+
+    Written on the ledger rather than handed to the builder separately, so the
+    caps a run applied and the window they were derived from travel as one
+    record and a summary read back from storage carries both or neither.
+    """
+    ledger = container.get_truncation_ledger()
+    try:
+        ledger.note_context_window(container.context_budget_snapshot())
+    except Exception as exc:  # noqa: BLE001 — telemetry never breaks a verdict
+        logger.debug("the context window was not recorded on the run summary: %s", exc)
+    return ledger.snapshot()
+
+
+def _generation_snapshot(container: Any) -> dict[str, Any] | None:
+    """The measured generation rates and the timeouts sized from them, or ``None``."""
+    try:
+        snapshot = container.get_generation_rates().snapshot()
+    except Exception as exc:  # noqa: BLE001 — telemetry never breaks a verdict
+        logger.debug("the generation rate was not recorded on the run summary: %s", exc)
+        return None
+    return snapshot if isinstance(snapshot, dict) else None
 
 
 def make_judge_node(
@@ -3172,10 +3468,9 @@ def make_judge_node(
             # confidence shipped for a verdict formed without any dynamic
             # evidence. Verified live: the only operator signal was a single
             # "Sandbox submission failed" line in the worker log.
-            if not state.get("sandbox_report"):
-                _degradation_reasons.append(
-                    "no sandbox report (dynamic detonation unavailable) — static-only evidence"
-                )
+            _no_sandbox = sandbox_degradation_reason(state.get("sandbox_report"))
+            if _no_sandbox:
+                _degradation_reasons.append(_no_sandbox)
             # A container we accept but cannot open. A .docm reaches here
             # legitimately — macro documents are among the commonest Windows
             # carriers, so rejecting them would be wrong — but the only analysis
@@ -3195,13 +3490,29 @@ def make_judge_node(
             # rests on, so it degrades rather than failing — but the reader of
             # the report is entitled to know the judge ran without its
             # threat-intel lookups.
-            _degradation_reasons.extend(container.server_degradation_reasons())
+            _degradation_reasons.extend(
+                reason
+                for reason in container.server_degradation_reasons()
+                if reason_applies_to_format(reason, str(state.get("file_type") or ""))
+            )
             if _failed_analysts:
                 _degradation_reasons.append(f"analyst failures: {', '.join(_failed_analysts)}")
             if _empty_analysts:
                 _degradation_reasons.append(
                     f"analysts produced no claims: {', '.join(_empty_analysts)}"
                 )
+            # Which of those answered in prose that did not parse into a claim
+            # after being asked once for the claim format. The prose is their
+            # report; nothing in it was made a claim.
+            from maljan.agents.base_agent import UNPARSED_ANSWER_REASON, unparsed_answers_reason
+
+            _prose_analysts = [
+                name
+                for name in _empty_analysts
+                if getattr(isr_reports.get(name), "status_reason", None) == UNPARSED_ANSWER_REASON
+            ]
+            if _prose_analysts:
+                _degradation_reasons.append(unparsed_answers_reason(_prose_analysts))
             # Technique claims the analyst kept after being asked to cite the
             # entry it read them from. A live run put sixteen of these in front
             # of the judge, which read them as sixteen techniques.
@@ -3288,6 +3599,13 @@ def make_judge_node(
                 ledger_ids=[entry.id for entry in _ledger],
                 facts_block=pack_text(state, container),
                 run_state=render_run_state(state),
+                # Who named which technique — the evidence summary as data —
+                # so a relationship crediting an agent with a technique it never
+                # named can be asked about.
+                technique_sources={
+                    tid: [source for source, _confidence in rows]
+                    for tid, rows in collect_technique_sources(isr_reports, _ledger).items()
+                },
             )
             # A verdict the judge never expressed as a bundle is the thinnest
             # answer this pipeline can produce — no severity, no reasoning the
@@ -3350,6 +3668,14 @@ def make_judge_node(
                     # that carries the mark and no code would otherwise leave
                     # the summary with nothing at all to say about it.
                     "recorded": _recorded,
+                    # Whether the unreadable answer had stated its assessment
+                    # whole, with the verdict this run publishes: then the
+                    # confidence beside that verdict is the judge's own.
+                    "stated": bool(
+                        isinstance(bundle, Bundle)
+                        and bundle.x_maljan_assessment is not None
+                        and normalise_verdict(bundle.x_maljan_assessment.verdict) == decision
+                    ),
                 }
 
             # What the analysts and the judge were told and did not fix. Both
@@ -3376,6 +3702,7 @@ def make_judge_node(
                     "confidence_history": state.get("confidence_history") or [],
                     "iteration_count": state.get("iteration_count", 0),
                     "is_consensus": state.get("is_consensus", False),
+                    "consensus_applicable": state.get("consensus_applicable", True),
                     "sycophancy_detected": state.get("sycophancy_detected", False),
                     "discussion_history": state.get("discussion_history") or [],
                 }
@@ -3406,8 +3733,11 @@ def make_judge_node(
                         )
                     )
                     .set_token_usage(container.get_token_ledger().snapshot())
-                    .set_truncation(container.get_truncation_ledger().snapshot())
+                    .set_server_rests(container.server_rests())
+                    .set_generation(_generation_snapshot(container))
+                    .set_truncation(_truncation_snapshot(container))
                     .set_triage(_triage_facts)
+                    .set_sandbox(state.get("sandbox_report"))
                     .set_nudge(state.get("nudge_retry_modes") or {})
                     .set_budget(state.get("budget_records") or {})
                     .set_tool_latency(state.get("evidence_ledger") or [])
@@ -3615,6 +3945,10 @@ def make_judge_node(
                     "final_decision": decision,
                     "judge_report": "Analyzed negotiation history and expert reports.",
                     "stix_output": stix_output,
+                    # The map from each label the judge wrote to the id it was
+                    # published under, kept with the judge's own bundle.
+                    "stix_labels": dict(verdict.labels),
+                    "stix_written": verdict.written,
                     # Set when the judge's answer was not the verdict it was
                     # asked for — text, or nothing at all. Written rather than
                     # left alone: the verdict stage runs once today, and a
@@ -3781,7 +4115,9 @@ def make_report_node(
         # judge's own number is the verdict's, and a verdict the judge put no
         # number on is published with none; see ``_overall_confidence``.
         _fallback = state.get("verdict_fallback") or None
-        overall_confidence = _overall_confidence(_bundle_assessment, judged=not _fallback)
+        overall_confidence = _overall_confidence(
+            _bundle_assessment, judged=the_judge_stated_the_verdict(_fallback)
+        )
 
         # A degraded run is not capped here. It is said to the judge in the
         # verdict prompt and printed in the report header, and the confidence
@@ -3960,13 +4296,29 @@ def make_report_node(
         # answers. They run after the judge built the run summary, so the
         # summary's ``validation`` block is amended here rather than there.
         _report_tally = ValidationTally()
+        # Each ledger entry's text as the run holds it, read once for both
+        # report rounds: a value their prose quotes is looked for in the entry
+        # it cites, and the composer is shown which entries hold what the
+        # analysts' claims quote.
+        _entry_texts = _report_entry_texts(container, _ledger)
 
         narrative_dict: dict[str, Any] | None = None
+        # Why no summary was written, when none is: said where the summary
+        # would have been, because the platform no longer writes one itself.
+        no_summary_because = "no report model ran in this run"
         try:
             narrative_agent = container.get_narrative_agent()
         except Exception as exc:  # noqa: BLE001
             logger.warning("report_node: NarrativeAgent unavailable (%s); using fallback.", exc)
             narrative_agent = None
+            no_summary_because = f"the report model was unavailable ({type(exc).__name__})"
+
+        # The narrative round is the reporter's first loop: its model list
+        # starts at its first model again, with turn deadlines measured against
+        # the narrative's own 600 s clock.
+        _restart_reporter(
+            getattr(narrative_agent, "llm", None), _NARRATIVE_TIMEOUT_SECONDS, container
+        )
 
         if narrative_agent is not None:
             try:
@@ -3983,6 +4335,8 @@ def make_report_node(
                         state.get("isr_reports"),
                         facts_block=pack_text(state, container),
                         run_state=render_run_state(state),
+                        citable_ids=ledger_ids(state),
+                        evidence=_entry_texts,
                     ),
                     timeout=_NARRATIVE_TIMEOUT_SECONDS,
                 )
@@ -3992,12 +4346,20 @@ def make_report_node(
                     _NARRATIVE_TIMEOUT_SECONDS,
                 )
                 narrative_output = None
+                no_summary_because = (
+                    f"the report model did not answer within {_NARRATIVE_TIMEOUT_SECONDS}s"
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "report_node: NarrativeAgent.generate raised (%s); using fallback.",
                     exc,
                 )
                 narrative_output = None
+                no_summary_because = f"the narrative round failed ({type(exc).__name__})"
+            else:
+                no_summary_because = (
+                    "the report model's answer did not fit its schema after its retry"
+                )
             if narrative_output is not None:
                 narrative_dict = narrative_output.model_dump(mode="json")
             _report_tally.merge(getattr(narrative_agent, "validation_tally", ValidationTally()))
@@ -4006,16 +4368,17 @@ def make_report_node(
             report = MalwareReportBuilder.apply_narrative(report, narrative_dict)
             logger.info(
                 "report_node: narrative LLM round succeeded (summary_chars=%d, "
-                "paragraphs=%d, recs=%d).",
+                "key_findings=%d, recs=%d).",
                 len(report.executive_summary),
-                len(report.capabilities_narrative),
+                len(report.key_findings),
                 len(report.defensive_recommendations),
             )
         else:
-            report = MalwareReportBuilder.apply_fallback_narrative(report)
+            report = MalwareReportBuilder.apply_fallback_narrative(report, no_summary_because)
 
         # Section-wise Composer authors the professional
-        # spine (intro, technical-analysis subsections, C2 channels, conclusion),
+        # spine (background, execution flow, technical-analysis subsections by
+        # capability, configuration, commands, C2 channels),
         # each grounded in its isolated evidence bundle. Best-effort — a Composer
         # failure never blocks the report. None in mock / when composer disabled.
         try:
@@ -4024,12 +4387,22 @@ def make_report_node(
             logger.warning("report_node: ReportComposer unavailable (%s); skipping spine.", exc)
             composer = None
         if composer is not None:
+            # The composer sections are its second: the list starts over, and
+            # each turn is measured against one section's clock. A slow
+            # narrative that moved the list does not decide the sections.
+            _restart_reporter(
+                getattr(composer, "llm", None),
+                getattr(container.config.reporting, "composer_per_section_timeout", None),
+                container,
+            )
             try:
                 await composer.compose(
                     report,
                     state.get("isr_reports"),
                     facts_block=pack_text(state, container),
                     run_state=render_run_state(state),
+                    citable_ids=ledger_ids(state),
+                    evidence=_entry_texts,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
@@ -4052,20 +4425,6 @@ def make_report_node(
             report.figures = build_figures(report)
         except Exception as exc:  # noqa: BLE001
             logger.warning("report_node: figure generation failed (%s).", exc)
-
-        # Detection signatures — template-based YARA/Sigma/Suricata
-        # generation. Runs after narrative so the LLM-written family name can
-        # influence rule metadata. Disabled via config when desired.
-        if cfg is None or cfg.auto_generate_detection_rules:
-            try:
-                report = MalwareReportBuilder.attach_detection_signatures(report)
-                logger.info(
-                    "report_node: detection rules generated (count=%d, errors=%d).",
-                    len(report.detection_signatures),
-                    sum(1 for r in report.detection_signatures if r.compile_error),
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("report_node: detection rule generation failed (%s).", exc)
 
         extended_dump: dict[str, Any] | None = None
         if cfg is None or cfg.include_extended_stix:
@@ -4092,6 +4451,20 @@ def make_report_node(
                     # blanked: the second-source test reads the same record
                     # the judge's grounding check does.
                     corpus=container.get_evidence_corpus(),
+                    # Who named which technique, the record the judge's credit
+                    # question was asked against: a credit it kept that names
+                    # no source is left off the export's copy.
+                    technique_sources={
+                        tid: [source for source, _confidence in rows]
+                        for tid, rows in collect_technique_sources(isr_reports, _ledger).items()
+                    },
+                    # The ledger entries the record ties to each technique:
+                    # the ids a finding naming it cites, and the entries of the
+                    # tools that asserted it. Written on the export's edges.
+                    technique_evidence=technique_evidence(isr_reports, _ledger),
+                    # The run's ledger, in its order: the export writes no id
+                    # it does not hold.
+                    ledger_ids=[entry.id for entry in _ledger],
                 )
                 extended_dump = extended_bundle.model_dump(mode="json")
                 # What the judge said about a technique the checks rejected
@@ -4134,6 +4507,31 @@ def make_report_node(
                     break
 
             report.stix_bundle_extended = extended_dump
+            # The IOC table read again, now that the export exists: a value
+            # the export publishes from the judge's objects is a published row
+            # of the table, the one ``/iocs`` serves as well.
+            try:
+                from maljan.reporting.builder import build_consolidated_iocs
+
+                report.consolidated_iocs = build_consolidated_iocs(report)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("report_node: the IOC table was not re-read (%s).", exc)
+
+        # Detection signatures — template-based YARA/Sigma/Suricata
+        # generation. Runs after narrative so the LLM-written family name can
+        # influence rule metadata, and after the export, because a draft matches
+        # only on what the run publishes: the IOC table's published rows, read
+        # once the export has decided them. Disabled via config when desired.
+        if cfg is None or cfg.auto_generate_detection_rules:
+            try:
+                report = MalwareReportBuilder.attach_detection_signatures(report)
+                logger.info(
+                    "report_node: detection rules generated (count=%d, errors=%d).",
+                    len(report.detection_signatures),
+                    sum(1 for r in report.detection_signatures if r.compile_error),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("report_node: detection rule generation failed (%s).", exc)
 
         # Post-pipeline FP linter. Run after every other
         # mutation has happened (narrative + detection sigs + STIX dump)
@@ -4232,6 +4630,35 @@ def make_report_node(
             if _closed_summary:
                 _closed_summary["elapsed_seconds"] = _elapsed
                 report.run_summary = _closed_summary
+        # What the run spent, closed here for the same reason: the narrative
+        # round and the composer sections are model calls the judge's snapshot
+        # was taken before, so the ledger is read again after the last model
+        # call of the run.
+        if state.get("run_summary"):
+            from maljan.analysis.run_summary import spend_blocks
+
+            _ledger_of = getattr(container, "get_token_ledger", None)
+            _spent = spend_blocks(_ledger_of().snapshot()) if callable(_ledger_of) else {}
+            if _spent:
+                _state_summary.update(_spent)
+                _with_spend = dict(report.run_summary or {})
+                if _with_spend:
+                    _with_spend.update(_spent)
+                    report.run_summary = _with_spend
+        # The generation rates again, now that the composer has sized its
+        # sections from them: the judge's snapshot predates those timeouts.
+        _generation = _generation_snapshot(container)
+        if (
+            state.get("run_summary")
+            and _generation
+            and (_generation.get("models") or _generation.get("timeouts"))
+            and _generation != (state.get("run_summary") or {}).get("generation")
+        ):
+            _state_summary["generation"] = _generation
+            _rated_summary = dict(report.run_summary or {})
+            if _rated_summary:
+                _rated_summary["generation"] = _generation
+                report.run_summary = _rated_summary
         # The markdown is rendered once every field it reads is final: the
         # validation block, the corroboration's published marks, the stage
         # rollup and the elapsed time are all written above this line, and so

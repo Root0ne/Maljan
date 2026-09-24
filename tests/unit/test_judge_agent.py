@@ -355,12 +355,12 @@ class TestJudgeToolCallsAreCitable:
     def _run(self, judge: JudgeAgent) -> str:
         from langchain_core.messages import AIMessage
 
-        async def _ainvoke(payload, config=None):
+        async def _astream(payload, config=None, stream_mode="values"):
             # The executor is the seam the loop calls the tool through; the
             # recorder wraps whichever tools it is handed.
             for wrapped in captured[0]:
                 wrapped.invoke({"indicator": "c2.evil.tld"})
-            return {"messages": [AIMessage(content="Verdict: Malware.")]}
+            yield {"messages": [AIMessage(content="Verdict: Malware.")]}
 
         captured: list = []
 
@@ -369,7 +369,7 @@ class TestJudgeToolCallsAreCitable:
             # way the analysts' loop does.
             captured.append(tools)
             executor = MagicMock()
-            executor.ainvoke = _ainvoke
+            executor.astream = _astream
             return executor
 
         with patch("langgraph.prebuilt.create_react_agent", _create):

@@ -259,21 +259,17 @@ class TestBuilderAttach:
 
 class TestEscapingEdgeCases:
     def test_domain_with_quotes_does_not_break_suricata(self) -> None:
-        """Confirm that a malicious domain containing quotes is escaped."""
-        sandbox = {
-            "network": {
-                "dns": [{"request": 'evil"injection.com', "answers": []}],
-            }
-        }
-        report = _build(sandbox_report=sandbox)
-        rules = build_detection_rules(report)
-        suricata = next((r for r in rules if r.kind == "suricata"), None)
-        assert suricata is not None
-        # Raw double-quote must NOT appear in content. We check by scanning
-        # the rule line by line for unescaped `content:"..."` quote breaks.
-        for line in suricata.body.splitlines():
-            if "content:" in line:
-                assert 'content:"evil"injection' not in line
+        """Confirm that a domain containing quotes is escaped by the rule writer.
+
+        Such a name is never published — it could not be a host — so no draft
+        reaches it through the report; the writer is asked directly.
+        """
+        from maljan.reporting.detection_signatures import _suricata_dns_rule
+        from maljan.reporting.models import NetworkDomain
+
+        line = _suricata_dns_rule(NetworkDomain(fqdn='evil"injection.com'), 1, "a" * 64, "x")
+        assert line is not None
+        assert 'content:"evil"injection' not in line
 
 
 class TestNoNetworkNoSuricata:

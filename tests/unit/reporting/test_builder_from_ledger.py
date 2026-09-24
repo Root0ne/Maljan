@@ -221,8 +221,9 @@ class TestConsolidatedIOCs:
         report = _build(ledger)
         values = {row.value for row in report.consolidated_iocs}
         assert _SHA in values
-        # Network indicators are defanged on the way into the table.
-        assert "c2[.]evil[.]tld" in values
+        # Stored live, like every other value in the JSON report; the Markdown
+        # defangs it by kind when it prints it.
+        assert "c2.evil.tld" in values
 
 
 class TestEvidenceIndex:
@@ -349,3 +350,82 @@ class TestSigningFromThePack:
         report = _build([])
         assert report.identity.signing.is_signed is False
         assert report.identity.signing.evidence_id is None
+
+
+class TestTheHeaderFactsAreStatedAsTheToolReadThem:
+    """Architecture, library-ness, the names a binary gives itself and its
+    export addresses: header facts the format tool reports, stated beside the
+    file type rather than left for a reader to infer."""
+
+    @staticmethod
+    def _pe_info(**over: Any) -> dict[str, Any]:
+        info: dict[str, Any] = {
+            "machine": 0x8664,
+            "is_dll": True,
+            "timestamp": 1700000000,
+            "exports": ["extra", "run"],
+            "export_rows": [
+                {"name": "extra", "ordinal": 1, "rva": "0x3ce4"},
+                {"name": "run", "ordinal": 2, "rva": "0x3ce4"},
+            ],
+            "export_name": "LibraryTag.dll",
+            "version_info": {"OriginalFilename": "updater.dll"},
+        }
+        info.update(over)
+        return info
+
+    def test_the_identity_carries_them(self) -> None:
+        report = _build([entry("pe_info", self._pe_info(), EvidenceCounter())])
+        ident = report.identity
+        assert (ident.architecture, ident.is_dll) == ("x86-64", True)
+        assert ident.export_name == "LibraryTag.dll"
+        assert ident.internal_name == "updater.dll"
+        assert ident.compile_timestamp is not None
+        assert ident.compile_timestamp.isoformat() == "2023-11-14T22:13:20+00:00"
+
+    def test_an_unknown_machine_is_named_by_its_value(self) -> None:
+        report = _build([entry("pe_info", self._pe_info(machine=0x1234), EvidenceCounter())])
+        assert report.identity.architecture == "machine 0x1234"
+
+    def test_the_export_addresses_reach_the_static_block(self) -> None:
+        report = _build([entry("pe_info", self._pe_info(), EvidenceCounter())])
+        assert report.static is not None
+        assert [(e.name, e.ordinal, e.rva) for e in report.static.export_rows] == [
+            ("extra", 1, "0x3ce4"),
+            ("run", 2, "0x3ce4"),
+        ]
+        assert report.static.exports == ["extra", "run"]
+
+    def test_the_report_says_the_exports_share_an_address(self) -> None:
+        from maljan.reporting.renderers.markdown import MarkdownRenderer
+
+        report = _build([entry("pe_info", self._pe_info(), EvidenceCounter())])
+        markdown = MarkdownRenderer().render(report)
+        assert "All 2 exports share one address, 0x3ce4." in markdown
+        assert "| Type | unknown, x86-64, DLL |" in markdown
+
+    def test_one_binary_read_twice_is_one_table(self) -> None:
+        """The triage pack and the analyst both call pe_info on the one file."""
+        counter = EvidenceCounter()
+        info = self._pe_info(
+            sections=[{"name": ".text", "virtual_address": 4096, "raw_offset": 1024}],
+            imports=[{"dll": "KERNEL32.dll", "function": "CreateMutexW"}],
+        )
+        report = _build([entry("pe_info", info, counter), entry("pe_info", info, counter)])
+        assert report.static is not None
+        assert [s.name for s in report.static.sections] == [".text"]
+        assert [(r.dll, r.function) for r in report.static.imports] == [
+            ("KERNEL32.dll", "CreateMutexW")
+        ]
+        assert report.static.exports == ["extra", "run"]
+        assert len(report.static.export_rows) == 2
+
+    def test_a_run_whose_format_tool_said_nothing_states_nothing(self) -> None:
+        ident = _build([]).identity
+        assert (ident.architecture, ident.is_dll, ident.export_name, ident.internal_name) == (
+            None,
+            None,
+            None,
+            None,
+        )
+        assert ident.compile_timestamp is None

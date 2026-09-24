@@ -20,6 +20,44 @@ SIGMA_TAG_RE = re.compile(r"^attack\.(t\d{4}(?:\.\d{3})?)$", re.IGNORECASE)
 # A whole string that is one id, for a field an agent wrote as the id itself.
 TECHNIQUE_ID_EXACT_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
 
+# The ``source_name`` values an external reference to an ATT&CK technique is
+# filed under. A reference under any other source — CAPEC, a vendor's own
+# catalogue — carries an ``external_id`` that is not a technique.
+MITRE_ATTACK_SOURCES = frozenset(
+    {"mitre-attack", "mitre attack", "mitre-mobile-attack", "mitre-ics-attack"}
+)
+
+
+# The words a producer writes in a technique field to say there is none. They
+# are an answer — no technique — and a row made of one printed ``NONE`` in the
+# ATT&CK table of a benign tool's report as an "unverified id".
+NO_TECHNIQUE_WORDS = frozenset(
+    {"NONE", "N/A", "NA", "NULL", "NIL", "UNKNOWN", "-", "NOT APPLICABLE"}
+)
+
+
+def says_no_technique(value: Any) -> bool:
+    """Whether a technique field holds a word for "no technique" rather than an id."""
+    return str(value or "").strip().upper() in NO_TECHNIQUE_WORDS
+
+
+def attack_reference_id(obj: Any) -> str:
+    """The technique id an object's MITRE ATT&CK reference names, or ``""``.
+
+    Only a reference filed under an ATT&CK source counts; the first one found
+    answers. Works on a dict or on a model.
+    """
+    refs = obj.get("external_references") if isinstance(obj, dict) else None
+    if refs is None and not isinstance(obj, dict):
+        refs = getattr(obj, "external_references", None)
+    for ref in refs or []:
+        read = ref.get if isinstance(ref, dict) else lambda key, r=ref: getattr(r, key, "")
+        source = str(read("source_name") or "").strip().lower()
+        external = str(read("external_id") or "").strip()
+        if source in MITRE_ATTACK_SOURCES and external:
+            return external.upper()
+    return ""
+
 
 def technique_ids_in(value: Any) -> list[str]:
     """Every technique id written anywhere in ``value``, first seen first.
@@ -67,9 +105,16 @@ def api_capability_hits(payload: Mapping[str, Any] | None) -> list[dict[str, Any
     The tool answers per API and repeats a rule under every API it matched;
     here the matched APIs are pooled per rule and the rule counts only when
     they clear its own ``min_apis``. Each row: ``technique_id``, ``name``,
-    ``rule``, ``matched_apis`` in first-seen order. Corroboration and the
-    report's projection both read this, so what one calls asserted the other
-    shows.
+    ``rule``, ``matched_apis`` in first-seen order, and ``benign_rate`` —
+    what share of a named benign corpus the rule fires on, which is the fact
+    the platform states about a deterministic association and the thing a
+    reader needs to weigh one. Corroboration and the report's projection both
+    read this, so what one calls asserted the other shows.
+
+    The rate is carried down here, and not looked up again later, because the
+    answer that produced the row is the answer the run recorded: the report has
+    to show what the catalogue said when the tool was asked, not what a
+    catalogue edited since would say.
 
     **A row is a rule, not a technique.** Two rules can name one technique by
     two mechanisms — the catalogue's own name is on both, so the name does not
@@ -82,7 +127,11 @@ def api_capability_hits(payload: Mapping[str, Any] | None) -> list[dict[str, Any
     """
     if not isinstance(payload, Mapping):
         return []
-    rules: dict[tuple[str, str, str], tuple[int, list[str]]] = {}
+    corpus = ""
+    corpora = payload.get("corpora")
+    if isinstance(corpora, Mapping):
+        corpus = str(corpora.get("benign") or "")
+    rules: dict[tuple[str, str, str], tuple[int, list[str], str]] = {}
     for row in payload.get("capabilities") or []:
         if not isinstance(row, Mapping):
             continue
@@ -93,16 +142,62 @@ def api_capability_hits(payload: Mapping[str, Any] | None) -> list[dict[str, Any
             if not ids:
                 continue
             key = (ids[0], str(rule.get("name") or ""), str(rule.get("rule") or ""))
-            _floor, apis = rules.setdefault(key, (_min_apis(rule), []))
+            _floor, apis, _rate = rules.setdefault(
+                key, (_min_apis(rule), [], _benign_rate(rule, corpus))
+            )
             for api in rule.get("matched") or []:
                 name = str(api).strip()
                 if name and name not in apis:
                     apis.append(name)
-    return [
-        {"technique_id": tid, "name": name, "rule": label, "matched_apis": apis}
-        for (tid, name, label), (floor, apis) in rules.items()
-        if len(apis) >= floor
-    ]
+    out: list[dict[str, Any]] = []
+    for (tid, name, label), (floor, apis, rate) in rules.items():
+        if len(apis) < floor:
+            continue
+        row_out: dict[str, Any] = {
+            "technique_id": tid,
+            "name": name,
+            "rule": label,
+            "matched_apis": apis,
+        }
+        if rate:
+            row_out["benign_rate"] = rate
+        out.append(row_out)
+    return out
+
+
+def _benign_rate(rule: Mapping[str, Any], corpus: str) -> str:
+    """One sentence for how common a rule is in software that is not a sample.
+
+    The sentence is written so it cannot be read as anything else. It says what
+    the rule did — *fires on* — before it says a number, it names the corpus the
+    number is a share of, and it carries the count behind the share, because a
+    share rounded to one decimal place reads as zero for a rule that fires on
+    one file in three thousand. It is emphatically not a probability that this
+    sample is benign, and the value is persisted and read on its own, so the
+    words that rule that reading out have to be inside the string rather than in
+    the column it happens to be drawn in. A rule with no measurement gets no
+    sentence rather than a zero.
+    """
+    measured = rule.get("measured")
+    if not isinstance(measured, Mapping):
+        return ""
+    percent, files = measured.get("seen_on_benign_percent"), measured.get("seen_on_benign_files")
+    if not isinstance(percent, int | float) or not isinstance(files, int):
+        return ""
+    of = f" of {corpus}" if corpus else " measured"
+    sentence = f"fires on {percent:.1f}% of benign software ({files}{of})"
+    # How thin the support is belongs beside how common the rule is, on the
+    # same string, because the two are read together or not at all: a rule at
+    # 1.0% of ordinary software reads well until you learn it has fired on no
+    # malware the combination was not chosen on. Absent where the platform has
+    # no malware corpus to count, which is not the same as a count of zero.
+    support = measured.get("held_out_malware_profiles")
+    if isinstance(support, int) and not isinstance(support, bool):
+        one = support == 1
+        sentence += (
+            f"; {support} held-out malware {'profile supports' if one else 'profiles support'} it"
+        )
+    return sentence
 
 
 def _min_apis(rule: Mapping[str, Any]) -> int:

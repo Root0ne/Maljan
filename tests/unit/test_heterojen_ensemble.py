@@ -399,18 +399,23 @@ class TestContainerGetAgentLLM:
         # Analyst models carry the expert output cap:
         # the analyst path was the only unbounded LLM call in the system and a
         # single forced-synthesis call was measured running 19+ minutes.
+        from maljan.llm.context_window import output_cap_for
+
+        derived = output_cap_for(container.config, "expert_max_tokens", "static")
         container._llm_registry.build_model_for_agent.assert_called_once_with(
-            "static", max_tokens=container.config.llm.expert_max_tokens
+            "static", max_tokens=derived.tokens
         )
+        assert derived.tokens > 0
         assert result is expected_llm
 
-    def test_no_token_cap_kwarg_when_budget_disabled(self) -> None:
-        """``expert_max_tokens = 0`` means "provider default" — send no kwarg."""
+    def test_an_operator_set_cap_is_used_as_set(self) -> None:
         container = self._make_container()
-        container.config.llm.expert_max_tokens = 0
+        container.config.llm.expert_max_tokens = 4096
         container._llm_registry.build_model_for_agent.return_value = MagicMock()
         container.get_agent_llm("static")
-        container._llm_registry.build_model_for_agent.assert_called_once_with("static")
+        container._llm_registry.build_model_for_agent.assert_called_once_with(
+            "static", max_tokens=4096
+        )
 
     def test_caches_result(self) -> None:
         container = self._make_container()

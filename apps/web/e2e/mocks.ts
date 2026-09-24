@@ -99,6 +99,7 @@ export const MOCK_JOB_SUMMARY = {
   id: "job-1",
   sample_id: "sample-1",
   sample_filename: "invoice_scan.exe",
+  sample_sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
   status: "completed",
   verdict: "Malware",
   overall_confidence: 0.93,
@@ -211,6 +212,20 @@ export const MOCK_DASHBOARD_STATS = {
     Suspicious: 2,
   },
   avg_duration_seconds: 120,
+};
+
+/** What `GET /dashboard/tools` answers: the per-tool ledger counts of the
+ *  latest completed runs. One name is long enough to be cut on screen. */
+export const MOCK_TOOL_USAGE = {
+  limit: 20,
+  // Five runs read, two of them written before the per-tool record existed.
+  read: 5,
+  runs: 3,
+  tools: [
+    { tool: "pe_info", calls: 9, runs: 3 },
+    { tool: "strings_extract_with_a_name_long_enough_to_truncate", calls: 4, runs: 2 },
+    { tool: "sandbox_network", calls: 1, runs: 1 },
+  ],
 };
 
 /** Matches `_SYSTEM_STATUS_SCHEMA`. */
@@ -1541,6 +1556,9 @@ export async function installApiMocks(
   await page.route("**/api/v1/dashboard/stats", (route) =>
     json(route, MOCK_DASHBOARD_STATS)
   );
+  await page.route("**/api/v1/dashboard/tools**", (route) =>
+    json(route, MOCK_TOOL_USAGE)
+  );
   await page.route("**/api/v1/system/status", (route) =>
     json(route, MOCK_SYSTEM_STATUS)
   );
@@ -1691,6 +1709,44 @@ export async function installApiMocks(
     };
     const keys = Object.keys(body.values ?? {});
     return json(route, { applied: keys, applies: { next_job: keys.length } });
+  });
+  // The team lint, registered after the generic `settings/*` handler above so
+  // it wins for its own path. No findings; each staged team laid out as the
+  // column its written order makes (row = position), with its `depends_on`
+  // as edges — enough for the stage graph to draw. A spec that wants
+  // findings overrides this with its own `page.route(...)`.
+  await page.route("**/api/v1/settings/lint-teams", (route) => {
+    const body = (route.request().postDataJSON() ?? {}) as {
+      profiles?: Record<string, { stages?: Array<Record<string, unknown>> }>;
+    };
+    const graphs: Record<string, unknown> = {};
+    for (const [team, entry] of Object.entries(body.profiles ?? {})) {
+      const stages = entry?.stages ?? [];
+      graphs[team] = {
+        nodes: stages.map((stage, row) => ({
+          key: String(stage.key ?? row),
+          label: String(stage.label ?? ""),
+          kind: String(stage.kind ?? "analysis"),
+          agents: (stage.agents as string[] | undefined) ?? [],
+          when: String(stage.when ?? ""),
+          reads: String(stage.inject_upstream ?? "findings"),
+          mode: String(stage.mode ?? "sequential"),
+          row,
+          column: 0,
+        })),
+        edges: stages.flatMap((stage) =>
+          ((stage.depends_on as string[] | undefined) ?? []).map((source) => ({
+            source,
+            target: String(stage.key),
+            implicit: false,
+            legal: true,
+          }))
+        ),
+        rows: stages.length,
+        columns: stages.length ? 1 : 0,
+      };
+    }
+    return json(route, { findings: [], graphs });
   });
   await page.route("**/api/v1/settings/test/*", (route) =>
     json(route, { ok: true, latency_ms: 42, detail: "mock probe ok", models: null, tools: null })

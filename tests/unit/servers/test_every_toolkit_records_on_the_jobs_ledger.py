@@ -60,7 +60,7 @@ class _Result:
 class _Session:
     """A server that answers one large document, on every call."""
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> _Result:
+    async def call_tool(self, name: str, arguments: dict[str, Any], **_: Any) -> _Result:
         rows = [{"offset": 100 + i, "enc": "ascii", "text": f"row number {i}"} for i in range(400)]
         return _Result(json.dumps({"read_path": "/staging/sample", "strings": rows}))
 
@@ -90,7 +90,11 @@ def attached(monkeypatch):
 
 
 def _settings() -> Settings:
-    cfg = Settings(_env_file=None)
+    # A declared window rather than the default, so the derived cap is a known
+    # number: 8,192 tokens less a quarter of itself for the reply, at three
+    # characters per token, an eighth per answer — 2,304 characters, which the
+    # document below is many times over.
+    cfg = Settings(_env_file=None, llm={"openai": {"context_size": 8192}})
     cfg.mcp.servers["analysis"] = MCPServerConfig(
         enabled=True, command="mcp", agents=["static", "network"]
     )
@@ -112,6 +116,7 @@ def test_a_run_that_shortened_an_answer_says_so_in_its_run_summary(attached):
         .to_dict()
     )
     truncation = summary["truncation"]
+    assert truncation["tool_output_limit_largest"] == 2304, "the derived cap is what cut it"
     assert truncation["tool_output_calls"] == 1
     assert truncation["tool_output_over_limit"] == 1
     assert truncation["tool_output_shortened"] == 1

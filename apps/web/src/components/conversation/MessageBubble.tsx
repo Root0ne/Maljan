@@ -19,12 +19,17 @@ import { useState } from "react";
 import { ArrowRight, CircleHelp, Gavel } from "lucide-react";
 
 import type { ConversationItem } from "@/lib/conversation";
+import { statusTone } from "@/lib/status";
 import { agentColor } from "./agentIdentity";
 
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   no_data: { label: "no data", cls: "border-status-orange/30 bg-status-orange/10 text-status-orange" },
   no_claims: { label: "no report", cls: "border-status-orange/30 bg-status-orange/10 text-status-orange" },
-  failed: { label: "failed", cls: "border-status-red/30 bg-status-red/10 text-status-red" },
+  // The run's own "failed" colour (`lib/status.ts`).
+  failed: {
+    label: "failed",
+    cls: `${statusTone("failed").border} ${statusTone("failed").bg} ${statusTone("failed").text}`,
+  },
   timeout: { label: "timed out", cls: "border-status-red/30 bg-status-red/10 text-status-red" },
 };
 

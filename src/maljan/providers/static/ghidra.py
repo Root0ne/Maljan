@@ -200,6 +200,7 @@ class GhidraStaticProvider(StaticProvider):
                 output_guardrail=output_guardrail,
                 max_output_chars=max_chars,
                 truncation_ledger=job.truncation_ledger,
+                context_budget=job.context_budget,
             )
 
             self._run_async(client.initialize())
@@ -232,6 +233,7 @@ class GhidraStaticProvider(StaticProvider):
             output_guardrail=output_guardrail,
             max_output_chars=max_chars,
             truncation_ledger=job.truncation_ledger,
+            context_budget=job.context_budget,
         )
 
         self._run_async(toolkit.initialize())

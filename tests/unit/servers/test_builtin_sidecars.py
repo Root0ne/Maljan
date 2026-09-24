@@ -61,6 +61,7 @@ def test_the_analysis_golden_carries_the_tools_the_static_analyst_needs() -> Non
         "yara_scan",
         "sigma_match",
         "capa",
+        "floss",
     } <= tools
 
 
@@ -125,6 +126,65 @@ def test_the_live_sidecar_offers_exactly_the_pinned_manifest(name: str) -> None:
     payload = _golden(name)
     assert sorted(live) == payload["tools"]
     assert {name: sorted(args) for name, args in live.items()} == payload["arguments"]
+
+
+def test_the_caveats_on_a_measured_number_reach_the_model_that_reads_them() -> None:
+    """The sidecar's docstring is the tool description in the default topology.
+
+    ``api_capability`` answers with a measured benign rate and a held-out
+    profile count. A model handed those without a glossary can read
+    ``held_out_malware_profiles: 6`` as six labelled samples the rule was
+    validated against, and no corpus behind this catalogue carries
+    technique-level ground truth. The sidecar reuses the in-process docstring
+    rather than paraphrasing it, because a paraphrase is one edit from saying
+    something the in-process one does not.
+    """
+    import importlib.util
+
+    from maljan.tools import knowledge as knowledge_tools
+
+    spec = importlib.util.spec_from_file_location(
+        "knowledge_sidecar", ROOT / "services" / "knowledge-mcp" / "server.py"
+    )
+    assert spec is not None and spec.loader is not None
+    server = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(server)
+
+    # The *served* description, not ``__doc__``. Flip the two decorators and
+    # ``__doc__`` still holds the long text while the registered description is
+    # empty, so a test on the attribute protects nothing; this is what a client
+    # handshake returns and what the model is handed.
+    served = {tool.name: tool.description or "" for tool in asyncio.run(server.mcp.list_tools())}
+    # The in-process text whole, then the one sentence every lookup argument
+    # carries about quotes.
+    in_process = (knowledge_tools.api_capability.__doc__ or "").rstrip()
+    assert served["api_capability"].startswith(in_process)
+    assert (
+        served["api_capability"][len(in_process) :]
+        .strip()
+        .startswith("Give ``api_names`` the value itself, as it should be matched")
+    )
+    # Line wrapping is not the subject; the sentences are.
+    described = " ".join(served["api_capability"].split())
+    for promise in (
+        # What the answer cannot say for itself, so it has to arrive before the
+        # call or not at all.
+        "asking the wrong one gives a libc symbol a Win32 category",
+        "A reference lookup, not an observation",
+        "A bare ``suspicious: true`` would be a verdict",
+        # What a reader of the numbers has to be told, because the misreading
+        # is silent and ends up in a report.
+        "in the one direction it was measured in",
+        "None of them is a probability that *this* sample is benign",
+        "None of the corpora carry technique-level ground truth",
+        "carries no ``measured`` key rather than a zero",
+    ):
+        assert promise in described, promise
+    # The field-by-field glossary is gone: every key in the answer names its own
+    # direction, `corpora` ships the corpus sentences, and a description paid
+    # for in every prompt should not repeat what the payload already says.
+    assert "seen_on_benign_percent" not in described
+    assert len(described) < 2600
 
 
 @pytest.mark.parametrize("name", TOOL_SIDECARS)

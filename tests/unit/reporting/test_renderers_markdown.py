@@ -20,28 +20,30 @@ from tests.unit._ledger_helpers import ledger_from_sandbox, persistence_isr
 
 # The headings every report carries, whatever the run gathered.
 REQUIRED_HEADINGS = [
-    "# Malware Analysis Report",
-    "## Sample Identification",
-    "## Severity & Impact",
-    "## Executive Summary",
-    "## Capabilities Narrative",
-    "## MITRE ATT&CK Matrix",
-    "## Family Attribution",
-    "## Detection Signatures",
-    "## Defensive Recommendations",
-    "## References",
-    "## Run Summary",
+    "## 1. Key findings",
+    "## 2. Sample overview",
+    "## 3. Verdict and assessment",
+    "## 6. Observed behaviour",
+    "## 8. MITRE ATT&CK mapping",
+    "## 9. Indicators of compromise",
+    "## 12. Attribution and related activity",
+    "## 13. Limitations and analysis notes",
+    "## Appendix B. Run summary",
+    "## Appendix C. References",
+    "## Appendix D. Methodology",
 ]
 
 # The headings that appear only when the run filled the block behind them. An
-# empty "Dynamic Behavior" section used to print a sentence apologising for
-# itself, which reads as a gap in the sample rather than a run that never
-# called a sandbox tool.
+# empty heading reads as a gap in the sample rather than a run that never
+# called the tool behind it.
+# The sections a run fills only from evidence: printed with their one line
+# when a run has none, and never with a model's voice.
 EVIDENCE_DEPENDENT_HEADINGS = [
-    "## Static Analysis",
-    "## Dynamic Behavior",
-    "## Network IOCs",
-    "## Persistence Mechanisms",
+    "## 4. Execution flow · _Measured_",
+    "## 5. Technical analysis",
+    "## 7. Static properties · _Measured_",
+    "## 10. Detection",
+    "## 11. Recommendations · _Measured_",
 ]
 
 
@@ -87,17 +89,23 @@ class TestMinimalReport:
         for heading in REQUIRED_HEADINGS:
             assert heading in markdown, f"missing heading: {heading}"
 
-    def test_empty_typed_blocks_are_left_out(self) -> None:
+    def test_an_empty_section_is_printed_with_one_line_saying_so(self) -> None:
         report = MalwareReportBuilder.apply_fallback_narrative(_build())
         markdown = MarkdownRenderer().render(report)
         for heading in EVIDENCE_DEPENDENT_HEADINGS:
-            assert heading not in markdown, f"empty section printed: {heading}"
+            assert heading in markdown, f"section not printed: {heading}"
+        assert "_Written by the report model_" not in markdown
 
-    def test_markdown_is_long_enough(self) -> None:
-        report = _build()
-        report = MalwareReportBuilder.apply_fallback_narrative(report)
+    def test_a_report_with_no_summary_says_so_and_lists_the_verdict_facts(self) -> None:
+        report = MalwareReportBuilder.apply_fallback_narrative(_build(), "the round timed out")
         markdown = MarkdownRenderer().render(report)
-        assert len(markdown.splitlines()) > 50
+        findings = markdown.split("## 1. Key findings", 1)[1].split("## 2.", 1)[0]
+        assert "No summary was written: the round timed out." in findings
+        assert "Verdict: Malware (moderate-to-high confidence, 0.85, stated by the judge)" in (
+            findings
+        )
+        assert "Published network indicators: 0 _(Measured)_" in findings
+        assert "_Pending narrative generation._" not in markdown
 
     def test_sha256_in_header(self) -> None:
         report = _build()
@@ -129,15 +137,23 @@ class TestHonestySignals:
         report.attribution.family_confidence = 0.0
         report.attribution.family_grounded = False
         md = MarkdownRenderer().render(report)
-        assert "ungrounded" in md
+        assert "evilcorp (very low confidence, 0.00, stated by the judge) (no evidence cited)" in md
+
+    def test_a_family_without_a_stated_number_is_not_assessed(self) -> None:
+        report = _build()
+        report.attribution.family = "evilcorp"
+        report.attribution.family_confidence = None
+        report.attribution.family_evidence_ids = ["ev_0010"]
+        md = MarkdownRenderer().render(report)
+        assert "evilcorp (not assessed) [" in md
+        assert "0.00" not in md.split("**Family:**", 1)[1].splitlines()[0]
 
     def test_unknown_family_has_no_confidence_noise(self) -> None:
         report = _build(malware_category=None)
         report.attribution.family = None
         md = MarkdownRenderer().render(report)
-        assert "not determined" in md
-        # The misleading "Family: unknown (confidence 0.00)" line must be gone.
-        assert "**Family**: unknown" not in md
+        assert "**Family:** none attributed" in md
+        assert "unknown (" not in md
 
 
 class TestProfileLine:
@@ -254,10 +270,11 @@ class TestRansomwareReport:
         )
         return MalwareReportBuilder.apply_fallback_narrative(report)
 
-    def test_network_iocs_rendered(self, report: MalwareReport) -> None:
+    def test_network_iocs_rendered_defanged(self, report: MalwareReport) -> None:
         markdown = MarkdownRenderer().render(report)
-        assert "evil-c2.duckdns.org" in markdown
-        assert "1.2.3.4" in markdown
+        assert "evil-c2[.]duckdns[.]org" in markdown
+        assert "1[.]2[.]3[.]4" in markdown
+        assert "evil-c2.duckdns.org" not in markdown
 
     def test_ja3_and_ja3s_fingerprints_rendered(self, report: MalwareReport) -> None:
         # The TLS rows have no typed home in ``NetworkIOCs`` any more; they
@@ -281,10 +298,16 @@ class TestRansomwareReport:
 
 
 class TestSeverityBadge:
-    def test_verdict_badge_uses_square_brackets(self) -> None:
-        report = _build(final_decision="Suspicious")
+    def test_the_severity_badge_uses_square_brackets(self) -> None:
+        from maljan.schemas.judgement import JudgeAssessment, SeverityVerdict
+
+        report = _build(
+            final_decision="Suspicious",
+            judge_assessment=JudgeAssessment(severity=SeverityVerdict(rating="Medium")),
+        )
         markdown = MarkdownRenderer().render(report)
-        assert "[SUSPICIOUS]" in markdown
+        assert "**Severity:** `[MEDIUM]`" in markdown
+        assert "/10" not in markdown
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +342,7 @@ class TestSectionFailureIsolation:
             sandbox_signatures=[],
         )
         markdown = MarkdownRenderer().render(report)
-        assert "## Dynamic Behavior" in markdown
+        assert "## 6. Observed behaviour" in markdown
         assert "CreateFile" in markdown
 
     def test_section_failure_isolated(self) -> None:
@@ -332,16 +355,18 @@ class TestSectionFailureIsolation:
 
         # Monkey-patch one section to raise; the remaining sections + the
         # safe-section stub must still produce a valid markdown body.
-        original = renderer._section_network  # type: ignore[attr-defined]
-        renderer._section_network = _boom  # type: ignore[assignment]
+        def _boom_with_context(_report: MalwareReport, _ctx: object) -> str:
+            return _boom(_report)
+
+        original = renderer._section_indicators  # type: ignore[attr-defined]
+        renderer._section_indicators = _boom_with_context  # type: ignore[assignment]
         try:
             markdown = renderer.render(report)
         finally:
-            renderer._section_network = original  # type: ignore[assignment]
+            renderer._section_indicators = original  # type: ignore[assignment]
 
-        assert "# Malware Analysis Report" in markdown
-        assert "## Sample Identification" in markdown
-        assert "section 'network' rendering failed" in markdown
+        assert "## 2. Sample overview" in markdown
+        assert "section 'indicators' rendering failed" in markdown
 
 
 class TestAnUnverifiedTechniqueIdIsPrintedWithItsMarker:
@@ -385,11 +410,13 @@ class TestAnUnverifiedTechniqueIdIsPrintedWithItsMarker:
         assert "T7777" in markdown
         assert UNVERIFIED_TECHNIQUE_MARKER in markdown
 
-    def test_the_evidence_block_carries_it_too(self) -> None:
+    def test_the_status_column_carries_it(self) -> None:
         markdown = MarkdownRenderer().render(self._report_with_unverified())
 
-        evidence = markdown.split("### Evidence", 1)[1]
-        assert UNVERIFIED_TECHNIQUE_MARKER in evidence
+        (row,) = [
+            line for line in markdown.splitlines() if line.startswith("| ") and "T7777" in line
+        ]
+        assert f"unverified id ({UNVERIFIED_TECHNIQUE_MARKER})" in row
 
     def test_the_html_export_carries_it(self) -> None:
         """HTML is generated from the markdown, so the ampersand in "ATT&CK"

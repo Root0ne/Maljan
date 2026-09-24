@@ -23,7 +23,7 @@ export default function DetectionTab() {
   const { report } = useReport();
   const mr = report?.malware_report;
   const generated = mr?.detection_signatures ?? [];
-  const matched = hasRuleMatches(report?.agent_findings);
+  const matched = hasRuleMatches(report?.agent_findings, mr?.sections);
   // A bundle with no objects in it is a bundle nobody wants to export.
   const stix = Object.keys(mr?.stix_bundle_extended ?? report?.stix_bundle ?? {}).length > 0;
 
@@ -66,8 +66,9 @@ export default function DetectionTab() {
               STIX 2.1 bundle (export)
             </h2>
             <p className="text-xs text-text-muted mt-0.5">
-              Machine-readable STIX 2.1 bundle for sharing with other tooling —
-              copy or download from the controls below.
+              Machine-readable STIX 2.1 bundle for sharing with other tooling,
+              drawn as a relationship graph, listed as a table, or shown as
+              JSON to copy or download.
             </p>
           </div>
           <StixPanel />

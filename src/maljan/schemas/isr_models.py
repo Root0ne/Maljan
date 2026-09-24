@@ -14,12 +14,26 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 # What a claim carrying an id the catalogue does not have is labelled with,
 # wherever it is printed. One string so the ISR summary the judge reads, the
 # Markdown report and the HTML report cannot word it three different ways.
 UNVERIFIED_TECHNIQUE_MARKER = "technique id not in the ATT&CK catalog"
+# The note on a technique whose claim reads as absence and whose analyst kept
+# the id when asked. The technique is published as the analyst stated it; the
+# note travels with it to the judge's summary and the report's ATT&CK table.
+ABSENCE_TECHNIQUE_MARKER = (
+    "the claim naming it reads as absence; the analyst kept the technique when asked"
+)
+# The note on a technique the judge named in its bundle and no analyst claimed.
+# The rule it is published by: a technique the judge states is the judge's own
+# claim, asked the catalogue and platform questions every claim is asked, and
+# published with the judge as its source and the judge's own number.
+JUDGE_ONLY_TECHNIQUE_MARKER = (
+    "stated by the judge and claimed by no analyst; a technique the judge states is "
+    "published as its own claim"
+)
 
 
 class ClaimEvidence(BaseModel):
@@ -56,6 +70,17 @@ class ClaimEvidence(BaseModel):
     technique_id_valid: bool = Field(
         default=True,
         description="False when the technique id is not in the ATT&CK catalogue.",
+    )
+    # Whether the claim reads as absence and its analyst kept the technique id
+    # after being asked (``pipeline.validation.ABSENCE_CLAIM_CODE``). Set only
+    # when the question was sent. The claim, its id and its publication are
+    # unchanged: the flag is a note the report and the judge print beside the
+    # id, and long-term memory stores no past-case technique from it.
+    kept_after_absence_question: bool = Field(
+        default=False,
+        description=(
+            "True when the claim reads as absence and the analyst kept its id when asked."
+        ),
     )
     # What the ATT&CK index made of the claim text against the id the analyst
     # chose: the id's own gate score and the index's top candidates with
@@ -111,7 +136,11 @@ class Finding(BaseModel):
     technique_ids: list[str] = Field(
         default_factory=list, description="MITRE ATT&CK technique ids, e.g. ['T1055']."
     )
-    confidence: float = Field(0.0, ge=0.0, le=1.0, description="Analyst self-reported confidence.")
+    # ``None`` when the analyst put no number on the finding: a default of 0.0
+    # would read downstream as a confidence of zero somebody stated.
+    confidence: float | None = Field(
+        None, ge=0.0, le=1.0, description="Analyst self-reported confidence, if stated."
+    )
     evidence_ids: list[str] = Field(
         default_factory=list, description="Ledger entry ids supporting this finding."
     )
@@ -171,6 +200,30 @@ class AgentISR(BaseModel):
     status_reason: str | None = Field(
         default=None, description="Why the analyst reports that status, in one sentence."
     )
+    # What the parser could not read out of the answer this ISR was parsed
+    # from, for the validation turn to ask about and the stage to keep. Not
+    # fields: they describe one parse, not the analyst's answer, and they are
+    # never serialised. ``unparsed_answer`` is the prose of an answer that
+    # yielded no claim at all, kept as the analyst wrote it; the count is the
+    # CLAIM blocks that stated no confidence, which are not claims — a number
+    # nobody stated is not put on one.
+    _unparsed_answer: str = PrivateAttr(default="")
+    _blocks_without_confidence: int = PrivateAttr(default=0)
+
+    @property
+    def unparsed_answer(self) -> str:
+        """The prose of an answer that parsed into no claim, or ``""``."""
+        return self._unparsed_answer
+
+    @property
+    def blocks_without_confidence(self) -> int:
+        """How many CLAIM blocks of the parsed answer stated no confidence."""
+        return self._blocks_without_confidence
+
+    def note_parse(self, *, unparsed_answer: str = "", blocks_without_confidence: int = 0) -> None:
+        """Record what the parse of this ISR's answer could not read."""
+        self._unparsed_answer = str(unparsed_answer or "")
+        self._blocks_without_confidence = max(0, int(blocks_without_confidence or 0))
 
     @property
     def mean_confidence(self) -> float:
@@ -197,6 +250,8 @@ class AgentISR(BaseModel):
             tech = f" ({claim.technique_id})" if claim.technique_id else ""
             if claim.technique_id and not claim.technique_id_valid:
                 tech = f" ({claim.technique_id} — {UNVERIFIED_TECHNIQUE_MARKER})"
+            elif claim.technique_id and claim.kept_after_absence_question:
+                tech = f" ({claim.technique_id} — {ABSENCE_TECHNIQUE_MARKER})"
             lines.append(
                 f"  Claim {i}: {claim.claim}{tech}"
                 f" | Evidence: {claim.evidence_ref}"

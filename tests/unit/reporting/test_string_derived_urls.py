@@ -75,7 +75,7 @@ def _entry(seq: int, tool: str, payload: dict[str, Any]) -> Any:
 def _report(
     urls: list[NetworkURL], indicators: list[dict[str, Any]] | None = None
 ) -> MalwareReport:
-    from maljan.reporting.models import NetworkIOCs
+    from maljan.reporting.models import DynamicBehavior, NetworkIOCs
 
     report = MalwareReportBuilder(
         file_hash="b" * 64,
@@ -96,6 +96,14 @@ def _report(
         evidence_ledger=[],
     ).build_deterministic()
     report.network = NetworkIOCs(urls=urls)
+    # What a sandbox saw written: the second source the one publish rule asks
+    # of the judge's file names and digests, as of any other row's.
+    report.dynamic = DynamicBehavior(
+        file_operations=[
+            {"operation": "write", "path": f"judge{n}.exe", "sha1": f"{n:040x}"}
+            for n in range(MAX_TOTAL_INDICATORS + 5)
+        ]
+    )
     return report
 
 

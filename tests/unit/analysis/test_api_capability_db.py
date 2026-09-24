@@ -76,10 +76,14 @@ class TestCategorisingIsNotAccusing:
         assert category == "registry"
         assert suspicious is False
 
-    def test_injection_apis_are_both(self) -> None:
+    def test_injection_apis_are_categorised_and_no_longer_labelled_either(self) -> None:
+        """Measured, the category appeared on 65.6% of ordinary Windows
+        software and 70.7% of malware — a label carried by two benign binaries
+        in three says nothing about the third. The categorisation is right and
+        stays; the label went."""
         category, suspicious = _classify("WriteProcessMemory")
         assert category == "process_injection"
-        assert suspicious is True
+        assert suspicious is False
 
     def test_the_new_names_did_not_arrive_pre_flagged(self) -> None:
         """The load-bearing property of the whole enlargement.
@@ -127,11 +131,10 @@ class TestReadingPermissionsIsNotModifyingThem:
     def setup_method(self) -> None:
         reset_cache()
 
-    def test_writing_a_dacl_is_high_tier_and_suspicious(self) -> None:
+    def test_writing_a_dacl_is_filed_apart_from_reading_one(self) -> None:
         for api in ("SetFileSecurityW", "SetEntriesInAclW", "SetSecurityInfo"):
-            category, suspicious = _classify(api)
+            category, _suspicious = _classify(api)
             assert category == "privilege", api
-            assert suspicious is True, api
 
     def test_reading_a_dacl_is_categorised_but_not_suspicious(self) -> None:
         for api in ("GetFileSecurityW", "GetAclInformation", "GetAce", "GetSidSubAuthority"):
@@ -139,20 +142,22 @@ class TestReadingPermissionsIsNotModifyingThem:
             assert category == "discovery", api
             assert suspicious is False, api
 
-    def test_t1222_fires_on_writes_only(self) -> None:
+    def test_the_permissions_rule_claims_neither_now(self) -> None:
+        """The asymmetry was right and the rule on top of it was not.
+
+        Measured over both corpora, T1222 appeared on 1.8% of ordinary Windows
+        software and 0.8% of malware profiles — it labelled software that is
+        not a sample twice as often as software that is. The category split
+        survives because it describes what the calls do; the technique claim
+        does not, because it discriminated in the wrong direction.
+        """
         table = load_api_attck_map(_ATTCK)
         assert table is not None
-
-        writes = {
-            rule.technique_id for rule, _ in table.match({"SetFileSecurityW", "SetEntriesInAclW"})
-        }
-        assert "T1222" in writes
-
-        reads = {
-            rule.technique_id
-            for rule, _ in table.match({"GetFileSecurityW", "GetAclInformation", "GetAce"})
-        }
-        assert "T1222" not in reads
+        for imports in (
+            {"SetFileSecurityW", "SetEntriesInAclW"},
+            {"GetFileSecurityW", "GetAclInformation", "GetAce"},
+        ):
+            assert "T1222" not in {rule.technique_id for rule, _ in table.match(imports)}
 
 
 class TestSearchPathControlIsCategorisedButNeverClaimed:
@@ -255,7 +260,7 @@ class TestACategoryThatMeansNothingAloneSaysWhatWouldChangeThat:
             assert windows[name]["corroborated_by"]
 
     def test_a_group_that_stands_on_its_own_names_none(self) -> None:
-        assert "corroborated_by" not in self._windows()["process_injection"]
+        assert "corroborated_by" not in self._windows()["registry"]
 
     def test_the_corroborators_are_apis_the_catalogue_knows(self) -> None:
         """A name with a typo in it is advice nobody can act on."""
@@ -264,3 +269,136 @@ class TestACategoryThatMeansNothingAloneSaysWhatWouldChangeThat:
         for name in ("screen_capture", "message_loop"):
             named = {api.lower() for api in windows[name]["corroborated_by"]}
             assert named <= known, sorted(named - known)
+
+
+class TestAnAssociationCarriesWhatItWasMeasuredAt:
+    """The Windows block labelled 97.73% of ordinary software and 93.50% of
+    malware, which is not a weak signal but no signal stated as a fact.
+
+    What replaced the label is the measurement itself: every surviving
+    association says what share of a named corpus of software that is not a
+    sample it fires on, so a reader weighs the row instead of reading it as a
+    finding.
+    """
+
+    def setup_method(self) -> None:
+        reset_cache()
+
+    def test_every_surviving_rule_says_what_it_fires_on_and_what_that_is_a_share_of(self) -> None:
+        table = load_api_attck_map(_ATTCK)
+        assert table is not None
+        for rule in table.techniques:
+            assert rule.measured is not None, rule.technique_id
+            assert rule.measured.benign_corpus, rule.technique_id
+            assert rule.measured.seen_on_benign_files >= 0, rule.technique_id
+
+    def test_every_category_says_the_same(self) -> None:
+        for platform in ("windows", "linux"):
+            db = load_api_behaviour_db(_BEHAVIOUR, platform)
+            assert db is not None
+            for category in db.tiers:
+                rate = db.measured_for(category)
+                assert rate is not None, f"{platform} {category}"
+                assert rate.benign_corpus, f"{platform} {category}"
+
+    def test_the_numbers_travel_without_the_corpus_sentence_under_every_name(self) -> None:
+        """One answer can carry three hundred import rows. The sentence naming
+        the corpus is said once; the row carries the share."""
+        table = load_api_attck_map(_ATTCK)
+        assert table is not None
+        rule = next(r for r in table.techniques if r.technique_id == "T1113")
+        assert rule.measured is not None
+        assert not [key for key in rule.measured.rates() if "corpus" in key]
+        assert rule.measured.corpora()["benign"]
+
+    def test_an_association_that_was_not_measured_says_nothing_rather_than_zero(self) -> None:
+        from maljan.analysis.api_capability_db import _measured
+
+        assert _measured(None) is None
+        assert _measured({"seen_on_benign_percent": 0.4}) is None
+        assert _measured({"seen_on_benign_files": 4}) is None
+        assert _measured({"seen_on_benign_percent": 0.0, "seen_on_benign_files": 0}) is not None
+
+
+class TestTheFloorIsReadStrictlyRatherThanCoerced:
+    """``min_apis`` is what stands between an import and a claim.
+
+    The data file is hand-editable and the loader used to run it through
+    ``max(1, int(...))``, which turned a ``0``, a negative, ``true`` or ``1.4``
+    into 1 — and a floor of one on a sixteen-name rule makes it fire on any
+    single one of them. A floor of one is allowed only where the rule names one
+    API, which is the shape the tool's own documentation promises.
+    """
+
+    def setup_method(self) -> None:
+        reset_cache()
+
+    @staticmethod
+    def _row(**over: object) -> dict:
+        row = {
+            "technique_id": "T1055",
+            "name": "Process Injection",
+            "apis": ["WriteProcessMemory", "CreateRemoteThread"],
+            "min_apis": 2,
+        }
+        row.update(over)
+        return row
+
+    def test_a_floor_that_is_not_a_whole_number_of_names_drops_the_rule(self) -> None:
+        from maljan.analysis.api_capability_db import _parse_rule
+
+        assert _parse_rule(self._row()) is not None
+        for bad in (0, -1, True, 1.4, "2", None):
+            assert _parse_rule(self._row(min_apis=bad)) is None, bad
+
+    def test_a_whole_number_written_as_a_float_is_a_whole_number(self) -> None:
+        """JSON has one number type. A catalogue round-tripped through a
+        serialiser that emits ``2.0`` would otherwise lose the rule, and the
+        real guard here is structural rather than a matter of spelling."""
+        from maljan.analysis.api_capability_db import _parse_rule
+
+        rule = _parse_rule(self._row(min_apis=2.0))
+        assert rule is not None and rule.min_apis == 2
+
+    def test_one_name_is_a_floor_only_for_a_rule_that_names_one(self) -> None:
+        from maljan.analysis.api_capability_db import _parse_rule
+
+        assert _parse_rule(self._row(min_apis=1)) is None
+        alone = _parse_rule(self._row(min_apis=1, apis=["IcmpSendEcho"]))
+        assert alone is not None and alone.min_apis == 1
+
+    def test_the_shipped_catalogue_has_exactly_one_such_rule(self) -> None:
+        table = load_api_attck_map(_ATTCK)
+        assert table is not None
+        single = [r for r in table.techniques if r.min_apis == 1]
+        assert [r.technique_id for r in single] == ["T1095"]
+        assert len(single[0].apis) == 1
+
+
+class TestALabelWaitsForTheCombinationThatEarnsIt:
+    """One labelled category per platform, and each waits for a second name.
+
+    Every Windows category that carried a bare tier is informational now, and
+    the one that keeps a label carries the input hook or raw-input device that
+    is the capture rather than the key-state read a game does every frame.
+    """
+
+    def setup_method(self) -> None:
+        reset_cache()
+
+    def test_only_a_gated_category_is_ever_labelled(self) -> None:
+        for platform in ("windows", "linux"):
+            db = load_api_behaviour_db(_BEHAVIOUR, platform)
+            assert db is not None
+            for category, tier in db.tiers.items():
+                if tier == "informational":
+                    continue
+                assert db.flags_with(category), f"{platform} {category}"
+
+    def test_the_windows_key_read_alone_is_not_a_label(self) -> None:
+        db = load_api_behaviour_db(_BEHAVIOUR, "windows")
+        assert db is not None
+        category, labelled = db.classify("GetKeyState", ["GetKeyState"])
+        assert (category, labelled) == ("keylogging", False)
+        _category, labelled = db.classify("GetKeyState", ["GetKeyState", "SetWindowsHookExW"])
+        assert labelled is True

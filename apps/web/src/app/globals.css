@@ -295,3 +295,40 @@ select:disabled {
 table {
   border-collapse: collapse;
 }
+
+/* ── Print ──────────────────────────────────────────── */
+/* A page marked `print-light` prints dark text on white paper. Browsers drop
+   background colours when printing, so the dark theme's light text would
+   print light on white; the tokens are redefined on the marked element and
+   every utility inside it follows, because they read the tokens at use time.
+   The status hues are darkened for the same reason, and every status also
+   carries a word and a mark, so nothing on paper depends on the hue. */
+@media print {
+  html {
+    color-scheme: light;
+  }
+  body {
+    background: #fff;
+    color: #000;
+  }
+  .print-light {
+    --bg-deep: #fff;
+    --bg-surface: #fff;
+    --bg-elevated: #fff;
+    --bg-active: #f3f4f6;
+    --bg-hover: #fff;
+    --border: #9ca3af;
+    --border-light: #d1d5db;
+    --text-primary: #000;
+    --text-secondary: #1f2937;
+    --text-muted: #374151;
+    --text-tertiary: #4b5563;
+    --status-red: #9f1d15;
+    --status-orange: #8a4600;
+    --status-green: #1d6b2c;
+    --status-blue: #0b4f9c;
+    --status-purple: #5b2a86;
+    --accent: #0b4f9c;
+    --accent-strong: #0b4f9c;
+  }
+}

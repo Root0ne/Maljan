@@ -111,6 +111,21 @@ class TestTheLines:
             "[ev_0003] signature: authenticode present (subject Simon Tatham, issuer Sectigo)"
         )
 
+    def test_every_digest_is_printed_whole(self) -> None:
+        """A 16-character prefix was copied out as an MD5 indicator and refused."""
+        digests = {
+            "sha256": "6" * 64,
+            "md5": "7" * 32,
+            "sha1": "e" * 40,
+            "imphash": "d" * 32,
+            "ssdeep": "3072:" + "A" * 60 + ":" + "B" * 30,
+        }
+        line = render_pack([_entry("hashes", digests, seq=1)], 0)
+
+        for key, value in digests.items():
+            assert f"{key} {value}" in line
+        assert "…" not in line
+
     def test_no_signature_is_said_as_none(self) -> None:
         payload = {"format": "pe", "authenticode": {"present": False}}
         assert render_pack([_entry("signing_info", payload)], 0) == "[ev_0001] signature: none"
@@ -171,8 +186,76 @@ class TestTheLines:
     def test_the_virustotal_answer_is_read_for_its_counts_and_labels(self) -> None:
         entry = _entry("get_file_report", VT_ANSWER, server="virustotal")
         assert render_pack([entry], 0) == (
-            "[ev_0001] reputation: VirusTotal 31/75 malicious, labels trojan.filisto/agent, Filisto"
+            "[ev_0001] reputation: VirusTotal: 31 of 75 engines flag it as malicious, "
+            "labels trojan.filisto/agent, Filisto"
         )
+
+    def test_no_detection_is_said_in_words_and_not_as_a_fraction(self) -> None:
+        """ "0/75 malicious" was turned by a report model into "clean by 75/75 engines"."""
+        answer = {
+            "data": {
+                "last_analysis_stats": {"malicious": 0, "undetected": 71, "type-unsupported": 4}
+            }
+        }
+        entry = _entry("get_file_report", answer, server="virustotal")
+
+        line = render_pack([entry], 0)
+
+        assert line == "[ev_0001] reputation: VirusTotal: 0 of 75 engines flag it as malicious"
+        assert "/75" not in line
+
+    def test_the_detection_labels_the_answer_carries_are_stated_with_their_counts(
+        self,
+    ) -> None:
+        """A recorded answer that carries ``detections`` and no popular classification.
+
+        Its labels are stated with how many engines gave each, most first and
+        then in the order the answer lists them, bounded, with the number of
+        distinct labels left out. The line counts; it does not decide.
+        """
+        entry = _entry("get_file_report", seq=17, server="virustotal")
+
+        line = render_pack([entry], 0)
+
+        assert line.startswith(
+            "[ev_0017] reputation: VirusTotal: 52 of 75 engines flag it as malicious, "
+            "52 detection labels, "
+            "47 distinct (engines per label, most first, 20 shown): "
+            "Gen:Variant.Ulise.482338 ×4, Trojan ( 005ef6721 ) ×2, Troj/Loader-CB ×2, "
+            "W32.Malware.D0BC8737 ×1, Trojan.Win32.Latrodectus.m!c ×1, "
+        )
+        assert line.endswith("(+27 more distinct labels)")
+        shown = line.split(": ", 2)[2].rsplit(" (+", 1)[0]
+        assert len(shown.split(" ×")) - 1 == 20
+
+    def test_every_label_is_shown_when_they_fit_the_bound(self) -> None:
+        answer = {
+            "data": {
+                "detections": ["Trojan.Example", "Trojan.Example", "Other.Label"],
+                "last_analysis_stats": {"malicious": 3, "undetected": 7},
+            }
+        }
+        entry = _entry("get_file_report", answer, server="virustotal")
+
+        assert render_pack([entry], 0) == (
+            "[ev_0001] reputation: VirusTotal: 3 of 10 engines flag it as malicious, "
+            "3 detection labels, "
+            "2 distinct (engines per label, most first): Trojan.Example ×2, Other.Label ×1"
+        )
+
+    def test_each_label_is_bounded_as_well_as_their_number(self) -> None:
+        long_label = "Trojan." + "x" * 500
+        answer = {
+            "data": {
+                "detections": [long_label, long_label],
+                "last_analysis_stats": {"malicious": 2, "undetected": 8},
+            }
+        }
+        line = render_pack([_entry("get_file_report", answer, server="virustotal")], 0)
+
+        shown = line.split("most first): ", 1)[1]
+        assert shown.endswith("… ×2")
+        assert len(shown) == 80 + len(" ×2")
 
     def test_the_threat_intel_prose_is_read_for_its_count(self) -> None:
         entry = _entry(

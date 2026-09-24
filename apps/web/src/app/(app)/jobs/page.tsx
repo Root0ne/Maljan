@@ -24,22 +24,13 @@ import {
   type StatusFilter,
 } from "@/lib/analyses";
 import { countLabel, formatDuration, timeAgo } from "@/lib/report-utils";
-import { verdictBucket, verdictLabel } from "@/lib/verdict";
+import { statusTone } from "@/lib/status";
+import { verdictLabel, verdictTone } from "@/lib/verdict";
+import CopyButton from "@/components/ui/CopyButton";
 
-const STATUS_BADGE: Record<string, { class: string; dot: string }> = {
-  completed: { class: "text-status-green", dot: "bg-status-green" },
-  running: { class: "text-status-blue", dot: "bg-status-blue" },
-  pending: { class: "text-text-muted", dot: "bg-text-muted" },
-  failed: { class: "text-status-red", dot: "bg-status-red" },
-  cancelled: { class: "text-text-muted", dot: "bg-text-muted" },
-};
+const COPY_CLASS =
+  "inline-flex min-h-6 items-center px-2 py-0.5 text-[11px] font-mono border border-border rounded text-text-secondary hover:text-text-primary hover:border-text-muted";
 
-const VERDICT_TEXT: Record<string, string> = {
-  malicious: "text-status-red",
-  suspicious: "text-status-orange",
-  benign: "text-status-green",
-  unknown: "text-text-muted",
-};
 
 function AnalysesList() {
   const router = useRouter();
@@ -217,7 +208,7 @@ function AnalysesList() {
                     <div className="flex items-center gap-2">
                       {f !== "all" && (
                         <span
-                          className={`w-1.5 h-1.5 rounded-full ${STATUS_BADGE[f]?.dot || "bg-text-muted"}`}
+                          className={`w-1.5 h-1.5 rounded-full ${statusTone(f).dot}`}
                         />
                       )}
                       <span className="capitalize">{f}</span>
@@ -259,7 +250,7 @@ function AnalysesList() {
               </div>
             ) : (
               filtered.map((row) => {
-                const badge = STATUS_BADGE[row.status] || STATUS_BADGE.pending;
+                const badge = statusTone(row.status);
                 const canCancel = row.status === "pending" || row.status === "running";
                 const duration = formatDuration(row.durationSeconds);
                 return (
@@ -287,9 +278,7 @@ function AnalysesList() {
                         </p>
                       </div>
                       {row.verdict && (
-                        <span
-                          className={`ml-auto text-xs ${VERDICT_TEXT[verdictBucket(row.verdict)] ?? VERDICT_TEXT.unknown}`}
-                        >
+                        <span className={`ml-auto text-xs ${verdictTone(row.verdict).text}`}>
                           {verdictLabel(row.verdict)}
                           {/* A bare `0` beside a confident verdict said
                               nothing about what the number was. */}
@@ -301,7 +290,25 @@ function AnalysesList() {
                         </span>
                       )}
                     </Link>
-                    <div className="flex items-center gap-3 ml-3">
+                    <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 ml-3">
+                      {/* Outside the link, because a control inside a link is
+                          two targets in one. The two values an operator pastes
+                          elsewhere — into a lookup, into a log search — one
+                          press each, and the name says which row's. */}
+                      {row.sha256 && (
+                        <CopyButton
+                          value={row.sha256}
+                          what={`SHA-256 of ${row.sample}, ${timeAgo(row.createdAt)}`}
+                          label="SHA-256"
+                          className={COPY_CLASS}
+                        />
+                      )}
+                      <CopyButton
+                        value={row.id}
+                        what={`job id of ${row.sample}, ${timeAgo(row.createdAt)}`}
+                        label="job id"
+                        className={COPY_CLASS}
+                      />
                       {canCancel && (
                         <button
                           onClick={(e) => {
@@ -314,7 +321,7 @@ function AnalysesList() {
                           Cancel
                         </button>
                       )}
-                      <div className={`flex items-center gap-1.5 ${badge.class}`}>
+                      <div className={`flex items-center gap-1.5 ${badge.text}`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
                         <span className="text-xs font-medium uppercase tracking-wider">
                           {row.status}

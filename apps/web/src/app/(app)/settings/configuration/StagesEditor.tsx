@@ -1,7 +1,7 @@
 "use client";
 
 import { humaniseKey } from "@/lib/humanise";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import type {
   AgentDefinitionEntry,
@@ -10,6 +10,8 @@ import type {
   SettingValue,
   StageEntry,
   StageKind,
+  TeamFinding,
+  TeamLintResult,
 } from "@/types/settings";
 import { agentDisplayName, agentFullName, agentKeySuffix } from "./agentNames";
 import {
@@ -20,6 +22,11 @@ import {
   removeEntry,
   type KeyError,
 } from "./mapEditorHelpers";
+import TeamGraph from "./TeamGraph";
+import { readLintResult, stageCardId, teamFindings } from "./teamGraph";
+
+/** How long the editor waits after the last keystroke before it asks the lint. */
+const LINT_DELAY_MS = 400;
 
 const input =
   "w-full bg-bg-deep border border-border rounded px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:border-accent";
@@ -74,6 +81,12 @@ const blankStage = (key: string): StageEntry => ({
  * asks `POST /settings/validate-condition` as it loses focus so the operator
  * hears about a typo while they are still on the stage that has it. One
  * grammar, one answer, two moments.
+ *
+ * The whole team is checked the same way. Each edit, once typing pauses, is
+ * sent to `POST /settings/lint-teams`, whose errors are the refusals apply
+ * would make in the words it would make them, and whose warnings never block
+ * apply. The answer draws the stage graph beside each team and puts each
+ * finding on the card it concerns; the browser decides nothing about a team.
  */
 export default function StagesEditor({
   entry,
@@ -107,6 +120,57 @@ export default function StagesEditor({
   const [newKey, setNewKey] = useState("");
   const [keyError, setKeyError] = useState<KeyError | null>(null);
   const newKeyRef = useRef<HTMLInputElement | null>(null);
+  const [lint, setLint] = useState<TeamLintResult | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [lintFailed, setLintFailed] = useState(false);
+
+  // One string for everything the lint reads, so an edit that changes nothing
+  // the lint can see does not ask it again, and the effect reads its inputs
+  // back out of the string it is keyed by.
+  const lintKey = JSON.stringify([value, definitions, activeProfile]);
+  useEffect(() => {
+    const [profiles, defs, active] = JSON.parse(lintKey) as [
+      Record<string, unknown>,
+      Record<string, unknown>,
+      string,
+    ];
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      setChecking(true);
+      api
+        .lintTeams(profiles, defs, active, { signal: controller.signal })
+        .then((answer: unknown) => {
+          // An answer of the wrong shape is a check that failed: the last
+          // good picture stays up, marked as not current.
+          const read = readLintResult(answer);
+          if (read) setLint(read);
+          setLintFailed(read === null);
+        })
+        .catch(() => {
+          // Apply still refuses what the lint would have found, so a lint the
+          // browser could not reach keeps the last picture, and says it is
+          // the last one, rather than pretending the team is clean.
+          if (!controller.signal.aborted) setLintFailed(true);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setChecking(false);
+        });
+    }, LINT_DELAY_MS);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [lintKey]);
+
+  const findings: TeamFinding[] = lint?.findings ?? [];
+  const acrossTeams = findings.filter((f) => f.team === null);
+
+  const selectStage = (team: string, stage: string) => {
+    const card = document.getElementById(stageCardId(team, stage));
+    if (!card) return;
+    card.scrollIntoView({ block: "nearest" });
+    card.focus();
+  };
 
   const analysts = Object.entries(definitions)
     .filter(([, d]) => d.enabled && d.role !== "judge" && d.role !== "report")
@@ -230,6 +294,7 @@ export default function StagesEditor({
         const locked = BUILTIN_PROFILES.has(key);
         const stages = profile.stages ?? [];
         const cardError = errorFor(`${entry.key}.${key}`, true);
+        const { byStage } = teamFindings(findings, key);
         return (
           <div key={key} className="border border-border rounded p-3" data-profile={key}>
             <div className="flex items-center justify-between gap-2 mb-2">
@@ -284,7 +349,8 @@ export default function StagesEditor({
               />
             </label>
 
-            <ol className="mt-3 space-y-2">
+            <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,19rem)]">
+            <ol className="space-y-2">
               {stages.map((stage, index) => (
                 <StageCard
                   key={stage.key}
@@ -297,6 +363,7 @@ export default function StagesEditor({
                   definitions={definitions}
                   locked={locked}
                   error={errorFor(`${entry.key}.${key}.stages.${stage.key}`)}
+                  findings={byStage.get(stage.key) ?? []}
                   warning={warningFor(`${entry.key}.${key}.stages.${stage.key}`)}
                   onPatch={(next) => putStage(key, index, next)}
                   onMove={(by) => moveStage(key, index, by)}
@@ -309,6 +376,17 @@ export default function StagesEditor({
                 </li>
               )}
             </ol>
+            <div className="xl:sticky xl:top-2 self-start">
+              <TeamGraph
+                team={key}
+                graph={lint?.graphs?.[key]}
+                findings={findings}
+                checking={checking}
+                failed={lintFailed}
+                onSelectStage={(stage) => selectStage(key, stage)}
+              />
+            </div>
+            </div>
 
             {cardError && (
               <p className="text-[11px] text-status-red mt-2" role="alert">
@@ -352,6 +430,18 @@ export default function StagesEditor({
           {keyError.message}
         </p>
       )}
+      {acrossTeams.length > 0 && (
+        <div className="border border-border rounded p-3">
+          <h4 className="text-[11px] uppercase tracking-wider text-text-muted">Across teams</h4>
+          <ul className="mt-1 space-y-1">
+            {acrossTeams.map((finding) => (
+              <li key={finding.path + finding.code} className="text-[11px] text-status-orange">
+                Warning: <span className="text-text-secondary">{finding.message}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -366,6 +456,7 @@ function StageCard({
   definitions,
   locked,
   error,
+  findings,
   warning,
   onPatch,
   onMove,
@@ -382,6 +473,10 @@ function StageCard({
   definitions: Record<string, AgentDefinitionEntry>;
   locked: boolean;
   error: string | undefined;
+  /** What the team lint said about this stage on the last check. Its errors
+   *  are what apply would refuse; a message apply already returned is shown
+   *  once, as the apply error. */
+  findings: TeamFinding[];
   warning: string | undefined;
   onPatch: (next: Partial<StageEntry>) => void;
   onMove: (by: number) => void;
@@ -415,7 +510,12 @@ function StageCard({
   const label = `${profile} ${stage.key}`;
 
   return (
-    <li className="border border-border rounded p-2" data-stage={stage.key}>
+    <li
+      className="border border-border rounded p-2 focus:outline-none focus-visible:border-accent"
+      data-stage={stage.key}
+      id={stageCardId(profile, stage.key)}
+      tabIndex={-1}
+    >
       <div className="flex items-center justify-between gap-2">
         {/* The name leads and the key stays in the Key field below, which is
             the one place it is edited. The header used to carry both, so
@@ -712,6 +812,21 @@ function StageCard({
         <p className="text-[11px] text-status-red mt-2" role="alert">
           {error}
         </p>
+      )}
+      {findings.filter((f) => f.message !== error && f.message !== warning).length > 0 && (
+        <ul className="mt-2 space-y-0.5" aria-label={`Checks on ${stage.key}`}>
+          {findings
+            .filter((f) => f.message !== error && f.message !== warning)
+            .map((f, index) => (
+              <li
+                key={`${f.code}:${f.field ?? ""}:${index}`}
+                className={`text-[11px] ${f.severity === "error" ? "text-status-red" : "text-status-orange"}`}
+              >
+                {f.severity === "error" ? "Apply will refuse: " : "Warning: "}
+                {f.message}
+              </li>
+            ))}
+        </ul>
       )}
       {/* A warning is not a refusal: the team saved, and this says what it
         * will do that the card does not show. */}

@@ -5,6 +5,7 @@ import {
   formatStageDuration,
   hasStageRecord,
   stageTimeline,
+  stageTiming,
   toolCallsByAgent,
   type StageEvent,
 } from "../stageTimeline";
@@ -168,5 +169,42 @@ describe("the tool calls each agent made", () => {
 
   it("skip an entry with no agent on it rather than inventing one", () => {
     expect(toolCallsByAgent([{ agent: "" }])).toEqual({});
+  });
+});
+
+describe("the time each stage took, as the Summary draws it", () => {
+  const rows = stageTimeline(
+    [],
+    [
+      stored({ key: "triage", kind: "triage", duration_ms: 30_000 }),
+      stored({ key: "analysis", duration_ms: 90_000 }),
+      stored({ key: "debate", kind: "debate", ran: false, reason: "one analyst", duration_ms: 0 }),
+    ],
+  );
+
+  it("prints the label the header strip prints, so the two cannot disagree", () => {
+    const { stages } = stageTiming(rows, 150);
+    for (const stage of stages) {
+      const row = rows.find((r) => r.key === stage.key);
+      expect(stage.label).toBe(formatStageDuration(row?.duration_ms ?? 0));
+    }
+  });
+
+  it("leaves out a stage that declined and took no time", () => {
+    expect(stageTiming(rows, 150).stages.map((s) => s.key)).toEqual(["triage", "analysis"]);
+  });
+
+  it("measures each bar against the run's elapsed time and sums the stages", () => {
+    const { stages, stagesMs } = stageTiming(rows, 150);
+    expect(stagesMs).toBe(120_000);
+    expect(stages.map((s) => s.share)).toEqual([20, 60]);
+  });
+
+  it("falls back to the stages' own sum when the job carries no elapsed time", () => {
+    expect(stageTiming(rows, null).stages.map((s) => s.share)).toEqual([25, 75]);
+  });
+
+  it("has nothing to draw for a run whose stages were never timed", () => {
+    expect(stageTiming(stageTimeline([], null), 150).stages).toEqual([]);
   });
 });

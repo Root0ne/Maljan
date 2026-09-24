@@ -221,7 +221,10 @@ class TestADebateWithNothingUpstreamThatRan:
 
     def test_it_hands_over_rather_than_looping(self) -> None:
         _, final = _run(self._team())
-        assert final["is_consensus"] is True
+        # Nothing ran, so no agreement was measured; the router hands over on
+        # that rather than on a consensus nobody reached.
+        assert final["consensus_applicable"] is False
+        assert final["is_consensus"] is None
         assert final["final_decision"] is not None
 
 

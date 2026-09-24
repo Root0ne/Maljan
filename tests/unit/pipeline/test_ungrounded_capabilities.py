@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from maljan.pipeline.validation import (
     UNGROUNDED_CAPABILITY_CODE,
     CapabilityGrounding,
@@ -83,13 +85,21 @@ class TestTheRunThatProducedIt:
         grounding = CapabilityGrounding.from_report(_report(techniques=("T1055.012",)))
         assert ungrounded_capabilities("It performs process injection.", grounding) == []
 
-    def test_a_typed_network_block_grounds_the_channel(self) -> None:
-        from maljan.reporting.models import NetworkIOCs
+    def test_an_observed_network_block_grounds_the_channel(self) -> None:
+        """A block something other than the string sweep recorded a row of;
+        an empty block, or one of swept rows only, grounds nothing."""
+        from maljan.reporting.models import NetworkDomain, NetworkIOCs
 
+        observed = NetworkIOCs(domains=[NetworkDomain(fqdn="gate9.example.org", source="sandbox")])
         grounding = CapabilityGrounding.from_report(
-            _report(techniques=("T1027",), network=NetworkIOCs())
+            _report(techniques=("T1027",), network=observed)
         )
         assert ungrounded_capabilities("It has a C2 channel.", grounding) == []
+
+        empty = CapabilityGrounding.from_report(
+            _report(techniques=("T1027",), network=NetworkIOCs())
+        )
+        assert ungrounded_capabilities("It has a C2 channel.", empty)
 
     def test_an_analyst_who_said_it_grounds_it(self) -> None:
         """A report is allowed to repeat what its own evidence says, mapped or not."""
@@ -215,6 +225,100 @@ class TestTheKnownLimitsOfTheWindow:
         assert {v.path for v in ungrounded_capabilities(text, self._thin())} == {"exfiltration"}
 
 
+class TestWhatANegationReaches:
+    """A negation governs the term it precedes in its own clause, and nothing past it."""
+
+    def _thin(self) -> CapabilityGrounding:
+        return CapabilityGrounding.from_report(_report(techniques=("T1082",)))
+
+    def _paths(self, text: str) -> set[str]:
+        return {v.path for v in ungrounded_capabilities(text, self._thin())}
+
+    def test_does_not_perform_is_a_negation(self) -> None:
+        assert self._paths("The sample does not perform lateral movement.") == set()
+
+    def test_the_term_a_purpose_names_is_negated(self) -> None:
+        assert self._paths("Isolate any host running it to prevent lateral movement.") == set()
+
+    def test_the_term_as_the_subject_of_is_absent_is_negated(self) -> None:
+        assert self._paths("Lateral movement is absent from the recorded evidence.") == set()
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "There is no evidence that the sample exfiltrates data.",
+            "We found no network activity such as exfiltration.",
+            "No evidence of malicious command and control infrastructure, such as C2 "
+            "callbacks or exfiltration endpoints, was found in the static analysis.",
+            # The term ends the subject of "is absent": the sentence claims
+            # nothing, whatever it leaves open.
+            "Behavioural confirmation of lateral movement is absent from the evidence.",
+        ],
+    )
+    def test_a_statement_of_absence_is_not_flagged(self, text: str) -> None:
+        assert self._paths(text) == set()
+
+    @pytest.mark.parametrize(
+        ("text", "path"),
+        [
+            (
+                "It deletes shadow copies to prevent recovery and encrypts every document.",
+                "encryption",
+            ),
+            (
+                "It compresses the data to avoid detection and exfiltrates it over HTTPS.",
+                "exfiltration",
+            ),
+            (
+                "It disables the firewall to block defenders, then performs lateral movement.",
+                "lateral_movement",
+            ),
+            (
+                "It uses process hollowing to avoid detection, injecting into explorer.exe.",
+                "process_injection",
+            ),
+            (
+                "No indication of a debugger check was found, as the sample itself harvests "
+                "stored credentials from browsers.",
+                "credential_theft",
+            ),
+            (
+                "There are no signs of packing or anti-analysis code in this binary, which "
+                "exfiltrates the collected files over FTP.",
+                "exfiltration",
+            ),
+            ("Persistence is missing a cleanup routine and uses a scheduled task.", "persistence"),
+            (
+                "No evidence of packing, such as UPX, yet the sample exfiltrates data over FTP.",
+                "exfiltration",
+            ),
+            (
+                "No evidence of packing was found, such as UPX, although the sample "
+                "exfiltrates data.",
+                "exfiltration",
+            ),
+            (
+                "No evidence of sandbox checks, such as VM artefacts, so the sample freely "
+                "exfiltrates files.",
+                "exfiltration",
+            ),
+            (
+                "There is no evidence of packing, such as UPX sections, and credentials are "
+                "stolen from browsers.",
+                "credential_theft",
+            ),
+            (
+                "Without any sign of user interaction, such as clicks, the sample exfiltrates "
+                "files.",
+                "exfiltration",
+            ),
+            ("It exfiltrates data such as credentials and cookies.", "exfiltration"),
+        ],
+    )
+    def test_a_claim_past_the_negation_is_still_flagged(self, text: str, path: str) -> None:
+        assert path in self._paths(text)
+
+
 class TestWhatTheFeedbackSays:
     def test_it_names_the_term_and_what_the_run_has(self) -> None:
         grounding = CapabilityGrounding.from_report(
@@ -246,11 +350,11 @@ class TestTheGuardIsNarrow:
 
 
 class TestTheTwoProducersReadTheirOwnAnswers:
-    def test_the_narrative_payload_is_read_field_by_field(self) -> None:
+    def test_the_narrative_payload_is_read_field_by_field_key_findings_included(self) -> None:
         grounding = CapabilityGrounding.from_report(_report(techniques=("T1027",)))
         payload = {
             "executive_summary": "A packed dropper with obfuscated strings.",
-            "capabilities_narrative": ["It exfiltrates browser credentials."],
+            "key_findings": [{"text": "It exfiltrates browser credentials.", "evidence_ids": []}],
             "defensive_recommendations": [],
         }
 
@@ -286,7 +390,7 @@ class TestTheSummaryIsKeptAndTheTermsRecorded:
         return json.dumps(
             {
                 "executive_summary": summary,
-                "capabilities_narrative": ["one", "two", "three"],
+                "key_findings": [{"text": "one"}, {"text": "two"}, {"text": "three"}],
                 "defensive_recommendations": [
                     {
                         "category": "edr_hunting",

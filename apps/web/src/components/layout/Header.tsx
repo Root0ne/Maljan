@@ -29,7 +29,7 @@ export default function Header() {
   }, []);
 
   return (
-    <header className="h-12 flex items-center justify-between px-4 border-b border-border bg-bg-surface">
+    <header className="h-12 flex items-center justify-between px-4 border-b border-border bg-bg-surface print:hidden">
       {/* Search */}
       <div className="flex items-center flex-1 max-w-2xl">
         <div className="relative w-full">

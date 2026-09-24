@@ -1,12 +1,14 @@
-"""Report endpoints — detail, STIX export, MITRE export, negotiation timeline.
+"""Report endpoints — detail, run diff, STIX export, MITRE export, negotiation timeline.
 
 Uses ReportService for business logic separation.
 """
 
+import asyncio
 import base64
+import json
 import secrets
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import HTMLResponse, PlainTextResponse
@@ -96,6 +98,36 @@ async def _detail(svc: ReportService, report: Any) -> ReportDetailResponse:
     return detail
 
 
+# Declared before ``/{report_id}``: a path parameter typed as a UUID would
+# otherwise claim ``/diff`` and answer 422.
+@router.get("/diff")
+async def diff_reports(
+    a: uuid.UUID = Query(..., description="The run compared from."),
+    b: uuid.UUID = Query(..., description="The run compared to."),
+    by: Literal["report", "job"] = Query(
+        "report",
+        description="Whether `a` and `b` are report ids or job ids.",
+    ),
+    user: User = Depends(get_current_user),
+    svc: ReportService = Depends(_get_service),
+) -> Response:
+    """What changed between two stored analyses, section by section.
+
+    Read only from the two stored records: it states what each run's record
+    says and never judges, merges or writes into either. Each section names
+    the key its rows are paired by; a row the record does not key stably is
+    listed as present in one run rather than paired by guess. Both runs must
+    be readable by the caller; otherwise 404, exactly as a single report read.
+    """
+    diff = await svc.diff_reports(a, b, user, by=by)
+    if diff is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+    # Encoded on a worker thread like the diff itself: the answer lists every
+    # row of both records, and walking it on the loop would stall the worker.
+    body = await asyncio.to_thread(json.dumps, diff, ensure_ascii=False)
+    return Response(content=body.encode("utf-8"), media_type="application/json")
+
+
 @router.get("/{report_id}", response_model=ReportDetailResponse)
 async def get_report(
     report_id: uuid.UUID,
@@ -127,11 +159,36 @@ async def get_report_by_job_id(
 @router.get("/{report_id}/stix")
 async def get_stix_bundle(
     report_id: uuid.UUID,
+    source: Literal["export", "judge"] = "export",
     user: User = Depends(get_current_user),
     svc: ReportService = Depends(_get_service),
 ) -> dict:
-    """Get the STIX 2.1 threat intelligence bundle."""
-    bundle = await svc.get_stix_bundle(report_id, user)
+    """Get the STIX 2.1 threat intelligence bundle.
+
+    ``source=judge`` serves the judge's own bundle with its label map instead
+    of the export: the record the export's decline rows point at. A report
+    with no such record — stored before it was kept, or from a run whose judge
+    produced no bundle — answers 200 with ``"kept": false`` and the reason: the
+    report exists and says it has none, which is not the 404 of a report that
+    does not.
+    """
+    if source == "judge":
+        report = await svc.get_report(report_id, user)
+        if report is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
+        if report.judge_stix_bundle is None:
+            return {
+                "kept": False,
+                "reason": (
+                    "No judge bundle is on record for this report: either it was stored "
+                    "before the judge's own bundle was kept beside the export, or the "
+                    "judge produced none."
+                ),
+                "bundle": None,
+                "labels": {},
+            }
+        return {"kept": True, **report.judge_stix_bundle}
+    bundle = await svc.get_stix_bundle(report_id, user, source=source)
     if bundle is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -296,7 +353,11 @@ async def get_full_malware_report_iocs(
     report_id: uuid.UUID,
     kind: str | None = Query(
         default=None,
-        description="Filter to one of: hash, domain, ip, url, user_agent, ja3, ja3s",
+        description=(
+            "Filter to one of: hash, domain, ip, url, user_agent, ja3, ja3s; and, for a value "
+            "the STIX export carries from the judge's objects, email, path, registry, mutex, "
+            "command"
+        ),
     ),
     include: str = Query(
         default="published",

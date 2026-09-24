@@ -52,6 +52,46 @@ _BENIGN_DOMAINS: frozenset[str] = frozenset(
     }
 )
 
+
+# Public resolvers a sample asks to test its connectivity: an address on
+# this list is benign infrastructure the way a listed name is.
+_PUBLIC_RESOLVERS = frozenset(
+    {
+        "8.8.8.8",
+        "8.8.4.4",
+        "1.1.1.1",
+        "1.0.0.1",
+        "9.9.9.9",
+        "149.112.112.112",
+        "208.67.222.222",
+        "208.67.220.220",
+    }
+)
+
+# Second-level labels a country code registers names under: ``example.co.uk``
+# is the registered name, not ``co.uk``.
+_SECOND_LEVEL_LABELS = frozenset({"co", "com", "net", "org", "ac", "gov", "edu", "or", "ne"})
+
+
+def is_well_known_benign_host(host: str) -> bool:
+    """Whether ``host`` sits under a registered name of the benign-infrastructure list.
+
+    The registered name is the last two labels, or the last three under a
+    country code's second level (``*.co.uk``). An address is benign when it
+    is a public resolver's.
+    """
+    text = str(host or "").strip().lower().rstrip(".")
+    if text in _PUBLIC_RESOLVERS:
+        return True
+    parts = text.split(".")
+    if len(parts) < 2:
+        return False
+    registered = ".".join(parts[-2:])
+    if len(parts) >= 3 and len(parts[-1]) == 2 and parts[-2] in _SECOND_LEVEL_LABELS:
+        registered = ".".join(parts[-3:])
+    return registered in _BENIGN_DOMAINS
+
+
 # RFC 6761/6762 reserved suffixes that must never be emitted as network IOCs.
 _RESERVED_DOMAIN_SUFFIXES: tuple[str, ...] = (
     ".local",

@@ -34,8 +34,40 @@ class TestApiCapability:
 
         by_api = {row["api"]: row for row in result["capabilities"]}
         assert by_api["WriteProcessMemory"]["category"] == "process_injection"
-        assert by_api["WriteProcessMemory"]["catalog_flags"] == ["suspicious"]
         assert by_api["CreateRemoteThread"]["behaviours"] == ["process_injection"]
+
+    def test_every_rate_in_the_answer_says_which_way_it_was_measured(self) -> None:
+        """A number called ``benign_percent`` beside a technique invites one
+        reading the measurement does not support — that the sample is that
+        likely to be benign. Every key says what was counted and what it was
+        counted over, and the corpus is named in the answer.
+        """
+        result = knowledge.api_capability(["GetDIBits", "PrintWindow"])
+        (cited,) = result["capabilities"][0]["techniques"]
+        assert set(cited["measured"]) == {
+            "seen_on_benign_percent",
+            "seen_on_benign_files",
+            "held_out_malware_profiles",
+        }
+        assert "Windows binaries" in result["corpora"]["benign"]
+        assert "profiles" in result["corpora"]["held_out_malware"]
+        # Nothing anywhere in the answer is a bare share of "benign".
+        blob = json.dumps(result)
+        assert '"benign_percent"' not in blob
+        assert '"labelled_percent"' not in blob
+
+    def test_the_category_a_reader_would_assume_is_a_label_carries_its_rate_instead(self) -> None:
+        """``process_injection`` is met by ``VirtualProtect``, which every
+        just-in-time compiler and every trampoline imports. Measured, the
+        category appeared on two benign Windows binaries in three; what the
+        answer states is that rate, and the label is gone."""
+        result = knowledge.api_capability(["WriteProcessMemory"])
+        (row,) = result["capabilities"]
+        assert row["catalog_flags"] == []
+        rate = result["behaviour_rates"]["process_injection"]
+        assert rate["seen_on_benign_percent"] > 50
+        assert rate["seen_on_benign_files"] > 0
+        assert "Windows binaries" in result["corpora"]["benign"]
 
     def test_an_api_the_catalog_does_not_know_comes_back_empty_not_guessed_at(self) -> None:
         result = knowledge.api_capability(["ZzNotARealWin32Api"])
@@ -48,9 +80,10 @@ class TestApiCapability:
     def test_the_catalog_label_names_its_source_rather_than_reading_as_a_verdict(self) -> None:
         """A bare ``suspicious: true`` would be this tool passing judgement.
         ``catalog_flags`` says whose judgement it is."""
-        row = knowledge.api_capability(["WriteProcessMemory"])["capabilities"][0]
-        assert "suspicious" not in row
-        assert row["catalog_flags"] == ["suspicious"]
+        rows = knowledge.api_capability(["SetWindowsHookExW", "GetAsyncKeyState"])["capabilities"]
+        by_api = {row["api"]: row for row in rows}
+        assert "suspicious" not in by_api["GetAsyncKeyState"]
+        assert by_api["GetAsyncKeyState"]["catalog_flags"] == ["suspicious"]
 
     def test_a_missing_catalog_is_named_rather_than_silently_empty(self) -> None:
         result = knowledge.api_capability(["WriteProcessMemory"], behaviour_map="data/nope.json")
@@ -60,9 +93,10 @@ class TestApiCapability:
         assert knowledge.api_capability([]) == {"capabilities": [], "platform": "windows"}
 
     def test_a_rule_fires_over_the_whole_set_and_each_api_it_matched_cites_it(self) -> None:
-        """Every rule in the vendored map needs two or more APIs. Matched one
-        name at a time no rule can fire, which is how the pack's entry came to
-        list no technique on any sample; the set is matched once."""
+        """Almost every rule in the vendored map needs two or more APIs, so
+        matched one name at a time nearly none can fire — which is how the
+        pack's entry came to list no technique on any sample. The set is
+        matched once."""
         result = knowledge.api_capability(
             ["VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread", "RegQueryValueExA"]
         )
@@ -78,6 +112,26 @@ class TestApiCapability:
     def test_one_api_alone_clears_no_rule(self) -> None:
         row = knowledge.api_capability(["WriteProcessMemory"])["capabilities"][0]
         assert row["techniques"] == []
+
+    def test_the_one_name_that_is_the_act_itself_needs_no_second_name(self) -> None:
+        """An echo request is ICMP by construction, so nothing beside it makes
+        it more so. The ten socket names this rule shipped with are gone: they
+        labelled one benign binary in twenty and more than a third of
+        everything that touches a network, and the protocol is an argument to
+        ``socket`` rather than a name in the import table.
+
+        A one-name rule still answers as a reference association: it says what
+        the combination is, who else sends the same request, and the share of
+        ordinary Windows software that does.
+        """
+        row = knowledge.api_capability(["IcmpSendEcho"])["capabilities"][0]
+        (cited,) = row["techniques"]
+        assert cited["technique_id"] == "T1095"
+        assert cited["min_apis"] == 1
+        assert cited["rule"] == "sending an ICMP echo request"
+        assert "ping" in cited["ordinary_use"]
+        assert cited["measured"]["seen_on_benign_files"] == 2
+        assert row["catalog_flags"] == []
 
 
 # The GDI and message-pump calls a Win32 program makes to put a window on the
@@ -130,12 +184,21 @@ class TestDrawingAWindowIsNotKeylogging:
         assert row["catalog_flags"] == ["suspicious"]
 
     def test_the_association_survives_the_relabelling(self) -> None:
-        """T1113 is what these calls are for; it is shown, never asserted."""
-        rows = knowledge.api_capability(["BitBlt", "CreateCompatibleDC", "GetDC", "GetDIBits"])[
-            "capabilities"
-        ]
+        """T1113 is what these calls are for; it is shown, never asserted.
+
+        The rule keys on the readback rather than on the blit: which device
+        context ``BitBlt`` copies from is an argument, and an import table does
+        not carry arguments. Pulling the pixels into the program's own memory,
+        taking another window's device context, or asking a window to render
+        itself is the capture.
+        """
+        rows = knowledge.api_capability(
+            ["BitBlt", "CreateCompatibleDC", "GetDC", "GetDIBits", "PrintWindow"]
+        )["capabilities"]
         cited = {t["technique_id"] for row in rows for t in row["techniques"]}
         assert "T1113" in cited
+        drawing_only = knowledge.api_capability(["BitBlt", "CreateCompatibleDC", "GetDC"])
+        assert [t for row in drawing_only["capabilities"] for t in row["techniques"]] == []
 
     def test_a_benign_gui_import_set_raises_no_flag_from_these_groups(self) -> None:
         rows = knowledge.api_capability(_A_GUI_PROGRAM_IMPORTS)["capabilities"]
@@ -143,7 +206,7 @@ class TestDrawingAWindowIsNotKeylogging:
         assert flagged == {}
 
     def test_an_api_with_no_corroboration_list_does_not_carry_the_key(self) -> None:
-        row = knowledge.api_capability(["WriteProcessMemory"])["capabilities"][0]
+        row = knowledge.api_capability(["RegQueryValueExA"])["capabilities"][0]
         assert "corroborated_by" not in row
 
 
@@ -540,20 +603,17 @@ class TestTheLinuxVocabulary:
     def test_a_windows_rule_cannot_fire_on_an_elf_s_symbols(self) -> None:
         """``socket``, ``connect``, ``send`` and ``recv`` are in both blocks.
 
-        The Windows half pins what that block does today rather than endorsing
-        it: the same four names clear its Non-Application Layer Protocol rule,
-        which the Linux block deliberately does not have. Raising that bar is
-        its own change, against Windows evidence this branch does not carry.
+        Neither block draws a technique from them any more. The Linux one never
+        did — the Windows one did, and measured, those four names labelled one
+        benign binary in twenty and more than a third of everything that
+        touches a network. A raw socket and a TCP socket are the same import;
+        the protocol is an argument to ``socket``.
         """
         names = ["socket", "connect", "send", "recv"]
-        linux = knowledge.api_capability(names, platform="linux")
-        assert [row["category"] for row in linux["capabilities"]] == ["network"] * 4
-        assert [hit for row in linux["capabilities"] for hit in row["techniques"]] == []
-        windows = knowledge.api_capability(names, platform="windows")
-        cleared = {
-            hit["technique_id"] for row in windows["capabilities"] for hit in row["techniques"]
-        }
-        assert "T1095" in cleared
+        for platform in ("linux", "windows"):
+            answer = knowledge.api_capability(names, platform=platform)
+            assert [row["category"] for row in answer["capabilities"]] == ["network"] * 4
+            assert [hit for row in answer["capabilities"] for hit in row["techniques"]] == []
 
     def test_the_catalogue_says_nothing_about_ordinary_linux_tools(self) -> None:
         """Real import lists, not a list picked to pass. Every one of these is
@@ -721,13 +781,22 @@ class TestTheLinuxVocabulary:
         labelled = {r["api"]: r["catalog_flags"] for r in beside["capabilities"]}
         assert labelled["memfd_create"] == ["suspicious"]
 
-    def test_the_windows_block_is_labelled_by_its_tier_as_before(self) -> None:
-        """The gate is data the Windows block does not carry, so nothing there
-        waits for a second name."""
-        result = knowledge.api_capability(["WriteProcessMemory"], platform="windows")
-        (row,) = result["capabilities"]
-        assert row["catalog_flags"] == ["suspicious"]
-        assert "flagged_with" not in row
+    def test_the_windows_block_waits_for_the_same_kind_of_second_name(self) -> None:
+        """One labelled Windows category, and it waits too.
+
+        Asking about the state of one key is what a game does every frame; the
+        capture is the channel that delivers keystrokes the program was never
+        sent, and the row names it while it is absent.
+        """
+        alone = knowledge.api_capability(["GetKeyState"], platform="windows")
+        (row,) = alone["capabilities"]
+        assert row["category"] == "keylogging"
+        assert row["catalog_flags"] == []
+        assert "SetWindowsHookExW" in row["flagged_with"]
+
+        beside = knowledge.api_capability(["GetKeyState", "SetWindowsHookExW"], platform="windows")
+        labelled = {r["api"]: r["catalog_flags"] for r in beside["capabilities"]}
+        assert labelled["GetKeyState"] == ["suspicious"]
 
     def test_a_platform_the_catalogue_has_no_block_for_says_so(self) -> None:
         result = knowledge.api_capability(["open"], platform="plan9")

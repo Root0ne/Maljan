@@ -131,6 +131,8 @@ async def complete_one_turn(
     api_key: str = "",
     disable_thinking: bool = False,
     compat: str = "auto",
+    num_ctx: int | None = None,
+    keep_alive: str | None = None,
 ) -> tuple[bool | None, str]:
     """Ask ``model`` at ``endpoint`` for one short answer.
 
@@ -150,7 +152,11 @@ async def complete_one_turn(
 
     ``disable_thinking`` and ``compat`` are the two OpenAI-compatible settings
     that decide the request body's shape, carried in so that the turn asked
-    here is the turn an agent would ask. See ``_completion_request``.
+    here is the turn an agent would ask. ``num_ctx`` and ``keep_alive`` are
+    Ollama's: the server loads a model at the context size the request names
+    and keeps it for the time the request names, so a probe asked without them
+    leaves the model loaded at the server's own default and the job's first
+    call pays a full reload. See ``_completion_request``.
 
     Never raises: a probe answers with what happened, including when what
     happened is that nothing did.
@@ -165,6 +171,8 @@ async def complete_one_turn(
         api_key,
         disable_thinking=disable_thinking,
         compat=compat,
+        num_ctx=num_ctx,
+        keep_alive=keep_alive,
     )
     if url is None:
         return False, f"unknown provider: {provider!r}"
@@ -319,8 +327,15 @@ def _completion_request(
     *,
     disable_thinking: bool = False,
     compat: str = "auto",
+    num_ctx: int | None = None,
+    keep_alive: str | None = None,
 ) -> tuple[str | None, dict[str, str], dict[str, Any]]:
-    """The one-turn request each provider takes, as ``(url, headers, body)``."""
+    """The one-turn request each provider takes, as ``(url, headers, body)``.
+
+    ``num_ctx`` and ``keep_alive`` travel to Ollama only, the two fields the
+    agents' provider sends with every call that decide the instance Ollama
+    keeps loaded. The other providers take no such field.
+    """
     base = str(endpoint or "").rstrip("/")
     if provider == "openai":
         return (
@@ -345,6 +360,12 @@ def _completion_request(
         # models that never had the problem.
         if disable_thinking:
             body["think"] = False
+        # The job's own window and keep-alive, so the model this loads is the
+        # instance the job's first call finds rather than one it has to reload.
+        if num_ctx:
+            body["options"]["num_ctx"] = int(num_ctx)
+        if keep_alive:
+            body["keep_alive"] = str(keep_alive)
         return (
             f"{base or 'http://localhost:11434'}/api/generate",
             {},
@@ -467,11 +488,17 @@ def _agent_models(v: dict[str, Any], provider: str) -> dict[str, tuple[str, str 
             data = entry.model_dump(mode="json")
         else:
             continue
-        entry_provider = str(data.get("provider") or "") or global_provider
-        model = str(data.get("model") or "")
-        base_url = str(data.get("base_url") or "").strip() or None
-        if model and entry_provider == provider:
-            out[str(name)] = (model, base_url)
+        # The models an entry falls back to are asked exactly as its first one
+        # is: a fallback is a model the run may call, and the gate refuses a
+        # job whose fallback no probe has reached.
+        rows = [data, *[row for row in (data.get("fallbacks") or []) if isinstance(row, dict)]]
+        for position, row in enumerate(rows):
+            entry_provider = str(row.get("provider") or "") or global_provider
+            model = str(row.get("model") or "")
+            base_url = str(row.get("base_url") or "").strip() or None
+            if model and entry_provider == provider:
+                label = str(name) if position == 0 else f"{name} fallback {position}"
+                out[label] = (model, base_url)
     return out
 
 
@@ -518,6 +545,8 @@ async def _complete_each_pair(
     deadline: float,
     disable_thinking: bool = False,
     compat: str = "auto",
+    num_ctx: int | None = None,
+    keep_alive: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[str], list[str]]:
     """One completion per pair in turn; what was reached, what failed, what was not tried.
 
@@ -550,6 +579,8 @@ async def _complete_each_pair(
             api_key=api_key,
             disable_thinking=disable_thinking,
             compat=compat,
+            num_ctx=num_ctx,
+            keep_alive=keep_alive,
         )
         if answered is None:
             broken.append(f"{label}: {said}")
@@ -590,6 +621,8 @@ async def _probe_llm_ollama(v: dict[str, Any]) -> ProbeResult:
         "",
         deadline=deadline,
         disable_thinking=bool(v.get("ollama_disable_thinking")),
+        num_ctx=int(v.get("ollama_num_ctx") or 0) or None,
+        keep_alive=str(v.get("ollama_keep_alive") or "") or None,
     )
     return _completed(t0, reached, broken, untried, f"{len(models)} models available", models)
 
@@ -661,6 +694,55 @@ async def probe_llm(v: dict[str, Any]) -> ProbeResult:
     if probe is None:
         return ProbeResult(False, 0, f"unknown provider: {provider!r}")
     return await probe(v)
+
+
+async def context_window_facts(settings: Any) -> dict[str, Any]:
+    """The window these settings' models serve, and what it gives one answer.
+
+    Free of charge and asked of the operator's own endpoints: the same metadata
+    requests the worker makes (``maljan.llm.context_window``), never a
+    generation call. An endpoint that says nothing falls to the vendored table
+    and then to the stated fallback, so this always answers and never raises.
+
+    ``cap`` is what one tool answer would be allowed on an empty conversation,
+    which is the largest it can be; a conversation with something in it gets
+    less, and the run summary reports the range that actually applied. Where
+    the window is unknown nothing is derived from it and ``cap`` is the
+    documented constant, with ``remedy`` naming what would change that.
+    ``setting`` is what ``core.preprocessing.max_tool_output_chars`` holds, so
+    the console can say whether the window decides at all.
+    """
+    from maljan.agents.composition import analyst_keys
+    from maljan.llm.context_window import (
+        ANSWER_SHARE,
+        UNKNOWN_WINDOW_REMEDY,
+        ContextBudget,
+        awindow_for_settings,
+        generation_reserve,
+    )
+
+    configured = int(getattr(settings.preprocessing, "max_tool_output_chars", 0) or 0)
+    try:
+        agents = [*analyst_keys(settings), "judge"]
+        window = await awindow_for_settings(settings, agents, probe=configured <= 0)
+    except Exception as exc:  # noqa: BLE001 — a window is never worth a failed page
+        logger.warning("the context window could not be learned: %s", type(exc).__name__)
+        from maljan.llm.context_window import unknown_window
+
+        window = unknown_window(f"the probe could not be made ({type(exc).__name__})")
+    budget = ContextBudget(window, reply_tokens=generation_reserve(settings))
+    return {
+        "tokens": window.tokens,
+        "source": window.source,
+        "detail": window.detail,
+        "chars_per_token": budget.chars_per_token,
+        "reply_tokens": budget.reply_tokens,
+        "answer_share": ANSWER_SHARE,
+        "cap": configured if configured > 0 else budget.cap_without_recording(),
+        "derived": configured <= 0,
+        "setting": configured,
+        "remedy": "" if budget.derives or configured > 0 else UNKNOWN_WINDOW_REMEDY,
+    }
 
 
 def _ghidra_tool_names(schema: Any) -> list[str]:
@@ -1106,22 +1188,31 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
         endpoint = endpoint_for(
             settings, llm_provider, getattr(agent_llm, "base_url", None) if agent_llm else None
         )
-        answered, said = await complete_one_turn(
-            llm_provider,
-            endpoint=endpoint,
-            model=str(llm_model or ""),
-            api_key=_provider_key(settings, llm_provider),
-            # An agent's own endpoint gets the body its own run would carry.
-            # Each provider is asked about its own thinking switch — the two
-            # are spelled differently and read by different code — and
-            # ``compat`` belongs to the OpenAI block alone.
-            disable_thinking=(
-                bool(settings.llm.ollama.disable_thinking)
-                if llm_provider == "ollama"
-                else bool(settings.llm.openai.disable_thinking)
-            ),
-            compat=str(settings.llm.openai.compat or "auto"),
-        )
+
+        async def _ask(provider: str, where: str, model: str) -> tuple[bool | None, str]:
+            return await complete_one_turn(
+                provider,
+                endpoint=where,
+                model=model,
+                api_key=_provider_key(settings, provider),
+                # An agent's own endpoint gets the body its own run would carry.
+                # Each provider is asked about its own thinking switch — the two
+                # are spelled differently and read by different code — and
+                # ``compat`` belongs to the OpenAI block alone.
+                disable_thinking=(
+                    bool(settings.llm.ollama.disable_thinking)
+                    if provider == "ollama"
+                    else bool(settings.llm.openai.disable_thinking)
+                ),
+                compat=str(settings.llm.openai.compat or "auto"),
+                # Ollama loads a model at the window and for the keep-alive the
+                # request names; asked the way the job asks, the probe leaves
+                # loaded the instance the job's first call will find.
+                num_ctx=int(settings.llm.ollama.num_ctx) if provider == "ollama" else None,
+                keep_alive=str(settings.llm.ollama.keep_alive) if provider == "ollama" else None,
+            )
+
+        answered, said = await _ask(llm_provider, endpoint, str(llm_model or ""))
         detail = f"{detail}; {said}"
         # A call that ran out of time proves nothing either way, so the probe
         # reports it as a failure the operator can act on and files no row —
@@ -1139,6 +1230,25 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
                 }
             ]
         )
+        # Each model the agent falls back to is asked the same one turn, one
+        # after another, and filed under its own pair: the gate refuses a job
+        # whose fallback no probe has reached, and this is the probe that
+        # reaches it. The agent passes only when every model on its list did.
+        for position, choice in enumerate(getattr(agent_llm, "fallbacks", None) or [], 1):
+            where = endpoint_for(settings, choice.provider, choice.base_url)
+            reached, told = await _ask(choice.provider, where, str(choice.model))
+            detail = f"{detail}; fallback {position} {choice.provider}/{choice.model}: {told}"
+            if reached is not None:
+                completions.append(
+                    {
+                        "endpoint": where,
+                        "model": str(choice.model),
+                        "provider": choice.provider,
+                        "ok": bool(reached),
+                        "detail": told,
+                    }
+                )
+            answered = bool(answered) and bool(reached)
         return ProbeResult(
             bool(answered),
             _ms(t0),
@@ -1445,6 +1555,9 @@ _INPUTS: dict[str, dict[str, str]] = {
         "core.llm.ollama.expert_model": "ollama_expert_model",
         "core.llm.ollama.judge_model": "ollama_judge_model",
         "core.llm.ollama.disable_thinking": "ollama_disable_thinking",
+        # The two leaves that decide which instance Ollama keeps loaded.
+        "core.llm.ollama.num_ctx": "ollama_num_ctx",
+        "core.llm.ollama.keep_alive": "ollama_keep_alive",
         "core.llm.gemini.api_key": "gemini_api_key",
         "core.llm.gemini.expert_model": "gemini_expert_model",
         "core.llm.gemini.judge_model": "gemini_judge_model",
@@ -1563,4 +1676,8 @@ async def run_probe(name: str, values: dict[str, Any], stored: dict[str, Any]) -
             resolved[short] = _unwrap(API_DEFAULTS[path])
         else:
             resolved[short] = _unwrap(getattr(api_settings, path))
+    # Deliberately no context-window block on the probe result. The window is
+    # a fact about the endpoint rather than about whether a model answered, the
+    # settings page reads it from its own route, and computing it here spent up
+    # to three metadata requests per Test press on something no surface drew.
     return await in_probe_loop(lambda: probe(resolved))

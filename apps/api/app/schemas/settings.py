@@ -120,6 +120,32 @@ class ProbeResponse(BaseModel):
     details: dict[str, Any] | None = None
 
 
+class ContextWindowResponse(BaseModel):
+    """The window the configured models serve, and what it buys one answer.
+
+    ``source`` is one of four words an operator can act on: ``declared`` (the
+    settings name it), ``probed`` (the server reported it), ``table`` (the
+    vendored figure for this model family) and ``fallback`` (nothing answered).
+    ``detail`` says the same thing in a sentence. ``cap`` is what one tool
+    answer may take on an empty conversation, which is the most it can be;
+    ``derived`` is false when the operator set the cap themselves, and ``cap``
+    is then their number and the window decides nothing. Where the window is
+    ``fallback`` nothing is derived from it either — ``cap`` is the documented
+    constant and ``remedy`` names the setting that would change that.
+    """
+
+    tokens: int
+    source: str
+    detail: str
+    chars_per_token: int
+    reply_tokens: int
+    answer_share: float
+    cap: int
+    derived: bool
+    setting: int
+    remedy: str = ""
+
+
 class VirustotalRegisterResponse(BaseModel):
     """The VirusTotal server as it stands after a registration.
 
@@ -156,6 +182,60 @@ class ConditionValidateResponse(BaseModel):
 
     valid: bool
     problems: list[str]
+
+
+class TeamLintRequest(BaseModel):
+    """The teams as the editor has staged them. A field left out is read from the store."""
+
+    profiles: dict[str, Any] | None = None
+    definitions: dict[str, Any] | None = None
+    profile: str | None = None
+
+
+class TeamFindingDTO(BaseModel):
+    """One lint finding. ``path`` is the dotted key a save refusal would use."""
+
+    severity: str
+    code: str
+    message: str
+    team: str | None = None
+    stage: str | None = None
+    field: str | None = None
+    agent: str | None = None
+    path: str
+
+
+class TeamNodeDTO(BaseModel):
+    key: str
+    label: str
+    kind: str
+    agents: list[str]
+    when: str
+    reads: str
+    mode: str
+    row: int
+    column: int
+
+
+class TeamEdgeDTO(BaseModel):
+    source: str
+    target: str
+    implicit: bool
+    legal: bool
+
+
+class TeamGraphDTO(BaseModel):
+    nodes: list[TeamNodeDTO]
+    edges: list[TeamEdgeDTO]
+    rows: int
+    columns: int
+
+
+class TeamLintResponse(BaseModel):
+    """Every finding, errors first, and each team laid out for the preview."""
+
+    findings: list[TeamFindingDTO]
+    graphs: dict[str, TeamGraphDTO]
 
 
 class ChannelPreview(BaseModel):

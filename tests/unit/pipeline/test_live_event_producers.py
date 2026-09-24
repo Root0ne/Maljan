@@ -227,6 +227,33 @@ class TestEveryViolationSaysWhatBecameOfIt:
             stage="analysis",
         )
 
+    def test_the_answer_the_caller_keeps_decides_what_is_published(self) -> None:
+        """A caller that keeps the first answer gets the first answer's findings back,
+        and the conversation says they survived rather than that the retry resolved them."""
+        sink = _Sink()
+        kept = Violation(code="attck.unknown_id", message="T9999 is not in the catalogue")
+        answers = iter(["first", "second"])
+
+        def validator(parsed: Any) -> list[Violation]:
+            return [kept] if parsed == "first" else []
+
+        parsed, left, retries = retry_with_feedback_sync(
+            lambda _turns: next(answers),
+            ["turn"],
+            [validator],
+            parse=lambda a: a,
+            sink=sink,  # type: ignore[arg-type]
+            agent="static",
+            stage="analysis",
+            keep=lambda first, _last: first,
+        )
+
+        assert (parsed, left, retries) == ("first", [kept], 1)
+        assert self._rows(sink) == [
+            ("attck.unknown_id", "retried"),
+            ("attck.unknown_id", "survived"),
+        ]
+
     def test_a_violation_that_survived_its_retry_is_published(self) -> None:
         sink = _Sink()
         kept = Violation(code="attck.unknown_id", message="T9999 is not in the catalogue")

@@ -15,7 +15,8 @@ only — no `.env` file is discovered or read. Construction never refuses;
 deployment does not have to be restarted once per missing variable.
 
 The full surface is documented in
-[`bootstrap.env.example`](../bootstrap.env.example). The table below is the
+[`bootstrap.env.example`](https://github.com/Root0ne/Maljan/blob/dev/bootstrap.env.example).
+The table below is the
 same contract in short form.
 
 | Variable | Required | Default | Notes |
@@ -130,6 +131,38 @@ treatment a global one does — the llama.cpp sampler keys and the structured
 output the local servers handle badly are decided from the endpoint the agent
 will actually call.
 
+An entry may also name the models the agent falls back to, in order, under
+`fallbacks` — each one a provider, a model and, for `openai` and `ollama`, a
+base URL of its own, written exactly like the entry's first model. A fallback
+with no temperature takes the entry's. The Agents page edits the list under
+the model override (add, remove, move up and down). The next model is asked
+**only when the one before failed as a provider**: a refused or dropped
+connection, a timeout, an HTTP 5xx, 408 or 429, a model the server does not
+have, a refused credential, or a refusal the provider reports as an error.
+Never on what a model said: an answer the validation loop rejects is sent back
+to the model that wrote it, and a parse or validation error a model's answer
+raises reaches the loop rather than the next model. A timeout is a provider
+failure because every model on a list but the last has its own turn deadline —
+`core.llm.fallback_turn_share` (0.5) of what is left, at that turn, of the
+budget the current loop runs under (never less than one second), so inside an
+ask it is a share of the ask's clock and a stall late in a loop is still
+replaced before the loop cancels it; a share of the loop because the loop is
+what would otherwise cancel a stalled model first. The reporter's list starts
+over before the narrative round, against its 600 s, and again before the
+composer sections, against `core.reporting.composer_per_section_timeout` —
+and every provider's client has a 1800 s request timeout. A 429 or 503 whose
+`Retry-After` (seconds or an HTTP date) asks for at most thirty seconds is waited out on the same model
+once before the list moves on. Once the list has moved, the model that answered
+stays for the rest of that loop (a stalled first model costs one deadline, not
+one per turn), and the next loop starts at the first model again.
+A model named twice in one list is refused on save. An entry without
+`fallbacks` is the single-model form every entry had before, unchanged.
+
+Which model answered is recorded on every turn — on the ledger entry of each
+call the turn asked for and per agent in `run_summary.models` — and the switch
+is recorded once, with the reason in words: in the run summary and as a
+`model_fallback` event the conversation draws whether or not deltas stream.
+
 ### Which dialect an OpenAI-compatible endpoint speaks
 
 `llm.openai.compat` says whether the endpoint behind `base_url` is llama.cpp or
@@ -242,6 +275,13 @@ setting and what it does. A measured 12B reasoning model failed the probe in
 55 s at the default and passed in 243 ms with the setting on; with
 `llm.require_probe` on, every job is refused in between. See the low-memory
 option in [getting-started.md](getting-started.md).
+Ollama's body also carries `options.num_ctx` and `keep_alive` from
+`llm.ollama.num_ctx` and `llm.ollama.keep_alive`, the two fields a run sends
+with every call that decide which instance Ollama keeps loaded. Ollama loads a
+model at the context size the request names and reloads it when a later
+request names another, so a probe asked at the server's default (4,096) left
+the model at that size and the job's first call paid a full reload out of its
+analyst's time budget.
 The completion gets ninety seconds of its own, because a local server reloads a
 model it had unloaded and a large one is not a ten-second load.
 
@@ -255,7 +295,10 @@ one endpoint apiece, named rather than addressed, so a per-agent entry there
 differs only in its model — and each is still asked, because a key may be
 refused for one model and not another. The same pair named twice is one call
 and one row. The judge model is listed and never called, so it is not filed.
-The `agent` probe files the one pair its agent would use.
+The `agent` probe files the pairs its agent would use: its first model, and
+every model it falls back to, one after another — the agent passes only when
+every model on its list answered. The `llm` probe asks the fallbacks served by
+the selected provider along with the per-agent entries.
 
 Where a call goes is worked out in one place (`maljan.core.model_assignments`)
 for the probe and for the gate alike, and folded there the way a URL folds —
@@ -280,7 +323,8 @@ host, so a base URL that carries credentials does not reach the screen or the
 stored row.
 
 **Where the gate stands.** Submitting a job reads that record for every model
-the run can reach — the agents its team's stages name, and every agent those
+the run can reach — fallbacks included, each named in the refusal as the model
+the agent *falls back to* — the agents its team's stages name, and every agent those
 can ask through `ask_<key>`, and so on — and refuses with 422 when one of them
 has no passing row, naming the agent, the model, the endpoint and the probe's
 last message. The endpoint appears there as its label — scheme and host — and
@@ -389,41 +433,90 @@ either way.
 
 The Linux block is narrower on purpose: there is no registry, and persistence,
 keylogging, screen capture and credential access have no unambiguous libc
-vocabulary to author from. Its tiers were measured rather than judged. A group
-whose bare presence would label more than one in a hundred of an ordinary
-Linux system's own binaries is an informational association carrying
-`corroborated_by` — the names that would give it weight — instead of a tier the
-catalogue calls suspicious; only `process_injection` is tiered, and it carries
-`flags_with`, so the label waits until a second name says the sample reaches
-into another process. A technique rule is kept only where the symbols are the
-technique's own mechanism, which left three; the rules that rested on
-privilege dropping, on ordinary sockets or on asking who the process runs as
-were removed because they fired on ordinary software.
+vocabulary to author from.
+
+**Both blocks are measured rather than judged, and both read alike.** A group
+whose bare presence would label ordinary software is an informational
+association carrying `corroborated_by` — the names that would give it weight —
+instead of a tier the catalogue calls suspicious. One group per platform keeps
+a label and each carries `flags_with`, so the label waits for the combination
+that makes the group mean something: `process_injection` on Linux waits for a
+name that reaches into another process, `keylogging` on Windows for the input
+hook, raw-input device or whole-keyboard read that is the capture rather than
+the key-state poll a game does every frame. A technique rule is kept only where
+its combination is the act the technique describes.
+
+**One bar, and one trigger for a second look.** The bar asks whether a rule
+carries information: one whose size-matched lift over a known-bad corpus is at
+or below 1.5 fires no more often on malware than on ordinary software, and it
+goes. The trigger is a rule above 4% of ordinary Windows software whose lift is
+under 3 — not a threshold that deletes it, because the measured rate is carried
+precisely so a common association can ship honestly and let the reader weigh it,
+but a sign that the rule should be argued on its own terms. Three were, and each
+went for a different reason: one was the sole row on no malware profile at all
+and so told a reader nothing another row did not; one was weak on its own
+numbers; one failed the test that decides whether a name belongs in a rule,
+applied to the whole rule, because the act its names describe is not the act the
+technique describes. A rule is deleted when one of those arguments carries, and
+not for its rate.
+
+**Every association carries the rate it was measured at**, under `measured`:
+`seen_on_benign_percent` is the share of a named benign corpus the association
+fired on, `seen_on_benign_files` the count behind that share, and — on Windows —
+`held_out_malware_profiles` how many profiles the combination was not chosen on
+that it fires on, stated as `0` where it fires on none, because an absent count
+and a count of zero read the same and mean opposite things. The rate reaches the
+model in the `api_capability` answer, the report's import-technique table and
+the console's cell, and a reader weighs it.
+
+Read those numbers in the one direction they were measured in: they say how
+often a *rule* fires on software that is not a sample, and none of them is a
+probability that a given sample is benign. There is no technique-level ground
+truth for either malware corpus, so what a malware number says is that a
+combination separates binaries already known to be bad from binaries already
+known to be good, never that a sample performs the technique; roughly three
+malware samples in ten import nothing an import rule can see at all, because
+they are packed, .NET, or resolve everything at runtime. An association that has
+not been measured carries no `measured` block, and the surfaces say so rather
+than printing a zero.
 
 A technique id in either block is retargeted, or dropped and listed, against
-the vendored catalogue's `revoked_by` when a release retires it. A rule carries
-`name` — the catalogue's name for the id — a `rule` label saying which of two
-rules on one technique matched, and, in the Linux block, `ordinary_use`: one
-sentence naming the software that is not a sample and imports the same symbols,
-because a mechanism with ordinary users that does not say so reads as an
-accusation.
+the vendored catalogue's `revoked_by` when a release retires it. Every rule
+carries `name` — the catalogue's name for the id — a `rule` label saying which
+of two rules on one technique matched and what combination it keys on, and
+`ordinary_use`: one sentence naming the software that is not a sample and
+imports the same names, because a mechanism with ordinary users that does not
+say so reads as an accusation. Almost every rule needs two or more names; one
+keys on a single name that is the act itself, which the row states by setting
+`min_apis` to one.
 
 Rerun the measurement after an ATT&CK refresh, after adding a group or a rule,
-or on a distribution whose software is not the one the block was written
-against:
+or against software that is not what the block was written against:
 
 ```
 uv run python scripts/knowledge/measure_api_behaviour_block.py \
     --fail-over 1 /usr/bin /usr/sbin /usr/lib/systemd
+uv run python scripts/knowledge/measure_api_behaviour_block.py --platform windows \
+    --fail-over 1 --write-inventory corpus.jsonl.gz /srv/windows-corpus
+uv run python scripts/knowledge/measure_api_behaviour_block.py --platform windows \
+    corpus.jsonl.gz
 ```
 
-It reads the dynamic symbol imports of the ELF files under those directories,
-prints per group and per rule how many binaries each appears on and labels, and
-names the ones carrying a label or a technique row so a reader can judge
-whether that population is the one the technique describes. `--fail-over` exits
-non-zero when anything is above that share. It needs `pyelftools`, reaches no
-network, and no test runs it: a test that read a host's binaries would answer
-differently on every machine.
+A Linux run reads the dynamic symbol imports of the ELF files under those
+directories; a Windows run reads PE import tables with `pefile`, the way
+`extractors/pe_extractor.py` does, recording an ordinal-only import as
+`Ordinal_<n>` so a binary that resolves everything by ordinal stays in the
+denominator. Either way the corpus is deduplicated by content, so a suite that
+ships the same runtime DLL in twenty packages counts once. It prints per group
+and per rule how many binaries each appears on and labels, and names the ones
+carrying a label or a technique row so a reader can judge whether that
+population is the one the technique describes. `--fail-over` exits non-zero
+when anything is above that share. `--write-inventory` saves what was read as
+gzipped JSON lines, so the same corpus can be measured again after the files
+are gone, and a Windows run takes such a file in place of a directory. It needs
+`pyelftools` or `pefile`, reaches no network, and no test runs it over real
+binaries: a test that read a host's software would answer differently on every
+machine.
 
 ### Rule corpora
 
@@ -462,6 +555,294 @@ asserts nothing — which is what `web_client_apis` and `file_enumeration_apis`
 are for. Importing an HTTP client is a fact; calling it a command-and-control
 channel is a claim no substring can support.
 
+### How much of a tool answer a model sees
+
+`core.preprocessing.max_tool_output_chars` is **0** by default, and 0 does not
+mean "no cap" — it means the cap is worked out at the moment of each call from
+the context window the served model was found to have. A positive value is an
+explicit operator cap and behaves as this setting always did: that many
+characters, on every answer, whatever the window.
+
+The arithmetic lives in one function (`maljan.llm.context_window`) and reads:
+the served window, less the tokens held back for the model's own reply (the
+larger of `core.llm.expert_max_tokens` and `core.llm.judge_max_tokens` where an
+operator set them, never more than a quarter of the window, and a quarter of it
+where both are 0), less what the conversation already holds,
+converted at **3 characters per token**, times the **eighth** of what is left
+that one answer may take. Three characters per token is measured rather than
+assumed — a recorded conversation of about 114,000 characters was reported by
+the server at 38,868 tokens — and is deliberately denser than the four the
+token estimate uses for prose, because what this bounds is JSON and decompiled
+C.
+
+**A cap never exceeds the room that is really left.** Below **2,000
+characters** the share stops falling and the floor applies, but only while the
+room affords it; where it does not, the cap is what is left. Because each
+answer is measured against what is free *at that moment*, and because what it
+takes is charged as soon as it is handed out — a model turn may call several
+tools at once — the answers of one conversation add up to less than the room it
+started with, on every window the vendored table ships.
+
+The share decides how large the first answer is and how quickly they shrink: at
+32,768 tokens the first is 9,216 characters and about twelve clear the floor;
+at 131,072 the first is 46,080; at a million, 371,928. At the floor the answer
+meets the structural shortener exactly as any other does and carries the same
+notice naming the arguments that would narrow it.
+
+An answer over the cap only because of its whitespace is not shortened. A tool
+that indents its JSON spends a quarter or more of its characters on layout, and
+a derived cap makes that gap the common case: a recorded `elf_info` was 8,628
+characters indented and 5,577 compact against a cap of 8,486. Such an answer is
+handed over whole, written without the whitespace — parseable, every value the
+tool's, and with no notice, because nothing was left out — and the run summary
+counts it as `tool_output_compacted`. Only a compact form that still does not
+fit meets the shortener, and what the shortener then cuts is the compact form.
+
+**When the room runs out, the tool phase ends.** Below about a thousand
+characters an answer cannot survive its own notice, so nothing of it is handed
+over. The model is told once, in one sentence, that the conversation has no
+room left for a tool answer; the whole answer stays on the evidence ledger
+under the call's id, and the run summary counts it as `tool_output_no_room`.
+From there that agent's tool calls are **not run** — a server's time is not
+spent on an answer with nowhere to go — and a call made anyway returns one
+short line. The run-state block carries the same fact on every model turn,
+replaced rather than appended, so it costs the same whether the loop reads it
+once or forty times. The loop then ends on that same step, the way a repeating
+loop does, whatever the model asks next: `no_room` on its budget record with
+the reason, on the `stage_ended_at_cap` event and under the agent's `caps` in
+`run_summary.budget`, and the forced synthesis turns what was gathered into the
+answer. The graph's own step-limit sentence ("need more steps") is never shown
+or handed on as an agent's words, and the platform writes none of its own in
+their place: where a loop a cap ended leaves no answer and the salvage writes
+none, the agent's answer is empty and its status `no_claims`, and why is on the
+budget record and the `stage_ended_at_cap` event. The node does not run such an
+analyst a second time over the same material, which would meet the same full
+window.
+
+Both notices come out of the **tool budget** — the window less the room kept
+back for the model's reply — and are withheld when they would not fit. So does
+the marker a character cut leaves behind, which is kept back out of the cap
+rather than appended after it, the way the shortener already reserves room for
+its own notice. That is what leaves the reply reserve whole: the forced
+synthesis above is this design's answer to a full conversation, and spending
+its room on saying that the room ran out would take it from the one thing left
+to do. Measured by driving the guardrail itself over every window the vendored
+table ships, at twenty, forty and sixty rounds, with a chunk preloaded and at
+fan-outs of thirty-two and a hundred and twenty-eight: the tool budget is never
+exceeded, and the whole reserve survives — 8,192 tokens on a 131,072-token
+window, 2,048 on 8,192, 1,024 on 4,096.
+
+What is outside that guarantee is the model's own output: its tool requests and
+its prose are not the platform's to cap, and on a very small window they reach
+the window before the platform's text does.
+
+What a conversation is measured at is what its next request will weigh, not the
+messages alone. The definitions of the loop's tools go with every request, and
+they are counted: a static analyst holding the default toolset — 35 tools
+from the analysis, knowledge and VirusTotal servers — carries about 20,500
+characters of them, 28% of a 32,768-token window's 73,728-character tool
+budget, and a count that left them out said there was room until the server
+refused. With the framing, about 46,000 characters (63%) are left for answers
+and the model's own turns. On a small window, or with a large toolset, untick
+the tools an agent does not need in each server's tick list in the Tools step:
+that list is the only thing that narrows what a server sends an agent, and
+every unticked tool is its definition's characters back on every request. Where the
+server reported how many tokens the last request really took, that figure,
+converted at the same three characters per token, plus what the conversation
+gained since, is a floor under the measure, so content that tokenises worse
+than three characters a token — pages of `strings` noise do — or the template
+the server wraps each message in cannot hide room that is gone.
+
+And where a server says the window is full anyway — llama.cpp's "context shift
+is disabled" or "the request exceeds the available context size", an
+OpenAI-compatible "maximum context length", Anthropic's "prompt is too long" —
+after the analyst's loop has gathered at least one tool answer, that agent's
+tool phase ends with `no_room` ("the model server reported its context window
+full" on the record and the stage event), and the forced synthesis writes the
+answer from what was gathered, rather than the agent failing and its work being
+lost. Only an error the provider's SDK raised for the server's answer counts.
+A server that names the reply cap is read by its numbers. vLLM words a full
+conversation as "'max_tokens' … is too large: 8192. This model's maximum
+context length is 32768 tokens and your request has 24808 input tokens": the
+cap fits the window on its own and the prompt grew until the two together did
+not, so that is a full window. A cap at least as large as the window, or one
+named with no numbers to read, is a configuration fault no conversation could
+avoid. The same full-window sentence on the first request, before anything was
+gathered, means the framing alone does not fit; and an error that is not a
+server's answer is the platform's own. Each of those faults still fails the
+agent, because there is nothing to salvage and the failure is the true
+statement. After the server has said the window is full, the final-answer
+nudge is not sent — it would re-send the conversation the server just refused
+— while after the platform's own budget ended the phase it still is, because
+that conversation is inside the tool budget with the reply reserve whole.
+
+The judge's tool loop is accounted the same way, under the judge's own name:
+its conversation and its tool definitions are measured before every model
+turn, with the server's reported count as a floor; its answers are capped from
+its own room; its loop is streamed, ends on the step it runs out of room, and
+ends with `no_room` on the same strict full-window answer once it has gathered
+something. Its reasoning is then asked for once, with no tools, from what it
+gathered, and mediation reads the verdict from that; a judge loop that fails
+before gathering anything fails as before. Both salvages re-send the
+conversation trimmed to two fifths of the window the budget counts on — the
+smaller of the declared and the probed one, so a `context_size` left larger
+than the served window cannot size a salvage close to the request the server
+just refused — and each gets only what is left of its loop's time. An
+analyst's salvage is also held to what that time can read and answer at the
+model's measured rates, and is not sent when not even the task fits (see the
+time cap in [architecture](architecture.md)).
+
+The window itself is learned free of charge and without asking the operator
+anything. In order:
+
+| Source | Where it comes from |
+|---|---|
+| `declared` | `core.llm.ollama.num_ctx`, which the provider sends with every call, or `core.llm.openai.context_size` where an operator has set it. It does **not** short-circuit the probe: where a window was also probed, the smaller of the two wins, so a model that holds less than `num_ctx` asks for — and a `context_size` left behind by a server restarted smaller — cannot overflow the real window |
+| `probed` | llama.cpp `GET /props` (`default_generation_settings.n_ctx`, then `n_ctx_per_seq`); an OpenAI-compatible `GET /v1/models` (`max_model_len` for vLLM, `context_length` for OpenRouter); Ollama `POST /api/show` (`model_info.<arch>.context_length`, with a Modelfile `num_ctx` winning); Text Generation Inference `GET /info` (`max_total_tokens`) |
+| `table` | `data/model_context_windows_v1.json`, keyed by model-id family, for the vendor APIs that publish a window without serving it |
+| `fallback` | nothing answered, and **nothing is derived from it**: one tool answer is capped at the documented 6,000 characters — exactly what this platform did before the window was learned at all — and every surface says the window is unknown |
+
+No generation call is ever made — the probe reads metadata endpoints only, a
+guard test drives both entry points through a transport that records every
+request, and a probe that fails never fails a run and never blocks a settings
+save. One question is asked per `(provider, endpoint, model)` rather than per
+agent, both outcomes are remembered for fifteen minutes, and the whole plan
+runs under one four-second wall clock.
+
+A window an endpoint reports is untrusted input and is believed only up to ten
+million tokens. Past that the figure is refused rather than clamped, with the
+reason in words, because a proxy reporting its window in bytes produces a cap
+larger than any answer there will ever be — and a cap that large makes every
+answer fit, which switches the shortener, the summariser and the character cut
+off for the whole run.
+
+A run whose agents sit on different models takes the **smallest** of their
+windows, because one cap is handed to every tool server the job opens. The
+models an agent falls back to count as models it sits on: a fallback with a
+smaller window than the first model governs the cap, because the turn it
+answers reads the same conversation.
+
+Where to see what applied: the Settings page prints the detected window beside
+the field, with the source word itself, and `run_summary.truncation` records
+the window, its source, the characters-per-token figure and the smallest and
+largest cap the run used. A run that landed on `fallback` is the one to act on
+— set `core.llm.openai.context_size` to the window the server was started with,
+and the cap is derived from then on.
+
+### A call waits as long as its answer takes at the model's pace
+
+Two calls have an output budget of their own: the judge's verdict
+(`core.llm.judge_max_tokens`, derived from the window by default, under the judge definition's
+timeout — 600 s in the shipped team) and each composer section
+(`core.reporting.composer_section_max_tokens`, under
+`core.reporting.composer_per_section_timeout`, 120 s). A timeout chosen for a
+fast model cuts a slow one off: at 3.8 tokens a second only about 2,280 of the
+judge's tokens fit in 600 s.
+
+**The analysts' and the judge's output caps are derived too.**
+`core.llm.expert_max_tokens` and `core.llm.judge_max_tokens` ship at **0**,
+which derives each agent's cap in three cases (`context_window.derived_reply`): where the model's maximum
+output is declared — by the probe's model list (`max_output_tokens`,
+`max_completion_tokens`, OpenRouter's `top_provider.max_completion_tokens`) or
+by a vendored `max_output` row, each carrying the vendor page it is documented
+on (gpt-4o and gpt-4o-mini 16,384, gpt-4.1 32,768) — the smaller of that and a
+quarter of the window; for a runtime we run — one that answered the window
+probe as a runtime: llama.cpp `/props`, Ollama `/api/show` or TGI `/info` — a
+quarter of the window, since no API limits its output (a loopback address alone
+is not one: a gateway on `localhost:4000` forwarding to a hosted API has that
+API's limit); and for a hosted API that declares
+no maximum, the documented fallback of 8,192 (never above a quarter of the
+window), which a quarter of a hosted model's window is routinely past.
+On a local 32,768-token window that is 8,192; on a local 131,072, 32,768; on
+the shipped gpt-4o, 16,384.
+A window nothing reported derives nothing: the documented fallback of 8,192
+applies and the sentence says the window is unknown. The reply reserve and the
+composer's section budget follow the same rule, bounded by an operator's
+generation cap where one is set. A value above 0 is
+the operator's and is used as set; a stored setting keeps its value. Each
+derivation is logged and recorded in `run_summary.generation.output_caps`
+(`{agent: {tokens, derivation}}`), and the judge's is printed beside the
+verdict wait. 0 no longer means unbounded.
+
+A section's budget is not a fixed number. `composer_section_max_tokens` ships
+at **0**, which derives it for each model of the reporter's list the way an
+analyst's reply room is derived: the larger of `llm.expert_max_tokens` and
+`llm.judge_max_tokens` where an operator set them, and the model's declared
+maximum output where there is one, at most a quarter of the
+context window that model serves (learned as the tool-output cap's window is:
+declared, probed, the vendored table, then the fallback). On a 32,768-token
+window that is 8,192 tokens; on a 16,384-token window, 4,096. Reasoning is
+spent inside it. The run summary prints the derivation beside the section's
+wait ("Output budget of `composer:section`: 8192 tokens — the generation cap of
+8192 tokens …, at most a quarter (8192) of the model's 32768-token context
+window (probed) …"). A positive value is the operator's own budget and behaves
+as the fixed value always did, including the reasoning room below. A fixed 900
+tokens dropped a live report's payloads section when the model reasoned past
+it.
+
+So each of those calls waits
+`max(configured, min(derived, 1800 s))`. Where the model's reading rate is
+measured and the call gives its prompt size (a composer section, the verdict),
+`derived = (prompt_tokens / reading rate + max_tokens / generation rate) × 1.5`;
+otherwise `derived = max_tokens / rate × 1.5` with the rate that includes the
+prompt read. Appendix B prints which one each timeout took. The rates are
+the model's own for this job, read off every answer it has already given
+without a token of its own: Ollama's `eval_count` over `eval_duration`,
+llama.cpp's `timings.predicted_n` over `predicted_ms` (the openai provider
+carries the `timings` object the OpenAI-compatible client would drop into each
+answer), and on an endpoint that reports neither the answer's output token
+count over the call's wall clock (which includes reading the prompt, so that
+rate is lower than the server's and the wait longer). The reading rate is
+Ollama's `prompt_eval_count` over `prompt_eval_duration` or llama.cpp's
+`timings.prompt_n` over `prompt_ms`. The margin, 1.5, covers the spread between
+turns, and the prompt read where it is not timed on its own.
+The ceiling, 1,800 s, is the HTTP request timeout every provider's client is
+built with (`PROVIDER_REQUEST_TIMEOUT_SECONDS`), so no derived wait outlives the
+request carrying it. A configured value above the ceiling is not lowered, but
+the request timeout still ends any single call at 1,800 s. At 3.8 tokens a
+second the judge's budget needs 8,192 / 3.8 × 1.5 ≈ 3,234 s, so the verdict
+call is held at 1,800 s and can receive about 6,840 tokens (3.8 × 1,800) where
+600 s allowed about 2,280. A composer section is its answer and the one retry
+its validation allows, so its wait holds two calls of its output cap. At 3.8
+tokens a second the derived budget of 8,192 tokens on a 32,768-token window
+needs 2 × min(8,192 / 3.8 × 1.5, 1,800) = 3,600 s; an operator's budget of 900
+with the reporter's `disable_thinking` on needs 2 × 900 / 3.8 × 1.5 ≈ 710 s.
+A fast model's derived time falls under its
+configured one, which then stands. Until a model has answered once, and for a
+call with no output budget, the configured value stands. Rates are kept per
+model and per server, so one tag served by a local and a remote Ollama is two
+paces. The verdict call starts its model list on its sized wait. The report
+stage starts the reporter's list once; each section then measures the list's
+turn deadline against its own wait, with the job's `llm.fallback_turn_share`,
+without putting the list back on its first model — a model that failed as a
+provider in one section is not waited out again in the next, and a switch
+holds for the rest of the report stage.
+
+The section budget is also the section's real cap, and a model's reasoning
+counts against it: Ollama's `num_predict` and llama.cpp's `n_predict` include
+the thinking channel. The derived budget already is the model's whole reply
+room. With an operator's own `composer_section_max_tokens`, where the
+reporter's provider has been told to keep reasoning out
+(`llm.ollama.disable_thinking` or `llm.openai.disable_thinking`), the
+composer's model is capped at that value alone; where it has not, the cap is
+that value plus the reporter's own output cap (`judge_max_tokens`, or derived) for the
+reasoning. Each model of the reporter's list is capped by its
+own provider's switch, and the wait is sized from the largest cap: the platform
+cannot tell a reasoning tag from its name, and sending `think: false` to a
+model that does not reason is an error on Ollama. A section the cap cut is
+recorded as cut at that cap, not as a schema failure. On Ollama every output
+cap — this one, `judge_max_tokens`, `expert_max_tokens` — now reaches the
+server as `num_predict`, which `ChatOllama` otherwise drops, so a thinking
+model's reasoning counts against the judge's and the analysts' caps too;
+`disable_thinking`, or a larger cap, is the remedy. The verdict call records
+whether it reached `judge_max_tokens`, Ollama's `done_reason: "length"`
+included. `run_summary.generation` records
+each model's rate, tokens, seconds, calls and source, its prompt reading rate
+where the server reports one (`prompt_tokens_per_second`, `prompt_tokens`,
+`prompt_seconds`, `prompt_sources`), and for each sized call
+the configured value, the budget, the rate, the derived and the applied
+seconds; the report's Run Summary prints the same numbers.
+
 ### The evidence budget
 
 `reporting.evidence_budget_bytes` (512 KiB by default) is how many bytes of
@@ -471,6 +852,18 @@ carry no output, and the report states how many were trimmed. Raise it for a
 deep reversing loop whose decompilation is the evidence; set it to `0` to keep
 every output, which is a supportable choice on a machine with room for it and
 a way to fill a JSONB column and a context window on one that has not.
+
+Half a megabyte holds one loop's whole tool output up to a served window of
+about 183,000 tokens, which follows from the cap above: a loop's answers come
+to at most `(window − reply reserve) × 3` characters. `evidence_corpus_bytes`
+(16 MB, the run-wide grounding corpus) holds six such loops at 131,072 tokens
+and about five and a half at a million. Neither is scaled with the window on
+purpose — they bound the worker's memory and a database column rather than the
+model's context, and a machine that also runs the model cannot answer a bigger
+window by holding a proportionally bigger corpus. Past either, what happens is
+what always happened: the ledger entry keeps the call and drops the output and
+the report says how many, and the corpus reports itself incomplete so that an
+absence measured against it is advisory.
 
 ### The live conversation
 
@@ -525,6 +918,26 @@ with `uv sync --extra tools` (the backend image already does); without them
 `document_info` and the 7z half of `archive_list` answer
 `{"error": "<module> is not installed"}`. Nothing else changes, and the server
 starts either way.
+
+`floss`, the emulating string decoder, runs FLOSS (Apache-2.0) as FLARE's
+pinned standalone Linux build, v3.1.1 (zip sha256
+`40c05a869f34f7e2417b17ca290cc54bd3671ee1f0a2d9bd5103284c01a54666`), outside the
+Python environment. The backend image installs it at `/usr/local/bin/floss` in
+a checksum-verified build stage; on a host, `scripts/install_floss.sh` installs
+it at `~/.local/share/maljan/tools/floss-3.1.1/floss`. To use a
+build elsewhere, set `MALJAN_FLOSS_PATH` in the `analysis` server's `env`. The
+tool runs only the executable whose sha256 is the pinned one. Without it the
+capability manifest marks `floss` unavailable with the reason and the remedy and
+the model is not offered the tool; with it, the first call on a sample emulates
+for up to ten minutes (the tool's declared `timeout_s`) within 4 GiB of address
+space, and later pages of the answer come from the kept result. The triage pack
+runs the same function once on every PE, reading `MALJAN_FLOSS_PATH` and
+`MALJAN_STAGING_DIR` from this process's environment with the `analysis`
+server's `env` over it. Name a build in the server's `env` and the pack and
+the tool find the same one; a `MALJAN_FLOSS_PATH` set only in the worker's own
+environment reaches the pack and not the tool, whose child environment carries
+only the server's `env` and its allowed keys. Without a build the pack's entry
+says so and names the remedy.
 
 Five teams ship built in; they are listed under **Teams** below. `default` is
 the three analysts with their tools.
@@ -635,6 +1048,63 @@ pipeline → Teams) is an ordered list of stages. Each stage is:
 | `debate` | Round limit, consensus threshold and sycophancy check, for a debate stage. |
 | `builtin_tools` | `false` withholds every built-in server (`analysis`, `knowledge`, `network`, `threatintel`, `virustotal`) from this stage's agents. |
 
+### Checking a team before it is saved
+
+The team editor checks every team as it is edited. Once typing pauses, the
+console sends the staged teams, the staged agent map and the staged active
+team to `POST /api/v1/settings/lint-teams`, which stores nothing and answers
+with every finding and each team's layout. Beside each team the console draws
+the stage graph that layout describes — stages as boxes in run order,
+`depends_on` as arrows, a conditional stage dashed — and marks each stage that
+has a finding; the same findings are listed in words under the graph and on
+each stage card.
+
+An **error** is a team apply refuses, and the lint reports it in the words
+apply refuses it with: the lint reads its errors off the same functions the
+settings model raises from (`maljan.core.team_lint`), and the apply path
+refuses from the lint. A test holds the two together: every refusal the
+settings model makes about a team is a lint error, word for word. The errors:
+
+- a team with no stages;
+- a stage key declared twice, or a key that is not a slug;
+- a stage that depends on itself, on a stage that does not exist, or on a
+  stage declared after it — and, named as such, a loop of stages that depend
+  on each other;
+- an agent in two analysis stages; an analysis stage with no agent;
+- a triage stage that names an agent, or is keyed like a node the pipeline
+  names itself;
+- a debate with no analysis stage upstream of it, one that names an agent, or
+  one that hands over to more than one node;
+- a stage naming an agent that does not exist, is disabled (a built-in team
+  may keep a disabled member while it is not the active team), or has the
+  judge or reporter role in an analysis stage;
+- not exactly one verdict stage, or a verdict stage not run by the judge;
+- more than one report stage, a report stage not run by the reporter, or one
+  that is not last;
+- a `when` the condition grammar refuses, reported by the parser that runs it;
+- a field of the wrong type or value, in pydantic's own words;
+- a built-in team edited beyond its debate options, its built-in-tool switch
+  and its excluded servers;
+- a team key that is not a slug.
+
+A **warning** is a team that saves and runs and will not do what it looks
+like it does. A warning never blocks apply, and each is decided from the team
+as written, never from a guess about the sample:
+
+- a stage the verdict stage does not run after (the judge does not wait for
+  it), or one that runs after the verdict, other than the report;
+- a condition that names no field and is false, so the stage never runs;
+- a condition reading `stages.<key>` for a stage the team does not have, or
+  for a stage this one does not run after;
+- an enabled agent that no team names and no agent asks;
+- an agent reading the static provider's tools while the static provider is
+  `none` (the note apply already returns).
+
+The layout the graph uses is `maljan.core.team_layout`: a stage one row below
+the lowest stage it runs after, stages that share a row side by side in the
+order they are written. The team diagrams on the architecture page are drawn
+with the same layout.
+
 ### The teams that ship
 
 | Team | Stages | What it is for |
@@ -650,14 +1120,17 @@ deterministic tools over the sample and writing each result to the evidence
 ledger before any analyst starts (see *The triage pack* in
 [architecture.md](architecture.md)). Every team but `measurement` ships with
 it first, a team written by hand may leave it out, and a stored team gains it
-on upgrade (`make migrate`). Its three settings sit in the Analysis layers
+on upgrade (`make migrate`). Its five settings sit in the Analysis layers
 group: `triage.enabled` (off leaves the stage in place and makes it decline
 with that reason), `triage.strings_head` (how many printable runs the strings
 entry keeps; 300), `triage.reputation` (`auto` asks the enabled reputation
 server once for the sample hash — VirusTotal's own server when enabled, else
 the threat-intel sidecar, never one the team lists in `exclude_servers` — and
-`off` records a skipped entry instead) and `triage.budget_seconds` (1200; a
-step that would start after the budget is spent is recorded as not run). The
+`off` records a skipped entry instead), `triage.budget_seconds` (1200; a
+step that would start after the budget is spent is recorded as not run) and
+`triage.memory_floor_mb` (10,240: what the host must still have available
+after capa's measured peak and FLOSS's 4 GiB bound for the two to run together;
+0 checks only that both fit, and the worker's cgroup limit is always checked). The
 pack runs the real tools in mock mode too, so a local observation run with a
 reputation server enabled makes that one outbound call; a team that withholds
 the server, or `triage.reputation = off`, keeps such a run offline.
@@ -1142,6 +1615,44 @@ CLI at, or an HTTP sidecar on another host that is handed paths rather than
 uploads. `ruleset` is held to the rule corpora instead: the repository's `data`
 tree and whatever `MALJAN_YARA_RULES_DIR` and `MALJAN_SIGMA_RULES_DIR` name.
 
+### A tool server that keeps failing is rested
+
+Per job and per tool server, three settings under **Tool servers → Resilience**:
+
+| Setting | Default | Where the default came from |
+|---|---|---|
+| `core.mcp.breaker.failures_to_open` | 3 | The number of attempts the platform already gives a model call that drops its connection before calling it a failure. No recorded live run had a tool server fail at the transport, so it is a judgement, not a measurement. |
+| `core.mcp.breaker.cooldown_seconds` | 60 | A judgement: long enough for a sidecar being restarted to come back, short against the analysts' own loop budgets. |
+| `core.mcp.breaker.call_timeout_seconds` | 0 (derived) | Derived from the longest tool budget the deployment configures — `core.static.capa.timeout_seconds`, 300 by default and 900 on a slow host — so a call never times out before the analysis it runs may finish. A tool whose server declares a longer budget in its manifest gets that; thirty seconds of grace are added either way. |
+| `core.mcp.breaker.max_concurrent_calls` | 4 | A judgement: the shipped teams run their analysts one after another, and four lets one analyst's parallel tool calls through while bounding a team that fans out. `0` leaves the calls uncapped, as every server was before. |
+
+An unanswered call is either a transport failure — a timeout, a refused or
+dropped connection, the server's process gone — or a call that did not finish
+within its caller's own budget (a loop's or an ask's) while it waited on the
+server. Every call is sent with a deadline (above), so a server that hangs
+times out and is counted; a call its caller's budget cut short is counted too,
+under its own reason, rather than let go. After that many in a row the
+server rests: a call is not sent, and the model is answered with a tool error
+in the structured shape —
+
+```json
+{"error": {"code": "server_resting",
+           "message": "tool server 'analysis' is resting after 3 calls in a row it did not answer; it will be tried again in 60 s",
+           "remediation": "this server did not answer several calls in a row and is not being called for now; use another tool, or call this one again after the time the message names"},
+ "tool": "pe_info"}
+```
+
+— which the ledger records as a failed call like any other. After the cooldown
+one call is let through (the others are told that one call is trying the server
+again and nothing more is sent until it answers); a success ends the rest and
+its own failure to answer starts another. The guard covers every server the job's
+registry attaches; the Ghidra and CAPE providers' own toolkits are outside it. A tool that answers with its own error (a bad argument, a file
+that is not there) has answered, and never counts. Each rest is published as a
+`tool_server_rested` event, drawn in the conversation, and kept in
+`run_summary.server_rests`, which the report and the console's "What the run
+spent" print. The call cap queues calls per event loop: a handle is opened per
+loop, and for a stdio server that is one child process per loop.
+
 ## Writing a tool server
 
 Any MCP server works: Maljan reads its manifest and calls its tools. Two
@@ -1200,10 +1711,12 @@ and `GET /api/v1/jobs/{id}/evidence` serves them.
 
 **The budget meter** needs nothing from a server. The tool loop emits
 `budget_tick` every five steps and once more when it ends (steps used against
-the cap, seconds against the limit, prompt characters, ledger entries so far)
+the cap, seconds against the limit, prompt characters, the characters of the
+tool definitions sent with every request, ledger entries so far)
 and `stage_ended_at_cap` when a cap ended the work — `steps`, `time`,
 `repeats` or, for the triage pack, `budget_seconds`; `run_summary.budget` sums
-the spend per agent with the caps it hit, and the console's pipeline panel
+the spend per agent with the caps it hit and keeps the largest
+`tool_definition_chars` of its loops, and the console's pipeline panel
 says beside the step which cap ended it.
 
 ## Export and import

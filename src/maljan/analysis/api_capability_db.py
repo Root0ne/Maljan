@@ -20,9 +20,12 @@ case-consistent: forwarded exports and ordinal-resolved names routinely differ
 in case from the canonical MSDN spelling.
 
 Degradation is the point of the fallback path: a missing or malformed data file
-logs and returns ``None``, and ``pe_extractor`` then falls back to its hardcoded
-51-entry table. An analysis that loses depth is acceptable; an analysis that
-fails because a JSON file moved is not.
+logs and returns ``None``, and ``tools.knowledge.api_capability`` — the one
+consumer, since the sidecar migration moved the import layer behind it — answers
+with empty rows and a ``reason`` naming the file. An analysis that loses depth
+is acceptable; an analysis that fails because a JSON file moved is not. A single
+malformed row degrades the same way and no further: it is dropped with a warning
+and the rest of the catalogue loads.
 """
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ from maljan.core.logger import logger
 __all__ = [
     "ApiAttckMap",
     "ApiBehaviourDB",
+    "MeasuredRate",
     "TechniqueRule",
     "load_api_attck_map",
     "load_api_behaviour_db",
@@ -51,12 +55,6 @@ __all__ = [
 # catalogue flag, named for where it comes from, not as a finding.
 _SUSPICIOUS_TIERS = frozenset({"high", "medium"})
 _VALID_TIERS = frozenset({"high", "medium", "informational"})
-
-# Hard ceiling on any deterministic import-derived claim. The YARA layer's floor
-# is 0.70; staying under it means this evidence corroborates other layers but
-# can never solo-drive a verdict, which is the same rationale the import layer's
-# original _CONF_BASE/_CONF_WITH_IOC constants were chosen under.
-_CONFIDENCE_CEILING = 0.65
 
 
 def _variants(name: str) -> tuple[str, ...]:
@@ -88,6 +86,95 @@ def canonical_name(name: str) -> str:
     return _canonical(name)
 
 
+@dataclass(frozen=True)
+class MeasuredRate:
+    """How much benign software an association fires on, and what that is a share of.
+
+    The catalogue's associations are not judged, they are measured, and the
+    measurement travels with the association rather than staying in whatever
+    document recorded it: an import-derived row that says "T1113, screen
+    capture" and nothing else invites a reader to treat it as a finding, and the
+    same row saying the rule fires on 0.3% of ordinary Windows software does
+    not. The model is told the rate and decides; the platform states a fact and
+    stops there.
+
+    Every field names its own direction, because the value travels and is read
+    apart from this class. ``seen_on_benign_percent`` is the share of the named
+    benign corpus the association fired on — never a probability that some
+    sample is benign, which is the misreading the name exists to prevent.
+    ``seen_on_benign_files`` is carried beside it because a share rounded to one
+    decimal place reads as zero for a rule that fires on one file in three
+    thousand, and an association that was never measured is ``None`` rather than
+    a zero, which is a different statement.
+
+    ``held_out_malware_profiles`` is how many distinct import profiles the
+    combination was *not* chosen on that it fires on. It is support, not
+    accuracy: no corpus here carries technique-level ground truth, so what was
+    measured is that a combination separates binaries already known to be bad
+    from binaries already known to be good.
+    """
+
+    seen_on_benign_percent: float
+    seen_on_benign_files: int
+    benign_corpus: str = ""
+    labels_benign_percent: float | None = None
+    labels_benign_files: int | None = None
+    held_out_malware_profiles: int | None = None
+    held_out_malware_corpus: str = ""
+
+    def rates(self) -> dict[str, Any]:
+        """The numbers alone, for a row that repeats under every matched name."""
+        out: dict[str, Any] = {
+            "seen_on_benign_percent": self.seen_on_benign_percent,
+            "seen_on_benign_files": self.seen_on_benign_files,
+        }
+        if self.labels_benign_percent is not None:
+            out["labels_benign_percent"] = self.labels_benign_percent
+            out["labels_benign_files"] = self.labels_benign_files
+        if self.held_out_malware_profiles is not None:
+            out["held_out_malware_profiles"] = self.held_out_malware_profiles
+        return out
+
+    def corpora(self) -> dict[str, str]:
+        """What the numbers are shares of, said once per answer rather than per row."""
+        out: dict[str, str] = {}
+        if self.benign_corpus:
+            out["benign"] = self.benign_corpus
+        if self.held_out_malware_corpus:
+            out["held_out_malware"] = self.held_out_malware_corpus
+        return out
+
+
+def _measured(raw: Any) -> MeasuredRate | None:
+    """One ``measured`` block, or ``None`` when it is absent or unreadable.
+
+    Unreadable is treated as absent on purpose: an association whose rate
+    cannot be parsed has not been measured as far as any reader is concerned,
+    and printing a partial number would be worse than printing none.
+    """
+    if not isinstance(raw, dict):
+        return None
+    percent, files = raw.get("seen_on_benign_percent"), raw.get("seen_on_benign_files")
+    if not isinstance(percent, int | float) or not isinstance(files, int):
+        return None
+    labels_benign_percent = raw.get("labels_benign_percent")
+    labels_benign_files = raw.get("labels_benign_files")
+    held = raw.get("held_out_malware_profiles")
+    return MeasuredRate(
+        seen_on_benign_percent=float(percent),
+        seen_on_benign_files=int(files),
+        benign_corpus=str(raw.get("benign_corpus") or ""),
+        labels_benign_percent=(
+            float(labels_benign_percent) if isinstance(labels_benign_percent, int | float) else None
+        ),
+        labels_benign_files=(
+            int(labels_benign_files) if isinstance(labels_benign_files, int) else None
+        ),
+        held_out_malware_profiles=(int(held) if isinstance(held, int) else None),
+        held_out_malware_corpus=str(raw.get("held_out_malware_corpus") or ""),
+    )
+
+
 def _canonical(name: str) -> str:
     """Fold an API name to one key shared by its ANSI and wide spellings.
 
@@ -112,9 +199,12 @@ class ApiBehaviourDB:
     corroborators: dict[str, tuple[str, ...]] = field(default_factory=dict)
     # Per category, the names whose presence beside it turns the catalogue's
     # ``suspicious`` label on. A category with no gate is labelled by its tier
-    # alone, which is how the label has always worked and how every Windows
-    # category still works.
+    # alone; every category the catalogue still tiers above informational has
+    # one, on both platforms.
     flag_gates: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Per category, how much benign software it appears on. A category with no
+    # entry here has not been measured, which is not the same as zero.
+    measurements: dict[str, MeasuredRate] = field(default_factory=dict)
 
     def corroborated_by(self, category: str | None) -> tuple[str, ...]:
         """The APIs the catalogue names as corroboration for ``category``."""
@@ -123,6 +213,10 @@ class ApiBehaviourDB:
     def flags_with(self, category: str | None) -> tuple[str, ...]:
         """The names a gated category needs beside it before it is labelled."""
         return self.flag_gates.get(category or "", ())
+
+    def measured_for(self, category: str | None) -> MeasuredRate | None:
+        """What ``category`` was measured at on benign software, or ``None``."""
+        return self.measurements.get(category or "")
 
     def _gate_is_met(self, category: str | None, present: Iterable[str]) -> bool:
         """Whether a gated category's second name is in the set asked about.
@@ -177,24 +271,16 @@ class TechniqueRule:
     # states a mechanism and a mechanism has ordinary users; the row carries
     # the sentence so it cannot be read as an accusation on its own.
     ordinary_use: str
+    # How much benign software this combination fires on, measured. ``None``
+    # where it has not been measured, which the surfaces say rather than
+    # printing a zero.
+    measured: MeasuredRate | None
     apis: frozenset[str]
     apis_lower: frozenset[str]
     min_apis: int
     confidence_base: float
     confidence_max: float
     platforms: tuple[str, ...]
-
-    def confidence_for(self, distinct_matches: int) -> float:
-        """Scale confidence with corroboration, bounded at both ends.
-
-        Each import beyond the minimum is worth a little more certainty, but the
-        curve is deliberately shallow and capped: a technique evidenced by
-        twelve imports is more likely than one evidenced by two, not six times
-        more likely. Counting matches as a raw score — the obvious approach —
-        produces exactly that six-times-more-likely claim.
-        """
-        extra = max(0, distinct_matches - self.min_apis)
-        return round(min(self.confidence_max, self.confidence_base + 0.05 * extra), 4)
 
 
 @dataclass(frozen=True)
@@ -339,6 +425,7 @@ def _load_behaviour_uncached(catalog_path: str, platform: str) -> ApiBehaviourDB
     tiers: dict[str, str] = {}
     corroborators: dict[str, tuple[str, ...]] = {}
     flag_gates: dict[str, tuple[str, ...]] = {}
+    measurements: dict[str, MeasuredRate] = {}
 
     for category, spec in block.items():
         if not isinstance(category, str) or not isinstance(spec, dict):
@@ -359,6 +446,9 @@ def _load_behaviour_uncached(catalog_path: str, platform: str) -> ApiBehaviourDB
         gate = spec.get("flags_with")
         if isinstance(gate, list):
             flag_gates[category] = tuple(a for a in gate if isinstance(a, str) and a)
+        rate = _measured(spec.get("measured"))
+        if rate is not None:
+            measurements[category] = rate
         suspicious = tier in _SUSPICIOUS_TIERS
         for api in apis:
             if not isinstance(api, str) or not api:
@@ -389,6 +479,7 @@ def _load_behaviour_uncached(catalog_path: str, platform: str) -> ApiBehaviourDB
         tiers=tiers,
         corroborators=corroborators,
         flag_gates=flag_gates,
+        measurements=measurements,
     )
 
 
@@ -442,18 +533,40 @@ def _parse_rule(row: Any) -> TechniqueRule | None:
         return None
 
     try:
-        min_apis = max(1, int(row.get("min_apis", 2)))
         conf_base = float(row.get("confidence_base", 0.40))
         conf_max = float(row.get("confidence_max", 0.60))
     except (TypeError, ValueError):
         logger.warning("api-attck: %s has non-numeric thresholds — skipped.", tid)
         return None
 
-    # The ceiling is enforced here as well as in the builder, because the data
-    # file is editable in place and a hand-edited 0.95 would otherwise let an
-    # import-table guess outrank a real YARA match.
-    conf_max = min(conf_max, _CONFIDENCE_CEILING)
-    conf_base = min(conf_base, conf_max)
+    # ``min_apis`` is what stands between "this binary imports one name the
+    # catalogue knows" and "this binary performs the technique", so it is read
+    # strictly rather than coerced. It used to be ``max(1, int(...))``, which
+    # turned a hand-edited ``0``, a negative, ``true`` or ``1.4`` into 1 — and
+    # 1 on a sixteen-name rule makes it fire on any one of them.
+    # JSON has one number type, so a catalogue round-tripped through a
+    # serialiser that emits ``2.0`` must not lose the rule. A float that is a
+    # whole number is that number; a fractional one, a bool, a string or
+    # anything below one is not a count of names and the rule is dropped.
+    floor = row.get("min_apis", 2)
+    if isinstance(floor, float) and floor.is_integer():
+        floor = int(floor)
+    if isinstance(floor, bool) or not isinstance(floor, int) or floor < 1:
+        logger.warning("api-attck: %s has a min_apis of %r — skipped.", tid, floor)
+        return None
+    # A floor of one is allowed only where the single name *is* the act, which
+    # a rule states by naming nothing else. Anything wider asking for one name
+    # is the data file having drifted from what the tool documents.
+    if floor == 1 and len(apis) > 1:
+        logger.warning("api-attck: %s asks for one of %d names — skipped.", tid, len(apis))
+        return None
+    min_apis = floor
+
+    # The authored numbers are kept as written. They used to be clamped under
+    # a 0.65 ceiling here, which silently lowered a hand-edited value; nothing
+    # reads them as a claim's confidence (a rule hit is reported by name and
+    # the imports it matched), and the data file's builder states its own
+    # bound where the numbers are written.
 
     platforms_raw = row.get("platforms")
     platforms = tuple(
@@ -465,6 +578,7 @@ def _parse_rule(row: Any) -> TechniqueRule | None:
         name=str(row.get("name") or tid),
         rule=str(row.get("rule") or ""),
         ordinary_use=str(row.get("ordinary_use") or ""),
+        measured=_measured(row.get("measured")),
         apis=frozenset(apis),
         apis_lower=frozenset(a.lower() for a in apis),
         min_apis=min_apis,

@@ -149,7 +149,14 @@ class TestTheRunSummaryPrintsBothNumbers:
             set(),
             {},
         )
-        rendered = MarkdownRenderer()._section_run_summary({"corroboration": marked})
+        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+
+        rendered = MarkdownRenderer()._appendix_run(
+            MalwareReport(
+                identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
+                run_summary={"corroboration": marked},
+            )
+        )
 
         assert "TTPs: 3 claimed, 0 published" in rendered
         assert "claimed, not published" in rendered

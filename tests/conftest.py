@@ -26,6 +26,21 @@ def reset_observability_state() -> None:
 
 
 @pytest.fixture(autouse=True)
+def no_floss_unless_a_test_names_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The triage pack runs FLOSS on every PE, and a test's pack runs none.
+
+    The build lives outside the environment, so whether a test found one was a
+    fact about the machine: on a box with it installed every pack over a
+    synthetic PE spent seconds emulating it and recorded an entry a runner
+    without it never had. ``MALJAN_FLOSS_PATH`` naming no file is the one
+    answer both give. A test about FLOSS sets or clears the variable itself,
+    and a sidecar a test starts never sees it — ``child_env`` passes no such
+    variable.
+    """
+    monkeypatch.setenv("MALJAN_FLOSS_PATH", "/nonexistent/maljan-tests/floss")
+
+
+@pytest.fixture(autouse=True)
 def close_the_sidecars_a_test_opened() -> Iterator[None]:
     """A test's tool servers go with the test, the way a job's go with the job.
 

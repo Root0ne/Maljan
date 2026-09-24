@@ -454,6 +454,22 @@ test.describe("agent definitions and profiles", () => {
     ).toHaveCount(1);
   });
 
+  test("a seeded team is drawn as its stage graph beside the editor", async ({
+    authenticatedPage: page,
+  }) => {
+    await page.goto(PROFILES_PATH);
+
+    const graph = page.locator('[data-profile="default"] [data-team-graph="default"]');
+    await expect(graph).toBeVisible();
+    await expect(graph.locator('[data-stage-node="verdict"]')).toBeVisible();
+    await expect(graph.getByText("No problems with this team.")).toBeVisible();
+
+    // A stage in the graph is a button that takes focus to its card.
+    await graph.locator('[data-stage-node="verdict"]').focus();
+    await page.keyboard.press("Enter");
+    await expect(page.locator('[data-profile="default"] [data-stage="verdict"]')).toBeFocused();
+  });
+
   /* B5 (dev audit 2026-09-06): Clone with an empty name box did nothing at all
    * — no card, no message, no request — and an invalid name put its message
    * beside the name box at the bottom of the editor, nowhere near the button

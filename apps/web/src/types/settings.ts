@@ -201,6 +201,57 @@ export interface ProfileEntry {
   static_provider?: string | null;
 }
 
+/**
+ * One finding of `POST /settings/lint-teams`. An error is a refusal the apply
+ * path would make, in the same words; a warning never blocks apply. `path` is
+ * the dotted key a refusal would carry, so it routes to the same card.
+ */
+export interface TeamFinding {
+  severity: "error" | "warning";
+  code: string;
+  message: string;
+  /** Null for a finding about the agent map rather than one team. */
+  team: string | null;
+  stage: string | null;
+  field: string | null;
+  agent: string | null;
+  path: string;
+}
+
+/** One stage as the shared team layout places it. */
+export interface TeamGraphNode {
+  key: string;
+  label: string;
+  kind: string;
+  agents: string[];
+  when: string;
+  reads: string;
+  mode: string;
+  row: number;
+  column: number;
+}
+
+/** A `depends_on` edge; `implicit` is the triage pack adopting a root stage,
+ *  `legal: false` a dependency on a stage written further down. */
+export interface TeamGraphEdge {
+  source: string;
+  target: string;
+  implicit: boolean;
+  legal: boolean;
+}
+
+export interface TeamGraph {
+  nodes: TeamGraphNode[];
+  edges: TeamGraphEdge[];
+  rows: number;
+  columns: number;
+}
+
+export interface TeamLintResult {
+  findings: TeamFinding[];
+  graphs: Record<string, TeamGraph>;
+}
+
 /** `ProbeResult.details` as the agent probe fills it in. */
 export interface AgentProbeDetails {
   prompt_chars: number;
@@ -287,6 +338,33 @@ export interface CapabilityManifest {
   server: string;
   version: string;
   tools: CapabilityCell[];
+}
+
+/**
+ * The context window the configured models serve, and what it buys one tool
+ * answer. Mirrors `ContextWindowResponse` in
+ * `apps/api/app/schemas/settings.py`.
+ *
+ * `source` is one of four words: `declared` (the settings name the window),
+ * `probed` (the server reported it), `table` (the vendored figure for this
+ * model family) and `fallback` (nothing answered). `cap` is what one answer
+ * may take on an empty conversation, which is the most it can be; `derived`
+ * is false when the operator set the cap themselves, and the window then
+ * decides nothing.
+ */
+export interface ContextWindow {
+  tokens: number;
+  source: "declared" | "probed" | "table" | "fallback";
+  detail: string;
+  chars_per_token: number;
+  reply_tokens: number;
+  answer_share: number;
+  cap: number;
+  derived: boolean;
+  setting: number;
+  /** What an operator does about an unknown window. Empty when the window is
+   *  known and there is nothing to do. */
+  remedy: string;
 }
 
 export interface ProbeResult {

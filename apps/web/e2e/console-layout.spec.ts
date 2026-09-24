@@ -120,7 +120,6 @@ test.describe("a verdict against its own severity", () => {
             severity: {
               ...REPORT.malware_report!.severity,
               rating: "Informational",
-              overall_score: 0.5,
             },
           },
         },

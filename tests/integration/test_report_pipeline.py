@@ -16,7 +16,8 @@ import pytest
 
 from maljan.app import MaljanApp
 from maljan.core.config import Settings
-from maljan.reporting.models import MalwareReport
+from maljan.reporting.builder import NO_SUMMARY_REASON
+from maljan.reporting.models import KeyFinding, MalwareReport
 from maljan.reporting.narrative_agent import NarrativeAgent, NarrativeOutput
 from maljan.schemas.stix_models import Bundle
 
@@ -47,16 +48,19 @@ class TestReportNodePopulatesState:
 
         report = MalwareReport.model_validate(result["malware_report"])
         assert report.identity.hashes.sha256 == "deadbeef" * 8
-        # Fallback narrative ensured the report is never empty.
-        assert report.executive_summary
+        # No report model ran, and the report says so rather than printing a
+        # template where the model's summary would be.
+        assert report.executive_summary == ""
+        assert any(r.startswith(NO_SUMMARY_REASON) for r in report.degradation_reasons)
 
     def test_markdown_contains_required_headings(self, mock_settings: Settings) -> None:
         app = MaljanApp(config=mock_settings, mock=True)
         result = app.run("deadbeef" * 8, file_name="report-test.exe")
         markdown = result["malware_report_markdown"]
-        assert "# Malware Analysis Report" in markdown
-        assert "## Sample Identification" in markdown
-        assert "## MITRE ATT&CK Matrix" in markdown
+        assert markdown.startswith("# ")
+        assert "## 1. Key findings" in markdown
+        assert "## 2. Sample overview" in markdown
+        assert "## 8. MITRE ATT&CK mapping" in markdown
 
     def test_extended_bundle_round_trips(self, mock_settings: Settings) -> None:
         app = MaljanApp(config=mock_settings, mock=True)
@@ -87,17 +91,22 @@ class TestReportNodeDisabled:
 
 
 class TestNarrativeFallbackInMock:
-    """In mock mode, NarrativeAgent is None and the deterministic fallback runs."""
+    """In mock mode no report model runs, and the platform writes no prose for it."""
 
-    def test_executive_summary_is_fallback_template(self, mock_settings: Settings) -> None:
+    def test_the_report_says_no_summary_was_written(self, mock_settings: Settings) -> None:
         app = MaljanApp(config=mock_settings, mock=True)
         result = app.run("deadbeef" * 8, file_name="mock-test.exe")
         report = MalwareReport.model_validate(result["malware_report"])
 
-        # Fallback narrative is unique enough to identify (mock/offline phrase).
-        assert "auto-generated summary" in report.executive_summary.lower()
-        # Always at least one recommendation, even on the fallback path.
-        assert len(report.defensive_recommendations) >= 1
+        assert report.executive_summary == ""
+        assert report.defensive_recommendations == []
+        assert f"{NO_SUMMARY_REASON}: no report model ran in this run" in (
+            report.degradation_reasons
+        )
+        assert (
+            "No summary was written: no report model ran in this run."
+            in (result["malware_report_markdown"])
+        )
 
 
 class TestNarrativeWithMockLLM:
@@ -119,10 +128,10 @@ class TestNarrativeWithMockLLM:
                 "Recommend immediate containment of the affected host. "
                 "Confidence anchored by corroborated dynamic + network layers."
             ),
-            capabilities_narrative=[
-                "Persistence via T1547.001 Run key under HKLM.",
-                "Command and Control via TLS to public destination.",
-                "Defense Evasion limited to standard packing.",
+            key_findings=[
+                KeyFinding(text="It persists through a T1547.001 Run key under HKLM."),
+                KeyFinding(text="It talks to its C2 over TLS to a public destination."),
+                KeyFinding(text="Its defense evasion is limited to standard packing."),
             ],
             defensive_recommendations=[
                 DefensiveRecommendation(
@@ -167,7 +176,7 @@ class TestNarrativeWithMockLLM:
 
         report = MalwareReport.model_validate(result["malware_report"])
         assert "FAKE LLM SUMMARY" in report.executive_summary
-        assert any("T1547.001" in p for p in report.capabilities_narrative)
+        assert any("T1547.001" in finding.text for finding in report.key_findings)
         agent.generate.assert_awaited_once()
 
     def test_narrative_failure_falls_back_to_template(
@@ -186,8 +195,9 @@ class TestNarrativeWithMockLLM:
         result = app.run("deadbeef" * 8, file_name="fallback-test.exe")
         report = MalwareReport.model_validate(result["malware_report"])
 
-        # Deterministic fallback should have run.
-        assert "auto-generated summary" in report.executive_summary.lower()
+        # No template stands in for the answer; the reason is recorded.
+        assert report.executive_summary == ""
+        assert any(r.startswith(NO_SUMMARY_REASON) for r in report.degradation_reasons)
 
 
 class TestDetectionSignaturesInReport:

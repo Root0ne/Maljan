@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 
 import { useReport } from "../layout";
 import { entropyClass, formatBytes } from "@/lib/report-utils";
@@ -9,9 +10,11 @@ import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import {
   binarySectionKeys,
   importContainerLabel,
+  hasSection,
   isCoveredBySection,
   sectionsForTab,
 } from "@/components/analysis/reportSections";
+import { SIGMA_SECTION, YARA_SECTION } from "@/components/analysis/ruleMatches";
 import { fileTypeLabel } from "@/types/malware-report";
 import type { StringIOC, StringIOCKind } from "@/types/malware-report";
 
@@ -45,6 +48,20 @@ export default function StaticTab() {
   // said the same thing.
   const reportSections = report?.malware_report?.sections;
   const evidenceSections = sectionsForTab(reportSections, "static");
+  /* The YARA and Sigma rules that fired are DETECTION's, where each Sigma
+   * rule's level sits on the severity ladder. This page points there rather
+   * than drawing the same table a second time. */
+  const rulesFired =
+    hasSection(reportSections, YARA_SECTION) || hasSection(reportSections, SIGMA_SECTION);
+  const rulesLink = rulesFired && report?.job_id ? (
+    <p className="text-xs text-text-secondary" data-rules-moved>
+      The YARA and Sigma rules that fired on this sample are on{" "}
+      <Link href={`/analysis/${report.job_id}/detection`} className="text-accent-strong hover:underline">
+        DETECTION
+      </Link>
+      .
+    </p>
+  ) : null;
   const showsExtractedSections = !isCoveredBySection(
     reportSections,
     binarySectionKeys("sections")
@@ -95,6 +112,7 @@ export default function StaticTab() {
   if (!staticData) {
     return (
       <div className="space-y-4">
+        {rulesLink}
         <ArtifactSections sections={evidenceSections} />
         <div className="p-8 text-center text-sm text-text-secondary">
           No format-aware extractor produced a typed static block for this{" "}
@@ -109,6 +127,7 @@ export default function StaticTab() {
 
   return (
     <div className="space-y-4">
+      {rulesLink}
       <ArtifactSections sections={evidenceSections} />
 
       {/* Carved payloads lead the page. A nested executable inside a dropper
@@ -174,7 +193,10 @@ export default function StaticTab() {
             </h2>
             <p className="text-[11px] text-text-muted mt-1">
               Derived from the import table alone — no sandbox, no model. This is the
-              audit trail behind the capability matrix.
+              audit trail behind the capability matrix. A row is an association, not a
+              finding: the last column is how much ordinary software the same rule
+              fires on, measured over the corpus it names, and it says nothing about
+              how likely this sample is to be benign.
             </p>
           </div>
           <table className="w-full">
@@ -185,6 +207,7 @@ export default function StaticTab() {
                 <Th>Rule</Th>
                 <Th>Confidence</Th>
                 <Th>Imports</Th>
+                <Th>Measured</Th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border-light">
@@ -204,6 +227,12 @@ export default function StaticTab() {
                     {(h.matched_apis ?? []).slice(0, 4).join(", ")}
                     {(h.matched_apis ?? []).length > 4 &&
                       ` +${(h.matched_apis ?? []).length - 4}`}
+                  </td>
+                  {/* An unmeasured rule says so. A blank cell here would read
+                      as a rule that never fires on anything benign, which is
+                      the opposite of what an absent measurement means. */}
+                  <td className="px-4 py-2 text-xs text-text-secondary">
+                    {h.benign_rate || "not measured"}
                   </td>
                 </tr>
               ))}
@@ -249,21 +278,37 @@ export default function StaticTab() {
             </div>
           )}
           {capabilityProfile.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-2 items-center">
-              {capabilityProfile.map(([cat, count]) => (
-                <span
-                  key={cat}
-                  className="text-[11px] px-1.5 py-0.5 rounded bg-bg-hover text-text-secondary font-mono"
-                >
-                  {cat} ×{count}
-                </span>
-              ))}
-              {(staticData.api_capabilities_evidence_ids ?? []).length > 0 && (
-                <span className="text-[11px] text-text-muted font-mono">
-                  from {(staticData.api_capabilities_evidence_ids ?? []).join(", ")}
-                </span>
+            <>
+              <div className="flex flex-wrap gap-1.5 mt-2 items-center">
+                {capabilityProfile.map(([cat, count]) => {
+                  const share = (staticData.api_capability_rates ?? {})[cat];
+                  return (
+                    <span
+                      key={cat}
+                      className="text-[11px] px-1.5 py-0.5 rounded bg-bg-hover text-text-secondary font-mono"
+                    >
+                      {cat} ×{count}
+                      {typeof share === "number" && ` (${share.toFixed(1)}%)`}
+                    </span>
+                  );
+                })}
+                {(staticData.api_capabilities_evidence_ids ?? []).length > 0 && (
+                  <span className="text-[11px] text-text-muted font-mono">
+                    from {(staticData.api_capabilities_evidence_ids ?? []).join(", ")}
+                  </span>
+                )}
+              </div>
+              {/* Said once rather than on every chip. A count of imports in a
+                * group is not a fact about the sample until a reader knows how
+                * much ordinary software is in the same group. */}
+              {staticData.api_capability_corpus && (
+                <div className="text-[11px] text-text-muted mt-1.5">
+                  The bracketed share is how much of {staticData.api_capability_corpus} the
+                  category appears on; it says nothing about how likely this sample is to be
+                  benign.
+                </div>
               )}
-            </div>
+            </>
           )}
           {staticData.obfuscation_indicators.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-1">
@@ -436,13 +481,39 @@ export default function StaticTab() {
               Exports ({staticData.exports.length})
             </h2>
           </div>
-          <div className="p-4 flex flex-wrap gap-1">
-            {staticData.exports.map((e) => (
-              <span key={e} className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-bg-active text-text-secondary">
-                {e}
-              </span>
-            ))}
-          </div>
+          {/* With the ordinal and the address when the format tool reported
+              them: several exports sharing one address is a fact the names
+              alone hide. */}
+          {(staticData.export_rows ?? []).length > 0 ? (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-text-muted">
+                  <th className="px-4 py-1.5 font-medium">Name</th>
+                  <th className="px-4 py-1.5 font-medium">Ordinal</th>
+                  <th className="px-4 py-1.5 font-medium">RVA</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(staticData.export_rows ?? []).map((row, i) => (
+                  <tr key={`${row.name}-${i}`} className="border-t border-border">
+                    <td className="px-4 py-1 font-mono text-text-secondary">
+                      {row.name || "(unnamed)"}
+                    </td>
+                    <td className="px-4 py-1 font-mono text-text-muted">{row.ordinal ?? "-"}</td>
+                    <td className="px-4 py-1 font-mono text-text-muted">{row.rva ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="p-4 flex flex-wrap gap-1">
+              {staticData.exports.map((e) => (
+                <span key={e} className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-bg-active text-text-secondary">
+                  {e}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

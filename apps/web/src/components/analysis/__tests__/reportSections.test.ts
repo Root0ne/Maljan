@@ -45,6 +45,16 @@ describe("which tab a section belongs on", () => {
     expect(tabOfSection("sandbox_services_and_tasks")).toBe("persistence");
   });
 
+  it("puts the rules that fired on DETECTION, once, and not on STATIC", () => {
+    expect(tabOfSection("yara_matches")).toBe("detection");
+    expect(tabOfSection("sigma_matches")).toBe("detection");
+    expect(
+      sectionsForTab([section({ key: "sigma_matches" }), section({ key: "strings" })], "static").map(
+        (s) => s.key,
+      ),
+    ).toEqual(["strings"]);
+  });
+
   it("treats anything else the sandbox reported as behaviour", () => {
     expect(tabOfSection("sandbox_processes")).toBe("dynamic");
     expect(tabOfSection("sandbox_mutexes")).toBe("dynamic");

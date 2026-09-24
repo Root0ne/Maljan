@@ -172,7 +172,8 @@ class TestTheJudgeIsAskedOnce:
 
         conflicting = (
             '{"type": "bundle", "objects": [{"type": "malware", '
-            '"id": "malware--aaaaaaaa-0000-4000-8000-bbbbbbbbbbbb", "name": "loader"}], '
+            '"id": "malware--aaaaaaaa-0000-4000-8000-bbbbbbbbbbbb", "name": "loader", '
+            '"is_family": false}], '
             '"x_maljan_assessment": {"verdict": "Malware", '
             '"severity": {"rating": "Informational", '
             '"rationale": "no evidence of malicious functionality"}, '

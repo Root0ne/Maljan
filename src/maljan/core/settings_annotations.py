@@ -202,10 +202,31 @@ ANNOTATIONS: dict[str, Annotation] = {
             "explicitly to keep the verdict call deterministic. A per-agent base URL "
             "applies to openai and ollama entries only and lets different agents use "
             "different local servers, while the provider's API key stays shared. "
+            "An entry may list fallbacks, models tried in order only when the one "
+            "before fails as a provider (a refused connection, a timeout, a server "
+            "error, a model the server does not have) and never because of what a "
+            "model answered; each is probed like the first. "
             "Ordinarily edited from "
             "the Agents page; this raw view is for bulk edits."
         ),
         "probe": "llm",
+        "advanced": True,
+    },
+    "llm.fallback_turn_share": {
+        "title": "Turn deadline for a model on a fallback list (share of the loop)",
+        "description": (
+            "How much of what is left of the current loop one model on its fallback list "
+            "may spend on a turn before it is treated as stalled and the next model is "
+            "asked (never less than one second); the model that answers then stays for the "
+            "rest of that loop. Worked out per turn from the budget that loop runs under, so "
+            "an agent answering an ask gets a share of the ask's clock and a late stall is "
+            "still replaced; the reporter's narrative round and composer sections are each "
+            "measured against their own clock. A share of the "
+            "loop, because the loop budget is what would otherwise cancel a stalled model "
+            "before any timeout inside it: the default of a half leaves the other half of "
+            "the loop to the model that took over. The last model on a list has no "
+            "deadline of its own and is bounded by the loop, as a lone model is."
+        ),
         "advanced": True,
     },
     "llm.anthropic.api_key": {
@@ -234,9 +255,13 @@ ANNOTATIONS: dict[str, Annotation] = {
     "llm.expert_max_tokens": {
         "title": "Analyst max output tokens",
         "description": (
-            "Per-call output-token budget for the analyst LLM. 0 means unbounded "
-            "(provider/server default); a nonzero value both caps a runaway decode and "
-            "sizes the split budget when view_decomposition_views is set."
+            "Per-call output-token budget for the analyst LLM. 0, the default, derives it: "
+            "the model's declared maximum output where one is declared (bounded by a quarter "
+            "of its context window), a quarter of the window for a runtime you run "
+            "that answered as one (llama.cpp /props, Ollama /api/show), and 8,192 for a "
+            "hosted API that declares no maximum; "
+            "printed in the run summary. A value above 0 is used as set; it caps a runaway "
+            "decode and sizes the split budget when view_decomposition_views is set."
         ),
     },
     "llm.frontier.active_params_b": {
@@ -400,8 +425,12 @@ ANNOTATIONS: dict[str, Annotation] = {
         "description": (
             "Hard output-token cap for the judge's final verdict generation. Bounds a "
             "rambling or degenerate decode on a slow local model to a predictable "
-            "wall-clock cost instead of relying only on the timeout; set to 0 for "
-            "unbounded."
+            "wall-clock cost instead of relying only on the timeout. 0, the default, "
+            "derives it: the model's declared maximum output where one is declared (bounded "
+            "by a quarter of its context window), a quarter of the window for a runtime you "
+            "run that answered as one (llama.cpp /props, Ollama /api/show), and 8,192 for "
+            "a hosted API that declares no maximum; "
+            "printed in the run summary. A value above 0 is used as set."
         ),
     },
     "llm.ollama.base_url": {
@@ -442,8 +471,10 @@ ANNOTATIONS: dict[str, Annotation] = {
         "description": (
             "How long Ollama keeps the model loaded in memory after the last request "
             "(an Ollama duration string, e.g. 30m). Longer values avoid reload latency "
-            "between calls at the cost of holding GPU/RAM."
+            "between calls at the cost of holding GPU/RAM. The LLM probe sends it "
+            "too, so the model it loads is the one a job finds."
         ),
+        "probe": "llm",
         "subgroup": "Ollama",
         "advanced": True,
     },
@@ -452,8 +483,10 @@ ANNOTATIONS: dict[str, Annotation] = {
         "description": (
             "Context window size (tokens) requested from the Ollama model. Must be "
             "large enough for the chunked prompt plus generation budget, or the server "
-            "silently truncates the oldest context."
+            "silently truncates the oldest context. The LLM probe asks at this size "
+            "too, so it loads the model the way a job will."
         ),
+        "probe": "llm",
         "subgroup": "Ollama",
     },
     "llm.openai.context_size": {
@@ -740,10 +773,11 @@ ANNOTATIONS: dict[str, Annotation] = {
     "preprocessing.max_tool_output_chars": {
         "title": "Max tool output characters",
         "description": (
-            "Maximum characters kept from an MCP tool's output (e.g. a Ghidra "
-            "decompile). Longer output is summarized (if the function summarizer is "
-            "enabled) or truncated; raising it risks pushing the accumulated ReAct "
-            "context past the model's window."
+            "Maximum characters kept from a tool's answer (e.g. a Ghidra decompile). "
+            "0 derives it per call from the context window the served model was found "
+            "to have, less what the conversation already holds and the room kept back "
+            "for the model's reply. A positive value caps every answer at that number "
+            "whatever the window."
         ),
         "subgroup": "Thresholds and limits",
     },
@@ -926,6 +960,17 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "subgroup": "Triage pack",
     },
+    "triage.memory_floor_mb": {
+        "title": "Triage memory floor (MiB)",
+        "description": (
+            "What running FLOSS beside capa must leave of the host's available "
+            "memory. The pack runs the two together only when the available memory, "
+            "less capa's measured peak and FLOSS's own bound, stays at or above this, "
+            "and the worker's memory limit, where it has one, holds both; otherwise it "
+            "runs them one after the other and records why."
+        ),
+        "subgroup": "Triage pack",
+    },
     "events.stream_deltas": {
         "title": "Stream partial answers",
         "description": (
@@ -1090,7 +1135,11 @@ ANNOTATIONS: dict[str, Annotation] = {
     },
     "reporting.composer_section_max_tokens": {
         "title": "Composer section max tokens",
-        "description": ("Output-token cap per report section when composer_enabled is true."),
+        "description": (
+            "Output-token cap per report section when composer_enabled is true. 0 derives it "
+            "per model from the context window the model serves (the room an analyst's reply "
+            "is given), and the run summary shows the derivation."
+        ),
         "subgroup": "Report content",
     },
     "reporting.default_tlp": {
@@ -1627,6 +1676,66 @@ ANNOTATIONS.update(
             "group": "mcp",
             "editor": "server_map",
             "order": -1,
+        },
+        "mcp.breaker.failures_to_open": {
+            "title": "Unanswered calls before a server rests",
+            "description": (
+                "How many calls in a row a tool server does not answer before it rests for "
+                "its cooldown, per job. A call is unanswered when it fails at the transport "
+                "— a timeout, a refused connection, the server's process gone — or does not "
+                "finish within its caller's own budget while it waits on the server. A tool "
+                "that answers with its own error (a bad argument, a missing file) has "
+                "answered and never counts. "
+                "The default is the number of attempts the platform already gives a "
+                "model call that drops its connection before calling it a failure; no "
+                "recorded live run had a tool server fail at the transport, so it is a "
+                "judgement and not a measurement."
+            ),
+            "subgroup": "Resilience",
+            "advanced": True,
+        },
+        "mcp.breaker.cooldown_seconds": {
+            "title": "How long a failing server rests (seconds)",
+            "description": (
+                "How long a rested tool server is left alone. A call in that time is "
+                "answered by the platform with a tool error naming the server, that it "
+                "is resting and when it will be tried again; after it, one call is let "
+                "through and a success ends the rest. The default is a judgement: long "
+                "enough for a sidecar being restarted to come back, short against the "
+                "analysts' own loop budgets. Zero tries the server again on the next call."
+            ),
+            "subgroup": "Resilience",
+            "advanced": True,
+        },
+        "mcp.breaker.call_timeout_seconds": {
+            "title": "How long a tool call may go unanswered (seconds)",
+            "description": (
+                "The budget every tool call gets at least before it counts as a server that "
+                "did not answer — a transport failure the breaker counts. A tool whose server "
+                "declares a longer budget in its capabilities manifest gets that one, and "
+                "thirty seconds of grace are added either way, so a tool that gives up at its "
+                "own budget answers with its own timeout error first. Zero, the default, "
+                "derives it from the longest tool budget this deployment configures: "
+                "core.static.capa.timeout_seconds (300, and 900 on a slow host, still fits). "
+                "A call cut short by its caller's own budget while it waited on the server "
+                "counts as unanswered too."
+            ),
+            "subgroup": "Resilience",
+            "advanced": True,
+        },
+        "mcp.breaker.max_concurrent_calls": {
+            "title": "Calls in flight per server",
+            "description": (
+                "How many calls one tool server may have in flight for one job at once; "
+                "the rest wait their turn, so parallel analysts queue rather than pile "
+                "onto one slow sidecar. Zero leaves the calls uncapped, which is how "
+                "every server was driven before this setting existed. The default is a "
+                "judgement: the shipped teams run their analysts one after another, and "
+                "four lets one analyst's parallel tool calls through while bounding a "
+                "team that fans out."
+            ),
+            "subgroup": "Resilience",
+            "advanced": True,
         },
         "static.generic.server": {
             "title": "Custom MCP server",

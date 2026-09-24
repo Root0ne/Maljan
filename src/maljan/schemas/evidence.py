@@ -14,13 +14,25 @@ shows it to the model with the result, agents cite it in their findings, report
 sections list the ids they were built from, and the API serves the entry those
 ids name.
 
-Two bounds keep the ledger from becoming the thing it records. Each output is
-trimmed to ``MAX_OUTPUT_CHARS`` on the way in, and each agent gets a byte
-budget (``report.evidence_budget_bytes``); past the budget an entry keeps its
-arguments, its outcome and its timing but drops its output, and says so with
-``truncated``. What was dropped is counted in the truncation ledger, so the
-report can state how many entries it is not showing rather than quietly
+One bound keeps the ledger from becoming the thing it records: each agent gets
+a byte budget (``report.evidence_budget_bytes``), and past it an entry keeps
+its arguments, its outcome and its timing but drops its output and says so
+with ``truncated``. What was dropped is counted in the truncation ledger, so
+the report can state how many entries it is not showing rather than quietly
 showing fewer.
+
+There used to be a second, silent one: every output was cut to six thousand
+characters on the way in, with a trailing ellipsis and no flag. That was
+defensible while the model read six thousand characters too. It is not now
+that what a model reads is derived from its context window — a decompilation
+the model read forty thousand characters of was stored as its first six
+thousand, and the stored record is what the evidence API serves and what the
+report sections are built from, so a citation was checkable only as far as the
+prefix went. The ledger stores the text the model was handed, whole; the byte
+budget is the one storage decision this platform makes, and it announces
+itself. A caller that passes a ``max_chars`` of its own still gets a cut, and
+that entry is flagged ``truncated`` like any other — a stored record that is a
+prefix and does not say so is the one shape this platform's principle forbids.
 """
 
 from __future__ import annotations
@@ -33,7 +45,6 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from maljan.schemas.tool_evidence import (
-    MAX_OUTPUT_CHARS,
     CapturedToolOutput,
     _symbol_from_args,
     trim_output,
@@ -159,6 +170,13 @@ class LedgerEntry(BaseModel):
         default=None,
         description="The arguments as the model wrote them, kept when they were repaired.",
     )
+    model: str | None = Field(
+        default=None,
+        description=(
+            "The model whose turn asked for this call, as provider/model; None where "
+            "nothing named it."
+        ),
+    )
     started_at: float = Field(default=0.0, description="Unix timestamp the call started at.")
     duration_ms: int = Field(default=0, description="Wall-clock duration of the call.")
     seq: int = Field(default=0, description="Call order within the job, 1-based.")
@@ -209,11 +227,12 @@ def build_entry(
     started_at: float = 0.0,
     duration_ms: int = 0,
     stage: str = "analysis",
-    max_chars: int = MAX_OUTPUT_CHARS,
+    max_chars: int = 0,
     repeated_of: str | None = None,
     remediation: str | None = None,
     args_repaired: bool = False,
     args_raw: str | None = None,
+    model: str | None = None,
 ) -> LedgerEntry:
     """One entry, with the output trimmed and parsed the same way every time.
 
@@ -224,12 +243,18 @@ def build_entry(
     ``error`` keeps its decision; only an entry handed in as a success is
     read for a returned error.
 
-    ``structured`` is parsed from the whole result and ``output`` is the text
-    cut at ``max_chars``: the cut is for what a model reads, and a reader of
-    the record — corroboration, the projections, the evidence sections — needs
-    the result the tool gave, not the first six thousand characters of it.
-    What bounds the stored size is the per-agent evidence byte budget
-    (``apply_budget``).
+    ``output`` is the text the model was handed, whole, and ``structured`` is
+    parsed from the same text. A second cut here would be a prefix nobody
+    asked for: what reaches this function has already met the tool-output
+    guardrail, which is what decides how much of an answer a model may read,
+    and cutting it again would make the stored record smaller than the thing
+    the citation points at. What bounds the stored size is the per-agent
+    evidence byte budget (``apply_budget``), which keeps the call, drops the
+    output and says so.
+
+    ``max_chars`` is off by default and exists for a caller with a ceiling of
+    its own. A cut made under it sets ``truncated``, because a record that is
+    a prefix has to say so.
 
     ``repeated_of`` names the earlier call this one repeats. Such an entry
     carries the note the model was given rather than a tool result, so it is
@@ -244,7 +269,7 @@ def build_entry(
     """
     safe_args = dict(args) if isinstance(args, dict) else {}
     full = str(output or "")
-    text = trim_output(full, max_chars)
+    text = trim_output(full, max_chars) if int(max_chars) > 0 else full
     if ok and error is None and not repeated_of:
         from maljan.tools.errors import error_parts
 
@@ -265,10 +290,12 @@ def build_entry(
         error=error,
         remediation=remediation if error else None,
         output=text,
+        truncated=len(text) < len(full),
         structured=None if repeated_of else parse_structured(full),
         repeated_of=repeated_of,
         args_repaired=bool(args_repaired),
         args_raw=args_raw if args_repaired else None,
+        model=model or None,
         started_at=started_at,
         duration_ms=max(0, int(duration_ms)),
         seq=seq,

@@ -1,6 +1,7 @@
 import type { TranscriptRow } from "@/lib/conversation";
 import type { JobRoster } from "@/types/events";
 import type { EvidenceListResponse, EvidenceQuery } from "@/types/evidence";
+import type { RunDiff } from "@/types/runDiff";
 import type {
   EnrichTriggerResponse,
   MalwareReport,
@@ -9,12 +10,14 @@ import type {
 import { ApiError } from "@/lib/errors";
 import { SettingsValidationError } from "@/types/settings";
 import type {
+  ContextWindow,
   ImportRequest,
   MappingPreview,
   PatchResult,
   ProbeResult,
   SettingsSchema,
   SettingsValues,
+  TeamLintResult,
   VirustotalRegistration,
 } from "@/types/settings";
 
@@ -146,6 +149,29 @@ export interface DashboardStatsDTO {
   jobs_by_status: Record<string, number>;
   verdict_distribution: Record<string, number>;
   avg_duration_seconds: number | null;
+}
+
+/** One tool on the dashboard's "Tools used" list. */
+export interface ToolUsageRowDTO {
+  tool: string;
+  /** Calls summed across the runs read. */
+  calls: number;
+  /** How many of those runs called it at least once. */
+  runs: number;
+}
+
+/** What `GET /dashboard/tools` answers: the per-tool counts of the caller's
+ *  latest completed runs, read from each run's `run_summary.evidence.by_tool`. */
+export interface ToolUsageDTO {
+  /** How many completed runs were asked for. */
+  limit: number;
+  /** How many completed runs were read, which is fewer while the account is
+   *  new. Absent from an API older than the field. */
+  read?: number;
+  /** How many of those carry the per-tool record. A report written before
+   *  the record existed is read but is not a run that called nothing. */
+  runs: number;
+  tools: ToolUsageRowDTO[];
 }
 
 export interface SystemStatusDTO {
@@ -558,6 +584,12 @@ class ApiClient {
     return this.request<DashboardStatsDTO>("/api/v1/dashboard/stats");
   }
 
+  /** The tools the caller's last `limit` completed runs called. */
+  getDashboardTools(limit?: number) {
+    const query = limit ? `?limit=${limit}` : "";
+    return this.request<ToolUsageDTO>(`/api/v1/dashboard/tools${query}`);
+  }
+
   /* ── System ────────────────────────────────────────── */
   async getSystemStatus() {
     const data = await this.request<SystemStatusDTO>("/api/v1/system/status");
@@ -594,6 +626,11 @@ class ApiClient {
       `/api/v1/settings?group=${encodeURIComponent(group)}`,
       { method: "DELETE" }
     );
+  }
+
+  /** The window the configured models serve. Read-only, and costs no tokens. */
+  getContextWindow() {
+    return this.request<ContextWindow>("/api/v1/settings/context-window");
   }
 
   testSettingsProbe(probe: string, values: Record<string, unknown>) {
@@ -641,6 +678,23 @@ class ApiClient {
       "/api/v1/settings/validate-condition",
       { method: "POST", body: JSON.stringify({ expression }) }
     );
+  }
+
+  /**
+   * Lint every team as staged and lay each one out. Nothing is stored; the
+   * errors are the refusals apply would make, in the same words.
+   */
+  lintTeams(
+    profiles: Record<string, unknown>,
+    definitions: Record<string, unknown>,
+    profile: string,
+    init: { signal?: AbortSignal } = {}
+  ) {
+    return this.request<TeamLintResult>("/api/v1/settings/lint-teams", {
+      method: "POST",
+      body: JSON.stringify({ profiles, definitions, profile }),
+      signal: init.signal,
+    });
   }
 
   /** Run a REST-sandbox mapping against a pasted response. Nothing is stored. */
@@ -708,12 +762,15 @@ class ApiClient {
   }
 
   /* ── Jobs ──────────────────────────────────────────── */
-  getJobs(page = 1, pageSize = 50, status?: string) {
+  /** One page of the caller's jobs; `sampleId` narrows it to one sample's
+   *  runs, which is how a run finds its siblings to compare with. */
+  getJobs(page = 1, pageSize = 50, status?: string, sampleId?: string) {
     const params = new URLSearchParams({
       page: String(page),
       page_size: String(pageSize),
     });
     if (status) params.set("status", status);
+    if (sampleId) params.set("sample_id", sampleId);
     return this.request<PaginatedResponse<JobDTO>>(
       `/api/v1/jobs?${params}`
     );
@@ -816,6 +873,13 @@ class ApiClient {
    * job id. */
   getReportByJobId(jobId: string) {
     return this.request<ReportDetailDTO>(`/api/v1/reports/job/${jobId}`);
+  }
+
+  /** What changed between two stored runs, both named by their job id.
+   *  404 when either run is not one the caller may read. */
+  getRunDiff(jobA: string, jobB: string) {
+    const params = new URLSearchParams({ a: jobA, b: jobB, by: "job" });
+    return this.request<RunDiff>(`/api/v1/reports/diff?${params}`);
   }
 
   getReportTimeline(reportId: string) {

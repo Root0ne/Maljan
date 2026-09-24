@@ -199,6 +199,7 @@ class StaticAnalyst(BaseAnalyst):
             output_guardrail=guardrail,
             max_output_chars=cfg.preprocessing.max_tool_output_chars,
             truncation_ledger=getattr(self, "truncation_ledger", None),
+            context_budget=self._context_budget(),
         )
 
     def _static_capabilities(self) -> Any:
@@ -524,17 +525,17 @@ class StaticAnalyst(BaseAnalyst):
             ]
         )
 
-        response = (prompt | self.llm).invoke(
-            {
-                "own_report": own_report,
-                "peer_section": peer_section,
-                "mediator_feedback": mediator_feedback,
+        return self.ask_the_model(
+            prompt.format_messages(
+                own_report=own_report,
+                peer_section=peer_section,
+                mediator_feedback=mediator_feedback,
                 # Don't let the "No static data available" placeholder
                 # talk the model out of its live-Ghidra ORIGINAL REPORT.
-                "data": _reframe_static_raw_data(original_data, bool(self.tools)),
-            }
+                data=_reframe_static_raw_data(original_data, bool(self.tools)),
+            ),
+            what="revision",
         )
-        return str(response.content)
 
     # ------------------------------------------------------------------
     # ISR interface (structured claim extraction)
@@ -650,16 +651,11 @@ class StaticAnalyst(BaseAnalyst):
             )
 
         if not claims:
-            # Fallback to text extraction if parsing fails
+            # No block the strict parser reads: the lenient reading, which
+            # keeps an answer with no claim as prose and says so.
             return self._text_to_isr(content, revision_round=0)
 
-        return AgentISR(
-            agent_id=self.name,
-            domain="static",
-            claims=claims,
-            dissent_items=[],
-            revision_round=0,
-        )
+        return self._parsed_isr(claims, content, "static")
 
     def revise_isr(
         self,
@@ -716,8 +712,9 @@ class StaticAnalyst(BaseAnalyst):
         # that obeys it puts a JSON fence into the revised report, and nothing
         # downstream of here — the claim parser, the transcript, the Composer —
         # should ever see it.
-        response = self.llm.invoke(self.frame_messages(messages))
-        content = self._capture_findings(str(response.content))
+        content = self._capture_findings(
+            self.ask_the_model(self.frame_messages(messages), what="revision")
+        )
 
         parsed = _parse_claim_blocks(content)
         # Drop defeatist meta-claims ("could not be performed / missing
@@ -913,7 +910,10 @@ def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
         try:
             confidence = max(0.0, min(1.0, float(confidence_match.group(1))))
         except ValueError:
-            confidence = 0.5
+            # A CONFIDENCE line that is not a number states no confidence, and
+            # a claim carries only the one its analyst stated. The block is
+            # counted by ``BaseAnalyst._parsed_isr`` and asked about.
+            continue
 
         technique_raw = technique_match.group(1).upper() if technique_match else "NONE"
         technique_id = None if technique_raw == "NONE" else technique_raw

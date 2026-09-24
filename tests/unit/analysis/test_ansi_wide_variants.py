@@ -89,18 +89,17 @@ class TestCountingImportsNotRuleEntries:
         assert any(rule.technique_id == "T1033" for rule, _ in hits)
 
     def test_the_evidence_cites_the_spelling_the_binary_uses(self) -> None:
-        """A report that says GetSystemDirectoryA when the binary imports the W
-        form sends a reader looking for something that is not there.
+        """A report that says RegDeleteValueA when the binary imports the W form
+        sends a reader looking for something that is not there.
 
-        (``GetWindowsDirectoryW``/``GetSystemDirectoryW`` are deliberately not
-        used here: they are catalogued under the ``filesystem`` behaviour
-        category but map to no ATT&CK technique, because path resolution is
-        something nearly every installer does. Qu1cksc0pe maps them to File and
-        Directory Discovery; that is a firehose we are declining.)
+        (The directory-walk names this used to use map to no ATT&CK technique
+        any more: walking a tree appeared on one ordinary binary in sixteen
+        while barely favouring malware, and an association that common changes
+        nothing a reader would believe. The imports are still in the pack.)
         """
         catalog = load_api_attck_map(_ATTCK)
         assert catalog is not None
-        hits = catalog.match({"FindFirstFileW", "FindNextFileW", "GetFileAttributesW"})
+        hits = catalog.match({"RegDeleteValueW", "RegCreateKeyExW"})
         assert hits
         for _rule, matched in hits:
             assert all(m.endswith("W") for m in matched), matched
@@ -110,12 +109,17 @@ class TestTheMeasuredEffect:
     def setup_method(self) -> None:
         reset_cache()
 
-    def test_a_wide_only_discovery_set_now_maps(self) -> None:
-        """T1083 was missing from Maljan's output for the audited sample and
-        present in Qu1cksc0pe's, for exactly this reason."""
+    def test_a_wide_only_set_still_maps(self) -> None:
+        """A discovery rule was missing from Maljan's output for the audited
+        sample and present in the other tool's, for exactly this reason.
+
+        That rule is gone — measured, it appeared on one ordinary binary in
+        sixteen while barely favouring malware — so the property is checked
+        where it still matters: the catalogue lists ``RegDeleteValueA`` and a
+        binary compiled against the wide entry points imports
+        ``RegDeleteValueW``, and the two are one capability.
+        """
         catalog = load_api_attck_map(_ATTCK)
         assert catalog is not None
-        hits = catalog.match(
-            {"FindFirstFileW", "FindNextFileW", "GetFileAttributesW", "GetLogicalDriveStringsA"}
-        )
-        assert any(rule.technique_id == "T1083" for rule, _ in hits)
+        hits = catalog.match({"RegDeleteValueW", "RegCreateKeyExW"})
+        assert any(rule.technique_id == "T1112" for rule, _ in hits)

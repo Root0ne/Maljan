@@ -7,7 +7,13 @@ import uuid
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from arq import ArqRedis
-from maljan.reporting.renderers.stix_renderer import indicator_publish_reason
+from maljan.reporting.renderers.stix_renderer import (
+    emulation_kwargs,
+    emulation_record,
+    indicator_publish_reason,
+    judge_indicator_rows,
+)
+from maljan.reporting.run_diff import RunRecord, diff_runs
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -73,7 +79,9 @@ def _shorten_hash_like(stem: str) -> str:
     return f"{short}.{ext}" if ext else short
 
 
-def _publishable(kind: str, value: Any, source: Any, reputation: Any) -> bool:
+def _publishable(
+    kind: str, value: Any, source: Any, reputation: Any, emulated: dict[str, Any] | None = None
+) -> bool:
     """Whether the platform's own publish rule would publish this row.
 
     The one rule, asked from a second place rather than copied into it: the
@@ -90,7 +98,10 @@ def _publishable(kind: str, value: Any, source: Any, reputation: Any) -> bool:
     operator notices and can work around with ``include=all``.
     """
     try:
-        return indicator_publish_reason(kind, str(value or ""), source, reputation) is not None
+        return (
+            indicator_publish_reason(kind, str(value or ""), source, reputation, **(emulated or {}))
+            is not None
+        )
     except Exception as exc:  # noqa: BLE001 — a feed answers, and says what broke
         logger.error(
             "the publish rule could not answer for a %s row; it is withheld from the "
@@ -102,6 +113,50 @@ def _publishable(kind: str, value: Any, source: Any, reputation: Any) -> bool:
         return False
 
 
+def _with_the_judge_s_values(out: list[dict], mr: dict, kind: str | None) -> None:
+    """Add the values the judge's indicators name, each with the one rule's answer.
+
+    The export asks the publish rule of every judge indicator before it carries
+    one, and the report's IOC table asks it of the same values
+    (``stix_renderer.judge_indicator_rows``); this feed reads the same answer, so
+    a value the export declined is withheld here too and one it carries is
+    published. A value the feed already has a row for keeps its row: its answer
+    is the same one. Rows are added in place; a stored report the model cannot
+    read adds none, and says so in the log.
+    """
+    if not mr.get("judge_indicators"):
+        return
+    try:
+        from maljan.reporting.models import MalwareReport
+
+        judged = judge_indicator_rows(MalwareReport.model_validate(mr))
+    except Exception as exc:  # noqa: BLE001 — a feed answers, and says what broke
+        logger.error(
+            "the judge's indicator values could not be asked the publish rule; none is "
+            "served (%s: %s)",
+            type(exc).__name__,
+            log_safe(exc),
+        )
+        return
+    for item, answer in judged:
+        if kind and item.kind != kind:
+            continue
+        value = (
+            f"{item.algorithm.lower().replace('-', '')}:{item.value}"
+            if item.kind == "hash"
+            else item.value
+        )
+        wanted = value.strip().lower()
+        if any(
+            row.get("kind") == item.kind and str(row.get("value") or "").strip().lower() == wanted
+            for row in out
+        ):
+            continue
+        out.append(
+            {"kind": item.kind, "value": value, "source": "judge", "published": answer == "yes"}
+        )
+
+
 def _url_host(raw: Any) -> str:
     """The host of a URL, lowercased, for the reputation the network block kept."""
     from urllib.parse import urlparse
@@ -110,6 +165,37 @@ def _url_host(raw: Any) -> str:
         return (urlparse(str(raw or "")).hostname or "").strip().lower().rstrip(".")
     except (ValueError, TypeError):
         return ""
+
+
+def run_record(report: AnalysisReport) -> RunRecord:
+    """A stored report as the run diff reads it, every value as stored."""
+    job = report.job
+    sample = job.sample if job is not None else None
+    duration = job.duration_seconds if job is not None else None
+    return RunRecord(
+        report_id=str(report.id),
+        job_id=str(report.job_id),
+        created_at=report.created_at.isoformat() if report.created_at else None,
+        verdict=report.verdict,
+        overall_confidence=report.overall_confidence,
+        malware_category=report.malware_category,
+        malware_report=report.malware_report,
+        run_summary=report.run_summary,
+        stix_bundle=report.stix_bundle,
+        agent_findings=[
+            {
+                "agent_name": f.agent_name,
+                "status": f.status,
+                "final_confidence": f.final_confidence,
+                "revision_rounds": f.revision_rounds,
+                "claims": f.claims,
+            }
+            for f in (report.agent_findings or [])
+        ],
+        sample_sha256=sample.sha256 if sample is not None else None,
+        sample_file_name=sample.original_filename if sample is not None else None,
+        duration_seconds=float(duration) if duration is not None else None,
+    )
 
 
 class ReportService:
@@ -209,6 +295,56 @@ class ReportService:
         )
         return result.scalar_one_or_none()
 
+    async def get_report_for_diff(
+        self,
+        run_id: uuid.UUID,
+        user: User,
+        *,
+        by: str = "report",
+    ) -> AnalysisReport | None:
+        """One report the caller may read, with its job and sample loaded.
+
+        The same ownership rule as ``get_report`` and ``get_report_by_job``:
+        the report's job must belong to the caller, and anything else is
+        ``None``. ``by="job"`` looks the run up by its job id, which is the id
+        the console's analysis pages carry.
+        """
+        match = AnalysisReport.job_id == run_id if by == "job" else AnalysisReport.id == run_id
+        result = await self.db.execute(
+            select(AnalysisReport)
+            .options(
+                selectinload(AnalysisReport.agent_findings),
+                selectinload(AnalysisReport.job).selectinload(AnalysisJob.sample),
+            )
+            .join(AnalysisJob, AnalysisReport.job_id == AnalysisJob.id)
+            .where(match, AnalysisJob.created_by == user.id)
+        )
+        return result.scalar_one_or_none()
+
+    async def diff_reports(
+        self,
+        run_a: uuid.UUID,
+        run_b: uuid.UUID,
+        user: User,
+        *,
+        by: str = "report",
+    ) -> dict[str, Any] | None:
+        """What changed between two stored runs, or ``None`` when either is not readable.
+
+        Both runs must be readable by the caller; one that is not answers
+        exactly as a missing one does, so the route's 404 says nothing about
+        whether someone else's run exists. The comparison itself is pure and
+        linear in the two records, and runs on a worker thread because two
+        large reports and their bundles are real work.
+        """
+        report_a = await self.get_report_for_diff(run_a, user, by=by)
+        if report_a is None:
+            return None
+        report_b = await self.get_report_for_diff(run_b, user, by=by)
+        if report_b is None:
+            return None
+        return await asyncio.to_thread(diff_runs, run_record(report_a), run_record(report_b))
+
     async def delete_report(
         self,
         report_id: uuid.UUID,
@@ -258,11 +394,20 @@ class ReportService:
         self,
         report_id: uuid.UUID,
         user: User,
+        source: str = "export",
     ) -> dict | None:
-        """Extract the STIX 2.1 bundle from a report."""
+        """Extract the STIX 2.1 bundle from a report.
+
+        ``source="judge"`` answers with the judge's own bundle and the map from
+        its labels to the published ids — the bundle every export decline row
+        says the object is unchanged in — or ``None`` for a report stored
+        before it was kept.
+        """
         report = await self.get_report(report_id, user)
         if not report:
             return None
+        if source == "judge":
+            return report.judge_stix_bundle
         return report.stix_bundle
 
     async def get_mitre_techniques(
@@ -403,6 +548,9 @@ class ReportService:
             if isinstance(dom, dict)
         }
         out: list[dict] = []
+        # What the run's FLOSS entry recovered by emulation, read from the
+        # stored report the way the report's own table reads it.
+        emulated = emulation_record(mr)
         identity = mr.get("identity") or {}
         hashes = identity.get("hashes") or {}
         for algo, value in hashes.items():
@@ -424,7 +572,11 @@ class ReportService:
                         # presented them identically.
                         "source": dom.get("source"),
                         "published": _publishable(
-                            "domain", dom.get("fqdn"), dom.get("source"), dom.get("reputation")
+                            "domain",
+                            dom.get("fqdn"),
+                            dom.get("source"),
+                            dom.get("reputation"),
+                            emulation_kwargs(mr, "domain", str(dom.get("fqdn") or ""), emulated),
                         ),
                     }
                 )
@@ -437,7 +589,11 @@ class ReportService:
                         "is_suspicious": bool(ip.get("is_suspicious")),
                         "source": ip.get("source"),
                         "published": _publishable(
-                            "ip", ip.get("address"), ip.get("source"), ip.get("reputation")
+                            "ip",
+                            ip.get("address"),
+                            ip.get("source"),
+                            ip.get("reputation"),
+                            emulation_kwargs(mr, "ip", str(ip.get("address") or ""), emulated),
                         ),
                     }
                 )
@@ -458,6 +614,7 @@ class ReportService:
                             url.get("url"),
                             url.get("source") or "strings",
                             reputations.get(host),
+                            emulation_kwargs(mr, "url", str(url.get("url") or ""), emulated),
                         ),
                     }
                 )
@@ -473,6 +630,7 @@ class ReportService:
                 continue
             for value in network.get(field) or []:
                 out.append({"kind": row_kind, "value": value, "source": "sandbox"})
+        _with_the_judge_s_values(out, mr, kind)
         rows = [row for row in out if row.get("value")]
         wanted = str(include or "published").strip().lower()
         if wanted == "all":
@@ -567,7 +725,10 @@ class ReportService:
 
         return {
             "total_rounds": negotiation.get("iteration_count", 0),
+            # ``None`` when consensus did not apply: fewer than two analysts
+            # produced claims, so there was no agreement to reach or miss.
             "reached_consensus": negotiation.get("is_consensus", False),
+            "consensus_applicable": negotiation.get("consensus_applicable", True),
             "confidence_curve": confidence_history,
             "discussion_timeline": discussion,
             "agent_findings": [

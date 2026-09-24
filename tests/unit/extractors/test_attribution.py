@@ -34,7 +34,7 @@ class TestBuildFamilyAttribution:
 
         assert attr.family is None
         assert attr.family_grounded is True
-        assert attr.family_confidence == 0.0
+        assert attr.family_confidence is None
 
     def test_the_judges_family_and_its_own_confidence_are_kept(self) -> None:
         attr = build_family_attribution(

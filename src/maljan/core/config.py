@@ -24,6 +24,7 @@ import logging
 import re
 import sys
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
 
@@ -132,20 +133,19 @@ class GeminiConfig(BaseModel):
     judge_model: str = "gemini-2.5-pro"
 
 
-class AgentLLMConfig(BaseModel):
-    """Per-agent LLM override for heterogeneous model ensemble.
+class ModelChoice(BaseModel):
+    """One model an agent may call: provider, model, and where it is served.
 
-    When populated for a specific agent name, ServiceContainer will build a
-    dedicated LLM instance for that agent instead of reusing the global expert
-    LLM. This breaks the single-model echo chamber by ensuring each expert
-    uses a different model family.
+    The shape a per-agent override has always had, named on its own so the
+    models an agent falls back to are written exactly the way its first model
+    is. ``temperature`` left at ``None`` takes the entry's own, and ``0.1``
+    when neither sets one.
 
     Attributes:
-        provider:    LLM provider name ("openai", "anthropic", "ollama").
-                     Overrides the global LLMConfig.provider for this agent.
+        provider:    LLM provider name ("openai", "anthropic", "ollama", "gemini").
         model:       Model identifier (e.g. "gpt-4o", "claude-3-5-sonnet",
-                     "llama3.1:8b"). Required when provider is set.
-        temperature: Optional temperature override. Defaults to 0.1 when None.
+                     "llama3.1:8b").
+        temperature: Optional temperature override.
         base_url:    Optional per-agent endpoint, so two agents can sit on two
                      different OpenAI-compatible servers (llama.cpp /
                      ik_llama.cpp) or two different Ollama servers instead of
@@ -161,7 +161,7 @@ class AgentLLMConfig(BaseModel):
     base_url: str | None = None
 
     @model_validator(mode="after")
-    def _base_url_belongs_to_an_endpoint_provider(self) -> "AgentLLMConfig":
+    def _base_url_belongs_to_an_endpoint_provider(self) -> "ModelChoice":
         """Reject a per-agent endpoint the provider has nowhere to send.
 
         Anthropic and Gemini are vendor APIs here, with no per-agent endpoint
@@ -176,6 +176,52 @@ class AgentLLMConfig(BaseModel):
                 f"not '{self.provider}'; those providers have no per-agent endpoint."
             )
         return self
+
+    def same_call(self, other: "ModelChoice") -> bool:
+        """Whether two choices would send a call to the same model at the same place."""
+        return (self.provider, self.model, self.base_url or None) == (
+            other.provider,
+            other.model,
+            other.base_url or None,
+        )
+
+
+class AgentLLMConfig(ModelChoice):
+    """Per-agent LLM override for heterogeneous model ensemble.
+
+    When populated for a specific agent name, ServiceContainer will build a
+    dedicated LLM instance for that agent instead of reusing the global expert
+    LLM. This breaks the single-model echo chamber by ensuring each expert
+    uses a different model family.
+
+    ``fallbacks`` is the rest of the agent's ordered model list: the models
+    tried, in order, when the one before them fails *as a provider* — a
+    connection error, a timeout, an HTTP 5xx, a model the server does not
+    have, a refusal the provider reports as an error. Never on what a model
+    said: an answer the platform's validation rejects goes back to the model
+    that wrote it, because asking another model instead would be the platform
+    choosing a different answer. Empty keeps the single-model form, which is
+    every entry written before the list existed.
+    """
+
+    fallbacks: list[ModelChoice] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _each_model_once(self) -> "AgentLLMConfig":
+        """A model named twice in one list would only be asked twice."""
+        seen: list[ModelChoice] = [self]
+        for choice in self.fallbacks:
+            if any(choice.same_call(earlier) for earlier in seen):
+                raise ValueError(
+                    f"fallback {choice.provider}/{choice.model} is already in this agent's "
+                    "model list; name each model once."
+                )
+            seen.append(choice)
+        return self
+
+    def chain(self) -> list[ModelChoice]:
+        """The agent's models in the order they are tried, first model first."""
+        return [self, *self.fallbacks]
 
 
 class FrontierArm(BaseModel):
@@ -280,6 +326,13 @@ class LLMConfig(BaseModel):
     frontier: FrontierConfig = Field(default_factory=FrontierConfig)
     # Per-agent overrides: {"static": AgentLLMConfig(...), "dynamic": ...}
     agents: dict[str, AgentLLMConfig] = Field(default_factory=dict)
+    # How much of an agent's loop budget one model on its fallback list may
+    # spend on a turn before it is treated as stalled and the next model is
+    # asked (``maljan.llm.fallback``). A share of the loop rather than a fixed
+    # number of seconds, because the loop budget is what would otherwise
+    # cancel the stall first: at a half, a first model that stops answering
+    # leaves the other half of the loop to the model that stays for it.
+    fallback_turn_share: Annotated[float, Field(gt=0.0, lt=1.0)] = 0.5
 
     # Whether a job is refused when an agent names a model no probe has
     # reached. A model name is the one part of a definition nothing validates
@@ -300,8 +353,14 @@ class LLMConfig(BaseModel):
     # headroom for legitimate output yet bounds a runaway decode to ~205 s at
     # ~40 tok/s, well under the timeout. This is a worst-case-latency/robustness
     # guard (in the spirit of the §3.3 degenerate-loop damper), not a quality
-    # fix — focus comes from the §7.1 hint. Set 0 to disable (unbounded).
-    judge_max_tokens: Annotated[int, Field(ge=0)] = 8192
+    # fix — focus comes from the §7.1 hint.
+    #
+    # 0, the default, derives it (``context_window.derived_reply``): the model's
+    # declared maximum output, bounded by a quarter of its window; a quarter of
+    # the window for a runtime we run; 8,192 for a hosted API that declares no
+    # maximum. The composer's section budget follows the same rule. A value
+    # above 0 is the operator's and is used as set.
+    judge_max_tokens: Annotated[int, Field(ge=0)] = 0
 
     # When True, analysts run in parallel —
     # correct for hosted multi-slot LLMs. When False (the default), the
@@ -357,8 +416,12 @@ class LLMConfig(BaseModel):
     # unbounded budget also gives the §3.3 degenerate-repetition failure mode a
     # full 25 minutes to burn. 8192 matches ``judge_max_tokens`` and is far above
     # any legitimate analyst answer (~2-4k tokens observed), so it bounds the
-    # tail without truncating real output. Set 0 to restore unbounded.
-    expert_max_tokens: Annotated[int, Field(ge=0)] = 8192
+    # tail without truncating real output.
+    #
+    # 0, the default, derives it as ``judge_max_tokens`` is derived
+    # (``context_window.derived_reply``), per analyst model. A value above 0 is
+    # the operator's and is used as set.
+    expert_max_tokens: Annotated[int, Field(ge=0)] = 0
 
     # View-decomposition strategy when ``view_decomposition_views >= 2``
     # (findings-log §4 Item 3, LAMD). "facet" = horizontal, AppPoet-style
@@ -430,10 +493,12 @@ class ChunkingConfig(BaseModel):
     # the 27 chunks burned its full 1200s budget — jobs never finished (live
     # job 95d88f7e/task 10, 2026-07-11: chunk 1/27 alone hit the hard cap).
     # llama-server now serves 128K (``-c 131072``); budgeting ~60K for the
-    # static loop's 40 tool observations (``max_tool_output_chars`` below, 6000
-    # each and now applied to every tool server), ~4K system and ~8K generation
-    # leaves ~56K headroom, so 20K/chunk is safe and
-    # collapses that same PE to ~8 chunks. Override via
+    # static loop's 40 tool observations, ~4K system and ~8K generation leaves
+    # ~56K headroom, so 20K/chunk is safe and collapses that same PE to ~8
+    # chunks. That 60K no longer has to be budgeted by hand: a tool answer is
+    # measured against what the window has left at the moment of the call
+    # (``max_tool_output_chars`` below), and the chunk sitting in the
+    # conversation is part of what it is measured against. Override via
     # ``CHUNKING__MAX_TOKENS_PER_CHUNK``.
     max_tokens_per_chunk: Annotated[int, Field(ge=1)] = 20000
 
@@ -495,31 +560,38 @@ class PreprocessingConfig(BaseModel):
     summarizer_max_words:
         Maximum words in each chunk summary.
     max_tool_output_chars:
-        Maximum character length for MCP tool outputs. When a tool
-        returns text exceeding this limit, the output is either
-        summarized (if FunctionSummarizer is enabled) or truncated.
+        Maximum character length for MCP tool outputs. Zero — the default —
+        derives it per call from the context window the served model was
+        found to have; a positive value is an explicit operator cap.
     """
 
     use_function_summarizer: bool = False
     summarizer_provider: Literal["openai", "anthropic", "ollama", "gemini"] = "ollama"
     summarizer_model: str = "llama3.2:3b"
     summarizer_max_words: Annotated[int, Field(ge=1)] = 150
-    # 2026-07-13 — restored 3000 -> 6000 (was 8000 before the 2026-07-11 cut).
-    # The cut to 3000 blamed "SWA re-prefill", a MISDIAGNOSIS: the served model
-    # is a hybrid Gated-DeltaNet (recurrent) MoE, not sliding-window, and the
-    # real re-prefill cause was parallel analysts clobbering the single slot's
-    # recurrent state (fixed by parallel_analysts=False; see LLMConfig). With
-    # sequential analysts each ReAct step reuses the prior context, so richer
-    # observations no longer inflate re-prefill cost. 6000 chars (~1500 tokens)
-    # per Ghidra observation lets a full priority function's pseudo-C survive
-    # untruncated. NOT 8000: there is no in-loop context pruning, so at the
-    # restored static max_steps=40 the worst-case accumulation is ~40*1500 tool
-    # tokens + 20k chunk + ~12k system/gen ~= 90-95k — a safe ~36k under
-    # n_ctx=131072. 8000 would push the peak to ~112k, and crossing 131072
-    # triggers a silent server context-shift that drops the earliest tokens (the
-    # load_program framing) — catastrophic and invisible. Override via
-    # ``PREPROCESSING__MAX_TOOL_OUTPUT_CHARS``.
-    max_tool_output_chars: Annotated[int, Field(ge=1)] = 6000
+    # Zero means "derive it", and zero is the default.
+    #
+    # The number this replaces was 6,000 characters, and every argument for it
+    # was an argument about one deployment: at the static analyst's 40 steps,
+    # 40 observations of ~1,500 tokens plus a 20k chunk plus ~12k of system and
+    # generation came to ~90-95k, a safe margin under the 131,072 that server
+    # was started with. Every part of that is a fact about one model. On a
+    # model served with 32,768 tokens the same constant does not fit; on one
+    # with a million it throws information away for nothing.
+    #
+    # Derived, the cap is worked out at the moment of the call from the window
+    # the served model was found to have, less what the conversation already
+    # holds and the room kept back for the model's own reply, converted at a
+    # measured characters-per-token figure, times the share one answer may
+    # take. The whole arithmetic, its numbers and where each came from are in
+    # ``maljan.llm.context_window``; the window itself is learned from the
+    # server's own metadata endpoint, from a vendored table, or from a stated
+    # fallback, and the run summary says which.
+    #
+    # A positive value is the operator saying the number themselves, and it
+    # behaves exactly as this setting always did: that cap, on every answer,
+    # whatever the window. Override via ``PREPROCESSING__MAX_TOOL_OUTPUT_CHARS``.
+    max_tool_output_chars: Annotated[int, Field(ge=0)] = 0
 
     # Sink-reachability triage (Maltracker-inspired). When enabled, the static
     # analyst runs a deterministic pre-pass over the Ghidra call graph to find
@@ -912,6 +984,36 @@ def builtin_env_allow(key: str, configured: Iterable[str]) -> list[str]:
     return list(dict.fromkeys([*REQUIRED_ENV_ALLOW.get(key, ()), *configured]))
 
 
+class MCPBreakerConfig(BaseModel):
+    """A tool server that keeps failing is rested; a slow one is not piled onto.
+
+    ``failures_to_open`` calls in a row the server did not answer — a timeout,
+    a refused connection, the server's process gone, or a call that did not
+    finish within its caller's budget — open the server's breaker for
+    ``cooldown_seconds``. A call in that time is answered by the platform with
+    an authored tool error naming the server, that it is resting and when it
+    will be tried again; after it, one call is let through and a success
+    closes the breaker. A tool that answers with its own error has answered and
+    never counts.
+
+    ``max_concurrent_calls`` is how many calls one server may have in flight
+    for one job at once, so parallel analysts queue rather than pile onto one
+    slow sidecar. ``0`` leaves the calls uncapped.
+
+    ``call_timeout_seconds`` is how long a call may go unanswered before it is
+    a timeout, which the breaker counts.
+    """
+
+    failures_to_open: Annotated[int, Field(ge=1)] = 3
+    cooldown_seconds: Annotated[float, Field(ge=0.0)] = 60.0
+    max_concurrent_calls: Annotated[int, Field(ge=0)] = 4
+    # The budget every tool call gets at least before it counts as a server
+    # that did not answer (a tool whose server declares a longer budget gets
+    # that, and thirty seconds of grace are added either way). Zero derives
+    # it from the longest tool budget the deployment configures — capa's.
+    call_timeout_seconds: Annotated[float, Field(ge=0.0)] = 0.0
+
+
 class MCPConfig(BaseModel):
     """The operator-visible registry of tool servers.
 
@@ -926,6 +1028,10 @@ class MCPConfig(BaseModel):
     # entries are re-seeded on load, so "delete" in the UI means enabled=False
     # for them and a real removal for a custom key.
     servers: dict[str, MCPServerConfig] = Field(default_factory=_builtin_servers)
+    # How a job treats a tool server that keeps failing at the transport, and
+    # how many calls it may have in flight at once. Per job and per server;
+    # see ``maljan.providers.server_guard``.
+    breaker: MCPBreakerConfig = Field(default_factory=lambda: MCPBreakerConfig())
 
     @model_validator(mode="after")
     def _reseed_builtins(self) -> "MCPConfig":
@@ -1207,12 +1313,72 @@ class StageDefinition(BaseModel):
 
     @model_validator(mode="after")
     def _condition_parses(self) -> "StageDefinition":
-        from maljan.pipeline.conditions import validate_condition
-
-        problems = validate_condition(self.when)
-        if problems:
-            raise ValueError(f"stage {self.key!r}: {problems[0]}")
+        problem = stage_condition_problem(self.key, self.when)
+        if problem:
+            raise ValueError(problem)
         return self
+
+
+def stage_condition_problem(key: str, when: str) -> str:
+    """Why stage ``key`` cannot carry ``when``, or an empty string when it can.
+
+    The one sentence both the stage model and the team lint report, so the
+    refusal on save and the finding in the editor are the same words.
+    """
+    from maljan.pipeline.conditions import validate_condition
+
+    problems = validate_condition(when)
+    return f"stage {key!r}: {problems[0]}" if problems else ""
+
+
+@dataclass(frozen=True)
+class TeamProblem:
+    """One thing the settings model refuses about a team, and where it sits.
+
+    ``stage`` and ``field`` locate it on the stage card it concerns; both are
+    ``None`` for a rule about the team as a whole. ``message`` is the exact
+    sentence the model raises, so a refusal on save and a finding in the
+    editor cannot say different things.
+    """
+
+    message: str
+    stage: str | None = None
+    field: str | None = None
+    code: str = ""
+
+    def __post_init__(self) -> None:
+        if self.code not in TEAM_RULE_CODES:
+            raise ValueError(f"team rule code {self.code!r} is not declared in TEAM_RULE_CODES")
+
+
+# Every code a team rule in this module reports. ``TeamProblem`` refuses one
+# that is not here, and the lint's parity test requires a refused team for
+# each, so a rule added to ``stage_list_problems`` or ``stage_member_problems``
+# cannot reach save without also being proven to reach the editor.
+TEAM_RULE_CODES: frozenset[str] = frozenset(
+    {
+        "no_stages",
+        "duplicate_key",
+        "self_dependency",
+        "dangling_dependency",
+        "later_dependency",
+        "agent_in_two_stages",
+        "no_agents",
+        "triage_agents",
+        "triage_key",
+        "debate_upstream",
+        "debate_handover",
+        "verdict_count",
+        "report_count",
+        "report_not_last",
+        "unknown_agent",
+        "agent_role",
+        "disabled_agent",
+        "verdict_judge",
+        "report_reporter",
+        "debate_agents",
+    }
+)
 
 
 # The stage that runs the deterministic tools before any analyst. One key
@@ -1370,6 +1536,27 @@ def stages_are_derived(analysts: list[str], stages: list["StageDefinition"]) -> 
     return True
 
 
+def analysts_become_stages(data: Any) -> Any:
+    """A profile document written as a list of analysts, read as the four stages.
+
+    ``ProfileDefinition`` applies it before it validates, and the team lint
+    applies it before it reads, so both see the stages a stored analyst list
+    stands for.
+    """
+    if not isinstance(data, dict):
+        return data
+    if data.get("stages"):
+        return data
+    analysts = data.get("analysts")
+    if not analysts:
+        return data
+    return {
+        **data,
+        "stages": [s.model_dump() for s in stages_from_analysts(list(analysts))],
+        "derived_from_analysts": True,
+    }
+
+
 class ProfileDefinition(BaseModel):
     """A team, as ordered dependent stages.
 
@@ -1417,18 +1604,7 @@ class ProfileDefinition(BaseModel):
     @classmethod
     def _analysts_become_stages(cls, data: Any) -> Any:
         """A profile written as a list of analysts is read as the four stages."""
-        if not isinstance(data, dict):
-            return data
-        if data.get("stages"):
-            return data
-        analysts = data.get("analysts")
-        if not analysts:
-            return data
-        return {
-            **data,
-            "stages": [s.model_dump() for s in stages_from_analysts(list(analysts))],
-            "derived_from_analysts": True,
-        }
+        return analysts_become_stages(data)
 
     @model_validator(mode="after")
     def _stages_are_a_pipeline(self) -> "ProfileDefinition":
@@ -1444,141 +1620,22 @@ class ProfileDefinition(BaseModel):
         if self.derived_from_analysts and not stages_are_derived(self.analysts, self.stages):
             self.derived_from_analysts = False
 
-        seen: set[str] = set()
-        for stage in self.stages:
-            if stage.key in seen:
-                raise ValueError(f"stage {stage.key!r} is declared twice")
-            seen.add(stage.key)
-
-        # ``depends_on`` may only name a stage declared earlier. That is a
-        # stronger rule than "no cycles" and a much kinder one: it makes the
-        # written order the run order, so a reader of the profile card reads
-        # the pipeline top to bottom, and it makes a cycle unrepresentable
-        # rather than merely detectable. The topological check below is what
-        # reports the failure in those terms.
-        earlier: set[str] = set()
-        for stage in self.stages:
-            for dependency in stage.depends_on:
-                if dependency == stage.key:
-                    raise ValueError(f"stage {stage.key!r} depends on itself")
-                if dependency not in seen:
-                    raise ValueError(f"stage {stage.key!r} depends on unknown stage {dependency!r}")
-                if dependency not in earlier:
-                    raise ValueError(
-                        f"stage {stage.key!r} depends on {dependency!r}, which is declared "
-                        "after it; a stage may only depend on an earlier stage"
-                    )
-            earlier.add(stage.key)
-
-        # Only analysis stages: an agent's node is named after the agent
-        # (``<agent>_analyst``), so two analysis stages naming one agent would
-        # collide in the graph. The verdict and report nodes are named after
-        # the stage kind, and the judge that runs the verdict is *expected* to
-        # be named again wherever the operator went wrong — reporting that as
-        # a name collision would hide the real error, which is the role.
-        agent_owner: dict[str, str] = {}
-        for stage in self.stages:
-            if stage.kind != "analysis":
-                continue
-            for agent in stage.agents:
-                previous = agent_owner.get(agent)
-                if previous is not None:
-                    raise ValueError(
-                        f"{agent!r} is in stage {previous!r} and again in {stage.key!r}; "
-                        "an agent belongs to one stage"
-                    )
-                agent_owner[agent] = stage.key
-
-        for stage in self.stages:
-            if stage.kind == "analysis" and not stage.agents:
-                raise ValueError(f"stage {stage.key!r} is an analysis stage with no agent")
-            if stage.kind == "triage" and stage.agents:
-                raise ValueError(
-                    f"stage {stage.key!r} is a triage stage and names an agent; the "
-                    "pipeline runs it"
-                )
-            if stage.kind == "triage" and _is_a_fixed_node_name(stage.key):
-                raise ValueError(
-                    f"stage {stage.key!r} is a triage stage keyed like a graph node the "
-                    "pipeline names itself; choose another key"
-                )
-            if stage.kind == "debate":
-                upstream = self._reachable(stage.key)
-                if not any(s.kind == "analysis" for s in self.stages if s.key in upstream):
-                    raise ValueError(
-                        f"stage {stage.key!r} debates nothing: it needs an analysis stage "
-                        "upstream of it"
-                    )
-
-        for stage in self.stages:
-            if stage.kind != "debate":
-                continue
-            problem = self.debate_handover_error(stage)
-            if problem:
-                raise ValueError(problem)
-
-        verdicts = [s.key for s in self.stages if s.kind == "verdict"]
-        if len(verdicts) != 1:
-            found = ", ".join(verdicts) or "none"
-            raise ValueError(f"a profile needs exactly one verdict stage; found {found}")
-        reports = [s.key for s in self.stages if s.kind == "report"]
-        if len(reports) > 1:
-            raise ValueError(f"a profile has at most one report stage; found {', '.join(reports)}")
-        if reports and self.stages[-1].kind != "report":
-            raise ValueError("the report stage is the last stage of a profile")
+        problems = stage_list_problems(self.stages)
+        if problems:
+            raise ValueError(problems[0].message)
         return self
 
     def entry_node_count(self, stage: "StageDefinition") -> int:
-        """How many graph nodes a dependency of ``stage`` has to point at.
-
-        One for every stage but a parallel analysis stage, which starts at all
-        of its agents at once. ``pipeline.topology`` derives the same number
-        from the same rule; it is restated here because the check below has to
-        run before a graph is ever built.
-        """
-        if stage.kind == "analysis" and stage.mode == "parallel":
-            return len(stage.agents)
-        return 1
+        """How many graph nodes a dependency of ``stage`` has to point at."""
+        return _entry_node_count(stage)
 
     def debate_handover_error(self, stage: "StageDefinition") -> str:
-        """Why ``stage`` cannot hand over, or an empty string when it can.
-
-        A debate leaves through a conditional edge, and a conditional edge has
-        exactly one destination per branch. A debate that feeds two stages — or
-        one parallel analysis stage with two agents, which is two nodes — has
-        no single destination for the branch that stops arguing.
-
-        This is checked when the team is saved rather than only when the graph
-        is built. The builder still refuses it, but by then the sample has been
-        uploaded and detonated and every job under that team fails; an operator
-        has to be told while they are still editing.
-        """
-        heads = 0
-        fed: list[str] = []
-        for candidate in self.stages:
-            if stage.key in candidate.depends_on:
-                heads += self.entry_node_count(candidate)
-                fed.append(candidate.key)
-        if heads <= 1:
-            return ""
-        return (
-            f"stage {stage.key!r} is a debate that hands over to {heads} nodes "
-            f"({', '.join(fed)}); a debate hands over to exactly one stage, and not "
-            "to a parallel analysis stage with more than one agent"
-        )
+        """Why ``stage`` cannot hand over, or an empty string when it can."""
+        return _debate_handover_error(self.stages, stage)
 
     def _reachable(self, key: str) -> set[str]:
         """Every stage ``key`` transitively depends on."""
-        by_key = {s.key: s for s in self.stages}
-        out: set[str] = set()
-        pending = list(by_key[key].depends_on) if key in by_key else []
-        while pending:
-            current = pending.pop()
-            if current in out or current not in by_key:
-                continue
-            out.add(current)
-            pending.extend(by_key[current].depends_on)
-        return out
+        return _upstream_of(self.stages, key)
 
     def stage(self, key: str) -> StageDefinition | None:
         for candidate in self.stages:
@@ -1599,6 +1656,255 @@ class ProfileDefinition(BaseModel):
             if stage.kind == "analysis":
                 out.extend(stage.agents)
         return out
+
+
+def _entry_node_count(stage: StageDefinition) -> int:
+    """How many graph nodes a dependency of ``stage`` has to point at.
+
+    One for every stage but a parallel analysis stage, which starts at all
+    of its agents at once. ``pipeline.topology`` derives the same number
+    from the same rule; it is restated here because the check below has to
+    run before a graph is ever built.
+    """
+    if stage.kind == "analysis" and stage.mode == "parallel":
+        return len(stage.agents)
+    return 1
+
+
+def _debate_handover_error(stages: list[StageDefinition], stage: StageDefinition) -> str:
+    """Why debate ``stage`` cannot hand over, or an empty string when it can.
+
+    A debate leaves through a conditional edge, and a conditional edge has
+    exactly one destination per branch. A debate that feeds two stages — or
+    one parallel analysis stage with two agents, which is two nodes — has
+    no single destination for the branch that stops arguing.
+
+    This is checked when the team is saved rather than only when the graph
+    is built. The builder still refuses it, but by then the sample has been
+    uploaded and detonated and every job under that team fails; an operator
+    has to be told while they are still editing.
+    """
+    return _handover_message(stage, [c for c in stages if stage.key in c.depends_on])
+
+
+def _handover_message(stage: StageDefinition, fed_by: list[StageDefinition]) -> str:
+    """The hand-over refusal for debate ``stage`` feeding ``fed_by``, or ``""``."""
+    heads = sum(_entry_node_count(candidate) for candidate in fed_by)
+    fed = [candidate.key for candidate in fed_by]
+    if heads <= 1:
+        return ""
+    return (
+        f"stage {stage.key!r} is a debate that hands over to {heads} nodes "
+        f"({', '.join(fed)}); a debate hands over to exactly one stage, and not "
+        "to a parallel analysis stage with more than one agent"
+    )
+
+
+def _upstream_of(stages: list[StageDefinition], key: str) -> set[str]:
+    """Every stage ``key`` transitively depends on."""
+    by_key = {s.key: s for s in stages}
+    out: set[str] = set()
+    pending = list(by_key[key].depends_on) if key in by_key else []
+    while pending:
+        current = pending.pop()
+        if current in out or current not in by_key:
+            continue
+        out.add(current)
+        pending.extend(by_key[current].depends_on)
+    return out
+
+
+def _dependents_by_key(stages: list[StageDefinition]) -> dict[str, list[StageDefinition]]:
+    """Each key's dependents in stage order, each listed once however often it names the key."""
+    out: dict[str, list[StageDefinition]] = {}
+    for candidate in stages:
+        for key in dict.fromkeys(candidate.depends_on):
+            out.setdefault(key, []).append(candidate)
+    return out
+
+
+def _keys_after_an_analysis(stages: list[StageDefinition]) -> set[str]:
+    """Every key with an analysis stage among what it transitively depends on.
+
+    ``_upstream_of`` asked once per stage, answered for all of them in one
+    breadth-first pass from the analysis stages along the reversed edges, so a
+    team of any size costs its stages plus its edges. The edges are read the
+    way ``_upstream_of`` reads them: a repeated key's dependencies are the
+    last declaration's, and a key counts as analysis if any stage keyed so is.
+    """
+    by_key = {s.key: s for s in stages}
+    reverse: dict[str, list[str]] = {}
+    for key, stage in by_key.items():
+        for dependency in stage.depends_on:
+            if dependency in by_key:
+                reverse.setdefault(dependency, []).append(key)
+    reached: set[str] = set()
+    pending = [
+        dependent
+        for key in {s.key for s in stages if s.kind == "analysis"}
+        for dependent in reverse.get(key, [])
+    ]
+    while pending:
+        current = pending.pop()
+        if current in reached:
+            continue
+        reached.add(current)
+        pending.extend(reverse.get(current, []))
+    return reached
+
+
+def stage_list_problems(stages: list[StageDefinition]) -> list[TeamProblem]:
+    """Everything the settings model refuses about a stage list on its own.
+
+    ``ProfileDefinition`` raises the first of these; the team lint reports
+    all of them. One list in one order, so the refusal on save is always the
+    first finding the editor shows and never a sentence it did not.
+    """
+    problems: list[TeamProblem] = []
+    if not stages:
+        return [TeamProblem("a profile needs at least one stage", code="no_stages")]
+
+    seen: set[str] = set()
+    for stage in stages:
+        if stage.key in seen:
+            problems.append(
+                TeamProblem(
+                    f"stage {stage.key!r} is declared twice", stage.key, "key", "duplicate_key"
+                )
+            )
+        seen.add(stage.key)
+
+    # ``depends_on`` may only name a stage declared earlier. That is a
+    # stronger rule than "no cycles" and a much kinder one: it makes the
+    # written order the run order, so a reader of the profile card reads
+    # the pipeline top to bottom, and it makes a cycle unrepresentable
+    # rather than merely detectable.
+    earlier: set[str] = set()
+    for stage in stages:
+        for dependency in stage.depends_on:
+            if dependency == stage.key:
+                message, code = f"stage {stage.key!r} depends on itself", "self_dependency"
+            elif dependency not in seen:
+                message = f"stage {stage.key!r} depends on unknown stage {dependency!r}"
+                code = "dangling_dependency"
+            elif dependency not in earlier:
+                message = (
+                    f"stage {stage.key!r} depends on {dependency!r}, which is declared "
+                    "after it; a stage may only depend on an earlier stage"
+                )
+                code = "later_dependency"
+            else:
+                continue
+            problems.append(TeamProblem(message, stage.key, "depends_on", code))
+        earlier.add(stage.key)
+
+    # Only analysis stages: an agent's node is named after the agent
+    # (``<agent>_analyst``), so two analysis stages naming one agent would
+    # collide in the graph. The verdict and report nodes are named after
+    # the stage kind, and the judge that runs the verdict is *expected* to
+    # be named again wherever the operator went wrong — reporting that as
+    # a name collision would hide the real error, which is the role.
+    agent_owner: dict[str, str] = {}
+    for stage in stages:
+        if stage.kind != "analysis":
+            continue
+        for agent in stage.agents:
+            previous = agent_owner.get(agent)
+            if previous is not None:
+                problems.append(
+                    TeamProblem(
+                        f"{agent!r} is in stage {previous!r} and again in {stage.key!r}; "
+                        "an agent belongs to one stage",
+                        stage.key,
+                        "agents",
+                        "agent_in_two_stages",
+                    )
+                )
+            else:
+                agent_owner[agent] = stage.key
+
+    after_analysis = _keys_after_an_analysis(stages)
+    for stage in stages:
+        if stage.kind == "analysis" and not stage.agents:
+            problems.append(
+                TeamProblem(
+                    f"stage {stage.key!r} is an analysis stage with no agent",
+                    stage.key,
+                    "agents",
+                    "no_agents",
+                )
+            )
+        if stage.kind == "triage" and stage.agents:
+            problems.append(
+                TeamProblem(
+                    f"stage {stage.key!r} is a triage stage and names an agent; the "
+                    "pipeline runs it",
+                    stage.key,
+                    "agents",
+                    "triage_agents",
+                )
+            )
+        if stage.kind == "triage" and _is_a_fixed_node_name(stage.key):
+            problems.append(
+                TeamProblem(
+                    f"stage {stage.key!r} is a triage stage keyed like a graph node the "
+                    "pipeline names itself; choose another key",
+                    stage.key,
+                    "key",
+                    "triage_key",
+                )
+            )
+        if stage.kind == "debate":
+            if stage.key not in after_analysis:
+                problems.append(
+                    TeamProblem(
+                        f"stage {stage.key!r} debates nothing: it needs an analysis stage "
+                        "upstream of it",
+                        stage.key,
+                        "depends_on",
+                        "debate_upstream",
+                    )
+                )
+
+    dependents = _dependents_by_key(stages)
+    for stage in stages:
+        if stage.kind != "debate":
+            continue
+        handover = _handover_message(stage, dependents.get(stage.key, []))
+        if handover:
+            problems.append(TeamProblem(handover, stage.key, "depends_on", "debate_handover"))
+
+    verdicts = [s.key for s in stages if s.kind == "verdict"]
+    if len(verdicts) != 1:
+        found = ", ".join(verdicts) or "none"
+        problems.append(
+            TeamProblem(
+                f"a profile needs exactly one verdict stage; found {found}",
+                verdicts[1] if len(verdicts) > 1 else None,
+                "kind" if len(verdicts) > 1 else None,
+                "verdict_count",
+            )
+        )
+    reports = [s.key for s in stages if s.kind == "report"]
+    if len(reports) > 1:
+        problems.append(
+            TeamProblem(
+                f"a profile has at most one report stage; found {', '.join(reports)}",
+                reports[1],
+                "kind",
+                "report_count",
+            )
+        )
+    if reports and stages[-1].kind != "report":
+        problems.append(
+            TeamProblem(
+                "the report stage is the last stage of a profile",
+                reports[0],
+                "kind",
+                "report_not_last",
+            )
+        )
+    return problems
 
 
 def _builtin_definitions() -> dict[str, AgentDefinition]:
@@ -2234,36 +2540,9 @@ class AgentsConfig(BaseModel):
                 expected.pop("enabled", None)
             if current != expected:
                 raise ValueError(f"{key!r} is built in; clone it to change it")
-        for key, profile_seed in _builtin_profiles().items():
-            current_profile = self.profiles[key].model_dump()
-            expected_profile = profile_seed.model_dump()
-            # ``exclude_servers`` is the one field an operator may edit on a
-            # built-in profile. It names servers, and the set of servers is
-            # the operator's own: a baseline that has to withhold a server
-            # added this morning would otherwise be unrepairable, because
-            # every edit to it is refused as tampering with a built-in.
-            current_profile.pop("exclude_servers", None)
-            expected_profile.pop("exclude_servers", None)
-            # ``analysts`` is inert once a profile carries stages — the model
-            # reads the stages and nothing else — so a document that dropped
-            # the deprecated copy is the same built-in profile.
-            current_profile.pop("analysts", None)
-            expected_profile.pop("analysts", None)
-            # Bookkeeping, not a setting: a built-in whose stages were written
-            # out by the migration and one that was derived on load are the
-            # same built-in team.
-            current_profile.pop("derived_from_analysts", None)
-            expected_profile.pop("derived_from_analysts", None)
-            # The stages of a built-in are the paper's architecture and stay
-            # fixed, with two exceptions an operator legitimately needs: how
-            # hard the debate argues, and whether a stage gets the built-in
-            # tool servers. Everything else about a stage — its kind, its
-            # agents, what it depends on, when it runs — is the architecture
-            # itself, and editing it means cloning the profile.
-            current_profile["stages"] = _profile_stage_identity(current_profile.get("stages"))
-            expected_profile["stages"] = _profile_stage_identity(expected_profile.get("stages"))
-            if current_profile != expected_profile:
-                raise ValueError(f"{key!r} is built in; clone it to change it")
+        for key in _builtin_profiles():
+            if builtin_profile_changed(key, self.profiles[key]):
+                raise ValueError(builtin_profile_message(key))
 
         for key, definition in self.definitions.items():
             # Spec §3.1: one judge, and it cannot be cloned. A second judge
@@ -2293,55 +2572,118 @@ class AgentsConfig(BaseModel):
         """Every rule about a profile's stages that needs the definition map.
 
         ``ProfileDefinition`` can check the shape of a pipeline but not who is
-        in it: it cannot see the definitions. Everything that compares a stage's
-        agents against the map that has to contain them lives here.
+        in it: it cannot see the definitions. See ``stage_member_problems``.
         """
-        # A built-in profile is exempt from the enabled check only while it is
-        # not the active profile: disabling a member of ``default`` is harmless
-        # as long as some other profile is actually running, but the moment
-        # ``default`` itself is selected the disabled member would be asked to
-        # run. A custom profile has no such exemption — its author chose every
-        # member, active or not.
         exempt = name in BUILTIN_PROFILES and name != self.profile
-        for stage in profile.stages:
-            for agent in stage.agents:
-                member = self.definitions.get(agent)
-                if member is None:
-                    raise ValueError(
-                        f"profile {name!r}, stage {stage.key!r}: unknown agent {agent!r}"
-                    )
-                if stage.kind == "analysis" and member.role in ("judge", "report"):
-                    raise ValueError(
-                        f"profile {name!r}, stage {stage.key!r}: {agent!r} has role "
-                        f"{member.role!r} and cannot be an analyst"
-                    )
-                if not exempt and not member.enabled:
-                    raise ValueError(
-                        f"profile {name!r}, stage {stage.key!r}: {agent!r} is disabled"
-                    )
-            if stage.kind == "verdict":
-                if len(stage.agents) != 1:
-                    raise ValueError(
-                        f"profile {name!r}, stage {stage.key!r}: a verdict stage names "
-                        "exactly one judge"
-                    )
-                judge = self.definitions.get(stage.agents[0])
-                if judge is None or judge.role != "judge":
-                    raise ValueError(
-                        f"profile {name!r}, stage {stage.key!r}: "
-                        f"{stage.agents[0]!r} is not a judge definition"
-                    )
-            if stage.kind == "report":
-                if stage.agents != [REPORTER_AGENT_KEY]:
-                    raise ValueError(
-                        f"profile {name!r}, stage {stage.key!r}: a report stage is run by "
-                        f"{REPORTER_AGENT_KEY!r}"
-                    )
-            if stage.kind == "debate" and stage.agents:
-                raise ValueError(
-                    f"profile {name!r}, stage {stage.key!r}: a debate stage names no agent; "
-                    "it argues over the analysis stages upstream of it"
-                )
+        problems = stage_member_problems(name, profile.stages, self.definitions, exempt=exempt)
+        if problems:
+            raise ValueError(problems[0].message)
+
+
+def _definition_field(definition: Any, field: str, default: Any = None) -> Any:
+    """One field of a definition that may be a model or its stored dict."""
+    if isinstance(definition, dict):
+        return definition.get(field, default)
+    return getattr(definition, field, default)
+
+
+def stage_member_problems(
+    name: str,
+    stages: list[StageDefinition],
+    definitions: Mapping[str, Any],
+    *,
+    exempt: bool = False,
+) -> list[TeamProblem]:
+    """Everything the settings model refuses about who is in a team's stages.
+
+    ``definitions`` maps agent keys to ``AgentDefinition`` or to its stored
+    dict, so the settings model, the API's save path and the team lint read
+    the same rules off whichever form they hold.
+
+    ``exempt`` lifts the enabled check. A built-in profile is exempt only
+    while it is not the active profile: disabling a member of ``default`` is
+    harmless as long as some other profile is actually running, but the moment
+    ``default`` itself is selected the disabled member would be asked to run. A
+    custom profile has no such exemption — its author chose every member,
+    active or not.
+    """
+    problems: list[TeamProblem] = []
+
+    def refuse(stage: StageDefinition, text: str, code: str) -> None:
+        problems.append(
+            TeamProblem(f"profile {name!r}, stage {stage.key!r}: {text}", stage.key, "agents", code)
+        )
+
+    for stage in stages:
+        for agent in stage.agents:
+            member = definitions.get(agent)
+            if member is None:
+                refuse(stage, f"unknown agent {agent!r}", "unknown_agent")
+                continue
+            role = _definition_field(member, "role")
+            if stage.kind == "analysis" and role in ("judge", "report"):
+                refuse(stage, f"{agent!r} has role {role!r} and cannot be an analyst", "agent_role")
+            if not exempt and _definition_field(member, "enabled", True) is False:
+                refuse(stage, f"{agent!r} is disabled", "disabled_agent")
+        if stage.kind == "verdict":
+            if len(stage.agents) != 1:
+                refuse(stage, "a verdict stage names exactly one judge", "verdict_judge")
+            else:
+                judge = definitions.get(stage.agents[0])
+                if judge is None or _definition_field(judge, "role") != "judge":
+                    refuse(stage, f"{stage.agents[0]!r} is not a judge definition", "verdict_judge")
+        if stage.kind == "report" and stage.agents != [REPORTER_AGENT_KEY]:
+            refuse(stage, f"a report stage is run by {REPORTER_AGENT_KEY!r}", "report_reporter")
+        if stage.kind == "debate" and stage.agents:
+            refuse(
+                stage,
+                "a debate stage names no agent; it argues over the analysis stages upstream of it",
+                "debate_agents",
+            )
+    return problems
+
+
+def builtin_profile_message(name: str) -> str:
+    """The refusal for an edit to a built-in team beyond what it allows."""
+    return f"{name!r} is built in; clone it to change it"
+
+
+def builtin_profile_changed(name: str, profile: ProfileDefinition) -> bool:
+    """Whether ``profile`` differs from built-in team ``name`` beyond what it allows.
+
+    False for a name that is not built in. Shared by the settings model, the
+    API's save path and the team lint.
+    """
+    seed = _builtin_profiles().get(name)
+    if seed is None:
+        return False
+    current_profile = profile.model_dump()
+    expected_profile = seed.model_dump()
+    # ``exclude_servers`` is the one field an operator may edit on a
+    # built-in profile. It names servers, and the set of servers is
+    # the operator's own: a baseline that has to withhold a server
+    # added this morning would otherwise be unrepairable, because
+    # every edit to it is refused as tampering with a built-in.
+    #
+    # ``analysts`` is inert once a profile carries stages — the model
+    # reads the stages and nothing else — so a document that dropped
+    # the deprecated copy is the same built-in profile.
+    #
+    # ``derived_from_analysts`` is bookkeeping, not a setting: a built-in
+    # whose stages were written out by the migration and one that was
+    # derived on load are the same built-in team.
+    for field in ("exclude_servers", "analysts", "derived_from_analysts"):
+        current_profile.pop(field, None)
+        expected_profile.pop(field, None)
+    # The stages of a built-in are the paper's architecture and stay
+    # fixed, with two exceptions an operator legitimately needs: how
+    # hard the debate argues, and whether a stage gets the built-in
+    # tool servers. Everything else about a stage — its kind, its
+    # agents, what it depends on, when it runs — is the architecture
+    # itself, and editing it means cloning the profile.
+    current_profile["stages"] = _profile_stage_identity(current_profile.get("stages"))
+    expected_profile["stages"] = _profile_stage_identity(expected_profile.get("stages"))
+    return current_profile != expected_profile
 
 
 # ---------------------------------------------------------------------------
@@ -2639,6 +2981,18 @@ class ReportingConfig(BaseModel):
     # of six stages would otherwise put the whole run into every prompt after
     # the second one, and the last stage would spend its context on a summary
     # of a summary instead of on the sample.
+    #
+    # The third copy of the six thousand the tool-output cap used to be, and it
+    # is the one that stays. The two it is not: the guardrail's number bounded
+    # a prompt and is now derived from the served window; the evidence ledger's
+    # bounded a *record* silently and is gone, because a stored prefix that
+    # does not say it is one cannot be cited. This bounds a prompt, like the
+    # first, and it announces itself — the block a stage reads ends in
+    # "[upstream findings truncated]" — and nothing is lost, because the whole
+    # findings stay in the run state, the transcript and the report. What it
+    # shares with the first is being a constant where the served window is
+    # knowable, and deriving it belongs with that cap rather than bolted on
+    # here.
     upstream_findings_max_chars: Annotated[int, Field(ge=0)] = 6000
     auto_generate_detection_rules: bool = True
 
@@ -2653,7 +3007,14 @@ class ReportingConfig(BaseModel):
     # legacy single-round NarrativeAgent. Bounded per-section prompts + hard
     # per-section timeout keep the local SWA model from stalling.
     composer_enabled: bool = True
-    composer_section_max_tokens: Annotated[int, Field(ge=1)] = 900
+    # What one report section may generate, in tokens. 0, the default, derives
+    # it per model: the room an analyst's reply is given on that model — the
+    # larger of ``expert_max_tokens`` and ``judge_max_tokens``, at most a
+    # quarter of the context window the model serves — with the derivation
+    # printed in the run summary. A positive value is an operator's own budget
+    # and is used as it always was. A fixed 900 dropped a section of a live
+    # report when the model reasoned past it.
+    composer_section_max_tokens: Annotated[int, Field(ge=0)] = 0
     composer_per_section_timeout: Annotated[int, Field(ge=1)] = 120
     # Server-side HTML→PDF export.
     html_export_enabled: bool = True
@@ -2662,7 +3023,21 @@ class ReportingConfig(BaseModel):
     # Past it an entry still records the call — tool, arguments, outcome,
     # timing — and drops the output, and the report says how many entries it
     # is not showing. Half a megabyte holds a full Ghidra loop's decompilation
-    # and stays well inside what a JSONB column and a context window tolerate.
+    # and stays well inside what a JSONB column tolerates.
+    #
+    # This used to be argued against answers of at most 6,000 characters, and
+    # that number is gone: a tool answer is now measured against what the
+    # served window has left. The arithmetic that replaces it is the one
+    # property the derivation has — the answers of one conversation sum to
+    # less than the room it began with — so one loop can put at most
+    # ``(window - reply reserve) * 3`` characters through this budget. Half a
+    # megabyte therefore holds a loop's whole tool output up to a window of
+    # about 183,000 tokens, which covers every deployment this platform has
+    # been run on. Above that it begins to bind, and what it does then is what
+    # it has always done: the call is recorded, the output is not, and the
+    # report says how many entries it is not showing. A deployment on a very
+    # large window that wants the whole of it kept raises this, and pays for it
+    # in a JSONB column rather than in the model's context.
     evidence_budget_bytes: Annotated[int, Field(ge=0)] = 524288
 
     # How much of a run's tool output is kept in memory, for the length of the
@@ -2678,11 +3053,28 @@ class ReportingConfig(BaseModel):
     # one. A ceiling only bounds what it says it bounds if the text is not
     # copied: at 400 answers of 6 000 characters the corpus holds 2.07 MB for
     # 2.40 MB of text and one grounding check allocates 0.01 MB on top of it,
-    # so the process cost is the ceiling and not four times it. Every answer
-    # passes ``max_tool_output_chars`` (6 000), so 16 MB is about 2 700 of
-    # them, against the order-400 tool calls a whole team spends — several
-    # times the heaviest run measured, and still a bound a machine running a
-    # model beside the worker can afford.
+    # so the process cost is the ceiling and not four times it.
+    #
+    # What that measurement was read against has changed. An answer used to be
+    # at most 6 000 characters, so 16 MB was about 2 700 of them; a tool answer
+    # is now measured against what the served window has left, and one loop can
+    # put at most ``(window - reply reserve) * 3`` characters through it. On the
+    # 32,768-token window this deployment serves that is 74 KB a loop, so a team
+    # of six spends under half a megabyte; at 131,072 it is 369 KB a loop and
+    # the six come to 2.2 MB; at a million it is 3.0 MB a loop and the ceiling
+    # holds five and a half of them, so a six-agent team on a window that size
+    # reaches it — and so does a static analyst taking a loop per chunk, which
+    # is how a run has more loops than it has agents.
+    #
+    # This is deliberately **not** scaled with the window. The window is the
+    # model's; this is the worker's RAM, on a machine that also runs the model,
+    # and answering a bigger window by holding a proportionally bigger corpus
+    # is how a 30 GB laptop runs out of memory mid-analysis. What happens when
+    # it binds is unchanged and is said out loud: the corpus reports itself
+    # incomplete, the run summary carries how many answers it could not hold
+    # and from which tools, and an absence measured against an incomplete
+    # corpus is advisory rather than a reason to drop anything. A deployment
+    # with the memory to spare raises this setting.
     evidence_corpus_bytes: Annotated[int, Field(ge=0)] = 16777216
 
 
@@ -2706,6 +3098,13 @@ class TriageConfig(BaseModel):
     # its own, and nothing else in the pack did; a step that would start after
     # this many seconds is recorded as not run instead.
     budget_seconds: Annotated[int, Field(ge=1)] = 1200
+    # What running FLOSS beside capa must leave of the host's available memory
+    # (MiB). The pack runs the two together only when what is available, less
+    # capa's measured peak and FLOSS's own address-space bound, stays at or
+    # above this — and when the worker's own memory limit, where it has one,
+    # holds both. 10,240 is the machine rule this project runs its models
+    # under: ten gigabytes free before heavy work. 0 checks only that both fit.
+    memory_floor_mb: Annotated[int, Field(ge=0)] = 10240
 
 
 class EventsConfig(BaseModel):

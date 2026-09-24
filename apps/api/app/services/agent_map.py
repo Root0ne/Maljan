@@ -14,10 +14,8 @@ from typing import Any
 
 from maljan.core.config import (
     AGENT_KEY_PATTERN,
-    BUILTIN_PROFILES,
     PROMPT_ROLES,
     PROVIDER_REFERENCE_RULE,
-    REPORTER_AGENT_KEY,
     AgentDefinition,
     ProfileDefinition,
     _builtin_definitions,
@@ -27,7 +25,8 @@ from maljan.core.config import (
     convert_builtin_profile_document,
 )
 from maljan.core.settings_overrides import build_settings
-from maljan.pipeline.conditions import validate_condition
+from maljan.core.team_layout import layout_team
+from maljan.core.team_lint import TeamFinding, lint_team, lint_teams, team_stages
 from pydantic import ValidationError
 
 AGENT_DEFINITIONS_KEY = "core.agents.definitions"
@@ -214,68 +213,35 @@ def validate_definitions(
     return out
 
 
-def validate_stage_conditions(profile: str, entry: Any) -> dict[str, str]:
-    """Every stage of ``entry`` whose ``when`` does not parse, keyed by field.
+def finding_path(finding: TeamFinding) -> str:
+    """The dotted settings path a team finding is reported under.
 
-    Run against the raw body, before ``ProfileDefinition`` sees it.
-    ``StageDefinition`` refuses a bad condition too, but it reports it as
-    ``stages.3`` with pydantic's wrapper text around it, and the editor routes
-    a message to a card by ``<profile>.stages.<key>.<field>``. Checking here
-    first is what puts the message under the box the operator typed it into.
+    The same shape the save path keys its refusals by —
+    ``core.agents.profiles.<team>.stages.<stage>.<field>`` — so the editor
+    routes a lint finding and a save refusal to the same card by the same
+    lookup. A finding about the agent map sits under the agent it names.
     """
-    errors: dict[str, str] = {}
-    stages = entry.get("stages") if isinstance(entry, dict) else None
-    if not isinstance(stages, list):
-        return errors
-    for index, stage in enumerate(stages):
-        if not isinstance(stage, dict):
-            continue
-        key = str(stage.get("key") or index)
-        problems = validate_condition(str(stage.get("when") or ""))
-        if problems:
-            errors[f"{profile}.stages.{key}.when"] = problems[0]
-    return errors
-
-
-def validate_stage_handovers(profile: str, entry: Any) -> dict[str, str]:
-    """Every debate in ``entry`` that has no single stage to hand over to.
-
-    Run against the raw body, before ``ProfileDefinition`` sees it, for the
-    reason the condition pre-pass is: the model refuses the same team, but it
-    refuses it with one message about the whole profile, and the editor routes
-    a message to a stage card by ``<profile>.stages.<key>.<field>``.
-    """
-    errors: dict[str, str] = {}
-    stages = entry.get("stages") if isinstance(entry, dict) else None
-    if not isinstance(stages, list):
-        return errors
-    typed = [s for s in stages if isinstance(s, dict)]
-
-    def heads(stage: dict) -> int:
-        if stage.get("kind") == "analysis" and stage.get("mode") == "parallel":
-            return len(stage.get("agents") or [])
-        return 1
-
-    for index, stage in enumerate(typed):
-        if stage.get("kind") != "debate":
-            continue
-        key = str(stage.get("key") or index)
-        fed = [s for s in typed if key in (s.get("depends_on") or [])]
-        total = sum(heads(s) for s in fed)
-        if total <= 1:
-            continue
-        names = ", ".join(str(s.get("key") or "?") for s in fed)
-        errors[f"{profile}.stages.{key}.depends_on"] = (
-            f"this debate hands over to {total} nodes ({names}); a debate hands over to "
-            "exactly one stage, and not to a parallel analysis stage with more than one agent"
-        )
-    return errors
+    if finding.team is None:
+        if finding.agent:
+            return f"{AGENT_DEFINITIONS_KEY}.{finding.agent}"
+        return AGENT_DEFINITIONS_KEY
+    path = f"{AGENT_PROFILES_KEY}.{finding.team}"
+    if finding.stage is not None:
+        path += f".stages.{finding.stage}"
+    if finding.field:
+        path += f".{finding.field}"
+    return path
 
 
 def validate_profiles(
     value: Any, *, definitions: dict[str, Any], active: str = "default"
 ) -> dict[str, Any]:
     """Return the profile map to store, or raise with one message per offender.
+
+    Every refusal is a team-lint error (``maljan.core.team_lint``), keyed by
+    the path the editor routes it to. The lint reads its errors off the same
+    functions the settings model raises from, so the preview the console shows
+    while a team is edited and what this refuses are one set of sentences.
 
     ``active`` is the profile that would actually run if this PATCH is
     accepted — the staged ``core.agents.profile`` if the PATCH sets one, else
@@ -298,112 +264,38 @@ def validate_profiles(
 
     for key, entry in value.items():
         name = str(key)
-        if not _KEY_RE.match(name):
-            errors[name] = _KEY_RULE
-            continue
-        if not isinstance(entry, dict):
-            errors[name] = "a profile entry must be an object"
-            continue
-        shape_errors = {
-            **validate_stage_conditions(name, entry),
-            **validate_stage_handovers(name, entry),
-        }
-        if shape_errors:
-            errors.update(shape_errors)
+        refusals = [
+            finding
+            for finding in lint_team(name, entry, definitions=definitions, active=active)
+            if finding.severity == "error"
+        ]
+        if refusals:
+            for finding in refusals:
+                errors.setdefault(finding_path(finding), finding.message)
             continue
         try:
             model = ProfileDefinition.model_validate(convert_builtin_profile_document(name, entry))
         except ValidationError as exc:
+            # Unreachable while the lint reports every refusal the model
+            # makes; kept so a rule added to the model and not to the lint is
+            # a refused save rather than a stored team the worker cannot load.
             for err in exc.errors():
                 location = ".".join(str(p) for p in err["loc"])
-                errors[f"{name}.{location}" if location else name] = err["msg"]
+                path = f"{AGENT_PROFILES_KEY}.{name}"
+                errors[f"{path}.{location}" if location else path] = err["msg"]
             continue
         # ``ProfileDefinition`` clears ``derived_from_analysts`` when the
         # stages are no longer the plain conversion of the analyst list, so the
         # dump is what gets stored and a PATCH that edits a migrated team's
         # stages stops it being re-derived over — whether it came from the
         # console, a script or an imported document.
-        dumped = model.model_dump(mode="json")
-
-        seed = seeds.get(name)
-        if seed is not None:
-            # A built-in profile's stages may differ from the seed's in the
-            # two fields an operator legitimately tunes; everything else about
-            # it is the architecture, and the settings model refuses the rest.
-            comparable = {**dumped, "stages": _stage_identity(dumped.get("stages"))}
-            expected = {**seed, "stages": _stage_identity(seed.get("stages"))}
-            for field in ("exclude_servers", "analysts", "derived_from_analysts"):
-                comparable.pop(field, None)
-                expected.pop(field, None)
-            if comparable != expected:
-                errors[name] = f"{name!r} is built in; clone it to change it"
-                continue
-
-        stage_errors = _stage_member_errors(name, model, definitions, active)
-        if stage_errors:
-            errors.update(stage_errors)
-            continue
-        out[name] = dumped
+        out[name] = model.model_dump(mode="json")
 
     if errors:
-        raise AgentMapError(_qualified(AGENT_PROFILES_KEY, errors))
+        raise AgentMapError(errors)
     for name, seed in seeds.items():
         out.setdefault(name, seed)
     return out
-
-
-def _stage_identity(stages: Any) -> Any:
-    """A built-in's stages with the two operator-editable fields removed."""
-    if not isinstance(stages, list):
-        return stages
-    return [
-        {k: v for k, v in stage.items() if k not in ("debate", "builtin_tools")}
-        if isinstance(stage, dict)
-        else stage
-        for stage in stages
-    ]
-
-
-def _stage_member_errors(
-    name: str, model: ProfileDefinition, definitions: dict[str, Any], active: str
-) -> dict[str, str]:
-    """Whether every agent a stage names exists, may run, and fits the kind.
-
-    The same rules ``AgentsConfig._check_profile_members`` applies, reported per
-    stage instead of as the first ``ValueError`` the model raised: an operator
-    editing a team of seven stages needs to know which card is wrong.
-    """
-    errors: dict[str, str] = {}
-    exempt = name in BUILTIN_PROFILES and name != active
-    for stage in model.stages:
-        field = f"{name}.stages.{stage.key}"
-        for agent in stage.agents:
-            definition = definitions.get(agent)
-            if definition is None:
-                errors[f"{field}.agents"] = f"unknown agent {agent!r}"
-                break
-            role = definition.get("role")
-            if stage.kind == "analysis" and role in ("judge", "report"):
-                errors[f"{field}.agents"] = f"{agent!r} has role {role!r} and cannot be an analyst"
-                break
-            if not exempt and definition.get("enabled") is False:
-                errors[f"{field}.agents"] = f"{agent!r} is disabled"
-                break
-        if f"{field}.agents" in errors:
-            continue
-        if stage.kind == "verdict":
-            judge = definitions.get(stage.agents[0]) if stage.agents else None
-            if len(stage.agents) != 1 or judge is None or judge.get("role") != "judge":
-                errors[f"{field}.agents"] = "a verdict stage names exactly one judge definition"
-        elif stage.kind == "report" and stage.agents != [REPORTER_AGENT_KEY]:
-            errors[f"{field}.agents"] = f"a report stage is run by {REPORTER_AGENT_KEY!r}"
-        elif stage.kind == "debate" and stage.agents:
-            errors[f"{field}.agents"] = (
-                "a debate stage names no agent; it argues over the analysis stages upstream of it"
-            )
-        elif stage.kind == "triage" and stage.agents:
-            errors[f"{field}.agents"] = "a triage stage names no agent; the pipeline runs it"
-    return errors
 
 
 STATIC_PROVIDER_KEY = "core.static.provider"
@@ -511,6 +403,79 @@ def _only_provider_tools(definition: Any) -> bool:
     if not tools:
         return False
     return {t.get("kind") for t in tools} == {"provider"}
+
+
+def staged_definitions(value: Any) -> dict[str, Any]:
+    """The agent map as the console has staged it, seeds filled in.
+
+    Read only for what the team rules ask of a definition — its role and
+    whether it is enabled — so a staged map that save would still refuse for
+    reasons of its own (a prompt left empty) is linted as written, and that
+    refusal stays the definition editor's to report. A built-in entry that
+    names only the fields it changes reads the rest from its seed, exactly as
+    the settings model merges it.
+    """
+    seeds = {name: d.model_dump(mode="json") for name, d in _builtin_definitions().items()}
+    out = dict(seeds)
+    if isinstance(value, dict):
+        for key, entry in value.items():
+            name = str(key)
+            if isinstance(entry, dict) and name in seeds:
+                out[name] = {**seeds[name], **_without_the_empty_builtin_tool_list(entry)}
+            else:
+                out[name] = entry
+    return out
+
+
+def lint_team_map(
+    stored: dict[str, Any],
+    *,
+    profiles: Any = None,
+    definitions: Any = None,
+    active: str | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Every team finding and every team's layout, for the editor's preview.
+
+    ``profiles``, ``definitions`` and ``active`` are what the console has
+    staged; each one left ``None`` is read from ``stored``, so a preview of a
+    team edited against last week's agents sees last week's agents. Nothing
+    is written. The findings are ``team_lint``'s, which is what the save path
+    refuses from, plus the static-provider note the save response already
+    carries, so the preview and the answer to apply say the same things.
+    """
+    profile_map = effective_profiles(stored if profiles is None else {AGENT_PROFILES_KEY: profiles})
+    if definitions is None:
+        definition_map = effective_definitions(stored)
+    else:
+        definition_map = staged_definitions(definitions)
+    running = str(active or stored.get(AGENT_PROFILE_KEY) or "default")
+
+    findings = [
+        {**finding.to_dict(), "path": finding_path(finding)}
+        for finding in lint_teams(profile_map, definitions=definition_map, active=running)
+    ]
+    for path, message in profile_warnings(
+        profile_map, definitions=definition_map, overrides=stored
+    ).items():
+        team, _, rest = path.removeprefix(f"{AGENT_PROFILES_KEY}.").partition(".stages.")
+        findings.append(
+            {
+                "severity": "warning",
+                "code": "static_provider_none",
+                "message": message,
+                "team": team,
+                "stage": rest or None,
+                "field": None,
+                "agent": None,
+                "path": path,
+            }
+        )
+
+    graphs: dict[str, dict[str, Any]] = {}
+    for name, entry in profile_map.items():
+        stages, _ = team_stages(str(name), entry)
+        graphs[str(name)] = layout_team(stages).to_dict()
+    return findings, graphs
 
 
 def validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict[str, Any]:

@@ -462,8 +462,11 @@ def _pe_packer_matches(pe: Any, sections: list[PESection], blob: bytes) -> list[
       files; a string-only match must never reach the confidence of a
       structural one.
 
-    Returns rows sorted most-confident first, so ``packer_hint`` can be derived
-    from ``[0]`` without re-deciding anything.
+    Returns rows ordered by that weight — section-name matches first, then
+    entry-point, then string-only — so ``packer_hint`` can be derived from
+    ``[0]`` without re-deciding anything. A row carries the methods and the
+    matched names, and no confidence: the ordering is this parser's, and a
+    number made from it would read as a confidence somebody stated.
     """
     signatures = _packer_signatures()
     if not signatures:
@@ -506,16 +509,6 @@ def _pe_packer_matches(pe: Any, sections: list[PESection], blob: bytes) -> list[
         if not (sect_hits or ep_hits or str_hits):
             continue
 
-        confidence = min(
-            0.95,
-            0.25 * len(sect_hits) + 0.20 * len(ep_hits) + 0.10 * len(str_hits),
-        )
-        # A lone string is a hint, not an identification.
-        if sect_hits or ep_hits:
-            confidence = max(confidence, 0.60)
-        else:
-            confidence = min(confidence, 0.45)
-
         methods = []
         if sect_hits:
             methods.append("section")
@@ -527,13 +520,16 @@ def _pe_packer_matches(pe: Any, sections: list[PESection], blob: bytes) -> list[
             {
                 "name": name,
                 "kind": str(row.get("kind") or "packer"),
-                "confidence": round(confidence, 3),
                 "method": "+".join(methods),
                 "evidence": (sect_hits + ep_hits + str_hits)[:5],
+                "_weight": (len(sect_hits), len(ep_hits), len(str_hits)),
             }
         )
 
-    out.sort(key=lambda r: float(r["confidence"]), reverse=True)
+    # A lone string is a hint, not an identification, so structure outranks it.
+    out.sort(key=lambda r: r["_weight"], reverse=True)
+    for row in out:
+        row.pop("_weight", None)
     return out
 
 

@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
 import { useParams } from "next/navigation";
 
 import { useReport } from "../layout";
-import { copyToClipboard, formatBytes } from "@/lib/report-utils";
+import { formatBytes } from "@/lib/report-utils";
+import CopyButton from "@/components/ui/CopyButton";
 import Field from "@/components/ui/Field";
 import { ArtifactSections } from "@/components/analysis/ArtifactTable";
 import ReputationSection from "@/components/analysis/ReputationSection";
@@ -149,6 +149,17 @@ export default function IdentityTab() {
                 : "",
             },
             { label: "Language / compiler", value: identity.language_or_compiler ?? "" },
+            // What the format tool read out of the header: the machine, and
+            // whether the image is a library — a DLL submitted under an .exe
+            // name is a fact a reader needs before trying to run it.
+            { label: "Architecture", value: identity.architecture ?? "" },
+            {
+              label: "Image",
+              value:
+                identity.is_dll === true ? "DLL" : identity.is_dll === false ? "executable" : "",
+            },
+            { label: "Export directory name", value: identity.export_name ?? "" },
+            { label: "Internal name", value: identity.internal_name ?? "" },
           ]
             // A field the ledger table above already carries is not drawn
             // again: `size` appeared in both tables on the one screen.
@@ -227,7 +238,6 @@ const HASH_ROWS: { field: HashField; label: string }[] = [
 ];
 
 function HashRow({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false);
   return (
     <div className="flex items-center gap-3">
       <span className="text-[11px] text-text-muted uppercase tracking-wider w-20 shrink-0">
@@ -238,17 +248,7 @@ function HashRow({ label, value }: { label: string; value: string }) {
           <code className="flex-1 font-mono text-xs text-status-blue truncate" title={value}>
             {value}
           </code>
-          <button
-            onClick={async () => {
-              if (await copyToClipboard(value)) {
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-              }
-            }}
-            className="text-[11px] px-2 py-0.5 border border-border rounded text-text-secondary hover:text-text-primary hover:border-text-muted"
-          >
-            {copied ? "copied" : "copy"}
-          </button>
+          <CopyButton value={value} what={label} />
         </>
       ) : (
         <span className="text-xs text-text-muted">-</span>

@@ -85,17 +85,18 @@ class TestWhatGetsReported:
         assert isinstance(dropped, dict)
         assert dropped["empty_pattern"] == 1
 
-    def test_a_truncated_pattern_is_attributed_to_empty_pattern(self) -> None:
-        """The real LLM failure mode: generation stopped mid-pattern. It is the
-        same category as empty because the shape check is what rejects both."""
+    def test_a_truncated_pattern_is_kept_for_the_judge_to_be_asked_about(self) -> None:
+        """Generation stopped mid-pattern: the judge is asked (``stix.pattern_refused``)
+        and the export declines one it keeps. Only an empty pattern is dropped here."""
         ledger = TruncationLedger()
         objects = [_indicator("indicator--1", pattern="[file:name = 'x")]
 
-        enforce_bundle_integrity(objects, ledger=ledger)
+        kept = enforce_bundle_integrity(objects, ledger=ledger)
 
         dropped = ledger.snapshot()["integrity_dropped"]
         assert isinstance(dropped, dict)
-        assert dropped["empty_pattern"] == 1
+        assert dropped["empty_pattern"] == 0
+        assert len(kept) == 1
 
     def test_duplicate_attack_patterns_are_attributed_separately(self) -> None:
         ledger = TruncationLedger()
@@ -188,12 +189,21 @@ class TestWhatTheIndicatorCapOrphans:
             evidence_ledger=[],
         ).build_deterministic()
         report.network = NetworkIOCs()
+        # A sandbox saw every file written: the second source the one publish
+        # rule asks of the judge's values. A file name is a value the export
+        # mints no row of its own for, so the indicators that reach the cap are
+        # the judge's.
+        from maljan.reporting.models import DynamicBehavior
+
+        report.dynamic = DynamicBehavior(
+            file_operations=[{"operation": "write", "path": f"h{n}.exe"} for n in range(40)]
+        )
         # More indicators than the cap keeps, each with a relationship of its
         # own, so the cap is bound to orphan some of them.
         objects: list[dict[str, Any]] = []
         for index in range(40):
             oid = f"indicator--0f1e2d3c-4b5a-4968-8776-6554433322{index:02d}"
-            objects.append(_indicator(oid, pattern=f"[domain-name:value = 'h{index}.example.org']"))
+            objects.append(_indicator(oid, pattern=f"[file:name = 'h{index}.exe']"))
             objects.append(
                 _relationship(
                     f"relationship--0f1e2d3c-4b5a-4968-8776-6554433322{index:02d}",

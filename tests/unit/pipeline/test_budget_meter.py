@@ -51,6 +51,7 @@ class TestTheBudgetEvents:
                     "timeout_s": 1500.0,
                     "prompt_chars": 9000,
                     "ledger_entries": 3,
+                    "tool_definition_chars": 0,
                     "final": False,
                 },
             )
@@ -234,6 +235,7 @@ class TestTheRunSummarySumsTheMeter:
                 "elapsed_s": 135.0,
                 "timeout_s": 1500.0,
                 "delegated_steps": 6,
+                "tool_definition_chars": 0,
                 "caps": ["steps"],
             }
         }

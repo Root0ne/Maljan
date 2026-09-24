@@ -191,6 +191,7 @@ class GenericMCPStaticProvider(StaticProvider):
             output_guardrail=job.output_guardrail,
             max_output_chars=job.max_output_chars,
             truncation_ledger=job.truncation_ledger,
+            context_budget=job.context_budget,
         )
         self.tools = self._handle.tools()
 

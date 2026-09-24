@@ -49,6 +49,14 @@ updates:
       day: "monday"
     target-branch: "dev"
     labels: ["dependencies", "ci"]
+    groups:
+      # init, analyze and upload-sarif are three steps of one release. A job
+      # that starts one version and finishes another fails outright ("Loaded a
+      # configuration file for version X, but running version Y"), so a bump
+      # that arrives one step at a time can never pass on its own.
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
 
   - package-ecosystem: "docker"
     directory: "/docker"

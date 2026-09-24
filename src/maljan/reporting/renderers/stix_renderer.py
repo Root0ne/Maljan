@@ -22,6 +22,8 @@ from __future__ import annotations
 import ipaddress
 import re
 import uuid
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from maljan.agents._indicator_denylists import (
@@ -36,17 +38,20 @@ from maljan.agents._indicator_denylists import (
     malformed_hash_in,
     whole_value_in,
 )
+from maljan.analysis.technique_ids import attack_reference_id
 from maljan.core.logger import logger
 from maljan.extractors.network_extractor import (
     address_is_publishable,
     corroboration_reason,
     host_is_public,
     ip_corroboration_reason,
+    is_well_known_benign_host,
     url_corroboration_reason,
     url_host,
 )
 from maljan.pipeline.events import safe_finding_value
 from maljan.reporting.models import (
+    EmulatedStrings,
     MalwareReport,
     NetworkDomain,
     NetworkIP,
@@ -56,18 +61,31 @@ from maljan.reporting.models import (
 )
 from maljan.schemas.judgement import indicator_type_for
 from maljan.schemas.stix_models import (
+    ATTACK_PATTERN_NAMESPACE,
+    EVIDENCE_REFS_PROPERTY,
     AttackPattern,
     Bundle,
+    File,
     Identity,
     Indicator,
     Malware,
     Note,
     ObservedData,
+    Process,
     Relationship,
     Report,
+    attack_pattern_id,
+    crediting_only,
     get_utcnow,
+    produced_by,
 )
-from maljan.schemas.stix_pattern import read_comparisons
+from maljan.schemas.stix_pattern import (
+    object_path_problems,
+    pattern_refusal,
+    read_comparisons,
+    stray_backslash_values,
+    unknown_object_types,
+)
 
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
@@ -90,11 +108,34 @@ UNPUBLISHABLE_ENDPOINT_CODE = "stix.unpublishable_endpoint"
 # the same decision, and ``apps/web/src/lib/validationRows.ts`` holds the list
 # it reads them from.
 LEGACY_UNPUBLISHABLE_CODES = ("stix.unpublishable_url", "stix.unpublishable_domain")
+# A ``created_by_ref`` naming an identity the bundle does not hold, which the
+# export replaced with this platform's identity.
+UNPUBLISHABLE_PRODUCER_CODE = "stix.unpublishable_producer"
+# A judge credit naming an agent that did not name the technique, which the
+# judge was asked about (``stix.credit_without_claim``) and kept.
+UNPUBLISHABLE_CREDIT_CODE = "stix.unpublishable_credit"
+# A judge object without a property the standard requires of it — a malware
+# object with no ``is_family``, a file with neither ``hashes`` nor ``name`` —
+# that the judge was asked about and kept absent. Published, the bundle is one a
+# consumer may refuse; filled in, it says something the judge did not.
+UNPUBLISHABLE_OBJECT_CODE = "stix.unpublishable_object"
 # An indicator over something that is not an endpoint: a mailbox that is not
 # one, a file name that names a directory or a root.
 UNPUBLISHABLE_ARTEFACT_CODE = "stix.unpublishable_artefact"
+# A ledger id the run's record cites for an exported object that the run's
+# ledger does not hold. The export writes only ids a reader can follow.
+EVIDENCE_REF_NOT_IN_LEDGER_CODE = "stix.evidence_ref_not_in_ledger"
 # A digest literal that is not a digest of the algorithm it is written under.
 MALFORMED_HASH_CODE = "stix.malformed_hash"
+# A pattern over an object type STIX does not have, which the judge was asked
+# about under ``stix.unknown_observable_type`` and kept. This row is the
+# export's decision rather than the judge's answer, so it has a code of its own.
+UNPUBLISHABLE_PATTERN_CODE = "stix.unpublishable_pattern"
+# A judge indicator naming a value the one publish rule refuses — a host only
+# the file's strings carry, a command line. Not exported, recorded, and
+# unchanged in the judge's own bundle; the IOC table and /iocs print the same
+# answer for the value.
+UNPUBLISHED_VALUE_CODE = "stix.indicator_not_published"
 
 # The sources whose rows are worth a recorded decline. Something a sandbox
 # watched, an agent wrote down or the judge asserted is an observation, and a
@@ -151,9 +192,11 @@ _UNREADABLE_OPERATORS = ("matches", "like", "issubset", "issuperset")
 
 # The object paths whose value this export can ask a validity question about:
 # the four endpoints a consumer would act on, the mailbox and the file name. A
-# pattern over anything else is carried as the judge wrote it — there is no
-# true question to ask of it, and inventing one would decline an object for a
-# reason that is not so.
+# pattern over any other STIX type is carried as the judge wrote it — there is
+# no true question to ask of it, and inventing one would decline an object for
+# a reason that is not so. A pattern over a type STIX does not have is a
+# different case and is declined before this table is read: ``ipv-addr`` is
+# not an unasked path, it is an address the endpoint question never saw.
 _DIRECT_PATHS = {
     "url:value": "url",
     "domain-name:value": "domain-name",
@@ -265,8 +308,37 @@ def _within_the_indicator_cap(
     return [obj for obj in objects if getattr(obj, "type", "") != "indicator" or obj.id in kept]
 
 
+class Declined(tuple[str, str]):
+    """One thing the export left out: ``(code, sentence)``, and who wrote it down.
+
+    A pair, so every reader that unpacks ``code, why`` still does. ``by`` is the
+    producer of the object that was declined: the judge for the judge's own
+    objects, and for a row of the report's network block the source that
+    recorded it — a sandbox, an analyst. Those rows used to be filed under the
+    judge, which wrote none of them.
+    """
+
+    by: str
+
+    def __new__(cls, code: str, why: str, *, by: str | None = "judge") -> Declined:
+        row = super().__new__(cls, (code, why))
+        row.by = str(by or "judge")
+        return row
+
+
 def impossible_host_sentence(value: str, whose: str) -> str:
-    """The recorded sentence for a URL no host could ever answer for."""
+    """The recorded sentence for a URL no host could ever answer for.
+
+    A value with no scheme is not a URL at all, and is said to be that rather
+    than to name a host that could not exist.
+    """
+    if "://" not in str(value):
+        return (
+            f"the URL indicator for {safe_finding_value(value)!r} is not in the exported bundle: "
+            "it is not a URL — it has no scheme — so there is no host in it to ask about; a "
+            "host is written as domain-name:value. It is unchanged in "
+            f"{whose}."
+        )
     return (
         f"the URL indicator for {safe_finding_value(value)!r} is not in the exported bundle: its "
         f"host is not a name or address that could exist outside the analysed network. It is "
@@ -289,6 +361,16 @@ def unreadable_endpoint_sentence(value: str, kind_words: str, whose: str) -> str
         f"the {kind_words} indicator for {safe_finding_value(value)!r} is not in the exported "
         f"bundle: the pipeline could not read the pattern's endpoint, so it could not ask whether "
         f"this export may carry it. It is unchanged in {whose}."
+    )
+
+
+def shaped_endpoint_sentence(value: str, kind_words: str, operator: str) -> str:
+    """The recorded sentence for an endpoint written as a shape rather than a value."""
+    return (
+        f"the {kind_words} indicator for {safe_finding_value(value)!r} is not in the exported "
+        f"bundle: it compares with {safe_finding_value(operator.upper())}, which names every "
+        "endpoint that fits it rather than one, so this export could not ask whether it may "
+        "carry the endpoint. It is unchanged in the judge's own bundle."
     )
 
 
@@ -320,6 +402,178 @@ def malformed_hash_sentence(algorithm: str, value: str) -> str:
         f"the {named} indicator for {safe_finding_value(value)!r} is not in the exported "
         f"bundle: {named} is {length}, and a consumer matching on it will never match this "
         f"value. It is unchanged in the judge's own bundle."
+    )
+
+
+def unknown_observable_type_sentence(pattern: str, types: list[str]) -> str:
+    """The recorded sentence for a pattern over a type STIX does not have."""
+    named = ", ".join(repr(safe_finding_value(t)) for t in types)
+    return (
+        f"the indicator {safe_finding_value(pattern)!r} is not in the exported bundle: it "
+        f"compares {named}, which is not a STIX Cyber-observable type, so no consumer holds "
+        "an object it could match and this export could not ask whether it may carry the "
+        "value. It is unchanged in the judge's own bundle."
+    )
+
+
+def unknown_object_path_sentence(pattern: str, problems: list[str]) -> str:
+    """The recorded sentence for a pattern over a path its type does not have."""
+    return (
+        f"the indicator {safe_finding_value(pattern)!r} is not in the exported bundle: "
+        f"{safe_finding_value('; '.join(problems))}, so the pattern matches nothing a consumer "
+        "holds. It is unchanged in the judge's own bundle."
+    )
+
+
+def stray_backslash_sentence(pattern: str, values: list[str]) -> str:
+    """The recorded sentence for a pattern whose value writes a backslash the grammar refuses."""
+    named = "a value" if len(values) == 1 else f"{len(values)} values"
+    return (
+        f"the indicator {safe_finding_value(pattern)!r} is not in the exported bundle: it "
+        f"quotes {named} with a backslash a STIX pattern cannot read — inside a quoted value "
+        "the grammar escapes only the quote and the backslash — so a consumer's parser would "
+        "refuse the whole pattern. It is unchanged in the judge's own bundle."
+    )
+
+
+def _unasked_findings(report: Any, code: str) -> list[str]:
+    """The run's unresolved judge findings under ``code`` the judge was never shown.
+
+    Read from ``run_summary.validation.unresolved``, where a finding the answer
+    to the judge's only retry raised first is recorded ``"asked": "false"``.
+    Each is its ``subject`` — the technique a credit is for, the malware
+    object's name — and, for a row stored before rows carried one, its message.
+    """
+    summary = getattr(report, "run_summary", None)
+    validation = summary.get("validation") if isinstance(summary, dict) else None
+    rows = validation.get("unresolved") if isinstance(validation, dict) else None
+    return [
+        str(row.get("subject") or row.get("message") or "")
+        for row in rows or []
+        if isinstance(row, dict)
+        and row.get("code") == code
+        and str(row.get("agent") or "judge") == "judge"
+        and str(row.get("asked") or "") == "false"
+    ]
+
+
+def _names_the_technique(sentence: str, technique: str) -> bool:
+    """Whether ``sentence`` names ``technique`` as an id of its own, not a prefix."""
+    return bool(re.search(rf"(?<![\w.]){re.escape(technique)}(?![\w.]\w)", sentence))
+
+
+def _without_unconfirmed_credit(
+    obj: Any, credit: Any, *, asked: bool = True
+) -> tuple[Any, Declined]:
+    """A copy of a judge relationship carrying only the credits a source stands behind.
+
+    ``asked`` is whether the judge was shown the credit question. The sentence
+    says which: "kept the credit when asked" of a credit it was never asked
+    about is a statement the run's record does not support.
+    """
+    from maljan.pipeline.validation import credited_agents
+
+    kept = [name for name in credited_agents(obj) if name not in credit.uncredited]
+    copy = crediting_only(obj, kept)
+    names = ", ".join(repr(safe_finding_value(n)) for n in credit.uncredited)
+    what_the_judge_did = (
+        "the judge kept the credit when asked"
+        if asked
+        else "the judge was not asked about it: the credit first appeared in an answer no "
+        "turn was left to question"
+    )
+    return copy, Declined(
+        UNPUBLISHABLE_CREDIT_CODE,
+        f"the credit to {names} for {safe_finding_value(credit.technique)} is not in the "
+        f"exported bundle: no source by that name named the technique in this run, and "
+        f"{what_the_judge_did}. It is unchanged in the judge's own bundle.",
+    )
+
+
+def _missing_what_the_standard_requires(obj: Any, unasked: Sequence[str] = ()) -> str:
+    """The recorded sentence for a judge object the standard refuses as written, or ``""``.
+
+    ``unasked`` is the run's ``stix.is_family_missing`` findings the judge was
+    never shown; the sentence says it was asked only when it was.
+    """
+    kind = str(getattr(obj, "type", "") or "")
+    label = safe_finding_value(getattr(obj, "name", "") or getattr(obj, "id", ""))
+    if kind == "malware" and getattr(obj, "is_family", None) is None:
+        named = f"{safe_finding_value(str(getattr(obj, 'name', '') or '').strip())!r}"
+        what_the_judge_did = (
+            "the judge was not asked about it: it first appeared in an answer no turn was "
+            "left to question"
+            if any(
+                said == str(getattr(obj, "name", "") or "").strip() or named in said
+                for said in unasked
+            )
+            else "the judge kept it absent when asked"
+        )
+        return (
+            f"the malware object {label!r} is not in the exported bundle: it does not say "
+            f"is_family, which STIX requires, and {what_the_judge_did}. The "
+            "export stands the platform's own sample object in for it, and the judge's "
+            "relationships that named it move onto that object unchanged. It is unchanged "
+            "in the judge's own bundle."
+        )
+    if kind == "file" and not getattr(obj, "hashes", None) and not getattr(obj, "name", None):
+        return (
+            f"the file {label!r} is not in the exported bundle: it has neither hashes nor "
+            "name, and STIX needs one of them to say which file it is. It is unchanged in the "
+            "judge's own bundle."
+        )
+    if kind in _ABOUT_OBJECTS and not getattr(obj, "object_refs", None):
+        return (
+            f"the {kind} {safe_finding_value(getattr(obj, 'abstract', '') or label)!r} is not "
+            "in the exported bundle: it names no object it is about, which STIX requires. It "
+            "is unchanged in the judge's own bundle."
+        )
+    return ""
+
+
+# The objects STIX defines as being about others, each of which must name at
+# least one in ``object_refs``.
+_ABOUT_OBJECTS = frozenset({"note", "opinion", "grouping", "report"})
+
+
+def _names_nothing_sentence(obj: Any) -> str:
+    """The recorded sentence for an object about others that names none of them."""
+    kind = safe_finding_value(getattr(obj, "type", "") or "object")
+    label = safe_finding_value(
+        getattr(obj, "abstract", "") or getattr(obj, "name", "") or getattr(obj, "id", "")
+    )
+    return (
+        f"the {kind} {label!r} is not in the exported bundle: every object it was about is "
+        "outside this export, and STIX requires it to name at least one. It is unchanged in "
+        "the judge's own bundle."
+    )
+
+
+def _names_any(obj: Any, ids: set[str]) -> bool:
+    """Whether a relationship names one of ``ids`` at either end."""
+    if not ids or getattr(obj, "type", "") != "relationship":
+        return False
+    return str(getattr(obj, "source_ref", "")) in ids or str(getattr(obj, "target_ref", "")) in ids
+
+
+def _onto(edge: Any, stood_in: set[str], stand_in: str) -> Any:
+    """A copy of a judge relationship naming the stand-in where it named a declined object."""
+    update = {
+        key: stand_in
+        for key in ("source_ref", "target_ref")
+        if str(getattr(edge, key, "")) in stood_in
+    }
+    return edge.model_copy(update=update)
+
+
+def replaced_producer_sentence(obj: Any, named: str) -> str:
+    """The recorded sentence for a producer the bundle does not hold, replaced."""
+    kind = safe_finding_value(getattr(obj, "type", "") or "object")
+    label = safe_finding_value(getattr(obj, "name", "") or getattr(obj, "id", ""))
+    return (
+        f"the {kind} {label!r} names {safe_finding_value(named)!r} as its producer, an "
+        "identity this bundle does not hold, so the export names this platform's identity "
+        "instead. It is unchanged in the judge's own bundle."
     )
 
 
@@ -465,6 +719,27 @@ def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
     every indicator the judge writes.
     """
     pattern = indicator.pattern or ""
+    unknown = unknown_object_types(pattern)
+    if unknown:
+        return (
+            UNPUBLISHABLE_PATTERN_CODE,
+            unknown_observable_type_sentence(pattern, unknown),
+        )
+    wrong_paths = object_path_problems(pattern)
+    if wrong_paths:
+        return (UNPUBLISHABLE_PATTERN_CODE, unknown_object_path_sentence(pattern, wrong_paths))
+    stray = stray_backslash_values(pattern)
+    if stray:
+        return (UNPUBLISHABLE_PATTERN_CODE, stray_backslash_sentence(pattern, stray))
+    malformed = malformed_hash_in(pattern)
+    refusal = "" if malformed is not None else pattern_refusal(pattern)
+    if refusal:
+        return (
+            UNPUBLISHABLE_PATTERN_CODE,
+            f"the indicator {safe_finding_value(pattern)!r} is not in the exported bundle: the "
+            f"STIX pattern grammar refuses it ({safe_finding_value(refusal)}), so a consumer's "
+            "parser would refuse it whole. It is unchanged in the judge's own bundle.",
+        )
     malformed = malformed_hash_in(pattern)
     if malformed is not None:
         algorithm, literal = malformed
@@ -475,6 +750,11 @@ def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
             continue
         code = _DECLINE_CODES.get(kind, UNPUBLISHABLE_ENDPOINT_CODE)
         words = _OBJECT_TYPE_WORDS.get(kind, "address")
+        if read and not readable:
+            # Read whole, and written as a shape: a ``LIKE`` or ``MATCHES``
+            # names every endpoint that fits it, which is not one the host
+            # question can be asked of.
+            return (code, shaped_endpoint_sentence(literal, words, operator))
         if not readable:
             return (code, unreadable_endpoint_sentence(literal, words, "the judge's own bundle"))
         if kind == "url":
@@ -484,6 +764,53 @@ def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
         if kind == "file":
             return (code, not_a_file_sentence(literal))
         return (code, unpublishable_endpoint_sentence(literal, words, "the judge's own bundle"))
+    return None
+
+
+def _judge_indicator_unpublished(
+    report: Any, indicator: Indicator, corroborating: str
+) -> tuple[str, str] | None:
+    """Why the one publish rule declines this judge indicator, or ``None``.
+
+    Every value a comparison of a kind the rule answers names is asked it,
+    whatever the operator — ``=``, each member of an ``IN`` list, the operand
+    of ``!=``, ``<`` or ``>`` — exactly as the report's own row for the value
+    is asked (:func:`judge_value_answer`); one refused value declines the
+    indicator. The IOC table and ``/iocs`` still read ``=`` alone; the export
+    asks every operator, so no operator carries a value the rule refused. A
+    comparison of a kind the IOC table has no row for (a port, a property of a
+    process) is left to the host question and the grounding check before this.
+    """
+    named = safe_finding_value(getattr(indicator, "name", "") or indicator.pattern)
+    for value in rule_values(indicator.pattern or ""):
+        answer = judge_value_answer(report, value.kind, value.value, corroborating)
+        if answer == "yes":
+            continue
+        return (
+            UNPUBLISHED_VALUE_CODE,
+            f"the judge's indicator {named!r} names {safe_finding_value(value.value)!r}, "
+            f"which this run does not publish ({safe_finding_value(answer)}). It is not in "
+            "the exported bundle and is unchanged in the judge's own bundle.",
+        )
+    # A comparison of a kind the rule answers for, written as a shape — a
+    # ``LIKE`` with its wildcards, a ``MATCHES`` expression, a range — names
+    # every value that fits it and none in particular. The rule answers for a
+    # value, and ``'%whoami%'`` is not the value ``whoami``: asking it about the
+    # text between the wildcards would publish a match nobody put to it, and
+    # asking nothing would let a shape carry a value the ``=`` form of the same
+    # indicator is refused. It is declined, with the reason, as a refused value is.
+    for comparison in read_comparisons(indicator.pattern or ""):
+        if not _exported_kind(comparison)[0] or _endpoint_is_readable(comparison.operator):
+            continue
+        return (
+            UNPUBLISHED_VALUE_CODE,
+            f"the judge's indicator {named!r} compares {safe_finding_value(comparison.path)} "
+            f"{safe_finding_value(comparison.operator.upper())} "
+            f"{safe_finding_value(comparison.literal)!r}, which names the values that fit it "
+            "rather than one value. The one publish rule answers for a value, so it cannot say "
+            "this run may publish what the pattern matches. It is not in the exported bundle "
+            "and is unchanged in the judge's own bundle.",
+        )
     return None
 
 
@@ -515,6 +842,9 @@ class ExtendedSTIXRenderer:
         *,
         ledger: Any | None = None,
         corpus: Any = None,
+        technique_sources: Any = None,
+        technique_evidence: Mapping[str, Sequence[str]] | None = None,
+        ledger_ids: Sequence[str] | None = None,
     ) -> Bundle:
         """Render the extended bundle.
 
@@ -524,10 +854,24 @@ class ExtendedSTIXRenderer:
         runs — the judge's
         own post-process is the first — so both must report or the aggregate
         undercounts.
+
+        ``technique_evidence`` is ``{technique id: [ledger id, ...]}`` as the
+        run's record ties them (``pipeline.evidence_summary.technique_evidence``).
+        The ids are written on the sample's ``uses`` edge to that technique,
+        and the attribution's family ids on a malware object this export mints
+        from the family name, as ``x_maljan_evidence_refs``. Nothing else gets
+        the property, and nothing is matched by value or read out of text.
+
+        ``ledger_ids`` is the run's ledger, in its order. Every id the export
+        writes is one it holds, in that order; with no ledger no id is written.
+        A family id it does not hold is recorded as
+        ``stix.evidence_ref_not_in_ledger`` and left out.
         """
         objects: list[Any] = []
         self.unlinked = []
         self.declined = []
+        ledger_order = {eid: i for i, eid in reversed(list(enumerate(ledger_ids or [])))}
+        minted_family_id: str | None = None
         # A verdict of Benign is a finding that this sample is not malware, so
         # the bundle it publishes carries no malware object — neither one the
         # judge wrote as "a container for the object type in STIX" beside an
@@ -560,12 +904,54 @@ class ExtendedSTIXRenderer:
         # report's own linter said so.
         linked: set[str] = set()
         carried: list[Indicator] = []
+        # The judge's malware objects the export declines for a property the
+        # standard requires, and the judge's relationships that name them. The
+        # platform's own sample object stands in for such an object, and the
+        # relationships move onto it unchanged — confidence, basis and credits
+        # as the judge wrote them — so the export's malware object uses what the
+        # judge said the sample uses and the judge's number is published.
+        stood_in: set[str] = set()
+        awaiting_stand_in: list[Any] = []
+        if base_bundle is not None and not benign:
+            stood_in = {
+                str(obj.id)
+                for obj in base_bundle.objects
+                if getattr(obj, "type", "") == "malware"
+                and _missing_what_the_standard_requires(obj)
+            }
+        # The run's second-source record, read once for the judge's values here
+        # and for the string rows below: one rule, asked of both.
+        judge_corroborating = _corroborating_values(report, corpus)
         if base_bundle is not None:
             self._normalize_judge_timestamps(base_bundle.objects)
             remap = _technique_remap(report, base_bundle)
             gone = _rejected_pattern_ids(base_bundle, remap)
-            for obj in base_bundle.objects:
+            # A credit the judge was asked about and kept, naming an agent no
+            # source of that name stands behind. The judge's own bundle keeps
+            # it; the export's copy of the relationship does not carry it, so
+            # no surface prints an agent as having named a technique it never
+            # named.
+            from maljan.pipeline.validation import unconfirmed_credits
+
+            unconfirmed = {
+                credit.index: credit
+                for credit in unconfirmed_credits(base_bundle, technique_sources)
+            }
+            unasked_credits = _unasked_findings(report, "stix.credit_without_claim")
+            for position, obj in enumerate(base_bundle.objects):
                 kind = getattr(obj, "type", "")
+                if position in unconfirmed:
+                    credit = unconfirmed[position]
+                    obj, row = _without_unconfirmed_credit(
+                        obj,
+                        credit,
+                        asked=not any(
+                            said.upper() == str(credit.technique).upper()
+                            or _names_the_technique(said, str(credit.technique))
+                            for said in unasked_credits
+                        ),
+                    )
+                    self.declined.append(row)
                 if kind == "attack-pattern":
                     continue
                 if kind == "malware" and benign:
@@ -580,13 +966,27 @@ class ExtendedSTIXRenderer:
                         )
                     )
                     continue
+                incomplete = _missing_what_the_standard_requires(
+                    obj, _unasked_findings(report, "stix.is_family_missing")
+                )
+                if incomplete:
+                    self.declined.append(Declined(UNPUBLISHABLE_OBJECT_CODE, incomplete))
+                    continue
                 if _points_at(obj, gone):
                     continue
                 moved, technique = _relinked(obj, remap)
                 if technique:
                     linked.add(technique)
+                if _names_any(moved, stood_in):
+                    # The judge's edge from a malware object the export
+                    # declined: it moves to the platform's stand-in, unchanged,
+                    # once that object exists (below).
+                    awaiting_stand_in.append(moved)
+                    continue
                 if isinstance(moved, Indicator):
-                    declined = _judge_indicator_problem(moved)
+                    declined = _judge_indicator_problem(moved) or _judge_indicator_unpublished(
+                        report, moved, judge_corroborating
+                    )
                     if declined:
                         self.declined.append(declined)
                         continue
@@ -595,10 +995,14 @@ class ExtendedSTIXRenderer:
                 objects.append(moved)
             self.unlinked = _unlinked_techniques(base_bundle, gone)
 
-        # 2) Identity SDO for Maljan itself.
+        # 2) Identity SDO for Maljan itself. ``system`` is STIX's word for a
+        #    producer that is software; ``software`` is not in the vocabulary.
+        #    One id on every export, so a consumer holding several reads one
+        #    producer rather than one per run.
         identity = Identity(
+            id=PRODUCER_IDENTITY_ID,
             name="Maljan",
-            identity_class="software",
+            identity_class="system",
             description="Automated multi-agent malware analysis pipeline",
         )
         objects.append(identity)
@@ -615,9 +1019,19 @@ class ExtendedSTIXRenderer:
                 description=f"Sample {report.identity.hashes.sha256}",
                 is_family=False,
                 malware_types=[report.malware_category] if report.malware_category else [],
+                # Named from the family, so the family's own citations are
+                # this object's; a name from the category or ``unknown`` has
+                # none in the record.
+                x_maljan_evidence_refs=(
+                    self._family_refs(report, ledger_order) if report.attribution.family else None
+                ),
             )
             objects.append(malware_obj)
             malware_id = malware_obj.id
+            if report.attribution.family:
+                minted_family_id = malware_obj.id
+        if malware_id is not None:
+            objects.extend(_onto(edge, stood_in, malware_id) for edge in awaiting_stand_in)
 
         # 3.5) One attack-pattern per published technique, with a stable id and
         #      an ATT&CK reference, related to the malware object. The judge's
@@ -684,7 +1098,7 @@ class ExtendedSTIXRenderer:
         #    keeping is the one that carries the observation.
         if report.network is not None:
             for ip in report.network.ips[:40]:
-                ip_ind = _indicator_for_ip(ip, report.verdict)
+                ip_ind = _indicator_for_ip(ip, report.verdict, report)
                 if ip_ind is not None:
                     _queue(ip_ind, _BAND_NETWORK, ip.source)
             for url in report.network.urls[:40]:
@@ -701,13 +1115,14 @@ class ExtendedSTIXRenderer:
                 # forty of them a run buries the findings a reader can act on.
                 if _observed(url.source) and not host_is_public(url_host(url.url)):
                     self.declined.append(
-                        (
+                        Declined(
                             UNPUBLISHABLE_ENDPOINT_CODE,
                             impossible_host_sentence(url.url, "the report's network block"),
+                            by=url.source,
                         )
                     )
             for domain in report.network.domains[:40]:
-                dom_ind = _indicator_for_domain(domain, report.verdict)
+                dom_ind = _indicator_for_domain(domain, report.verdict, report)
                 if dom_ind is not None:
                     _queue(dom_ind, _BAND_NETWORK, domain.source)
                     continue
@@ -717,9 +1132,10 @@ class ExtendedSTIXRenderer:
                 # back by the corroboration rule, which is the rule working.
                 if _observed(domain.source) and not host_is_public(domain.fqdn):
                     self.declined.append(
-                        (
+                        Declined(
                             UNPUBLISHABLE_ENDPOINT_CODE,
                             unpublishable_domain_sentence(domain.fqdn),
+                            by=domain.source,
                         )
                     )
 
@@ -733,7 +1149,7 @@ class ExtendedSTIXRenderer:
         # the network block's own answer for a name, and everything some other
         # producer in this run wrote down for every other kind.
         publishable_domains = _publishable_domains(report)
-        corroborating = _corroborating_values(report, corpus)
+        corroborating = judge_corroborating
 
         # Apply the same acceptance-based filter
         # used by the judge bundle postprocess so deterministic
@@ -748,7 +1164,7 @@ class ExtendedSTIXRenderer:
                 if pattern is None:
                     continue
                 if not _accept_string_ioc(
-                    ioc, pattern, file_name_kept, publishable_domains, corroborating
+                    ioc, pattern, file_name_kept, publishable_domains, corroborating, report
                 ):
                     continue
                 if pattern.lstrip().startswith("[file:name"):
@@ -779,16 +1195,22 @@ class ExtendedSTIXRenderer:
             _queue(carried_indicator, _indicator_band(carried_indicator.pattern), "judge")
 
         # 7) ObservedData for the process tree roots.
+        #    The processes and their images are objects of the bundle, named by
+        #    ``object_refs``. The sandbox block carries no observation time, so
+        #    both ends are the time the report was built — the latest the
+        #    observation can have been — and one run is one observation.
         if report.dynamic is not None and report.dynamic.process_tree:
-            obs_objects = _processes_to_observed(report.dynamic.process_tree)
-            if obs_objects:
-                observed = ObservedData(
-                    first_observed=report.generated_at,
-                    last_observed=report.generated_at,
-                    number_observed=len(obs_objects),
-                    objects=obs_objects,
+            observables = _processes_to_observables(report.dynamic.process_tree)
+            if observables:
+                objects.extend(observables)
+                objects.append(
+                    ObservedData(
+                        first_observed=report.generated_at,
+                        last_observed=report.generated_at,
+                        number_observed=1,
+                        object_refs=[obs.id for obs in observables],
+                    )
                 )
-                objects.append(observed)
 
         # 8) Note wraps the executive summary; abstract is the verdict.
         #
@@ -818,6 +1240,19 @@ class ExtendedSTIXRenderer:
             )
             objects.append(note)
 
+        # 8.5) The ledger entries the record ties to each technique, on the
+        #      sample's ``uses`` edge to it. On the edge and not on the
+        #      attack-pattern: the attack-pattern's id is the same in every
+        #      export, and one run's evidence written on it would make two
+        #      bundles disagree about one object. The edge is this run's claim.
+        #      Every object is passed through, so the property on the export
+        #      is only ever the record's: a judge object reaches here without
+        #      it (``judge_postprocess.PLATFORM_ONLY_PROPERTIES``), and nothing
+        #      else is kept.
+        objects = _with_record_evidence(
+            objects, malware_id, technique_evidence or {}, ledger_order, minted_family_id
+        )
+
         # 9) Report SDO bundles every object_ref. Pre-existing AttackPattern
         #    objects are referenced too so the report stays the single root.
         #    A report with nothing to reference is not emitted: ``object_refs``
@@ -831,14 +1266,13 @@ class ExtendedSTIXRenderer:
                     description=(
                         f"Verdict: {report.verdict}. "
                         + (
-                            f"Severity {report.severity.overall_score}/10 "
-                            f"({report.severity.rating})."
+                            f"Severity {report.severity.rating}."
                             if report.severity
                             else "Severity not assessed."
                         )
                     ),
                     published=report.generated_at,
-                    report_types=["malware-analysis"],
+                    report_types=report_types_for(report.verdict),
                     object_refs=refs,
                 )
             )
@@ -860,34 +1294,83 @@ class ExtendedSTIXRenderer:
 
         objects = enforce_bundle_integrity(objects, ledger=ledger)
         capped = _within_the_indicator_cap(objects, order, ledger=ledger)
-        if capped is objects:
-            return Bundle(objects=objects)
-        # Only what the cap orphaned is left to sweep, and it is the cap's
-        # doing rather than a defect of anybody's bundle — so it is counted
-        # under a reason of its own. Counted it must be: the pass used to run
-        # here with no ledger at all, so this sweep's losses appeared in no
-        # total. The cap's own removals are counted beside them, under
-        # ``indicator_cap_removed``, so every object that left this bundle
-        # left under a name.
-        return Bundle(
-            objects=enforce_bundle_integrity(capped, ledger=ledger, dropped_as=CAP_ORPHAN_REASON)
-        )
+        if capped is not objects:
+            # Only what the cap orphaned is left to sweep, and it is the cap's
+            # doing rather than a defect of anybody's bundle — so it is counted
+            # under a reason of its own. Counted it must be: the pass used to
+            # run here with no ledger at all, so this sweep's losses appeared in
+            # no total. The cap's own removals are counted beside them, under
+            # ``indicator_cap_removed``, so every object that left this bundle
+            # left under a name.
+            objects = enforce_bundle_integrity(capped, ledger=ledger, dropped_as=CAP_ORPHAN_REASON)
+        # A note, opinion, grouping or report is about the objects it names,
+        # and STIX requires it to name at least one. The passes above take out
+        # references to what the export declined; one left naming nothing is
+        # an object the standard refuses, and it is declined with the reason
+        # rather than exported so.
+        objects = self._without_empty_references(objects)
+        return Bundle(objects=_produced_by(objects, identity.id, self.declined))
+
+    def _without_empty_references(self, objects: list[Any]) -> list[Any]:
+        """``objects`` less every object whose required references are now empty."""
+        while True:
+            empty = {
+                str(getattr(obj, "id", ""))
+                for obj in objects
+                if getattr(obj, "type", "") in _ABOUT_OBJECTS
+                and not getattr(obj, "object_refs", None)
+            }
+            if not empty:
+                return objects
+            kept: list[Any] = []
+            for obj in objects:
+                if str(getattr(obj, "id", "")) in empty:
+                    self.declined.append(
+                        Declined(UNPUBLISHABLE_OBJECT_CODE, _names_nothing_sentence(obj))
+                    )
+                    continue
+                refs = getattr(obj, "object_refs", None)
+                if isinstance(refs, list) and any(ref in empty for ref in refs):
+                    obj = obj.model_copy(
+                        update={"object_refs": [ref for ref in refs if ref not in empty]}
+                    )
+                kept.append(obj)
+            objects = kept
+
+    def _family_refs(
+        self, report: MalwareReport, ledger_order: Mapping[str, int]
+    ) -> list[str] | None:
+        """The family's ledger ids the ledger holds; each one it does not is recorded."""
+        who = report.attribution.family_source or "judge"
+        for raw in report.attribution.family_evidence_ids or []:
+            eid = str(raw or "").strip()
+            if eid and eid not in ledger_order:
+                self.declined.append(
+                    Declined(
+                        EVIDENCE_REF_NOT_IN_LEDGER_CODE,
+                        f"the family {safe_finding_value(report.attribution.family)!r} cites "
+                        f"{safe_finding_value(eid)!r}, which this run's ledger does not hold, so "
+                        "the export's malware object does not carry it. The attribution keeps "
+                        "the citation as written.",
+                        by=who,
+                    )
+                )
+        return _evidence_refs(report.attribution.family_evidence_ids, ledger_order)
 
     @staticmethod
     def _normalize_judge_timestamps(objects: list[Any]) -> None:
-        """Normalize the judge's LLM-emitted SDOs to authoritative values.
+        """Stamp the judge's SDOs with the time the platform published them.
 
-        The judge Bundle is emitted by the LLM, which copies STIX documentation
-        examples verbatim. Two fields are never authoritative and are fixed here:
+        ``created`` and ``modified`` are the platform's bookkeeping — when this
+        export made the object — and the prompt tells the judge to leave them
+        out; a model that writes them copies the documentation's
+        ``2023-01-01T00:00:00Z``. They are set to the render time, matching
+        every renderer-produced SDO.
 
-        * ``created``/``modified`` — land on the placeholder
-          ``2023-01-01T00:00:00Z`` epoch instead of the analysis
-          time; a downstream CTI consumer would trust that bogus date. Overwrite
-          with the render time (matching every renderer-produced SDO).
-        * ``is_family`` on Malware SDOs — the LLM often
-          copies ``is_family: true`` from the docs, but Maljan analyses a single
-          specimen, so this must be ``false``. STIX ``is_family=true`` asserts
-          the object represents a malware *family*, not one sample.
+        Nothing the judge states is touched. ``is_family`` used to be forced to
+        ``false`` here, on the reasoning that one sample is not a family; whether
+        the object stands for the family is the judge's statement, and it is
+        published as written.
 
         Object ids are left untouched so intra-bundle relationship refs stay
         valid.
@@ -898,8 +1381,6 @@ class ExtendedSTIXRenderer:
                 obj.created = now
             if hasattr(obj, "modified"):
                 obj.modified = now
-            if isinstance(obj, Malware) and getattr(obj, "is_family", False):
-                obj.is_family = False
 
     @staticmethod
     def _find_malware_id(objects: list[Any]) -> str | None:
@@ -912,16 +1393,65 @@ class ExtendedSTIXRenderer:
         return None
 
 
-# The namespace the technique objects' ids are derived in. A UUIDv5 over the
-# technique id, so the same technique is the same object across exports of the
-# same run and across runs — and never a UUID copied out of the STIX
-# documentation, which is what the judge's own objects sometimes carried.
-_ATTACK_PATTERN_NAMESPACE = uuid.UUID("2f0b4c10-6f7e-5b6a-9d3b-1f6a5c7e8d90")
+def _produced_by(
+    objects: list[Any], producer: str, declined: list[tuple[str, str]] | None = None
+) -> list[Any]:
+    """Every object naming the identity that produced it, as a copy.
+
+    A copy, because the judge's objects are the judge's own bundle's too, and
+    that bundle is kept as the run's record (``analysis_reports.judge_stix_bundle``,
+    served at ``/reports/{id}/stix?source=judge``). An object that already names a
+    producer in this bundle keeps the one it names; one naming an identity the
+    bundle does not hold names nothing, the way a relationship pointing at
+    nothing does, and is given this one — recorded in ``declined``, because the
+    export then says something about the object that its writer did not.
+    """
+    present = {getattr(obj, "id", None) for obj in objects} - {None}
+    out: list[Any] = []
+    for obj in objects:
+        named = getattr(obj, "created_by_ref", None)
+        if getattr(obj, "id", None) == producer or named in present:
+            out.append(obj)
+            continue
+        if "created_by_ref" not in type(obj).model_fields:
+            out.append(obj)
+            continue
+        if named and declined is not None:
+            declined.append(
+                Declined(UNPUBLISHABLE_PRODUCER_CODE, replaced_producer_sentence(obj, str(named)))
+            )
+        out.append(produced_by(obj, producer))
+    return out
+
+
+# The namespace the technique objects' ids are derived in: one, in
+# ``schemas.stix_models``, for the export and for the judge's own bundle.
+_ATTACK_PATTERN_NAMESPACE = ATTACK_PATTERN_NAMESPACE
+
+# This platform's identity, the producer every exported object names. Derived
+# in the same namespace, so it is the same object in every export and a
+# consumer holding many of them holds one producer.
+PRODUCER_IDENTITY_ID = f"identity--{uuid.uuid5(_ATTACK_PATTERN_NAMESPACE, 'maljan')}"
 
 
 def _pattern_id_for(technique_id: str) -> str:
     """The published object id of one technique. Same id every time."""
-    return f"attack-pattern--{uuid.uuid5(_ATTACK_PATTERN_NAMESPACE, technique_id)}"
+    return attack_pattern_id(technique_id)
+
+
+def report_types_for(verdict: str) -> list[str]:
+    """The STIX 2.1 ``report_types`` for the verdict the record states.
+
+    A report type says what the report is about (``report-type-ov``; the
+    object type ``malware-analysis`` is not one of them). ``malware`` is "a
+    characterization of one or more malware instances", which a Malware
+    verdict states and a Suspicious or Benign one does not: a Benign export
+    once went out typed ``malware``. The vocabulary has no term for a finding
+    that the subject is not a threat, and its general entry, ``threat-report``
+    ("a broad characterization of a threat across multiple facets"), is the
+    one that claims no malware instance.
+    """
+    return ["malware"] if str(verdict or "") == "Malware" else ["threat-report"]
 
 
 def _published_ids(report: MalwareReport) -> dict[str, str]:
@@ -936,9 +1466,9 @@ def _published_ids(report: MalwareReport) -> dict[str, str]:
 
 def _declared_technique(obj: Any) -> str:
     """The ATT&CK id an attack-pattern declares, from its reference or its name."""
-    for ref in getattr(obj, "external_references", None) or []:
-        if isinstance(ref, dict) and str(ref.get("external_id") or "").strip():
-            return str(ref["external_id"]).strip().upper()
+    declared = attack_reference_id(obj)
+    if declared:
+        return declared
     name = str(getattr(obj, "name", "") or "").strip().upper()
     first = name.split()[0].rstrip(":") if name else ""
     return first if first.startswith("T") else ""
@@ -970,6 +1500,10 @@ def _relinked(obj: Any, remap: dict[str, str]) -> tuple[Any, str]:
     of. It is ``""`` for every other shape, which keeps the minted edge for a
     technique the judge only related some other way.
     """
+    refs = getattr(obj, "object_refs", None)
+    if isinstance(refs, list) and any(ref in remap for ref in refs):
+        # An object about the judge's techniques is about the rebuilt ones.
+        return obj.model_copy(update={"object_refs": [remap.get(r, r) for r in refs]}), ""
     if getattr(obj, "type", "") != "relationship":
         return obj, ""
     source = str(getattr(obj, "source_ref", "") or "")
@@ -1020,6 +1554,57 @@ def _unlinked_techniques(base_bundle: Bundle, gone: dict[str, str]) -> list[tupl
                 counts[label] = counts.get(label, 0) + 1
                 break
     return sorted(counts.items())
+
+
+def _evidence_refs(ids: Any, ledger_order: Mapping[str, int]) -> list[str] | None:
+    """Ledger ids as the export writes them: ids the ledger holds, once each,
+    in the ledger's order. ``None`` for none."""
+    kept = {str(raw or "").strip() for raw in ids or []}
+    held = sorted((eid for eid in kept if eid in ledger_order), key=ledger_order.__getitem__)
+    return held or None
+
+
+def _with_record_evidence(
+    objects: list[Any],
+    malware_id: str | None,
+    technique_evidence: Mapping[str, Sequence[str]],
+    ledger_order: Mapping[str, int],
+    minted_id: str | None = None,
+) -> list[Any]:
+    """``objects`` with the property on each object exactly as the record gives it.
+
+    The sample's ``uses`` edge to a technique gets that technique's ledger ids.
+    The malware object this export minted keeps the family ids it was minted
+    with (already checked against the ledger). Every other object that could
+    carry the property carries none. A copy is written rather than the object
+    changed, because the judge's objects are the judge's own bundle's too.
+    """
+    by_pattern: dict[str, list[str]] = {}
+    for tid, ids in technique_evidence.items():
+        refs = _evidence_refs(ids, ledger_order)
+        if refs:
+            by_pattern[_pattern_id_for(str(tid).strip().upper())] = refs
+    out: list[Any] = []
+    for obj in objects:
+        if EVIDENCE_REFS_PROPERTY not in type(obj).model_fields:
+            out.append(obj)
+            continue
+        current = getattr(obj, EVIDENCE_REFS_PROPERTY, None)
+        if minted_id is not None and getattr(obj, "id", None) == minted_id:
+            wanted = current
+        elif (
+            malware_id is not None
+            and getattr(obj, "type", "") == "relationship"
+            and getattr(obj, "relationship_type", "") == "uses"
+            and getattr(obj, "source_ref", None) == malware_id
+        ):
+            wanted = by_pattern.get(str(getattr(obj, "target_ref", "") or ""))
+        else:
+            wanted = None
+        if wanted != current:
+            obj = obj.model_copy(update={EVIDENCE_REFS_PROPERTY: wanted})
+        out.append(obj)
+    return out
 
 
 def _attack_patterns_for(
@@ -1217,6 +1802,9 @@ def indicator_publish_reason(
     reputation: Any = None,
     *,
     corroborated_by: str = "",
+    recovered: str = "",
+    verdict: Any = None,
+    also_plain: str = "",
 ) -> str | None:
     """Why this run may publish one indicator of ``kind``, or ``None``.
 
@@ -1233,15 +1821,40 @@ def indicator_publish_reason(
     claim citing evidence that holds it, a reputation record. ``source`` is who
     recorded the row, and ``corroborated_by`` is what a caller found for a row
     whose source is by construction the string sweep.
+
+    A network value the sample hid and only emulation recovered — a decoded,
+    stack or tight string in the run's FLOSS entry that the static string sweep
+    did not also read as a plain string (``also_plain`` names the sweep's entry
+    when it did, and the value is then the sweep's) — is a source of its own
+    (``recovered``: "recovered by emulation (decoded strings), ev_NNNN"). Hiding
+    a host behind encoding is a deliberate act benign software rarely performs,
+    where a plain string in a binary is routinely benign. It admits a domain,
+    an address or a URL that passes every other question here — the host
+    question, the address classes, the reputation half — and is not a
+    well-known benign host or a denied URL host. It admits nothing under a
+    Benign ``verdict``, nor under one the judge did not state with a confidence:
+    a Benign run publishes no malicious indicator, and the refusal says so.
+    A value only the string sweep read stays unpublished.
     """
     if kind == "domain":
         if not host_is_public(value):
             return None
-        return corroboration_reason(source, reputation, value)
+        return corroboration_reason(source, reputation, value) or _emulation_admits(
+            value, recovered, verdict
+        )
     if kind == "ip":
-        return ip_corroboration_reason(value, source, reputation)
+        admitted = ip_corroboration_reason(value, source, reputation)
+        if admitted or not address_is_publishable(value, source):
+            return admitted
+        return _emulation_admits(value, recovered, verdict)
     if kind == "url":
-        return url_corroboration_reason(value, source, reputation)
+        admitted = url_corroboration_reason(value, source, reputation)
+        host = url_host(value)
+        if admitted or not host_is_public(host):
+            return admitted
+        if any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
+            return None
+        return _emulation_admits(host, recovered, verdict)
     if kind == "email":
         if not email_is_publishable(value):
             return None
@@ -1256,11 +1869,499 @@ def indicator_publish_reason(
             return None
     if kind == "path" and not path_names_a_file(value):
         return None
+    if kind == "hash":
+        # A digest is publishable when it is whole and somebody other than the
+        # string sweep knows it: the sample's own identity, a sandbox's dropped
+        # file, an analyst's carved payload, a second source's record. A run of
+        # hex the byte image carries is not a file anybody has.
+        if not _is_a_whole_digest(value):
+            return None
+        if str(source or "").strip().lower() not in ("", "strings"):
+            return str(source)
+        return corroborated_by or None
+    # A command line is not an indicator this platform publishes: it is a
+    # behaviour a detection rule reads, not a value a blocklist or the /iocs
+    # feed matches on, and STIX has no pattern this export writes for one. The
+    # rule answers it — no — rather than leaving it to whichever path asks.
     if kind not in STRING_IOC_KINDS or indicator_pattern(kind, value) is None:
         return None
     if str(source or "").strip().lower() not in ("", "strings"):
         return str(source)
     return corroborated_by or None
+
+
+# What the rule writes for a value emulation recovered, before the entry id.
+RECOVERED_BY_EMULATION = "recovered by emulation (decoded strings)"
+
+# The FLOSS string kinds that are text the sample hid: a decoded string, a
+# stack string, a tight string. A static string FLOSS also lists is not.
+_EMULATED_KINDS = frozenset({"decoded", "stack", "tight"})
+
+
+def _emulation_admits(host: str, recovered: str, verdict: Any) -> str | None:
+    """``recovered`` when emulation may stand as this value's source, else ``None``.
+
+    Never under a Benign verdict, nor under one the judge did not state with a
+    confidence (a fallback's default word), nor for a well-known benign host.
+    """
+    if not recovered or _is_benign_verdict(verdict) or verdict == UNSTATED_VERDICT:
+        return None
+    if is_well_known_benign_host(host):
+        return None
+    return recovered
+
+
+def _is_benign_verdict(verdict: Any) -> bool:
+    return str(verdict or "").strip().lower() == "benign"
+
+
+def _field(obj: Any, name: str) -> Any:
+    """``obj.name`` or ``obj[name]``: a report as a model or as its stored dict."""
+    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+
+
+def _rows_of(structured: Any, key: str) -> list[Any]:
+    rows = structured.get(key) if isinstance(structured, dict) else None
+    return list(rows) if isinstance(rows, list) else []
+
+
+def _whole_listing(structured: Any, rows: list[Any]) -> bool:
+    """Whether a paged listing's answer is every row it matched, unfiltered."""
+    if not isinstance(structured, dict) or structured.get("pattern"):
+        return False
+    if structured.get("truncated") or int(structured.get("page_offset") or 0):
+        return False
+    matched = structured.get("total_matched", structured.get("total"))
+    try:
+        return int(matched if matched is not None else len(rows)) <= len(rows)
+    except (TypeError, ValueError):
+        return False
+
+
+def _hold_out_plain(
+    values: dict[str, str], plain_texts: list[tuple[str, str]]
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Split emulated values into those only emulation read and those a plain string holds."""
+    kept: dict[str, str] = {}
+    plain: dict[str, str] = {}
+    for value, entry in values.items():
+        holder = next((eid for eid, text in plain_texts if whole_value_in(value, text)), "")
+        if holder:
+            plain[value] = holder
+        else:
+            kept[value] = entry
+    return kept, plain
+
+
+def _add_emulated(values: dict[str, str], text: Any, entry: str) -> None:
+    value = str(text or "").strip().lower()
+    if not value:
+        return
+    values.setdefault(value.rstrip("."), entry)
+    host = url_host(value)
+    if host:
+        values.setdefault(host, entry)
+
+
+def emulation_from_ledger(ledger: Iterable[Any] | None) -> EmulatedStrings:
+    """What emulation alone recovered in this run, read from every FLOSS entry the ledger holds.
+
+    A decoded, stack or tight string FLOSS returned, folded to lower case (a
+    URL adds its host), with the entry it came from — the pack's own entry
+    first, since it is issued first. A value the static string sweep also read
+    as a whole value (the ``strings`` entries, the ``iocs_from_file`` rows) is
+    held out: text the sample did not hide is not recovered by emulation,
+    whatever kind FLOSS gave it. ``partial`` says why the record may not be
+    the run's whole: no FLOSS entry listed every string it recovered, or no
+    ``strings`` entry listed every plain string, so a value past a page could
+    be missing from either side. Built at build time and stored on the report,
+    so no kept-row cap of a section decides a publish answer.
+    """
+    values: dict[str, str] = {}
+    plain_texts: list[tuple[str, str]] = []
+    floss_whole = strings_whole = False
+    saw_floss = saw_strings = False
+    for entry in ledger or ():
+        tool = str(getattr(entry, "tool", "") or "").rsplit("__", 1)[-1]
+        entry_id = str(getattr(entry, "id", "") or getattr(entry, "entry_id", "") or "")
+        structured = getattr(entry, "structured", None)
+        if tool == "floss":
+            saw_floss = True
+            rows = _rows_of(structured, "strings")
+            floss_whole = floss_whole or _whole_listing(structured, rows)
+            for row in rows:
+                if isinstance(row, dict) and str(row.get("kind") or "").lower() in _EMULATED_KINDS:
+                    _add_emulated(values, row.get("string"), entry_id)
+        elif tool == "strings":
+            saw_strings = True
+            rows = _rows_of(structured, "strings")
+            strings_whole = strings_whole or _whole_listing(structured, rows)
+            plain_texts.extend(
+                (entry_id, str(row.get("text") or "").lower())
+                for row in rows
+                if isinstance(row, dict) and row.get("text")
+            )
+        elif tool == "iocs_from_file":
+            plain_texts.extend(
+                (entry_id, str(row.get("value") or "").lower())
+                for row in _rows_of(structured, "iocs")
+                if isinstance(row, dict) and row.get("value")
+            )
+    kept, plain = _hold_out_plain(values, plain_texts)
+    why: list[str] = []
+    if saw_floss and not floss_whole:
+        why.append("no FLOSS entry listed every string it recovered")
+    if kept and not (saw_strings and strings_whole):
+        why.append("no strings entry listed every plain string in the file")
+    return EmulatedStrings(values=kept, plain=plain, partial="; ".join(why))
+
+
+# Why a record read back from a stored report is partial: it holds only the
+# rows the report's sections kept.
+_FROM_KEPT_ROWS = "read from the kept rows of a report stored before the record existed"
+
+
+def emulation_record(report: Any) -> EmulatedStrings:
+    """The report's record of what emulation alone recovered.
+
+    The one built from the ledger at build time (``emulated_strings``), or, for
+    a report stored before it existed, one read from the report's kept section
+    rows — FLOSS's ``tool_floss_strings`` and the sweep's ``strings`` and
+    string rows — and marked partial, because a section keeps a bounded number
+    of rows.
+    """
+    stored = _field(report, "emulated_strings")
+    if stored:
+        return (
+            stored
+            if isinstance(stored, EmulatedStrings)
+            else EmulatedStrings.model_validate(stored)
+        )
+    index = {
+        str(_field(row, "id") or ""): str(_field(row, "agent") or "")
+        for row in (_field(report, "evidence_index") or [])
+    }
+    values: dict[str, str] = {}
+    plain_texts: list[tuple[str, str]] = []
+    for section in _field(report, "sections") or []:
+        key = str(_field(section, "key") or "")
+        columns = [str(c) for c in (_field(section, "columns") or [])]
+        ids = [str(i) for i in (_field(section, "evidence_ids") or [])]
+        rows = _field(section, "rows") or []
+        if key == "tool_floss_strings" and "kind" in columns and "string" in columns and ids:
+            entry = next((i for i in ids if index.get(i) == "pipeline"), ids[0])
+            at_kind, at_string = columns.index("kind"), columns.index("string")
+            for row in rows:
+                if len(row) > max(at_kind, at_string) and (
+                    str(row[at_kind]).strip().lower() in _EMULATED_KINDS
+                ):
+                    _add_emulated(values, row[at_string], entry)
+        elif key == "strings" and "Text" in columns:
+            at_text = columns.index("Text")
+            plain_texts.extend(
+                (ids[0] if ids else "", str(row[at_text]).lower())
+                for row in rows
+                if len(row) > at_text
+            )
+    static = _field(report, "static")
+    for row in _field(static, "interesting_strings") or [] if static is not None else []:
+        plain_texts.append(("", str(_field(row, "value") or "").lower()))
+    kept, plain = _hold_out_plain(values, plain_texts)
+    return EmulatedStrings(values=kept, plain=plain, partial=_FROM_KEPT_ROWS if values else "")
+
+
+# The verdict a record is asked under when the judge stated none with a
+# confidence: a fallback's default word is not a verdict anybody stated.
+UNSTATED_VERDICT = "unstated"
+
+
+def emulation_kwargs(
+    report: Any, kind: str, value: str, record: EmulatedStrings | None = None
+) -> dict[str, Any]:
+    """The rule's emulation arguments for one value of one report.
+
+    ``recovered`` (the reason, with the record's partiality where it has
+    any) and ``verdict`` for a value only emulation recovered; ``also_plain``
+    (the sweep's entry) for one the static sweep read too; nothing otherwise.
+    The verdict is read as stated only when the judge gave it a confidence.
+    """
+    if kind not in ("domain", "ip", "url"):
+        return {}
+    found = emulation_record(report) if record is None else record
+    key = str(value or "").strip().lower().rstrip(".")
+    if key in found.plain:
+        return {"also_plain": found.plain[key] or "the strings entry"}
+    entry = found.values.get(key)
+    if not entry:
+        return {}
+    reason = f"{RECOVERED_BY_EMULATION}, {entry}"
+    if found.partial:
+        reason += f" (the record is partial: {found.partial})"
+    stated = _field(report, "overall_confidence") is not None
+    return {
+        "recovered": reason,
+        "verdict": _field(report, "verdict") if stated else UNSTATED_VERDICT,
+    }
+
+
+_WHOLE_DIGEST_RE = re.compile(r"^[0-9a-fA-F]+$")
+_DIGEST_HEX_LENGTHS = frozenset({32, 40, 56, 64, 96, 128})
+
+
+def _is_a_whole_digest(value: Any) -> bool:
+    """Whether ``value`` is hex of a digest's own length."""
+    text = str(value or "").strip()
+    return bool(_WHOLE_DIGEST_RE.match(text)) and len(text) in _DIGEST_HEX_LENGTHS
+
+
+def publish_answer(
+    kind: str,
+    value: str,
+    source: Any,
+    reputation: Any = None,
+    *,
+    corroborating: str = "",
+    recovered: str = "",
+    verdict: Any = None,
+    also_plain: str = "",
+) -> str:
+    """The publish rule's answer for one row, as the report prints it.
+
+    ``yes``, or ``no: <reason>`` naming the half of :func:`indicator_publish_reason`
+    that refused it. The decision is that function's and nothing here decides
+    anything: the reason is read back from the same questions it asks, in the
+    same order. ``corroborating`` is the run's second-source record
+    (:func:`corroborating_values`), asked whole-value for a string row the way
+    the export asks it.
+    """
+    text = str(value or "").strip()
+    from_strings = str(source or "").strip().lower() in ("", "strings")
+    corroborated = (
+        "a second source in this run records it"
+        if from_strings and text and corroborating and whole_value_in(text, corroborating)
+        else ""
+    )
+    if indicator_publish_reason(
+        kind,
+        text,
+        source,
+        reputation,
+        corroborated_by=corroborated,
+        recovered=recovered,
+        verdict=verdict,
+    ):
+        return "yes"
+    if kind == "domain" and not host_is_public(text):
+        return "no: not a name that resolves outside the analysed network"
+    if kind == "url" and not host_is_public(url_host(text)):
+        return "no: its host does not resolve outside the analysed network"
+    if kind == "ip" and not address_is_publishable(text, source):
+        return "no: not an address this run may publish"
+    if kind == "email" and not email_is_publishable(text):
+        return "no: not a mailbox at a host that could exist"
+    if (
+        kind == "email"
+        and from_strings
+        and not reads_as_a_host_in_the_bytes(text.rsplit("@", 1)[-1])
+    ):
+        return "no: its domain part reads as code in the file, not as a host"
+    if kind == "path" and not path_names_a_file(text):
+        return "no: names a directory or a root, not a file"
+    if kind == "hash" and not _is_a_whole_digest(text):
+        return "no: not a whole digest"
+    if recovered and _is_benign_verdict(verdict):
+        return f"no: {recovered}, but the verdict is Benign, which publishes no malicious indicator"
+    if recovered and verdict == UNSTATED_VERDICT:
+        return f"no: {recovered}, but the judge stated no verdict with a confidence"
+    if also_plain:
+        return (
+            f"no: seen only in the file's strings — also a plain string in the file "
+            f"({also_plain}), so not recovered by emulation"
+        )
+    if recovered and is_well_known_benign_host(url_host(text) if kind == "url" else text):
+        return f"no: {recovered}, but it is a well-known benign host"
+    if kind == "command":
+        return "no: a command line is not an indicator this run publishes"
+    if kind != "hash" and (kind not in STRING_IOC_KINDS or indicator_pattern(kind, text) is None):
+        return "no: the export has no object for this kind"
+    return "no: seen only in the file's strings"
+
+
+def corroborating_values(report: Any, corpus: Any = None) -> str:
+    """The run's second-source record, as :func:`publish_answer` asks it."""
+    return _corroborating_values(report, corpus)
+
+
+def judge_value_answer(report: Any, kind: str, value: str, corroborating: str) -> str:
+    """The one publish rule's answer for a value the judge's indicator names.
+
+    The judge asserting a value is not a second source for it — the export
+    used to take "the judge said so" as one, and a certificate authority's host
+    the judge copied out of the strings table was published, fed and drafted
+    an alert for. So the value is asked exactly as the report's own row for it
+    is: a network value with the source and reputation of its row in the
+    network block where the block has one, the sample's own digest as its
+    identity, and anything else as the string sweep's, with the run's
+    second-source record (:func:`corroborating_values`) asked whole-value.
+    ``yes`` or ``no: <reason>``, as :func:`publish_answer` writes it.
+    """
+    text = str(value or "").strip()
+    network = getattr(report, "network", None)
+    emulated = emulation_kwargs(report, kind, text)
+    if kind == "domain" and network is not None:
+        for row in network.domains:
+            if row.fqdn.strip().lower().rstrip(".") == text.lower().rstrip("."):
+                return publish_answer("domain", text, row.source, row.reputation, **emulated)
+    if kind == "ip" and network is not None:
+        for ip_row in network.ips:
+            if ip_row.address.strip() == text:
+                return publish_answer("ip", text, ip_row.source, ip_row.reputation, **emulated)
+    if kind == "url" and network is not None:
+        for url_row in network.urls:
+            if url_row.url.strip() == text:
+                return publish_answer(
+                    "url",
+                    text,
+                    url_row.source or "strings",
+                    _host_reputation(report, url_host(text)),
+                    **emulated,
+                )
+    if kind == "hash":
+        hashes = getattr(getattr(report, "identity", None), "hashes", None)
+        own = {
+            str(getattr(hashes, name, "") or "").strip().lower()
+            for name in ("md5", "sha1", "sha256", "sha512", "imphash")
+        } - {""}
+        if text.lower() in own:
+            return publish_answer("hash", text, "identity")
+    reputation = _host_reputation(report, url_host(text)) if kind == "url" else None
+    return publish_answer(
+        kind, text, "strings", reputation, corroborating=corroborating, **emulated
+    )
+
+
+def judge_indicator_rows(report: Any, corpus: Any = None) -> list[tuple[Any, str]]:
+    """Each value the judge's indicators name, with the one rule's answer for it.
+
+    What the IOC table and ``/iocs`` read for a judge value, and what the
+    export asks before it carries a judge indicator, so the three surfaces
+    read one decision.
+    """
+    rows = list(getattr(report, "judge_indicators", None) or [])
+    if not rows:
+        return []
+    corroborating = _corroborating_values(report, corpus)
+    return [(row, judge_value_answer(report, row.kind, row.value, corroborating)) for row in rows]
+
+
+# What one comparison of an exported pattern names, as the IOC table's kind.
+# The inverse of :func:`indicator_pattern` for the kinds it writes, plus the
+# digests a hash indicator compares.
+_EXPORTED_KINDS: dict[tuple[str, str], str] = {
+    ("domain-name", "value"): "domain",
+    ("ipv4-addr", "value"): "ip",
+    ("ipv6-addr", "value"): "ip",
+    ("url", "value"): "url",
+    ("email-addr", "value"): "email",
+    ("file", "name"): "path",
+    ("windows-registry-key", "key"): "registry",
+    ("mutex", "name"): "mutex",
+    ("process", "command_line"): "command",
+}
+_HASH_PROPERTY_RE = re.compile(r"^hashes\.'([^']+)'$")
+
+
+@dataclass(frozen=True)
+class ExportedValue:
+    """One value an exported indicator compares: its kind, the value, and a hash's algorithm."""
+
+    kind: str
+    value: str
+    algorithm: str = ""
+
+
+def pattern_values(pattern: str) -> list[ExportedValue]:
+    """The values a pattern compares with ``=``, each typed as the IOC table types it.
+
+    A comparison over a path the table has no kind for is not returned.
+    """
+    found: list[ExportedValue] = []
+    for comparison in read_comparisons(str(pattern or "")):
+        if not comparison.readable or comparison.operator != "=":
+            continue
+        value = comparison.literal.strip()
+        kind, algorithm = _exported_kind(comparison)
+        if kind and value:
+            found.append(ExportedValue(kind=kind, value=value, algorithm=algorithm))
+    return found
+
+
+def rule_values(pattern: str) -> list[ExportedValue]:
+    """Every value a pattern names over a kind the rule answers, whatever the operator.
+
+    :func:`pattern_values` reads ``=`` alone, which is what the IOC table and
+    ``/iocs`` list. This reads what the export asks the rule about: every
+    quoted operand of an operator that compares with a value — ``=``, ``!=``,
+    ``<``, ``>``, ``<=``, ``>=`` and each member of ``IN`` — and never a shape
+    (``LIKE``, ``MATCHES``, ``ISSUBSET``, ``ISSUPERSET``), which names no value.
+    An ``IN`` list, a ``<`` or a ``!=`` used to reach the export with nothing
+    asked, so a value the rule refused as ``=`` was published inside one.
+    """
+    found: list[ExportedValue] = []
+    for comparison in read_comparisons(str(pattern or "")):
+        if not comparison.readable or not _endpoint_is_readable(comparison.operator):
+            continue
+        value = comparison.literal.strip()
+        kind, algorithm = _exported_kind(comparison)
+        if kind and value:
+            found.append(ExportedValue(kind=kind, value=value, algorithm=algorithm))
+    return found
+
+
+def shape_is_asked_the_rule(comparison: Any) -> bool:
+    """Whether a comparison is over an endpoint or a kind the one publish rule answers for.
+
+    The two places a shape (``LIKE``, ``MATCHES``) is declined from the export:
+    the host question's paths and the IOC table's kinds.
+    """
+    if _exported_kind(comparison)[0]:
+        return True
+    return bool(_checked_kind(comparison.object_type, comparison.prop))
+
+
+def _exported_kind(comparison: Any) -> tuple[str, str]:
+    """The IOC table's kind for a comparison's path, and a digest's algorithm; ``("", "")``."""
+    digest = _HASH_PROPERTY_RE.match(comparison.prop)
+    if comparison.object_type == "file" and digest:
+        return "hash", digest.group(1).upper()
+    return _EXPORTED_KINDS.get((comparison.object_type, comparison.prop), ""), ""
+
+
+def exported_indicator_values(bundle: Any) -> list[ExportedValue]:
+    """Every value a bundle's single-comparison indicators name, once each.
+
+    Read of the judge's own bundle by the report builder, which stores the
+    values for the IOC table and ``/iocs`` to ask the one publish rule of
+    (:func:`judge_indicator_rows`), and of the export by the consistency test
+    that holds the three surfaces to one decision. It decides nothing. A
+    compound pattern (``[a] AND [b]``) names no single value and is left to
+    the bundle, where the export asks each of its values the rule.
+    """
+    objects = (bundle or {}).get("objects") if isinstance(bundle, dict) else None
+    found: list[ExportedValue] = []
+    seen: set[tuple[str, str]] = set()
+    for obj in objects or []:
+        if not isinstance(obj, dict) or obj.get("type") != "indicator":
+            continue
+        pattern = str(obj.get("pattern") or "")
+        if len(read_comparisons(pattern)) != 1:
+            continue
+        for value in pattern_values(pattern):
+            if (value.kind, value.value.lower()) in seen:
+                continue
+            seen.add((value.kind, value.value.lower()))
+            found.append(value)
+    return found
 
 
 def _stix_pattern_for_string_ioc(ioc: StringIOC) -> str | None:
@@ -1280,11 +2381,18 @@ def _publishable_domains(report: Any) -> frozenset[str]:
     network = getattr(report, "network", None)
     if network is None:
         return frozenset()
+    record = emulation_record(report)
     return frozenset(
         domain.fqdn.strip().lower().rstrip(".")
         for domain in network.domains
         if domain.fqdn
-        and indicator_publish_reason("domain", domain.fqdn, domain.source, domain.reputation)
+        and indicator_publish_reason(
+            "domain",
+            domain.fqdn,
+            domain.source,
+            domain.reputation,
+            **emulation_kwargs(report, "domain", domain.fqdn, record),
+        )
         is not None
     )
 
@@ -1404,6 +2512,7 @@ def _accept_string_ioc(
     file_name_kept: int,
     publishable_domains: frozenset[str] = frozenset(),
     corroborating: str = "",
+    report: Any = None,
 ) -> bool:
     """Gate StringIOC → Indicator emission.
 
@@ -1458,7 +2567,13 @@ def _accept_string_ioc(
         else ""
     )
     return (
-        indicator_publish_reason(ioc.kind, value, "strings", corroborated_by=corroborated)
+        indicator_publish_reason(
+            ioc.kind,
+            value,
+            "strings",
+            corroborated_by=corroborated,
+            **(emulation_kwargs(report, ioc.kind, value) if report is not None else {}),
+        )
         is not None
     )
 
@@ -1488,7 +2603,9 @@ def _looks_like_real_path(value: str) -> bool:
     return False
 
 
-def _indicator_for_domain(domain: NetworkDomain, verdict: Any = "") -> Indicator | None:
+def _indicator_for_domain(
+    domain: NetworkDomain, verdict: Any = "", report: Any = None
+) -> Indicator | None:
     """The name as an indicator, or ``None`` when this run may not publish it.
 
     Two ways to be refused, and they are different facts: a name nothing but
@@ -1500,7 +2617,13 @@ def _indicator_for_domain(domain: NetworkDomain, verdict: Any = "") -> Indicator
     fqdn = domain.fqdn.strip()
     if not fqdn:
         return None
-    admitted = indicator_publish_reason("domain", fqdn, domain.source, domain.reputation)
+    admitted = indicator_publish_reason(
+        "domain",
+        fqdn,
+        domain.source,
+        domain.reputation,
+        **(emulation_kwargs(report, "domain", fqdn) if report is not None else {}),
+    )
     if admitted is None:
         # A run of bytes that has the shape of a hostname is not an
         # observation of infrastructure. One PE's string sweep put fifteen
@@ -1533,7 +2656,7 @@ def _indicator_for_domain(domain: NetworkDomain, verdict: Any = "") -> Indicator
     )
 
 
-def _indicator_for_ip(ip: NetworkIP, verdict: Any = "") -> Indicator | None:
+def _indicator_for_ip(ip: NetworkIP, verdict: Any = "", report: Any = None) -> Indicator | None:
     """The address as an indicator, or ``None`` when this run may not publish it.
 
     The same rule the domains and the URLs go through. The addresses were the
@@ -1545,7 +2668,13 @@ def _indicator_for_ip(ip: NetworkIP, verdict: Any = "") -> Indicator | None:
     address = ip.address.strip()
     if not address:
         return None
-    admitted = indicator_publish_reason("ip", address, ip.source, ip.reputation)
+    admitted = indicator_publish_reason(
+        "ip",
+        address,
+        ip.source,
+        ip.reputation,
+        **(emulation_kwargs(report, "ip", address) if report is not None else {}),
+    )
     if admitted is None:
         return None
     pattern = indicator_pattern("ip", address)
@@ -1580,7 +2709,13 @@ def _indicator_for_url(url: NetworkURL, report: Any = None) -> Indicator | None:
     # "unrecorded" is how one of them ends up publishing what the other ranks
     # as noise. Only a row persisted before the field existed reaches this.
     source = url.source or "strings"
-    admitted = indicator_publish_reason("url", url.url, source, _host_reputation(report, host))
+    admitted = indicator_publish_reason(
+        "url",
+        url.url,
+        source,
+        _host_reputation(report, host),
+        **(emulation_kwargs(report, "url", url.url) if report is not None else {}),
+    )
     if admitted is None:
         return None
     pattern = indicator_pattern("url", url.url)
@@ -1609,24 +2744,34 @@ def _host_reputation(report: Any, host: str) -> dict[str, Any] | None:
     return None
 
 
-def _processes_to_observed(roots: list[ProcessNode]) -> dict[str, dict[str, Any]]:
-    """Flatten the process tree to a STIX 2.1 ``observed-data`` objects dict."""
-    out: dict[str, dict[str, Any]] = {}
-    counter = 0
+def _processes_to_observables(roots: list[ProcessNode]) -> list[File | Process]:
+    """The process tree as STIX 2.1 observables: processes, their images, their children.
 
-    def _walk(node: ProcessNode) -> None:
-        nonlocal counter
-        entry: dict[str, Any] = {
-            "type": "process",
-            "pid": node.pid,
-            "name": node.name,
-        }
-        if node.command_line:
-            entry["command_line"] = node.command_line
-        out[str(counter)] = entry
-        counter += 1
-        for child in node.children:
-            _walk(child)
+    A process's name is the file it ran from — STIX 2.1 has no ``name`` on a
+    process — so it becomes a ``file`` observable the process names by
+    ``image_ref``, and one image run twice is one file. The tree is kept by
+    ``child_refs``.
+    """
+    out: list[File | Process] = []
+    images: dict[str, File] = {}
+
+    def _walk(node: ProcessNode) -> str:
+        children = [_walk(child) for child in node.children]
+        image_ref = None
+        if node.name:
+            image = images.get(node.name)
+            if image is None:
+                image = images[node.name] = File(name=node.name)
+                out.append(image)
+            image_ref = image.id
+        process = Process(
+            pid=node.pid,
+            command_line=node.command_line or None,
+            image_ref=image_ref,
+            child_refs=children,
+        )
+        out.append(process)
+        return process.id
 
     for root in roots[:20]:  # cap to keep ObservedData reasonable
         _walk(root)

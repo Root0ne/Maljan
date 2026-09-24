@@ -523,7 +523,7 @@ class TestTheRecordedAnswerReplayedUnchanged:
 
         markdown = MarkdownRenderer().render(_report(_recorded_putty(), "Malware"))
 
-        assert "**Overall Confidence**: not assessed" in markdown
+        assert "(not assessed) · **Severity:**" in markdown
         assert "1.00" not in markdown.split("## ")[0]
 
     def test_it_survives_the_retry_and_is_still_recorded(self) -> None:

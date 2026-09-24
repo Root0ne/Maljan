@@ -57,7 +57,7 @@ def _report(*, degraded: bool = False, confidence: float = 0.91) -> MalwareRepor
         static=StaticAnalysis(
             sections=[PESection(name=".text", virtual_address="0x1000", entropy=7.7)]
         ),
-        network=NetworkIOCs(domains=[NetworkDomain(fqdn="c2.invariant.test")]),
+        network=NetworkIOCs(domains=[NetworkDomain(fqdn="c2.invariant.example.org")]),
         ttp_mappings=[
             TTPMapping(
                 technique_id="T1055",
@@ -213,7 +213,7 @@ class TestEveryExportSurfaceRenders:
         stix = ExtendedSTIXRenderer().render(report)
         pdf = PdfRenderer().render(report)
 
-        assert markdown.startswith("# Malware Analysis Report")
+        assert markdown.startswith("# ") and "## 1. Key findings" in markdown
         assert html.startswith("<!DOCTYPE html>")
         assert stix.objects, "STIX bundle carried no objects"
         assert pdf.startswith(b"%PDF-")

@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Sequence
 from contextlib import suppress
+from datetime import timedelta
 from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
@@ -24,6 +25,22 @@ from pydantic import create_model
 
 from maljan.core.logger import logger
 
+# What a character cut leaves behind, and the room kept back for it.
+#
+# The marker goes *inside* the limit rather than after it, which is the same
+# rule ``output_shortening.shorten_target`` follows for the notice a shortened
+# answer carries: the limit is how much may reach the model, and the marker
+# reaches the model. Appended after the cut instead, it left twenty characters
+# a call unaccounted — self-correcting between model turns, because the next
+# measurement sees the true size, and not self-correcting inside one, where
+# every answer of a wide fan-out leaked its own.
+TRUNCATION_MARKER = "\n\n[OUTPUT TRUNCATED]"
+
+
+def truncation_target(limit: int) -> int:
+    """How much of an answer a character cut keeps, so the marker fits the limit."""
+    return max(0, int(limit) - len(TRUNCATION_MARKER))
+
 
 class MCPLangChainToolkit:
     """Toolkit that connects to an MCP server and exposes its tools to LangChain."""
@@ -32,12 +49,14 @@ class MCPLangChainToolkit:
         self,
         server_params: StdioServerParameters | None = None,
         output_guardrail: Callable[[str], str] | None = None,
-        max_output_chars: int = 8000,
+        max_output_chars: int = 0,
         *,
         transport: str = "stdio",
         http_url: str = "",
         http_headers: dict[str, str] | None = None,
         truncation_ledger: Any | None = None,
+        context_budget: Any | None = None,
+        guard: Any | None = None,
     ):
         self.server_params = server_params
         self.transport = (transport or "stdio").lower()
@@ -47,10 +66,20 @@ class MCPLangChainToolkit:
         self._exit_stack: Any = None
         self._tools: list[BaseTool] = []
         self._output_guardrail = output_guardrail
+        # Zero is the ordinary case and means "ask the budget below". A
+        # positive number is the operator's own cap and wins over it.
         self._max_output_chars = max_output_chars
         # Optional TruncationLedger (pitfall P6). Typed loosely so this module
         # keeps no core import it does not otherwise need; None disables counting.
         self._truncation_ledger = truncation_ledger
+        # The job's context budget, which knows the window the served model has
+        # and what the conversation currently holds. None outside a job, and the
+        # conservative window then answers.
+        self._context_budget = context_budget
+        # The job's breaker and call cap for this server
+        # (``maljan.providers.server_guard``). None outside a job's registry,
+        # and every call is then sent exactly as it always was.
+        self._guard = guard
 
     async def initialize(self) -> None:
         """Initialize the connection to the MCP server and fetch available tools."""
@@ -227,23 +256,32 @@ class MCPLangChainToolkit:
             # second turns "unset" into "explicitly null" and denies the server
             # the chance to apply its own default.
             args = {k: v for k, v in kwargs.items() if v is not None or k in required}
+            guard = self._guard
+            if guard is None:
+                return await self._call(tool_name, args, narrowing)
+            # Asked before waiting for a slot and again after it: a server
+            # that is resting answers at once, and one that began resting
+            # while this call queued is not sent the call either. The trial
+            # after a cooldown is admitted once and keeps its admission.
+            refused, trial = guard.admit(tool_name)
+            if refused is not None:
+                return str(refused)
+            sent = False
             try:
-                result = await self.session.call_tool(tool_name, arguments=args)
-                if result.isError:
-                    return (
-                        f'{{"tool_error": "tool_returned_error", "tool": "{tool_name}", '
-                        f'"detail": {result.content!r}}}'
-                    )
-                output = "\n".join(c.text for c in result.content if hasattr(c, "text"))
-                # On a thread: shortening a five-megabyte answer is CPU-bound
-                # and synchronous, and this is a coroutine serving an agent.
-                return await asyncio.to_thread(self._apply_output_guardrail, output, narrowing)
-            except Exception as exc:
-                logger.warning("MCP tool '%s' raised %s: %s", tool_name, type(exc).__name__, exc)
-                return (
-                    f'{{"tool_error": "exception", "tool": "{tool_name}", '
-                    f'"type": "{type(exc).__name__}", "detail": "{exc}"}}'
-                )
+                async with guard.slot():
+                    if not trial:
+                        refused, trial = guard.admit(tool_name)
+                        if refused is not None:
+                            return str(refused)
+                    # From here ``_call`` owns the outcome, abandonment
+                    # included, so the guard is told exactly once.
+                    sent = True
+                    return await self._call(tool_name, args, narrowing, trial=trial)
+            except BaseException:
+                if not sent:
+                    # Cancelled while it queued for a slot: nothing was sent.
+                    guard.abandoned(trial=trial)
+                raise
 
         # Compress description to reduce ReAct context bloat
         raw_desc = mcp_tool.description or f"Executes {mcp_tool.name} on the MCP server."
@@ -256,6 +294,74 @@ class MCPLangChainToolkit:
             description=description,
             args_schema=args_schema,
         )
+
+    async def _call(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        narrowing: Sequence[str],
+        *,
+        trial: bool = False,
+    ) -> str:
+        """Send one call and tell the guard whether the transport carried it."""
+        from maljan.providers.server_guard import transport_failure
+
+        guard = self._guard
+        settled = False
+        try:
+            session = self.session
+            if session is None:
+                return f'{{"tool_error": "mcp_session_inactive", "tool": "{tool_name}"}}'
+            deadline = guard.call_timeout(tool_name) if guard is not None else None
+            # The client library answers a call past its deadline with its own
+            # request-timeout error, which is a transport failure. Only named
+            # when there is one, so an unguarded call is sent exactly as before.
+            timing: dict[str, Any] = (
+                {"read_timeout_seconds": timedelta(seconds=deadline)} if deadline else {}
+            )
+            try:
+                result = await session.call_tool(tool_name, arguments=args, **timing)
+            except asyncio.CancelledError:
+                # The caller's own budget ran out while this call was with the
+                # server: a call the server did not answer in the time there
+                # was, counted as one rather than let go as abandoned.
+                if guard is not None and not settled:
+                    guard.failed(
+                        "the call did not finish within its caller's budget",
+                        trial=trial,
+                    )
+                    settled = True
+                raise
+            if guard is not None:
+                guard.answered()
+                settled = True
+            if result.isError:
+                return (
+                    f'{{"tool_error": "tool_returned_error", "tool": "{tool_name}", '
+                    f'"detail": {result.content!r}}}'
+                )
+            output = "\n".join(c.text for c in result.content if hasattr(c, "text"))
+            # On a thread: shortening a five-megabyte answer is CPU-bound
+            # and synchronous, and this is a coroutine serving an agent.
+            return await asyncio.to_thread(self._apply_output_guardrail, output, narrowing)
+        except Exception as exc:
+            if guard is not None and not settled:
+                reason = transport_failure(exc)
+                if reason is None:
+                    # The server answered with an error of its own; the
+                    # transport carried it, and that is all the breaker reads.
+                    guard.answered()
+                else:
+                    guard.failed(reason, trial=trial)
+                settled = True
+            logger.warning("MCP tool '%s' raised %s: %s", tool_name, type(exc).__name__, exc)
+            return (
+                f'{{"tool_error": "exception", "tool": "{tool_name}", '
+                f'"type": "{type(exc).__name__}", "detail": "{exc}"}}'
+            )
+        finally:
+            if guard is not None and not settled:
+                guard.abandoned(trial=trial)
 
     def _tag_description(self, name: str, description: str) -> str:
         """Add a category tag and truncate to keep ReAct context lean."""
@@ -309,7 +415,19 @@ class MCPLangChainToolkit:
     def _apply_output_guardrail(self, output: str, narrowing: Sequence[str] = ()) -> str:
         """Limit tool output size to prevent LLM context overflow.
 
-        If the output exceeds ``_max_output_chars``:
+        The limit is ``_max_output_chars`` when the operator set one, and
+        otherwise what the served model's context window has left for one
+        answer at this moment (``maljan.llm.context_window.output_limit``). It
+        is read once, here, so the whole of one call's decision — the
+        shortening target, the summariser, the character cut and the ledger row
+        — is taken against one number.
+
+        A limit of zero is not "cut to nothing": it is the conversation having
+        no room left for a tool answer at all. The model is handed one sentence
+        saying so — a deterministic fact about this conversation — and the
+        whole answer stays on the evidence ledger under the call's own id.
+
+        If the output exceeds it:
           1. Call ``_output_guardrail`` (e.g. FunctionSummarizer) when available.
           2. Fall back to simple character truncation otherwise.
 
@@ -317,6 +435,11 @@ class MCPLangChainToolkit:
         ``_truncation_ledger`` when one is attached. The pass-through matters as
         much as the cut: pitfall P6 asks for truncation *frequency*, and a
         frequency needs its denominator.
+
+        A JSON answer over the limit only because of its whitespace is handed
+        over whole, written without it: no value changes, so it carries no
+        notice, and the ledger counts it as ``compacted``. Only a compact form
+        that still does not fit is shortened.
 
         A JSON object is shortened as a document: elements come off the end of
         its largest lists, then characters off the end of its largest long
@@ -346,22 +469,37 @@ class MCPLangChainToolkit:
             Potentially shortened output.
         """
         from maljan.agents.output_shortening import shorten_json_document, shorten_target
+        from maljan.llm.context_window import output_limit
 
         chars_in = len(output)
+        limit = output_limit(self._max_output_chars, self._context_budget)
 
-        if chars_in <= self._max_output_chars:
-            self._record_guardrail(chars_in, chars_in, over_limit=False)
+        if limit <= 0:
+            said = self._no_room(chars_in)
+            self._record_guardrail(chars_in, len(said), over_limit=True, no_room=True, limit=limit)
+            return said
+
+        if chars_in <= limit:
+            self._record_guardrail(chars_in, chars_in, over_limit=False, limit=limit)
             return output
 
         logger.warning(
             "Tool output exceeds limit (%d > %d chars). Applying guardrail.",
             chars_in,
-            self._max_output_chars,
+            limit,
         )
 
-        attempt = shorten_json_document(output, shorten_target(self._max_output_chars, narrowing))
+        attempt = shorten_json_document(output, shorten_target(limit, narrowing), cap=limit)
+        if attempt.compacted:
+            self._record_guardrail(
+                chars_in, len(attempt.text), over_limit=True, compacted=True, limit=limit
+            )
+            return attempt.text
         if attempt.shortened:
-            self._record_guardrail(chars_in, len(attempt.text), over_limit=True, shortened=True)
+            self._charge_overage(len(attempt.text), limit)
+            self._record_guardrail(
+                chars_in, len(attempt.text), over_limit=True, shortened=True, limit=limit
+            )
             return attempt.text
 
         if self._output_guardrail is not None:
@@ -370,19 +508,72 @@ class MCPLangChainToolkit:
             except Exception as exc:
                 logger.warning("Output guardrail failed: %s — falling back to truncation.", exc)
             else:
-                self._record_guardrail(chars_in, len(summarised), over_limit=True, summarised=True)
+                self._charge_overage(len(summarised), limit)
+                self._record_guardrail(
+                    chars_in, len(summarised), over_limit=True, summarised=True, limit=limit
+                )
                 return summarised
 
         # Fallback: simple truncation with a marker
-        result = output[: self._max_output_chars] + "\n\n[OUTPUT TRUNCATED]"
+        result = output[: truncation_target(limit)] + TRUNCATION_MARKER
+        self._charge_overage(len(result), limit)
         self._record_guardrail(
             chars_in,
             len(result),
             over_limit=True,
             hard_truncated=True,
             shortening_timed_out=attempt.timed_out,
+            limit=limit,
         )
         return result
+
+    def _charge_overage(self, kept: int, limit: int) -> str:
+        """Charge what a result is longer than the cap it was measured against.
+
+        The budget reserved ``limit`` when it granted the cap, and two branches
+        can hand back more than that: the character cut appends its marker
+        after cutting, and a summariser may legitimately expand a short input.
+        Twenty characters a call sounds like nothing and is not — within one
+        model turn, where no measurement intervenes, every granted answer leaks
+        its marker, and the run's own account of what the conversation holds
+        drifts from what is in it. The ledger already records the real length;
+        this makes the budget agree with it.
+
+        Returns nothing useful; it is called for the charge.
+        """
+        from maljan.llm.context_window import ContextBudget
+
+        budget = getattr(self, "_context_budget", None)
+        over = max(0, int(kept) - int(limit))
+        if over and isinstance(budget, ContextBudget):
+            budget.charge(over)
+        return ""
+
+    def _no_room(self, chars_in: int) -> str:
+        """The sentence a conversation with no room left gets, said once.
+
+        Charged to the budget, because it is text that enters the conversation
+        like any answer, and the agent is marked so its tool phase ends rather
+        than paying for this sentence on every remaining round.
+
+        Withheld when it would not fit, on the same rule as the shorter line a
+        later call gets: a conversation already at its budget took a constant
+        few hundred characters to be told it had none, which is the one claim
+        this design makes about its own text and has to hold for the long
+        sentence as well as the short one. The agent is marked either way —
+        the phase ends whether or not there was room to say so.
+        """
+        from maljan.llm.context_window import ContextBudget, no_room_sentence
+
+        said = no_room_sentence(chars_in)
+        budget = getattr(self, "_context_budget", None)
+        if not isinstance(budget, ContextBudget):
+            return said
+        budget.note_no_room()
+        if not budget.room_for(len(said)):
+            return ""
+        budget.charge(len(said))
+        return said
 
     def _record_guardrail(
         self,
@@ -394,6 +585,9 @@ class MCPLangChainToolkit:
         hard_truncated: bool = False,
         shortened: bool = False,
         shortening_timed_out: bool = False,
+        no_room: bool = False,
+        compacted: bool = False,
+        limit: int = 0,
     ) -> None:
         """Record one guardrail decision; no-op without a ledger, never raises."""
         from maljan.core.truncation_ledger import record_guardrail_outcome
@@ -407,4 +601,7 @@ class MCPLangChainToolkit:
             hard_truncated=hard_truncated,
             shortened=shortened,
             shortening_timed_out=shortening_timed_out,
+            no_room=no_room,
+            compacted=compacted,
+            limit=limit,
         )

@@ -117,6 +117,15 @@ def _tools(result: Any) -> list[str]:
     return [entry.tool for entry in result.entries]
 
 
+def _reputation_entry(result: Any) -> Any:
+    """The pack's last reputation entry, whichever name it was recorded under."""
+    return [
+        entry
+        for entry in result.entries
+        if entry.tool in ("reputation", "get_file_report", "check_hash")
+    ][-1]
+
+
 def _pack(path: str, file_type: str, **over: Any) -> Any:
     recorder = EvidenceRecorder(PIPELINE, counter=EvidenceCounter(), stage="triage_pack")
     return run_pack(recorder, _inputs(path, file_type, **over))
@@ -135,6 +144,8 @@ class TestTheOrderAndTheIds:
             "yara_scan",
             "capa",
             "api_capability",
+            "sandbox_status",
+            "floss",
         ]
         assert [entry.id for entry in result.entries] == [
             f"ev_{index:04d}" for index in range(1, len(result.entries) + 1)
@@ -311,7 +322,7 @@ class TestFailures:
     def test_the_counts_the_run_summary_reports(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setattr(rules, "capa", lambda path, **_: {"error": "no", "tool": "capa"})
         state = _pack(_write(tmp_path, "s.exe", _pe()), "pe").to_state()
-        assert state["entries"] == 9
+        assert state["entries"] == 11
         assert state["failed"] == 1
         assert state["duration_ms"] >= 0
         assert state["degradation_reasons"] == ["triage.capa_failed"]
@@ -333,6 +344,7 @@ class TestTheSandboxSteps:
             "sandbox_signatures",
             "sandbox_dropped_files",
             "sandbox_channels",
+            "floss",
         ]
         (lolbin,) = [entry for entry in result.entries if entry.tool == "lolbin_lookup"]
         assert lolbin.args == {"command_lines": ["rundll32.exe javascript:x"]}
@@ -363,7 +375,8 @@ class TestTheSandboxSteps:
 
     def test_no_report_means_none_of_them(self, tmp_path: Path) -> None:
         tools = _tools(_pack(_write(tmp_path, "s.exe", _pe()), "pe"))
-        assert not any(tool.startswith("sandbox_") for tool in tools)
+        # One sentence saying no sandbox ran, and no view of a report there is not.
+        assert [tool for tool in tools if tool.startswith("sandbox_")] == ["sandbox_status"]
         assert "sigma_match_sandbox" not in tools
         assert "lolbin_lookup" not in tools
 
@@ -383,7 +396,7 @@ class TestTheReputationStep:
             _inputs(_write(tmp_path, "s.exe", _pe()), "pe"),
             reputation=_reputation_lookup(container, "b" * 64),
         )
-        skipped = result.entries[-1]
+        skipped = _reputation_entry(result)
         assert skipped.tool == "reputation"
         assert skipped.server == PIPELINE
         assert skipped.ok is False
@@ -401,7 +414,7 @@ class TestTheReputationStep:
             _inputs(_write(tmp_path, "s.exe", _pe()), "pe"),
             reputation=_reputation_lookup(container, "b" * 64),
         )
-        assert "core.triage.reputation is off" in (result.entries[-1].error or "")
+        assert "core.triage.reputation is off" in (_reputation_entry(result).error or "")
         assert result.failed == []
 
     def test_a_lookup_that_answered_is_read_for_its_count(self, tmp_path: Path) -> None:
@@ -416,7 +429,7 @@ class TestTheReputationStep:
         result = run_pack(
             self._recorder(), _inputs(_write(tmp_path, "s.exe", _pe()), "pe"), reputation=lookup
         )
-        assert result.entries[-1].server == "virustotal"
+        assert _reputation_entry(result).server == "virustotal"
         assert result.facts.reputation_malicious == 42
         assert result.failed == []
 
@@ -444,7 +457,7 @@ class TestTheReputationStep:
         result = run_pack(
             self._recorder(), _inputs(_write(tmp_path, "s.exe", _pe()), "pe"), reputation=lookup
         )
-        last = result.entries[-1]
+        last = _reputation_entry(result)
         assert last.tool == "reputation"
         assert last.ok is False
         assert "exceeded hard cap" in (last.error or "")
@@ -574,15 +587,20 @@ class TestTheNode:
             "yara_scan",
             "capa",
             "api_capability",
+            "sandbox_status",
             "reputation",
+            "floss",
         ]
         assert [row["id"] for row in ledger][:2] == ["ev_0001", "ev_0002"]
         assert all(row["agent"] == PIPELINE and row["stage"] == "triage_pack" for row in ledger)
+        assert ledger[-2]["ok"] is False
+        # No build on a test host: the entry says so, and it is not a failure.
         assert ledger[-1]["ok"] is False
+        assert ledger[-1]["error"].startswith("not run: floss is not installed")
         assert "tool_evidence" not in update
 
         facts = update["triage_facts"]
-        assert facts["entries"] == 10
+        assert facts["entries"] == 12
         assert facts["failed"] == 0
         assert facts["has_signature"] is False
         assert facts["capa_hits"] == 1
@@ -648,7 +666,7 @@ class TestTheReputationLookupHonoursTheTeam:
         settings = Settings(_env_file=None)
         settings.agents.profile = "measurement"
         result = self._run(settings, tmp_path=tmp_path)
-        last = result.entries[-1]
+        last = _reputation_entry(result)
         assert last.tool == "reputation" and last.server == PIPELINE and last.ok is False
         assert "withheld by the team's exclude_servers" in (last.error or "")
         assert result.failed == []
@@ -666,7 +684,7 @@ class TestTheReputationLookupHonoursTheTeam:
         settings.mcp.servers["virustotal"].enabled = False
         result = self._run(settings, tmp_path=tmp_path)
         assert "threatintel withheld by the team's exclude_servers" in (
-            result.entries[-1].error or ""
+            _reputation_entry(result).error or ""
         )
 
     def test_exclusions_that_cannot_be_read_withhold_every_server(self, tmp_path: Path) -> None:
@@ -683,14 +701,14 @@ class TestTheReputationLookupHonoursTheTeam:
             _inputs(_write(tmp_path, "s.exe", _pe()), "pe"),
             reputation=_reputation_lookup(container, "b" * 64),
         )
-        last = result.entries[-1]
+        last = _reputation_entry(result)
         assert last.tool == "reputation" and last.server == PIPELINE and last.ok is False
         assert "withheld because the team's exclusions could not be read" in (last.error or "")
         assert result.failed == []
 
     def test_no_sha256_means_no_lookup_and_a_reason(self, tmp_path: Path) -> None:
         result = self._run(Settings(_env_file=None), sha256="", tmp_path=tmp_path)
-        assert "no sha256 to look up" in (result.entries[-1].error or "")
+        assert "no sha256 to look up" in (_reputation_entry(result).error or "")
         assert result.failed == []
 
 
@@ -725,7 +743,11 @@ class TestThePackBudget:
 
     def test_no_budget_means_every_step_runs(self, tmp_path: Path) -> None:
         result = _pack(_write(tmp_path, "s.exe", _pe()), "pe", budget_s=0)
-        assert all(entry.ok for entry in result.entries)
+        # A test host has no FLOSS build, which the entry says; that is not a
+        # step the budget stopped.
+        assert all(entry.ok for entry in result.entries if entry.tool != "floss")
+        (floss,) = [entry for entry in result.entries if entry.tool == "floss"]
+        assert "budget" not in (floss.error or "")
 
 
 class TestAReasonBesideNothingIsAFailure:

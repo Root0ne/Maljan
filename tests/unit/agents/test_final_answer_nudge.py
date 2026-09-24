@@ -25,6 +25,7 @@ from maljan.agents.base_agent import (
     FINAL_ANSWER_NUDGE,
     NO_STRUCTURED_REPORT_REASON,
     NO_STRUCTURED_REPORT_STATUS,
+    UNPARSED_ANSWER_REASON,
     BaseAnalyst,
     answer_is_isr,
 )
@@ -152,15 +153,15 @@ class TestNoFabricatedClaims:
         isr = analyst._text_to_isr(_INTENTION, revision_round=0)
         assert isr.claims == []
 
-    def test_an_intention_inside_prose_is_dropped_but_the_rest_survives(self) -> None:
+    def test_prose_around_an_intention_is_kept_as_prose_and_makes_no_claim(self) -> None:
         analyst = _Analyst(_FakeLLM([]))
         text = (
             "Let me search for more specific strings related to malware indicators. "
             "The binary imports VirtualAllocEx from KERNEL32 and writes to a remote process."
         )
         isr = analyst._text_to_isr(text, revision_round=0)
-        assert len(isr.claims) == 1
-        assert "VirtualAllocEx" in isr.claims[0].claim
+        assert isr.claims == []
+        assert "VirtualAllocEx" in isr.unparsed_answer
 
     def test_a_sentence_that_only_announces_the_next_step_is_dropped(self) -> None:
         analyst = _Analyst(_FakeLLM([]))
@@ -170,12 +171,13 @@ class TestNoFabricatedClaims:
         ):
             assert analyst._text_to_isr(text, revision_round=0).claims == []
 
-    def test_a_report_opening_with_a_heading_still_yields_claims(self) -> None:
+    def test_a_report_opening_with_a_heading_is_prose_not_a_claim(self) -> None:
         analyst = _Analyst(_FakeLLM([]))
         text = "Findings:\nThe sample writes a copy of itself into the user's startup folder."
         isr = analyst._text_to_isr(text, revision_round=0)
-        assert len(isr.claims) == 1
-        assert "startup folder" in isr.claims[0].claim
+        assert isr.claims == []
+        assert isr.unparsed_answer == text
+        assert isr.status_reason == UNPARSED_ANSWER_REASON
 
 
 class TestTheStatusItReports:

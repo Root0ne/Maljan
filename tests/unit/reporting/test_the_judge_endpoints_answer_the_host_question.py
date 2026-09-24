@@ -9,14 +9,12 @@ blocklist that loopback is malicious infrastructure with nothing in the run
 summary saying it had happened. Every other path in the tree refuses the same
 two values.
 
-What is still not asked of the judge's objects is the corroboration half. The
-judge's own assertion is the source, so that half would answer trivially, and
-letting "the judge said so" count as a second source is a claim this code
-should not make on the judge's behalf. A syntactically public address the
-judge invented therefore passes this question — and is caught by the grounding
-check instead, which is the check that asks whether any evidence holds it up.
-The last class below pins that, because it is the half of the answer this file
-is not responsible for.
+The corroboration half is the one publish rule's, asked of a judge value
+exactly as it is asked of the report's own row for it: the judge asserting a
+value is not a second source (``stix.indicator_not_published`` when nothing
+else records it). The survivors below are real infrastructure a sandbox
+recorded; a version-shaped address the judge wrote passes the host question
+and is declined by the rule.
 """
 
 from __future__ import annotations
@@ -28,9 +26,17 @@ from typing import Any
 
 from maljan.pipeline.validation import validate_verdict_bundle
 from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import MalwareReport, NetworkIOCs
+from maljan.reporting.models import (
+    MalwareReport,
+    NetworkDomain,
+    NetworkIOCs,
+    NetworkIP,
+    NetworkURL,
+)
 from maljan.reporting.renderers.stix_renderer import (
     UNPUBLISHABLE_ENDPOINT_CODE,
+    UNPUBLISHABLE_PATTERN_CODE,
+    UNPUBLISHED_VALUE_CODE,
     ExtendedSTIXRenderer,
 )
 from maljan.schemas.stix_models import Bundle
@@ -106,7 +112,16 @@ def _report() -> MalwareReport:
         sample_file_type="pe",
         evidence_ledger=[],
     ).build_deterministic()
-    report.network = NetworkIOCs()
+    # What a sandbox recorded: the second source the one publish rule asks of
+    # every judge value, as it asks it of the report's own rows.
+    report.network = NetworkIOCs(
+        domains=[NetworkDomain(fqdn=C2_DOMAIN, source="sandbox")],
+        ips=[
+            NetworkIP(address=C2_ADDRESS, source="sandbox"),
+            NetworkIP(address="10.0.0.5", source="sandbox"),
+        ],
+        urls=[NetworkURL(url=f"https://{C2_DOMAIN}/x?next=domain-name:value", source="sandbox")],
+    )
     return report
 
 
@@ -126,7 +141,11 @@ def _render(*patterns: str) -> tuple[list[str], list[tuple[str, str]]]:
     """
     renderer = ExtendedSTIXRenderer()
     bundle = renderer.render(_report(), base_bundle=_judge_bundle(*patterns))
-    return [p for p in _patterns(bundle) if "d" * 64 not in p], renderer.declined
+    # The judge's patterns the export carries. A value the network block holds
+    # is minted by the platform too, as the same pattern, and a consumer reads
+    # one indicator either way.
+    carried = set(_patterns(bundle))
+    return [p for p in patterns if p in carried], renderer.declined
 
 
 class TestTheFourValuesEveryOtherPathRefuses:
@@ -204,18 +223,16 @@ class TestWhatTheJudgeMayStillPublish:
         assert exported == ["[ipv4-addr:value = '10.0.0.5']"]
         assert declined == []
 
-    def test_a_version_number_the_judge_wrote_is_a_public_address_and_passes(self) -> None:
-        """Stated rather than hidden: the host question alone lets this through.
-
-        ``6.0.0.0`` is syntactically routable, so nothing about the endpoint
-        refuses it, and the corroboration half is deliberately not asked of the
-        judge. Whether any evidence holds it up is the grounding check's
-        question, and the class below shows that check firing on exactly this.
-        """
+    def test_a_version_number_the_judge_wrote_passes_the_host_question_not_the_rule(
+        self,
+    ) -> None:
+        """``6.0.0.0`` is syntactically routable, so nothing about the endpoint
+        refuses it; nothing but the judge records it, so the one publish rule
+        does."""
         exported, declined = _render(f"[ipv4-addr:value = '{VERSION_SHAPED}']")
 
-        assert exported == [f"[ipv4-addr:value = '{VERSION_SHAPED}']"]
-        assert declined == []
+        assert exported == []
+        assert [code for code, _why in declined] == [UNPUBLISHED_VALUE_CODE]
 
     def test_an_ipv6_address_is_asked_the_same_question(self) -> None:
         exported, declined = _render("[ipv6-addr:value = '::1']")
@@ -224,12 +241,13 @@ class TestWhatTheJudgeMayStillPublish:
         assert [code for code, _why in declined] == [UNPUBLISHABLE_ENDPOINT_CODE]
 
     def test_a_hash_indicator_is_not_an_endpoint_and_is_not_asked(self) -> None:
+        """Not asked the host question; asked the rule, which no second source answers."""
         pattern = "[file:hashes.'SHA-256' = '" + "e" * 64 + "']"
 
         exported, declined = _render(pattern)
 
-        assert exported == [pattern]
-        assert declined == []
+        assert exported == []
+        assert [code for code, _why in declined] == [UNPUBLISHED_VALUE_CODE]
 
 
 class TestAPatternIsNotOneComparison:
@@ -257,20 +275,26 @@ class TestAPatternIsNotOneComparison:
         assert LOOPBACK in declined[0][1]
 
     def test_a_kind_this_question_is_not_about_does_not_carry_over(self) -> None:
-        """A second object path in one pattern is read as itself."""
+        """A second object path in one pattern is read as itself: the file name
+        is not asked the host question, and is asked the publish rule."""
         pattern = f"[domain-name:value = '{C2_DOMAIN}' AND file:name = '{RESERVED}']"
 
         exported, declined = _render(pattern)
 
-        assert exported == [pattern]
-        assert declined == []
+        assert exported == []
+        assert [code for code, _why in declined] == [UNPUBLISHED_VALUE_CODE]
 
-    def test_the_object_type_is_read_whatever_case_it_is_written_in(self) -> None:
-        """Case carries no meaning in a STIX object path, and a judge shouts."""
+    def test_a_capitalised_object_type_never_reaches_the_export(self) -> None:
+        """STIX types are lower case and the grammar refuses a capitalised one.
+
+        A judge that shouts wrote a type no consumer matches, so the indicator
+        is declined for that — before the endpoint is asked anything — and it
+        still never reaches the export.
+        """
         exported, declined = _render(f"[DOMAIN-NAME:value = '{RESERVED}']")
 
         assert exported == []
-        assert [code for code, _why in declined] == [UNPUBLISHABLE_ENDPOINT_CODE]
+        assert [code for code, _why in declined] == [UNPUBLISHABLE_PATTERN_CODE]
 
     def test_a_comparison_with_no_endpoint_in_it_says_that_is_why(self) -> None:
         """A regular expression is not an endpoint, and saying it is not a name
@@ -279,7 +303,8 @@ class TestAPatternIsNotOneComparison:
 
         assert exported == []
         assert declined[0][0] == UNPUBLISHABLE_ENDPOINT_CODE
-        assert "could not read the pattern's endpoint" in declined[0][1]
+        assert "compares with MATCHES" in declined[0][1]
+        assert "names every endpoint that fits it rather than one" in declined[0][1]
 
     def test_the_same_holds_for_a_wildcard_and_for_a_subnet(self) -> None:
         for pattern in (
@@ -289,7 +314,7 @@ class TestAPatternIsNotOneComparison:
             exported, declined = _render(pattern)
 
             assert exported == [], pattern
-            assert "could not read the pattern's endpoint" in declined[0][1], pattern
+            assert "names every endpoint that fits it rather than one" in declined[0][1], pattern
 
     def test_an_endpoint_reached_through_a_reference_is_asked_the_same_question(self) -> None:
         """``network-traffic:dst_ref.value`` carries an endpoint like any other.
@@ -355,7 +380,7 @@ class TestAPatternIsNotOneComparison:
 
     def test_a_hash_under_a_quoted_algorithm_is_not_read_as_a_file_name(self) -> None:
         """The key inside the object path is the reader's business, not a heuristic."""
-        pattern = "[file:extensions['pe'].pe_imphash = '" + "f" * 32 + "']"
+        pattern = "[file:extensions.'windows-pebinary-ext'.imphash = '" + "f" * 32 + "']"
 
         exported, declined = _render(pattern)
 
@@ -366,17 +391,15 @@ class TestAPatternIsNotOneComparison:
         exported, declined = _render(f"[domain-name:value = '{C2_DOMAIN}")
 
         assert exported == []
-        assert "could not read the pattern's endpoint" in declined[0][1]
+        assert "the STIX pattern grammar refuses it" in declined[0][1]
 
     def test_a_qualifier_timestamp_is_not_read_as_an_endpoint(self) -> None:
-        """Asked of the question itself: a qualified pattern does not reach the
-        bundle at all, because the integrity pass wants a bracketed expression
-        and records that drop under its own reason."""
+        """A qualified pattern, written as the grammar writes it (``t'…'``)."""
         from maljan.reporting.renderers.stix_renderer import _judge_indicator_problem
 
         indicator = _judge_bundle(
             f"[ipv4-addr:value = '{C2_ADDRESS}'] "
-            "START '2026-01-01T00:00:00Z' STOP '2026-01-02T00:00:00Z'"
+            "START t'2026-01-01T00:00:00Z' STOP t'2026-01-02T00:00:00Z'"
         ).objects[0]
 
         assert _judge_indicator_problem(indicator) is None
@@ -435,6 +458,17 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
             "stix.ungrounded_indicator",
             "stix.unknown_object",
             "stix.indicator_type_contradicts_verdict",
+            "stix.unknown_observable_type",
+            "stix.indicator_type_vocabulary",
+            "stix.credit_without_claim",
+            "stix.is_family_missing",
+            "stix.annotation_out_of_schema",
+            "stix.duplicate_label",
+            "stix.unknown_object_path",
+            "stix.unescaped_backslash",
+            "stix.pattern_refused",
+            "stix.shape_names_a_value",
+            "stix.file_unidentified",
         }
     )
 

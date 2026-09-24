@@ -36,6 +36,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 SRC = Path(__file__).resolve().parents[2] / "src" / "maljan"
 
 # The names that carry a decision. ``verdict`` is the one the whole run is
@@ -43,7 +45,31 @@ SRC = Path(__file__).resolve().parents[2] / "src" / "maljan"
 # may write it, which is how a signed utility came to be published as malware
 # over a judge that had called it benign.
 GUARDED = frozenset(
-    {"technique_id", "confidence", "severity", "malware_category", "family", "verdict"}
+    {
+        "technique_id",
+        "confidence",
+        "severity",
+        "malware_category",
+        "family",
+        "verdict",
+        # What the judge writes into its STIX objects. The annotation on a
+        # relationship is the judge's own number, basis and credit; a pattern,
+        # its indicator types and a relationship's type are what the judge
+        # states about the sample; and the producer an object names is a
+        # statement too. The export may decline one with a record, through the
+        # copy helpers in ``schemas/stix_models``; nothing writes one.
+        "x_maljan_confidence",
+        "x_maljan_contributing_agents",
+        "x_maljan_evidence_basis",
+        "pattern",
+        "indicator_types",
+        "created_by_ref",
+        "relationship_type",
+        # Whether a malware object stands for the family or for this one
+        # sample. The renderer used to force a judge's ``true`` to ``false``;
+        # where an instance-level object is needed, the platform mints its own.
+        "is_family",
+    }
 )
 
 # Where a write to one of them is the answer rather than an override of one.
@@ -91,6 +117,45 @@ def _setattr_target(node: ast.Call) -> str | None:
     if isinstance(key, ast.Constant) and key.value in GUARDED:
         return str(key.value)
     return None
+
+
+def _model_copy_targets(node: ast.Call) -> list[str]:
+    """The guarded names a ``obj.model_copy(update={...})`` call writes.
+
+    A copy with a guarded key changed is a write like any other: the object it
+    returns stands in for the one that was said. A computed update (a name, a
+    comprehension) is not read — there is nothing to read — the same rule as a
+    computed key.
+    """
+    func = node.func
+    if getattr(func, "attr", "") != "model_copy":
+        return []
+    for keyword in node.keywords:
+        if keyword.arg != "update" or not isinstance(keyword.value, ast.Dict):
+            continue
+        return [
+            str(key.value)
+            for key, value in zip(keyword.value.keys, keyword.value.values, strict=True)
+            if isinstance(key, ast.Constant)
+            and key.value in GUARDED
+            and not _keeps_what_was_said(value, str(key.value))
+        ]
+    return []
+
+
+def _keeps_what_was_said(value: ast.expr, name: str) -> bool:
+    """``update={"technique_id": rec.technique_id or found}`` — a fill, not an override.
+
+    The object's own value wins whenever it has one, so nothing it said is
+    replaced; only an absence is filled, which is the "move a model's own
+    content to where the schema wants it" act. Anything else is a write.
+    """
+    return (
+        isinstance(value, ast.BoolOp)
+        and isinstance(value.op, ast.Or)
+        and isinstance(value.values[0], ast.Attribute)
+        and value.values[0].attr == name
+    )
 
 
 def _constructor_lines(tree: ast.AST) -> set[int]:
@@ -142,6 +207,8 @@ def offences(source: str, label: str) -> list[str]:
             attribute = _setattr_target(node)
             if attribute:
                 found.append(f"{label}:{node.lineno}: setattr(..., {attribute!r}, ...)")
+            for name in _model_copy_targets(node):
+                found.append(f"{label}:{node.lineno}: model_copy(update={{{name!r}: ...}})")
             continue
 
         for target in targets:
@@ -152,6 +219,47 @@ def offences(source: str, label: str) -> list[str]:
             found.append(f"{label}:{node.lineno}: assignment to {how} {name!r}")
 
     return found
+
+
+# The export's two guarded copies, which live in ``schemas/stix_models.py``.
+# The ``schemas/`` exemption is for a model constructing its own fields; these
+# two copy an object the judge wrote with one guarded field changed, so they are
+# named here with the reason each is allowed, and the test below holds them to
+# it rather than letting their placement pass them.
+EXPORT_DECLINE_COPIES: dict[str, str] = {
+    "produced_by": (
+        "names this platform's identity on the export's copy of an object that named no "
+        "producer the bundle holds; a replaced one is recorded as stix.unpublishable_producer"
+    ),
+    "crediting_only": (
+        "leaves off the export's copy a credit the judge kept after stix.credit_without_claim; "
+        "recorded as stix.unpublishable_credit, and the judge's own bundle keeps it"
+    ),
+}
+
+
+def _function_at(tree: ast.AST, line: int) -> str:
+    """The name of the innermost function holding ``line``, or ``""``."""
+    found = ""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            end = getattr(node, "end_lineno", node.lineno)
+            if node.lineno <= line <= end:
+                found = node.name
+    return found
+
+
+def test_the_stix_models_guarded_writes_are_the_named_export_copies_only():
+    """Scanned despite the ``schemas/`` exemption, and each write accounted for."""
+    path = SRC / "schemas" / "stix_models.py"
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    writers = {
+        _function_at(tree, int(found.split(":")[1]))
+        for found in offences(source, "schemas/stix_models.py")
+    }
+
+    assert writers == set(EXPORT_DECLINE_COPIES), writers
 
 
 def test_nothing_outside_schemas_tools_and_validation_overrides_a_decision():
@@ -211,6 +319,31 @@ class TestTheScannerWouldActuallyCatchOne:
 
     def test_a_computed_key_is_not_caught(self):
         assert offences("row[name] = value\n", "probe.py") == []
+
+    def test_a_model_copy_that_changes_a_decision_is_caught(self):
+        source = "moved = edge.model_copy(update={'x_maljan_confidence': 0.5})\n"
+
+        assert offences(source, "probe.py") == [
+            "probe.py:1: model_copy(update={'x_maljan_confidence': ...})"
+        ]
+
+    def test_a_model_copy_that_only_fills_an_absence_is_not_caught(self):
+        source = "row = rec.model_copy(update={'technique_id': rec.technique_id or found})\n"
+
+        assert offences(source, "probe.py") == []
+
+    def test_a_model_copy_of_a_reference_is_not_caught(self):
+        assert offences("moved = edge.model_copy(update={'source_ref': new})\n", "probe.py") == []
+
+    def test_forcing_is_family_is_caught(self):
+        source = "if isinstance(obj, Malware) and obj.is_family:\n    obj.is_family = False\n"
+
+        assert offences(source, "probe.py") == ["probe.py:2: assignment to attribute 'is_family'"]
+
+    def test_a_pattern_write_is_caught(self):
+        assert offences("indicator.pattern = fixed\n", "probe.py") == [
+            "probe.py:1: assignment to attribute 'pattern'"
+        ]
 
     def test_a_constructor_passthrough_is_exempt(self):
         source = "class A:\n    def __init__(self, severity):\n        self.severity = severity\n"
@@ -573,3 +706,427 @@ class TestARejectedIdIsDroppedAndNeverRewritten:
         _cells, mappings = self._matrix()
 
         assert mappings == []
+
+
+# The report fields a model writes, and the one module each may be written from:
+# the code that receives that model's answer. Anything else writing one of them
+# is the platform putting words where a model's go — the fallback narrative did
+# exactly that until it stopped, and the report printed its template as though
+# the report model had written it.
+REPORT_PROSE_WRITERS: dict[str, frozenset[str]] = {
+    "executive_summary": frozenset({"reporting/builder.py"}),
+    "key_findings": frozenset({"reporting/builder.py"}),
+    "defensive_recommendations": frozenset({"reporting/builder.py"}),
+    "capabilities_narrative": frozenset(),
+    "intro_background": frozenset({"reporting/composer.py"}),
+    "execution_flow": frozenset({"reporting/composer.py"}),
+    "configuration": frozenset({"reporting/composer.py"}),
+    "commands": frozenset({"reporting/composer.py"}),
+    "host_identifiers": frozenset({"reporting/composer.py"}),
+    "c2_channels": frozenset({"reporting/composer.py"}),
+    "conclusion": frozenset(),
+    # The composer's spine and each of its prose subsections.
+    "technical_analysis": frozenset({"reporting/composer.py"}),
+    "packing_obfuscation": frozenset({"reporting/composer.py"}),
+    "evasion_antiforensics": frozenset({"reporting/composer.py"}),
+    "string_resolution": frozenset({"reporting/composer.py"}),
+    "persistence_detail": frozenset({"reporting/composer.py"}),
+    "discovery": frozenset({"reporting/composer.py"}),
+    "command_and_control": frozenset({"reporting/composer.py"}),
+    "message_packet_structure": frozenset({"reporting/composer.py"}),
+    "payloads": frozenset({"reporting/composer.py"}),
+    "cli_flags": frozenset({"reporting/composer.py"}),
+    "encryption_scheme": frozenset({"reporting/composer.py"}),
+    "ransom_note": frozenset({"reporting/composer.py"}),
+    "service_process_kill": frozenset({"reporting/composer.py"}),
+    "shadow_copy_destruction": frozenset({"reporting/composer.py"}),
+    # The words inside a model-written element: a step's action, a
+    # subsection's body, a recommendation's rationale. Nothing assigns them
+    # after the model answered.
+    "action": frozenset(),
+    "body": frozenset(),
+    "rationale": frozenset(),
+    "detection": frozenset(),
+    "business_impact": frozenset(),
+}
+
+# A ``setattr`` whose field name is computed is a write the scanner cannot
+# read. Each module that has one is named here with what it writes; a new one
+# fails the test until it is looked at.
+DYNAMIC_SETATTR: dict[str, str] = {
+    "reporting/composer.py": "a prose subsection, from the answer the composer received for it",
+    "agents/judge_postprocess.py": "a STIX object's property, not a report field",
+    "agents/delegation.py": "a callee's attribute, not a report field",
+    "core/config.py": "a settings attribute, not a report field",
+}
+
+# The list methods that change a model-written list in place.
+_MUTATORS = frozenset({"append", "extend", "insert", "clear", "pop", "remove", "sort", "reverse"})
+
+
+def prose_writes(source: str, label: str) -> list[tuple[str, str]]:
+    """Every write of a report prose field, in any of the shapes one takes.
+
+    ``obj.<field> = …``, ``setattr(obj, "<field>", …)``, ``obj.<field>[i] = …``
+    and ``obj.<field>.append(…)`` (or any list mutator). A ``setattr`` whose
+    name is computed is reported as ``<dynamic>``.
+    """
+    tree = ast.parse(source, filename=label)
+    found: list[tuple[str, str]] = []
+    for node in ast.walk(tree):
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AugAssign | ast.AnnAssign):
+            targets = [node.target]
+        elif isinstance(node, ast.Call):
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+            key = node.args[1] if name == "setattr" and len(node.args) >= 2 else None  # noqa: PLR2004
+            if isinstance(key, ast.Constant) and key.value in REPORT_PROSE_WRITERS:
+                found.append((str(key.value), f"{label}:{node.lineno}"))
+            elif key is not None and not isinstance(key, ast.Constant):
+                found.append(("<dynamic>", f"{label}:{node.lineno}"))
+            owner = func.value if isinstance(func, ast.Attribute) else None
+            if (
+                name in _MUTATORS
+                and isinstance(owner, ast.Attribute)
+                and owner.attr in REPORT_PROSE_WRITERS
+            ):
+                found.append((owner.attr, f"{label}:{node.lineno}"))
+            continue
+        for target in targets:
+            if isinstance(target, ast.Subscript):
+                target = target.value
+            if isinstance(target, ast.Attribute) and target.attr in REPORT_PROSE_WRITERS:
+                found.append((target.attr, f"{label}:{node.lineno}"))
+    return found
+
+
+def test_the_report_prose_is_written_only_by_the_code_that_received_it():
+    found: list[str] = []
+    for path in sorted(SRC.rglob("*.py")):
+        relative = _relative(path)
+        if relative.startswith("schemas/"):
+            continue
+        for field_name, where in prose_writes(path.read_text(encoding="utf-8"), relative):
+            if field_name == "<dynamic>":
+                if relative not in DYNAMIC_SETATTR:
+                    found.append(f"{where}: a setattr whose field name is computed")
+            elif relative not in REPORT_PROSE_WRITERS[field_name]:
+                found.append(f"{where}: writes {field_name!r}")
+    assert not found, (
+        "These write a report field a model writes, from a module that did not "
+        "receive the model's answer:\n  " + "\n  ".join(found)
+    )
+
+
+class TestTheProseScannerWouldCatchOne:
+    def test_an_attribute_write_is_caught(self):
+        assert prose_writes("report.executive_summary = 'template'\n", "p.py") == [
+            ("executive_summary", "p.py:1")
+        ]
+
+    def test_setattr_is_caught(self):
+        assert prose_writes("setattr(ta, 'execution_flow', [])\n", "p.py") == [
+            ("execution_flow", "p.py:1")
+        ]
+
+    def test_an_element_mutation_is_caught(self):
+        assert prose_writes("report.key_findings.append(x)\n", "p.py") == [
+            ("key_findings", "p.py:1")
+        ]
+        assert prose_writes("report.key_findings[0] = x\n", "p.py") == [("key_findings", "p.py:1")]
+
+    def test_a_write_inside_an_element_is_caught(self):
+        assert prose_writes("step.action = 'template'\n", "p.py") == [("action", "p.py:1")]
+
+    def test_a_computed_setattr_is_named(self):
+        assert prose_writes("setattr(ta, name, sub)\n", "p.py") == [("<dynamic>", "p.py:1")]
+
+    def test_a_constructor_argument_is_not_a_write(self):
+        assert prose_writes("MalwareReport(executive_summary='')\n", "p.py") == []
+
+
+class TestARejectedAnswerIsNeverAskedOfAnotherModel:
+    """An agent's fallback models answer for a provider, never for a validator.
+
+    The feedback turn a rejected answer gets goes to the model that wrote the
+    answer. Moving it to the next model on the agent's list would be the
+    platform picking the answer it liked better, which is the override every
+    other class here forbids — so the one thing that moves a turn is an
+    exception a provider raised, and a validator raises nothing.
+    """
+
+    @staticmethod
+    def _models() -> tuple[Any, list[Any]]:
+        from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+        from maljan.llm.fallback import FallbackChatModel
+
+        first = FakeListChatModel(responses=["T9999 is what it does", "T1055 is what it does"])
+        second = FakeListChatModel(responses=["the other model's answer"])
+        chain = FallbackChatModel(
+            models=[first, second], labels=["openai/first", "ollama/second"], agent="static"
+        )
+        return chain, [first, second]
+
+    def test_the_feedback_turn_goes_back_to_the_model_that_answered(self) -> None:
+        from langchain_core.messages import HumanMessage
+
+        from maljan.llm.fallback import turn_model
+        from maljan.pipeline.validation import Violation, retry_with_feedback_sync
+
+        chain, (first, second) = self._models()
+        asked: list[str] = []
+
+        def run(turns: list[Any]) -> Any:
+            answer = chain.invoke(turns)
+            asked.append(turn_model(answer)[0])
+            return answer
+
+        def unknown_id(answer: Any) -> list[Violation]:
+            text = str(answer.content)
+            return (
+                [Violation("technique.unknown", "T9999 is not in the catalogue")]
+                if "T9999" in text
+                else []
+            )
+
+        parsed, left, retries = retry_with_feedback_sync(
+            run,
+            [HumanMessage(content="what does it do")],
+            [unknown_id],
+            parse=lambda answer: answer,
+        )
+
+        assert retries == 1 and left == []
+        assert asked == ["openai/first", "openai/first"]
+        assert parsed.content == "T1055 is what it does"
+        assert second.i == 0, "the fallback model was asked for an answer the first one gave"
+
+    def test_a_content_error_the_first_model_raises_is_never_asked_of_the_next(self) -> None:
+        """The half of the rule an exception can break: content is not a provider failure.
+
+        A parse error and a validation error are about what the model wrote.
+        Moving the turn to the next model on either would be the platform
+        asking for an answer it liked better, so the error reaches the caller
+        — the loop that feeds it back — and the next model is never asked.
+        """
+        from langchain_core.exceptions import OutputParserException
+        from langchain_core.language_models.chat_models import BaseChatModel
+        from langchain_core.language_models.fake_chat_models import FakeListChatModel
+        from langchain_core.messages import HumanMessage
+        from pydantic import BaseModel, ValidationError
+
+        from maljan.llm.fallback import FallbackChatModel
+
+        class _Shape(BaseModel):
+            technique_id: int
+
+        try:
+            _Shape.model_validate({"technique_id": "not a number"})
+        except ValidationError as caught:
+            invalid = caught
+
+        for content_error in (OutputParserException("the answer did not parse"), invalid):
+
+            class _Refuses(BaseChatModel):
+                error: Any
+
+                @property
+                def _llm_type(self) -> str:
+                    return "refuses"
+
+                def _generate(self, *args: Any, **kwargs: Any) -> Any:
+                    raise self.error
+
+            second = FakeListChatModel(responses=["the other model's answer"])
+            chain = FallbackChatModel(
+                models=[_Refuses(error=content_error), second],
+                labels=["openai/first", "ollama/second"],
+            )
+            with pytest.raises(type(content_error)):
+                chain.invoke([HumanMessage(content="what does it do")])
+            assert second.i == 0, f"{type(content_error).__name__} was asked of another model"
+
+
+class TestNoClaimCarriesAConfidenceNobodyStated:
+    """The flat 0.50: a confidence written onto a claim its analyst never rated.
+
+    The text fallback cut an unparsed answer into sentences and gave each one
+    0.50, and the lenient CLAIM parser wrote the same number onto a block that
+    stated none. Neither is an assignment the scan above can see — the number
+    went into a fresh object's constructor — so the behaviour is driven here,
+    and the constructors are scanned for a constant confidence.
+    """
+
+    PROSE = (
+        "**Binary Identification**:\n"
+        "- The binary is a 64-bit ELF executable, 9,800 bytes in size.\n"
+        "It downloads a payload and runs it from memory."
+    )
+
+    @staticmethod
+    def _analyst() -> Any:
+        import logging
+
+        from maljan.agents.static_analyst import StaticAnalyst
+
+        analyst = StaticAnalyst.__new__(StaticAnalyst)
+        analyst.name = "static"
+        analyst.logger = logging.getLogger("test")
+        return analyst
+
+    def test_prose_is_not_cut_into_claims(self) -> None:
+        isr = self._analyst()._text_to_isr(self.PROSE, revision_round=0)
+
+        assert isr.claims == []
+        assert isr.unparsed_answer == self.PROSE
+
+    def test_a_block_that_states_no_confidence_is_not_given_one(self) -> None:
+        from maljan.agents.base_agent import parse_structured_claims_counted
+
+        claims, without = parse_structured_claims_counted(
+            "CLAIM: The sample is packed.\nEVIDENCE: entropy 7.9 [ev_0004]\nTECHNIQUE: T1027\n"
+        )
+
+        assert claims == []
+        assert without == 1
+
+    def test_no_claim_is_constructed_with_a_constant_confidence(self) -> None:
+        found: list[str] = []
+        for path in sorted(SRC.rglob("*.py")):
+            relative = _relative(path)
+            if _is_exempt(relative):
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=relative)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+                if name != "ClaimEvidence":
+                    continue
+                for keyword in node.keywords:
+                    value = keyword.value
+                    if (
+                        keyword.arg == "confidence"
+                        and isinstance(value, ast.Constant)
+                        and isinstance(value.value, int | float)
+                        and not isinstance(value.value, bool)
+                    ):
+                        found.append(f"{relative}:{node.lineno}: confidence={value.value!r}")
+
+        assert not found, "A claim carries the confidence its analyst stated:\n  " + "\n  ".join(
+            found
+        )
+
+
+def _is_number(node: ast.expr) -> bool:
+    return (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, int | float)
+        and not isinstance(node.value, bool)
+    )
+
+
+def constant_confidences(source: str, label: str) -> list[str]:
+    """Every place ``source`` writes a confidence as a number of its own.
+
+    The forms the platform used to put a number nobody stated on a finding: a
+    ``"confidence": 0.5`` row (a packer match, a capa hit), ``.get("confidence",
+    0.75)`` (a rule its author left unrated), ``max(authored, 0.70)`` or
+    ``min(authored, 0.65)`` over an authored value, and a confidence field or
+    attribute whose default is a number rather than ``None``. A clamp to the
+    range itself (``max(0.0, min(1.0, x))``) states no number and is allowed.
+    """
+    found: list[str] = []
+    for node in ast.walk(ast.parse(source, filename=label)):
+        where = f"{label}:{getattr(node, 'lineno', 0)}"
+        if isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values, strict=True):
+                if (
+                    isinstance(key, ast.Constant)
+                    and key.value == "confidence"
+                    and _is_number(value)
+                ):
+                    found.append(f"{where}: 'confidence': {ast.unparse(value)}")
+        elif isinstance(node, ast.Call):
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+            text = ast.unparse(node)
+            if (
+                name == "get"
+                and len(node.args) == 2  # noqa: PLR2004 — the key and its default
+                and isinstance(node.args[0], ast.Constant)
+                and node.args[0].value == "confidence"
+                and _is_number(node.args[1])
+                and node.args[1].value != 0
+            ):
+                found.append(f"{where}: {text}")
+            elif (
+                name in {"max", "min"}
+                and "confidence" in text.lower()
+                and any(_is_number(arg) and arg.value not in (0, 1) for arg in node.args)
+            ):
+                found.append(f"{where}: {text}")
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and "confidence" in node.target.id
+            and node.value is not None
+        ):
+            value = node.value
+            default = (
+                value.args[0]
+                if isinstance(value, ast.Call)
+                and getattr(value.func, "id", "") == "Field"
+                and value.args
+                else value
+            )
+            if _is_number(default):
+                found.append(f"{where}: {node.target.id} defaults to {ast.unparse(default)}")
+    return found
+
+
+class TestNoConfidenceIsAConstantOfThePlatforms:
+    """No layer, the schemas included, writes a confidence nobody stated."""
+
+    def test_nothing_under_src_writes_one(self) -> None:
+        found = [
+            row
+            for path in sorted(SRC.rglob("*.py"))
+            for row in constant_confidences(path.read_text(encoding="utf-8"), _relative(path))
+        ]
+
+        assert not found, "A confidence nobody stated, written by the platform:\n  " + (
+            "\n  ".join(found)
+        )
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "row = {'name': name, 'confidence': 0.5}\n",
+            "hit = {'technique_id': tid, 'confidence': 0.6}\n",
+            "c = data.get('confidence', 0.75)\n",
+            "c = max(float(data.get('confidence')), 0.70)\n",
+            "conf_max = min(confidence_max, 0.65)\n",
+            "class M:\n    family_confidence: float = 0.0\n",
+            "class M:\n    confidence: float = Field(0.0, ge=0.0)\n",
+        ],
+    )
+    def test_each_form_is_caught(self, source: str) -> None:
+        assert constant_confidences(source, "probe.py")
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "c = max(0.0, min(1.0, float(stated)))\n",
+            "row = {'confidence': stated}\n",
+            "class M:\n    confidence: float | None = None\n",
+            "c = data.get('confidence')\n",
+        ],
+    )
+    def test_what_states_no_number_is_not(self, source: str) -> None:
+        assert constant_confidences(source, "probe.py") == []

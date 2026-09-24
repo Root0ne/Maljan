@@ -39,11 +39,13 @@ from langchain_core.language_models.chat_models import BaseChatModel
 
 from maljan.agents.registry import AgentRegistry
 from maljan.agents.run_evidence_corpus import RunEvidenceCorpus
+from maljan.core.cancellation import Cancellation
 from maljan.core.config import PROMPT_ROLES, REPORTER_AGENT_KEY, Settings
 from maljan.core.exceptions import ConfigurationError
 from maljan.core.logger import logger
 from maljan.core.token_ledger import TokenLedger
 from maljan.core.truncation_ledger import TruncationLedger
+from maljan.llm.generation_rate import GenerationRates, attach_rate_meter
 from maljan.llm.registry import LLMProviderRegistry
 from maljan.loaders.file_loader import FileDataLoader
 from maljan.parsers.registry import ParserRegistry
@@ -127,6 +129,77 @@ def _drop_llm_caches_on_retirement(loop: object) -> None:
     # loop, and the rebuild cleared nothing. Models this provider builds now
     # own their pools, and this clears any that were built elsewhere.
     clear_shared_httpx_clients()
+
+
+def composer_output_cap(config: Settings, provider: str | None = None) -> int:
+    """What a composer section may generate under a configured section budget.
+
+    Only asked when ``reporting.composer_section_max_tokens`` is set; at its
+    default of 0 the budget is derived per model (:func:`composer_output_budget`).
+
+    Ollama's ``num_predict`` and llama.cpp's ``n_predict`` count the reasoning
+    channel with the answer, and a reasoning model left thinking spends its
+    budget there: a 900-token cap came back as an empty section. The platform
+    cannot tell a reasoning model from its tag; what it knows is whether it
+    asked the reporter's provider to keep reasoning out
+    (``llm.ollama.disable_thinking`` / ``llm.openai.disable_thinking``). Asked,
+    the cap is the section's own budget. Not asked, the cap leaves the room
+    the reporter already has for reasoning — ``judge_max_tokens`` — on top of
+    the section's budget, rather than asking the model not to reason: a
+    ``think: false`` a model does not understand is an error on Ollama, and
+    the setting that sends it is the operator's.
+
+    Decided per provider: each model of the reporter's list is capped by its
+    own provider's switch. With no provider named, the reporter's first.
+    """
+    section = int(config.reporting.composer_section_max_tokens)
+    if section <= 0:
+        return 0
+    if provider is None:
+        agent = config.llm.agents.get(REPORTER_AGENT_KEY)
+        provider = str(getattr(agent, "provider", "") or config.llm.provider)
+    block = getattr(config.llm, provider, None)
+    if provider not in ("ollama", "openai") or bool(getattr(block, "disable_thinking", False)):
+        return section
+    from maljan.llm.context_window import output_cap_for
+
+    return (
+        section
+        + output_cap_for(config, "judge_max_tokens", REPORTER_AGENT_KEY, role="judge").tokens
+    )
+
+
+def composer_output_budget(config: Settings, assignment: Any) -> tuple[int, str, int]:
+    """What one model of the reporter's list may generate for a section, and why.
+
+    ``reporting.composer_section_max_tokens`` above 0 is the operator's own
+    budget, used as it always was (:func:`composer_output_cap`). At 0, the
+    default, nothing is fixed: the budget is the room an analyst's reply is
+    given on the same model — the deployment's generation cap, at most a
+    quarter of the context window that model serves
+    (``llm.context_window.reply_budget``) — and a model's reasoning is spent
+    inside it. A fixed 900 tokens dropped a section of a live report when the
+    model reasoned past it.
+
+    Returns the tokens, the sentence that says how they were reached, which
+    the run summary prints beside the section's wait, and the model's context
+    window in tokens, which a section's tool answers are sized against
+    whichever way the budget was set.
+    """
+    from maljan.llm.context_window import reply_budget, window_for_assignment
+
+    configured = int(config.reporting.composer_section_max_tokens)
+    if configured > 0:
+        cap = composer_output_cap(config, str(assignment.provider))
+        extra = "" if cap == configured else f", plus {cap - configured} for its reasoning"
+        window = window_for_assignment(config, assignment)
+        return (
+            cap,
+            f"{cap} tokens — reporting.composer_section_max_tokens is set to {configured}{extra}",
+            window.tokens,
+        )
+    budget = reply_budget(config, assignment)
+    return budget.tokens, budget.sentence(), budget.window.tokens
 
 
 def _swap_healed_llm(replaced: object, healed: object) -> None:
@@ -355,6 +428,17 @@ class ServiceContainer:
         # judge add each call's usage; the judge node snapshots it into RunSummary.
         self._token_ledger = TokenLedger()
 
+        # Per-run generation rate of each model, read off every call's answer
+        # by a meter attached where the model is built. The judge and the
+        # composer size their per-call timeouts from it; the judge node and
+        # the report node snapshot it into RunSummary.
+        self._generation_rates = GenerationRates()
+
+        # Whether this job has been cancelled. The worker sets it; the graph's
+        # nodes, every model call and every call in flight on the agent loop
+        # answer to it (``core.cancellation``).
+        self.cancellation = Cancellation()
+
         # Per-run truncation ledger (pitfall P6). Same lifecycle as the token
         # ledger: written to at every bound, snapshotted by the judge node.
         # Truncation is designed into this pipeline and has never been counted.
@@ -372,6 +456,12 @@ class ServiceContainer:
         # Per-job source of evidence-ledger ids. One counter for the whole job
         # so ``ev_0007`` names one tool call rather than one per agent.
         self._evidence_counter = EvidenceCounter()
+
+        # The window this job's models were served with, and the cap it gives
+        # one tool answer. Built on first use rather than here: learning the
+        # window costs a metadata request to the operator's own endpoint, and a
+        # container that never attaches a tool server should never make it.
+        self._context_budget: Any | None = None
 
         _LIVE_CONTAINERS.add(self)
         _register_retirement_hook()
@@ -415,16 +505,33 @@ class ServiceContainer:
     # LLM accessors
     # ------------------------------------------------------------------
 
-    def _expert_token_cap(self) -> dict[str, Any]:
-        """``max_tokens`` kwargs for analyst-role models, or ``{}`` when unset.
+    def _expert_token_cap(self, agent: str = "") -> dict[str, Any]:
+        """``max_tokens`` kwargs for an analyst-role model: the operator's cap, or derived.
 
         The analyst path was the only unbounded LLM call in the system while
         judge/narrative/composer were all capped. MEASURED:
         a 19-tool-call static loop produced a forced-synthesis call that ran 19+
         minutes against its 25-minute wall clock. Mirrors ``get_judge_llm``.
         """
-        cap = getattr(self.config.llm, "expert_max_tokens", 0) or 0
-        return {"max_tokens": cap} if cap > 0 else {}
+        return {"max_tokens": self._output_cap("expert_max_tokens", agent or "expert")}
+
+    def _output_cap(self, setting: str, agent: str, *, role: str = "expert") -> int:
+        """The output cap one agent's model is built with, its derivation logged and recorded.
+
+        ``llm.expert_max_tokens`` / ``llm.judge_max_tokens`` above 0 are the
+        operator's; at 0 the cap is derived from the window the agent's model
+        serves (``context_window.output_cap_for``), learned once per endpoint.
+        A mock container asks no endpoint.
+        """
+        from maljan.llm.context_window import output_cap_for
+
+        named = "" if agent in ("expert", "judge") and role == agent else agent
+        cap = output_cap_for(self.config, setting, named, role=role, probe=not self.mock)
+        rates = getattr(self, "_generation_rates", None)
+        if rates is not None:
+            rates.note_output_cap(agent, cap.tokens, cap.sentence)
+        logger.info("Output cap for %s: %s.", agent, cap.sentence)
+        return cap.tokens
 
     def get_expert_llm(self) -> BaseChatModel:
         if self._llm_registry is None:
@@ -434,6 +541,7 @@ class ServiceContainer:
             cached = self._expert_llm_cache.lookup(loop)
             if cached is None:
                 cached = self._llm_registry.build_model(role="expert", **self._expert_token_cap())
+                attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._expert_llm_cache.put(loop, "", cached)
             return cached
 
@@ -446,10 +554,9 @@ class ServiceContainer:
             if cached is None:
                 # Bound the verdict generation so a degenerate decode can't
                 # consume the full wall-clock timeout (see LLMConfig.judge_max_tokens).
-                extra: dict[str, Any] = {}
-                cap = self.config.llm.judge_max_tokens
-                if cap and cap > 0:
-                    extra["max_tokens"] = cap
+                extra: dict[str, Any] = {
+                    "max_tokens": self._output_cap("judge_max_tokens", "judge", role="judge")
+                }
                 # Through the per-agent path so a configured
                 # ``llm.agents.judge`` decides provider/model/temperature the
                 # same way it does for an analyst; with no such entry the
@@ -461,6 +568,7 @@ class ServiceContainer:
                 cached = self._llm_registry.build_model_for_agent(
                     "judge", fallback_role="judge", **extra
                 )
+                attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._judge_llm_cache.put(loop, "", cached)
             return cached
 
@@ -478,13 +586,15 @@ class ServiceContainer:
         with self._lock:
             cached = self._reporter_llm_cache.lookup(loop)
             if cached is None:
-                extra: dict[str, Any] = {}
-                cap = self.config.llm.judge_max_tokens
-                if cap and cap > 0:
-                    extra["max_tokens"] = cap
+                extra: dict[str, Any] = {
+                    "max_tokens": self._output_cap(
+                        "judge_max_tokens", REPORTER_AGENT_KEY, role="judge"
+                    )
+                }
                 cached = self._llm_registry.build_model_for_agent(
                     REPORTER_AGENT_KEY, fallback_role="judge", **extra
                 )
+                attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._reporter_llm_cache.put(loop, "", cached)
             return cached
 
@@ -506,6 +616,7 @@ class ServiceContainer:
                     provider_override=self.config.preprocessing.summarizer_provider,
                     model_override=self.config.preprocessing.summarizer_model,
                 )
+                attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._summarizer_llm_cache.put(loop, "", cached)
             return cached
 
@@ -520,8 +631,9 @@ class ServiceContainer:
                 # static/dynamic/network ReAct loops and their forced-synthesis
                 # fallback actually use.
                 cached = self._llm_registry.build_model_for_agent(
-                    agent_name, **self._expert_token_cap()
+                    agent_name, **self._expert_token_cap(agent_name)
                 )
+                attach_rate_meter(cached, getattr(self, "_generation_rates", None))
                 self._agent_llm_cache.put(loop, agent_name, cached)
             return cached
 
@@ -618,14 +730,23 @@ class ServiceContainer:
         providers already have.
 
         It carries this job's truncation ledger, so every toolkit it opens
-        records its guardrail decisions where the run summary reads them.
+        records its guardrail decisions where the run summary reads them, and
+        this job's context budget, so every answer those toolkits hand back is
+        sized against the window the served model was found to have.
         """
+        # Built before the lock is taken, because building it may make a
+        # metadata request and no other thread's accessor should wait on a
+        # network round trip to a model server.
+        budget = self.get_context_budget()
         with self._lock:
             if self._server_registry_cache is None:
                 from maljan.providers.servers import ServerRegistry
 
                 self._server_registry_cache = ServerRegistry(
-                    self.config, truncation_ledger=self._truncation_ledger
+                    self.config,
+                    truncation_ledger=self._truncation_ledger,
+                    context_budget=budget,
+                    event_sink=self.event_sink,
                 )
                 logger.info(
                     "Tool servers: %s.",
@@ -643,13 +764,91 @@ class ServiceContainer:
         registry = self._server_registry_cache
         return list(registry.degradation_reasons) if registry is not None else []
 
+    def server_rests(self) -> list[dict[str, Any]]:
+        """Every tool-server rest this job gave, in order, or an empty list.
+
+        Reads the cached registry only, for the same reason
+        ``server_degradation_reasons`` does.
+        """
+        registry = self._server_registry_cache
+        return [dict(row) for row in getattr(registry, "rests", None) or []]
+
     def get_token_ledger(self) -> TokenLedger:
         """Return the per-run LLM token/cost ledger (findings-log §4 Item 1)."""
         return self._token_ledger
 
+    def get_generation_rates(self) -> GenerationRates:
+        """Return the per-run measured generation rate of each model."""
+        return self._generation_rates
+
     def get_truncation_ledger(self) -> TruncationLedger:
         """Return the per-run truncation ledger (pitfall P6)."""
         return self._truncation_ledger
+
+    def get_context_budget(self) -> Any:
+        """The window this job's models serve, and what one tool answer may take.
+
+        Built once, on first use, because learning the window means asking the
+        operator's own endpoint for its metadata — free, but a request, and a
+        container that attaches no tool server never makes it. A mock container
+        does not ask at all: nothing it builds reaches a model, and a unit test
+        must not put a request on the network to find that out.
+
+        The failure mode is a smaller answer, never a failed job: an endpoint
+        that says nothing falls to the vendored table, and a window nothing
+        could answer for is not derived from at all — the documented constant
+        applies and the run summary says the window is unknown.
+
+        The container's lock is **not** held while the window is learned. A
+        probe is a network round trip, and holding the lock across one blocks
+        every other accessor on every other thread for its whole duration;
+        the last writer wins instead, which costs at most one redundant probe
+        on the first two callers and is already answered from the cache.
+        """
+        held = self._context_budget
+        if held is not None:
+            return held
+        from maljan.agents.composition import analyst_keys
+        from maljan.llm.context_window import budget_for_settings
+
+        agents = [*analyst_keys(self.config), "judge"]
+        budget = budget_for_settings(
+            self.config, agents, probe=self._cap_is_derived() and not self.mock
+        )
+        with self._lock:
+            if self._context_budget is None:
+                self._context_budget = budget
+            budget = self._context_budget
+        window = budget.window
+        # ``cap_without_recording``: reading the figure for a log line must not
+        # reserve room a tool answer never took, nor leave a run that called no
+        # tool reporting a cap range nothing used.
+        logger.info(
+            "Context window: %d (%s — %s); one tool answer may take %d characters.",
+            window.tokens,
+            window.source,
+            window.detail,
+            budget.cap_without_recording(),
+        )
+        return budget
+
+    def _cap_is_derived(self) -> bool:
+        """Whether the tool-output cap comes from the window rather than a setting."""
+        return int(getattr(self.config.preprocessing, "max_tool_output_chars", 0) or 0) <= 0
+
+    def context_budget_snapshot(self) -> dict[str, Any]:
+        """The window this job's tool-output caps were derived from, or ``{}``.
+
+        Empty on a job that attached no tool server, because none was built,
+        and empty on one whose operator set the cap themselves, because then no
+        window decided anything and reporting one would describe a number
+        nothing used. Never builds a budget: a record of what happened does not
+        go and find out.
+        """
+        budget = self._context_budget
+        if budget is None or not self._cap_is_derived():
+            return {}
+        return dict(budget.snapshot())
 
     def get_evidence_corpus(self) -> RunEvidenceCorpus | None:
         """Return the per-job record of what the run's tools answered, or ``None``.
@@ -830,7 +1029,11 @@ class ServiceContainer:
                     config=self.config,
                 )
                 cached._job_id = self.job_key()
+                # The mediator's instance is built on the expert model, and its
+                # calls are recorded under that model.
+                cached._runs_on = "judge" if role == "judge" else "expert"
                 cached.token_ledger = getattr(self, "_token_ledger", None)
+                cached.generation_rates = getattr(self, "_generation_rates", None)
                 cached.truncation_ledger = getattr(self, "_truncation_ledger", None)
                 cached.evidence_counter = getattr(self, "_evidence_counter", None)
                 cached.evidence_corpus = getattr(self, "_evidence_corpus", None)
@@ -1022,31 +1225,110 @@ class ServiceContainer:
                     llm=llm,
                     max_input_tokens=max_tokens,
                     token_ledger=getattr(self, "_token_ledger", None),
+                    model_label=self._reporter_model_label(),
                 )
+                self._narrative_agent_cache.event_sink = self.event_sink
             return self._narrative_agent_cache
+
+    def _reporter_model_label(self) -> str:
+        """The label of the model ``get_reporter_llm`` builds for the report's rounds."""
+        from maljan.core.model_assignments import model_label_for
+
+        return model_label_for(self.config, REPORTER_AGENT_KEY, role="judge")
+
+    def _summarizer_model_label(self) -> str:
+        """The label of the model ``get_summarizer_llm`` builds, or ``""``."""
+        from maljan.core.model_assignments import endpoint_for, model_label
+
+        try:
+            pre = self.config.preprocessing
+            provider = str(pre.summarizer_provider or self.config.llm.provider)
+            model = str(pre.summarizer_model or self.config.llm.expert_model)
+            return model_label(provider, model, endpoint_for(self.config, provider))
+        except Exception:  # noqa: BLE001 — a label is never worth a lost summary
+            return ""
 
     def get_report_composer(self) -> Any | None:
         """Return the singleton section-wise ReportComposer, or ``None``.
 
         ``None`` in mock mode or when ``composer_enabled`` is
         off (callers then simply skip the professional spine). Runs on the
-        reporter's model like the NarrativeAgent, and pins it for the same
-        reason and under the same condition: the report node is the one
-        caller, on one loop.
+        reporter's model like the NarrativeAgent, built with each model's
+        section budget as its output cap (:func:`composer_output_budget`), and
+        pins it for the same reason and under the same condition: the report
+        node is the one caller, on one loop.
         """
-        if self.is_mock or not self.config.reporting.composer_enabled:
+        registry = self._llm_registry
+        if self.is_mock or not self.config.reporting.composer_enabled or registry is None:
             return None
+        config = self.config
+        budgets: dict[str, tuple[int, str, int]] = {}
+        chain: list[Any] = []
+        if getattr(self, "_report_composer_cache", None) is None:
+            # Learned before the lock: learning a window may ask the model's
+            # server, and nothing else the container serves should wait on it.
+            from maljan.core.model_assignments import assignment_chain_for
+
+            chain = assignment_chain_for(config, REPORTER_AGENT_KEY, role="judge")
+            budgets = {a.label: composer_output_budget(config, a) for a in chain}
         with self._lock:
             if getattr(self, "_report_composer_cache", None) is None:
                 from maljan.reporting.composer import ReportComposer
 
                 rc = self.config.reporting
+                # The reporter's model, built with the section's own output cap
+                # rather than the judge's: the section budget is what a section
+                # may generate, and a wait sized from it over a call allowed
+                # ``judge_max_tokens`` would say something untrue.
+                # Held by the composer, which is dropped with the loop it ran on.
+                caps = {label: tokens for label, (tokens, _why, _window) in budgets.items()}
+                # What each provider's model is built with: the budget of its
+                # model on the list, the smaller where one provider serves two.
+                by_provider: dict[str, int] = {}
+                for a in chain:
+                    tokens = budgets[a.label][0]
+                    by_provider[a.provider] = min(by_provider.get(a.provider, tokens), tokens)
+                # A section's tool answers are sized for the tightest window of
+                # the list, since any model of it may be the one that answers.
+                window_tokens = min(
+                    (window for _tokens, _why, window in budgets.values()), default=0
+                )
+                # The wait is sized for the most a model of the list may write.
+                output_cap = max(caps.values(), default=composer_output_cap(config))
+                budget_note = "; ".join(
+                    why if len(budgets) == 1 else f"{label}: {why}"
+                    for label, (_tokens, why, _window) in budgets.items()
+                )
+                if window_tokens > 0:
+                    from maljan.llm.context_window import CHARS_PER_TOKEN
+
+                    budget_note += (
+                        f". A section's tool answers share what the {window_tokens}-token "
+                        "window leaves after the output budget and the rest of the section's "
+                        f"prompt, at {CHARS_PER_TOKEN} characters a token, evenly"
+                    )
+                composer_llm = registry.build_model_for_agent(
+                    REPORTER_AGENT_KEY,
+                    fallback_role="judge",
+                    max_tokens_for=lambda provider: by_provider.get(
+                        provider, composer_output_cap(config, provider)
+                    ),
+                )
+                attach_rate_meter(composer_llm, getattr(self, "_generation_rates", None))
                 self._report_composer_cache = ReportComposer(
-                    llm=self.get_reporter_llm(),
+                    llm=composer_llm,
                     section_max_tokens=rc.composer_section_max_tokens,
                     per_section_timeout=rc.composer_per_section_timeout,
                     token_ledger=getattr(self, "_token_ledger", None),
+                    model_label=self._reporter_model_label(),
+                    generation_rates=getattr(self, "_generation_rates", None),
+                    output_cap=output_cap,
+                    caps_by_model=caps,
+                    turn_share=float(config.llm.fallback_turn_share),
+                    budget_note=budget_note,
+                    window_tokens=window_tokens,
                 )
+                self._report_composer_cache.event_sink = self.event_sink
             return self._report_composer_cache
 
     # ------------------------------------------------------------------
@@ -1198,6 +1480,8 @@ class ServiceContainer:
                 self._function_summarizer_cache = FunctionSummarizer(
                     llm=summarizer_llm,
                     max_summary_words=self.config.preprocessing.summarizer_max_words,
+                    token_ledger=getattr(self, "_token_ledger", None),
+                    model_label=self._summarizer_model_label(),
                 )
                 logger.info(
                     "FunctionSummarizer initialized (%s / %s, max_words=%d).",

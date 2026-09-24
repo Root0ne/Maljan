@@ -883,11 +883,12 @@ class TestAssertionsFromYaraAndFromRetiredIds:
 
 class TestACatalogueAssociationIsNeverASource:
     def test_it_is_shown_apart_and_counts_for_nothing(self) -> None:
-        """BitBlt plus CreateCompatibleDC reads as screen capture on any GUI
-        program; the association is shown for reference and is not asserted."""
+        """Reading a window's pixels back is what a screenshot is made of, and
+        it is also what a screen recorder and a remote-desktop server do; the
+        association is shown for reference and is not asserted."""
         from maljan.tools.knowledge import api_capability
 
-        payload = api_capability(["BitBlt", "CreateCompatibleDC", "GetDC", "GetDIBits"])
+        payload = api_capability(["GetDIBits", "PrintWindow", "GetDC", "BitBlt"])
         assert any(row["techniques"] for row in payload["capabilities"])
         rows = corroboration({}, [_entry("api_capability", payload, 1)])
         assert rows["T1113"] == {

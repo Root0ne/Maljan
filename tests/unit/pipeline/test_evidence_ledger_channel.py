@@ -310,10 +310,10 @@ def _mediates_with_a_tool_call(judge: Any) -> None:
     from langchain_core.messages import AIMessage
 
     async def _mediate(**_kwargs: Any) -> tuple[Any, bool]:
-        async def _ainvoke(payload, config=None):
+        async def _astream(payload, config=None, stream_mode="values"):
             for wrapped in captured[0]:
                 wrapped.invoke({})
-            return {"messages": [AIMessage(content="Agents agree.")]}
+            yield {"messages": [AIMessage(content="Agents agree.")]}
 
         captured: list = []
 
@@ -323,7 +323,7 @@ def _mediates_with_a_tool_call(judge: Any) -> None:
             # make the meter untestable here.
             captured.append(tools)
             executor = MagicMock()
-            executor.ainvoke = _ainvoke
+            executor.astream = _astream
             return executor
 
         judge.tools = [_tool("reputation")]
@@ -384,7 +384,8 @@ class TestTheNegotiationNode:
             )
         )
 
-        assert update["is_consensus"] is False
+        # One analyst and no claims: no agreement to fail at, so none recorded.
+        assert update["is_consensus"] is None
         assert _ids(update) == ["ev_0001"]
 
 

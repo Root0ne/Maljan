@@ -111,6 +111,8 @@ def default_profile_summary() -> dict[str, Any]:
         ]
     )
     builder.set_triage({"entries": 11, "failed": 1, "duration_ms": 900, "yara_hits": 2})
+    # The mock sandbox's stand-in, so the key is pinned with its shape.
+    builder.set_sandbox({"synthetic": True})
     builder.set_nudge({"static": "invalid_tool_calls_dropped"})
     builder.set_budget(
         {
@@ -129,15 +131,27 @@ def default_profile_summary() -> dict[str, Any]:
     )
     builder.set_degraded_mode(False, [])
     builder.set_failed_analysts([])
-    builder.set_token_usage(
-        {
-            "input_tokens": 10,
-            "output_tokens": 20,
-            "total_tokens": 30,
-            "llm_calls": 3,
-            "estimated_calls": 0,
-        }
+    # Through the ledger a run records on, so the golden follows its shape:
+    # one reported call with a cost, one a fallback answered with none.
+    from maljan.core.token_ledger import TokenLedger
+
+    ledger = TokenLedger()
+    ledger.add(
+        {"input_tokens": 10, "output_tokens": 20, "cost": 0.001},
+        agent="static",
+        model="openai/qwen",
     )
+    ledger.add(None, agent="static", model="ollama/gemma", fallback="openai/qwen: timed out")
+    builder.set_token_usage(ledger.snapshot())
+    builder.set_server_rests(
+        [{"server": "analysis", "failures": 3, "cooldown_s": 60.0, "reason": "timed out"}]
+    )
+    from maljan.llm.generation_rate import GenerationRates
+
+    rates = GenerationRates()
+    rates.observe("qwen", 380, 100.0, "ollama eval_count/eval_duration")
+    rates.call_timeout("judge:verdict", "qwen", 600.0, 8192)
+    builder.set_generation(rates.snapshot())
     builder.set_truncation(
         {
             "tool_output_calls": 4,
@@ -213,7 +227,7 @@ def stored_summary() -> dict[str, Any]:
     return summary
 
 
-# Two of the maps in the summary are keyed by data rather than by schema --
+# Several of the maps in the summary are keyed by data rather than by schema --
 # one technique layer per layer that produced a technique, one integrity
 # counter per object kind that was dropped. Their contents are a property of
 # the run, not of the format, so they are pinned as present and opaque.
@@ -230,6 +244,12 @@ DATA_KEYED = frozenset(
         "budget",
         "evidence.by_tool",
         "settings_snapshot",
+        # One row per agent that made a model call, keyed by the agent.
+        "models",
+        "tokens.per_agent",
+        # Keyed by the model measured, and by the calls a run sized.
+        "generation.models",
+        "generation.timeouts",
     }
 )
 

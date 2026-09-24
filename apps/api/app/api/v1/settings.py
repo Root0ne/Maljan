@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Awaitable
 from contextlib import suppress
@@ -27,6 +28,7 @@ from app.schemas.settings import (
     CatalogEntryDTO,
     ConditionValidateRequest,
     ConditionValidateResponse,
+    ContextWindowResponse,
     ExportResponse,
     GroupDTO,
     ImportRequest,
@@ -38,6 +40,10 @@ from app.schemas.settings import (
     ProbeResponse,
     ResetResponse,
     SchemaResponse,
+    TeamFindingDTO,
+    TeamGraphDTO,
+    TeamLintRequest,
+    TeamLintResponse,
     ValueDTO,
     ValuesResponse,
     VirustotalRegisterResponse,
@@ -49,6 +55,7 @@ from app.services.settings_catalog_api import catalog_index, full_catalog, resol
 from app.services.settings_probes import (
     PROBES,
     candidate_settings,
+    context_window_facts,
     run_agent_probe,
     run_mcp_probe,
     run_probe,
@@ -118,6 +125,29 @@ async def get_values(
 ) -> ValuesResponse:
     vals = await SettingsService(db).values()
     return ValuesResponse(values={k: ValueDTO(**vars(v)) for k, v in vals.items()})
+
+
+@router.get("/context-window", response_model=ContextWindowResponse)
+async def get_context_window(
+    _: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
+) -> ContextWindowResponse:
+    """What the configured models serve, and what it gives one tool answer.
+
+    Read-only, and free: the probe behind it reads a server's metadata
+    endpoint and never asks a model to produce anything. The answer is cached
+    per provider, endpoint and model, so the settings page pays for it once
+    and a changed endpoint asks again. An endpoint that says nothing is not an
+    error — the vendored table answers, then the stated fallback, and
+    ``source`` says which.
+
+    Registered ahead of ``/{key}`` on the delete side and beside the fixed
+    paths here for the same reason ``/test/mcp`` is: a fixed path must win the
+    match against a parameterised one.
+    """
+    stored = await SettingsService(db).load_overrides()
+    settings = candidate_settings({}, stored)
+    await end_read_transaction(db)
+    return ContextWindowResponse(**await context_window_facts(settings))
 
 
 async def _agent_warnings(db: AsyncSession) -> dict[str, str]:
@@ -717,6 +747,41 @@ async def validate_stage_condition(
             extra={"expression": log_safe(body.expression)},
         )
     return ConditionValidateResponse(valid=not problems, problems=problems)
+
+
+@router.post("/lint-teams", response_model=TeamLintResponse)
+async def lint_teams_route(
+    body: TeamLintRequest,
+    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> TeamLintResponse:
+    """Check every team as the editor has staged it, and lay each one out.
+
+    Nothing is stored. The console calls this as a team is edited, debounced,
+    and draws the preview and the findings from the answer. The errors are the
+    team refusals the apply path makes, in the same words; a warning never
+    blocks apply.
+
+    The lint and the layout are CPU work over whatever the body holds, so they
+    run in a worker thread, as the API's other blocking work does, and the
+    event loop keeps serving every other request while a large team is read.
+    """
+    stored = await SettingsService(db).load_overrides()
+    return await asyncio.to_thread(_lint_response, stored, body)
+
+
+def _lint_response(stored: dict[str, Any], body: TeamLintRequest) -> TeamLintResponse:
+    from app.services.agent_map import lint_team_map
+
+    findings, graphs = lint_team_map(
+        stored, profiles=body.profiles, definitions=body.definitions, active=body.profile
+    )
+    order = {"error": 0, "warning": 1}
+    findings.sort(key=lambda f: order.get(str(f["severity"]), 2))
+    return TeamLintResponse(
+        findings=[TeamFindingDTO(**f) for f in findings],
+        graphs={name: TeamGraphDTO(**graph) for name, graph in graphs.items()},
+    )
 
 
 @router.post("/sandbox-rest/preview", response_model=MappingPreviewResponse)

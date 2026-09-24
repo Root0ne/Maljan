@@ -82,18 +82,36 @@ def _elf_with_imports(*functions: str) -> bytes:
     return ehdr + dynstr + dynsym + shstrtab + sections
 
 
-def _pe(import_rva: int = 0x1000, delay: bool = True, delay_rva: int = 0x2000) -> bytes:
+def _pe(
+    import_rva: int = 0x1000,
+    delay: bool = True,
+    delay_rva: int = 0x2000,
+    ordinal: int | None = None,
+) -> bytes:
     """A 32-bit PE with one real import and, optionally, one delay-load import.
 
     Hand-built rather than checked in as a fixture: the point of the damaged
     case is that the import directory RVA is wrong and everything else is
     right, and that is one argument here instead of a second binary nobody can
     read in a diff.
+
+    ``ordinal`` adds a second import resolved by ordinal rather than by name,
+    which is what a reader of an import table has to keep in the denominator:
+    a binary that imports everything that way has no names at all, and a parser
+    that drops it drops the binary.
     """
     idata = bytearray(0x200)
-    idata[0x00:0x14] = struct.pack("<IIIII", 0x1028, 0, 0, 0x1060, 0x1030)
-    idata[0x28:0x30] = struct.pack("<II", 0x1040, 0)
-    idata[0x30:0x38] = struct.pack("<II", 0x1040, 0)
+    if ordinal is None:
+        idata[0x00:0x14] = struct.pack("<IIIII", 0x1028, 0, 0, 0x1060, 0x1030)
+        idata[0x28:0x30] = struct.pack("<II", 0x1040, 0)
+        idata[0x30:0x38] = struct.pack("<II", 0x1040, 0)
+    else:
+        # Two thunks and a terminator need more room than the eight bytes
+        # between the one-entry arrays above, so both arrays move up.
+        by_ordinal = 0x80000000 | ordinal
+        idata[0x00:0x14] = struct.pack("<IIIII", 0x1080, 0, 0, 0x1060, 0x1090)
+        idata[0x80:0x8C] = struct.pack("<III", 0x1040, by_ordinal, 0)
+        idata[0x90:0x9C] = struct.pack("<III", 0x1040, by_ordinal, 0)
     idata[0x40:0x4E] = struct.pack("<H", 0) + b"CreateFileA\x00"
     idata[0x60:0x6D] = b"KERNEL32.dll\x00"
 
@@ -553,3 +571,66 @@ class TestWhichImportWarningMeansDamage:
 
     def test_no_warnings_at_all(self) -> None:
         assert tool._import_table_damaged([]) is False
+
+
+class TestTheExportDirectoryIsReadWhole:
+    """Names, ordinals, addresses and the library's own name, as the header states them.
+
+    Read through stand-ins shaped like pefile's objects, because hand-building an
+    export directory proves pefile's parser rather than this reading of it.
+    """
+
+    @staticmethod
+    def _pe(*symbols: tuple[bytes | None, int, int], name: bytes | None = b"LibraryTag.dll"):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            DIRECTORY_ENTRY_EXPORT=SimpleNamespace(
+                name=name,
+                symbols=[SimpleNamespace(name=n, ordinal=o, address=a) for n, o, a in symbols],
+            )
+        )
+
+    def test_every_symbol_carries_its_ordinal_and_address(self) -> None:
+        pe = self._pe((b"extra", 1, 0x3CE4), (b"run", 2, 0x3CE4), (None, 3, 0x1000))
+
+        assert tool._pe_export_rows(pe) == [
+            {"name": "extra", "ordinal": 1, "rva": "0x3ce4"},
+            {"name": "run", "ordinal": 2, "rva": "0x3ce4"},
+            {"name": "", "ordinal": 3, "rva": "0x1000"},
+        ]
+
+    def test_the_directory_s_own_name_is_reported(self) -> None:
+        assert tool._pe_export_name(self._pe()) == "LibraryTag.dll"
+        assert tool._pe_export_name(self._pe(name=None)) == ""
+
+    def test_a_binary_with_no_export_directory_has_no_rows(self) -> None:
+        from types import SimpleNamespace
+
+        assert tool._pe_export_rows(SimpleNamespace()) == []
+        assert tool._pe_export_name(SimpleNamespace()) == ""
+
+
+class TestTheVersionResourceNamesTheBinary:
+    def test_the_naming_strings_are_read_and_nothing_else(self) -> None:
+        from types import SimpleNamespace
+
+        table = SimpleNamespace(
+            entries={
+                b"InternalName": b"updater",
+                b"OriginalFilename": b"updater.dll\x00",
+                b"CompanyName": b"Example Org",
+                b"ProductName": b"",
+            }
+        )
+        pe = SimpleNamespace(FileInfo=[[SimpleNamespace(StringTable=[table])]])
+
+        assert tool._pe_version_strings(pe) == {
+            "InternalName": "updater",
+            "OriginalFilename": "updater.dll",
+        }
+
+    def test_a_binary_without_a_version_resource_names_nothing(self) -> None:
+        from types import SimpleNamespace
+
+        assert tool._pe_version_strings(SimpleNamespace()) == {}

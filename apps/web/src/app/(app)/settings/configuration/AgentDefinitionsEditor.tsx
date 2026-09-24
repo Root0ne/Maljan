@@ -6,6 +6,7 @@ import { Bot } from "lucide-react";
 import { api } from "@/lib/api";
 import { getErrorMessage } from "@/lib/errors";
 import { agentDisplayName, agentKeySuffix } from "./agentNames";
+import { hasEndpoint, moveChoice, storedChoice, type ModelChoice } from "./modelList";
 import {
   BUILTIN_AGENT_KEYS,
   cloneDefinition,
@@ -68,6 +69,11 @@ export interface AgentLLMOverride {
    *  servers. Only the `openai` and `ollama` providers accept one; the
    *  provider's API key stays global. */
   base_url?: string | null;
+  /** The rest of the agent's ordered model list: tried in order only when
+   *  the model before fails as a provider (a refused connection, a timeout,
+   *  a 5xx, a model the server does not have) — never on what a model said.
+   *  Absent or empty is the single-model form. */
+  fallbacks?: ModelChoice[];
 }
 
 /** What the detail's LLM section needs to know about the two *global* leaves
@@ -111,6 +117,123 @@ function wholeNumber(raw: string): number | null {
   if (raw.trim() === "") return null;
   const parsed = Number(raw);
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : null;
+}
+
+/**
+ * The models an agent falls back to, in the order they are tried.
+ *
+ * The next model answers a turn only when the one before failed as a
+ * provider; what a model said is never a reason to ask another, so the
+ * editor says so where the list is edited. Each fallback passes the same
+ * probe gate the first model does, which is why saving one asks for a probe.
+ */
+function FallbackModels({
+  agentKey,
+  rows,
+  providerChoices,
+  inputClass,
+  onChange,
+}: {
+  agentKey: string;
+  rows: ModelChoice[];
+  providerChoices: string[] | null;
+  inputClass: string;
+  onChange: (rows: ModelChoice[]) => void;
+}) {
+  const put = (index: number, next: Partial<ModelChoice>) =>
+    onChange(rows.map((row, i) => (i === index ? { ...row, ...next } : row)));
+  return (
+    <div className="mt-2 text-xs">
+      <p className="text-text-muted">
+        Fallback models, tried in order only when the model before fails as a provider — a
+        refused connection, a timeout, a server error, a model the server does not have. A
+        rejected answer is always sent back to the model that wrote it.
+      </p>
+      <ol className="space-y-1 mt-1" aria-label={`${agentKey} fallback models`}>
+        {rows.map((row, index) => (
+          <li key={index} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_auto] gap-1">
+            {providerChoices !== null ? (
+              <select
+                className={inputClass}
+                aria-label={`${agentKey} fallback ${index + 1} provider`}
+                value={row.provider}
+                onChange={(e) => put(index, { provider: e.target.value })}
+              >
+                <option value="">provider</option>
+                {providerChoices.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                className={inputClass}
+                aria-label={`${agentKey} fallback ${index + 1} provider`}
+                placeholder="provider"
+                value={row.provider}
+                onChange={(e) => put(index, { provider: e.target.value })}
+              />
+            )}
+            <input
+              className={inputClass}
+              aria-label={`${agentKey} fallback ${index + 1} model`}
+              placeholder="model"
+              value={row.model}
+              onChange={(e) => put(index, { model: e.target.value })}
+            />
+            {hasEndpoint(row.provider) ? (
+              <input
+                className={inputClass}
+                aria-label={`${agentKey} fallback ${index + 1} base url`}
+                placeholder="base URL (blank = the provider's)"
+                value={row.base_url ?? ""}
+                onChange={(e) => put(index, { base_url: e.target.value })}
+              />
+            ) : (
+              <span />
+            )}
+            <span className="flex gap-1">
+              <button
+                type="button"
+                className="px-1 border border-border rounded disabled:opacity-40"
+                aria-label={`move ${agentKey} fallback ${index + 1} up`}
+                disabled={index === 0}
+                onClick={() => onChange(moveChoice(rows, index, -1))}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                className="px-1 border border-border rounded disabled:opacity-40"
+                aria-label={`move ${agentKey} fallback ${index + 1} down`}
+                disabled={index === rows.length - 1}
+                onClick={() => onChange(moveChoice(rows, index, 1))}
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                className="px-1 border border-border rounded text-status-red"
+                aria-label={`remove ${agentKey} fallback ${index + 1}`}
+                onClick={() => onChange(rows.filter((_, i) => i !== index))}
+              >
+                ×
+              </button>
+            </span>
+          </li>
+        ))}
+      </ol>
+      <button
+        type="button"
+        className="mt-1 px-2 py-0.5 border border-border rounded"
+        aria-label={`add a fallback model to ${agentKey}`}
+        onClick={() => onChange([...rows, { provider: "", model: "" }])}
+      >
+        Add a fallback model
+      </button>
+    </div>
+  );
 }
 
 /** One field's validation message, under the field the API named. */
@@ -328,10 +451,31 @@ export function AgentDetail({
     // Dropped rather than carried when the provider has no endpoint to
     // override: switching an entry to Anthropic would otherwise stage a
     // base_url the API rejects, from a field that is no longer on screen.
-    if (merged.base_url && (provider === "openai" || provider === "ollama")) {
+    if (merged.base_url && hasEndpoint(provider)) {
       stored.base_url = merged.base_url;
     }
+    // The list is carried whole: a row still being typed is kept on screen
+    // (`draftFallbacks`) and staged once it names a provider and a model.
+    const fallbacks = (merged.fallbacks ?? [])
+      .map(storedChoice)
+      .filter((c): c is ModelChoice => c !== null);
+    if (fallbacks.length) stored.fallbacks = fallbacks;
     onChangeLlmAgents({ ...llmAgents, [key]: stored });
+  };
+
+  /** The fallback rows on screen for one agent: the staged list, or — while
+   *  a row is still being typed and names no provider or model yet, so is
+   *  not staged — the rows as typed. Once every row is complete the staged
+   *  list is what shows, so a discarded edit does not linger on screen. */
+  const [draftFallbacks, setDraftFallbacks] = useState<Record<string, ModelChoice[]>>({});
+  const fallbackRows = (key: string): ModelChoice[] => {
+    const draft = draftFallbacks[key];
+    if (draft && draft.some((row) => storedChoice(row) === null)) return draft;
+    return llmAgents[key]?.fallbacks ?? [];
+  };
+  const putFallbacks = (key: string, rows: ModelChoice[]) => {
+    setDraftFallbacks((all) => ({ ...all, [key]: rows }));
+    putLlm(key, { fallbacks: rows });
   };
 
   /** Removes an agent from the map. The header offers it only where `locked`
@@ -754,6 +898,15 @@ export function AgentDetail({
               {llmError}
             </p>
           )}
+          {llmAgents[agentKey]?.model ? (
+            <FallbackModels
+              agentKey={agentKey}
+              rows={fallbackRows(agentKey)}
+              providerChoices={llmGlobal.providerChoices}
+              inputClass={input}
+              onChange={(rows) => putFallbacks(agentKey, rows)}
+            />
+          ) : null}
         </fieldset>
       )}
 

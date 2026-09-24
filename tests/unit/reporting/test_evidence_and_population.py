@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from maljan.reporting.builder import _build_version_history, build_consolidated_iocs, defang
+from maljan.reporting.builder import _build_version_history, build_consolidated_iocs
 from maljan.reporting.evidence_bundles import SECTIONS, bundle_for, is_empty
 from maljan.reporting.models import (
     FileHashes,
@@ -26,26 +26,8 @@ def _report(**over: object) -> MalwareReport:
     )
 
 
-class TestDefang:
-    def test_domain(self) -> None:
-        assert defang("888kafa.com") == "888kafa[.]com"
-
-    def test_url(self) -> None:
-        assert defang("http://evil.com/a") == "hxxp[://]evil[.]com/a"
-
-    def test_idempotent(self) -> None:
-        assert defang(defang("evil.com")) == "evil[.]com"
-
-    def test_hash_untouched(self) -> None:
-        assert defang("a" * 64) == "a" * 64
-
-    def test_registry_path_untouched(self) -> None:
-        v = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run"
-        assert defang(v) == v
-
-
 class TestConsolidatedIOCs:
-    def test_gathers_and_defangs_network(self) -> None:
+    def test_gathers_network_rows_live_with_their_kind(self) -> None:
         r = _report(
             network=NetworkIOCs(
                 domains=[NetworkDomain(fqdn="888kafa.com", reason="C2")],
@@ -54,12 +36,15 @@ class TestConsolidatedIOCs:
         )
         iocs = build_consolidated_iocs(r)
         by_type = {i.type: i for i in iocs}
-        assert by_type["Domain"].value == "888kafa[.]com"
+        # Live, like every other value in the JSON report: the Markdown and
+        # the HTML defang them by kind when they print them.
+        assert by_type["Domain"].value == "888kafa.com"
+        assert by_type["Domain"].kind == "domain"
         assert by_type["Domain"].is_network is True
-        assert by_type["IPv4"].value == "94[.]156[.]79[.]162"
-        # Hashes present, not defanged.
+        assert by_type["IPv4"].value == "94.156.79.162"
         assert by_type["SHA-256"].value == "a" * 64
         assert by_type["SHA-256"].is_network is False
+        assert by_type["SHA-256"].published == "yes"
 
     def test_dedupes(self) -> None:
         r = _report(
@@ -79,7 +64,7 @@ class TestConsolidatedIOCs:
         )
         iocs = build_consolidated_iocs(r)
         types = {i.type for i in iocs}
-        assert "URL" in types and "Registry Key" in types
+        assert "URL" in types and "Registry key" in types
 
 
 class TestFrontMatter:
@@ -225,8 +210,8 @@ class TestTheComposerCanFalsifyAWrongClaim:
             ),
         )
 
-    def test_the_conclusion_can_see_what_the_binary_is(self) -> None:
-        bundle = bundle_for("conclusion", self._native_report())
+    def test_the_execution_flow_can_see_what_the_binary_is(self) -> None:
+        bundle = bundle_for("execution_flow", self._native_report())
         binary = bundle["binary"]
         assert "Microsoft Visual C++" in (binary["language_or_compiler"] or "")
         dll_key = next(k for k in binary if k.startswith("imported_dlls"))
@@ -337,21 +322,21 @@ class TestAbsenceMustBeProvableNotJustUnstated:
         )
 
     def test_a_short_list_is_declared_complete(self) -> None:
-        binary = bundle_for("conclusion", self._with_dlls(3))["binary"]
+        binary = bundle_for("execution_flow", self._with_dlls(3))["binary"]
         key = next(k for k in binary if k.startswith("imported_dlls"))
         assert "complete list, 3 total" in key
 
     def test_a_truncated_list_is_never_declared_complete(self) -> None:
         """Trading one wrong inference for a worse one: telling the model an
         abridged list is exhaustive would license it to deny real imports."""
-        binary = bundle_for("conclusion", self._with_dlls(40))["binary"]
+        binary = bundle_for("execution_flow", self._with_dlls(40))["binary"]
         key = next(k for k in binary if k.startswith("imported_dlls"))
         assert "complete" not in key
         assert "NOT exhaustive" in key
         assert len(binary[key]) == 24
 
     def test_the_clr_shim_absence_is_its_own_fact(self) -> None:
-        binary = bundle_for("conclusion", self._with_dlls(3))["binary"]
+        binary = bundle_for("execution_flow", self._with_dlls(3))["binary"]
         assert binary["imports_dotnet_runtime (mscoree.dll)"] is False
 
     def test_a_real_dotnet_binary_is_not_denied(self) -> None:
@@ -361,5 +346,5 @@ class TestAbsenceMustBeProvableNotJustUnstated:
             identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
             static=StaticAnalysis(imports=[ImportRow(dll="mscoree.dll", function="_CorExeMain")]),
         )
-        binary = bundle_for("conclusion", report)["binary"]
+        binary = bundle_for("execution_flow", report)["binary"]
         assert binary["imports_dotnet_runtime (mscoree.dll)"] is True

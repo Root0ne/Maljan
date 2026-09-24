@@ -127,6 +127,44 @@ export function formatStageDuration(ms: number): string {
   return `${minutes}m ${seconds}s`;
 }
 
+export interface StageTiming {
+  key: string;
+  duration_ms: number;
+  /** The stage's duration as the header strip prints it. */
+  label: string;
+  /** Its bar's length, as a share of the run's elapsed time in percent. */
+  share: number;
+}
+
+/**
+ * The stages that took time, from the rows the header strip draws.
+ *
+ * The same rows and the same formatter as the strip, so a stage's duration on
+ * the Summary and on the strip cannot disagree. A stage that declined, or has
+ * not finished, has no duration and no row. Each bar is a share of the run's
+ * elapsed time when the job carries one — the gap between the bars and the
+ * whole is queueing, ingestion and the writing of the report — and of the
+ * stages' own sum when it does not.
+ */
+export function stageTiming(
+  rows: StageTimelineRow[],
+  elapsedSeconds: number | null | undefined,
+): { stages: StageTiming[]; stagesMs: number } {
+  const timed = rows.filter((row) => (Number(row.duration_ms) || 0) > 0);
+  const stagesMs = timed.reduce((sum, row) => sum + row.duration_ms, 0);
+  const elapsedMs = (Number(elapsedSeconds) || 0) * 1000;
+  const whole = Math.max(elapsedMs, stagesMs);
+  return {
+    stagesMs,
+    stages: timed.map((row) => ({
+      key: row.key,
+      duration_ms: row.duration_ms,
+      label: formatStageDuration(row.duration_ms),
+      share: whole > 0 ? Math.max(1, Math.round((row.duration_ms / whole) * 100)) : 0,
+    })),
+  };
+}
+
 /**
  * How many ledger calls each agent made, from one page of the evidence ledger.
  *

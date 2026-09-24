@@ -30,6 +30,7 @@ from collections.abc import Callable
 from typing import Any
 
 from maljan.core.logger import logger
+from maljan.utils.marked_cut import marked_cut
 
 # (event_type, payload) -> None. Must be safe to call from any thread.
 EventSink = Callable[[str, dict[str, Any]], None]
@@ -110,13 +111,19 @@ def emit(sink: EventSink | None, event_type: str, data: dict[str, Any]) -> None:
 # — every ``BUDGET_TICK_EVERY`` steps and once more when its loop ends — and
 # ``stage_ended_at_cap`` says which cap, when a cap is what ended the work:
 # ``steps`` (the loop's own recursion limit), ``time``
-# (the wall-clock hard cap), ``repeats`` (the repeat guard) or
-# ``budget_seconds`` (the triage pack's budget). Both are telemetry; neither
-# changes what a model said.
+# (the wall-clock hard cap), ``repeats`` (the repeat guard), ``no_room`` (the
+# conversation had no room left for a tool answer) or ``budget_seconds`` (the
+# triage pack's budget). Both are telemetry; neither changes what a model said.
 BUDGET_TICK = "budget_tick"
 STAGE_ENDED_AT_CAP = "stage_ended_at_cap"
+# A tool server this job stopped calling for a while, after a run of calls it
+# did not answer (``maljan.providers.server_guard``).
+TOOL_SERVER_RESTED = "tool_server_rested"
+# An agent's model list moved on to its next model because the one before it
+# failed as a provider (``maljan.llm.fallback``). Once per switch.
+MODEL_FALLBACK = "model_fallback"
 BUDGET_TICK_EVERY = 5
-CAPS: tuple[str, ...] = ("steps", "time", "repeats", "budget_seconds")
+CAPS: tuple[str, ...] = ("steps", "time", "repeats", "no_room", "budget_seconds")
 
 
 def emit_budget_tick(
@@ -131,8 +138,14 @@ def emit_budget_tick(
     prompt_chars: int,
     ledger_entries: int,
     final: bool = False,
+    tool_definition_chars: int = 0,
 ) -> None:
-    """One agent's spend as of now: steps against its cap, seconds against its limit."""
+    """One agent's spend as of now: steps against its cap, seconds against its limit.
+
+    ``tool_definition_chars`` is what the loop's tool definitions weigh; they
+    go with every request and the context budget counts them beside the
+    prompt, so the two figures together are what a turn sends.
+    """
     emit(
         sink,
         BUDGET_TICK,
@@ -145,6 +158,7 @@ def emit_budget_tick(
             "timeout_s": round(max(0.0, float(timeout_s)), 1),
             "prompt_chars": max(0, int(prompt_chars)),
             "ledger_entries": max(0, int(ledger_entries)),
+            "tool_definition_chars": max(0, int(tool_definition_chars)),
             "final": bool(final),
         },
     )
@@ -158,6 +172,52 @@ def emit_stage_ended_at_cap(
     if detail:
         payload["detail"] = str(detail)
     emit(sink, STAGE_ENDED_AT_CAP, payload)
+
+
+def emit_model_fallback(
+    sink: EventSink | None, *, stage: str, agent: str, model: str, reason: str
+) -> None:
+    """An agent's model list moved on: which model now answers, and why, once per switch."""
+    emit(
+        sink,
+        MODEL_FALLBACK,
+        {"stage": str(stage), "agent": str(agent), "model": str(model), "reason": str(reason)},
+    )
+
+
+def announce_model_fallback(
+    sink: EventSink | None, message: Any, *, agent: str, stage: str
+) -> None:
+    """Publish ``model_fallback`` when ``message`` is the answer its model list moved on for.
+
+    Published whatever ``core.events.stream_deltas`` says: the switch is a
+    fact about the run a reader of the conversation has to see, not part of
+    the text being streamed. Once per switch, because a list that moved stays
+    moved for the loop and only the answer that moved it carries the reason.
+    Never raises.
+    """
+    try:
+        from maljan.llm.fallback import turn_model
+
+        model, reason = turn_model(message)
+        if reason:
+            emit_model_fallback(sink, stage=stage, agent=agent, model=model, reason=scrub(reason))
+    except Exception as exc:  # noqa: BLE001 — an announcement never costs a turn
+        logger.debug("model fallback not announced (%s).", exc)
+
+
+def emit_tool_server_rested(sink: EventSink | None, record: dict[str, Any]) -> None:
+    """A tool server is resting: which one, after how many failures, for how long and why."""
+    emit(
+        sink,
+        TOOL_SERVER_RESTED,
+        {
+            "server": str(record.get("server") or ""),
+            "failures": max(0, int(record.get("failures") or 0)),
+            "cooldown_s": round(max(0.0, float(record.get("cooldown_s") or 0.0)), 1),
+            "reason": str(record.get("reason") or ""),
+        },
+    )
 
 
 def emit_agent_message(
@@ -290,8 +350,8 @@ def claims_to_payload(claims: Any, limit: int = 12) -> list[dict[str, Any]]:
         try:
             out.append(
                 {
-                    "claim": str(getattr(claim, "claim", "") or "")[:400],
-                    "evidence_ref": str(getattr(claim, "evidence_ref", "") or "")[:300],
+                    "claim": marked_cut(str(getattr(claim, "claim", "") or ""), 400),
+                    "evidence_ref": marked_cut(str(getattr(claim, "evidence_ref", "") or ""), 300),
                     "confidence": round(float(getattr(claim, "confidence", 0.0) or 0.0), 4),
                     "technique_id": getattr(claim, "technique_id", None),
                 }
@@ -982,6 +1042,8 @@ def emit_agent_message_delta(
     stage: str,
     agent: str,
     text_delta: str,
+    model: str = "",
+    tokens: dict[str, Any] | None = None,
 ) -> None:
     """Part of what an agent is saying, before it has finished saying it.
 
@@ -990,14 +1052,27 @@ def emit_agent_message_delta(
     the smallest thing it observes is one model turn's text. The console
     appends deltas under the speaker and replaces them with the
     ``agent_message`` that closes the turn.
+
+    It is also the one event per model turn, so it says which model gave the
+    turn (``model``) and what the turn spent as the provider reported it
+    (``tokens``; absent where the provider reported nothing). A turn that said
+    nothing — one that only asked for tools — is still published when it
+    carries tokens, so a reader sees what every turn spent. The turn a
+    fallback model gave is announced by ``model_fallback``, which is
+    published whether or not deltas are.
     """
-    if not text_delta:
+    if not text_delta and not tokens:
         return
-    emit(
-        sink,
-        AGENT_MESSAGE_DELTA,
-        {"stage": str(stage), "agent": str(agent), "text_delta": str(text_delta)},
-    )
+    payload: dict[str, Any] = {
+        "stage": str(stage),
+        "agent": str(agent),
+        "text_delta": str(text_delta),
+    }
+    if model:
+        payload["model"] = str(model)
+    if tokens:
+        payload["tokens"] = dict(tokens)
+    emit(sink, AGENT_MESSAGE_DELTA, payload)
 
 
 def _field(obj: Any, name: str, fallback: Any = "") -> Any:
