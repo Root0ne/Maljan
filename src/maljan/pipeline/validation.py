@@ -1273,7 +1273,7 @@ CAPABILITY_TERMS: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] 
     (
         "anti-forensics",
         r"anti[\s-]?forensic\w*|indicator[\s-]+removal"
-        r"|(?:clear|wip|eras|delet)\w*\s+(?:the\s+|its\s+)?(?:event\s+)?logs?\b",
+        r"|(?:clear|wip|eras|delet)\w*\s+(?:the\s+|its\s+)?(?:\w+\s+)?(?:event\s+)?logs?\b",
         ("T1070",),
         ("anti_forensics",),
     ),
@@ -1282,6 +1282,21 @@ CAPABILITY_TERMS: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] 
 _COMPILED_CAPABILITY_TERMS = tuple(
     (label, re.compile(pattern, re.IGNORECASE), techniques, keys)
     for label, pattern, techniques, keys in CAPABILITY_TERMS
+)
+
+
+# The report sections that are reference lookups rather than observations of
+# the sample. The API capability table says which catalogue categories an
+# imported API is listed under (``evidence_summary.catalogue_associations``:
+# reference, not evidence), so what it names is nothing the sample was found
+# to do.
+_REFERENCE_SECTION_SOURCES: frozenset[str] = frozenset({"tool:api_capability"})
+
+# The report sections that list values the sample holds — its printable
+# strings, the indicators read out of them and the strings emulation decoded.
+# Their words are the sample's bytes, not anybody's statement about behaviour.
+_SAMPLE_VALUE_SECTION_SOURCES: frozenset[str] = frozenset(
+    {"tool:strings", "tool:iocs_from_file", "tool:floss"}
 )
 
 
@@ -1311,12 +1326,17 @@ class CapabilityGrounding:
         or not anybody mapped it to T1071, and a report is allowed to repeat
         what its own evidence says. What is forbidden is the report being the
         first place the word appears.
+
+        The word has to be said there, not denied: the same reader that spares
+        the report's own "no persistence was observed" is asked of the
+        evidence, so an analyst's "does not exhibit obvious persistence
+        mechanisms" grounds no "establishes persistence".
         """
         if any(base in self.technique_ids for base in techniques):
             return True
         if any(key in self.evidence_keys for key in keys):
             return True
-        return bool(self.evidence_text and pattern.search(self.evidence_text))
+        return bool(self.evidence_text and _claimed(pattern, self.evidence_text))
 
     def summary(self) -> str:
         """What the run does have, for the feedback turn to offer instead."""
@@ -1366,6 +1386,11 @@ class CapabilityGrounding:
             ):
                 if str(getattr(row, "technique_id", "") or "") in rule_only:
                     continue
+                # A matrix row this run did not publish — an id the catalogue
+                # lacks, one only a claim of absence named, one a rule matched
+                # and nobody claimed — is not something the run found.
+                if str(getattr(row, "not_published", "") or ""):
+                    continue
                 base = _base_technique(getattr(row, "technique_id", ""))
                 if base:
                     techniques.add(base)
@@ -1383,9 +1408,25 @@ class CapabilityGrounding:
             if list(getattr(report, "persistence", None) or []):
                 keys.add("persistence")
             for section in getattr(report, "sections", None) or []:
+                # A reference table's rows say what a catalogue lists an API
+                # under, not what the sample does: "CreateMutexA | persistence"
+                # grounded a report's "likely uses these registry APIs to
+                # establish persistence". Its words and its key ground nothing.
+                if str(getattr(section, "source", "") or "").strip().lower() in (
+                    _REFERENCE_SECTION_SOURCES
+                ):
+                    continue
                 key = str(getattr(section, "key", "") or "").strip().lower()
                 if key:
                     keys.add(key)
+                # The sample's own strings are values it holds, not statements
+                # about what it does: a benign client's settings path
+                # "/SSH/Auth/Credentials" grounded "credential harvesting".
+                # The section still counts by its key.
+                if str(getattr(section, "source", "") or "").strip().lower() in (
+                    _SAMPLE_VALUE_SECTION_SOURCES
+                ):
+                    continue
                 words.append(str(getattr(section, "title", "") or ""))
                 for row in getattr(section, "rows", None) or []:
                     if row and str(row[0]).strip().lower() in rule_only_rules:
@@ -1411,7 +1452,9 @@ class CapabilityGrounding:
         return cls(
             technique_ids=frozenset(techniques),
             evidence_keys=frozenset(keys),
-            evidence_text=" ".join(w for w in words if w).lower(),
+            # One item a line: a line break ends a clause for the negation
+            # reader, so a cue in one cell never reaches a word in the next.
+            evidence_text="\n".join(w for w in words if w).lower(),
             rule_only=tuple(rule_rows),
         )
 
