@@ -131,33 +131,54 @@ def verdict_cut_violation(cap: int, text: str = "") -> Violation:
     The size is the answer's characters and the objects it began, by type, and
     how many of its lines were indented: a bundle is cut by the objects it
     writes and by how it writes them, and the question names both, the way a
-    report section's cut question does. It asks for a shorter bundle — the
-    compact contract's — and never for fewer findings than the evidence holds.
+    report section's cut question does. The length it was cut at is the
+    concrete bound the next answer has to stay under, and the kind of object
+    it began most of is named as where the room went. It asks for a shorter
+    bundle — the compact contract's — and never for fewer findings than the
+    evidence holds.
+
+    The cut answer itself is not sent back (``retry_with_feedback``'s
+    ``drop_answer_for``). It is a cap's worth of tokens that could not be read,
+    and a retry that carried it gave a model at temperature 0 its own answer to
+    continue: the benchmark's benign control answered this question with a
+    response one byte shorter than the one it was asked about.
     """
     counts: dict[str, int] = {}
     for found in _OBJECT_TYPE_RE.finditer(text):
         kind = found.group(1)
         if kind != "bundle":
             counts[kind] = counts.get(kind, 0) + 1
-    begun = ", ".join(
-        f"{count} {kind}" for kind, count in sorted(counts.items(), key=lambda item: -item[1])
-    )
+    ranked = sorted(counts.items(), key=lambda item: -item[1])
+    begun = ", ".join(f"{count} {kind}" for kind, count in ranked)
     indented = len(_INDENTED_LINE_RE.findall(text))
     size = (
         f" It ran to {len(text):,} characters"
         + (f" and began {safe_finding_value(begun)} object(s)" if begun else "")
         + (f", on {indented:,} indented lines" if indented else "")
-        + "."
+        + ". It is not shown to you again."
         if text
         else ""
     )
     said = f" {safe_finding_value(size.strip())}" if size else ""
+    bound = (
+        f" The whole bundle has to be shorter than those {len(text):,} characters, the "
+        "length at which the limit cut it."
+        if text
+        else ""
+    )
+    most = (
+        f" Most of that room went on {ranked[0][1]} {safe_finding_value(ranked[0][0])} "
+        "object(s): write one only where the evidence in "
+        "this run supports it, and each only once."
+        if ranked and ranked[0][1] > 1
+        else ""
+    )
     return Violation(
         code=VERDICT_CUT_CODE,
         message=(
             f"Your previous answer stopped at the output limit of {int(cap)} tokens before "
-            f"the bundle closed, so it could not be read.{said} Any reasoning you write "
-            f"counts against the same limit. Return a bundle that closes well inside "
+            f"the bundle closed, so it could not be read.{said}{bound}{most} Any reasoning "
+            f"you write counts against the same limit. Return a bundle that closes well inside "
             f"{int(cap)} tokens: x_maljan_assessment first, then only the objects the "
             "evidence supports; your confidence, basis and sources on the relationship "
             "only, never repeated on the object it relates; an attack-pattern with at most "
@@ -1739,6 +1760,8 @@ class JudgeAgent(BudgetMeter):
             sink=self._event_sink(),
             agent="judge",
             stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
+            # The cut answer is described, not repeated: see verdict_cut_violation.
+            drop_answer_for=frozenset({VERDICT_CUT_CODE}),
         )
         violations = not_asked(violations, shown)
         _from_the_loop = list(violations)
