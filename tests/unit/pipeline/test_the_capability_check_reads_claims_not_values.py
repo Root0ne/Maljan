@@ -235,3 +235,44 @@ class TestAnAbsenceIsNotMarked:
         assert states_absence(ABSENT_SUBJECT, pattern)
         assert states_absence(NEGATED_OBJECT, pattern)
         assert not states_absence("It writes a Run key for persistence.", pattern)
+
+
+class TestOnlyAMatchIsSpared:
+    """A sentence is spared only when its assertion is that a rule matched."""
+
+    def test_a_rule_that_matched_is_spared(self) -> None:
+        assert _paths("YARA rule keylogger_apis matched in the input handler.") == set()
+
+    def test_capa_reporting_a_rule_is_spared(self) -> None:
+        assert _paths("capa reports the rule for keystroke logging via polling.") == set()
+
+    def test_a_conclusion_drawn_from_yara_is_checked(self) -> None:
+        text = "Based on YARA results, the sample steals credentials and performs keylogging."
+
+        assert _paths(text) == {"keylogging", "credential_theft"}
+
+    def test_a_conclusion_capa_confirms_is_checked(self) -> None:
+        assert _paths("capa confirms that the sample performs keylogging.") == {"keylogging"}
+
+    def test_a_match_followed_by_a_conclusion_is_checked(self) -> None:
+        text = "YARA rule keylogger_apis matched, so the sample performs keylogging."
+
+        assert _paths(text) == {"keylogging"}
+
+
+class TestAPathHasAPathsShape:
+    def test_a_slash_joined_list_of_words_is_read(self) -> None:
+        text = "The sample implements injection/hollowing/persistence routines."
+
+        assert "persistence" in _paths(text)
+
+    def test_a_key_under_a_hive_is_not_read(self) -> None:
+        assert _paths("It reads HKCU\\Software\\Persist\\Run at start.") == set()
+
+
+class TestANegatedNeedIsAClaim:
+    def test_does_not_require_rights_for_persistence_claims_persistence(self) -> None:
+        text = "It does not require administrator rights for persistence."
+
+        assert _paths(text) == {"persistence"}
+        assert not states_absence(text, behaviour_pattern("T1547"))

@@ -150,8 +150,15 @@ class ValidationTally:
         for violation in violations:
             self.by_code[violation.code] = self.by_code.get(violation.code, 0) + 1
 
-    def record_unresolved(self, producer: str, violations: Sequence[Violation]) -> None:
+    def record_unresolved(
+        self, producer: str, violations: Sequence[Violation], *, asked: bool = True
+    ) -> None:
         """Keep what survived the retry, as a row naming who was told.
+
+        ``asked=False`` is a finding the producer was never shown — no turn to
+        ask on, or first raised by the answer to its only retry — and the row
+        says so (``"asked": "false"``), so a reader counting rows can tell it
+        from one the producer was told and left.
 
         ``advisory`` travels with it. Rebuilt without the flag, a row the
         platform explicitly declined to act on was stored, printed and drawn as
@@ -164,6 +171,7 @@ class ValidationTally:
                 "code": v.code,
                 "message": v.message,
                 **({"advisory": "true"} if v.advisory else {}),
+                **({} if asked else {"asked": "false"}),
             }
             for v in violations
         )
@@ -450,7 +458,8 @@ def validate_isr(
                 # A claim that names the behaviour to say it is absent is asked
                 # that question, and an id the sample's platform cannot host is
                 # asked about the platform; one whose sentence never names its
-                # technique is asked this one. One question per claim.
+                # technique is asked this one. The weak-alignment challenge,
+                # when it is on, may still be asked of the same claim.
                 undescribed = claim_does_not_describe_violation(claim, tid, attck, path=path)
                 if undescribed is not None:
                     violations.append(undescribed)
@@ -542,6 +551,10 @@ _CUE_THAT_ASSERTS_RE = re.compile(
     r"^\W*(?:longer|merely|only|just|simply|stops?|ceases?|fails?\s+to\s+stop|end)\b",
     re.IGNORECASE,
 )
+# A negated verb of need: "does not require administrator rights for
+# persistence" says what the behaviour does without, and claims the behaviour.
+# The cue negates the need, not the purpose it names.
+_NEED_VERB_RE = re.compile(r"^\s+(?:require|need|depend|rely)\w*\b", re.IGNORECASE)
 
 
 def _governed_absence(text: str, start: int) -> bool:
@@ -563,7 +576,7 @@ def _governed_absence(text: str, start: int) -> bool:
         if lowered.startswith(_NOT_A_NEGATION, cue.start()):
             continue
         after = window[cue.end() :]
-        if _CUE_THAT_ASSERTS_RE.match(after):
+        if _CUE_THAT_ASSERTS_RE.match(after) or _NEED_VERB_RE.match(after):
             continue
         if _ASSERTION_BETWEEN_RE.search(after) or _reach_ends(after):
             continue
@@ -680,7 +693,7 @@ def _in_a_negated_object(text: str, start: int) -> bool:
     if not cues:
         return False
     after = clause[cues[-1].end() :]
-    if _CUE_THAT_ASSERTS_RE.match(after):
+    if _CUE_THAT_ASSERTS_RE.match(after) or _NEED_VERB_RE.match(after):
         return False
     if "," in after or _ASSERTION_BETWEEN_RE.search(after) or _reach_ends(after):
         return False
@@ -1954,6 +1967,7 @@ def _is_negated(text: str, start: int, end: int | None = None) -> bool:
     lowered = window.lower()
     return any(
         not lowered.startswith(_NOT_A_NEGATION, cue.start())
+        and not _NEED_VERB_RE.match(window[cue.end() :])
         and not _reach_ends(window[cue.end() :])
         for cue in _NEGATION_RE.finditer(window)
     )
@@ -1983,9 +1997,20 @@ def _sentence_around(text: str, position: int) -> str:
 
 
 # A value written in running text: a run with no space in it holding two path
-# or key separators, a drive, a hive or a share opening it allowed
-# ("/SSH/Auth/Credentials", "HKCU\Software\...\Run", "C:\Users\...").
+# or key separators ("/SSH/Auth/Credentials", "HKCU\Software\...\Run",
+# "C:\Users\..."). A slash-joined list of words ("injection/hollowing/
+# persistence") has that too, so a run is a value only in a path's shape
+# (:func:`_path_shaped`).
 _PATH_VALUE_RE = re.compile(r"[^\s\"'`“”]*[\\/][^\s\"'`“”]*[\\/][^\s\"'`“”]*")
+# A path's shape: opened by a separator, a drive, a hive or a share, or with a
+# component that holds a dot or begins with a capital letter.
+_PATH_OPENING_RE = re.compile(r"^(?:[\\/]|[A-Za-z]:[\\/]|HK[A-Z_]+\\)")
+_PATH_COMPONENT_RE = re.compile(r"(?:^|[\\/])(?:[^\\/\s]*\.[^\\/\s]+|[A-Z][^\\/\s]*)")
+
+
+def _path_shaped(run: str) -> bool:
+    """Whether a run with two separators reads as a path or key, not a list of words."""
+    return bool(_PATH_OPENING_RE.match(run) or _PATH_COMPONENT_RE.search(run))
 
 
 def masked_values(text: str, own_words: Iterable[str] = ()) -> str:
@@ -2003,10 +2028,11 @@ def masked_values(text: str, own_words: Iterable[str] = ()) -> str:
         return text
     chars = list(text)
     spans = [
-        match.span()
-        for regex in (_CODE_SPAN_RE, _QUOTED_SPAN_RE, _PATH_VALUE_RE)
-        for match in regex.finditer(text)
+        match.span() for regex in (_CODE_SPAN_RE, _QUOTED_SPAN_RE) for match in regex.finditer(text)
     ]
+    spans.extend(
+        match.span() for match in _PATH_VALUE_RE.finditer(text) if _path_shaped(match.group(0))
+    )
     words = {w.lower() for w in own_words if len(w) >= 4}
     if words:
         spans.extend(
@@ -2065,14 +2091,34 @@ def _base_technique(technique_id: Any) -> str:
 _TERM_IDS_SHOWN = 2
 
 
-# A sentence that says a rule matched: it reports the matcher, not the sample.
-# The capability check's own advice for a rule-only technique is to write
-# exactly that.
-_SAYS_A_RULE_MATCHED_RE = re.compile(
-    r"\b(?:capa|yara)\b|\brules?\s+(?:match\w*|hit\w*|fired|flag\w*)"
-    r"|\bmatch\w*\s+(?:(?:a|the|an|one|its)\s+)?(?:[\w-]+\s+){0,2}?rules?\b",
+# A sentence whose assertion is that a rule matched: the matcher, a rule or a
+# signature is its subject, the verb says it matched or reported the rule, and
+# nothing is concluded about the sample. "YARA rule X matched" and "capa
+# reports the rule Y" report the matcher; "Based on YARA results, the sample
+# steals credentials" and "capa confirms that the sample performs keylogging"
+# claim what the sample does and are read like any other sentence. The
+# capability check's own advice for a rule-only technique is to write the first
+# kind.
+_RULE_MATCH_ASSERTION_RE = re.compile(
+    r"(?:\b(?:yara|capa)\b(?:\s+(?:rules?|signatures?))?|\brules?\b|\bsignatures?\b)"
+    r"(?:\s+\S+){0,6}?\s+(?:matched|matches|match|flagged|flags|hit|hits|fired|fires|reports|"
+    r"reported|lists|listed)\b",
     re.IGNORECASE,
 )
+_CONCLUDES_ABOUT_THE_SAMPLE_RE = re.compile(
+    r"\b(?:so|therefore|thus|hence|because|since|based|indicat\w*|suggest\w*|show\w*|"
+    r"mean\w*|confirm\w*|prov\w*|reveal\w*|demonstrat\w*|consistent)\b"
+    r"|\b(?:the|this|it)\s+(?:sample|binary|malware|file|executable)\s+(?!\.)"
+    r"(?:is|was|has|can|will|may|does|\w+s)\b",
+    re.IGNORECASE,
+)
+
+
+def _says_only_that_a_rule_matched(sentence: str) -> bool:
+    """Whether the sentence's assertion is a rule match and nothing about the sample."""
+    return bool(_RULE_MATCH_ASSERTION_RE.search(sentence)) and not (
+        _CONCLUDES_ABOUT_THE_SAMPLE_RE.search(sentence)
+    )
 
 
 def ungrounded_capabilities(
@@ -2091,8 +2137,9 @@ def ungrounded_capabilities(
     expression into something no model wrote.
 
     No word inside a value is read (:func:`masked_values`; ``masked`` is the
-    caller's own masking of ``text``, positions kept), and a sentence that says
-    a rule matched is not a claim that the sample does what the rule names.
+    caller's own masking of ``text``, positions kept), and a sentence whose
+    assertion is only that a rule matched is not a claim that the sample does
+    what the rule names (:func:`_says_only_that_a_rule_matched`).
     """
     if not text or not text.strip():
         return []
@@ -2111,7 +2158,7 @@ def ungrounded_capabilities(
         sentences = [
             sentence
             for sentence in _claiming_sentences(pattern, text, masked)
-            if not _SAYS_A_RULE_MATCHED_RE.search(sentence)
+            if not _says_only_that_a_rule_matched(sentence)
         ]
         if not sentences:
             continue
