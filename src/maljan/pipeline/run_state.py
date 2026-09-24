@@ -5,10 +5,16 @@ step, and the facts that matter — what the sample is, what has already been
 established, what failed, how much budget is left — end up buried under tool
 output or dropped when the conversation is cut. This block is the answer to
 that: derived from the ledger and the stage results, never written by a model,
-rendered fresh on every turn and put in the system turn between two markers.
-Regenerating it is what keeps it from accumulating: a prompt carries one block,
-the current one, and a trimmed conversation keeps it because the system turn is
-the one message trimming never drops.
+rendered fresh on every turn and put between two markers.
+
+Where it goes is decided by what a provider caches. A tool loop's block
+changes on every turn — its budget line counts down — and a byte that changes
+early in a request voids every byte after it in a provider's prefix cache, and
+makes a local server read the whole conversation again. So the block a loop
+regenerates travels last, as a turn of its own after the conversation
+(:func:`run_state_turn`), and each turn's request is the previous one's with
+the old block taken off and new turns added. Regenerating it is what keeps it
+from accumulating: a prompt carries one block, the current one.
 """
 
 from __future__ import annotations
@@ -22,7 +28,9 @@ from maljan.pipeline.triage_pack import NOT_RUN_PREFIX, PIPELINE, pack_entries, 
 __all__ = [
     "RUN_STATE_BEGIN",
     "RUN_STATE_END",
+    "is_run_state_turn",
     "render_run_state",
+    "run_state_turn",
     "with_run_state",
 ]
 
@@ -70,6 +78,30 @@ def with_run_state(system_text: str, body: str) -> str:
     if not block:
         return text
     return f"{text.rstrip()}\n\n{block}" if text.strip() else block
+
+
+def run_state_turn(body: str) -> str:
+    """The text of the turn that carries ``body`` on its own, between its markers.
+
+    Empty for an empty ``body``: a caller with nothing to say sends no turn.
+    """
+    return with_run_state("", body)
+
+
+def is_run_state_turn(text: object) -> bool:
+    """Whether ``text`` is a whole run-state turn and nothing else.
+
+    Whole, not containing: a prompt that leads with the block and goes on to
+    its task is a task, and taking it out would take the task with it.
+    """
+    if not isinstance(text, str):
+        return False
+    stripped = text.strip()
+    return (
+        stripped.startswith(RUN_STATE_BEGIN)
+        and stripped.endswith(RUN_STATE_END)
+        and stripped.count(RUN_STATE_BEGIN) == 1
+    )
 
 
 def _lines(

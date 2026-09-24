@@ -69,17 +69,25 @@ def _system_and_human(messages: list[Any]) -> tuple[str, str]:
     return system, human
 
 
+def _last_turn(messages: list[Any]) -> str:
+    """The last message of a request, where the run-state turn goes."""
+    last = messages[-1]
+    assert isinstance(last, HumanMessage)
+    return str(last.content)
+
+
 class TestAnAnalystsPrompt:
     def test_the_tool_loop_s_first_turn_carries_both_blocks(self) -> None:
         llm = _LLM()
         agent = _briefed(llm)
         agent.execute_tool_loop([("system", "You are a static analyst."), ("human", "Analyse.")])
         system, human = _system_and_human(llm.seen[0])
-        assert system.startswith("You are a static analyst.")
-        assert RUN_STATE_BEGIN in system and RUN_STATE_END in system
-        assert "ledger: 3 entries" in system
+        assert system == "You are a static analyst."
+        block = _last_turn(llm.seen[0])
+        assert block.startswith(RUN_STATE_BEGIN) and block.endswith(RUN_STATE_END)
+        assert "ledger: 3 entries" in block
         # The loop's whole budget is what the first turn has left.
-        assert "budget remaining:" in system
+        assert "budget remaining:" in block
         assert human.startswith(FACTS + "\n\nAnalyse.")
 
     def test_a_revision_turn_carries_them_too(self) -> None:
@@ -89,7 +97,8 @@ class TestAnAnalystsPrompt:
             prompt_to_messages([("system", "sys"), ("human", "YOUR ORIGINAL REPORT: ...")])
         )
         system, human = _system_and_human(messages)
-        assert RUN_STATE_BEGIN in system
+        assert system == "sys"
+        assert _last_turn(messages).startswith(RUN_STATE_BEGIN)
         assert human.startswith(PACK_HEADING)
 
     def test_the_validation_feedback_turn_shows_the_ids_it_asks_the_analyst_to_cite(
@@ -125,7 +134,11 @@ class TestAnAnalystsPrompt:
         agent._validate_isr(isr, "the raw data")
         assert sent
         system, human = _system_and_human(sent[0])
-        assert RUN_STATE_BEGIN in system
+        assert RUN_STATE_BEGIN not in system
+        assert any(
+            isinstance(m, HumanMessage) and str(m.content).startswith(RUN_STATE_BEGIN)
+            for m in sent[0]
+        )
         assert human.startswith(PACK_HEADING)
         assert "[ev_0001]" in human
 

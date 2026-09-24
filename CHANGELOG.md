@@ -831,6 +831,16 @@ change landed on `main`.
 
 ### Changed
 
+- **The run-state block travels last, so a request's front stays the same.**
+  A tool loop's block, with the budget line that counts down every turn, used
+  to be rewritten at the end of the system turn, and a changed byte there voids
+  a provider's prefix cache (measured on DeepSeek: 0 cached tokens of 3,884
+  with only that line changed, 3,712 with it unchanged) and makes a local
+  server read the whole conversation again. It is now the last turn of each
+  request, a human turn of its own: each turn's request is the previous one's
+  without its old block, plus the new turns and the new block. The text is the
+  same; the nudge and the forced synthesis carry the block as of their own
+  moment.
 - **The analysts' and the judge's output caps are derived from the window.**
   `llm.expert_max_tokens` and `llm.judge_max_tokens` ship at 0, which derives
   each agent's cap in three cases: the model's declared maximum output (a model
