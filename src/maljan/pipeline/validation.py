@@ -1354,6 +1354,16 @@ _NOUN_NEGATION_RE = re.compile(
 )
 
 
+# Where a ", such as …" list ends: a comma that no "or"/"and" follows, a
+# coordinating break, or "and" opening a new subject ("and credentials are
+# stolen").
+_LIST_END_RE = re.compile(
+    r",(?!\s*(?:or|and)\b)|\b(?:yet|although|though|so|but)\b"
+    r"|\band\s+\w+\s+(?:is|are|was|were|has|have|had)\b",
+    re.IGNORECASE,
+)
+
+
 def _reach_ends(after_cue: str) -> bool:
     """Whether a relative clause or a new statement stands after a cue."""
     return _NEGATION_REACH_END_RE.search(_INSIDE_A_NEGATION_RE.sub(" ", after_cue)) is not None
@@ -1368,8 +1378,18 @@ def _in_a_named_list(text: str, start: int) -> bool:
     if not cues:
         return False
     after = clause[cues[-1].end() :]
-    return re.search(r",\s*such\s+as\b", after, re.IGNORECASE) is not None and not _reach_ends(
-        after
+    named = re.search(r",\s*such\s+as\b", after, re.IGNORECASE)
+    if named is None or _reach_ends(after):
+        return False
+    # The list ends at its first comma not followed by "or"/"and", or at a
+    # coordinating break; a term past that point is outside the negation.
+    listed = after[named.end() :]
+    if _LIST_END_RE.search(listed):
+        return False
+    # "…, and credentials are stolen": the term itself opens the new subject.
+    return not (
+        re.search(r"\band\s*$", listed, re.IGNORECASE)
+        and re.match(r"\w+(?:\s+\w+)?\s+(?:is|are|was|were|has|have|had)\b", text[start:], re.I)
     )
 
 

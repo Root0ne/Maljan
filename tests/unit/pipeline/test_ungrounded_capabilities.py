@@ -289,6 +289,31 @@ class TestWhatANegationReaches:
                 "Behavioural confirmation of lateral movement is absent from the evidence.",
                 "lateral_movement",
             ),
+            (
+                "No evidence of packing, such as UPX, yet the sample exfiltrates data over FTP.",
+                "exfiltration",
+            ),
+            (
+                "No evidence of packing was found, such as UPX, although the sample "
+                "exfiltrates data.",
+                "exfiltration",
+            ),
+            (
+                "No evidence of sandbox checks, such as VM artefacts, so the sample freely "
+                "exfiltrates files.",
+                "exfiltration",
+            ),
+            (
+                "There is no evidence of packing, such as UPX sections, and credentials are "
+                "stolen from browsers.",
+                "credential_theft",
+            ),
+            (
+                "Without any sign of user interaction, such as clicks, the sample exfiltrates "
+                "files.",
+                "exfiltration",
+            ),
+            ("It exfiltrates data such as credentials and cookies.", "exfiltration"),
         ],
     )
     def test_a_claim_past_the_negation_is_still_flagged(self, text: str, path: str) -> None:
