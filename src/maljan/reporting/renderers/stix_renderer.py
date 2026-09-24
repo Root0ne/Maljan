@@ -1110,9 +1110,7 @@ class ExtendedSTIXRenderer:
                         )
                     ),
                     published=report.generated_at,
-                    # A report type says what the report is about; the
-                    # object type ``malware-analysis`` is not one of them.
-                    report_types=["malware"],
+                    report_types=report_types_for(report.verdict),
                     object_refs=refs,
                 )
             )
@@ -1245,6 +1243,21 @@ PRODUCER_IDENTITY_ID = f"identity--{uuid.uuid5(_ATTACK_PATTERN_NAMESPACE, 'malja
 def _pattern_id_for(technique_id: str) -> str:
     """The published object id of one technique. Same id every time."""
     return attack_pattern_id(technique_id)
+
+
+def report_types_for(verdict: str) -> list[str]:
+    """The STIX 2.1 ``report_types`` for the verdict the record states.
+
+    A report type says what the report is about (``report-type-ov``; the
+    object type ``malware-analysis`` is not one of them). ``malware`` is "a
+    characterization of one or more malware instances", which a Malware
+    verdict states and a Suspicious or Benign one does not: a Benign export
+    once went out typed ``malware``. The vocabulary has no term for a finding
+    that the subject is not a threat, and its general entry, ``threat-report``
+    ("a broad characterization of a threat across multiple facets"), is the
+    one that claims no malware instance.
+    """
+    return ["malware"] if str(verdict or "") == "Malware" else ["threat-report"]
 
 
 def _published_ids(report: MalwareReport) -> dict[str, str]:

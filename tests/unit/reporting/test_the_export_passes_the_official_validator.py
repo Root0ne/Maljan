@@ -193,6 +193,35 @@ def test_a_benign_export_is_valid() -> None:
     assert _errors(_benign()) == []
 
 
+def _report_object_findings(bundle: Bundle) -> tuple[list[str], list[str]]:
+    """The report object's ``report_types``, and every validator message about it."""
+    dumped = bundle.model_dump(mode="json")
+    (report_object,) = [o for o in dumped["objects"] if o["type"] == "report"]
+    result = validate_instance(dumped, ValidationOptions(version="2.1"))
+    about = [
+        str(getattr(finding, "message", finding))
+        for finding in [*result.errors, *result.warnings]
+        if report_object["id"] in str(getattr(finding, "message", finding))
+    ]
+    return report_object["report_types"], about
+
+
+class TestTheReportTypeFollowsTheVerdict:
+    """A Benign export once went out typed ``malware``: "a characterization of one
+    or more malware instances". Each verdict's type is in the vocabulary, and the
+    validator has nothing to say about the report object of either."""
+
+    def test_a_malware_export(self) -> None:
+        types, about = _report_object_findings(_rich())
+
+        assert (types, about) == (["malware"], [])
+
+    def test_a_benign_export(self) -> None:
+        types, about = _report_object_findings(_benign())
+
+        assert (types, about) == (["threat-report"], [])
+
+
 class TestTheObservedData:
     def test_it_references_process_objects_the_bundle_holds(self) -> None:
         dumped = _sandbox().model_dump(mode="json")
