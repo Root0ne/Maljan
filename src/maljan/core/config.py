@@ -353,8 +353,14 @@ class LLMConfig(BaseModel):
     # headroom for legitimate output yet bounds a runaway decode to ~205 s at
     # ~40 tok/s, well under the timeout. This is a worst-case-latency/robustness
     # guard (in the spirit of the §3.3 degenerate-loop damper), not a quality
-    # fix — focus comes from the §7.1 hint. Set 0 to disable (unbounded).
-    judge_max_tokens: Annotated[int, Field(ge=0)] = 8192
+    # fix — focus comes from the §7.1 hint.
+    #
+    # 0, the default, derives it (``context_window.derived_reply``): the model's
+    # declared maximum output, bounded by a quarter of its window; a quarter of
+    # the window for a runtime we run; 8,192 for a hosted API that declares no
+    # maximum. The composer's section budget follows the same rule. A value
+    # above 0 is the operator's and is used as set.
+    judge_max_tokens: Annotated[int, Field(ge=0)] = 0
 
     # When True, analysts run in parallel —
     # correct for hosted multi-slot LLMs. When False (the default), the
@@ -410,8 +416,12 @@ class LLMConfig(BaseModel):
     # unbounded budget also gives the §3.3 degenerate-repetition failure mode a
     # full 25 minutes to burn. 8192 matches ``judge_max_tokens`` and is far above
     # any legitimate analyst answer (~2-4k tokens observed), so it bounds the
-    # tail without truncating real output. Set 0 to restore unbounded.
-    expert_max_tokens: Annotated[int, Field(ge=0)] = 8192
+    # tail without truncating real output.
+    #
+    # 0, the default, derives it as ``judge_max_tokens`` is derived
+    # (``context_window.derived_reply``), per analyst model. A value above 0 is
+    # the operator's and is used as set.
+    expert_max_tokens: Annotated[int, Field(ge=0)] = 0
 
     # View-decomposition strategy when ``view_decomposition_views >= 2``
     # (findings-log §4 Item 3, LAMD). "facet" = horizontal, AppPoet-style

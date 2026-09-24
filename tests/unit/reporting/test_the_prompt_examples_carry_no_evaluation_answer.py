@@ -30,10 +30,12 @@ from maljan.agents.judge_agent import COMPACT_BUNDLE_RULES, verdict_cut_violatio
 from maljan.pipeline.validation import (
     CapabilityGrounding,
     absence_claim_violation,
+    analyst_cut_violation,
     claim_does_not_describe_violation,
     repeated_item_violations,
     section_cut_violation,
     ungrounded_capabilities,
+    validate_verdict_bundle,
 )
 from maljan.reporting.composer import (
     _EXAMPLES,
@@ -47,7 +49,12 @@ from maljan.reporting.composer import (
     section_contract,
 )
 from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXAMPLE_OBJECT, EXPECTED_OBJECT
-from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, ClaimEvidence
+from maljan.schemas.isr_models import (
+    ABSENCE_TECHNIQUE_MARKER,
+    JUDGE_ONLY_TECHNIQUE_MARKER,
+    ClaimEvidence,
+)
+from maljan.schemas.stix_models import Bundle
 from maljan.tools import knowledge
 
 # The distinctive terms of the evaluation key: how the scored sample resolves its
@@ -241,6 +248,73 @@ PROMPTS: dict[str, str] = {
         )
     ),
     "rule-match-only note": RULE_ONLY_NOTE,
+    "judge-only technique note": JUDGE_ONLY_TECHNIQUE_MARKER,
+    "analyst cut-at-cap question": analyst_cut_violation(
+        4096, "CLAIM: The file opens a window.\nEVIDENCE: [ev_0001]\nCLAIM: The fi"
+    ).message,
+    "judge cut-at-cap question naming where the room went": verdict_cut_violation(
+        8192,
+        '{"type": "bundle", "objects": [{"type": "attack-pattern", "id": "a"}, '
+        '{"type": "attack-pattern", "id": "b"}',
+    ).message,
+    "judge questions about a pattern's backslash and a shape's fixed text": " ".join(
+        v.message
+        for v in validate_verdict_bundle(
+            Bundle.model_validate(
+                {
+                    "type": "bundle",
+                    "objects": [
+                        {
+                            "type": "indicator",
+                            "id": "indicator--1",
+                            "pattern": "[url:value LIKE '%one.example%']",
+                            "indicator_types": ["malicious-activity"],
+                        },
+                        {
+                            "type": "indicator",
+                            "id": "indicator--2",
+                            "pattern": "[file:name = 'C:\\Temp\\a.exe']",
+                            "indicator_types": ["malicious-activity"],
+                        },
+                    ],
+                }
+            ),
+            {"nothing here"},
+        )
+        if v.code in ("stix.ungrounded_indicator", "stix.unescaped_backslash")
+    ),
+    "judge questions about a shape naming a value and a pattern the grammar refuses": " ".join(
+        v.message
+        for v in validate_verdict_bundle(
+            Bundle.model_validate(
+                {
+                    "type": "bundle",
+                    "objects": [
+                        {
+                            "type": "indicator",
+                            "id": "indicator--1",
+                            "pattern": "[domain-name:value LIKE '%one.example%']",
+                            "indicator_types": ["malicious-activity"],
+                        },
+                        {
+                            "type": "indicator",
+                            "id": "indicator--2",
+                            "pattern": "[url:value MATCHES '^two\\\\.example$']",
+                            "indicator_types": ["malicious-activity"],
+                        },
+                        {
+                            "type": "indicator",
+                            "id": "indicator--3",
+                            "pattern": "[file:name =]",
+                            "indicator_types": ["malicious-activity"],
+                        },
+                    ],
+                }
+            ),
+            {"host one.example and two.example seen"},
+        )
+        if v.code in ("stix.shape_names_a_value", "stix.pattern_refused")
+    ),
 }
 
 # Each composer section's whole contract — the object, the lines on how to
@@ -288,6 +362,13 @@ def test_the_guard_would_catch_one() -> None:
 def test_the_term_list_is_long_enough_to_mean_something() -> None:
     assert len(KEY_TERMS) >= 50
     assert len(set(KEY_TERMS)) == len(KEY_TERMS)
+
+
+def test_the_shape_and_refusal_questions_are_both_scanned() -> None:
+    text = PROMPTS["judge questions about a shape naming a value and a pattern the grammar refuses"]
+    assert "write domain-name:value = 'one.example'" in text
+    assert "keep the MATCHES" in text
+    assert "is not a pattern the STIX grammar reads" in text
 
 
 def test_every_question_built_for_this_scan_has_words_to_scan() -> None:

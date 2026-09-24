@@ -26,6 +26,7 @@ from maljan.agents.judge_agent import (
     JudgeAgent,
     JudgeVerdict,
     stated_assessment_in,
+    verdict_cut_violation,
 )
 from maljan.core.config import get_settings
 from maljan.pipeline.outcome import decide_from_bundle, stated_confidence, verdict_reading
@@ -63,7 +64,10 @@ def _cut_bundle(chars: int = 25_000) -> str:
 
 
 def _cap() -> int:
-    return int(get_settings().llm.judge_max_tokens)
+    from maljan.agents.judge_agent import judge_output_cap
+
+    assert get_settings() is not None
+    return judge_output_cap().tokens
 
 
 def _answer(text: str, *, tokens: int) -> AIMessage:
@@ -177,6 +181,33 @@ class TestTheRound:
         feedback = str(llm.calls[1][-1].content)
         assert f"output limit of {_cap()} tokens" in feedback
         assert "25,000 characters" in feedback
+
+    @pytest.mark.asyncio
+    async def test_the_retry_carries_the_question_and_not_the_cut_answer(self) -> None:
+        """At temperature 0 a retry that carried the cut answer was answered with it again.
+
+        The benign control's retry prompt was its first prompt plus the whole
+        8,192-token cut answer plus the question, and the model wrote a
+        response one byte shorter than the first. The retry is the first prompt
+        and the question, which describes the answer instead of repeating it.
+        """
+        cut = _cut_bundle()
+        llm = _Llm(_answer(cut, tokens=_cap()), _answer(cut, tokens=_cap()))
+
+        await _verdict(llm)
+
+        first, retry = llm.calls
+        assert len(retry) == len(first) + 1
+        assert [str(t.content) for t in retry[:-1]] == [str(t.content) for t in first]
+        assert cut[:2_000] not in "\n".join(str(t.content) for t in retry)
+        assert "It is not shown to you again." in str(retry[-1].content)
+
+    def test_the_question_names_the_bound_and_where_the_room_went(self) -> None:
+        message = verdict_cut_violation(_cap(), _cut_bundle()).message
+
+        assert "shorter than those 25,000 characters" in message
+        assert "Most of that room went on" in message
+        assert "118 indicator object(s): write one only where the evidence" in message
 
     @pytest.mark.asyncio
     async def test_after_the_retry_the_stated_assessment_is_kept_and_the_fallback_recorded(

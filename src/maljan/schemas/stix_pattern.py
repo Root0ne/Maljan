@@ -55,7 +55,9 @@ _OBJECT_PATH_RE = re.compile(
 # The two characters a STIX literal escapes. A backslash before anything else
 # is a backslash: a judge writes ``'C:\Windows\system32\x.exe'`` unescaped far
 # more often than it writes a path that needed escaping, and reading every
-# backslash as an escape would eat the separators out of it.
+# backslash as an escape would eat the separators out of it. It is read as
+# the backslash it means and marked (``Comparison.stray_backslash``), because
+# the grammar itself refuses it.
 _ESCAPABLE = ("'", "\\")
 
 # What a name is written with, for the bracket question below: a bracket that
@@ -83,6 +85,12 @@ class Comparison:
     # case for the questions that read it; STIX types are lower case, and a
     # capitalised one is a type the grammar refuses.
     written_type: str = ""
+    # Whether the quoted value writes a backslash the grammar has no escape
+    # for. A STIX string escapes two characters, the quote and the backslash
+    # itself, and refuses the whole pattern over any other ``\x``. The reader
+    # still reads such a value — as the backslash it plainly means — so the
+    # questions about it can be asked; this says the pattern is not valid.
+    stray_backslash: bool = False
 
     @property
     def path(self) -> str:
@@ -111,7 +119,7 @@ def read_comparisons(pattern: str) -> list[Comparison]:
         if text[index] != "'":
             index += 1
             continue
-        literal, end, closed = _read_quoted(text, index)
+        literal, end, closed, stray = _read_quoted(text, index)
         if closed and _opens_a_key(text, outside, index):
             # A key continues the path rather than answering it, and the path
             # regex above reads it back out of the text it is written in.
@@ -142,6 +150,7 @@ def read_comparisons(pattern: str) -> list[Comparison]:
                 operator=operator,
                 literal=literal,
                 readable=closed and bool(object_type),
+                stray_backslash=stray,
             )
         )
     return found
@@ -166,9 +175,14 @@ def _opens_a_key(text: str, start: int, quote: int) -> bool:
     return text[index] == "[" and index - 1 >= start and text[index - 1] in _NAME_CHARACTERS
 
 
-def _read_quoted(text: str, start: int) -> tuple[str, int, bool]:
-    """The literal opening at ``text[start]``, where it ends, and whether it closed."""
+def _read_quoted(text: str, start: int) -> tuple[str, int, bool, bool]:
+    """The literal opening at ``text[start]``: its value, its end, whether it closed.
+
+    And whether it wrote a backslash before a character the grammar does not
+    escape, which the value keeps as the backslash it plainly means.
+    """
     value: list[str] = []
+    stray = False
     index = start + 1
     while index < len(text):
         char = text[index]
@@ -176,11 +190,366 @@ def _read_quoted(text: str, start: int) -> tuple[str, int, bool]:
             value.append(text[index + 1])
             index += 2
             continue
+        if char == "\\":
+            stray = True
         if char == "'":
-            return "".join(value), index + 1, True
+            return "".join(value), index + 1, True, stray
         value.append(char)
         index += 1
-    return "".join(value), len(text), False
+    return "".join(value), len(text), False, stray
+
+
+def reads_whole(pattern: str) -> bool:
+    """Whether ``pattern`` is a pattern the official validator accepts.
+
+    The official validator — ``stix2-patterns``, pinned in the runtime
+    dependencies — decides, acceptance and refusal alike. The grammar reader in
+    this module answers only where the package cannot be imported.
+    """
+    return not pattern_refusal(pattern)
+
+
+def pattern_refusal(pattern: str) -> str:
+    """Why the pattern grammar refuses ``pattern``, in words, or ``""`` when it does not.
+
+    The STIX 2.1 pattern grammar, read over the same quoted values every other
+    question here reads: observation expressions in brackets joined by
+    ``AND``, ``OR`` and ``FOLLOWEDBY`` and grouped in parentheses, each with
+    its qualifiers (``START … STOP …``, ``WITHIN … SECONDS``, ``REPEATS …
+    TIMES``); inside the brackets, comparisons joined by ``AND`` and ``OR``,
+    each an object path, an optional ``NOT``, an operator — ``=``, ``!=``,
+    ``<>``, ``<``, ``>``, ``<=``, ``>=``, ``LIKE``, ``MATCHES``, ``ISSUBSET``,
+    ``ISSUPERSET``, or ``IN`` and a parenthesised list — and a literal, or
+    ``EXISTS`` and a path. A shape check that wanted ``=`` threw away every
+    ``LIKE`` a judge wrote; one that asked only for balanced brackets kept
+    ``[file:name]``, which a consumer's parser refuses.
+
+    Whether the path is one its type defines, and whether a quoted value writes
+    a backslash the grammar cannot read, are asked by
+    :func:`object_path_problems` and :func:`stray_backslash_values`.
+    """
+    text = str(pattern or "")
+    if not text.strip():
+        return "it is empty"
+    verdict = _validator_verdict(text)
+    if verdict is not None:
+        return verdict
+    return _grammar_refusal(text)
+
+
+def _grammar_refusal(text: str) -> str:
+    """The grammar reader's refusal, for where the official validator is not installed."""
+    tokens, broken = _pattern_tokens(text)
+    if broken:
+        return broken
+    if not tokens:
+        return "it is empty"
+    return _PatternGrammar(tokens).read()
+
+
+def _validator_verdict(pattern: str) -> str | None:
+    """The official validator's answer — ``""`` accepted, its first refusal otherwise.
+
+    ``None`` only when ``stix2-patterns`` cannot be imported. Where it can, its
+    answer is the whole answer, acceptance and refusal alike: ``==`` and
+    ``NOT EXISTS`` are the grammar's own, and a reader of the grammar that
+    refused them told a judge its valid pattern was not one.
+    """
+    try:
+        from stix2patterns.validator import run_validator
+    except ImportError:
+        return None
+    try:
+        errors = run_validator(pattern)
+    except Exception:  # noqa: BLE001 — a validator that cannot read it refuses it
+        return "the official pattern validator could not read it"
+    return str(errors[0]).removeprefix("FAIL: ") if errors else ""
+
+
+# The keywords of the pattern grammar, which it spells in capitals.
+_KEYWORDS = frozenset(
+    {
+        "AND",
+        "OR",
+        "NOT",
+        "FOLLOWEDBY",
+        "LIKE",
+        "MATCHES",
+        "ISSUBSET",
+        "ISSUPERSET",
+        "IN",
+        "EXISTS",
+        "START",
+        "STOP",
+        "WITHIN",
+        "SECONDS",
+        "REPEATS",
+        "TIMES",
+    }
+)
+_COMPARATORS = frozenset(
+    {"=", "==", "!=", "<>", "<", ">", "<=", ">=", "LIKE", "MATCHES", "ISSUBSET", "ISSUPERSET"}
+)
+# The operators whose right-hand side the grammar requires to be a quoted string.
+_STRING_COMPARATORS = frozenset({"LIKE", "MATCHES", "ISSUBSET", "ISSUPERSET"})
+_SYMBOL_RE = re.compile(r"<>|!=|<=|>=|==|=|<|>|\[|\]|\(|\)|,")
+_NUMBER_RE = re.compile(r"[-+]?\d+(?:\.\d+)?")
+_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _pattern_tokens(text: str) -> tuple[list[tuple[str, str]], str]:
+    """``(kind, text)`` per token, and why the text cannot be split into tokens, or ``""``."""
+    tokens: list[tuple[str, str]] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char.isspace():
+            index += 1
+            continue
+        if char in "thb" and text[index + 1 : index + 2] == "'":
+            literal, end, closed, _stray = _read_quoted(text, index + 1)
+            if not closed:
+                return tokens, "a quoted value never closes"
+            tokens.append(({"t": "timestamp", "h": "hex", "b": "binary"}[char], literal))
+            index = end
+            continue
+        if char == "'":
+            literal, end, closed, _stray = _read_quoted(text, index)
+            if not closed:
+                return tokens, (
+                    "a quoted value never closes (a backslash right before a closing quote "
+                    "escapes it)"
+                )
+            tokens.append(("string", literal))
+            index = end
+            continue
+        path = _OBJECT_PATH_RE.match(text, index)
+        if path is not None:
+            tokens.append(("path", path.group(0)))
+            index = path.end()
+            continue
+        symbol = _SYMBOL_RE.match(text, index)
+        if symbol is not None:
+            tokens.append(("symbol", symbol.group(0)))
+            index = symbol.end()
+            continue
+        number = _NUMBER_RE.match(text, index)
+        if number is not None:
+            tokens.append(("number", number.group(0)))
+            index = number.end()
+            continue
+        word = _WORD_RE.match(text, index)
+        if word is not None:
+            value = word.group(0)
+            if value in _KEYWORDS:
+                tokens.append(("keyword", value))
+            elif value in ("true", "false"):
+                tokens.append(("boolean", value))
+            else:
+                return tokens, f"{value!r} is neither an object path, a keyword nor a value"
+            index = word.end()
+            continue
+        return tokens, f"{char!r} is not part of the pattern grammar"
+    return tokens, ""
+
+
+_LITERALS = frozenset({"string", "timestamp", "hex", "binary", "number", "boolean"})
+
+
+class _PatternGrammar:
+    """A recursive-descent reading of one pattern's tokens; ``read`` says what it refused."""
+
+    def __init__(self, tokens: list[tuple[str, str]]) -> None:
+        self.tokens = tokens
+        self.at = 0
+
+    def _peek(self) -> tuple[str, str]:
+        return self.tokens[self.at] if self.at < len(self.tokens) else ("end", "")
+
+    def _take(self, kind: str, text: str | None = None) -> bool:
+        found = self._peek()
+        if found[0] == kind and (text is None or found[1] == text):
+            self.at += 1
+            return True
+        return False
+
+    def _where(self) -> str:
+        kind, text = self._peek()
+        return "the end of the pattern" if kind == "end" else repr(text)
+
+    def read(self) -> str:
+        refusal = self._observations()
+        if refusal:
+            return refusal
+        if self._peek()[0] != "end":
+            return f"{self._where()} follows a complete pattern"
+        return ""
+
+    def _observations(self) -> str:
+        refusal = self._observation()
+        while not refusal and self._peek() in (
+            ("keyword", "AND"),
+            ("keyword", "OR"),
+            ("keyword", "FOLLOWEDBY"),
+        ):
+            self.at += 1
+            refusal = self._observation()
+        return refusal
+
+    def _observation(self) -> str:
+        if self._take("symbol", "["):
+            refusal = self._comparisons()
+            if refusal:
+                return refusal
+            if not self._take("symbol", "]"):
+                return f"{self._where()} where the observation expression should close"
+        elif self._take("symbol", "("):
+            refusal = self._observations()
+            if refusal:
+                return refusal
+            if not self._take("symbol", ")"):
+                return f"{self._where()} where a parenthesis should close"
+        else:
+            return f"{self._where()} where an observation expression should open with ["
+        return self._qualifiers()
+
+    def _qualifiers(self) -> str:
+        while True:
+            if self._take("keyword", "START"):
+                if not (
+                    self._take("timestamp")
+                    and self._take("keyword", "STOP")
+                    and self._take("timestamp")
+                ):
+                    return "START is not followed by t'…' STOP t'…'"
+            elif self._take("keyword", "WITHIN"):
+                if not (self._take("number") and self._take("keyword", "SECONDS")):
+                    return "WITHIN is not followed by a number and SECONDS"
+            elif self._take("keyword", "REPEATS"):
+                count = self._peek()
+                if not (
+                    count[0] == "number"
+                    and count[1].lstrip("+-").isdigit()
+                    and self._take("number")
+                    and self._take("keyword", "TIMES")
+                ):
+                    return "REPEATS is not followed by a whole number and TIMES"
+            else:
+                return ""
+
+    def _comparisons(self) -> str:
+        refusal = self._comparison()
+        while not refusal and self._peek() in (("keyword", "AND"), ("keyword", "OR")):
+            self.at += 1
+            refusal = self._comparison()
+        return refusal
+
+    def _comparison(self) -> str:
+        if self._take("symbol", "("):
+            refusal = self._comparisons()
+            if refusal:
+                return refusal
+            return (
+                ""
+                if self._take("symbol", ")")
+                else f"{self._where()} where a parenthesis should close"
+            )
+        if self._peek() == ("keyword", "NOT") and self.tokens[self.at + 1 : self.at + 2] == [
+            ("keyword", "EXISTS")
+        ]:
+            self.at += 1
+        if self._take("keyword", "EXISTS"):
+            return "" if self._take("path") else "EXISTS is not followed by an object path"
+        kind, text = self._peek()
+        if kind != "path":
+            return f"{self._where()} where a comparison should begin with an object path"
+        self.at += 1
+        self._take("keyword", "NOT")
+        if self._take("keyword", "IN"):
+            if not self._take("symbol", "("):
+                return f"IN after {text!r} is not followed by a parenthesised list"
+            if self._take("symbol", ")"):
+                return ""
+            while True:
+                if self._peek()[0] not in _LITERALS:
+                    return (
+                        f"the list after {text!r} IN holds {self._where()} where a value should be"
+                    )
+                self.at += 1
+                if self._take("symbol", ")"):
+                    return ""
+                if not self._take("symbol", ","):
+                    return f"the list after {text!r} IN never closes"
+        operator = self._peek()
+        if operator[1] not in _COMPARATORS or operator[0] not in ("symbol", "keyword"):
+            return f"no comparison operator follows {text!r}"
+        self.at += 1
+        if self._peek()[0] not in _LITERALS:
+            return f"{text!r} {operator[1]} is followed by {self._where()}, not by a value"
+        if operator[1] in _STRING_COMPARATORS and self._peek()[0] != "string":
+            return (
+                f"{operator[1]} after {text!r} compares with a quoted string, not {self._where()}"
+            )
+        self.at += 1
+        return ""
+
+
+def stray_backslash_values(pattern: str) -> list[str]:
+    """The quoted values of ``pattern`` that write a backslash the grammar cannot read.
+
+    Each once, in the order written. A STIX string escapes the quote and the
+    backslash and nothing else, so ``'C:\\Windows\\x.exe'`` written with single
+    backslashes is a pattern the official validator refuses whole.
+    """
+    found: list[str] = []
+    for comparison in read_comparisons(pattern):
+        if comparison.stray_backslash and comparison.literal not in found:
+            found.append(comparison.literal)
+    return found
+
+
+# The two wildcards of ``LIKE``: any run of characters, and any one.
+_LIKE_WILDCARDS_RE = re.compile(r"[%_]+")
+
+
+def like_fixed_text(literal: str) -> list[str]:
+    """The runs of text a ``LIKE`` value fixes, between its wildcards.
+
+    ``'%host.example%'`` matches any value that contains
+    ``host.example``; it is not that value. What a value matching it must
+    contain is these runs, in order, and nothing else is said by it. A value
+    that is all wildcards fixes nothing.
+    """
+    return [part for part in _LIKE_WILDCARDS_RE.split(str(literal or "")) if part]
+
+
+# What makes a regular expression more than its text, once its anchors and the
+# escaped dots are read.
+_REGEX_METACHARACTERS = frozenset("\\.^$|?*+()[]{}")
+
+
+def matches_fixed_text(expression: str) -> list[str]:
+    """The one run of text a ``MATCHES`` expression fixes, when it is only that text.
+
+    ``'^host\\.example$'`` fixes ``host.example``: anchors at its ends and
+    escaped characters read as themselves. An expression that is anything more
+    — a class, an alternation, a repetition — fixes no one value, and says so
+    by answering nothing.
+    """
+    text = str(expression or "").removeprefix("^").removesuffix("$")
+    out: list[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "\\" and index + 1 < len(text) and text[index + 1] in _REGEX_METACHARACTERS:
+            out.append(text[index + 1])
+            index += 2
+            continue
+        if char in _REGEX_METACHARACTERS:
+            return []
+        out.append(char)
+        index += 1
+    return ["".join(out)] if out else []
 
 
 # The Cyber-observable object types STIX 2.1 defines. A pattern compares a

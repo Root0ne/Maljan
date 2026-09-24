@@ -81,7 +81,9 @@ from maljan.schemas.stix_models import (
 )
 from maljan.schemas.stix_pattern import (
     object_path_problems,
+    pattern_refusal,
     read_comparisons,
+    stray_backslash_values,
     unknown_object_types,
 )
 
@@ -325,7 +327,18 @@ class Declined(tuple[str, str]):
 
 
 def impossible_host_sentence(value: str, whose: str) -> str:
-    """The recorded sentence for a URL no host could ever answer for."""
+    """The recorded sentence for a URL no host could ever answer for.
+
+    A value with no scheme is not a URL at all, and is said to be that rather
+    than to name a host that could not exist.
+    """
+    if "://" not in str(value):
+        return (
+            f"the URL indicator for {safe_finding_value(value)!r} is not in the exported bundle: "
+            "it is not a URL — it has no scheme — so there is no host in it to ask about; a "
+            "host is written as domain-name:value. It is unchanged in "
+            f"{whose}."
+        )
     return (
         f"the URL indicator for {safe_finding_value(value)!r} is not in the exported bundle: its "
         f"host is not a name or address that could exist outside the analysed network. It is "
@@ -348,6 +361,16 @@ def unreadable_endpoint_sentence(value: str, kind_words: str, whose: str) -> str
         f"the {kind_words} indicator for {safe_finding_value(value)!r} is not in the exported "
         f"bundle: the pipeline could not read the pattern's endpoint, so it could not ask whether "
         f"this export may carry it. It is unchanged in {whose}."
+    )
+
+
+def shaped_endpoint_sentence(value: str, kind_words: str, operator: str) -> str:
+    """The recorded sentence for an endpoint written as a shape rather than a value."""
+    return (
+        f"the {kind_words} indicator for {safe_finding_value(value)!r} is not in the exported "
+        f"bundle: it compares with {safe_finding_value(operator.upper())}, which names every "
+        "endpoint that fits it rather than one, so this export could not ask whether it may "
+        "carry the endpoint. It is unchanged in the judge's own bundle."
     )
 
 
@@ -402,29 +425,93 @@ def unknown_object_path_sentence(pattern: str, problems: list[str]) -> str:
     )
 
 
-def _without_unconfirmed_credit(obj: Any, credit: Any) -> tuple[Any, Declined]:
-    """A copy of a judge relationship carrying only the credits a source stands behind."""
+def stray_backslash_sentence(pattern: str, values: list[str]) -> str:
+    """The recorded sentence for a pattern whose value writes a backslash the grammar refuses."""
+    named = "a value" if len(values) == 1 else f"{len(values)} values"
+    return (
+        f"the indicator {safe_finding_value(pattern)!r} is not in the exported bundle: it "
+        f"quotes {named} with a backslash a STIX pattern cannot read — inside a quoted value "
+        "the grammar escapes only the quote and the backslash — so a consumer's parser would "
+        "refuse the whole pattern. It is unchanged in the judge's own bundle."
+    )
+
+
+def _unasked_findings(report: Any, code: str) -> list[str]:
+    """The run's unresolved judge findings under ``code`` the judge was never shown.
+
+    Read from ``run_summary.validation.unresolved``, where a finding the answer
+    to the judge's only retry raised first is recorded ``"asked": "false"``.
+    Each is its ``subject`` — the technique a credit is for, the malware
+    object's name — and, for a row stored before rows carried one, its message.
+    """
+    summary = getattr(report, "run_summary", None)
+    validation = summary.get("validation") if isinstance(summary, dict) else None
+    rows = validation.get("unresolved") if isinstance(validation, dict) else None
+    return [
+        str(row.get("subject") or row.get("message") or "")
+        for row in rows or []
+        if isinstance(row, dict)
+        and row.get("code") == code
+        and str(row.get("agent") or "judge") == "judge"
+        and str(row.get("asked") or "") == "false"
+    ]
+
+
+def _names_the_technique(sentence: str, technique: str) -> bool:
+    """Whether ``sentence`` names ``technique`` as an id of its own, not a prefix."""
+    return bool(re.search(rf"(?<![\w.]){re.escape(technique)}(?![\w.]\w)", sentence))
+
+
+def _without_unconfirmed_credit(
+    obj: Any, credit: Any, *, asked: bool = True
+) -> tuple[Any, Declined]:
+    """A copy of a judge relationship carrying only the credits a source stands behind.
+
+    ``asked`` is whether the judge was shown the credit question. The sentence
+    says which: "kept the credit when asked" of a credit it was never asked
+    about is a statement the run's record does not support.
+    """
     from maljan.pipeline.validation import credited_agents
 
     kept = [name for name in credited_agents(obj) if name not in credit.uncredited]
     copy = crediting_only(obj, kept)
     names = ", ".join(repr(safe_finding_value(n)) for n in credit.uncredited)
+    what_the_judge_did = (
+        "the judge kept the credit when asked"
+        if asked
+        else "the judge was not asked about it: the credit first appeared in an answer no "
+        "turn was left to question"
+    )
     return copy, Declined(
         UNPUBLISHABLE_CREDIT_CODE,
         f"the credit to {names} for {safe_finding_value(credit.technique)} is not in the "
-        "exported bundle: no source by that name named the technique in this run, and the "
-        "judge kept the credit when asked. It is unchanged in the judge's own bundle.",
+        f"exported bundle: no source by that name named the technique in this run, and "
+        f"{what_the_judge_did}. It is unchanged in the judge's own bundle.",
     )
 
 
-def _missing_what_the_standard_requires(obj: Any) -> str:
-    """The recorded sentence for a judge object the standard refuses as written, or ``""``."""
+def _missing_what_the_standard_requires(obj: Any, unasked: Sequence[str] = ()) -> str:
+    """The recorded sentence for a judge object the standard refuses as written, or ``""``.
+
+    ``unasked`` is the run's ``stix.is_family_missing`` findings the judge was
+    never shown; the sentence says it was asked only when it was.
+    """
     kind = str(getattr(obj, "type", "") or "")
     label = safe_finding_value(getattr(obj, "name", "") or getattr(obj, "id", ""))
     if kind == "malware" and getattr(obj, "is_family", None) is None:
+        named = f"{safe_finding_value(str(getattr(obj, 'name', '') or '').strip())!r}"
+        what_the_judge_did = (
+            "the judge was not asked about it: it first appeared in an answer no turn was "
+            "left to question"
+            if any(
+                said == str(getattr(obj, "name", "") or "").strip() or named in said
+                for said in unasked
+            )
+            else "the judge kept it absent when asked"
+        )
         return (
             f"the malware object {label!r} is not in the exported bundle: it does not say "
-            "is_family, which STIX requires, and the judge kept it absent when asked. The "
+            f"is_family, which STIX requires, and {what_the_judge_did}. The "
             "export stands the platform's own sample object in for it, and the judge's "
             "relationships that named it move onto that object unchanged. It is unchanged "
             "in the judge's own bundle."
@@ -435,7 +522,31 @@ def _missing_what_the_standard_requires(obj: Any) -> str:
             "name, and STIX needs one of them to say which file it is. It is unchanged in the "
             "judge's own bundle."
         )
+    if kind in _ABOUT_OBJECTS and not getattr(obj, "object_refs", None):
+        return (
+            f"the {kind} {safe_finding_value(getattr(obj, 'abstract', '') or label)!r} is not "
+            "in the exported bundle: it names no object it is about, which STIX requires. It "
+            "is unchanged in the judge's own bundle."
+        )
     return ""
+
+
+# The objects STIX defines as being about others, each of which must name at
+# least one in ``object_refs``.
+_ABOUT_OBJECTS = frozenset({"note", "opinion", "grouping", "report"})
+
+
+def _names_nothing_sentence(obj: Any) -> str:
+    """The recorded sentence for an object about others that names none of them."""
+    kind = safe_finding_value(getattr(obj, "type", "") or "object")
+    label = safe_finding_value(
+        getattr(obj, "abstract", "") or getattr(obj, "name", "") or getattr(obj, "id", "")
+    )
+    return (
+        f"the {kind} {label!r} is not in the exported bundle: every object it was about is "
+        "outside this export, and STIX requires it to name at least one. It is unchanged in "
+        "the judge's own bundle."
+    )
 
 
 def _names_any(obj: Any, ids: set[str]) -> bool:
@@ -617,6 +728,18 @@ def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
     wrong_paths = object_path_problems(pattern)
     if wrong_paths:
         return (UNPUBLISHABLE_PATTERN_CODE, unknown_object_path_sentence(pattern, wrong_paths))
+    stray = stray_backslash_values(pattern)
+    if stray:
+        return (UNPUBLISHABLE_PATTERN_CODE, stray_backslash_sentence(pattern, stray))
+    malformed = malformed_hash_in(pattern)
+    refusal = "" if malformed is not None else pattern_refusal(pattern)
+    if refusal:
+        return (
+            UNPUBLISHABLE_PATTERN_CODE,
+            f"the indicator {safe_finding_value(pattern)!r} is not in the exported bundle: the "
+            f"STIX pattern grammar refuses it ({safe_finding_value(refusal)}), so a consumer's "
+            "parser would refuse it whole. It is unchanged in the judge's own bundle.",
+        )
     malformed = malformed_hash_in(pattern)
     if malformed is not None:
         algorithm, literal = malformed
@@ -627,6 +750,11 @@ def _judge_indicator_problem(indicator: Indicator) -> tuple[str, str] | None:
             continue
         code = _DECLINE_CODES.get(kind, UNPUBLISHABLE_ENDPOINT_CODE)
         words = _OBJECT_TYPE_WORDS.get(kind, "address")
+        if read and not readable:
+            # Read whole, and written as a shape: a ``LIKE`` or ``MATCHES``
+            # names every endpoint that fits it, which is not one the host
+            # question can be asked of.
+            return (code, shaped_endpoint_sentence(literal, words, operator))
         if not readable:
             return (code, unreadable_endpoint_sentence(literal, words, "the judge's own bundle"))
         if kind == "url":
@@ -644,14 +772,17 @@ def _judge_indicator_unpublished(
 ) -> tuple[str, str] | None:
     """Why the one publish rule declines this judge indicator, or ``None``.
 
-    Every comparison whose value is of a kind the rule answers is asked it,
-    exactly as the report's own row for the value is asked
-    (:func:`judge_value_answer`); one refused value declines the indicator. A
+    Every value a comparison of a kind the rule answers names is asked it,
+    whatever the operator — ``=``, each member of an ``IN`` list, the operand
+    of ``!=``, ``<`` or ``>`` — exactly as the report's own row for the value
+    is asked (:func:`judge_value_answer`); one refused value declines the
+    indicator. The IOC table and ``/iocs`` still read ``=`` alone; the export
+    asks every operator, so no operator carries a value the rule refused. A
     comparison of a kind the IOC table has no row for (a port, a property of a
     process) is left to the host question and the grounding check before this.
     """
     named = safe_finding_value(getattr(indicator, "name", "") or indicator.pattern)
-    for value in pattern_values(indicator.pattern or ""):
+    for value in rule_values(indicator.pattern or ""):
         answer = judge_value_answer(report, value.kind, value.value, corroborating)
         if answer == "yes":
             continue
@@ -660,6 +791,25 @@ def _judge_indicator_unpublished(
             f"the judge's indicator {named!r} names {safe_finding_value(value.value)!r}, "
             f"which this run does not publish ({safe_finding_value(answer)}). It is not in "
             "the exported bundle and is unchanged in the judge's own bundle.",
+        )
+    # A comparison of a kind the rule answers for, written as a shape — a
+    # ``LIKE`` with its wildcards, a ``MATCHES`` expression, a range — names
+    # every value that fits it and none in particular. The rule answers for a
+    # value, and ``'%whoami%'`` is not the value ``whoami``: asking it about the
+    # text between the wildcards would publish a match nobody put to it, and
+    # asking nothing would let a shape carry a value the ``=`` form of the same
+    # indicator is refused. It is declined, with the reason, as a refused value is.
+    for comparison in read_comparisons(indicator.pattern or ""):
+        if not _exported_kind(comparison)[0] or _endpoint_is_readable(comparison.operator):
+            continue
+        return (
+            UNPUBLISHED_VALUE_CODE,
+            f"the judge's indicator {named!r} compares {safe_finding_value(comparison.path)} "
+            f"{safe_finding_value(comparison.operator.upper())} "
+            f"{safe_finding_value(comparison.literal)!r}, which names the values that fit it "
+            "rather than one value. The one publish rule answers for a value, so it cannot say "
+            "this run may publish what the pattern matches. It is not in the exported bundle "
+            "and is unchanged in the judge's own bundle.",
         )
     return None
 
@@ -787,10 +937,20 @@ class ExtendedSTIXRenderer:
                 credit.index: credit
                 for credit in unconfirmed_credits(base_bundle, technique_sources)
             }
+            unasked_credits = _unasked_findings(report, "stix.credit_without_claim")
             for position, obj in enumerate(base_bundle.objects):
                 kind = getattr(obj, "type", "")
                 if position in unconfirmed:
-                    obj, row = _without_unconfirmed_credit(obj, unconfirmed[position])
+                    credit = unconfirmed[position]
+                    obj, row = _without_unconfirmed_credit(
+                        obj,
+                        credit,
+                        asked=not any(
+                            said.upper() == str(credit.technique).upper()
+                            or _names_the_technique(said, str(credit.technique))
+                            for said in unasked_credits
+                        ),
+                    )
                     self.declined.append(row)
                 if kind == "attack-pattern":
                     continue
@@ -806,7 +966,9 @@ class ExtendedSTIXRenderer:
                         )
                     )
                     continue
-                incomplete = _missing_what_the_standard_requires(obj)
+                incomplete = _missing_what_the_standard_requires(
+                    obj, _unasked_findings(report, "stix.is_family_missing")
+                )
                 if incomplete:
                     self.declined.append(Declined(UNPUBLISHABLE_OBJECT_CODE, incomplete))
                     continue
@@ -1141,7 +1303,39 @@ class ExtendedSTIXRenderer:
             # ``indicator_cap_removed``, so every object that left this bundle
             # left under a name.
             objects = enforce_bundle_integrity(capped, ledger=ledger, dropped_as=CAP_ORPHAN_REASON)
+        # A note, opinion, grouping or report is about the objects it names,
+        # and STIX requires it to name at least one. The passes above take out
+        # references to what the export declined; one left naming nothing is
+        # an object the standard refuses, and it is declined with the reason
+        # rather than exported so.
+        objects = self._without_empty_references(objects)
         return Bundle(objects=_produced_by(objects, identity.id, self.declined))
+
+    def _without_empty_references(self, objects: list[Any]) -> list[Any]:
+        """``objects`` less every object whose required references are now empty."""
+        while True:
+            empty = {
+                str(getattr(obj, "id", ""))
+                for obj in objects
+                if getattr(obj, "type", "") in _ABOUT_OBJECTS
+                and not getattr(obj, "object_refs", None)
+            }
+            if not empty:
+                return objects
+            kept: list[Any] = []
+            for obj in objects:
+                if str(getattr(obj, "id", "")) in empty:
+                    self.declined.append(
+                        Declined(UNPUBLISHABLE_OBJECT_CODE, _names_nothing_sentence(obj))
+                    )
+                    continue
+                refs = getattr(obj, "object_refs", None)
+                if isinstance(refs, list) and any(ref in empty for ref in refs):
+                    obj = obj.model_copy(
+                        update={"object_refs": [ref for ref in refs if ref not in empty]}
+                    )
+                kept.append(obj)
+            objects = kept
 
     def _family_refs(
         self, report: MalwareReport, ledger_order: Mapping[str, int]
@@ -1306,6 +1500,10 @@ def _relinked(obj: Any, remap: dict[str, str]) -> tuple[Any, str]:
     of. It is ``""`` for every other shape, which keeps the minted edge for a
     technique the judge only related some other way.
     """
+    refs = getattr(obj, "object_refs", None)
+    if isinstance(refs, list) and any(ref in remap for ref in refs):
+        # An object about the judge's techniques is about the rebuilt ones.
+        return obj.model_copy(update={"object_refs": [remap.get(r, r) for r in refs]}), ""
     if getattr(obj, "type", "") != "relationship":
         return obj, ""
     source = str(getattr(obj, "source_ref", "") or "")
@@ -2092,14 +2290,51 @@ def pattern_values(pattern: str) -> list[ExportedValue]:
         if not comparison.readable or comparison.operator != "=":
             continue
         value = comparison.literal.strip()
-        kind = _EXPORTED_KINDS.get((comparison.object_type, comparison.prop), "")
-        algorithm = ""
-        digest = _HASH_PROPERTY_RE.match(comparison.prop)
-        if comparison.object_type == "file" and digest:
-            kind, algorithm = "hash", digest.group(1).upper()
+        kind, algorithm = _exported_kind(comparison)
         if kind and value:
             found.append(ExportedValue(kind=kind, value=value, algorithm=algorithm))
     return found
+
+
+def rule_values(pattern: str) -> list[ExportedValue]:
+    """Every value a pattern names over a kind the rule answers, whatever the operator.
+
+    :func:`pattern_values` reads ``=`` alone, which is what the IOC table and
+    ``/iocs`` list. This reads what the export asks the rule about: every
+    quoted operand of an operator that compares with a value — ``=``, ``!=``,
+    ``<``, ``>``, ``<=``, ``>=`` and each member of ``IN`` — and never a shape
+    (``LIKE``, ``MATCHES``, ``ISSUBSET``, ``ISSUPERSET``), which names no value.
+    An ``IN`` list, a ``<`` or a ``!=`` used to reach the export with nothing
+    asked, so a value the rule refused as ``=`` was published inside one.
+    """
+    found: list[ExportedValue] = []
+    for comparison in read_comparisons(str(pattern or "")):
+        if not comparison.readable or not _endpoint_is_readable(comparison.operator):
+            continue
+        value = comparison.literal.strip()
+        kind, algorithm = _exported_kind(comparison)
+        if kind and value:
+            found.append(ExportedValue(kind=kind, value=value, algorithm=algorithm))
+    return found
+
+
+def shape_is_asked_the_rule(comparison: Any) -> bool:
+    """Whether a comparison is over an endpoint or a kind the one publish rule answers for.
+
+    The two places a shape (``LIKE``, ``MATCHES``) is declined from the export:
+    the host question's paths and the IOC table's kinds.
+    """
+    if _exported_kind(comparison)[0]:
+        return True
+    return bool(_checked_kind(comparison.object_type, comparison.prop))
+
+
+def _exported_kind(comparison: Any) -> tuple[str, str]:
+    """The IOC table's kind for a comparison's path, and a digest's algorithm; ``("", "")``."""
+    digest = _HASH_PROPERTY_RE.match(comparison.prop)
+    if comparison.object_type == "file" and digest:
+        return "hash", digest.group(1).upper()
+    return _EXPORTED_KINDS.get((comparison.object_type, comparison.prop), ""), ""
 
 
 def exported_indicator_values(bundle: Any) -> list[ExportedValue]:

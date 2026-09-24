@@ -594,15 +594,18 @@ def _remap_refs_poly(objects: list[Any], remap: dict[str, str]) -> None:
 
 
 def _is_wellformed_pattern(indicator: Any) -> bool:
-    """Conservative STIX 2.1 pattern shape check for an indicator object.
+    """Whether an indicator carries a pattern at all: anything but empty or whitespace.
 
-    Returns True only when the pattern is a bracketed comparison expression
-    (``[ <path> <op> '<value>' ]``). Keeps all patterns Maljan emits; rejects
-    empty/whitespace and truncated/garbage LLM output — a ``[file:name``
-    comparison cut off before its closing bracket, say.
+    What a pattern says is not decided here. A pattern the grammar refuses —
+    cut short, a comparison with nothing to compare, a value the grammar cannot
+    read — is the judge's to fix: it is asked once
+    (``stix.pattern_refused`` and the questions beside it), and one it keeps is
+    declined by the export with a record. This pass used to keep only
+    patterns containing ``=``, which dropped every ``LIKE`` a judge wrote as an
+    empty pattern before any question was asked; an empty pattern is the one
+    thing with nothing to ask about.
     """
-    pat = str(_oget(indicator, "pattern", "") or "").strip()
-    return pat.startswith("[") and pat.endswith("]") and "=" in pat
+    return bool(str(_oget(indicator, "pattern", "") or "").strip())
 
 
 def _merge_indicator_sets(kept: Any, duplicate: Any) -> None:
@@ -643,12 +646,12 @@ def enforce_bundle_integrity(
 
     Works on both parsed dicts (judge bundle) and pydantic SDOs (extended
     bundle). Order-preserving. Steps:
-      1. Drop indicators with an empty/whitespace pattern (STIX 2.1 invalid).
+      1. Drop indicators whose pattern is empty.
       2. Deduplicate attack-patterns by technique ID (keep first; remap refs).
       3. Deduplicate indicators by (pattern_type, pattern) (keep first; remap refs).
       4. Drop relationships whose source/target is not in the bundle, and
          deduplicate identical relationships.
-      5. Trim object_refs (Report/Note) to objects that still exist.
+      5. Trim object_refs (Report/Note) to objects that still exist, each once.
 
     Args:
         objects: The bundle contents to repair.
@@ -669,11 +672,9 @@ def enforce_bundle_integrity(
     _objects_in = len(objects)
     _dropped: dict[str, int] = {}
 
-    # 1) drop indicators with an empty or syntactically malformed pattern. The
-    # shape check is deliberately conservative — a STIX comparison expression is
-    # wrapped in brackets and contains a comparator — so it keeps every pattern
-    # this codebase emits and only rejects truncated/garbage LLM output (no full
-    # grammar parser, hence no over-dropping).
+    # 1) drop indicators with no pattern at all. A pattern the grammar refuses
+    # is kept for the judge to be asked about and, kept, declined by the export
+    # (``_is_wellformed_pattern``).
     _before = len(objects)
     objects = [o for o in objects if _otype(o) != "indicator" or _is_wellformed_pattern(o)]
     _dropped["empty_pattern"] = _before - len(objects)
@@ -757,7 +758,10 @@ def enforce_bundle_integrity(
         for ref_key in ("object_refs", "sample_refs"):
             refs = _oget(o, ref_key)
             if isinstance(refs, list):
-                surviving = [r for r in refs if r in ids]
+                # Each once, too: two objects step 3 folded into one leave a
+                # list that names the kept one twice, and a report object
+                # listing an id twice is one the official validator refuses.
+                surviving = list(dict.fromkeys(r for r in refs if r in ids))
                 _refs_trimmed += len(refs) - len(surviving)
                 _oset(o, ref_key, surviving)
 

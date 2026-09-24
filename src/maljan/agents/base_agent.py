@@ -46,10 +46,12 @@ from maljan.llm.context_window import (
 from maljan.pipeline.validation import (
     ABSENCE_CLAIM_CODE,
     ALIGNMENT_MARGIN,
+    ANALYST_CUT_CODE,
     CLAIM_DOES_NOT_DESCRIBE_CODE,
     VALIDITY_CODE,
     ValidationTally,
     Violation,
+    analyst_cut_violation,
     mark_invalid_technique_ids,
     parse_violations,
     retry_with_feedback_sync,
@@ -2250,6 +2252,40 @@ def revision_messages(
     ]
 
 
+def analyst_output_cap(agent: str = "") -> int:
+    """The output cap an analyst's calls are built with, in tokens.
+
+    ``llm.expert_max_tokens`` when the operator set it, and otherwise the cap
+    derived from the window the analyst's model serves
+    (``context_window.output_cap_for``), as the container binds it. Read,
+    never raised: the cut question names the cap in force.
+    """
+    try:
+        from maljan.llm.context_window import output_cap_for
+
+        return output_cap_for(get_settings(), "expert_max_tokens", agent).tokens
+    except Exception:  # noqa: BLE001 — an unreadable setting names no cap
+        return 0
+
+
+def answer_cut_at_cap(response: Any, cap: int) -> tuple[int, str] | None:
+    """``(cap, text)`` when the output cap ended ``response``, else ``None``.
+
+    By the server's word or by its count: ik_llama.cpp reports ``stop`` for an
+    answer it cut at ``n_predict``, so a count equal to the cap is the signal
+    that holds (``core.truncation_ledger.record_judge_response``).
+    """
+    from maljan.core.truncation_ledger import completion_tokens_of, hit_length_cap
+
+    text = str(getattr(response, "content", "") or "")
+    if not text.strip():
+        return None
+    produced = completion_tokens_of(response)
+    if hit_length_cap(response) or (cap > 0 and produced is not None and produced >= cap):
+        return (cap or int(produced or 0), text)
+    return None
+
+
 class _PriorAnswer:
     """The answer the analyst already gave, in the shape the retry loop reads.
 
@@ -2349,6 +2385,11 @@ class BudgetMeter:
             response,
             agent=str(getattr(self, "name", "") or ""),
             model=self._model_label(),
+        )
+        # Whether this answer ended at the output cap, kept for the validation
+        # turn: the last model answer recorded is the one the turn checks.
+        self._last_answer_cut = answer_cut_at_cap(
+            response, analyst_output_cap(str(getattr(self, "name", "") or ""))
         )
         if announce:
             self._announce_fallback(response)
@@ -4922,11 +4963,23 @@ class BaseAnalyst(BudgetMeter, ABC):
         # left unread is recorded instead of asked.
         nudged = bool(getattr(self, "_answer_unstructured", False))
 
+        # Whether the answer being checked ended at the output cap: the loop's
+        # own answer first, then each retry's. A cut answer is asked for a
+        # whole shorter one (``analyst_cut_violation``) and is not sent back;
+        # the question describes it.
+        # Keyed by the parsed answer, because the loop checks the kept answer
+        # again after choosing it, and that may be the first one.
+        cuts: dict[int, tuple[int, str] | None] = {id(isr): getattr(self, "_last_answer_cut", None)}
+        # Read once: the next model call records its own.
+        self._last_answer_cut = None
+
         def _validator(candidate: AgentISR) -> list[Violation]:
             first = not asked
             asked.append(True)
             unread = [] if nudged else parse_violations(candidate)
+            cut = cuts.get(id(candidate))
             return [
+                *([analyst_cut_violation(*cut)] if cut is not None else []),
                 *unread,
                 *validate_isr(
                     candidate,
@@ -4972,8 +5025,13 @@ class BaseAnalyst(BudgetMeter, ABC):
             # never sent notes nothing on the claim: the finding is recorded
             # saying it was not asked, and the technique goes through as claimed.
             unasked = [
-                replace(v, message=f"{v.message} {detail[:1].upper()}{detail[1:]}.", sentence="")
-                if v.code in (ABSENCE_CLAIM_CODE, CLAIM_DOES_NOT_DESCRIBE_CODE)
+                replace(
+                    v,
+                    message=f"{v.message} {detail[:1].upper()}{detail[1:]}.",
+                    sentence="",
+                    asked=False,
+                )
+                if v.code in (ABSENCE_CLAIM_CODE, CLAIM_DOES_NOT_DESCRIBE_CODE, ANALYST_CUT_CODE)
                 else v
                 for v in initial
             ]
@@ -5001,6 +5059,35 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         first: list[Any] = [_PriorAnswer(isr)]
 
+        # A retry that asks for a whole new answer is sent only when the
+        # conversation it sends leaves the cap free in the window. Every other
+        # question keeps the answer and asks for a fix to it, as it always did.
+        loop_cut = cuts.get(id(isr))
+        # Measured with the turn that carries every question of this retry,
+        # not the framed conversation alone: fourteen questions are not free.
+        from langchain_core.messages import HumanMessage as _Question
+
+        from maljan.pipeline.validation import feedback_text
+
+        sent = [*messages, _Question(content=feedback_text(initial))]
+        if loop_cut is not None and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
+            self, sent, loop_cut[0]
+        ):
+            detail = (
+                "not asked: the conversation the question is sent in and the "
+                f"{loop_cut[0]}-token answer it asks for do not fit this model's window"
+            )
+            self.logger.warning("%s: the cut-at-cap question was %s.", self.name, detail)
+            unasked_cut = analyst_cut_violation(*loop_cut)
+            self.validation_findings.append(
+                replace(
+                    unasked_cut,
+                    message=f"{unasked_cut.message} {detail[:1].upper()}{detail[1:]}.",
+                    asked=False,
+                )
+            )
+            cuts[id(isr)] = None
+
         def _run(turns: list[Any]) -> Any:
             if first:
                 return first.pop()
@@ -5010,7 +5097,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             if isinstance(answer, _PriorAnswer):
                 return answer.isr
             text = str(getattr(answer, "content", answer))
-            return self._text_to_isr(self._capture_findings(text), isr.revision_round)
+            parsed = self._text_to_isr(self._capture_findings(text), isr.revision_round)
+            cuts[id(parsed)] = getattr(self, "_last_answer_cut", None)
+            self._last_answer_cut = None
+            return parsed
 
         def _keep(first_answer: AgentISR, retried: AgentISR) -> AgentISR:
             # A retry that came back with fewer claims than it started with
@@ -5025,6 +5115,22 @@ class BaseAnalyst(BudgetMeter, ABC):
             # gathered; the retry was asked over the evidence text alone.
             if not retried.claims and first_answer.unparsed_answer:
                 return first_answer
+            # Asked for a whole shorter answer because the first was cut, and
+            # given one that ended on its own: that answer is the analyst's,
+            # fewer claims and all. The cut one it replaces was never whole.
+            if (
+                cuts.get(id(first_answer)) is not None
+                and cuts.get(id(retried)) is None
+                and retried.claims
+            ):
+                self.logger.info(
+                    "Validation: '%s' answered the cut-at-cap question whole; its %d claim(s) "
+                    "replace the cut answer's %d.",
+                    self.name,
+                    len(retried.claims),
+                    len(first_answer.claims),
+                )
+                return retried
             if len(retried.claims) < len(first_answer.claims):
                 self.logger.warning(
                     "Validation: the retry for '%s' returned %d claim(s) against %d; "
@@ -5048,6 +5154,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 agent=str(self.name),
                 stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
                 keep=_keep,
+                drop_answer_for=frozenset({ANALYST_CUT_CODE}),
             )
         except Exception as exc:  # noqa: BLE001 — a retry that fails keeps the first answer
             self.logger.warning("Validation retry failed (%s); keeping the first answer.", exc)
@@ -5067,6 +5174,24 @@ class BaseAnalyst(BudgetMeter, ABC):
                 ", ".join(sorted({v.code for v in violations})),
             )
         return revised
+
+    def _fits_the_window(self, messages: list[Any], cap: int) -> bool:
+        """Whether ``messages`` and an answer of ``cap`` tokens fit this model's window.
+
+        Measured against the job's learned window, in the budget's own
+        characters per token. With no window learned there is nothing to
+        measure against, and the question is asked.
+        """
+        budget = BaseAnalyst._context_budget(self)  # type: ignore[arg-type]
+        if budget is None or not getattr(budget, "derives", False):
+            return True
+        try:
+            per_token = float(budget.chars_per_token)
+            room = (int(budget.window.tokens) - int(cap)) * per_token
+        except Exception:  # noqa: BLE001 — a budget that cannot say leaves the question asked
+            return True
+        sent = sum(len(str(getattr(m, "content", m) or "")) for m in messages)
+        return sent <= room
 
     def drain_nudge_retry_mode(self) -> str | None:
         """How the last nudge had to be sent, handed over once."""

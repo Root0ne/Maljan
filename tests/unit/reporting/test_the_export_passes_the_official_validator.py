@@ -497,3 +497,124 @@ class TestEveryMalwareExportHangsTogether:
         (uses,) = [o for o in bundle.objects if getattr(o, "relationship_type", "") == "uses"]
         assert uses.x_maljan_evidence_basis == "static"
         assert uses.x_maljan_contributing_agents == ["static"]
+
+
+# A Benign answer the output cap cut: its assessment and two indicators were
+# written whole, the rest of the bundle was not. The shape the fallback reads.
+_CUT_BENIGN_ANSWER = (
+    '{"type": "bundle", "id": "bundle--1", "x_maljan_assessment": {"verdict": "Benign", '
+    '"confidence": 0.95, "severity": {"rating": "Informational", "rationale": "A signed '
+    'tool."}}, "objects": [{"type": "indicator", "id": "indicator--1", "name": "tool hash", '
+    f'"pattern": "[file:hashes.\'SHA-256\' = \'{SHA256}\']", "indicator_types": '
+    '["benign"]}, {"type": "indicator", "id": "indicator--2", "name": "tool host", '
+    '"pattern": "[domain-name:value = \'updates.example.org\']", "indicator_types": '
+    '["benign"]}, {"type": "attack-pattern", "id": "attack-pattern--1", "name": "Sys'
+)
+
+_NOTE_ID = "note--0f1e2d3c-4b5a-4968-8776-655443332212"
+_HOST_ID = "indicator--0f1e2d3c-4b5a-4968-8776-655443332211"
+
+
+def _fallback_export(text: str) -> tuple[Bundle, Bundle, list[Any]]:
+    """The fallback bundle for ``text``, its export, and what the export declined."""
+    reader = JudgeAgent(llm=object())  # type: ignore[arg-type]
+    judge = reader._fallback_bundle_from_text(text, {}, None)
+    renderer = ExtendedSTIXRenderer()
+    exported = renderer.render(_report("Benign", judge), judge)
+    return judge, exported, list(renderer.declined)
+
+
+class TestTheFallbackPathExportsAValidBundle:
+    """The non-Malware fallback wrote a note naming nothing, and the export failed.
+
+    STIX requires a note to name at least one object in ``object_refs``; the
+    fallback's note named none, and the report object listed the sample's hash
+    indicator twice after the judge's copy of it was folded into the export's.
+    """
+
+    def test_a_cut_benign_answer_exports_a_valid_bundle(self) -> None:
+        judge, exported, _declined = _fallback_export(_CUT_BENIGN_ANSWER)
+
+        assert judge.x_maljan_fallback_verdict is not None
+        assert _errors(exported) == []
+
+    def test_the_fallback_note_names_the_objects_it_is_about(self) -> None:
+        reader = JudgeAgent(llm=object())  # type: ignore[arg-type]
+        judge = reader._fallback_bundle_from_text(_CUT_BENIGN_ANSWER, {}, None)
+
+        (note,) = [o for o in judge.objects if o.type == "note"]
+        others = [o.id for o in judge.objects if o.type != "note"]
+        assert others, "the answer's whole indicators are in the fallback bundle"
+        assert note.object_refs == others
+
+    def test_the_report_object_names_each_object_once(self) -> None:
+        _judge, exported, _declined = _fallback_export(_CUT_BENIGN_ANSWER)
+
+        (report_object,) = [o for o in exported.objects if o.type == "report"]
+        assert len(report_object.object_refs) == len(set(report_object.object_refs))
+
+    def test_a_fallback_with_nothing_to_name_writes_no_note_and_keeps_its_record(self) -> None:
+        judge, exported, _declined = _fallback_export("Benign. T1486 looks likely.")
+
+        assert [o for o in judge.objects if o.type == "note"] == []
+        assert judge.x_maljan_fallback_verdict is not None
+        assert judge.x_maljan_fallback_verdict.model_only_technique_ids == ["T1486"]
+        # The judge's text the note would have carried stays on the mark.
+        assert judge.x_maljan_fallback_verdict.reasoning == "Benign. T1486 looks likely."
+        assert _errors(exported) == []
+
+    def test_a_malware_fallback_with_claims_and_indicators_exports_a_valid_bundle(self) -> None:
+        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+
+        answer = _CUT_BENIGN_ANSWER.replace('"verdict": "Benign"', '"verdict": "Malware"')
+        claimed = {
+            "static": AgentISR(
+                agent_id="static",
+                domain="static",
+                claims=[
+                    ClaimEvidence(
+                        claim="It packs its code.",
+                        evidence_ref="[ev_0001]",
+                        confidence=0.8,
+                        technique_id="T1027",
+                    )
+                ],
+            )
+        }
+        reader = JudgeAgent(llm=object())  # type: ignore[arg-type]
+        judge = reader._fallback_bundle_from_text(answer, {}, claimed)
+        exported = ExtendedSTIXRenderer().render(_report("Malware", judge), judge)
+
+        assert [o.type for o in judge.objects if o.type == "malware"] == ["malware"]
+        assert _errors(exported) == []
+
+    def test_a_note_whose_objects_the_export_declines_is_declined_with_a_record(self) -> None:
+        judge = Bundle.model_validate(
+            {
+                "type": "bundle",
+                "objects": [
+                    {
+                        "type": "indicator",
+                        "id": _HOST_ID,
+                        "name": "tool host",
+                        "pattern": "[domain-name:value = 'updates.example.org']",
+                        "indicator_types": ["benign"],
+                    },
+                    {
+                        "type": "note",
+                        "id": _NOTE_ID,
+                        "abstract": "Verdict: Benign (judge fallback)",
+                        "content": "A signed tool.",
+                        "object_refs": [_HOST_ID],
+                    },
+                ],
+                "x_maljan_fallback_verdict": {"decision": "Benign", "source": "extracted"},
+            }
+        )
+        renderer = ExtendedSTIXRenderer()
+
+        exported = renderer.render(_report("Benign", judge), judge)
+
+        assert _NOTE_ID not in [o.id for o in exported.objects]
+        assert any("name at least one" in why for _code, why in renderer.declined)
+        assert _errors(exported) == []

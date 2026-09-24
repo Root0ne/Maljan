@@ -61,6 +61,10 @@ dependencies = [
     "argon2-cffi>=25.1.0",
     "email-validator>=2.3.0",
     "python-dotenv>=1.2.2",
+    # The official STIX pattern validator, so what the export carries is what
+    # a consumer's parser accepts. schemas.stix_pattern reads the grammar
+    # itself only where this is absent.
+    "stix2-patterns==2.1.2",
 ]
 
 [project.scripts]

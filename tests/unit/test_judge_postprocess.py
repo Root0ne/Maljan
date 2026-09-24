@@ -70,7 +70,7 @@ class TestBundleIntegrity:
         objs = [
             _ind("indicator--1", ""),
             _ind("indicator--2", "   "),
-            _ind("indicator--3", "[x=1]"),
+            _ind("indicator--3", "[file:size = 1]"),
         ]
         out = enforce_bundle_integrity(objs)
         ids = {o["id"] for o in out}
@@ -123,15 +123,21 @@ class TestBundleIntegrity:
         report = next(o for o in out if o["type"] == "report")
         assert report["object_refs"] == ["malware--1"]
 
-    def test_drops_malformed_pattern_indicator(self) -> None:
+    def test_keeps_a_malformed_pattern_for_the_judge_to_be_asked_about(self) -> None:
+        """Only an empty pattern has nothing to ask about; the rest are asked, then declined."""
         objs = [
             _ind("indicator--1", "[file:name = 'unclosed"),  # missing closing bracket
             _ind("indicator--2", "not a pattern at all"),
-            _ind("indicator--3", "[file:hashes.'SHA-256' = 'abc']"),  # valid
-            _ind("indicator--4", "[ipv4-addr:value = '1.2.3.4']"),  # valid
+            _ind("indicator--3", "[file:hashes.'SHA-256' = 'abc']"),
+            _ind("indicator--4", "[ipv4-addr:value = '1.2.3.4']"),
         ]
         out = enforce_bundle_integrity(objs)
-        assert {o["id"] for o in out} == {"indicator--3", "indicator--4"}
+        assert {o["id"] for o in out} == {
+            "indicator--1",
+            "indicator--2",
+            "indicator--3",
+            "indicator--4",
+        }
 
     def test_postprocess_runs_integrity_pass(self) -> None:
         # End-to-end: postprocess_judge_bundle now drops a dangling relationship.

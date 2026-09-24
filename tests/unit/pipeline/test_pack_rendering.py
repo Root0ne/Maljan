@@ -186,8 +186,23 @@ class TestTheLines:
     def test_the_virustotal_answer_is_read_for_its_counts_and_labels(self) -> None:
         entry = _entry("get_file_report", VT_ANSWER, server="virustotal")
         assert render_pack([entry], 0) == (
-            "[ev_0001] reputation: VirusTotal 31/75 malicious, labels trojan.filisto/agent, Filisto"
+            "[ev_0001] reputation: VirusTotal: 31 of 75 engines flag it as malicious, "
+            "labels trojan.filisto/agent, Filisto"
         )
+
+    def test_no_detection_is_said_in_words_and_not_as_a_fraction(self) -> None:
+        """ "0/75 malicious" was turned by a report model into "clean by 75/75 engines"."""
+        answer = {
+            "data": {
+                "last_analysis_stats": {"malicious": 0, "undetected": 71, "type-unsupported": 4}
+            }
+        }
+        entry = _entry("get_file_report", answer, server="virustotal")
+
+        line = render_pack([entry], 0)
+
+        assert line == "[ev_0001] reputation: VirusTotal: 0 of 75 engines flag it as malicious"
+        assert "/75" not in line
 
     def test_the_detection_labels_the_answer_carries_are_stated_with_their_counts(
         self,
@@ -203,7 +218,8 @@ class TestTheLines:
         line = render_pack([entry], 0)
 
         assert line.startswith(
-            "[ev_0017] reputation: VirusTotal 52/75 malicious, 52 detection labels, "
+            "[ev_0017] reputation: VirusTotal: 52 of 75 engines flag it as malicious, "
+            "52 detection labels, "
             "47 distinct (engines per label, most first, 20 shown): "
             "Gen:Variant.Ulise.482338 ×4, Trojan ( 005ef6721 ) ×2, Troj/Loader-CB ×2, "
             "W32.Malware.D0BC8737 ×1, Trojan.Win32.Latrodectus.m!c ×1, "
@@ -222,7 +238,8 @@ class TestTheLines:
         entry = _entry("get_file_report", answer, server="virustotal")
 
         assert render_pack([entry], 0) == (
-            "[ev_0001] reputation: VirusTotal 3/10 malicious, 3 detection labels, "
+            "[ev_0001] reputation: VirusTotal: 3 of 10 engines flag it as malicious, "
+            "3 detection labels, "
             "2 distinct (engines per label, most first): Trojan.Example ×2, Other.Label ×1"
         )
 

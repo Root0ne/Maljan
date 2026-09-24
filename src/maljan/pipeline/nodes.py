@@ -2172,7 +2172,11 @@ def make_stage_agent_node(
                 # sub-prompts and merge. Default 0 keeps the monolithic path.
                 _views = int(getattr(container.config.llm, "view_decomposition_views", 0) or 0)
                 if _views >= 2:
-                    _budget = int(getattr(container.config.llm, "expert_max_tokens", 0) or 0)
+                    from maljan.llm.context_window import output_cap_for
+
+                    _budget = output_cap_for(
+                        container.config, "expert_max_tokens", agent_name
+                    ).tokens
                     # Item 3 (LAMD): "tier" reinterprets the N knob as sequential
                     # vertical reasoning tiers; "facet" (default) keeps the §3.6
                     # horizontal concurrent views. Both share the equal budget.

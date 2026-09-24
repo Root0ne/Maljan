@@ -28,6 +28,11 @@ from maljan.reporting.composer import ReportComposer
 def _composer(window: int, **llm: int) -> Any:
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     settings.llm.provider = "openai"
+    # A llama server we run, which answered the probe's /props: no API limits
+    # its output.
+    settings.llm.openai.base_url = "http://127.0.0.1:8080/v1"
+    settings.llm.openai.expert_model = "local-model"
+    settings.llm.openai.judge_model = "local-model"
     settings.reporting.composer_enabled = True
     for name, value in llm.items():
         setattr(settings.llm, name, value)
@@ -35,7 +40,7 @@ def _composer(window: int, **llm: int) -> Any:
     registry = MagicMock()
     registry.build_model_for_agent.return_value = FakeMessagesListChatModel(responses=[])
     container._llm_registry = registry  # type: ignore[assignment]
-    fact = WindowFact(window, "probed", "the server's /props")
+    fact = WindowFact(window, "probed", f"llama.cpp /props reported {window:,} tokens")
     with patch("maljan.llm.context_window.learn_window", return_value=fact):
         composer = container.get_report_composer()
     built = registry.build_model_for_agent.call_args.kwargs["max_tokens_for"]("openai")
@@ -69,17 +74,17 @@ class TestTheDerivation:
 
         assert composer.output_cap == 12000
 
-    def test_no_generation_cap_takes_the_default_reply_room(self) -> None:
+    def test_no_generation_cap_takes_a_quarter_of_the_window_with_no_ceiling(self) -> None:
         composer, _built = _composer(131072, judge_max_tokens=0, expert_max_tokens=0)
 
-        assert composer.output_cap == 8192
+        assert composer.output_cap == 32768
 
     def test_the_derivation_is_said(self) -> None:
         composer, _built = _composer(16384, judge_max_tokens=8192, expert_max_tokens=8192)
 
         assert composer.budget_note.startswith("4096 tokens — ")
         assert "16384-token context window (probed)" in composer.budget_note
-        assert "8192 tokens" in composer.budget_note
+        assert "of 8192" in composer.budget_note
 
     def test_the_run_summary_prints_it_beside_the_wait(self) -> None:
         composer, _built = _composer(16384, judge_max_tokens=8192, expert_max_tokens=8192)

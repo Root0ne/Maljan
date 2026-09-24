@@ -1634,7 +1634,13 @@ def _reputation_facts(entry: LedgerEntry) -> str:
         stats = _find_key(data, "last_analysis_stats")
         if isinstance(stats, dict):
             total = sum(int(v) for v in stats.values() if isinstance(v, int))
-            parts = [f"{service} {int(stats.get('malicious') or 0)}/{total} malicious"]
+            # In words, never as a fraction. "0/75 malicious" is a score shape a
+            # model reads either way round: a benign control's summary turned
+            # it into "verified clean by 75/75 AV engines".
+            parts = [
+                f"{service}: {int(stats.get('malicious') or 0)} of {total} engines flag it "
+                "as malicious"
+            ]
             labels: list[str] = []
             classification = _find_key(data, "popular_threat_classification")
             if isinstance(classification, dict):

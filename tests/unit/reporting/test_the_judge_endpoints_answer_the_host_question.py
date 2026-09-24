@@ -303,7 +303,8 @@ class TestAPatternIsNotOneComparison:
 
         assert exported == []
         assert declined[0][0] == UNPUBLISHABLE_ENDPOINT_CODE
-        assert "could not read the pattern's endpoint" in declined[0][1]
+        assert "compares with MATCHES" in declined[0][1]
+        assert "names every endpoint that fits it rather than one" in declined[0][1]
 
     def test_the_same_holds_for_a_wildcard_and_for_a_subnet(self) -> None:
         for pattern in (
@@ -313,7 +314,7 @@ class TestAPatternIsNotOneComparison:
             exported, declined = _render(pattern)
 
             assert exported == [], pattern
-            assert "could not read the pattern's endpoint" in declined[0][1], pattern
+            assert "names every endpoint that fits it rather than one" in declined[0][1], pattern
 
     def test_an_endpoint_reached_through_a_reference_is_asked_the_same_question(self) -> None:
         """``network-traffic:dst_ref.value`` carries an endpoint like any other.
@@ -390,17 +391,15 @@ class TestAPatternIsNotOneComparison:
         exported, declined = _render(f"[domain-name:value = '{C2_DOMAIN}")
 
         assert exported == []
-        assert "could not read the pattern's endpoint" in declined[0][1]
+        assert "the STIX pattern grammar refuses it" in declined[0][1]
 
     def test_a_qualifier_timestamp_is_not_read_as_an_endpoint(self) -> None:
-        """Asked of the question itself: a qualified pattern does not reach the
-        bundle at all, because the integrity pass wants a bracketed expression
-        and records that drop under its own reason."""
+        """A qualified pattern, written as the grammar writes it (``t'…'``)."""
         from maljan.reporting.renderers.stix_renderer import _judge_indicator_problem
 
         indicator = _judge_bundle(
             f"[ipv4-addr:value = '{C2_ADDRESS}'] "
-            "START '2026-01-01T00:00:00Z' STOP '2026-01-02T00:00:00Z'"
+            "START t'2026-01-01T00:00:00Z' STOP t'2026-01-02T00:00:00Z'"
         ).objects[0]
 
         assert _judge_indicator_problem(indicator) is None
@@ -466,6 +465,9 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
             "stix.annotation_out_of_schema",
             "stix.duplicate_label",
             "stix.unknown_object_path",
+            "stix.unescaped_backslash",
+            "stix.pattern_refused",
+            "stix.shape_names_a_value",
             "stix.file_unidentified",
         }
     )

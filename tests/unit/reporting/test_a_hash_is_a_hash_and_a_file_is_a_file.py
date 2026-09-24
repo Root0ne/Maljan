@@ -93,7 +93,11 @@ class TestAHashIsItsAlgorithmsLength:
         other = "b" * 32
         bundle = Bundle(objects=[_indicator(f"[file:hashes.'MD5' IN ('{FULL_MD5}', '{other}')]")])
 
-        found = [v.message for v in validate_verdict_bundle(bundle, {FULL_MD5})]
+        found = [
+            v.message
+            for v in validate_verdict_bundle(bundle, {FULL_MD5})
+            if v.code == "stix.ungrounded_indicator"
+        ]
 
         assert found and other in found[0]
         assert "appears nowhere in the evidence" in found[0]

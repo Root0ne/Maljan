@@ -20,10 +20,11 @@ and the drop of an indicator that named a value no tool ever saw.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, get_args, get_origin
 
 from pydantic import ValidationError
@@ -105,6 +106,17 @@ class Violation:
     # renderer to mark where they stand. Never shown to the producer and never
     # stored on the channel: the text they come from is.
     quoted: tuple[str, ...] = ()
+    # Whether the producer was shown this finding and asked to fix it. False
+    # for one it never saw: raised first by the answer to its only retry, or
+    # found where no turn was left to ask on. A row that says the producer
+    # "kept" something when asked is only true of a row that was asked.
+    asked: bool = True
+    # What the finding is about, by a fact that survives the retry: the
+    # technique a credit names, the malware object's name. Two answers of one
+    # judge number their objects afresh, and an answer to a credit question
+    # renames the credited source — so "was this asked" is keyed on this where
+    # a check sets it, never on the words of the message.
+    subject: str = ""
 
     def __post_init__(self) -> None:
         # A row written by a validator has no route, and its message is its
@@ -122,6 +134,8 @@ class Violation:
             "advisory": "true" if self.advisory else "",
             "sentence": self.sentence,
             "route": ROUTE_SEPARATOR.join(self.route),
+            **({} if self.asked else {"asked": "false"}),
+            **({"subject": self.subject} if self.subject else {}),
         }
 
 
@@ -171,7 +185,8 @@ class ValidationTally:
                 "code": v.code,
                 "message": v.message,
                 **({"advisory": "true"} if v.advisory else {}),
-                **({} if asked else {"asked": "false"}),
+                **({} if asked and v.asked else {"asked": "false"}),
+                **({"subject": v.subject} if v.subject else {}),
             }
             for v in violations
         )
@@ -2536,6 +2551,47 @@ UNCITED_CONFIGURATION_CODE = "report.configuration_uncited"
 # of a benchmark report's host-identifier section ran to exactly 8,192 tokens.
 SECTION_CUT_CODE = "composer.cut_at_output_cap"
 
+# An analyst's answer the output cap ended. The judge and the composer were
+# asked about theirs; an analyst whose answer stopped at the cap — 42 claims,
+# the last one cut — was asked its other questions over the cut answer, spent
+# the retry's whole cap again, and returned no claim at all.
+ANALYST_CUT_CODE = "isr.cut_at_output_cap"
+
+# A claim begun in an analyst's answer: the label every claim block opens with.
+_CLAIM_BEGUN_RE = re.compile(r"^\s*CLAIM:", re.MULTILINE)
+
+
+def analyst_cut_violation(cap: int, text: str = "") -> Violation:
+    """What an analyst the cap cut is told: the cap, what was begun, and the bound.
+
+    The cut answer is not sent back (``retry_with_feedback_sync``'s
+    ``drop_answer_for``): it is described — its characters and the claims it
+    began — and the length it was cut at is the bound the next answer stays
+    under. It asks once for a whole shorter answer, never for fewer findings
+    than the evidence holds, and the cap it names is the one in force: nothing
+    here raises it.
+    """
+    begun = len(_CLAIM_BEGUN_RE.findall(text))
+    size = (
+        f" It ran to {len(text):,} characters"
+        + (f" and began {begun} CLAIM block(s)" if begun else "")
+        + ", and it is not shown to you again. The whole answer has to be shorter than "
+        f"those {len(text):,} characters, the length at which the limit cut it."
+        if text
+        else ""
+    )
+    return Violation(
+        code=ANALYST_CUT_CODE,
+        message=(
+            f"Your previous answer stopped at the output limit of {int(cap)} tokens before "
+            f"it ended, so its last claim was cut off.{size} Any reasoning you write counts "
+            f"against the same limit. Write the whole answer again so that it ends well inside "
+            f"{int(cap)} tokens: the claims the evidence supports best, each written once, "
+            "each one sentence with its EVIDENCE, CONFIDENCE and TECHNIQUE lines, and nothing "
+            "between the blocks."
+        ),
+    )
+
 
 # How much of a cut answer its question shows, as a sample of its shape.
 SECTION_CUT_HEAD_CHARS = 160
@@ -3407,6 +3463,8 @@ UNKNOWN_OBSERVABLE_TYPE_CODE = "stix.unknown_observable_type"
 IS_FAMILY_MISSING_CODE = "stix.is_family_missing"
 FILE_UNIDENTIFIED_CODE = "stix.file_unidentified"
 UNKNOWN_OBJECT_PATH_CODE = "stix.unknown_object_path"
+STRAY_BACKSLASH_CODE = "stix.unescaped_backslash"
+PATTERN_REFUSED_CODE = "stix.pattern_refused"
 INDICATOR_TYPE_VOCABULARY_CODE = "stix.indicator_type_vocabulary"
 
 # STIX 2.1's indicator-type vocabulary. Open, so a value outside it is legal
@@ -3425,18 +3483,22 @@ INDICATOR_TYPES = (
 
 
 def unknown_observable_type_violations(obj: Any, *, path: str) -> list[Violation]:
-    """A judge indicator whose pattern names an object type STIX does not have.
+    """A judge indicator whose pattern the grammar refuses: its type, its path, its escapes.
 
     Asked, never rewritten: the sentence says which type the value is when the
     value or the spelling answers that, and lists the types when neither does.
-    An indicator that keeps the type is left out of the export, which records
-    why (``reporting.renderers.stix_renderer``).
+    A path the type does not have and a value with a backslash the grammar
+    cannot read are asked the same way. An indicator that keeps any of them is
+    left out of the export, which records why
+    (``reporting.renderers.stix_renderer``).
     """
     from maljan.schemas.stix_pattern import (
         CYBER_OBSERVABLE_TYPES,
         is_observable_type,
         object_path_problems,
         observable_type_for,
+        pattern_refusal,
+        stray_backslash_values,
     )
 
     pattern = str(getattr(obj, "pattern", "") or "")
@@ -3486,7 +3548,142 @@ def unknown_observable_type_violations(obj: Any, *, path: str) -> list[Violation
                 path=path,
             )
         )
+    stray = stray_backslash_values(pattern)
+    if stray:
+        out.append(
+            Violation(
+                code=STRAY_BACKSLASH_CODE,
+                message=(
+                    f"the indicator {safe_finding_value(named)!r} quotes "
+                    f"{len(stray)} value(s) with a "
+                    "backslash the pattern grammar cannot read: inside a quoted value a STIX "
+                    "pattern "
+                    "escapes the quote and the backslash and nothing else, so every backslash "
+                    "of the value is written twice in the pattern (four times in the JSON "
+                    "string that carries it). Write it so, or drop the indicator; an indicator "
+                    "that keeps it is not exported."
+                ),
+                path=path,
+            )
+        )
+    # Anything else the grammar refuses, asked in the grammar's own words when
+    # none of the questions above named it: a comparison with nothing to
+    # compare, a value written in double quotes, text after the expression
+    # closed. A digest the wrong length is the grounding check's question.
+    from maljan.agents._indicator_denylists import malformed_hash_in
+
+    refusal = (
+        "" if out or not pattern.strip() or malformed_hash_in(pattern) else pattern_refusal(pattern)
+    )
+    if refusal:
+        out.append(
+            Violation(
+                code=PATTERN_REFUSED_CODE,
+                message=(
+                    f"the indicator {safe_finding_value(named)!r} is not a pattern the STIX "
+                    f"grammar reads: {safe_finding_value(refusal)}. A consumer's parser refuses "
+                    "it whole. Write the comparison whole — an object path, an operator and a "
+                    "quoted value, in brackets — or drop the indicator; an indicator that keeps "
+                    "it is not exported."
+                ),
+                path=path,
+            )
+        )
     return out
+
+
+SHAPE_NAMES_A_VALUE_CODE = "stix.shape_names_a_value"
+
+# The shortest fixed text of a shape that says anything about which value the
+# evidence holds: shorter runs are found in any evidence at all.
+_SHAPE_TEXT_MIN = 4
+
+
+def shape_names_a_value_violations(
+    obj: Any, haystack: Haystack, stated_values: set[str], *, path: str
+) -> list[Violation]:
+    """A ``LIKE`` or ``MATCHES`` whose fixed text is a value this run holds: asked about ``=``.
+
+    A ``LIKE`` names every value that fits it, and the export publishes values:
+    the one publish rule answers for a value, so a shape over an endpoint or a
+    kind the rule answers for is declined. When the text between its wildcards
+    is one run that the evidence holds as a value of its own, or that another
+    of the judge's indicators compares with ``=``, the judge most likely read
+    that value and wrote a shape of it — the reference run wrote every decoded
+    host as ``LIKE '%host%'``. It is asked once whether it means the value; what
+    it keeps is its decision, and a shape it keeps is declined as before.
+    """
+    from maljan.reporting.renderers.stix_renderer import shape_is_asked_the_rule
+    from maljan.schemas.stix_pattern import like_fixed_text, matches_fixed_text
+
+    pattern = str(getattr(obj, "pattern", "") or "")
+    named = str(getattr(obj, "name", "") or "").strip() or pattern
+    out: list[Violation] = []
+    for comparison in read_comparisons(pattern):
+        if comparison.operator not in ("like", "matches") or not comparison.readable:
+            continue
+        if not shape_is_asked_the_rule(comparison):
+            continue
+        fixed = (
+            like_fixed_text(comparison.literal)
+            if comparison.operator == "like"
+            else matches_fixed_text(comparison.literal)
+        )
+        if len(fixed) != 1:
+            continue
+        value = fixed[0].strip()
+        operator = safe_finding_value(comparison.operator.upper())
+        if len(value) < _SHAPE_TEXT_MIN or not (
+            value.lower() in stated_values or haystack.holds_value(value)
+        ):
+            continue
+        written_as = _path_for_the_value(comparison.path, value)
+        # A URL is scrubbed to its scheme and host in any stored sentence, so
+        # the whole URL is named by what it is rather than quoted cut short.
+        suggestion = (
+            "url:value = the whole URL, exactly as the LIKE writes it between its wildcards"
+            if written_as == "url:value"
+            else f"{safe_finding_value(written_as)} = {safe_finding_value(value)!r}"
+        )
+        out.append(
+            Violation(
+                code=SHAPE_NAMES_A_VALUE_CODE,
+                message=(
+                    f"the indicator {safe_finding_value(named)!r} compares "
+                    f"{safe_finding_value(comparison.path)} with {operator} "
+                    f"{safe_finding_value(comparison.literal)!r}, which names every value that "
+                    "fits it; the export publishes values, so it is not exported as written. "
+                    f"This run holds {safe_finding_value(value)!r} as a value of its own: if you "
+                    f"mean that value, write {suggestion}; or keep the {operator}, and it is not "
+                    "exported."
+                ),
+                path=path,
+            )
+        )
+    return out
+
+
+def _path_for_the_value(path: str, value: str) -> str:
+    """The object path a value is written under so the one publish rule can answer for it.
+
+    A host a ``url`` shape was written around is a host, not a URL: written as
+    ``url:value = 'host'`` it is declined as a URL with no host, and the rule is
+    never asked. It is suggested as the type it is — ``domain-name:value``, or
+    the address family an address belongs to — and a whole URL, scheme and all,
+    stays ``url:value``. Every other path is suggested as the shape wrote it.
+    """
+    if path not in ("url:value", "domain-name:value"):
+        return path
+    text = str(value).strip()
+    if "://" in text:
+        return "url:value"
+    try:
+        return f"ipv{ipaddress.ip_address(text.strip('[]')).version}-addr:value"
+    except ValueError:
+        pass
+    from maljan.extractors.network_extractor import host_is_public
+
+    return "domain-name:value" if "/" not in text and host_is_public(text) else path
 
 
 def indicator_type_vocabulary_violations(obj: Any, *, path: str) -> list[Violation]:
@@ -3714,6 +3911,7 @@ def credit_without_claim_violations(
                     "no source is not published."
                 ),
                 path=where,
+                subject=str(credit.technique).strip().upper(),
             )
         )
     return out
@@ -3802,11 +4000,23 @@ def validate_verdict_bundle(
     if not haystack:
         how_whole = both_searched(how_whole, NOTHING_SEARCHED)
     not_searched = partial_evidence_note(how_whole)
+    # Every value the bundle's own indicators compare with ``=``: a shape whose
+    # fixed text is one of them names a value the judge already wrote whole.
+    stated_values = {
+        comparison.literal.strip().lower()
+        for obj in objects
+        if str(getattr(obj, "type", "") or "") == "indicator"
+        for comparison in read_comparisons(str(getattr(obj, "pattern", "") or ""))
+        if comparison.operator == "=" and comparison.literal.strip()
+    }
     for index, obj in enumerate(objects):
         where = _object_path(index, origins)
         kind = str(getattr(obj, "type", "") or "")
         if kind == "indicator":
             pattern = str(getattr(obj, "pattern", "") or "")
+            violations.extend(
+                shape_names_a_value_violations(obj, haystack, stated_values, path=where)
+            )
             violations.extend(
                 indicator_type_contradicts_verdict(
                     obj,
@@ -3862,6 +4072,7 @@ def validate_verdict_bundle(
                         "filled in for you."
                     ),
                     path=where,
+                    subject=named or str(getattr(obj, "id", "") or ""),
                 )
             )
         elif kind == "attack-pattern":
@@ -4686,7 +4897,51 @@ def _indicator_problem(
     # answered for the whole expression. What one comparison establishes is
     # that *it* raised no problem; the others are still asked.
     grounded = False
+    # A ``LIKE`` value is a shape, not a value: ``'%host.example%'`` matches
+    # whatever contains the text between its wildcards. That text is what the
+    # evidence is asked for, each run of it; the wildcards themselves appear in
+    # no tool's answer, and asking for them told the judge that a host it read
+    # in the decoded strings was nowhere in the evidence.
+    from maljan.schemas.stix_pattern import like_fixed_text, matches_fixed_text
+
+    shapes = {
+        (comparison.path, comparison.literal.strip()): comparison.operator
+        for comparison in read_comparisons(pattern)
+        if comparison.operator in ("like", "matches")
+    }
     for path, literal in comparisons:
+        if shapes.get((path, literal)) == "matches":
+            # A regular expression is not a value. One that is only its text is
+            # asked for that text; any other says nothing about which value
+            # the evidence holds, and neither grounds nor refuses the pattern.
+            fixed = matches_fixed_text(literal)
+            if fixed and not _found(fixed[0]):
+                return _an_absence(
+                    f"the text {safe_finding_value(fixed[0])!r}, which the pattern's MATCHES "
+                    f"{safe_finding_value(literal)!r} is written for, appears nowhere in this "
+                    "run's evidence."
+                )
+            grounded = grounded or bool(fixed)
+            continue
+        if (path, literal) in shapes:
+            fixed = like_fixed_text(literal)
+            missing = next((part for part in fixed if not _found(part)), None)
+            if missing is not None:
+                return _an_absence(
+                    f"the text {safe_finding_value(missing)!r}, which the pattern's LIKE "
+                    f"{safe_finding_value(literal)!r} requires of every value it matches, "
+                    "appears nowhere in this run's evidence."
+                )
+            # A run of a character or three is found in any evidence at all, so
+            # it says nothing about which value this run saw.
+            if fixed and not any(len(part.strip()) >= _SHAPE_TEXT_MIN for part in fixed):
+                return (
+                    f"the pattern's LIKE {safe_finding_value(literal)!r} fixes no text of "
+                    f"{_SHAPE_TEXT_MIN} or more characters, so nothing in this run's evidence "
+                    "says which value it names; it matches values this run never saw."
+                )
+            grounded = grounded or bool(fixed)
+            continue
         if path.startswith("file:hashes") or path.endswith("imphash"):
             if _HEX_TOKEN_RE.match(literal) and len(literal) in _DIGEST_LENGTHS:
                 if not _whole_token_in(literal, haystack, own):
@@ -4869,6 +5124,30 @@ def drop_ungrounded_indicators(
         bundle.objects = kept
         logger.warning("validation: dropped %d ungrounded indicator(s) from the bundle.", dropped)
     return dropped
+
+
+# Where a finding names the object it is about. Two answers of one judge
+# write the same object at different positions and under different labels, so
+# a finding about it is the same question whichever answer raised it.
+_OBJECT_PLACE_RE = re.compile(r"objects\[\d+\](?: '[^']*')?")
+
+
+def not_asked(violations: Sequence[Violation], shown: Sequence[Violation]) -> list[Violation]:
+    """``violations``, each one the producer was never shown marked ``asked=False``.
+
+    A finding counts as shown when one of the same code was about the same
+    thing: its ``subject`` where the check names one — the technique a credit
+    is for, whatever source the answer credits it to now — and otherwise the
+    same words, whatever position and label its object had in the answer that
+    raised it. The answer to a retry numbers its objects afresh and renames
+    what the question told it to; the question is still the one it was asked.
+    """
+
+    def _about(v: Violation) -> tuple[str, str]:
+        return (v.code, v.subject or _OBJECT_PLACE_RE.sub("objects[]", v.message))
+
+    said = {_about(v) for v in shown}
+    return [v if _about(v) in said else replace(v, asked=False) for v in violations]
 
 
 def _object_index(path: str) -> int | None:
@@ -5135,6 +5414,7 @@ def retry_with_feedback_sync[T](
     agent: str = "",
     stage: str = "",
     keep: Callable[[T, T], T] | None = None,
+    drop_answer_for: frozenset[str] = frozenset(),
 ) -> tuple[T, list[Violation], int]:
     """:func:`retry_with_feedback` for the analysts, whose loop is synchronous.
 
@@ -5149,6 +5429,9 @@ def retry_with_feedback_sync[T](
     one of them is published with are then the kept answer's. Chosen after the
     outcome, the conversation said "resolved" for four findings the run kept
     and recorded unresolved.
+
+    ``drop_answer_for`` is :func:`retry_with_feedback`'s: the codes whose
+    correction describes the answer instead of following it.
     """
     feed = _feed(sink, agent, stage)
     turns = list(messages)
@@ -5161,7 +5444,8 @@ def retry_with_feedback_sync[T](
     while violations and retries < max_retries:
         _announce_feedback(violations, on_feedback, feed, retries + 1)
         shown.extend(violations)
-        turns = _with_feedback(turns, answer, violations)
+        keep_answer = not any(v.code in drop_answer_for for v in violations)
+        turns = _with_feedback(turns, answer, violations, keep_answer=keep_answer)
         retries += 1
         answer = run(turns)
         parsed = parse(answer)
@@ -5210,6 +5494,10 @@ def validation_metrics(
                 # platform declined to act on, stored without the flag, reads
                 # downstream as a producer's own unfixed finding.
                 **({"advisory": "true"} if violation.advisory else {}),
+                # And whether the producer was ever shown it: a finding the
+                # answer to the last retry raised first was never a question.
+                **({} if violation.asked else {"asked": "false"}),
+                **({"subject": violation.subject} if violation.subject else {}),
             }
         )
     return {

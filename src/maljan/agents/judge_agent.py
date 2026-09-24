@@ -30,6 +30,7 @@ import contextlib
 import re
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -82,6 +83,7 @@ from maljan.pipeline.validation import (
     assessment_conflict_violations,
     assessment_violations,
     drop_ungrounded_indicators,
+    not_asked,
     retry_with_feedback,
     stated_verdict_violations,
     unsupported_benign_violations,
@@ -123,39 +125,71 @@ _OBJECT_TYPE_RE = re.compile(r'"type"\s*:\s*"([a-z][a-z0-9-]*)"')
 _INDENTED_LINE_RE = re.compile(r"\n[ \t]+")
 
 
+def judge_output_cap() -> Any:
+    """The judge's output cap and how it was reached: ``llm.judge_max_tokens``, or derived.
+
+    Read from what the job has learned (``context_window.output_cap_for``,
+    no request), so it is the cap the container built the judge's model with.
+    """
+    from maljan.llm.context_window import output_cap_for
+
+    return output_cap_for(get_settings(), "judge_max_tokens", "judge", role="judge")
+
+
 def verdict_cut_violation(cap: int, text: str = "") -> Violation:
     """What a verdict the cap cut is told: the cap, the answer's size, and what filled it.
 
     The size is the answer's characters and the objects it began, by type, and
     how many of its lines were indented: a bundle is cut by the objects it
     writes and by how it writes them, and the question names both, the way a
-    report section's cut question does. It asks for a shorter bundle — the
-    compact contract's — and never for fewer findings than the evidence holds.
+    report section's cut question does. The length it was cut at is the
+    concrete bound the next answer has to stay under, and the kind of object
+    it began most of is named as where the room went. It asks for a shorter
+    bundle — the compact contract's — and never for fewer findings than the
+    evidence holds.
+
+    The cut answer itself is not sent back (``retry_with_feedback``'s
+    ``drop_answer_for``). It is a cap's worth of tokens that could not be read,
+    and a retry that carried it gave a model at temperature 0 its own answer to
+    continue: the benchmark's benign control answered this question with a
+    response one byte shorter than the one it was asked about.
     """
     counts: dict[str, int] = {}
     for found in _OBJECT_TYPE_RE.finditer(text):
         kind = found.group(1)
         if kind != "bundle":
             counts[kind] = counts.get(kind, 0) + 1
-    begun = ", ".join(
-        f"{count} {kind}" for kind, count in sorted(counts.items(), key=lambda item: -item[1])
-    )
+    ranked = sorted(counts.items(), key=lambda item: -item[1])
+    begun = ", ".join(f"{count} {kind}" for kind, count in ranked)
     indented = len(_INDENTED_LINE_RE.findall(text))
     size = (
         f" It ran to {len(text):,} characters"
         + (f" and began {safe_finding_value(begun)} object(s)" if begun else "")
         + (f", on {indented:,} indented lines" if indented else "")
-        + "."
+        + ". It is not shown to you again."
         if text
         else ""
     )
     said = f" {safe_finding_value(size.strip())}" if size else ""
+    bound = (
+        f" The whole bundle has to be shorter than those {len(text):,} characters, the "
+        "length at which the limit cut it."
+        if text
+        else ""
+    )
+    most = (
+        f" Most of that room went on {ranked[0][1]} {safe_finding_value(ranked[0][0])} "
+        "object(s): write one only where the evidence in "
+        "this run supports it, and each only once."
+        if ranked and ranked[0][1] > 1
+        else ""
+    )
     return Violation(
         code=VERDICT_CUT_CODE,
         message=(
             f"Your previous answer stopped at the output limit of {int(cap)} tokens before "
-            f"the bundle closed, so it could not be read.{said} Any reasoning you write "
-            f"counts against the same limit. Return a bundle that closes well inside "
+            f"the bundle closed, so it could not be read.{said}{bound}{most} Any reasoning "
+            f"you write counts against the same limit. Return a bundle that closes well inside "
             f"{int(cap)} tokens: x_maljan_assessment first, then only the objects the "
             "evidence supports; your confidence, basis and sources on the relationship "
             "only, never repeated on the object it relates; an attack-pattern with at most "
@@ -873,7 +907,7 @@ class JudgeAgent(BudgetMeter):
                 # The cap this call was actually built with. Passed because the
                 # local server truncates silently — same token count, same
                 # ``finish_reason: "stop"`` — so the count is the only evidence.
-                cap=getattr(get_settings().llm, "judge_max_tokens", None),
+                cap=judge_output_cap().tokens,
             )
             return str(response.content)
 
@@ -1485,7 +1519,7 @@ class JudgeAgent(BudgetMeter):
         # Built as messages rather than through ``ChatPromptTemplate``: the
         # system turn now contains a JSON skeleton, and a template would read
         # its braces as placeholders and refuse the prompt outright.
-        cap = int(getattr(get_settings().llm, "judge_max_tokens", 0) or 0) or None
+        cap = judge_output_cap().tokens or None
         # The answer's own budget, said where the answer is asked for. Nothing
         # told the judge its bundle had to close inside it, and a bundle that
         # does not close cannot be read at all.
@@ -1718,17 +1752,29 @@ class JudgeAgent(BudgetMeter):
                 *_verdict_checks(bundle),
             ]
 
+        # What the judge was shown. A finding its retry's answer raised first
+        # was never put to it, and a row saying it "kept" something "when
+        # asked" is only true of one that was.
+        shown: list[Violation] = []
+
+        def _told(found: Sequence[Violation]) -> None:
+            shown.extend(found)
+            tally.count(found)
+
         bundle, violations, retries = await retry_with_feedback(
             _run,
             messages,
             [_validate],
             max_retries=_VERDICT_RETRIES,
             parse=_parse,
-            on_feedback=tally.count,
+            on_feedback=_told,
             sink=self._event_sink(),
             agent="judge",
             stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
+            # The cut answer is described, not repeated: see verdict_cut_violation.
+            drop_answer_for=frozenset({VERDICT_CUT_CODE}),
         )
+        violations = not_asked(violations, shown)
         _from_the_loop = list(violations)
         if timed_out:
             # No answer at all, so there is nothing to feed back and nothing
@@ -1761,7 +1807,8 @@ class JudgeAgent(BudgetMeter):
             # is wrong is recorded, and an ungrounded one is dropped below
             # like one that survived a retry.
             violations.extend(
-                _indicator_findings(
+                replace(finding, asked=False)
+                for finding in _indicator_findings(
                     bundle,
                     validate_verdict_bundle(
                         bundle,
@@ -2109,12 +2156,15 @@ class JudgeAgent(BudgetMeter):
             if model_only:
                 malware["x_maljan_model_only_technique_ids"] = model_only
             objects.append(malware)
-        else:
-            # A verdict that is not Malware gets no malware object, so the
-            # rationale and the record of what was dropped need somewhere else
-            # to live: a Note, which is where STIX puts an analyst's own words
-            # about a set of objects.
-            note: dict[str, Any] = {
+        # A verdict that is not Malware gets no malware object, so the
+        # rationale and the record of what was dropped need somewhere else to
+        # live: a Note, which is where STIX puts an analyst's own words about a
+        # set of objects. It is written last, about the objects this bundle
+        # holds, because STIX requires a note to name at least one; it once went
+        # out naming none, and the export failed the official validator.
+        note: dict[str, Any] | None = None
+        if decision != "Malware":
+            note = {
                 "type": "note",
                 "id": f"note--{uuid.uuid4()}",
                 "abstract": f"Verdict: {decision} (judge fallback)",
@@ -2123,7 +2173,6 @@ class JudgeAgent(BudgetMeter):
             }
             if model_only:
                 note["x_maljan_model_only_technique_ids"] = model_only
-            objects.append(note)
 
         for tid in sorted(tids):
             attack_id = f"attack-pattern--{uuid.uuid4()}"
@@ -2169,12 +2218,23 @@ class JudgeAgent(BudgetMeter):
         # command-and-control hosts were never put to the rule at all.
         objects.extend(self._stated_indicators(text) if extracted else [])
 
+        # The note is about every object the bundle holds. A bundle holding
+        # none has nothing a note could name, and then the record stays on the
+        # bundle's own fallback mark below, where it is on every fallback.
+        if note is not None and objects:
+            note["object_refs"] = [str(obj["id"]) for obj in objects]
+            objects.append(note)
+
         return Bundle.model_validate(
             {
                 "objects": objects,
                 "x_maljan_fallback_verdict": {
                     "decision": decision,
                     "source": "extracted" if extracted else "pipeline",
+                    **({"model_only_technique_ids": model_only} if model_only else {}),
+                    # With no note written, the judge's text it would have
+                    # carried stays on the mark instead.
+                    **({"reasoning": text_snippet} if note is not None and not objects else {}),
                 },
                 **({"x_maljan_assessment": stated} if stated is not None else {}),
             }
@@ -2233,7 +2293,7 @@ class JudgeAgent(BudgetMeter):
         rates = getattr(self, "generation_rates", None)
         if rates is None:
             return configured
-        cap = int(getattr(get_settings().llm, "judge_max_tokens", 0) or 0)
+        output = judge_output_cap()
         from maljan.llm.context_window import CHARS_PER_TOKEN
 
         return float(
@@ -2241,7 +2301,8 @@ class JudgeAgent(BudgetMeter):
                 "judge:verdict",
                 model_name_of(self.llm),
                 configured,
-                cap,
+                output.tokens,
+                budget=output.sentence,
                 prompt_tokens=-(-int(prompt_chars) // CHARS_PER_TOKEN),
             )
         )

@@ -216,7 +216,10 @@ class TestTheJudgeAndTheComposerAskForIt:
 
         judge = JudgeAgent(llm=_Named())  # type: ignore[arg-type]
         judge.generation_rates = _measured()
-        cap = int(get_settings().llm.judge_max_tokens)
+        from maljan.agents.judge_agent import judge_output_cap
+
+        assert get_settings() is not None
+        cap = judge_output_cap().tokens
 
         assert judge._verdict_timeout(600.0) == pytest.approx(
             max(600.0, min(cap / 3.8 * TIMEOUT_MARGIN, TIMEOUT_CEILING_SECONDS))
