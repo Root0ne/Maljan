@@ -586,6 +586,11 @@ class FallbackVerdict(_SpecConformantModel):
 
     decision: str
     source: Literal["extracted", "pipeline"]
+    # The technique ids that appeared in the model's raw text and in no
+    # evidence claim, recorded and not emitted. The same record the fallback's
+    # malware object or note carries, kept here on every fallback, because a
+    # bundle with nothing for a note to name has no note to carry it.
+    model_only_technique_ids: list[str] | None = None
 
 
 class Bundle(_SpecConformantModel):

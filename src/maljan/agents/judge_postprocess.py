@@ -652,7 +652,7 @@ def enforce_bundle_integrity(
       3. Deduplicate indicators by (pattern_type, pattern) (keep first; remap refs).
       4. Drop relationships whose source/target is not in the bundle, and
          deduplicate identical relationships.
-      5. Trim object_refs (Report/Note) to objects that still exist.
+      5. Trim object_refs (Report/Note) to objects that still exist, each once.
 
     Args:
         objects: The bundle contents to repair.
@@ -761,7 +761,10 @@ def enforce_bundle_integrity(
         for ref_key in ("object_refs", "sample_refs"):
             refs = _oget(o, ref_key)
             if isinstance(refs, list):
-                surviving = [r for r in refs if r in ids]
+                # Each once, too: two objects step 3 folded into one leave a
+                # list that names the kept one twice, and a report object
+                # listing an id twice is one the official validator refuses.
+                surviving = list(dict.fromkeys(r for r in refs if r in ids))
                 _refs_trimmed += len(refs) - len(surviving)
                 _oset(o, ref_key, surviving)
 

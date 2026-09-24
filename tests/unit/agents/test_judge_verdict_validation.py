@@ -391,7 +391,11 @@ class TestAnAnswerThatIsNotABundle:
         # disagree with the feed.
         assert [v.code for v in verdict.violations] == ["verdict.not_json", VERDICT_FALLBACK_CODE]
         assert verdict.violations[-1].message == VERDICT_FALLBACK_REASON
-        assert verdict.bundle.objects, "the fallback bundle is still built"
+        # Built, and marked as the fallback. With no claim and no whole
+        # indicator it holds no object, so it writes no note: a note must name
+        # an object it is about, and the record stays on the fallback mark.
+        assert verdict.bundle.x_maljan_fallback_verdict is not None, "the fallback bundle is built"
+        assert [o for o in verdict.bundle.objects if o.type == "note"] == []
 
     @pytest.mark.asyncio
     async def test_an_empty_answer_carrying_tool_calls_is_not_an_answer(self) -> None:

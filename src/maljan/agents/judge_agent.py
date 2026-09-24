@@ -2109,12 +2109,15 @@ class JudgeAgent(BudgetMeter):
             if model_only:
                 malware["x_maljan_model_only_technique_ids"] = model_only
             objects.append(malware)
-        else:
-            # A verdict that is not Malware gets no malware object, so the
-            # rationale and the record of what was dropped need somewhere else
-            # to live: a Note, which is where STIX puts an analyst's own words
-            # about a set of objects.
-            note: dict[str, Any] = {
+        # A verdict that is not Malware gets no malware object, so the
+        # rationale and the record of what was dropped need somewhere else to
+        # live: a Note, which is where STIX puts an analyst's own words about a
+        # set of objects. It is written last, about the objects this bundle
+        # holds, because STIX requires a note to name at least one; it once went
+        # out naming none, and the export failed the official validator.
+        note: dict[str, Any] | None = None
+        if decision != "Malware":
+            note = {
                 "type": "note",
                 "id": f"note--{uuid.uuid4()}",
                 "abstract": f"Verdict: {decision} (judge fallback)",
@@ -2123,7 +2126,6 @@ class JudgeAgent(BudgetMeter):
             }
             if model_only:
                 note["x_maljan_model_only_technique_ids"] = model_only
-            objects.append(note)
 
         for tid in sorted(tids):
             attack_id = f"attack-pattern--{uuid.uuid4()}"
@@ -2169,12 +2171,20 @@ class JudgeAgent(BudgetMeter):
         # command-and-control hosts were never put to the rule at all.
         objects.extend(self._stated_indicators(text) if extracted else [])
 
+        # The note is about every object the bundle holds. A bundle holding
+        # none has nothing a note could name, and then the record stays on the
+        # bundle's own fallback mark below, where it is on every fallback.
+        if note is not None and objects:
+            note["object_refs"] = [str(obj["id"]) for obj in objects]
+            objects.append(note)
+
         return Bundle.model_validate(
             {
                 "objects": objects,
                 "x_maljan_fallback_verdict": {
                     "decision": decision,
                     "source": "extracted" if extracted else "pipeline",
+                    **({"model_only_technique_ids": model_only} if model_only else {}),
                 },
                 **({"x_maljan_assessment": stated} if stated is not None else {}),
             }

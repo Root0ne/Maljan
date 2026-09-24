@@ -457,7 +457,31 @@ def _missing_what_the_standard_requires(obj: Any) -> str:
             "name, and STIX needs one of them to say which file it is. It is unchanged in the "
             "judge's own bundle."
         )
+    if kind in _ABOUT_OBJECTS and not getattr(obj, "object_refs", None):
+        return (
+            f"the {kind} {safe_finding_value(getattr(obj, 'abstract', '') or label)!r} is not "
+            "in the exported bundle: it names no object it is about, which STIX requires. It "
+            "is unchanged in the judge's own bundle."
+        )
     return ""
+
+
+# The objects STIX defines as being about others, each of which must name at
+# least one in ``object_refs``.
+_ABOUT_OBJECTS = frozenset({"note", "opinion", "grouping", "report"})
+
+
+def _names_nothing_sentence(obj: Any) -> str:
+    """The recorded sentence for an object about others that names none of them."""
+    kind = safe_finding_value(getattr(obj, "type", "") or "object")
+    label = safe_finding_value(
+        getattr(obj, "abstract", "") or getattr(obj, "name", "") or getattr(obj, "id", "")
+    )
+    return (
+        f"the {kind} {label!r} is not in the exported bundle: every object it was about is "
+        "outside this export, and STIX requires it to name at least one. It is unchanged in "
+        "the judge's own bundle."
+    )
 
 
 def _names_any(obj: Any, ids: set[str]) -> bool:
@@ -1190,7 +1214,39 @@ class ExtendedSTIXRenderer:
             # ``indicator_cap_removed``, so every object that left this bundle
             # left under a name.
             objects = enforce_bundle_integrity(capped, ledger=ledger, dropped_as=CAP_ORPHAN_REASON)
+        # A note, opinion, grouping or report is about the objects it names,
+        # and STIX requires it to name at least one. The passes above take out
+        # references to what the export declined; one left naming nothing is
+        # an object the standard refuses, and it is declined with the reason
+        # rather than exported so.
+        objects = self._without_empty_references(objects)
         return Bundle(objects=_produced_by(objects, identity.id, self.declined))
+
+    def _without_empty_references(self, objects: list[Any]) -> list[Any]:
+        """``objects`` less every object whose required references are now empty."""
+        while True:
+            empty = {
+                str(getattr(obj, "id", ""))
+                for obj in objects
+                if getattr(obj, "type", "") in _ABOUT_OBJECTS
+                and not getattr(obj, "object_refs", None)
+            }
+            if not empty:
+                return objects
+            kept: list[Any] = []
+            for obj in objects:
+                if str(getattr(obj, "id", "")) in empty:
+                    self.declined.append(
+                        Declined(UNPUBLISHABLE_OBJECT_CODE, _names_nothing_sentence(obj))
+                    )
+                    continue
+                refs = getattr(obj, "object_refs", None)
+                if isinstance(refs, list) and any(ref in empty for ref in refs):
+                    obj = obj.model_copy(
+                        update={"object_refs": [ref for ref in refs if ref not in empty]}
+                    )
+                kept.append(obj)
+            objects = kept
 
     def _family_refs(
         self, report: MalwareReport, ledger_order: Mapping[str, int]
@@ -1355,6 +1411,10 @@ def _relinked(obj: Any, remap: dict[str, str]) -> tuple[Any, str]:
     of. It is ``""`` for every other shape, which keeps the minted edge for a
     technique the judge only related some other way.
     """
+    refs = getattr(obj, "object_refs", None)
+    if isinstance(refs, list) and any(ref in remap for ref in refs):
+        # An object about the judge's techniques is about the rebuilt ones.
+        return obj.model_copy(update={"object_refs": [remap.get(r, r) for r in refs]}), ""
     if getattr(obj, "type", "") != "relationship":
         return obj, ""
     source = str(getattr(obj, "source_ref", "") or "")
