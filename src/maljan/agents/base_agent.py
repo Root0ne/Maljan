@@ -3388,7 +3388,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The per-turn refresher rides ``create_react_agent(prompt=...)``, which
         # langgraph 1.x deprecates in favour of ``langchain.agents.create_agent``
         # and its middleware hook. The contract this loop needs is one call
-        # before every model turn that can replace the system message; that is
+        # before every model turn that can rewrite the request it sends; that is
         # what moves when the helper does.
         def _close_off_truncated_calls(answer: Any) -> Any:
             """The model's turn with a call it ran out of room to finish made good.
@@ -4490,7 +4490,7 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         The delegated path (``agents.delegation``): the agent's own system
         prompt, the task as the human turn — framed like every other first
-        turn, with the pack in front and the run state in the system turn —
+        turn, with the pack in front and the run state as the last turn —
         the tool loop, the parse into claims, and the same checks an answer to
         a stage gets: the consistency gate and the technique check, in this
         agent's own conversation. Returns the loop's text and the checked ISR.
