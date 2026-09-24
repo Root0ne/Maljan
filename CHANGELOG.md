@@ -4436,6 +4436,15 @@ change landed on `main`.
   analysis and its sophistication rating beside the verdict.
 - **`reporting.builder.defang`**, replaced by `reporting.defang.defang(value, kind)`.
 
+### Documentation
+
+- **The benchmark is published** in `docs/benchmark/`: the method (samples,
+  models, the mock sandbox and the scoring key), the default model across four
+  iterations, a small model, the reference sample scored against Bitsight's
+  published Latrodectus analysis, the disassembler run, the PuTTY
+  false-positive control and the limitations, with the five item-by-item score
+  files. The README has a short "How Maljan compares" section that links to it.
+
 ### Upgrading
 
 An analyst claim carries `kept_after_absence_question` (false on a stored ISR,
