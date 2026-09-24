@@ -1157,7 +1157,10 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Output-token cap per report section when composer_enabled is true. 0 takes the "
             "judge's max tokens where set, else the model's declared maximum output, else a "
             "quarter of the context window the model serves; never more than the model's "
-            "maximum. The run summary and the worker log show the derivation."
+            "maximum. A positive value gets the reporter's own cap on top for reasoning where "
+            "thinking is left on, held at the model's maximum; with no judge's max tokens set "
+            "that resolves to the model's maximum. The run summary and the worker log show "
+            "the derivation."
         ),
         "subgroup": "Report content",
     },
@@ -1216,14 +1219,6 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Emits the extended STIX bundle (Identity/Note/Report SDOs) alongside the "
             "minimal judge bundle. Disable to roughly halve serialization cost when "
             "consumers only need the minimal bundle."
-        ),
-        "subgroup": "Report content",
-    },
-    "reporting.narrative_max_tokens": {
-        "title": "Narrative max tokens",
-        "description": (
-            "Hard output-token cap for the NarrativeAgent's LLM round, keeping "
-            "report-generation tail latency predictable."
         ),
         "subgroup": "Report content",
     },

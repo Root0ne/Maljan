@@ -83,7 +83,7 @@ class NarrativeOutput(BaseModel):
 # shown the keys answers with them; a model shown a description of the keys
 # answered with its own names on two unrelated models six times out of six.
 EXPECTED_OBJECT = """{
-  "executive_summary": "One paragraph.",
+  "executive_summary": "One paragraph of at least 120 characters.",
   "key_findings": [
     {"text": "One sentence stating one finding.", "evidence_ids": ["ev_0007"]}
   ],
@@ -146,18 +146,19 @@ _SYSTEM_PROMPT = (
     "sandbox entry above records some.\n"
     "2. Every MITRE ATT&CK technique you cite must appear in parentheses with "
     "its ID, e.g. 'inhibit system recovery (T1490)'.\n"
-    "3. executive_summary: one paragraph, no headings. This "
+    "3. executive_summary: one paragraph of at least 120 characters, no headings. This "
     "is a verdict/impact briefing ONLY — state the classification, the severity, "
     "the single most important risk, and the containment call to action. Do NOT "
     "enumerate individual techniques here.\n"
-    '4. key_findings: a JSON ARRAY of objects, each {"text": one finding, '
+    '4. key_findings: a JSON ARRAY of at least two objects, each {"text": one finding, '
     '"evidence_ids": [the ev_ ids it stands on]}. Emit the key ONCE with a list '
     "value. Cover what the sample is, what it does, how it persists, how it talks "
     "to its C2, how it is detected and what is uncertain. Cite only ev_ ids that "
     "appear in the evidence above; leave evidence_ids empty rather than invent one. "
     "A finding may only summarise what the evidence above holds: never introduce a "
     "fact nothing above states.\n"
-    "5. defensive_recommendations: one entry per action. Each entry is a JSON object "
+    "5. defensive_recommendations: at least three entries, one per action. Each entry "
+    "is a JSON object "
     "with EXACTLY these six fields, and the first four are REQUIRED:\n"
     "   - `category`: one of firewall, edr_hunting, registry_hardening, gpo, "
     "patching, user_awareness, other\n"
@@ -188,6 +189,10 @@ _SYSTEM_PROMPT = (
 
 
 _LIST_FIELDS = ("key_findings", "defensive_recommendations")
+
+# The calls the manual path may make: the answer and the one retry the
+# validation loop gives an answer it finds fault with.
+NARRATIVE_ATTEMPTS = 2
 
 
 def _parse_keeping_duplicate_keys(text: str) -> dict[str, Any] | None:
@@ -430,12 +435,25 @@ class NarrativeAgent:
     def __init__(
         self,
         llm: BaseChatModel,
-        max_input_tokens: int = 3000,
         token_ledger: Any | None = None,
         model_label: str = "",
+        *,
+        output_cap: int = 0,
+        budget_note: str = "",
+        generation_rates: Any | None = None,
+        window_tokens: int = 0,
     ) -> None:
         self.llm = llm
-        self.max_input_tokens = max_input_tokens
+        # The window the reporter's model serves, 0 when nothing reported one:
+        # a call whose budget would not fit beside its prompt is held to what
+        # the window leaves (:meth:`_call_bound`).
+        self.window_tokens = int(window_tokens or 0)
+        # What one answer of this round may run to and how it was reached
+        # (``container.report_stage_budget``), and the job's measured rates:
+        # together they size the round's wait (:meth:`round_timeout`).
+        self.output_cap = int(output_cap or 0)
+        self.budget_note = budget_note
+        self.generation_rates = generation_rates
         # The narrative round is a real LLM call and counts toward the run's
         # token total on both paths: the structured one asks for the raw turn
         # beside the parsed answer, because the parser hides the usage.
@@ -450,6 +468,72 @@ class NarrativeAgent:
         # narrative runs after the run summary is built, so the report node
         # reads this and folds it in rather than the builder collecting it.
         self.validation_tally = ValidationTally()
+
+    def attempts(self) -> int:
+        """The calls this round may make: its answer and one validation retry,
+        plus the structured attempt first where the endpoint supports one."""
+        return NARRATIVE_ATTEMPTS + (1 if structured_output_supported_for_llm(self.llm) else 0)
+
+    def round_timeout(self, configured: float, prompt_chars: int = 0) -> float:
+        """This round's wait: configured, or what its calls need at the model's pace.
+
+        The composer section's rule (``ReportComposer._section_timeout``):
+        where the model's rate is measured, each call is given the time its
+        output cap takes at that pace (``GenerationRates.call_timeout``, with
+        the prompt read at the reading rate where one is measured), and the
+        round holds :meth:`attempts` such calls; where it is not, or the round
+        has no output cap, the configured wait stands. Recorded in the run
+        summary as ``narrative:round``.
+        """
+        configured = float(configured)
+        rates = getattr(self, "generation_rates", None)
+        if rates is None:
+            return configured
+        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from maljan.llm.generation_rate import model_name_of
+
+        per_call = float(
+            rates.call_timeout(
+                "narrative:round",
+                model_name_of(self.llm),
+                configured,
+                int(getattr(self, "output_cap", 0) or 0),
+                budget=str(getattr(self, "budget_note", "") or ""),
+                prompt_tokens=-(-int(prompt_chars) // CHARS_PER_TOKEN),
+            )
+        )
+        if per_call <= configured:
+            return configured
+        return per_call * self.attempts()
+
+    def _call_bound(self, turns: Sequence[BaseMessage]) -> int | None:
+        """The ``max_tokens`` one call of this round is held to, or ``None``.
+
+        The composer's rule (``context_window.call_output_bound``): where the
+        window is known and the budget would not fit beside the prompt, the
+        call may write what the window leaves after it.
+        """
+        from maljan.llm.context_window import accepts_output_bound, call_output_bound
+
+        chars = sum(len(str(getattr(message, "content", "") or "")) for message in turns)
+        bound = call_output_bound(
+            int(getattr(self, "output_cap", 0) or 0),
+            int(getattr(self, "window_tokens", 0) or 0),
+            chars,
+        )
+        if bound is None or not accepts_output_bound(self.llm):
+            return None
+        return bound
+
+    def prompt_chars(
+        self, report: MalwareReport, facts_block: str = "", run_state: str = ""
+    ) -> int:
+        """The characters of this round's first prompt, as :meth:`generate` builds it."""
+        try:
+            messages = self._build_prompt(report, facts_block, run_state)
+            return sum(len(str(message.content)) for message in messages)
+        except Exception:  # noqa: BLE001 — a size is never worth a lost round
+            return len(_SYSTEM_PROMPT) + len(facts_block) + len(run_state)
 
     async def generate(
         self,
@@ -500,7 +584,9 @@ class NarrativeAgent:
         # more, producing 90 minutes of a silent report node. The manual-parse
         # path below is what actually serves local servers, and it is reached
         # in seconds instead of an hour and a half.
-        if structured_output_supported_for_llm(self.llm):
+        # A call that has to be held under its budget goes by the manual path,
+        # where the hold can be passed with the call.
+        if structured_output_supported_for_llm(self.llm) and self._call_bound(messages) is None:
             try:
                 structured = self.llm.with_structured_output(NarrativeOutput, include_raw=True)
                 result = structured_answer(
@@ -544,8 +630,20 @@ class NarrativeAgent:
         # template with nothing saying which rule was broken. A dropped socket
         # is still retried separately (``retry_on_connection_error``).
         async def _run(turns: list[BaseMessage]) -> Any:
+            bound = self._call_bound(turns)
+            if bound is not None:
+                logger.info(
+                    "NarrativeAgent: this call may write %d tokens — what its %d-token "
+                    "window leaves after the prompt, under its budget of %d.",
+                    bound,
+                    self.window_tokens,
+                    self.output_cap,
+                )
             raw = await retry_on_connection_error(
-                lambda: self.llm.ainvoke(turns), what="NarrativeAgent raw"
+                (lambda: self.llm.ainvoke(turns, max_tokens=bound))
+                if bound is not None
+                else (lambda: self.llm.ainvoke(turns)),
+                what="NarrativeAgent raw",
             )
             if self.token_ledger is not None:
                 try:

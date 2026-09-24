@@ -835,14 +835,42 @@ each model of the reporter's list, in order:
 
 It is never more than the model's maximum — its declared maximum output, or
 the window it serves when it declares none — and a value held at it says so;
-the reasoning room is inside that bound too. On DeepSeek's `deepseek-flash`
-with nothing set, a section may write 393,216 tokens, and the 1,048,576-token
-window leaves the remaining 655,360 for the section's evidence. A section
-whose facts do not fit what the window leaves after the budget records the
-degradation "the section's prompt without its claims and tool answers …
-exceeds the … its model's context window leaves after the reply", its claims
-and tool answers are shown as the no-room sentence, and the section is still
-asked. The worker log prints one line per section ("ReportComposer: section
+the reasoning room is inside that bound too. With thinking left on and no
+`llm.judge_max_tokens`, the reasoning room is the model's whole maximum, so
+any positive `composer_section_max_tokens` resolves to the model's maximum.
+On DeepSeek's `deepseek-flash` with nothing set, a section may write 393,216
+tokens, and the 1,048,576-token window leaves the remaining 655,360 for the
+section's evidence.
+
+A section's evidence is sized against the window only when the window was
+learned. The 8,192-token fallback a failed probe leaves is a number printed
+beside the word `fallback`, not a fact: the section's claims and tool answers
+are then shown whole, and its budget is the operator's value, else the
+model's declared maximum, else the documented 8,192. Where the window is
+known, the evidence room is the window less the budget, never below zero,
+and each call is held to what the window leaves after that call's own prompt
+(at three characters a token) when its budget would not fit beside it — a
+hosted API refuses a request whose prompt and `max_tokens` pass the window.
+The call's `max_tokens` is lowered for that call alone and the worker log says
+so; an Ollama model keeps the cap it was built with, since its client takes no
+per-call cap and the runtime stops at its own context. A budget that fills the
+window — a gateway that declares its window as its maximum output, a local
+`llm.judge_max_tokens` at or past the window — so leaves the section no room
+for claims and tool answers. A section whose facts do not fit what the window
+leaves records the degradation "the section's prompt without its claims and
+tool answers … exceeds the … its model's context window leaves after the
+reply", its claims and tool answers are shown as the no-room sentence, and
+the section is still asked.
+
+Every list a section's model writes — flow steps, configuration items,
+commands, flags, C2 channels, citations — is kept whole; no count cuts it.
+
+The narrative round (the executive summary, key findings and recommendations)
+takes the same budget, is held per call the same way, and waits the way a
+composer section does: 600 s until the reporter's pace is measured, then the
+time its budget takes at that pace for each call it may make (its answer, the
+one retry, and the structured attempt where the endpoint supports one).
+Appendix B prints it as `narrative:round`. The worker log prints one line per section ("ReportComposer: section
 '…' output budget: …"), and the run summary prints the derivation beside the
 section's wait ("Output budget of `composer:section`: 393216 tokens — the
 model's declared maximum output of 393216 (the vendored table's
@@ -866,18 +894,30 @@ Ollama's `prompt_eval_count` over `prompt_eval_duration` or llama.cpp's
 turns, and the prompt read where it is not timed on its own.
 The HTTP request carrying a call is sized the same way. Every provider's
 client is built with a 1,800 s request timeout
-(`PROVIDER_REQUEST_TIMEOUT_SECONDS`), which stands until the model's pace is
-measured. After that each OpenAI-compatible and Anthropic request carries its
-own timeout, the SDK's per-request option: the larger of 1,800 s and the time
-the request's own output cap takes at the measured pace, by the same
-arithmetic and margin (its prompt counted at three characters a token). So no
-derived wait is held under 1,800 s any more: at 3.8 tokens a second the
-judge's 8,192 tokens need 8,192 / 3.8 × 1.5 ≈ 3,234 s and get it, where 600 s
-allowed about 2,280 of them, and a 393,216-token section at 40 tokens a second
-gets 393,216 / 40 × 1.5 ≈ 14,746 s where a request cut at 1,800 s would have
-received about 48,000 of its tokens. The Ollama client streams every answer,
-so its 1,800 s bounds the silence between two pieces of an answer rather than
-the answer. A composer section is its answer and the one retry its validation
+(`PROVIDER_REQUEST_TIMEOUT_SECONDS`; Gemini's was a fixed 90 s and is now the
+same). httpx reads it as the longest silence it waits through, not as a
+deadline for the whole answer, so it ended an answer only on a server that
+sends nothing until it has finished — a non-streaming llama.cpp server, whose
+answers it held to about 1,800 s of generation. A streamed answer, and
+DeepSeek's, which sends keep-alive lines while it generates, were not ended
+by it. Once the model's pace is measured, an OpenAI-compatible (chat
+completions or Responses API), Anthropic or Gemini request whose output cap
+takes longer at that pace than its client allows carries its own timeout, the
+SDK's per-request option: that time, by the same arithmetic and margin, its
+prompt counted at three characters a token. Any other request keeps its
+client's timeout. So no derived wait is held under 1,800 s any more: at 3.8
+tokens a second the judge's 8,192 tokens need 8,192 / 3.8 × 1.5 ≈ 3,234 s and
+get it, where 600 s allowed about 2,280 of them, and a 393,216-token section
+at 40 tokens a second gets 393,216 / 40 × 1.5 ≈ 14,746 s. The Ollama client
+streams every answer, so its 1,800 s bounds the silence between two pieces of
+an answer. The function summariser's wait follows its request's.
+
+These waits have no upper bound of their own. A server that stays connected
+but stops generating, or a call left running on a single-slot llama.cpp
+server after its loop gave up on it, is held for the whole derived time — at
+3.8 tokens a second 32,768 tokens take about 12,900 s — where 1,800 s used to
+release it. The last resort is the analysis job's own arq timeout, 8 hours
+(`job_timeout` in `apps/api/app/worker/analysis_worker.py`). A composer section is its answer and the one retry its validation
 allows, so its wait holds two calls of its output cap: at 3.8 tokens a second
 a budget of 8,192 needs 2 × 8,192 / 3.8 × 1.5 ≈ 6,467 s; an operator's budget
 of 900 with the reporter's `disable_thinking` on needs 2 × 900 / 3.8 × 1.5 ≈

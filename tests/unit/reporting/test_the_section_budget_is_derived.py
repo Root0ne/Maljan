@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
+from langchain_core.messages import HumanMessage
 
 from maljan.analysis.run_summary import generation_lines
 from maljan.core.config import Settings
@@ -40,6 +41,7 @@ def _composer(
     detail: str = "",
     section: int = 0,
     thinking_off: bool = True,
+    source: str = "probed",
     **llm: int,
 ) -> Any:
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
@@ -58,7 +60,7 @@ def _composer(
     registry = MagicMock()
     registry.build_model_for_agent.return_value = FakeMessagesListChatModel(responses=[])
     container._llm_registry = registry  # type: ignore[assignment]
-    fact = WindowFact(window, "probed", detail or f"llama.cpp /props reported {window:,} tokens")
+    fact = WindowFact(window, source, detail or f"llama.cpp /props reported {window:,} tokens")
     with patch("maljan.llm.context_window.learn_window", return_value=fact):
         composer = container.get_report_composer()
     built = registry.build_model_for_agent.call_args.kwargs["max_tokens_for"]("openai")
@@ -328,7 +330,7 @@ def _compose(isr_reports: dict[str, Any], report: Any = None, **composer: int) -
         def with_structured_output(self, schema: type, **_: Any) -> Any:  # pragma: no cover
             raise RuntimeError("structured output is unavailable")
 
-        async def ainvoke(self, messages: Any) -> Any:
+        async def ainvoke(self, messages: Any, **_: Any) -> Any:
             prompt = str(messages[-1].content)
             section = prompt.split("The evidence for the ", 1)[-1].split(" section", 1)[0]
             sent.setdefault(section, prompt)
@@ -409,3 +411,89 @@ class TestTheFactsEnterWhole:
         assert "relay2999.example.net" in "".join(
             v for k, v in sent.items() if k != "_degradations"
         )
+
+
+class TestAWindowTheBudgetFills:
+    """The budget never leaves negative room, and a call is held to what the window leaves."""
+
+    def test_a_failed_probe_is_an_unknown_window_not_a_fact(self) -> None:
+        composer, built = _composer(
+            8192,
+            model=HOSTED_MODEL,
+            base_url="https://api.example.com",
+            detail="no endpoint reported a window",
+            source="fallback",
+        )
+
+        assert composer.output_cap == HOSTED_MAXIMUM
+        assert built == HOSTED_MAXIMUM
+        assert composer.window_tokens == 0
+        assert composer._room_chars() is None
+        assert composer._call_bound([HumanMessage(content="x" * 30000)]) is None
+
+    def test_a_gateway_declaring_its_window_as_its_output_leaves_no_debt(self) -> None:
+        from maljan.llm import model_output_limits
+
+        model_output_limits.note_from_model_list(
+            {"data": [{"id": "gateway-model", "max_completion_tokens": 131072}]},
+            "gateway-model",
+        )
+        try:
+            composer, _built = _composer(
+                131072,
+                model="gateway-model",
+                base_url="https://gateway.example.com",
+                detail="the served model list reported 131,072",
+            )
+        finally:
+            model_output_limits.forget_learned()
+
+        assert composer.output_cap == 131072
+        assert composer._room_chars() == 0
+        assert composer._call_bound([HumanMessage(content="x" * 3000)]) == 131072 - 1000
+
+    def test_a_local_judge_cap_past_the_window_is_held_per_call(self) -> None:
+        composer, _built = _composer(16384, judge_max_tokens=40000)
+
+        assert composer.output_cap == 16384
+        assert composer._room_chars() == 0
+        assert composer._call_bound([HumanMessage(content="x" * 3000)]) == 16384 - 1000
+
+    def test_a_budget_that_fits_beside_its_prompt_is_not_held(self) -> None:
+        composer, _built = _hosted()
+
+        assert composer._call_bound([HumanMessage(content="x" * 3000)]) is None
+
+    def test_the_held_value_reaches_the_call(self) -> None:
+        import asyncio
+
+        from maljan.reporting.composer import _IntroOut
+
+        sent: list[dict[str, Any]] = []
+
+        class _Raw:
+            async def ainvoke(self, messages: Any, **kwargs: Any) -> Any:
+                sent.append(kwargs)
+                return SimpleNamespace(content='{"text": "An example."}')
+
+        composer = ReportComposer(
+            llm=_Raw(),  # type: ignore[arg-type]
+            per_section_timeout=5,
+            output_cap=16384,
+            window_tokens=16384,
+        )
+        with patch(
+            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=True
+        ):
+            asyncio.run(
+                composer._invoke([HumanMessage(content="x" * 3000)], _IntroOut, section="intro")
+            )
+
+        assert sent == [{"max_tokens": 16384 - 1000}]
+
+    def test_an_ollama_model_is_left_to_its_own_context(self) -> None:
+        from langchain_ollama import ChatOllama
+
+        from maljan.llm.context_window import accepts_output_bound
+
+        assert not accepts_output_bound(ChatOllama(model="m"))

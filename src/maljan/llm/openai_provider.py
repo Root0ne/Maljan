@@ -716,6 +716,11 @@ def _with_standard_retry(
             replacement = provider._build(
                 model, temperature, base_url, rebuild_kwargs, force_standard=True
             )
+            # The meter the job attached goes with it, so the healed model's
+            # answers are measured and its requests sized like the original's.
+            from maljan.llm.generation_rate import carry_rate_meter
+
+            carry_rate_meter(model_obj, replacement)
             healed.append(replacement)
         _close_sync_client(model_obj)
         _announce_healed(model_obj, replacement)

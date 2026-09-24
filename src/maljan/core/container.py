@@ -131,54 +131,34 @@ def _drop_llm_caches_on_retirement(loop: object) -> None:
     clear_shared_httpx_clients()
 
 
-def composer_output_cap(config: Settings, provider: str | None = None) -> int:
-    """What a composer section may generate under a configured section budget, for any model.
-
-    Only asked when ``reporting.composer_section_max_tokens`` is set, and only
-    for a provider no model of the reporter's list names; each model of the
-    list is budgeted, and held at its maximum output, by
-    :func:`composer_output_budget`.
-
-    Ollama's ``num_predict`` and llama.cpp's ``n_predict`` count the reasoning
-    channel with the answer, and a reasoning model left thinking spends its
-    budget there: a 900-token cap came back as an empty section. The platform
-    cannot tell a reasoning model from its tag; what it knows is whether it
-    asked the reporter's provider to keep reasoning out
-    (``llm.ollama.disable_thinking`` / ``llm.openai.disable_thinking``). Asked,
-    the cap is the section's own budget. Not asked, the cap leaves the room
-    the reporter already has for reasoning — ``judge_max_tokens`` — on top of
-    the section's budget, rather than asking the model not to reason: a
-    ``think: false`` a model does not understand is an error on Ollama, and
-    the setting that sends it is the operator's.
-
-    Decided per provider: each model of the reporter's list is capped by its
-    own provider's switch. With no provider named, the reporter's first.
-    """
-    section = int(config.reporting.composer_section_max_tokens)
-    if section <= 0:
-        return 0
-    if provider is None:
-        agent = config.llm.agents.get(REPORTER_AGENT_KEY)
-        provider = str(getattr(agent, "provider", "") or config.llm.provider)
-    if not _reporter_reasons(config, provider):
-        return section
-    from maljan.llm.context_window import output_cap_for
-
-    return (
-        section
-        + output_cap_for(config, "judge_max_tokens", REPORTER_AGENT_KEY, role="judge").tokens
-    )
-
-
 def _reporter_reasons(config: Settings, provider: str) -> bool:
     """Whether the reporter's ``provider`` was left free to reason inside its cap.
 
     Ollama's ``num_predict`` and llama.cpp's ``n_predict`` count the reasoning
-    channel with the answer; what the platform knows is whether it asked the
-    provider to keep reasoning out (``llm.<provider>.disable_thinking``).
+    channel with the answer, and a reasoning model left thinking spends its
+    budget there: a 900-token section cap came back as an empty section. The
+    platform cannot tell a reasoning model from its tag; what it knows is
+    whether it asked the provider to keep reasoning out
+    (``llm.ollama.disable_thinking`` / ``llm.openai.disable_thinking``). Not
+    asked, an operator's section budget is given the reporter's own cap on top
+    for the reasoning, rather than the model being asked not to reason: a
+    ``think: false`` a model does not understand is an error on Ollama, and the
+    setting that sends it is the operator's.
     """
     block = getattr(config.llm, provider, None)
     return provider in ("ollama", "openai") and not bool(getattr(block, "disable_thinking", False))
+
+
+def _known_window(window: Any) -> int:
+    """A learned window's tokens, or 0 for one nothing reported.
+
+    The fallback window is a number to print beside the word ``fallback``, not
+    a fact: a section's evidence is not sized against it, and a call's output
+    is not bounded by it.
+    """
+    from maljan.llm.context_window import FALLBACK
+
+    return 0 if getattr(window, "source", FALLBACK) == FALLBACK else int(window.tokens)
 
 
 def report_stage_budget(config: Settings, assignment: Any, *, probe: bool = True) -> Any:
@@ -205,7 +185,7 @@ def composer_output_budget(config: Settings, assignment: Any) -> tuple[int, str,
 
     In order: ``reporting.composer_section_max_tokens`` above 0, the operator's
     section budget, plus the reporter's own cap as room for reasoning where the
-    provider was not asked to keep reasoning out (:func:`composer_output_cap`);
+    provider was not asked to keep reasoning out (:func:`_reporter_reasons`);
     else the operator's ``llm.judge_max_tokens``, the reporter's cap; else the
     model's declared maximum output; else the analysts' derivation, a quarter
     of the window. Never more than the model's maximum output, the reasoning
@@ -222,7 +202,7 @@ def composer_output_budget(config: Settings, assignment: Any) -> tuple[int, str,
     section = int(config.reporting.composer_section_max_tokens)
     if section <= 0:
         budget = report_stage_budget(config, assignment)
-        return budget.tokens, budget.sentence(), budget.window.tokens
+        return budget.tokens, budget.sentence(), _known_window(budget.window)
     said = f"reporting.composer_section_max_tokens is set to {section}"
     total = section
     if _reporter_reasons(config, str(assignment.provider)):
@@ -230,7 +210,7 @@ def composer_output_budget(config: Settings, assignment: Any) -> tuple[int, str,
         total += reasoning.tokens
         said += f", plus {reasoning.tokens} for its reasoning ({reasoning.sentence()})"
     budget = report_output_budget(config, assignment, total, said)
-    return budget.tokens, budget.sentence(), budget.window.tokens
+    return budget.tokens, budget.sentence(), _known_window(budget.window)
 
 
 def _swap_healed_llm(replaced: object, healed: object) -> None:
@@ -581,13 +561,28 @@ class ServiceContainer:
                 if best is None or budget.tokens < best.tokens:
                     best = budget
         except Exception as exc:  # noqa: BLE001 — an unreadable assignment takes the derived cap
-            logger.debug("report stage: no budget for the reporter's list (%s)", exc)
+            logger.warning(
+                "Report stage: the reporter's list could not be budgeted (%s); its model "
+                "takes the analysts' derived cap instead of the report stage's order.",
+                exc,
+            )
         if best is None:
-            return self._output_cap("judge_max_tokens", REPORTER_AGENT_KEY, role="judge")
+            tokens = self._output_cap("judge_max_tokens", REPORTER_AGENT_KEY, role="judge")
+            self._reporter_output_budget = (
+                tokens,
+                f"{tokens} tokens — the analysts' derivation",
+                0,
+            )
+            return tokens
         rates = getattr(self, "_generation_rates", None)
         if rates is not None:
             rates.note_output_cap(REPORTER_AGENT_KEY, best.tokens, best.sentence())
         logger.info("Output cap for %s: %s.", REPORTER_AGENT_KEY, best.sentence())
+        self._reporter_output_budget = (
+            int(best.tokens),
+            best.sentence(),
+            _known_window(best.window),
+        )
         return int(best.tokens)
 
     def get_expert_llm(self) -> BaseChatModel:
@@ -1273,12 +1268,15 @@ class ServiceContainer:
                 from maljan.reporting.narrative_agent import NarrativeAgent
 
                 llm = self.get_reporter_llm()
-                max_tokens = self.config.reporting.narrative_max_tokens
+                cap, why, window = getattr(self, "_reporter_output_budget", (0, "", 0))
                 self._narrative_agent_cache = NarrativeAgent(
                     llm=llm,
-                    max_input_tokens=max_tokens,
                     token_ledger=getattr(self, "_token_ledger", None),
                     model_label=self._reporter_model_label(),
+                    output_cap=cap,
+                    budget_note=why,
+                    generation_rates=getattr(self, "_generation_rates", None),
+                    window_tokens=window,
                 )
                 self._narrative_agent_cache.event_sink = self.event_sink
             return self._narrative_agent_cache
@@ -1343,11 +1341,14 @@ class ServiceContainer:
                     by_provider[a.provider] = min(by_provider.get(a.provider, tokens), tokens)
                 # A section's tool answers are sized for the tightest window of
                 # the list, since any model of it may be the one that answers.
+                # A window nothing reported is left out: it is not a fact to
+                # size evidence against.
                 window_tokens = min(
-                    (window for _tokens, _why, window in budgets.values()), default=0
+                    (window for _tokens, _why, window in budgets.values() if window > 0),
+                    default=0,
                 )
                 # The wait is sized for the most a model of the list may write.
-                output_cap = max(caps.values(), default=composer_output_cap(config))
+                output_cap = max(caps.values(), default=0)
                 budget_note = "; ".join(
                     why if len(budgets) == 1 else f"{label}: {why}"
                     for label, (_tokens, why, _window) in budgets.items()
@@ -1363,9 +1364,9 @@ class ServiceContainer:
                 composer_llm = registry.build_model_for_agent(
                     REPORTER_AGENT_KEY,
                     fallback_role="judge",
-                    max_tokens_for=lambda provider: by_provider.get(
-                        provider, composer_output_cap(config, provider)
-                    ),
+                    # Every model of the list is budgeted above, and held at
+                    # its maximum; no other provider is built.
+                    max_tokens_for=lambda provider: by_provider.get(provider, output_cap),
                 )
                 attach_rate_meter(composer_llm, getattr(self, "_generation_rates", None))
                 self._report_composer_cache = ReportComposer(

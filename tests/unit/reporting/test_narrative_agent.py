@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
@@ -155,14 +155,23 @@ class TestNarrativeOutputSchema:
         assert len(out.key_findings) == 15
         assert len(out.defensive_recommendations) == 15
 
-    def test_the_prompt_asks_for_no_length_or_count(self) -> None:
+    def test_the_prompt_sets_no_upper_size(self) -> None:
         import re
 
         from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXPECTED_OBJECT
 
         for text in (_SYSTEM_PROMPT, EXPECTED_OBJECT):
             assert not re.search(r"\d+\s*(-|to)\s*\d+", text)
-            assert "characters" not in text
+            assert not re.search(r"\b(at most|no more than|up to)\b", text)
+
+    def test_the_prompt_states_the_minimums_the_schema_holds(self) -> None:
+        from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXPECTED_OBJECT
+
+        assert NarrativeOutput.model_fields["executive_summary"].metadata[0].min_length == 120
+        assert "at least 120 characters" in _SYSTEM_PROMPT
+        assert "at least 120 characters" in EXPECTED_OBJECT
+        assert "at least two objects" in _SYSTEM_PROMPT
+        assert "at least three entries" in _SYSTEM_PROMPT
 
     def test_two_good_key_findings_are_kept(self) -> None:
         """Two findings are a whole answer; the lower bound is what the schema keeps."""
@@ -583,3 +592,65 @@ class TestAKeyFindingCitesOnlyWhatTheLedgerHolds:
 
         assert await NarrativeAgent(llm=llm).generate(self._report_with_index()) is not None
         assert llm.ainvoke.await_count == 1
+
+
+class TestTheRoundIsSizedFromItsBudget:
+    """The narrative round waits as long as its output budget takes at the model's pace."""
+
+    MODEL = "narrative-model"
+
+    class _Named:
+        model_name = "narrative-model"
+
+        async def ainvoke(self, messages: Any, **_: Any) -> Any:  # pragma: no cover
+            raise RuntimeError("not called")
+
+    def _agent(self, rates: Any, cap: int = 393216, window: int = 0) -> NarrativeAgent:
+        return NarrativeAgent(
+            llm=self._Named(),  # type: ignore[arg-type]
+            output_cap=cap,
+            budget_note=f"{cap} tokens — the model's declared maximum output",
+            generation_rates=rates,
+            window_tokens=window,
+        )
+
+    def test_with_no_rate_the_configured_wait_stands(self) -> None:
+        from maljan.llm.generation_rate import GenerationRates
+
+        assert self._agent(GenerationRates()).round_timeout(600.0) == 600.0
+
+    def test_a_measured_pace_sizes_every_attempt(self) -> None:
+        from maljan.llm.generation_rate import TIMEOUT_MARGIN, GenerationRates
+        from maljan.reporting.narrative_agent import NARRATIVE_ATTEMPTS
+
+        rates = GenerationRates()
+        rates.observe(self.MODEL, 4000, 100.0, "output tokens over the call's wall clock")
+        agent = self._agent(rates)
+        with patch(
+            "maljan.reporting.narrative_agent.structured_output_supported_for_llm",
+            return_value=False,
+        ):
+            seconds = agent.round_timeout(600.0)
+
+        assert seconds == pytest.approx(NARRATIVE_ATTEMPTS * 393216 / 40 * TIMEOUT_MARGIN)
+        row = rates.snapshot()["timeouts"]["narrative:round"]
+        assert row["max_tokens"] == 393216
+        assert row["budget"].startswith("393216 tokens")
+
+    def test_the_report_node_uses_the_sized_wait(self) -> None:
+        from maljan.llm.generation_rate import GenerationRates
+        from maljan.pipeline.nodes import _narrative_timeout
+
+        rates = GenerationRates()
+        rates.observe(self.MODEL, 4000, 100.0, "output tokens over the call's wall clock")
+        agent = self._agent(rates)
+
+        assert _narrative_timeout(agent, _make_report(), "", "") > 1800
+
+    def test_a_call_past_its_window_is_held_to_what_the_window_leaves(self) -> None:
+        from langchain_core.messages import HumanMessage
+
+        agent = self._agent(None, cap=16384, window=16384)
+
+        assert agent._call_bound([HumanMessage(content="x" * 3000)]) == 16384 - 1000
+        assert self._agent(None, cap=16384, window=0)._call_bound([]) is None

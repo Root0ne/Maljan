@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
@@ -719,13 +720,25 @@ class TestTheRequestCarriesItsOwnTimeout:
 
         assert payload["timeout"] == pytest.approx(393216 / 40 * TIMEOUT_MARGIN)
 
-    def test_an_unmeasured_model_sends_the_request_as_it_was(self) -> None:
+    def test_an_unmeasured_model_is_left_to_its_client(self) -> None:
         built = self._openai(393216)
         attach_rate_meter(built, GenerationRates())
 
         payload = built._get_request_payload([HumanMessage(content="write the report")])
 
-        assert payload.get("timeout") == UNMEASURED_REQUEST_TIMEOUT_SECONDS
+        assert "timeout" not in payload
+
+    def test_a_request_within_its_client_s_timeout_is_left_to_it(self) -> None:
+        from maljan.llm.generation_rate import model_name_of
+
+        built = self._openai(8192)
+        rates = GenerationRates()
+        rates.observe(model_name_of(built), 100000, 100.0, "llama.cpp timings")
+        attach_rate_meter(built, rates)
+
+        payload = built._get_request_payload([HumanMessage(content="write the report")])
+
+        assert "timeout" not in payload
 
     def test_a_model_with_no_meter_is_left_to_its_client(self) -> None:
         payload = self._openai(393216)._get_request_payload([HumanMessage(content="x")])
@@ -749,3 +762,76 @@ class TestTheRequestCarriesItsOwnTimeout:
         payload = built._get_request_payload([HumanMessage(content="write the report")])
 
         assert payload["timeout"] == pytest.approx(64000 / 40 * TIMEOUT_MARGIN)
+
+    def test_the_deepseek_dialect_carries_the_timeout_and_its_cap_together(self) -> None:
+        from pydantic import SecretStr
+
+        from maljan.core.config import Settings
+        from maljan.llm.generation_rate import model_name_of
+        from maljan.llm.openai_provider import OpenAIProvider
+
+        settings = Settings(_env_file=None)  # type: ignore[call-arg]
+        settings.llm.openai.base_url = "https://api.example.com"
+        settings.llm.openai.api_key = SecretStr("hosted")
+        settings.llm.openai.compat = "deepseek"
+        built = OpenAIProvider(settings).build_model("m", 0.1, max_tokens=393216)
+        rates = GenerationRates()
+        rates.observe(model_name_of(built), 4000, 100.0, "output tokens over the call's wall clock")
+        attach_rate_meter(built, rates)
+
+        payload = built._get_request_payload([HumanMessage(content="write the report")])
+
+        assert payload["timeout"] == pytest.approx(393216 / 40 * TIMEOUT_MARGIN)
+        assert payload["extra_body"]["max_tokens"] == 393216
+
+    def test_a_responses_api_request_is_sized_from_its_output_cap(self) -> None:
+        from maljan.llm.generation_rate import request_timeout_for
+
+        class _Metered:
+            callbacks: list[Any] = []
+
+        model = _Metered()
+        rates = GenerationRates()
+        rates.observe(SLOW, 4000, 100.0, "output tokens over the call's wall clock")
+        attach_rate_meter(model, rates, SLOW)
+
+        seconds = request_timeout_for(
+            model, {"max_output_tokens": 393216, "input": [{"role": "user", "content": "x"}]}
+        )
+
+        assert seconds == pytest.approx(393216 / 40 * TIMEOUT_MARGIN)
+
+    def test_a_gemini_request_is_sized_the_same_way(self) -> None:
+        from pydantic import SecretStr
+
+        from maljan.core.config import Settings
+        from maljan.llm.gemini_provider import GeminiProvider
+        from maljan.llm.generation_rate import model_name_of
+
+        settings = Settings(_env_file=None)  # type: ignore[call-arg]
+        settings.llm.gemini.api_key = SecretStr("hosted")
+        built = GeminiProvider(settings).build_model("gemini-example", 0.1, max_output_tokens=64000)
+        assert built.timeout == UNMEASURED_REQUEST_TIMEOUT_SECONDS  # type: ignore[attr-defined]
+        rates = GenerationRates()
+        rates.observe(model_name_of(built), 4000, 100.0, "output tokens over the call's wall clock")
+        attach_rate_meter(built, rates)
+
+        with patch.object(type(built).__mro__[1], "_prepare_request", lambda _self, _m, **kw: kw):
+            sent = built._prepare_request([HumanMessage(content="write the report")])
+
+        assert sent["timeout"] == pytest.approx(64000 / 40 * TIMEOUT_MARGIN)
+
+    def test_a_healed_model_keeps_its_meter(self) -> None:
+        from maljan.llm.generation_rate import RateMeter, carry_rate_meter
+
+        class _Model:
+            callbacks: list[Any] = []
+
+        original, healed = _Model(), _Model()
+        rates = GenerationRates()
+        attach_rate_meter(original, rates, SLOW)
+
+        carry_rate_meter(original, healed)
+
+        (meter,) = [cb for cb in healed.callbacks if isinstance(cb, RateMeter)]
+        assert meter.rates is rates and meter.model == SLOW

@@ -57,11 +57,14 @@ TIMEOUT_MARGIN = 1.5
 
 # The HTTP request timeout a call is sent with until its model has a measured
 # rate: the one every provider builds its client with
-# (``registry.PROVIDER_REQUEST_TIMEOUT_SECONDS``). Once a rate is measured the
-# request is given the larger of it and the call's derived time, so the derived
-# waits above are no longer held under it: a 393,216-token answer at 40 tokens
-# a second needs 393,216 / 40 × 1.5 ≈ 14,746 s, and a request cut at 1,800 s
-# would have received about 48,000 of those tokens.
+# (``registry.PROVIDER_REQUEST_TIMEOUT_SECONDS``). httpx reads it as the
+# longest silence it waits through, so it ended an answer only on a server that
+# sends nothing until it has finished — a non-streaming llama.cpp server; a
+# streamed answer, or DeepSeek's, which sends keep-alive lines while it
+# generates, was not ended by it. Once a rate is measured a request whose
+# output cap takes longer at that pace is given that time instead
+# (``with_sized_request_timeout``), and the derived waits above are no longer
+# held under it.
 UNMEASURED_REQUEST_TIMEOUT_SECONDS = float(PROVIDER_REQUEST_TIMEOUT_SECONDS)
 
 OLLAMA_SOURCE = "ollama eval_count/eval_duration"
@@ -470,43 +473,100 @@ def attach_rate_meter(llm: Any, rates: GenerationRates | None, model: str | None
     return llm
 
 
-# The payload fields an output cap is sent under, in the order they are read.
-_PAYLOAD_CAP_KEYS = ("max_completion_tokens", "max_tokens")
+# The payload fields an output cap is sent under, in the order they are read:
+# chat completions' two and the Responses API's.
+_PAYLOAD_CAP_KEYS = ("max_completion_tokens", "max_tokens", "max_output_tokens")
+
+# Where a built model keeps the request timeout its client was given.
+_CLIENT_TIMEOUT_ATTRS = ("request_timeout", "default_request_timeout", "timeout")
+
+
+def _meter_of(llm: Any) -> RateMeter | None:
+    """The ``RateMeter`` attached to ``llm``, or ``None``."""
+    return next(
+        (cb for cb in (getattr(llm, "callbacks", None) or []) if isinstance(cb, RateMeter)),
+        None,
+    )
+
+
+def carry_rate_meter(source: Any, target: Any) -> Any:
+    """Attach ``source``'s meter to ``target`` as well, when it has one; returns ``target``.
+
+    For a model rebuilt in place of another — the llama.cpp self-heal — so the
+    replacement's answers are measured, and its requests sized, as the
+    original's were.
+    """
+    meter = _meter_of(source)
+    if meter is None:
+        return target
+    return attach_rate_meter(target, meter.rates, meter.model)
+
+
+def _client_timeout(llm: Any) -> float:
+    """The request timeout ``llm``'s client was built with, or the unmeasured one."""
+    for attr in _CLIENT_TIMEOUT_ATTRS:
+        value = getattr(llm, attr, None)
+        if isinstance(value, int | float) and not isinstance(value, bool) and value > 0:
+            return float(value)
+    return UNMEASURED_REQUEST_TIMEOUT_SECONDS
+
+
+def sized_request_timeout(llm: Any, cap: int, prompt_chars: int = 0) -> float | None:
+    """The timeout one request of ``llm`` needs beyond its client's, or ``None``.
+
+    The time the request's output cap takes at the model's measured pace, by
+    :meth:`GenerationRates.request_timeout`'s arithmetic, with its prompt at
+    ``CHARS_PER_TOKEN`` characters a token. ``None`` — the client's own timeout
+    stands — for a model with no meter, no measured rate yet, a request with no
+    cap, or one whose derived time is within what its client already allows.
+    Never raises.
+    """
+    try:
+        meter = _meter_of(llm)
+        if meter is None or int(cap or 0) <= 0:
+            return None
+        if meter.rates.rate(meter.model) is None:
+            return None
+        from maljan.llm.context_window import CHARS_PER_TOKEN
+
+        seconds = meter.rates.request_timeout(
+            meter.model, int(cap), -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+        )
+        return seconds if seconds > _client_timeout(llm) else None
+    except Exception:  # noqa: BLE001 — a timeout that cannot be sized keeps the client's
+        return None
+
+
+def _content_chars(entries: Any) -> int:
+    """The characters of a request's messages (chat completions) or input items (Responses)."""
+    if isinstance(entries, str):
+        return len(entries)
+    total = 0
+    for entry in entries or []:
+        if isinstance(entry, dict):
+            total += len(str(entry.get("content") or ""))
+        else:
+            total += len(str(getattr(entry, "content", "") or ""))
+    return total
 
 
 def request_timeout_for(llm: Any, payload: dict[str, Any]) -> float | None:
     """The HTTP request timeout one request of ``llm`` is sent with, or ``None``.
 
-    Read from the request itself: its output cap (``max_completion_tokens`` or
-    ``max_tokens``), its prompt at ``CHARS_PER_TOKEN`` characters a token, and
-    the rates of the ``RateMeter`` attached to ``llm``
-    (:meth:`GenerationRates.request_timeout`). ``None`` — the client's own
-    timeout stands — for a model with no meter or a request with no cap.
-    Never raises.
+    Read from the request itself: its output cap (``max_completion_tokens``,
+    ``max_tokens`` or the Responses API's ``max_output_tokens``) and its prompt
+    (``messages``, or the Responses API's ``input``), sized by
+    :func:`sized_request_timeout`. Never raises.
     """
     try:
-        meter = next(
-            (cb for cb in (getattr(llm, "callbacks", None) or []) if isinstance(cb, RateMeter)),
-            None,
-        )
-        if meter is None:
-            return None
         cap = 0
         for key in _PAYLOAD_CAP_KEYS:
             value = payload.get(key)
             if isinstance(value, int) and not isinstance(value, bool) and value > 0:
                 cap = value
                 break
-        if cap <= 0:
-            return None
-        from maljan.llm.context_window import CHARS_PER_TOKEN
-
-        chars = sum(
-            len(str(message.get("content") or ""))
-            for message in payload.get("messages") or []
-            if isinstance(message, dict)
-        )
-        return meter.rates.request_timeout(meter.model, cap, -(-chars // CHARS_PER_TOKEN))
+        chars = _content_chars(payload.get("messages")) + _content_chars(payload.get("input"))
+        return sized_request_timeout(llm, cap, chars)
     except Exception:  # noqa: BLE001 — a timeout that cannot be sized keeps the client's
         return None
 
@@ -518,31 +578,53 @@ _SIZED_CLASSES: dict[type, type] = {}
 def with_sized_request_timeout(chat_class: Any) -> Any:
     """``chat_class`` sending each request with a timeout sized for its answer.
 
-    The client is built with ``PROVIDER_REQUEST_TIMEOUT_SECONDS``, and without
-    this every request ended there, whatever its output cap: a long answer at
-    a measured pace was cut by the client while the wait around it still ran.
-    Each request now carries its own ``timeout`` — the SDK's per-request
-    option, which overrides the client's — sized from the request's output
-    cap and the model's measured rates
-    (:func:`request_timeout_for`): the larger of the client's
-    timeout and the time the cap takes at that pace. A model with no measured
-    rate yet, or a request with no cap, is sent as it was.
+    The client is built with ``PROVIDER_REQUEST_TIMEOUT_SECONDS``. httpx reads
+    that as the longest silence it waits through, not as a deadline for the
+    whole answer, so it ended a request only where the server sent nothing
+    until it had finished — a non-streaming llama.cpp server, which kept a
+    long answer to about 1,800 s of generation. Each request now carries its
+    own ``timeout`` where the model's pace is measured and its output cap takes
+    longer than the client allows: the SDK's per-request option, which
+    overrides the client's (:func:`request_timeout_for`). Anything else is sent
+    as it was.
+
+    Chat classes that build an OpenAI-style payload (``_get_request_payload``)
+    get the timeout in the payload; Gemini's (``_prepare_request``) gets it as
+    the ``timeout`` argument that method reads.
     """
-    if not isinstance(chat_class, type) or not hasattr(chat_class, "_get_request_payload"):
+    if not isinstance(chat_class, type):
         return chat_class
     cached = _SIZED_CLASSES.get(chat_class)
     if cached is not None:
         return cached
     base: Any = chat_class
+    members: dict[str, Any] = {}
 
-    def _get_request_payload(self: Any, input_: Any, *, stop: Any = None, **kwargs: Any) -> Any:
-        payload = base._get_request_payload(self, input_, stop=stop, **kwargs)
-        if isinstance(payload, dict) and "timeout" not in payload:
-            seconds = request_timeout_for(self, payload)
-            if seconds is not None:
-                payload["timeout"] = seconds
-        return payload
+    if hasattr(chat_class, "_get_request_payload"):
 
-    sized = type(chat_class.__name__, (chat_class,), {"_get_request_payload": _get_request_payload})
+        def _get_request_payload(self: Any, input_: Any, *, stop: Any = None, **kwargs: Any) -> Any:
+            payload = base._get_request_payload(self, input_, stop=stop, **kwargs)
+            if isinstance(payload, dict) and "timeout" not in payload:
+                seconds = request_timeout_for(self, payload)
+                if seconds is not None:
+                    payload["timeout"] = seconds
+            return payload
+
+        members["_get_request_payload"] = _get_request_payload
+    elif hasattr(chat_class, "_prepare_request"):
+
+        def _prepare_request(self: Any, messages: Any, **kwargs: Any) -> Any:
+            if kwargs.get("timeout") is None:
+                cap = kwargs.get("max_output_tokens") or getattr(self, "max_output_tokens", 0)
+                seconds = sized_request_timeout(self, int(cap or 0), _content_chars(messages))
+                if seconds is not None:
+                    kwargs["timeout"] = seconds
+            return base._prepare_request(self, messages, **kwargs)
+
+        members["_prepare_request"] = _prepare_request
+    else:
+        return chat_class
+
+    sized = type(chat_class.__name__, (chat_class,), members)
     _SIZED_CLASSES[chat_class] = sized
     return sized

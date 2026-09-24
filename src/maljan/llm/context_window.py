@@ -1335,6 +1335,39 @@ def model_maximum_output(window: WindowFact, model: object) -> tuple[int, str]:
     return 0, ""
 
 
+def call_output_bound(cap: int, window_tokens: int, prompt_chars: int) -> int | None:
+    """The ``max_tokens`` one call is sent with when its budget would pass the window, or ``None``.
+
+    A call's answer is written into the window its prompt already fills, so the
+    most it can be is the window less the prompt, at :data:`CHARS_PER_TOKEN`
+    characters a token. ``None`` — the budget stands — when the window is not
+    known (``window_tokens`` 0: nothing to bound by) or the budget already fits.
+    Never below one token: a prompt that fills the window is the caller's
+    degradation to record, not a request for nothing.
+    """
+    if int(window_tokens) <= 0 or int(cap) <= 0:
+        return None
+    left = int(window_tokens) - -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+    if int(cap) <= left:
+        return None
+    return max(1, left)
+
+
+# The chat model types a per-call ``max_tokens`` cannot be handed to: Ollama's
+# client takes its cap only inside ``options`` and refuses an unknown keyword.
+# A runtime we run stops at its own context rather than refusing the request,
+# so leaving its cap as built costs no call.
+_NO_PER_CALL_CAP = ("ChatOllama",)
+
+
+def accepts_output_bound(llm: Any) -> bool:
+    """Whether ``max_tokens`` may be passed to one call of ``llm`` (every model of a list)."""
+    models = getattr(llm, "models", None)
+    if isinstance(models, list) and models:
+        return all(accepts_output_bound(model) for model in models)
+    return not any(cls.__name__ in _NO_PER_CALL_CAP for cls in type(llm).__mro__)
+
+
 def report_output_budget(
     settings: Any,
     assignment: Any,

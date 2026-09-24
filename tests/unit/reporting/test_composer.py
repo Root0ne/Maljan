@@ -620,20 +620,37 @@ class TestEachSectionIsShownAnExampleOfItsShape:
         assert module._EXAMPLES["execution_flow"] in human
 
 
-class TestAModelListIsCutOnlyWithARecord:
-    def test_a_list_past_its_cap_is_kept_to_the_cap_and_recorded(self) -> None:
-        comp = ReportComposer(llm=None, per_section_timeout=5)  # type: ignore[arg-type]
-        kept = comp._kept("execution_flow", list(range(25)), 20)
-        assert kept == list(range(20))
-        assert comp.degradations == [
-            "report section 'execution_flow' was trimmed: the report keeps the first 20 of "
-            "the 25 items the report model wrote"
-        ]
+class TestAModelListIsKeptWhole:
+    """No count cuts what the report model wrote: every item it lists is kept."""
 
-    def test_a_list_within_its_cap_is_kept_whole_and_says_nothing(self) -> None:
-        comp = ReportComposer(llm=None, per_section_timeout=5)  # type: ignore[arg-type]
-        assert comp._kept("commands", [1, 2], 40) == [1, 2]
-        assert comp.degradations == []
+    @staticmethod
+    def _isr() -> dict[str, Any]:
+        return {
+            "static": AgentISR(
+                agent_id="static",
+                domain="static",
+                claims=[
+                    ClaimEvidence(
+                        claim="Resolves APIs by CRC32 hash", evidence_ref="ev_0009", confidence=0.8
+                    )
+                ],
+            )
+        }
+
+    def test_every_flow_step_is_kept(self) -> None:
+        steps = [
+            {"order": i, "action": f"Step {i}", "voice": "assessed", "evidence_refs": ["ev_0009"]}
+            for i in range(1, 36)
+        ]
+        r = _report()
+        _compose(r, by_schema={"_FlowOut": {"steps": steps}}, isr=self._isr())
+
+        assert r.technical_analysis is not None
+        assert len(r.technical_analysis.execution_flow) == 35
+        assert not any("trimmed" in reason for reason in r.degradation_reasons or [])
+
+    def test_the_composer_has_no_list_cap(self) -> None:
+        assert not hasattr(ReportComposer, "_kept")
 
 
 class TestTheModelDecidesTheLength:

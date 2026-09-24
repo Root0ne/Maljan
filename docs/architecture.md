@@ -1689,9 +1689,11 @@ inside the list rather than being cancelled with the whole loop (on the
 blocking path the abandoned call is left in a daemon thread, so it never holds
 up the process's exit); and every provider's client has a request
 timeout (1800 s, `PROVIDER_REQUEST_TIMEOUT_SECONDS` — Ollama's had none) until
-the model's pace is measured; then each OpenAI-compatible and Anthropic request
-carries its own, the larger of that and the time its output cap takes at the
-measured pace (`generation_rate.with_sized_request_timeout`). A 429
+the model's pace is measured; then an OpenAI-compatible, Anthropic or Gemini
+request whose output cap takes longer at the measured pace carries that time
+as its own (`generation_rate.with_sized_request_timeout`; Gemini's fixed 90 s
+is gone). httpx reads a client's timeout as the longest silence, so it only
+ever ended an answer on a server that sends nothing until done. A 429
 or 503 that asks, in `Retry-After` (seconds or an HTTP date), for at most thirty seconds is waited out on
 the same model once before the list moves on. The switch is **sticky for the
 loop**: the model that took over answers the rest of that loop, so a stalled
@@ -2535,8 +2537,14 @@ is assembled from what the run gathered rather than recomputed beside it:
   we run, the documented 8,192 for a hosted API that declares nothing). Never
   more than the model's maximum — its declared maximum output, or its window
   when it declares none — reasoning room included. A section's evidence gets
-  what the window leaves after the budget; facts that do not fit record a
-  degradation and the section is still asked. The derivation is logged per
+  what a learned window leaves after the budget, never below zero (a fallback
+  window sizes nothing); each call is held to what the window leaves after its
+  own prompt when the budget would not fit beside it
+  (`context_window.call_output_bound`); facts that do not fit record a
+  degradation and the section is still asked. The narrative round takes the
+  same budget and its wait is sized like a section's
+  (`NarrativeAgent.round_timeout`, `narrative:round` in Appendix B). Every list
+  a section's model writes is kept whole. The derivation is logged per
   section and printed in Appendix B beside the section's wait ("Output budget
   of `composer:section`"). A fixed budget dropped a section of a live report
   when the model's answer outgrew it, and a quarter of a million-token window

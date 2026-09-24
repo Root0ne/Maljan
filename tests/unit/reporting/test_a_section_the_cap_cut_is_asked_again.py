@@ -42,7 +42,7 @@ class _Answers:
         self.answers = list(answers)
         self.seen: list[list[Any]] = []
 
-    async def ainvoke(self, messages: Any) -> AIMessage:
+    async def ainvoke(self, messages: Any, **_: Any) -> AIMessage:
         self.seen.append(list(messages))
         return self.answers.pop(0)
 

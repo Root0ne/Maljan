@@ -2981,15 +2981,12 @@ class ReportingConfig(BaseModel):
     - ``include_extended_stix``: emit the extended Bundle (Identity / Note /
       Report SDOs). Disable to halve serialization cost when consumers only
       need the minimal judge bundle.
-    - ``narrative_max_tokens``: hard cap for the NarrativeAgent LLM round.
-      Keeps tail latency predictable.
     - ``auto_generate_detection_rules``: template-based YARA/Sigma/Suricata
       generation.
     """
 
     enabled: bool = True
     include_extended_stix: bool = True
-    narrative_max_tokens: Annotated[int, Field(ge=1)] = 1500
     # How much of the upstream stages' findings a stage is handed. A pipeline
     # of six stages would otherwise put the whole run into every prompt after
     # the second one, and the last stage would spend its context on a summary

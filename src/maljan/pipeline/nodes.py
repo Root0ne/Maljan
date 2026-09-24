@@ -114,12 +114,27 @@ if TYPE_CHECKING:
 # Helpers
 # ---------------------------------------------------------------------------
 
-# Wall-clock ceiling for the single narrative LLM round in the report node.
-# Generous — the deterministic report is already built by then and the prose is
-# the last thing standing between a finished analysis and the operator — but
-# finite, which it was not. See the call site for the 30-minute silence this
+# The narrative round's configured wait, before the model's pace is known.
+# Once the job has measured the reporter's rate, the round waits as long as
+# its output budget takes at that pace, as a composer section does
+# (``NarrativeAgent.round_timeout``); this is the least it is given. Finite,
+# which the round once was not: see the call site for the 30-minute silence it
 # bounds.
 _NARRATIVE_TIMEOUT_SECONDS = 600
+
+
+def _narrative_timeout(narrative_agent: Any, report: Any, facts: str, run_state: str) -> float:
+    """The narrative round's wait: sized from its output cap and the measured pace."""
+    try:
+        return float(
+            narrative_agent.round_timeout(
+                _NARRATIVE_TIMEOUT_SECONDS,
+                narrative_agent.prompt_chars(report, facts, run_state),
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — a wait that cannot be sized is the configured one
+        logger.debug("report_node: the narrative wait was not sized (%s).", exc)
+        return float(_NARRATIVE_TIMEOUT_SECONDS)
 
 
 def _restart_reporter(llm: Any, seconds: Any, container: Any) -> None:
@@ -4364,10 +4379,16 @@ def make_report_node(
 
         # The narrative round is the reporter's first loop: its model list
         # starts at its first model again, with turn deadlines measured against
-        # the narrative's own 600 s clock.
-        _restart_reporter(
-            getattr(narrative_agent, "llm", None), _NARRATIVE_TIMEOUT_SECONDS, container
+        # the narrative's own clock, sized from its output budget and the
+        # model's measured pace.
+        _narrative_facts = pack_text(state, container)
+        _narrative_state = render_run_state(state)
+        narrative_seconds = (
+            _narrative_timeout(narrative_agent, report, _narrative_facts, _narrative_state)
+            if narrative_agent is not None
+            else float(_NARRATIVE_TIMEOUT_SECONDS)
         )
+        _restart_reporter(getattr(narrative_agent, "llm", None), narrative_seconds, container)
 
         if narrative_agent is not None:
             try:
@@ -4382,21 +4403,21 @@ def make_report_node(
                     narrative_agent.generate(
                         report,
                         state.get("isr_reports"),
-                        facts_block=pack_text(state, container),
-                        run_state=render_run_state(state),
+                        facts_block=_narrative_facts,
+                        run_state=_narrative_state,
                         citable_ids=ledger_ids(state),
                         evidence=_entry_texts,
                     ),
-                    timeout=_NARRATIVE_TIMEOUT_SECONDS,
+                    timeout=narrative_seconds,
                 )
             except TimeoutError:
                 logger.error(
                     "report_node: NarrativeAgent exceeded %ds; using fallback narrative.",
-                    _NARRATIVE_TIMEOUT_SECONDS,
+                    int(narrative_seconds),
                 )
                 narrative_output = None
                 no_summary_because = (
-                    f"the report model did not answer within {_NARRATIVE_TIMEOUT_SECONDS}s"
+                    f"the report model did not answer within {int(narrative_seconds)}s"
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
