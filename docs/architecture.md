@@ -364,7 +364,7 @@ baseline has no triage stage at all.
 line each — `[ev_0001] identity: pe windows, 4,486,656 bytes, …`,
 `[ev_0003] signature: none`, `[ev_0007] yara: 2 hits of 30 rules (…)`,
 `[ev_0008] capa: 6 capabilities, ATT&CK T1027, T1055 (rule-asserted)`,
-`[ev_0017] reputation: VirusTotal 31/75 malicious, labels Filisto` — cut at
+`[ev_0017] reputation: VirusTotal: 31 of 75 engines flag it as malicious, labels Filisto` — cut at
 `reporting.upstream_findings_max_chars` with a last line saying how many
 entries were left out and that their full output is a tool call away. The
 decoded strings are one line: the counts, then each string quoted as
@@ -391,7 +391,7 @@ MCP server answers with `detections`, one result label per engine that
 detected the file, and no popular threat classification; the line counts those
 labels exactly as written and names them with how many engines gave each,
 most first and then in the answer's order, at most twenty, with the number of
-distinct labels left out — `VirusTotal 52/75 malicious, 52 detection labels,
+distinct labels left out — `VirusTotal: 52 of 75 engines flag it as malicious, 52 detection labels,
 47 distinct (engines per label, most first, 20 shown): Gen:Variant.… ×4, …
 (+27 more distinct labels)`. Nothing is merged or normalised and no family is
 read out of them; an answer that does carry a popular classification still has
@@ -1073,9 +1073,13 @@ answer was cut, so its true length is unknown, and the compact contract alone
 fits it only if it would have closed within about 9,600 tokens as written.
 An answer that stopped at the budget is told so — `verdict.cut_at_output_cap`,
 with the cap, the answer's characters, the objects it began by type and its
-indented lines, asking for the compact bundle — rather than that it was not
-JSON, which made a judge whose bundle was too large write the same bundle
-again. When the retry is still not a bundle, the fallback reads the
+indented lines, the length it was cut at as the bound the next answer stays
+under and the kind of object it began most of, asking for the compact bundle —
+rather than that it was not JSON, which made a judge whose bundle was too large
+write the same bundle again. The retry is the first prompt and that question:
+the cut answer is described, not sent back. Sent back, it made the retry's
+prompt larger by exactly the cap, and at temperature 0 a benign control's judge
+answered with a response one byte shorter than the one it was asked about. When the retry is still not a bundle, the fallback reads the
 `x_maljan_assessment` object the answer wrote whole, if it did, through the
 reader a whole answer goes through and `JudgeAssessment`, and keeps it only
 when its verdict is one of the three words. The run then publishes that
@@ -1087,7 +1091,24 @@ the bundle, a string or a nested object — as written with minted ids, asked wh
 bundle's indicator is asked — findings recorded, an ungrounded one dropped —
 and put to the one publish rule like any judge indicator, so decoded C2 hosts
 an answer wrote before the cut are published exactly as they would have been
-from an answer that closed. Nothing is read out of prose.
+from an answer that closed. Nothing is read out of prose. A fallback that
+is not Malware has no malware object, so its record — the degraded path and
+the technique ids only the raw text named — goes on a note about the objects
+the fallback bundle holds; STIX requires a note to name at least one, and a
+fallback that holds none writes no note. The ids are on the bundle's own
+`x_maljan_fallback_verdict.model_only_technique_ids` on every fallback. The
+export declines, with a record, any note, opinion, grouping or report left
+naming nothing, and the integrity pass lists each reference once: a reference
+fallback exported a note with no `object_refs` and a report object naming the
+sample's hash indicator twice, and failed the official validator.
+
+A finding the judge was never shown — first raised by the answer to its only
+retry, or recorded on a fallback where no turn was left — is recorded with
+`"asked": "false"` on its `run_summary.validation.unresolved` row, whatever
+position its object had in each answer, and the export's records say which
+happened: "the judge kept the credit when asked" only of a credit it was asked
+about, and "the judge was not asked about it" otherwise; the same for a malware
+object kept without `is_family`.
 
 Two metrics record the outcome:
 
@@ -1129,6 +1150,23 @@ a fresh budget, and is not asked when that cannot hold one answer at the pace
 the loop measured (its final-answer reserve); what it would have asked is then
 recorded as unresolved and `run_summary.budget.<agent>.validation_not_asked`
 says why.
+
+An analyst answer that ended at its output cap (`llm.expert_max_tokens`, by the
+server's finish reason or by a generated count equal to the cap, since
+ik_llama.cpp reports `stop` for an answer it cut) is asked once for a whole
+shorter one, the way the judge's and a report section's are:
+`isr.cut_at_output_cap` states the cap, the characters the answer ran to, the
+CLAIM blocks it began, and the length it was cut at as the bound to stay under,
+and asks for the claims the evidence supports best, each written once. The cut
+answer is described, not sent back, and the question is asked only when the
+conversation it is sent in and an answer of the cap's size fit the model's
+window; otherwise it is recorded `"asked": "false"` with the reason. A whole
+answer that comes back is the analyst's, fewer claims and all; a retry cut
+again keeps the first answer, as a retry with fewer claims always did, and the
+finding is recorded. The cap is the one in force: nothing raises it. A reference
+static analyst answered with 42 claims in exactly its 4,096 tokens, was asked
+fourteen questions over that answer, spent the whole cap again and returned no
+claim, and every question went unanswered.
 
 An analyst whose loop ended with nothing at all — no claim and no prose — is
 given a second loop over the same material only when what is left of its
@@ -2087,7 +2125,13 @@ is assembled from what the run gathered rather than recomputed beside it:
   judge which sources did name it, by the summary's names — a parent or
   sub-technique counts. Nothing rewrites the credit in the judge's bundle; one
   the judge keeps is left off the export's copy of the relationship and
-  recorded as `stix.unpublishable_credit`, so no surface prints it. The ELF run
+  recorded as `stix.unpublishable_credit`, so no surface prints it. A technique
+  the judge names and no analyst claims is the judge's own claim: asked the
+  catalogue and platform questions every claim is asked, and published with the
+  judge as its source and the judge's own number. Its ATT&CK row says so ("stated
+  by the judge and claimed by no analyst; a technique the judge states is
+  published as its own claim"), so a row with no analyst beside it reads as the
+  rule it is published by and not as a gap. The ELF run
   credited `STATIC ANALYST` with T1490 and T1048.001, which no source named. A
   bundle the pipeline built from the analysts' claims because the judge's
   answer was not one credits those analysts, not the judge. A technique id is
@@ -2720,10 +2764,34 @@ whole, and a value reached through a reference is one of them:
 carry an endpoint and are asked whichever of the two questions fits what is
 written there. The object type is read whatever case it is written in. A
 comparison whose right-hand side is not an endpoint at all — `MATCHES`,
-`LIKE`, `ISSUBSET` — is declined too, with the reason that is true of it: the
-pipeline could not read the pattern's endpoint, so it could not ask whether
-this export may carry it, and a comparison the reader cannot read at all is
-declined with the same sentence rather than guessed at.
+`LIKE`, `ISSUBSET` — is declined too, with the reason that is true of it: it
+names every endpoint that fits it rather than one, so this export could not ask
+whether it may carry the endpoint; a comparison the reader cannot read at all is
+declined as one whose endpoint the pipeline could not read, rather than guessed
+at. A shape over a kind the publish rule answers for that is not an endpoint — a
+command line, a registry key, a mutex, a digest — is declined for the same
+reason under `stix.indicator_not_published`: the rule answers for a value, and
+`LIKE '%whoami%'` is not the value `whoami`. The IOC table and `/iocs` read a
+value only from an `=` comparison, so a `LIKE` indicator lists no row there.
+
+**A pattern is kept whatever its operator.** The judge's integrity pass drops
+an indicator only when its pattern is not written whole
+(`schemas.stix_pattern.reads_whole`): it must open an observation expression,
+close every quoted value, bracket and parenthesis it opens, and name an object
+path. Every operator the grammar has passes — `=`, `!=`, `<`, `>`, `<=`, `>=`,
+`LIKE`, `MATCHES`, `IN`, `ISSUBSET`, `ISSUPERSET`, `EXISTS` — and the test
+holds the check to the official pattern validator's answer on each. It used to
+keep only patterns containing `=`, and a reference judge that wrote its
+command-and-control hosts as `[url:value LIKE '%host%']` had twelve of thirteen
+indicators dropped as `empty_pattern`, with their relationships, before any
+rule saw them. The grounding check reads a `LIKE` value for the text between its
+wildcards (`like_fixed_text`): each run of it must appear in the evidence, and
+an absence names that text, never the wildcards. A quoted value that writes a
+backslash the grammar cannot read — STIX escapes only the quote and the
+backslash, so `'Software\Microsoft'` with one backslash is refused whole by the
+official validator — is asked `stix.unescaped_backslash` and, kept, declined as
+`stix.unpublishable_pattern`; the reader still reads it as the backslash it
+means, for the other questions.
 
 One reader answers what a pattern says, for the export and for the grounding
 check both: `schemas.stix_pattern.read_comparisons`, which returns the object

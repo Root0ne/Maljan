@@ -8,6 +8,20 @@ change landed on `main`.
 
 ### Added
 
+- **An analyst answer cut at its output cap is asked for a whole shorter one**
+  (`isr.cut_at_output_cap`), as the judge's and a report section's are: the
+  question states the cap, the characters the answer ran to, the CLAIM blocks
+  it began and the length it was cut at as the bound to stay under. The cut
+  answer is described rather than sent back, the question is asked only when
+  it and an answer of the cap's size fit the model's window, and a whole answer
+  that comes back is kept even with fewer claims. The cap is unchanged. A
+  reference static analyst's 42 claims ended at exactly its 4,096 tokens; its
+  retry spent the cap again, returned no claim, and fourteen questions went
+  unanswered.
+- **A technique only the judge named says why it is published.** Its ATT&CK
+  row carries "stated by the judge and claimed by no analyst; a technique the
+  judge states is published as its own claim" — the rule it is published by.
+
 - **A claim whose sentence does not describe its technique is asked about.**
   A claim carrying a technique id whose sentence shares no term with that
   technique — no capability term listing the id, no word of its catalogue
@@ -1883,6 +1897,38 @@ change landed on `main`.
   `MALJAN_FLOSS_PATH` to a missing file unless a test names a build.
 
 ### Fixed
+
+- **A pattern is kept whatever its comparison operator.** The judge's
+  integrity pass kept only patterns containing `=`, so every `LIKE` a judge
+  wrote was dropped as `empty_pattern` with its relationships — twelve of a
+  reference judge's thirteen indicators, its command-and-control hosts among
+  them. Well-formedness is read by the one pattern reader
+  (`stix_pattern.reads_whole`) and agrees with the official validator on every
+  operator. A `LIKE` value is grounded by the text between its wildcards, lists
+  no row in the IOC table or `/iocs`, and is declined from the export with the
+  reason when it names an endpoint or a kind the publish rule answers for. A
+  quoted value with a backslash the grammar cannot read is asked about
+  (`stix.unescaped_backslash`) and, kept, declined.
+- **The fallback's export is valid.** A non-Malware fallback wrote a note with
+  no `object_refs`, which STIX requires, and the report object named the
+  sample's hash indicator twice once the judge's copy was folded into the
+  export's. The note names the objects the fallback bundle holds and is not
+  written when it holds none; each reference is listed once; an object about
+  others that the export leaves naming nothing is declined with a record.
+- **The judge's retry after a cut answer no longer carries the cut answer.**
+  Its prompt grew by exactly the cap, and at temperature 0 a benign control's
+  judge answered with a response one byte shorter than the one it was asked
+  about. The retry is the first prompt and the question, which now states the
+  length the answer was cut at as the bound and the kind of object it began
+  most of.
+- **A record says the judge was asked only when it was.** A finding the judge
+  was never shown — first raised by the answer to its only retry — is recorded
+  `"asked": "false"`, and the export's credit and `is_family` records say "the
+  judge was not asked about it" instead of "kept … when asked".
+- **VirusTotal's count is written in words.** The triage pack wrote
+  "VirusTotal 0/75 malicious", and a benign control's summary turned it into
+  "verified clean by 75/75 AV engines". The pack line and the report's network
+  reputation cell say "0 of 75 engines flag it".
 
 - **A fallback verdict keeps the indicators its answer wrote whole.** After
   the judge's answer was cut twice the fallback bundle carried no indicator,
@@ -4507,6 +4553,19 @@ change landed on `main`.
   files. The README has a short "How Maljan compares" section that links to it.
 
 ### Upgrading
+
+Two validation codes are new, `isr.cut_at_output_cap` and
+`stix.unescaped_backslash`, and `stix.indicator_not_published` also records a
+`LIKE` or `MATCHES` over a kind the publish rule answers for. A judge indicator whose pattern has an operator
+other than `=` now reaches the checks and the export instead of being dropped;
+a `LIKE` endpoint's decline sentence says it names every endpoint that fits it.
+A `run_summary.validation.unresolved` row of the judge's carries `"asked":
+"false"` when the judge was never shown it, and `Violation` has an `asked`
+field. `x_maljan_fallback_verdict` may carry `model_only_technique_ids`; a
+non-Malware fallback bundle with nothing for a note to name carries no note.
+`retry_with_feedback_sync` takes `drop_answer_for`. A capability matrix cell's
+`note` may hold the judge-only marker. The triage pack's reputation line reads
+"VirusTotal: N of M engines flag it as malicious".
 
 The judge is asked to leave `pattern_type` out of an indicator (the model
 fills in `stix`) and to write its annotations on relationships only. A
