@@ -91,7 +91,20 @@ class OpenAIConfig(BaseModel):
     # asked here instead of inferred from one. ``auto`` reads the host: a
     # loopback, link-local or private address is a local server, anything else
     # is a hosted API that gets standard fields only.
-    compat: Literal["auto", "llama_cpp", "standard"] = "auto"
+    #
+    # ``deepseek`` is a hosted dialect of its own, named because no body works
+    # for both it and OpenAI: DeepSeek ignores ``max_completion_tokens``, the
+    # only cap field langchain-openai sends (measured: a cap of 5 produced 88
+    # and 138 tokens), and reads ``max_tokens``, which OpenAI's own API refuses
+    # beside ``max_completion_tokens`` for its reasoning models. It sends the
+    # cap as ``max_tokens`` too, and the thinking switch as DeepSeek's own
+    # ``thinking.type``; none of the llama.cpp extras.
+    compat: Literal["auto", "llama_cpp", "standard", "deepseek"] = "auto"
+    # The reasoning effort sent as ``reasoning_effort`` on every request, as
+    # written, so each API's own levels work (DeepSeek: ``low``, ``high``,
+    # ``max``; OpenAI's reasoning models: ``minimal`` … ``high``). Empty sends
+    # nothing and leaves the endpoint's own default.
+    reasoning_effort: str = ""
     # The context window the server behind ``base_url`` was started with, in
     # tokens. Zero means it is not known, which is the honest default: an
     # OpenAI-compatible endpoint does not report it and guessing one is worse

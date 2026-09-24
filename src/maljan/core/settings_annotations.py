@@ -527,9 +527,13 @@ ANNOTATIONS: dict[str, Annotation] = {
             "llama.cpp-only request extras (repetition penalty, the n_predict echo of "
             "the output cap, chat_template_kwargs); standard sends OpenAI-standard "
             "fields only, which is what a hosted OpenAI-compatible API accepts — it "
-            "returns 400 Unsupported parameter otherwise. auto reads the base URL "
-            "host: loopback, link-local and private addresses are treated as a local "
-            "llama.cpp server, everything else as a hosted API."
+            "returns 400 Unsupported parameter otherwise. deepseek is DeepSeek's API, "
+            "which ignores the max_completion_tokens field OpenAI's clients send the "
+            "output cap in: it sends the cap as max_tokens as well, and disable_thinking "
+            "as DeepSeek's own thinking.type, with none of the llama.cpp extras. auto "
+            "reads the base URL host: loopback, link-local and private addresses are "
+            "treated as a local llama.cpp server, everything else as a hosted API that "
+            "gets standard fields only."
         ),
         "probe": "llm",
         "subgroup": "OpenAI",
@@ -540,9 +544,10 @@ ANNOTATIONS: dict[str, Annotation] = {
         "description": (
             "When true and base_url points at a local OpenAI-compatible server, "
             "forwards chat_template_kwargs.enable_thinking=false to suppress a "
-            "reasoning model's (e.g. Qwen3) hidden chain-of-thought. Needed on "
-            "constrained local hosts, where thinking otherwise consumes the whole "
-            "output budget; has no effect on vanilla OpenAI."
+            "reasoning model's (e.g. Qwen3) hidden chain-of-thought; with the deepseek "
+            "dialect it sends thinking.type=disabled. Needed on constrained local "
+            "hosts, where thinking otherwise consumes the whole output budget; has no "
+            "effect on vanilla OpenAI."
         ),
         "probe": "llm",
         "subgroup": "OpenAI",
@@ -566,6 +571,19 @@ ANNOTATIONS: dict[str, Annotation] = {
         ),
         "probe": "llm",
         "subgroup": "OpenAI",
+    },
+    "llm.openai.reasoning_effort": {
+        "title": "OpenAI reasoning effort",
+        "description": (
+            "Sent as reasoning_effort on every request when set, exactly as written, "
+            "so each API's own levels work: DeepSeek takes low, high and max, OpenAI's "
+            "reasoning models minimal to high. Empty sends nothing and leaves the "
+            "endpoint's own default. A value the endpoint does not know is its 400 to "
+            "answer, and the connection test asks with it."
+        ),
+        "probe": "llm",
+        "subgroup": "OpenAI",
+        "advanced": True,
     },
     "llm.openai.repetition_penalty": {
         "title": "OpenAI repetition penalty",

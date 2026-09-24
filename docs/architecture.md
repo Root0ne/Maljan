@@ -1712,8 +1712,14 @@ the model its caller was built on. `run_summary.tokens` holds the sums
 for the run and per agent, and `run_summary.models` the per-agent model count
 and the fallbacks with their reasons. A call whose provider reported no usage
 is counted as *not reported*: its tokens are not estimated, and a figure the
-report prints as a count is always a count a provider gave. There is no price
-table; a cost appears only where the provider reported one.
+report prints as a count is always a count a provider gave. Two parts of a
+call are recorded where the provider reports them: the input read from its
+prompt cache (`cached_input_tokens`, from the client's `cache_read` or
+DeepSeek's `prompt_cache_hit_tokens`) and the output spent reasoning
+(`reasoning_tokens`). Each is part of the input or output count, not added to
+it, carries the number of calls that reported it, and is absent where no call
+did. There is no price table; a cost appears only where the provider reported
+one.
 
 **A tool server that keeps failing.** Each tool server the job's registry
 attaches — the built-in sidecars and every operator-configured server — has one

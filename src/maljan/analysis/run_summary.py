@@ -144,8 +144,12 @@ class TokenUsageMetrics:
     Their tokens are not in the sums and are not estimated: a sum is what the
     providers reported, and the calls that reported nothing are said to have
     reported nothing. ``cost`` is present only where a provider reported one,
-    over ``cost_calls`` calls; there is no price table. ``per_agent`` holds
-    the same figures for each agent, and the models that answered it.
+    over ``cost_calls`` calls; there is no price table. ``cached_input_tokens``
+    (the part of the input read from the provider's prompt cache) and
+    ``reasoning_tokens`` (the part of the output spent reasoning) are present
+    only where a provider reported them, over ``cached_calls`` and
+    ``reasoning_calls`` calls. ``per_agent`` holds the same figures for each
+    agent, and the models that answered it.
     """
 
     input_tokens: int
@@ -153,6 +157,10 @@ class TokenUsageMetrics:
     total_tokens: int
     llm_calls: int
     unreported_calls: int = 0
+    cached_input_tokens: int | None = None
+    cached_calls: int = 0
+    reasoning_tokens: int | None = None
+    reasoning_calls: int = 0
     cost: float | None = None
     cost_calls: int = 0
     per_agent: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -189,6 +197,10 @@ def tokens_sentence(tokens: dict[str, Any] | None) -> str | None:
     )
     if unreported:
         text += f"; not reported for {unreported} of them"
+    text += _part_clause(
+        tokens, "cached_input_tokens", "cached_calls", "of the input read from the prompt cache"
+    )
+    text += _part_clause(tokens, "reasoning_tokens", "reasoning_calls", "of the output reasoning")
     cost = tokens.get("cost")
     cost_calls = int(tokens.get("cost_calls") or 0)
     if isinstance(cost, int | float) and cost_calls:
@@ -199,6 +211,24 @@ def tokens_sentence(tokens: dict[str, Any] | None) -> str | None:
             f"{cost_calls} {'call' if cost_calls == 1 else 'calls'}"
         )
     return text + "."
+
+
+def _part_clause(tokens: dict[str, Any], key: str, calls_key: str, what: str) -> str:
+    """``"; N of the … (reported for K calls)"``, or ``""`` where no call reported it."""
+    calls = int(tokens.get(calls_key) or 0)
+    value = tokens.get(key)
+    if calls <= 0 or not isinstance(value, int | float) or isinstance(value, bool):
+        return ""
+    noun = "call" if calls == 1 else "calls"
+    return f"; {int(value):,} {what} (reported for {calls} {noun})"
+
+
+def _reported_part(snapshot: dict[str, Any], key: str, calls_key: str) -> int | None:
+    """A part's token count from a ledger snapshot, or ``None`` where no call reported it."""
+    value = snapshot.get(key)
+    if not int(snapshot.get(calls_key, 0) or 0) or not isinstance(value, int | float):
+        return None
+    return int(value)
 
 
 def spend_blocks(snapshot: dict[str, Any] | None) -> dict[str, Any]:
@@ -1004,6 +1034,12 @@ class RunSummary:
             "unreported_calls": tok.unreported_calls,
             "per_agent": {agent: dict(row) for agent, row in sorted(tok.per_agent.items())},
         }
+        if tok.cached_input_tokens is not None and tok.cached_calls:
+            out["cached_input_tokens"] = tok.cached_input_tokens
+            out["cached_calls"] = tok.cached_calls
+        if tok.reasoning_tokens is not None and tok.reasoning_calls:
+            out["reasoning_tokens"] = tok.reasoning_tokens
+            out["reasoning_calls"] = tok.reasoning_calls
         if tok.cost is not None and tok.cost_calls:
             out["cost"] = round(tok.cost, 6)
             out["cost_calls"] = tok.cost_calls
@@ -1332,6 +1368,10 @@ class RunSummaryBuilder:
             total_tokens=int(snapshot.get("total_tokens", 0)),
             llm_calls=int(snapshot.get("llm_calls", 0)),
             unreported_calls=int(snapshot.get("unreported_calls", 0)),
+            cached_input_tokens=_reported_part(snapshot, "cached_input_tokens", "cached_calls"),
+            cached_calls=int(snapshot.get("cached_calls", 0) or 0),
+            reasoning_tokens=_reported_part(snapshot, "reasoning_tokens", "reasoning_calls"),
+            reasoning_calls=int(snapshot.get("reasoning_calls", 0) or 0),
             cost=float(cost) if isinstance(cost, int | float) else None,
             cost_calls=int(snapshot.get("cost_calls", 0) or 0),
             per_agent={str(name): dict(row) for name, row in agents.items()},

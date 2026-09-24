@@ -14,6 +14,14 @@ provider gave; where it gave none, the report says so. The same rule holds for
 cost: there is no price table here, and a cost appears only where the provider
 reported one. Recording never raises — telemetry must not break analysis.
 
+Two parts of a call are recorded where the provider reports them, and only
+there: the input tokens it read from its prompt cache, and the output tokens
+its model spent reasoning. Both are parts of the input and output counts, not
+additions to them — a provider that bills cached input at its own rate, or
+counts reasoning inside the output, is read off the same figures. A call that
+did not report a part is not counted as a zero for it: each part carries the
+number of calls that reported it.
+
 Every call also says which model answered it, so the ledger is where a run's
 per-agent model count comes from, and a fallback — a turn another model
 answered because the first one failed as a provider — is kept with its reason.
@@ -49,11 +57,62 @@ def _cost_of(response: Any) -> float | None:
     return None
 
 
-def turn_usage(response: Any) -> dict[str, Any] | None:
-    """One answer's reported usage as ``{input_tokens, output_tokens[, cost]}``, or ``None``.
+def _count(value: Any) -> int | None:
+    """``value`` as a token count, or ``None`` when it is not one."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return max(0, int(value))
 
-    ``None`` is the provider having reported nothing, which the caller says in
-    words rather than as a zero.
+
+def _raw_usage(response: Any) -> dict[str, Any]:
+    """The usage block as the provider sent it, where the client kept it."""
+    metadata = getattr(response, "response_metadata", None)
+    if not isinstance(metadata, dict):
+        return {}
+    raw = metadata.get("token_usage") or metadata.get("usage")
+    return raw if isinstance(raw, dict) else {}
+
+
+def _cached_input_of(usage: dict[str, Any], raw: dict[str, Any]) -> int | None:
+    """The input tokens the provider read from its prompt cache, or ``None`` unreported.
+
+    LangChain's ``input_token_details.cache_read`` first — every client fills
+    it from its provider's own field (OpenAI's and DeepSeek's
+    ``prompt_tokens_details.cached_tokens``, Anthropic's cache reads) — and
+    DeepSeek's ``prompt_cache_hit_tokens`` where only that was sent.
+    """
+    details = usage.get("input_token_details")
+    if isinstance(details, dict):
+        found = _count(details.get("cache_read"))
+        if found is not None:
+            return found
+    return _count(raw.get("prompt_cache_hit_tokens"))
+
+
+def _reasoning_of(usage: dict[str, Any], raw: dict[str, Any]) -> int | None:
+    """The output tokens the model spent reasoning, or ``None`` unreported.
+
+    ``output_token_details.reasoning`` first, the provider's own
+    ``completion_tokens_details.reasoning_tokens`` where the client left it.
+    """
+    details = usage.get("output_token_details")
+    if isinstance(details, dict):
+        found = _count(details.get("reasoning"))
+        if found is not None:
+            return found
+    completion = raw.get("completion_tokens_details")
+    if isinstance(completion, dict):
+        return _count(completion.get("reasoning_tokens"))
+    return None
+
+
+def turn_usage(response: Any) -> dict[str, Any] | None:
+    """One answer's reported usage, or ``None``.
+
+    ``{input_tokens, output_tokens[, cached_input_tokens][, reasoning_tokens][, cost]}``:
+    the optional keys are there only when the provider reported them. ``None``
+    is the provider having reported nothing, which the caller says in words
+    rather than as a zero.
     """
     usage = getattr(response, "usage_metadata", None)
     if not isinstance(usage, dict) or usage.get("input_tokens") is None:
@@ -62,6 +121,13 @@ def turn_usage(response: Any) -> dict[str, Any] | None:
         "input_tokens": max(0, int(usage.get("input_tokens") or 0)),
         "output_tokens": max(0, int(usage.get("output_tokens") or 0)),
     }
+    raw = _raw_usage(response)
+    cached = _cached_input_of(usage, raw)
+    if cached is not None:
+        out["cached_input_tokens"] = min(cached, out["input_tokens"])
+    reasoning = _reasoning_of(usage, raw)
+    if reasoning is not None:
+        out["reasoning_tokens"] = min(reasoning, out["output_tokens"])
     cost = _cost_of(response)
     if cost is not None:
         out["cost"] = cost
@@ -72,12 +138,16 @@ class _Tally:
     """One agent's calls: the reported figures, and the calls that reported none."""
 
     __slots__ = (
+        "cached_calls",
+        "cached_input_tokens",
         "calls",
         "cost",
         "cost_calls",
         "input_tokens",
         "models",
         "output_tokens",
+        "reasoning_calls",
+        "reasoning_tokens",
         "unreported",
     )
 
@@ -86,6 +156,10 @@ class _Tally:
         self.unreported = 0
         self.input_tokens = 0
         self.output_tokens = 0
+        self.cached_input_tokens = 0
+        self.cached_calls = 0
+        self.reasoning_tokens = 0
+        self.reasoning_calls = 0
         self.cost = 0.0
         self.cost_calls = 0
         self.models: dict[str, int] = {}
@@ -97,6 +171,21 @@ class _Tally:
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "total_tokens": self.input_tokens + self.output_tokens,
+            # The two parts, each with the calls that reported it, and absent
+            # when none did — for the reason the cost below is.
+            **(
+                {
+                    "cached_input_tokens": self.cached_input_tokens,
+                    "cached_calls": self.cached_calls,
+                }
+                if self.cached_calls
+                else {}
+            ),
+            **(
+                {"reasoning_tokens": self.reasoning_tokens, "reasoning_calls": self.reasoning_calls}
+                if self.reasoning_calls
+                else {}
+            ),
             # Absent rather than zero when no call reported a cost: zero is a
             # figure a provider can report, and "reported nothing" is not it.
             **(
@@ -139,6 +228,12 @@ class TokenLedger:
                     continue
                 tally.input_tokens += int(usage.get("input_tokens") or 0)
                 tally.output_tokens += int(usage.get("output_tokens") or 0)
+                if "cached_input_tokens" in usage:
+                    tally.cached_input_tokens += int(usage["cached_input_tokens"] or 0)
+                    tally.cached_calls += 1
+                if "reasoning_tokens" in usage:
+                    tally.reasoning_tokens += int(usage["reasoning_tokens"] or 0)
+                    tally.reasoning_calls += 1
                 if "cost" in usage:
                     tally.cost += float(usage["cost"])
                     tally.cost_calls += 1

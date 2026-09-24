@@ -8,6 +8,22 @@ change landed on `main`.
 
 ### Added
 
+- **`llm.openai.reasoning_effort`**: sent as the request's `reasoning_effort`
+  field, exactly as written, so each API's own levels work (DeepSeek: `low`,
+  `high`, `max`). Empty, the shipped value, sends nothing. The `llm` connection
+  test asks with it.
+- **`llm.openai.compat: deepseek`**: DeepSeek's API ignores
+  `max_completion_tokens`, the only cap field OpenAI's clients send (measured:
+  a cap of 5 came back as 88 and 138 tokens), so no output cap reached it. The
+  dialect sends the cap as `max_tokens` as well, which DeepSeek honours with
+  reasoning counted, and `disable_thinking` as DeepSeek's `thinking.type`. It is
+  explicit rather than read from the host, because OpenAI's own API refuses
+  `max_tokens` beside `max_completion_tokens` for its reasoning models.
+- **Cached input and reasoning tokens are recorded where reported.**
+  `run_summary.tokens` (and each agent's row) carries `cached_input_tokens` and
+  `reasoning_tokens`, each with the calls that reported it, from the client's
+  usage details or DeepSeek's `prompt_cache_hit_tokens`; the token sentence
+  names them. Absent where no call reported them.
 - **An analyst answer cut at its output cap is asked for a whole shorter one**
   (`isr.cut_at_output_cap`), as the judge's and a report section's are: the
   question states the cap, the characters the answer ran to, the CLAIM blocks

@@ -70,7 +70,9 @@ def sends_llama_cpp_extras(base_url: str | None, compat: str) -> bool:
     if not base_url:
         # api.openai.com itself, which has always been left alone.
         return False
-    if compat == "standard":
+    if compat in ("standard", "deepseek"):
+        # ``deepseek`` is a hosted API with fields of its own, sent by
+        # ``OpenAIProvider._add_deepseek_fields`` instead.
         return False
     if base_url in _STANDARD_ONLY_ENDPOINTS:
         # What the self-heal learned beats what ``auto`` would guess, and it
@@ -104,6 +106,28 @@ def add_thinking_switch(extra: dict[str, Any], disable_thinking: bool) -> None:
     kwargs = dict(extra.get("chat_template_kwargs") or {})
     kwargs.setdefault("enable_thinking", False)
     extra["chat_template_kwargs"] = kwargs
+
+
+def add_deepseek_thinking_switch(extra: dict[str, Any], disable_thinking: bool) -> None:
+    """Put DeepSeek's own ``thinking: {"type": "disabled"}`` into ``extra`` when asked.
+
+    DeepSeek's switch, not llama.cpp's: it accepts
+    ``chat_template_kwargs.enable_thinking=false`` and ignores it (measured: the
+    model still reasoned). Shared with the settings probe for the reason
+    ``add_thinking_switch`` is. Nothing already in ``extra`` is overwritten.
+    """
+    if disable_thinking:
+        extra.setdefault("thinking", {"type": "disabled"})
+
+
+def reasoning_effort_of(config: Any) -> str | None:
+    """The configured ``llm.openai.reasoning_effort``, or ``None`` when none is set.
+
+    Passed through as written — each API names its own levels — with only the
+    surrounding blanks taken off, so an empty field sends nothing.
+    """
+    value = str(getattr(config, "reasoning_effort", "") or "").strip()
+    return value or None
 
 
 def unsupported_parameter(message: str) -> str | None:
@@ -312,10 +336,19 @@ class OpenAIProvider:
         if base_url:
             build_kwargs["base_url"] = base_url
 
+        # The operator's reasoning effort, on every request of every dialect:
+        # ``ChatOpenAI`` sends it as the top-level ``reasoning_effort`` field,
+        # which is where OpenAI's and DeepSeek's chat completions read it.
+        effort = reasoning_effort_of(self._config.llm.openai)
+        if effort is not None:
+            build_kwargs.setdefault("reasoning_effort", effort)
+
         compat = str(getattr(self._config.llm.openai, "compat", "auto") or "auto")
         local = not force_standard and sends_llama_cpp_extras(base_url, compat)
         if local:
             self._add_llama_cpp_extras(build_kwargs, base_url)
+        elif compat == "deepseek":
+            self._add_deepseek_fields(build_kwargs)
 
         # Explicit ``request_timeout`` and ``max_retries`` so the openai SDK
         # can't silently retry a stalled request three times (3 x default
@@ -398,6 +431,30 @@ class OpenAIProvider:
         if extra:
             build_kwargs["extra_body"] = extra
         logger.debug("openai provider: sending llama.cpp extras to %s.", base_url)
+
+    def _add_deepseek_fields(self, build_kwargs: dict[str, Any]) -> None:
+        """The two request fields DeepSeek reads where OpenAI's API reads others.
+
+        Output cap: ``ChatOpenAI(max_tokens=N)`` goes on the wire as
+        ``max_completion_tokens``, which DeepSeek's chat completions ignore —
+        measured, a cap of 5 came back as 88 tokens with thinking off and 138
+        with it on, both ending ``stop``. DeepSeek reads ``max_tokens``, with
+        the reasoning counted against it, so the cap is sent there as well,
+        through ``extra_body``; the ``max_completion_tokens`` beside it is
+        ignored. Not sent to OpenAI's own API, which refuses ``max_tokens``
+        beside ``max_completion_tokens`` for its reasoning models: that is why
+        this is a dialect of its own rather than a field every hosted API gets.
+
+        Thinking: ``llm.openai.disable_thinking`` as DeepSeek's own
+        ``thinking.type``, the one switch it honours.
+        """
+        extra = dict(build_kwargs.get("extra_body") or {})
+        cap = build_kwargs.get("max_tokens")
+        if isinstance(cap, int) and cap > 0:
+            extra.setdefault("max_tokens", cap)
+        add_deepseek_thinking_switch(extra, self._config.llm.openai.disable_thinking)
+        if extra:
+            build_kwargs["extra_body"] = extra
 
 
 # Called with (replaced model, healed model) whenever the self-heal swaps one
