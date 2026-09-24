@@ -2042,15 +2042,27 @@ SECTION_CUT_CODE = "composer.cut_at_output_cap"
 SECTION_CUT_HEAD_CHARS = 160
 
 
-def section_cut_violation(cap: int, *, chars: int = 0, begun: int = 0, head: str = "") -> Violation:
+def section_cut_violation(
+    cap: int, *, chars: int = 0, begun: int = 0, head: str = "", distinct: int = 0
+) -> Violation:
     """What a section the cap cut is told: the cap, the answer's size, and how it opened.
 
     The cut answer itself is not sent back (``retry_with_feedback``'s
     ``drop_answer_for``): it is about a cap's worth of tokens nobody can read,
     and a retry that carried it had less room to answer in than the first call.
+    ``distinct`` is how many of the items begun differ; fewer than were begun
+    is an answer that repeated itself into the cap, and the question says how
+    often.
     """
+    repeated = int(begun) - int(distinct) if 0 < int(distinct) < int(begun) else 0
     size = (
         f" It ran to {int(chars):,} characters with {int(begun)} item(s) begun"
+        + (
+            f", at most {int(distinct)} of them distinct, so at least {repeated} repeat an "
+            "item already written"
+            if repeated
+            else ""
+        )
         + (
             f", and opened with {safe_finding_value(head[:SECTION_CUT_HEAD_CHARS])!r}."
             if head
@@ -2070,6 +2082,58 @@ def section_cut_violation(cap: int, *, chars: int = 0, begun: int = 0, head: str
             "without indentation."
         ),
     )
+
+
+# A report section answer that writes one item again. Every list section's
+# contract says each item is written once; a host-identifier answer began 161
+# items of which at most 19 differed. The answer is kept as written with the
+# finding beside it: the platform removes no item the model wrote.
+REPEATED_ITEMS_CODE = "composer.repeated_items"
+
+
+def repeated_item_violations(
+    payload: Any, identity: Mapping[str, Sequence[str]]
+) -> list[Violation]:
+    """Lists in a section answer that write an item already written, one question per list.
+
+    ``identity`` names, per list key, the fields that make two items the same
+    item — ``{"identifiers": ("value",)}``; no fields means the whole item. The
+    question counts the repeats and names the values written more than once.
+    """
+    data = payload if isinstance(payload, dict) else {}
+    found: list[Violation] = []
+    for list_key, fields in identity.items():
+        rows = data.get(list_key)
+        if not isinstance(rows, list) or len(rows) < 2:
+            continue
+        counts: dict[str, int] = {}
+        for row in rows:
+            if isinstance(row, dict) and fields:
+                key = " | ".join(str(row.get(name) or "").strip() for name in fields)
+            else:
+                key = json.dumps(row, sort_keys=True, default=str)
+            counts[key] = counts.get(key, 0) + 1
+        repeats = len(rows) - len(counts)
+        if not repeats:
+            continue
+        named = _named_ids(
+            f"{value!r} {count} times"
+            for value, count in sorted(counts.items(), key=lambda item: -item[1])
+            if count > 1
+        )
+        found.append(
+            Violation(
+                code=REPEATED_ITEMS_CODE,
+                message=(
+                    f"{int(repeats)} of the {len(rows)} items in {safe_finding_value(list_key)!r} "
+                    f"repeat an item already written; {len(counts)} are distinct. Written more "
+                    f"than once: {named}. Each item is written once: answer again with every "
+                    "item once."
+                ),
+                path=list_key,
+            )
+        )
+    return found
 
 
 CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
@@ -2092,6 +2156,7 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         UNCITED_IDENTIFIER_CODE,
         TECHNIQUE_NAME_CODE,
         RULE_MATCH_AS_ACTION_CODE,
+        REPEATED_ITEMS_CODE,
     }
 )
 

@@ -26,7 +26,11 @@ from typing import Any
 
 import pytest
 
-from maljan.pipeline.validation import section_cut_violation
+from maljan.pipeline.validation import (
+    absence_claim_violation,
+    repeated_item_violations,
+    section_cut_violation,
+)
 from maljan.reporting.composer import (
     _EXAMPLES,
     _INSTRUCTIONS,
@@ -39,6 +43,7 @@ from maljan.reporting.composer import (
     section_contract,
 )
 from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXAMPLE_OBJECT, EXPECTED_OBJECT
+from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, ClaimEvidence
 
 # The distinctive terms of the evaluation key: how the scored sample resolves its
 # APIs, checks its host, persists, configures itself, talks to its server and
@@ -173,6 +178,29 @@ PROMPTS: dict[str, str] = {
     "composer published-techniques heading": PUBLISHED_TECHNIQUES_HEADING,
     "composer claim note": WHERE_QUOTED_LEAD,
     "composer cut-at-cap question": section_cut_violation(8192).message,
+    "composer cut-at-cap question on a repeating answer": section_cut_violation(
+        8192, chars=20000, begun=160, distinct=20
+    ).message,
+    "composer repeated-items question": " ".join(
+        v.message
+        for v in repeated_item_violations({"items": [{"v": "x"}, {"v": "x"}]}, {"items": ("v",)})
+    ),
+    "analyst absence-claim question": " ".join(
+        v.message
+        for v in [
+            absence_claim_violation(
+                ClaimEvidence(
+                    claim="The file holds no persistence mechanism.",
+                    evidence_ref="[ev_0001]",
+                    confidence=0.9,
+                    technique_id="T1547",
+                ),
+                "T1547",
+            )
+        ]
+        if v is not None
+    ),
+    "absence marker": ABSENCE_TECHNIQUE_MARKER,
     "rule-match-only note": RULE_ONLY_NOTE,
 }
 
@@ -221,3 +249,8 @@ def test_the_guard_would_catch_one() -> None:
 def test_the_term_list_is_long_enough_to_mean_something() -> None:
     assert len(KEY_TERMS) >= 50
     assert len(set(KEY_TERMS)) == len(KEY_TERMS)
+
+
+def test_every_question_built_for_this_scan_has_words_to_scan() -> None:
+    """A builder that answered nothing would leave an empty text that passes."""
+    assert all(PROMPTS[name].strip() for name in PROMPTS)

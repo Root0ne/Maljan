@@ -49,6 +49,7 @@ from maljan.pipeline.validation import (
     pack_line_ids,
     quoted_values,
     record_flagged_statements,
+    repeated_item_violations,
     retry_with_feedback,
     schema_violations,
     section_capability_violations,
@@ -121,6 +122,20 @@ class _HostIdentifiersOut(BaseModel):
 class _CommandsOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
     commands: list[CommandRow] = Field(default_factory=list)
+
+
+# What makes two items of a list section the same item, per list: the fields
+# the report prints the item by. An empty tuple is the whole item. Every list
+# section's contract says each item is written once, and an answer that writes
+# one again is asked once (``repeated_item_violations``) and kept as written.
+_ITEM_IDENTITY: dict[type[BaseModel], dict[str, tuple[str, ...]]] = {
+    _FlowOut: {"steps": ()},
+    _ConfigOut: {"items": ("key", "value")},
+    _HostIdentifiersOut: {"identifiers": ("value",)},
+    _CommandsOut: {"commands": ("name",)},
+    _CliFlagsOut: {"flags": ("flag",)},
+    _C2Out: {"channels": ("name",)},
+}
 
 
 # Rule 2 is the one that was missing, and its absence was not theoretical: on
@@ -1019,6 +1034,7 @@ class ReportComposer:
                     *citation_violations(answer, citable, prose=prose),
                     *wrong_entry_citations(answer, entries, prose=prose),
                     *technique_name_violations(answer),
+                    *repeated_item_violations(answer, _ITEM_IDENTITY.get(schema, {})),
                 ]
                 for extra in validators or []:
                     found.extend(extra(answer))
@@ -1112,9 +1128,11 @@ class ReportComposer:
                 # Whatever a repair made of the text, it is the front of an
                 # answer the cap ended: the model is told why, and asked once
                 # for a shorter one.
-                chars, begun, _distinct = cut_answer_counts(cut_text)
+                chars, begun, distinct = cut_answer_counts(cut_text)
                 return [
-                    section_cut_violation(cut_at, chars=chars, begun=begun, head=cut_text.strip())
+                    section_cut_violation(
+                        cut_at, chars=chars, begun=begun, head=cut_text.strip(), distinct=distinct
+                    )
                 ]
             found = [
                 *schema_violations(schema, payload, code="composer.schema"),
@@ -1122,6 +1140,7 @@ class ReportComposer:
                 *citation_violations(payload, citable, prose=prose),
                 *wrong_entry_citations(payload, entries, prose=prose),
                 *technique_name_violations(payload),
+                *repeated_item_violations(payload, _ITEM_IDENTITY.get(schema, {})),
             ]
             for extra in validators or []:
                 found.extend(extra(payload))
