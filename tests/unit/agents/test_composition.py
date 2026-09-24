@@ -141,11 +141,22 @@ def test_a_clone_on_r2_gets_the_r2_fragment_in_the_built_in_assembly():
             "profile": "two",
         },
     )
-    from maljan.agents.prompt_fragments import format_fragment
+    from maljan.agents.prompt_fragments import format_fragment, tools_statement
 
     resolved = resolve_agent("static_r2", _Container(cfg))
+    # Resolution runs before the analyst attaches its own provider, so the
+    # provider is described as expected; the sentence about tools names it.
+    statement = tools_statement(
+        resolved.tools, provider_label="the r2 static provider", provider_expected=True
+    )
     assert resolved.prompt == (
-        _ISR_HEAD + format_fragment("unknown", "unknown") + "\n\n" + "R2-FRAGMENT " + _ISR_TAIL
+        _ISR_HEAD
+        + format_fragment("unknown", "unknown")
+        + "\n\n"
+        + "R2-FRAGMENT"
+        + "\n\n"
+        + statement
+        + _ISR_TAIL
     )
     assert resolved.static_provider_id == "r2"
     assert resolved.role == "static"
@@ -160,7 +171,11 @@ def test_an_explicit_prompt_wins_over_the_built_in_assembly():
             "profile": "two",
         },
     )
-    assert resolve_agent("static_r2", _Container(cfg)).prompt == "MINE"
+    from maljan.agents.prompt_fragments import tools_statement
+
+    resolved = resolve_agent("static_r2", _Container(cfg))
+    # The operator's text, then the platform's sentence about the tools.
+    assert resolved.prompt == "MINE\n\n" + tools_statement(resolved.tools)
 
 
 def test_a_generic_agent_with_no_references_and_no_bound_servers_is_tool_less():
@@ -172,9 +187,11 @@ def test_a_generic_agent_with_no_references_and_no_bound_servers_is_tool_less():
             "profile": "one",
         },
     )
+    from maljan.agents.prompt_fragments import NO_TOOLS_STATEMENT
+
     resolved = resolve_agent("strings", _Container(cfg))
     assert resolved.tools == []
-    assert resolved.prompt == "read strings"
+    assert resolved.prompt == "read strings\n\n" + NO_TOOLS_STATEMENT
 
 
 def test_a_provider_reference_is_the_only_way_a_generic_agent_gets_provider_tools():

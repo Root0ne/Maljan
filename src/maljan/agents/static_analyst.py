@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -22,10 +23,15 @@ from maljan.agents.base_agent import (
 from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_FRAGMENT,
     FINDINGS_BLOCK_FRAGMENT,
+    PROVIDER_FAMILY,
     REPUTATION_LOOKUP_FRAGMENT,
+    has_decompiler,
+    tool_families,
+    tool_names,
+    tools_statement,
 )
 from maljan.agents.registry import register_agent
-from maljan.providers.base import StaticJobContext
+from maljan.providers.base import StaticJobContext, absent_provider_fragment
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
 # The provider- and platform-independent head of the static system prompt.
@@ -51,14 +57,52 @@ _CLAIMS_BEAR_ON_THE_VERDICT = (
 _ISR_TAIL = FINDINGS_BLOCK_FRAGMENT + _CLAIMS_BEAR_ON_THE_VERDICT + REPUTATION_LOOKUP_FRAGMENT
 
 
-def _static_prompt(provider: Any | None = None) -> str:
+def assemble_static_prompt(
+    provider: Any,
+    fragment: str,
+    tools: Sequence[Any],
+    *,
+    provider_expected: bool = False,
+    with_statement: bool = True,
+) -> str:
+    """The static system prompt for ``provider``, true of the tool list ``tools``.
+
+    HEAD, the sample's format fragment, the provider's fragment, the sentence
+    about the tools, then TAIL. The provider's fragment walks the model through
+    the provider's own tools, so it is the prompt only when those tools are in
+    the list (or, for a prompt resolved before the analyst attaches them,
+    ``provider_expected``); otherwise the provider says what it is and that it
+    is not attached. The sentence about tools is built from ``tools`` alone;
+    ``with_statement=False`` leaves it out, for a text an operator copies.
+    """
+    attached = provider_expected or PROVIDER_FAMILY in tool_families(tools)
+    label = str(getattr(provider, "label", "") or getattr(provider, "id", "") or "static")
+    offers_tools = bool(getattr(getattr(provider, "capabilities", None), "provides_tools", True))
+    # A provider that offers no tools (``none``, capa/YARA) has nothing to be
+    # absent: its fragment describes it whatever the list holds.
+    if attached or not offers_tools:
+        body = str(provider.prompt_fragment())
+    elif hasattr(provider, "absent_fragment"):
+        body = str(provider.absent_fragment())
+    else:
+        body = absent_provider_fragment(label)
+    statement = tools_statement(
+        tools,
+        provider_label=f"the {label} static provider",
+        provider_expected=attached,
+    )
+    middle = body.rstrip() + ("\n\n" + statement if with_statement else "")
+    return _ISR_HEAD + fragment + "\n\n" + middle + _ISR_TAIL
+
+
+def _static_prompt(provider: Any | None = None, tools: Sequence[Any] = ()) -> str:
     """The neutral static system prompt for ``provider`` (the configured one by default).
 
     Neutral because it carries the format fragment for a sample nothing has
     identified. A running job does not use this: the container resolves the
     agent's prompt with the job's own format (``composition.builtin_prompt``)
-    and ``BaseAnalyst._system_prompt`` reads it. This is the fallback for an
-    analyst built outside a container.
+    and ``BaseAnalyst._system_prompt`` builds it for the tools the request
+    carries. This is the fallback for an analyst built outside a container.
     """
     if provider is None:
         from maljan.core.config import get_settings
@@ -67,13 +111,7 @@ def _static_prompt(provider: Any | None = None) -> str:
         provider = get_static_provider(get_settings())
     from maljan.agents.prompt_fragments import format_fragment
 
-    return (
-        _ISR_HEAD
-        + format_fragment("unknown", "unknown")
-        + "\n\n"
-        + provider.prompt_fragment()
-        + _ISR_TAIL
-    )
+    return assemble_static_prompt(provider, format_fragment("unknown", "unknown"), tools)
 
 
 # Back-compat: several modules and tests import this name. It is the default
@@ -109,7 +147,7 @@ def _reframe_static_raw_data(data: str, has_tools: bool) -> str:
         return (
             "No pre-extracted static fixture is available for this sample. This is "
             "EXPECTED for a freshly analysed binary and does NOT mean static analysis "
-            "is impossible — your live Ghidra tool findings in YOUR ORIGINAL REPORT "
+            "is impossible — the tool findings in YOUR ORIGINAL REPORT "
             "above are the authoritative static evidence. Revise from those findings; "
             "do NOT claim the binary data is missing or that analysis could not be performed."
         )
@@ -176,6 +214,10 @@ class StaticAnalyst(BaseAnalyst):
             ),
         ]
         self.logger.info("Static provider '%s': %d tools attached.", provider.id, len(self.tools))
+
+    def _fallback_prompt(self, tools: Sequence[Any]) -> str:
+        """The prompt of an analyst built outside a container, for ``tools``."""
+        return _static_prompt(self._provider(), tools)
 
     def _job_context(self) -> StaticJobContext:
         from maljan.core.config import get_settings
@@ -474,13 +516,17 @@ class StaticAnalyst(BaseAnalyst):
             target_info = f"Static output:\n{data}"
 
         prompt_messages = [
-            ("system", self._system_prompt(lambda: _static_prompt(self._provider()))),
+            ("system", self._system_prompt(self._fallback_prompt)),
             (
                 "human",
                 "Analyze the following target for obfuscation, "
                 "suspicious API imports, and hardcoded C2 patterns. "
-                "Use your tools to deeply analyze the binary if it's a file path.\n"
-                f"{target_info}",
+                + (
+                    "Use your tools to deeply analyze the binary if it's a file path.\n"
+                    if self.tools
+                    else "\n"
+                )
+                + f"{target_info}",
             ),
         ]
 
@@ -588,7 +634,7 @@ class StaticAnalyst(BaseAnalyst):
         # ``analysis_file_path`` on the chunk JSON. When present we hoist
         # it to a separate "Load using" line so the model can't miss it,
         # even on a degraded local 8-9B run.
-        load_hint = _extract_load_hint(data)
+        load_hint = _extract_load_hint(data, tool_names(self.tools))
 
         # Maltracker-style sink-reachability triage: when we have a
         # container-visible path, run a deterministic call-graph pre-pass and
@@ -616,11 +662,11 @@ class StaticAnalyst(BaseAnalyst):
         if host_path:
             rag_hint = self._compute_family_rag_hint(host_path)
         prompt_messages = [
-            ("system", self._system_prompt(lambda: _static_prompt(self._provider()))),
+            ("system", self._system_prompt(self._fallback_prompt)),
             (
                 "human",
                 "Analyze the target binary and return a structured list of findings.\n"
-                "You may use tools to gather more information (decompile, xrefs, etc.).\n"
+                f"{_tool_use_line(self.tools)}"
                 "For each finding state: the claim, the exact artifact "
                 "reference (e.g. 'API import: VirtualAllocEx', 'string at .data+0x20: /bin/sh'), "
                 "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID if applicable.\n\n"
@@ -682,7 +728,8 @@ class StaticAnalyst(BaseAnalyst):
             [
                 (
                     "system",
-                    self._system_prompt(lambda: _static_prompt(self._provider())) + "\n\n"
+                    # A revision is one tools-free call: the prompt says so.
+                    self._system_prompt(self._fallback_prompt, tools=()) + "\n\n"
                     "You are in a negotiation round. You MUST:\n"
                     "1. List any peer claims you still DISPUTE in a DISPUTES section.\n"
                     "2. Revise your own claims based on new evidence.\n"
@@ -755,8 +802,28 @@ class StaticAnalyst(BaseAnalyst):
 # ------------------------------------------------------------------
 
 
-def _extract_load_hint(data: str) -> str:
-    """Return a one-line ``load_program`` hint when the chunk carries a path.
+def _tool_use_line(tools: Sequence[Any]) -> str:
+    """The human turn's line about tools, true of the list the request carries.
+
+    A decompile-and-xrefs example is a promise only a decompiler keeps: a live
+    run on the ``none`` provider was told it could decompile while no tool in
+    its list could. With no tools at all the turn says nothing about them; the
+    system prompt already says there are none.
+    """
+    if not tools:
+        return ""
+    if has_decompiler(tools):
+        return "You may use tools to gather more information (decompile, xrefs, etc.).\n"
+    return "You may use the tools in your tool list to gather more information.\n"
+
+
+# The tool the load line names. Only a provider that opens the sample in a
+# program database (Ghidra) has it; a request without it gets the path alone.
+_LOAD_TOOL = "load_program"
+
+
+def _extract_load_hint(data: str, offered: frozenset[str]) -> str:
+    """Return a one-line sample-path hint when the chunk carries a path.
 
     The analyst-node wrapper splices the
     container-visible sample path into the chunk JSON as
@@ -765,6 +832,11 @@ def _extract_load_hint(data: str) -> str:
     larger ``target`` block. Returns an empty string when the chunk
     isn't JSON (the legacy raw-bytes path) or when no path is present,
     keeping the prompt verbatim with the pre-Wave-6 behaviour.
+
+    ``offered`` is the tool names the request carries. The ``load_program`` line
+    is written only when that tool is among them; without it the line gives
+    the path and names no tool, so a provider with no program database is
+    not told to call one.
     """
     import json as _json
 
@@ -780,11 +852,15 @@ def _extract_load_hint(data: str) -> str:
     path = parsed.get("analysis_file_path")
     if not isinstance(path, str) or not path:
         return ""
-    return (
-        f'LOAD THIS BINARY FIRST: call ``load_program(file="{path}")``.\n'
-        "All subsequent analysis tools operate on the program loaded by "
-        "that call. Do not invent a path — use the one above verbatim.\n\n"
-    )
+    if _LOAD_TOOL in offered:
+        return (
+            f'LOAD THIS BINARY FIRST: call ``load_program(file="{path}")``.\n'
+            "All subsequent analysis tools operate on the program loaded by "
+            "that call. Do not invent a path — use the one above verbatim.\n\n"
+        )
+    if offered:
+        return f"Sample path (use exactly this string wherever a tool asks for a file): {path}\n\n"
+    return f"Sample path: {path}\n\n"
 
 
 def _extract_analysis_path(data: str) -> str | None:

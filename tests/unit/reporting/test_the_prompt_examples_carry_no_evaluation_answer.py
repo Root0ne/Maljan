@@ -26,7 +26,13 @@ from typing import Any
 
 import pytest
 
+from maljan.agents.base_agent import FINAL_ANSWER_NUDGE
 from maljan.agents.judge_agent import COMPACT_BUNDLE_RULES, verdict_cut_violation
+from maljan.agents.network_analyst import NO_PACKET_TOOL_LINE, OTHER_TOOLS_THEN_ANALYZE
+from maljan.agents.prompt_fragments import NO_TOOLS_STATEMENT, tools_statement
+from maljan.agents.prompts import LEAD_PROMPT, REVERSER_PROMPT
+from maljan.agents.static_analyst import _extract_load_hint, _tool_use_line
+from maljan.pipeline.nodes import NO_SANDBOX_DATA_REASON, skipped_analysts_reason
 from maljan.pipeline.validation import (
     CapabilityGrounding,
     absence_claim_violation,
@@ -37,6 +43,8 @@ from maljan.pipeline.validation import (
     ungrounded_capabilities,
     validate_verdict_bundle,
 )
+from maljan.providers.base import STATIC_EVIDENCE_INSTRUCTIONS, absent_provider_fragment
+from maljan.providers.static.null import NullStaticProvider
 from maljan.reporting.composer import (
     _EXAMPLES,
     _INSTRUCTIONS,
@@ -180,6 +188,15 @@ def _strings(value: Any) -> list[str]:
 
 EXAMPLES: dict[str, str] = {"narrative": EXAMPLE_OBJECT, **_EXAMPLES}
 
+
+class _StampedTool:
+    """A tool as the registry hands it over, for the tool statement's words."""
+
+    def __init__(self, name: str, server: str = "") -> None:
+        self.name = name
+        self.metadata = {"maljan_server": server} if server else {}
+
+
 # Everything else a report model is shown on every run, as plain text.
 PROMPTS: dict[str, str] = {
     "narrative contract": EXPECTED_OBJECT,
@@ -283,6 +300,36 @@ PROMPTS: dict[str, str] = {
         )
         if v.code in ("stix.ungrounded_indicator", "stix.unescaped_backslash")
     ),
+    "analyst tool statement naming every family": tools_statement(
+        [
+            _StampedTool("a", "analysis"),
+            _StampedTool("ask_static", "team"),
+            _StampedTool("sandbox_processes"),
+            _StampedTool("load_program"),
+        ],
+        provider_label="the Ghidra static provider",
+    ),
+    "analyst tool statement for a request with none": NO_TOOLS_STATEMENT,
+    "static provider sentence when none is attached": NullStaticProvider.NO_PROVIDER_FRAGMENT[
+        len(STATIC_EVIDENCE_INSTRUCTIONS) :
+    ],
+    "static provider sentence when its tools did not attach": absent_provider_fragment("Ghidra")[
+        len(STATIC_EVIDENCE_INSTRUCTIONS) :
+    ],
+    "static human-turn tool lines": " ".join(
+        [
+            _tool_use_line([_StampedTool("decompile_function")]),
+            _tool_use_line([_StampedTool("a", "analysis")]),
+            _extract_load_hint('{"analysis_file_path": "/s/a.bin"}', frozenset({"x"})),
+            _extract_load_hint('{"analysis_file_path": "/s/a.bin"}', frozenset()),
+        ]
+    ),
+    "network packet-tool lines": f"{NO_PACKET_TOOL_LINE} {OTHER_TOOLS_THEN_ANALYZE}",
+    "final-answer nudge": FINAL_ANSWER_NUDGE,
+    "skipped-analyst degradation reason": skipped_analysts_reason(
+        NO_SANDBOX_DATA_REASON, ["dynamic", "network"]
+    ),
+    "seeded reverser and lead prompts": f"{REVERSER_PROMPT} {LEAD_PROMPT}",
     "judge questions about a shape naming a value and a pattern the grammar refuses": " ".join(
         v.message
         for v in validate_verdict_bundle(

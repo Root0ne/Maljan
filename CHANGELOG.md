@@ -1914,6 +1914,41 @@ change landed on `main`.
 
 ### Fixed
 
+- **An analyst is told the truth about its tools.** With `static.provider =
+  none` the static analyst's system prompt said "You have no analysis tools in
+  this configuration" while the same request carried 36 tools from the
+  `analysis`, `knowledge` and `virustotal` servers; the model believed the
+  prompt, answered in one turn and called nothing. A provider's fragment now
+  says only what the provider is (`none`: no disassembler or decompiler comes
+  with the analyst; a configured provider whose tools did not attach: that it
+  is configured and not attached), and one sentence about tools is built from
+  the list the request carries — the servers and in-process sources it names,
+  or that there are none. Every built-in analyst, the generic and lead
+  agents and the mediator's tool turn build it the same way, and a
+  tools-free call — a revision, the validation turn, a synthesis, the
+  final-answer nudge — is told it carries none. The static human turn offers
+  "decompile, xrefs" only when a decompiling tool is in the list and names
+  `load_program` only when that tool is; the dynamic prompt carries the CAPE
+  workflow only when the sandbox's own server attached; the network PCAP turn
+  names only the packet tools it has; the seeded reverser and lead prompts no
+  longer promise a decompiler or `ask_` tools unconditionally. Nothing forces
+  a tool call: a model that answers from the evidence it was handed is a
+  recorded outcome. A guard test resolves every built-in agent under every
+  static and sandbox provider, in the default and measurement teams, through
+  `aresolve_agent` and the analyst's own prompt builder, and fails on a "no
+  tools" sentence beside a tool list or a tool family the list does not hold.
+- **The validation turn stays tools-free, and says so.** It is one call over
+  the evidence text that asks for a fix to an answer — its time is what the
+  loop left, measured against one answer's pace, and the answer it gets is
+  parsed and kept or refused as a whole — not a second loop with its own
+  budget, ledger and recorder. Its system prompt now states that the request
+  carries no tools instead of repeating the loop's tool sentence.
+- **An analyst skipped for want of sandbox data is said to be skipped.** The
+  degradation reason reads "analysts skipped (no sandbox data): dynamic,
+  network" instead of "analysts produced no claims", which read as if they had
+  run; "analysts produced no claims:" names only analysts that ran. The worker
+  log says "skipped: no sandbox data" where it said "no data chunks available".
+
 - **A pattern is kept whatever its comparison operator.** The judge's
   integrity pass kept only patterns containing `=`, so every `LIKE` a judge
   wrote was dropped as `empty_pattern` with its relationships — twelve of a

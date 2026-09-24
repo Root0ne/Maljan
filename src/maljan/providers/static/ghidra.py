@@ -151,6 +151,10 @@ class GhidraStaticProvider(StaticProvider):
     def prompt_fragment(self) -> str:
         return GHIDRA_PROMPT_FRAGMENT
 
+    @property
+    def label(self) -> str:
+        return "Ghidra"
+
     def open(self, job: StaticJobContext) -> None:
         """Attach to Ghidra for ``job``. Idempotent, per the base contract.
 

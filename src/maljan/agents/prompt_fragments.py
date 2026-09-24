@@ -14,6 +14,8 @@ neutral default, which asks for concrete artefacts without naming any OS.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 # Keyed by platform, since the artefacts follow the operating system rather
 # than the container the code arrived in: a DEX and an APK look for the same
 # things. ``file_type`` refines this below where the format matters more than
@@ -202,3 +204,89 @@ REPUTATION_LOOKUP_FRAGMENT = (
     "it as one source: a reputation label is not the verdict, and an unknown hash is "
     "not a clean sample."
 )
+
+
+# What an agent is told about its tools, built from the list its request
+# carries rather than written into any role's or provider's text. A live run
+# sent the static analyst 36 tools under a provider fragment that said it had
+# none; the model believed the fragment, answered in one turn and called
+# nothing. Every statement about tools a prompt makes comes from here, so it
+# can only say what the list says.
+#
+# The families are where the tools came from: a registry server by its key,
+# the team's ``ask_<agent>`` tools, the sandbox report's tools, and the tools
+# of the provider the role attaches itself (Ghidra, radare2, a sandbox's own
+# server), which carry no server key of their own.
+TEAM_FAMILY = "team"
+SANDBOX_FAMILY = "sandbox"
+PROVIDER_FAMILY = "provider"
+
+NO_TOOLS_STATEMENT = (
+    "No tools are attached to this request, so answer from the evidence in front of "
+    "you. Do not describe tool calls you did not make, and do not claim the analysis "
+    "was impossible: the evidence you are given is real."
+)
+
+
+def tool_family(tool: object) -> str:
+    """The family one tool belongs to: its server key, or an in-process source."""
+    from maljan.agents.tool_pinning import server_of
+
+    server = server_of(tool)
+    if server:
+        return server
+    if str(getattr(tool, "name", "")).startswith("sandbox_"):
+        return SANDBOX_FAMILY
+    return PROVIDER_FAMILY
+
+
+def tool_families(tools: Sequence[object]) -> list[str]:
+    """Every family in ``tools``, in the order the list first names it."""
+    return list(dict.fromkeys(tool_family(tool) for tool in tools))
+
+
+def _family_label(family: str, provider_label: str) -> str:
+    if family == TEAM_FAMILY:
+        return "your team's other agents (one `ask_<agent>` tool each)"
+    if family == SANDBOX_FAMILY:
+        return "the job's sandbox report"
+    if family == PROVIDER_FAMILY:
+        return provider_label or "the provider attached to this role"
+    return f"the `{family}` server"
+
+
+def tools_statement(
+    tools: Sequence[object], *, provider_label: str = "", provider_expected: bool = False
+) -> str:
+    """The one sentence about tools a prompt carries, true of ``tools``.
+
+    ``provider_expected`` is for a prompt resolved before the role attaches its
+    own provider — the settings probe and the resolved prompt of a built-in
+    role. It names the provider's family without counting tools nobody has
+    listed yet; the prompt the role sends is built again from the list it
+    sends, where the provider's tools are present or the sentence says nothing
+    of them.
+    """
+    families = tool_families(tools)
+    if provider_expected and PROVIDER_FAMILY not in families:
+        families.insert(0, PROVIDER_FAMILY)
+    if not families:
+        return NO_TOOLS_STATEMENT
+    named = [_family_label(family, provider_label) for family in families]
+    joined = named[0] if len(named) == 1 else ", ".join(named[:-1]) + " and " + named[-1]
+    return (
+        f"The tools attached to this request come from {joined}; their names and "
+        "arguments are listed with the request. Call them where the evidence in front "
+        "of you leaves a question open or a claim needs checking, and cite each result "
+        "by the evidence id it carries."
+    )
+
+
+def has_decompiler(tools: Sequence[object]) -> bool:
+    """Whether any tool in ``tools`` decompiles, by the name it is offered under."""
+    return any("decompile" in str(getattr(tool, "name", "")).lower() for tool in tools)
+
+
+def tool_names(tools: Sequence[object]) -> frozenset[str]:
+    """The names ``tools`` are offered under."""
+    return frozenset(str(getattr(tool, "name", "")) for tool in tools)

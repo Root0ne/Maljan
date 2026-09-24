@@ -93,6 +93,29 @@ class ProviderProbe:
     latency_ms: int = 0
 
 
+# The provider-neutral instructions every static provider fragment opens with:
+# what a claim must cite and which techniques to look for. A provider with no
+# tools of its own, and one whose tools did not attach, say only this and what
+# the provider is.
+STATIC_EVIDENCE_INSTRUCTIONS = (
+    "Analyze the deterministic static evidence you are given. "
+    "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "
+    "string offset (.data+0xNN), API import, or hex pattern. "
+    "Focus on MITRE ATT&CK: T1027 (Obfuscation), T1106 (Native API), "
+    "T1055 (Process Injection), T1140 (Deobfuscation)."
+)
+
+
+def absent_provider_fragment(label: str) -> str:
+    """The static fragment for a provider none of whose tools reached the request."""
+    return (
+        STATIC_EVIDENCE_INSTRUCTIONS
+        + "\n\n"
+        + f"The {label} static provider is configured, but none of its tools is "
+        "attached to this request, so no disassembler or decompiler comes with it."
+    )
+
+
 class StaticProvider(ABC):
     """One static-analysis tool, as the pipeline sees it.
 
@@ -123,8 +146,24 @@ class StaticProvider(ABC):
         return []
 
     def prompt_fragment(self) -> str:
-        """The tool-facing body of the static system prompt for this provider."""
+        """The tool-facing body of the static system prompt, with this provider attached."""
         return ""
+
+    @property
+    def label(self) -> str:
+        """What a prompt calls this provider."""
+        return self.id or "static"
+
+    def absent_fragment(self) -> str:
+        """The body of the static system prompt when none of this provider's tools is attached.
+
+        A provider whose tools did not reach the request — disabled, degraded,
+        or not yet opened — is not described by ``prompt_fragment``, which
+        walks the model through calls it cannot make. This says what the
+        provider is and that it is not attached; what the request does carry is
+        said by the tool statement beside it.
+        """
+        return absent_provider_fragment(self.label)
 
     def collect_evidence(self, sample_path: str) -> StaticEvidenceBundle | None:
         return None

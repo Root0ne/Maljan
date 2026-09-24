@@ -282,7 +282,7 @@ class TestSafeAnalyzeISRChunked:
         def _infer_domain(self):
             return "static"
 
-        def _system_prompt(self, fallback):
+        def _system_prompt(self, fallback, tools=None):
             return "system"
 
         def _truncate_input(self, text: str) -> str:

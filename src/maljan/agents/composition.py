@@ -35,6 +35,7 @@ stage agent.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -68,6 +69,10 @@ class ResolvedAgent:
     # worker does. An analyst passes this to ``pin_paths`` so a tool call goes
     # out with the path its own server can open.
     path_by_server: dict[str, str] = field(default_factory=dict)
+    # ``prompt`` without the platform's sentence about tools: the agent's own
+    # text, or its role's assembly. What a clone is seeded with, so a copy
+    # never carries a sentence about a tool list that is not its own.
+    authored_prompt: str = ""
 
 
 def active_profile(settings: Settings) -> ProfileDefinition:
@@ -154,46 +159,156 @@ def sample_format(container: Any) -> tuple[str, str]:
     return str(fmt[0] or "unknown"), str(fmt[1] or "unknown")
 
 
-def builtin_prompt(role: str, container: Any, static_provider_id: str) -> str:
-    """The prompt a built-in role sends for this job's sample.
+# The roles ``builtin_prompt`` assembles a prompt for. Any other role needs a
+# prompt on its definition.
+BUILTIN_PROMPT_ROLES: frozenset[str] = frozenset({"static", "dynamic", "network", "judge"})
+
+
+def _sandbox_provider(container: Any) -> Any | None:
+    """The job's sandbox provider, or ``None`` for a container that has none."""
+    try:
+        return container.get_sandbox_provider()
+    except Exception as exc:  # noqa: BLE001 — a prompt never fails over a provider lookup
+        logger.debug("No sandbox provider for the dynamic prompt (%s).", exc)
+        return None
+
+
+def builtin_prompt(
+    role: str,
+    container: Any,
+    static_provider_id: str,
+    tools: Sequence[Any] = (),
+    *,
+    provider_expected: bool = False,
+    with_statement: bool = True,
+) -> str:
+    """The prompt a built-in role sends for this job's sample, with ``tools``.
 
     Every analyst assembles the same way: HEAD, then the sample's format
-    fragment, then the provider fragment where the role has one, then TAIL.
-    The head says what the role does, the format fragment says what artefacts
-    exist on this sample, and the provider fragment says what tools are on the
-    other end — so handing the same agent an APK, or attaching radare2, each
-    changes one part and nothing else.
+    fragment, then the provider fragment where the role has one, then the
+    sentence about tools, then TAIL. The head says what the role does, the
+    format fragment says what artefacts exist on this sample, the provider
+    fragment says what the provider is, and the tool sentence says what the
+    request carries — so handing the same agent an APK, or attaching radare2,
+    each changes one part and nothing else.
+
+    ``tools`` is the list the request carries, and the prompt says nothing
+    about tools that is not true of it: a provider's tool workflow is sent only
+    when that provider's tools are in the list, and the sentence about tools is
+    built from the list alone (``prompt_fragments.tools_statement``).
+
+    ``provider_expected`` is for resolution, which runs before a built-in role
+    attaches its own provider (``StaticAnalyst._initialize_mcp_client`` and
+    friends): it describes the provider as attached when the provider offers
+    tools at all. The analyst builds its prompt again from the list it sends
+    (``BaseAnalyst._system_prompt``), where an attach that failed shows.
+
+    ``with_statement=False`` leaves the sentence about tools out: the text a
+    clone of the role is seeded with, which gets its own sentence, for its own
+    list, when it is resolved.
 
     ``static`` reads the *agent's own* static provider, which is what makes a
-    clone on radare2 meaningful.
-
-    ``dynamic`` uses the CAPE2 fragment, not the configured sandbox's. This
-    analyst has never read the configured provider for its prompt (the default
-    is ``mock``, whose fragment is empty) and there is no per-agent sandbox
-    provider to vary.
+    clone on radare2 meaningful. ``dynamic`` reads the job's sandbox provider
+    for the workflow of that sandbox's own tool server.
     """
     from maljan.agents.prompt_fragments import format_fragment
 
     fragment = format_fragment(*sample_format(container))
     if role == "static":
-        from maljan.agents.static_analyst import _ISR_HEAD, _ISR_TAIL
+        from maljan.agents.static_analyst import assemble_static_prompt
 
         provider = container.get_static_provider(static_provider_id)
-        return _ISR_HEAD + fragment + "\n\n" + str(provider.prompt_fragment()) + _ISR_TAIL
+        return assemble_static_prompt(
+            provider,
+            fragment,
+            tools,
+            provider_expected=provider_expected and bool(provider.capabilities.provides_tools),
+            with_statement=with_statement,
+        )
     if role == "dynamic":
-        from maljan.agents.dynamic_analyst import _DYN_HEAD, _DYN_TAIL
-        from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
+        from maljan.agents.dynamic_analyst import assemble_dynamic_prompt
 
-        return _DYN_HEAD + fragment + "\n\n" + CAPE2SandboxProvider.CAPE_PROMPT_FRAGMENT + _DYN_TAIL
+        sandbox = _sandbox_provider(container)
+        workflow = str(sandbox.dynamic_prompt_fragment() or "") if sandbox is not None else ""
+        offers_tools = sandbox is not None and bool(sandbox.capabilities.provides_tools)
+        label = f"the {sandbox.id} sandbox's own tool server" if sandbox is not None else ""
+        return assemble_dynamic_prompt(
+            fragment,
+            tools,
+            provider_fragment=workflow,
+            provider_label=label,
+            provider_expected=provider_expected and offers_tools,
+            with_statement=with_statement,
+        )
     if role == "network":
-        from maljan.agents.network_analyst import _NET_HEAD, _NET_TAIL
+        from maljan.agents.network_analyst import assemble_network_prompt
 
-        return _NET_HEAD + fragment + _NET_TAIL
+        return assemble_network_prompt(fragment, tools, with_statement=with_statement)
     if role == "judge":
+        # The verdict prompt names no tool, and the judge's own turns say what
+        # it may call where it may call it; nothing is appended here.
         from maljan.agents.judge_agent import JUDGE_VERDICT_SYSTEM
 
         return JUDGE_VERDICT_SYSTEM
     raise ValueError(f"no built-in prompt for role {role!r}: give the definition a prompt")
+
+
+def _agent_prompt(
+    definition: AgentDefinition,
+    container: Any,
+    provider_id: str,
+    tools: Sequence[Any],
+    *,
+    provider_expected: bool = False,
+    with_statement: bool = True,
+) -> str:
+    """An agent's prompt for ``tools``: its own text, or its role's built-in one.
+
+    A prompt an operator wrote says what the agent is for; the sentence about
+    the tools it is handed is the platform's, built from the list, and follows
+    it — a seeded reverser that expects a decompiler is told whether one is
+    there. The judge's prompt is sent by its own code and gets nothing added.
+    """
+    if definition.prompt is None:
+        return builtin_prompt(
+            definition.role,
+            container,
+            provider_id,
+            tools,
+            provider_expected=provider_expected,
+            with_statement=with_statement,
+        )
+    if definition.role == "judge" or not with_statement:
+        return definition.prompt
+    from maljan.agents.prompt_fragments import tools_statement
+
+    return definition.prompt.rstrip() + "\n\n" + tools_statement(tools)
+
+
+def prompt_for(resolved: ResolvedAgent, container: Any, tools: Sequence[Any]) -> str:
+    """The prompt agent ``resolved.key`` sends with a request carrying ``tools``.
+
+    What a built-in analyst's ``_system_prompt`` calls: the composition that
+    resolved the agent, built again for the list this request carries — the
+    tool loop's, or none for a tools-free call. An agent whose definition is
+    gone keeps the prompt it was resolved with.
+    """
+    definition = container.config.agents.definitions.get(resolved.key)
+    if definition is None:
+        return resolved.prompt
+    return _agent_prompt(definition, container, resolved.static_provider_id, tools)
+
+
+def _check_prompt_role(definition: AgentDefinition) -> None:
+    """Refuse a definition with no prompt for a role that has no built-in one.
+
+    Before any tool is attached, so a definition that cannot be resolved opens
+    nothing.
+    """
+    if definition.prompt is None and definition.role not in BUILTIN_PROMPT_ROLES:
+        raise ValueError(
+            f"no built-in prompt for role {definition.role!r}: give the definition a prompt"
+        )
 
 
 def _definition(settings: Settings, key: str) -> AgentDefinition:
@@ -551,9 +666,7 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
     settings: Settings = container.config
     definition = _definition(settings, key)
     provider_id = static_provider_id_for(settings, key)
-    prompt = definition.prompt
-    if prompt is None:
-        prompt = builtin_prompt(definition.role, container, provider_id)
+    _check_prompt_role(definition)
 
     reasons: list[str] = []
     # One ``seen`` map across every half, so B's collision rule holds over the
@@ -587,7 +700,15 @@ def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAge
     return ResolvedAgent(
         key=key,
         role=definition.role,
-        prompt=prompt,
+        prompt=_agent_prompt(definition, container, provider_id, deduped, provider_expected=True),
+        authored_prompt=_agent_prompt(
+            definition,
+            container,
+            provider_id,
+            deduped,
+            provider_expected=True,
+            with_statement=False,
+        ),
         tools=deduped,
         static_provider_id=provider_id,
         llm=_agent_llm(container, key),
@@ -606,9 +727,7 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
     settings: Settings = container.config
     definition = _definition(settings, key)
     provider_id = static_provider_id_for(settings, key)
-    prompt = definition.prompt
-    if prompt is None:
-        prompt = builtin_prompt(definition.role, container, provider_id)
+    _check_prompt_role(definition)
 
     reasons: list[str] = []
     seen: dict[str, str] = {}
@@ -651,7 +770,15 @@ async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> Reso
     return ResolvedAgent(
         key=key,
         role=definition.role,
-        prompt=prompt,
+        prompt=_agent_prompt(definition, container, provider_id, deduped, provider_expected=True),
+        authored_prompt=_agent_prompt(
+            definition,
+            container,
+            provider_id,
+            deduped,
+            provider_expected=True,
+            with_statement=False,
+        ),
         tools=deduped,
         static_provider_id=provider_id,
         llm=_agent_llm(container, key),

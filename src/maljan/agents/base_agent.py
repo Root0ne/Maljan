@@ -867,8 +867,13 @@ def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[
 # either, and each ask is another full model turn.
 # No tool half to the sentence: the nudge invokes the bare model, with no tools
 # bound to that turn, so a model that took that branch answered with an empty
-# message and the run's one extra step bought nothing.
-FINAL_ANSWER_NUDGE = "Your last message was not a final report. Return your final ISR now."
+# message and the run's one extra step bought nothing. The turn says so: the
+# system prompt above it described the loop's tools, and this request carries
+# none (or carries them forbidden, on the second way of asking).
+FINAL_ANSWER_NUDGE = (
+    "Your last message was not a final report. No tool can be called in this turn. "
+    "Return your final ISR now."
+)
 
 # What the analyst reports for itself when even the nudge produced no report.
 # Not ``no_data``: the analyst had data, read it, and stopped mid-thought.
@@ -2719,26 +2724,43 @@ class BaseAnalyst(BudgetMeter, ABC):
         # to the state and the judge reads it into ``run_summary.budget``.
         self._budget_records: Sequence[dict[str, Any]] = []
 
-    def _system_prompt(self, fallback: str | Callable[[], str]) -> str:
+    def _system_prompt(
+        self,
+        fallback: str | Callable[[Sequence[Any]], str],
+        tools: Sequence[Any] | None = None,
+    ) -> str:
         """This analyst's system turn for the job it is actually running.
 
-        The container resolves an agent once per job — its prompt already
-        carries the sample's format fragment, the agent's own static provider
-        fragment and any prompt the operator set on the definition — and hands
-        it over as ``_resolved``. Reading it here is what makes that resolution
-        the prompt a built-in analyst sends, rather than a value only the
-        settings probe ever saw.
+        The container resolves an agent once per job — its prompt carries the
+        sample's format fragment, the agent's own static provider fragment and
+        any prompt the operator set on the definition — and hands it over as
+        ``_resolved``. Building it here, through the same composition, is what
+        makes that resolution the prompt a built-in analyst sends, rather than
+        a value only the settings probe ever saw.
 
-        ``fallback`` is the module constant (or a callable that assembles it),
-        used by an analyst constructed outside a container: a test, a script,
-        the CLI. It is the neutral assembly, which is the honest answer when
-        nothing has said what the sample is.
+        ``tools`` is the list the request this prompt goes with carries:
+        ``self.tools`` by default, which is what the tool loop binds, and
+        ``()`` for a tools-free call — a revision, a validation turn, a
+        synthesis. The prompt's statement about tools is built from it, so a
+        request is never told about tools it does not carry, nor told it has
+        none when it does.
+
+        ``fallback`` is the module constant, or a callable that assembles the
+        prompt for a tool list, used by an analyst constructed outside a
+        container: a test, a script, the CLI. It is the neutral assembly,
+        which is the honest answer when nothing has said what the sample is.
         """
+        sent = list(getattr(self, "tools", None) or []) if tools is None else list(tools)
         resolved = getattr(self, "_resolved", None)
+        container = getattr(self, "_container", None)
+        if resolved is not None and container is not None and bool(getattr(resolved, "key", "")):
+            from maljan.agents.composition import prompt_for
+
+            return prompt_for(resolved, container, sent)
         prompt = getattr(resolved, "prompt", "") if resolved is not None else ""
         if prompt:
             return str(prompt)
-        return fallback() if callable(fallback) else fallback
+        return fallback(sent) if callable(fallback) else fallback
 
     def _initialize_mcp_client(self) -> None:
         """Attach this analyst's MCP toolkit. Subclasses that have one override."""
@@ -4594,7 +4616,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             for isr in answers
             if isr is not None
         ]
-        prompt = self._system_prompt("")
+        # Tools-free, and the turn below says so: the prompt must not say otherwise.
+        prompt = self._system_prompt("", tools=())
         messages: list[Any] = []
         if prompt:
             messages.append(SystemMessage(content=prompt))
@@ -5042,7 +5065,10 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        prompt = self._system_prompt("")
+        # The validation turn is one tools-free call over the evidence text: it
+        # asks for a fix to an answer, not for more looking, so the prompt it is
+        # sent with says it carries no tools.
+        prompt = self._system_prompt("", tools=())
         messages: list[BaseMessage] = []
         if prompt:
             messages.append(SystemMessage(content=prompt))

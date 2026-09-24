@@ -66,7 +66,8 @@ def test_a_generic_definition_runs_the_configurable_analyst():
     agent = container.get_agent("strings")
     assert isinstance(agent, ConfigurableAnalyst)
     assert agent.name == "strings"
-    assert agent._resolved.prompt == "read strings"
+    assert agent._resolved.authored_prompt == "read strings"
+    assert agent._resolved.prompt.startswith("read strings\n\n")
     assert container.agent_role("strings") == "generic"
 
 

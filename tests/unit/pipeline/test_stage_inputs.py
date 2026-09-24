@@ -435,14 +435,14 @@ class TestInjectionKeepsTheHeadChunkAContract:
 
         head = self._head("findings")
         assert head.lstrip().startswith("{")
-        assert "LOAD THIS BINARY FIRST" in _extract_load_hint(head)
+        assert "LOAD THIS BINARY FIRST" in _extract_load_hint(head, frozenset({"load_program"}))
         assert _extract_analysis_path(head) == "/srv/samples/abc123.exe"
 
     def test_the_load_hint_still_fires_with_full_reports_injected(self) -> None:
         from maljan.agents.static_analyst import _extract_load_hint
 
         head = self._head("full")
-        assert "LOAD THIS BINARY FIRST" in _extract_load_hint(head)
+        assert "LOAD THIS BINARY FIRST" in _extract_load_hint(head, frozenset({"load_program"}))
         assert "The full static prose report." in head
 
     def test_the_block_arrives_as_a_field_of_the_document(self) -> None:

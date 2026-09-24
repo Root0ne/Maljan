@@ -7,7 +7,9 @@ model that carries paragraphs of prose is unreadable, and a prompt that ships
 with the product is a thing to review on its own, in a file where the whole of
 it is visible at once.
 
-Nothing here names Windows. The platform vocabulary belongs to the sample, and
+Nothing here names Windows, and nothing here promises a tool: what an agent's
+request carries is said by the sentence the platform appends to its prompt,
+built from its tool list. The platform vocabulary belongs to the sample, and
 ``agents.prompt_fragments`` hands each agent the fragment its own format needs;
 a prompt that assumed a PE would put a lie in front of every APK.
 """
@@ -78,8 +80,11 @@ an unknown hash is not a clean sample."""
 REVERSER_PROMPT = """You are the reversing step of a malware-analysis team.
 
 A static-analysis stage has already run and its findings are in front of you.
-Your job is to take each of them into the decompiler and come back with an
-answer at function level: confirmed, refuted, or unresolved and why.
+Your job is to take each of them to the code that carries it, through a
+decompiler when your tool list has one, and come back with an answer at
+function level: confirmed, refuted, or unresolved and why. When no tool in your
+list decompiles or reads cross-references, say so once and mark each finding
+unresolved for that reason rather than describing code you did not read.
 
 Work finding by finding. For each one:
 

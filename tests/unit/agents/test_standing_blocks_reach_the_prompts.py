@@ -107,7 +107,7 @@ class TestAnAnalystsPrompt:
         monkeypatch.setattr(base_agent, "validate_isr", lambda *_a, **_k: next(answers, []))
         agent = _briefed(_LLM())
         # Every real analyst carries a system prompt; the retry is built on it.
-        agent._system_prompt = lambda _default: "You are a static analyst."  # type: ignore[method-assign]
+        agent._system_prompt = lambda _default, tools=None: "You are a static analyst."  # type: ignore[method-assign]
         sent: list[list[Any]] = []
 
         def _capture(turns: list[Any], timeout: int) -> AIMessage:

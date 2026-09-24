@@ -7,6 +7,7 @@ chains, and persistence mechanisms observable from sandbox JSON output.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -15,7 +16,10 @@ from maljan.agents.base_agent import BaseAnalyst, prompt_to_messages
 from maljan.agents.prompt_fragments import (
     CLAIM_FORMAT_FRAGMENT,
     FINDINGS_BLOCK_FRAGMENT,
+    PROVIDER_FAMILY,
     format_fragment,
+    tool_families,
+    tools_statement,
 )
 from maljan.agents.registry import register_agent
 from maljan.agents.static_analyst import _parse_claim_blocks, _parse_disputes
@@ -42,20 +46,56 @@ _DYN_HEAD = (
 # the contract the tool-server and agent-composition layers build prompts from.
 _DYN_TAIL = FINDINGS_BLOCK_FRAGMENT
 
-# Back-compat, and the fallback for an analyst built outside a container: the
-# neutral assembly, against CAPEv2 — the sandbox this project has always
-# measured the dynamic analyst on — rather than whatever ``sandbox.provider``
-# happens to be configured on a given box (that one field defaults to "mock").
-# A running job sends the container's resolved prompt, which is the same three
-# parts with its own sample's format fragment; see
-# ``composition.builtin_prompt`` and ``BaseAnalyst._system_prompt``.
-_ISR_SYSTEM = (
-    _DYN_HEAD
-    + format_fragment("unknown", "unknown")
-    + "\n\n"
-    + CAPE2SandboxProvider.CAPE_PROMPT_FRAGMENT
-    + _DYN_TAIL
-)
+
+def assemble_dynamic_prompt(
+    fragment: str,
+    tools: Sequence[Any],
+    *,
+    provider_fragment: str = "",
+    provider_label: str = "",
+    provider_expected: bool = False,
+    with_statement: bool = True,
+) -> str:
+    """The dynamic system prompt, true of the tool list ``tools``.
+
+    HEAD, the sample's format fragment, the sandbox's own tool workflow when
+    that sandbox's tools are in the list, the sentence about tools, then TAIL.
+    The CAPE workflow names ``submit_file``, ``get_task_report`` and the rest;
+    it used to be sent whatever the sandbox was, so an analyst on the mock
+    sandbox with only the report tools was walked through calls to a server
+    it did not have.
+    """
+    attached = provider_expected or PROVIDER_FAMILY in tool_families(tools)
+    workflow = provider_fragment.strip() if attached else ""
+    statement = tools_statement(
+        tools,
+        provider_label=provider_label or "the sandbox's own tool server",
+        provider_expected=attached,
+    )
+    middle = "\n\n".join(part for part in (workflow, statement if with_statement else "") if part)
+    return _DYN_HEAD + fragment + ("\n\n" + middle if middle else "") + _DYN_TAIL
+
+
+def _dynamic_prompt(tools: Sequence[Any] = ()) -> str:
+    """The neutral dynamic prompt, for an analyst built outside a container.
+
+    Against CAPEv2's workflow, the sandbox this project has always measured
+    the dynamic analyst on, and only when the tools it walks through are in
+    the list. A running job sends the container's resolved prompt for the
+    tools the request carries; see ``composition.builtin_prompt`` and
+    ``BaseAnalyst._system_prompt``.
+    """
+    return assemble_dynamic_prompt(
+        format_fragment("unknown", "unknown"),
+        tools,
+        provider_fragment=CAPE2SandboxProvider.CAPE_PROMPT_FRAGMENT,
+        provider_label="the CAPEv2 tool server",
+    )
+
+
+# Back-compat: the neutral assembly with no tools, which is what an analyst
+# built outside a container and never given any sends.
+_ISR_SYSTEM = _dynamic_prompt()
 
 
 @register_agent("dynamic")
@@ -115,12 +155,13 @@ class DynamicAnalyst(BaseAnalyst):
         task_info = f"Task ID: {data}" if data.strip().isdigit() else f"Sandbox data:\n{data}"
 
         prompt_messages = [
-            ("system", self._system_prompt(_ISR_SYSTEM)),
+            ("system", self._system_prompt(_dynamic_prompt)),
             (
                 "human",
                 "Analyze registry persistence, process injection, and file/folder drops "
-                "in this sandbox behavior data. You may use tools to gather more information.\n"
-                f"{task_info}",
+                "in this sandbox behavior data."
+                + (" You may use tools to gather more information.\n" if self.tools else "\n")
+                + f"{task_info}",
             ),
         ]
 
@@ -193,12 +234,16 @@ class DynamicAnalyst(BaseAnalyst):
         task_info = f"Task ID: {data}" if data.strip().isdigit() else f"Sandbox data:\n{data}"
 
         prompt_messages = [
-            ("system", self._system_prompt(_ISR_SYSTEM)),
+            ("system", self._system_prompt(_dynamic_prompt)),
             (
                 "human",
                 "Analyze the sandbox behavioral data and return a structured list of findings.\n"
-                "You may use tools to gather more information about the task.\n"
-                "For each finding state: the claim, the exact artifact reference "
+                + (
+                    "You may use tools to gather more information about the task.\n"
+                    if self.tools
+                    else ""
+                )
+                + "For each finding state: the claim, the exact artifact reference "
                 "(e.g. 'API call: WriteProcessMemory PID=832', 'RegSetValue: HKLM\\Run\\malware'), "
                 "your confidence (0.0-1.0), and the MITRE ATT&CK technique ID.\n\n"
                 f"{CLAIM_FORMAT_FRAGMENT}\n"
@@ -239,7 +284,8 @@ class DynamicAnalyst(BaseAnalyst):
             [
                 (
                     "system",
-                    self._system_prompt(_ISR_SYSTEM) + "\n\n"
+                    # A revision is one tools-free call: the prompt says so.
+                    self._system_prompt(_dynamic_prompt, tools=()) + "\n\n"
                     "You are in a negotiation round. You MUST:\n"
                     "1. List any peer claims you still DISPUTE in a DISPUTES section.\n"
                     "2. Revise your own claims based on new evidence.\n"
