@@ -489,7 +489,10 @@ def behaviour_pattern(technique_id: str, attck: Any = None) -> re.Pattern[str] |
     Three sources, none of them written for a sample: the capability terms the
     report's prose is checked against that list the technique, and — where the
     catalogue can be read — the technique's own name and the names of its
-    tactics.
+    tactics. A tactic name alone is an ordinary word ("execution",
+    "collection", "discovery", "impact"), so it names the behaviour only as a
+    category of mechanism: the tactic followed by a word such as "mechanisms"
+    or "techniques" ("discovery mechanisms").
     """
     base = _base_technique(technique_id)
     parts = [
@@ -505,24 +508,75 @@ def behaviour_pattern(technique_id: str, attck: Any = None) -> re.Pattern[str] |
             for spelling in _TACTIC_SPELLINGS.get(slug, (slug.replace("-", " "),)):
                 phrase = _phrase(spelling)
                 if phrase:
-                    parts.append(phrase)
+                    parts.append(phrase + _CATEGORY_NOUN)
     if not parts:
         return None
     return re.compile("|".join(f"(?:{part})" for part in parts), re.IGNORECASE)
+
+
+# What a tactic name must be followed by to name a category of behaviour.
+_CATEGORY_NOUN = (
+    r"\s+(?:mechanisms?|techniques?|capabilit(?:y|ies)|behaviou?rs?|activit(?:y|ies)"
+    r"|functionality|methods?|patterns?)\b"
+)
+
+# Between a negation and the behaviour it is read to govern, what makes the
+# behaviour something the sentence asserts after all: a comma (a new clause,
+# "Without encryption, the sample exfiltrates data"; a comma splice), or a
+# coordinator that joins a second statement ("No persistence exists and
+# process injection is used", "lacks persistence and instead injects").
+_ASSERTION_BETWEEN_RE = re.compile(
+    r",|\b(?:and|instead|only|but|yet|so|then|rather|while)\b", re.IGNORECASE
+)
+# A cue that opens a phrase asserting the verb after it: "no longer checks",
+# "not merely reads", "never stops beaconing", "not just", "not only".
+_CUE_THAT_ASSERTS_RE = re.compile(
+    r"^\W*(?:longer|merely|only|just|simply|stops?|ceases?|fails?\s+to\s+stop|end)\b",
+    re.IGNORECASE,
+)
+
+
+def _governed_absence(text: str, start: int) -> bool:
+    """Whether a negation in the mention's own clause governs it, nothing asserting between.
+
+    The strict reading the absence question needs. The capability check errs
+    toward reading a negation, because its mistake costs a feedback turn; here a
+    mistake asks an analyst to reconsider a positive claim, so only a cue that
+    stands directly over the mention counts — with no comma and no coordinator
+    between them, and not a cue that opens an assertion of its own ("no
+    longer", "never stops").
+    """
+    window = text[max(0, start - _NEGATION_WINDOW) : start]
+    breaks = list(_CLAUSE_BREAK_RE.finditer(window))
+    if breaks:
+        window = window[breaks[-1].end() :]
+    lowered = window.lower()
+    for cue in _NEGATION_RE.finditer(window):
+        if lowered.startswith(_NOT_A_NEGATION, cue.start()):
+            continue
+        after = window[cue.end() :]
+        if _CUE_THAT_ASSERTS_RE.match(after):
+            continue
+        if _ASSERTION_BETWEEN_RE.search(after) or _reach_ends(after):
+            continue
+        return True
+    return False
 
 
 def states_absence(text: str, pattern: re.Pattern[str] | None) -> bool:
     """Whether ``text`` names the behaviour only to say it is absent.
 
     The capability check's own reader (:func:`_is_negated`), asked of every
-    place the behaviour is named. A mention the reader finds negated is a
-    statement of absence. A later mention in the same clause — nothing that
-    ends a clause or a negation's reach between the two — is read with the
-    negation that governs the first: "does not contain any command and control
-    (C2) patterns" names the behaviour twice in one negated phrase. Any other
-    mention the reader does not find negated is a claim that the behaviour is
-    there, and one is enough. A text that never names the behaviour states
-    nothing about it.
+    place the behaviour is named, and held to a stricter reading of which cue
+    governs the mention (:func:`_governed_absence`). A mention both find
+    negated is a statement of absence. A later mention in the same phrase —
+    nothing between them that ends a clause, a negation's reach, or joins a
+    second statement — is read with the negation that governs the first: "does
+    not contain any command and control (C2) patterns" names the behaviour
+    twice in one negated phrase. Any other mention is a claim that the
+    behaviour is there, and one is enough. A text that never names the
+    behaviour states nothing about it. The reading decides only whether the
+    analyst is asked (``ABSENCE_CLAIM_CODE``); what the analyst answers stands.
     """
     if not text or pattern is None:
         return False
@@ -531,12 +585,16 @@ def states_absence(text: str, pattern: re.Pattern[str] | None) -> bool:
         return False
     negated_to: int | None = None
     for match in matches:
-        if _is_negated(text, match.start(), match.end()):
+        if _is_negated(text, match.start(), match.end()) and _governed_absence(text, match.start()):
             negated_to = match.end()
             continue
         if negated_to is not None:
             between = text[negated_to : match.start()]
-            if not _CLAUSE_BREAK_RE.search(between) and not _reach_ends(between):
+            if (
+                not _CLAUSE_BREAK_RE.search(between)
+                and not _reach_ends(between)
+                and not _ASSERTION_BETWEEN_RE.search(between)
+            ):
                 negated_to = match.end()
                 continue
         return False
@@ -551,9 +609,11 @@ def absence_claim_violation(
     A technique id on a claim is read everywhere downstream as something the
     sample does: a benign control run published thirteen techniques from claims
     such as "does not contain any obvious persistence mechanisms". The analyst
-    is asked once; the claim and its id are never edited. What still reads as
-    absence after the question is flagged on the claim
-    (:func:`mark_invalid_technique_ids`) and the publish rule does not count it.
+    is asked once; the claim and its id are never edited. An analyst that drops
+    the id has removed it; an id kept after the question is published as
+    usual, and the claim is noted (:func:`mark_invalid_technique_ids`) so the
+    report and the judge say the claim reads as absence and the analyst kept
+    the technique when asked. The platform withholds nothing on this reading.
     """
     text = str(getattr(claim, "claim", "") or "")
     if not states_absence(text, behaviour_pattern(technique_id, attck)):
@@ -562,11 +622,11 @@ def absence_claim_violation(
     return Violation(
         code=ABSENCE_CLAIM_CODE,
         message=(
-            f"CLAIM {safe_finding_value(text)!r} says the behaviour is absent, "
+            f"CLAIM {safe_finding_value(text)!r} reads as saying the behaviour is absent, "
             f"and carries TECHNIQUE {tid}. A technique on a claim is read as something the "
-            f"sample does, so {tid} would be published as a finding of this run. If the "
-            "behaviour is absent, write TECHNIQUE: NONE on this claim; if the sample does do "
-            "it, say what it does and cite the entry that shows it."
+            f"sample does, so {tid} is published as a finding of this run. If the behaviour "
+            "is absent, write TECHNIQUE: NONE on this claim; if the sample does do it, keep "
+            "the technique and say what the sample does."
         ),
         path=path,
     )
@@ -1055,11 +1115,12 @@ def mark_invalid_technique_ids(isr: Any, violations: Iterable[Violation]) -> Non
 
     The id itself is left exactly as the analyst wrote it. What changes is the
     report's description of it: ``technique_id_valid=False`` is how a reader,
-    the STIX minting step and the FP linter learn that this one is not real,
-    and ``states_absence=True`` is how the publish rule, the evidence summary
-    and the capability check learn that the claim carrying it said the
-    behaviour is absent. One reading, made once in the analyst's loop, and read
-    by every surface after it.
+    the STIX minting step and the FP linter learn that this one is not real.
+    ``kept_after_absence_question=True`` is a note, not a verdict: the claim
+    reads as absence and the analyst kept its id when asked, so the technique
+    is published and the report and the judge say so beside it. Call it only
+    with violations the analyst was shown: an absence question that was never
+    sent leaves the claim unnoted (see ``BaseAnalyst._validate_isr``).
     """
     claims = list(getattr(isr, "claims", None) or [])
     for violation in violations:
@@ -1071,8 +1132,8 @@ def mark_invalid_technique_ids(isr: Any, violations: Iterable[Violation]) -> Non
         claim = claims[index]
         if violation.code == VALIDITY_CODE and hasattr(claim, "technique_id_valid"):
             claim.technique_id_valid = False
-        if violation.code == ABSENCE_CLAIM_CODE and hasattr(claim, "states_absence"):
-            claim.states_absence = True
+        if violation.code == ABSENCE_CLAIM_CODE and hasattr(claim, "kept_after_absence_question"):
+            claim.kept_after_absence_question = True
 
 
 def _claim_index(path: str) -> int | None:
@@ -1267,7 +1328,7 @@ CAPABILITY_TERMS: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] 
         "anti-analysis",
         r"anti[\s-]?(?:analysis|debug\w*|disassembl\w*|emulation|sandbox|vm)\b"
         r"|(?:sandbox|virtuali[sz]ation|debugger)[\s-]+evasion",
-        ("T1014", "T1562", "T1564", "T1497", "T1622", "T1027", "T1140", "T1480"),
+        ("T1562", "T1564", "T1497", "T1622", "T1027", "T1140", "T1480"),
         ("anti_analysis",),
     ),
     (
@@ -1436,11 +1497,6 @@ class CapabilityGrounding:
             values = isr_reports.values() if hasattr(isr_reports, "values") else ()
             for isr in values:
                 for claim in getattr(isr, "claims", None) or []:
-                    # A claim that said the behaviour is absent grounds nothing:
-                    # "does not contain any obvious persistence mechanisms"
-                    # grounded "persistence" by its words and its id alike.
-                    if getattr(claim, "states_absence", False):
-                        continue
                     words.append(str(getattr(claim, "claim", "") or ""))
                     base = _base_technique(str(getattr(claim, "technique_id", "") or ""))
                     if base:
@@ -1687,6 +1743,13 @@ def _base_technique(technique_id: Any) -> str:
     return value.split(".")[0] if TECHNIQUE_ID_EXACT_RE.match(value) else ""
 
 
+# How many of a term's technique ids its question names, as examples of what
+# would ground it. Two: every term leads with the ids that describe it most
+# generally, and a longer list only puts more technique ids in front of a report
+# model that has not established any of them.
+_TERM_IDS_SHOWN = 2
+
+
 def ungrounded_capabilities(
     text: str, grounding: CapabilityGrounding, *, code: str = UNGROUNDED_CAPABILITY_CODE
 ) -> list[Violation]:
@@ -1731,7 +1794,7 @@ def ungrounded_capabilities(
                 code=code,
                 message=(
                     f"the text claims {label}, which nothing in this run establishes — "
-                    f"no {', '.join(techniques[:3])} technique, no matching evidence "
+                    f"no {', '.join(techniques[:_TERM_IDS_SHOWN])} technique, no matching evidence "
                     f"section, and no analyst said it"
                     f" (in: {safe_finding_value(sentences[0])!r}).{rule_line} "
                     f"{grounding.summary()} Describe what was found, or drop the claim."
@@ -2050,16 +2113,18 @@ def section_cut_violation(
     The cut answer itself is not sent back (``retry_with_feedback``'s
     ``drop_answer_for``): it is about a cap's worth of tokens nobody can read,
     and a retry that carried it had less room to answer in than the first call.
-    ``distinct`` is how many of the items begun differ; fewer than were begun
-    is an answer that repeated itself into the cap, and the question says how
-    often.
+    ``distinct`` is the most different values any one string field of those
+    items holds. Items can still differ in combination or in a list field, so
+    it says nothing certain about how many items repeat; what it does say is
+    that every string field repeats a value an earlier item carried in at least
+    ``begun - distinct`` of them, and the question says that.
     """
     repeated = int(begun) - int(distinct) if 0 < int(distinct) < int(begun) else 0
     size = (
         f" It ran to {int(chars):,} characters with {int(begun)} item(s) begun"
         + (
-            f", at most {int(distinct)} of them distinct, so at least {repeated} repeat an "
-            "item already written"
+            f"; in each of its text fields, at least {repeated} of them repeat a value an "
+            "earlier item already carried"
             if repeated
             else ""
         )
@@ -2096,9 +2161,12 @@ def repeated_item_violations(
 ) -> list[Violation]:
     """Lists in a section answer that write an item already written, one question per list.
 
-    ``identity`` names, per list key, the fields that make two items the same
-    item — ``{"identifiers": ("value",)}``; no fields means the whole item. The
-    question counts the repeats and names the values written more than once.
+    ``identity`` names, per list key, every field the report prints an item
+    by — ``{"identifiers": ("kind", "value")}``; no fields means the whole
+    item. Two rows alike in all of them are counted as written again. The
+    question says how many rows are alike and which, and asks the model to say
+    whether they are repeats: it never tells the model to remove a row, since
+    two alike rows can still be two items the fields do not tell apart.
     """
     data = payload if isinstance(payload, dict) else {}
     found: list[Violation] = []
@@ -2109,7 +2177,9 @@ def repeated_item_violations(
         counts: dict[str, int] = {}
         for row in rows:
             if isinstance(row, dict) and fields:
-                key = " | ".join(str(row.get(name) or "").strip() for name in fields)
+                key = " | ".join(
+                    json.dumps(row.get(name), sort_keys=True, default=str) for name in fields
+                )
             else:
                 key = json.dumps(row, sort_keys=True, default=str)
             counts[key] = counts.get(key, 0) + 1
@@ -2117,18 +2187,21 @@ def repeated_item_violations(
         if not repeats:
             continue
         named = _named_ids(
-            f"{value!r} {count} times"
+            f"{value} {count} times"
             for value, count in sorted(counts.items(), key=lambda item: -item[1])
             if count > 1
         )
+        what = ", ".join(fields) if fields else "every field"
         found.append(
             Violation(
                 code=REPEATED_ITEMS_CODE,
                 message=(
-                    f"{int(repeats)} of the {len(rows)} items in {safe_finding_value(list_key)!r} "
-                    f"repeat an item already written; {len(counts)} are distinct. Written more "
-                    f"than once: {named}. Each item is written once: answer again with every "
-                    "item once."
+                    f"{int(repeats)} of the {len(rows)} rows in {safe_finding_value(list_key)!r} "
+                    f"are alike in {safe_finding_value(what)} to a row written before them; "
+                    f"{len(counts)} differ. Alike: {named}. The contract writes each item once. "
+                    "Confirm whether these rows are repeats: answer again with the list as you "
+                    "intend it, and where alike rows are different items, write what tells them "
+                    "apart."
                 ),
                 path=list_key,
             )

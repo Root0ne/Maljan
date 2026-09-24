@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from maljan.schemas.isr_models import AgentISR
@@ -163,6 +163,21 @@ class MemoryStore(Protocol):
 # ---------------------------------------------------------------------------
 
 
+def a_past_case_technique(claim: Any) -> bool:
+    """Whether a claim's id is one a later run may be shown as this case's technique.
+
+    Not an id the ATT&CK catalogue lacks, and not one on a claim that reads as
+    absence and was kept when asked: a later judge is shown a past case's
+    techniques as priors, and a benign run's "does not contain any obvious
+    persistence mechanisms" with T1547 would teach it a technique the case said
+    was not there. The id stays published in its own run's report; only the
+    memory of it is left out.
+    """
+    return bool(getattr(claim, "technique_id_valid", True)) and not bool(
+        getattr(claim, "kept_after_absence_question", False)
+    )
+
+
 def build_stored_case(
     sample_id: str,
     isr_reports: dict[str, AgentISR],
@@ -209,10 +224,11 @@ def build_stored_case(
             text_parts.append(claim.claim)
             if claim.evidence_ref:
                 text_parts.append(claim.evidence_ref)
-            if claim.technique_id:
-                text_parts.append(claim.technique_id)
-                if claim.technique_id not in technique_ids:
-                    technique_ids.append(claim.technique_id)
+            if not claim.technique_id or not a_past_case_technique(claim):
+                continue
+            text_parts.append(claim.technique_id)
+            if claim.technique_id not in technique_ids:
+                technique_ids.append(claim.technique_id)
 
     summary_text = " ".join(text_parts)
 

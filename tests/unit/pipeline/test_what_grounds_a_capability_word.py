@@ -16,11 +16,14 @@ nor marked:
   from an absence claim, and by the sample's own settings path
   "/SSH/Auth/Credentials".
 
-Each ground is closed where it is wrong, with the capability check's own
-negation reader: a claim of absence grounds nothing, a matrix row the run did
-not publish grounds nothing, a reference table grounds nothing, the sample's
-own strings ground nothing by their words, and a word in the evidence grounds
-only where it is said rather than denied.
+The run here is the benign run after its absence claims were asked and the
+analyst dropped their ids. A technique the analyst keeps is published and
+grounds its words like any other (the platform withholds nothing). What is
+closed is every ground that is not something the run found, with the
+capability check's own negation reader: the words of a claim that deny the
+behaviour, a matrix row the run did not publish, a reference table, and the
+words of the sample's own strings; a word in the evidence grounds only where it
+is said rather than denied.
 """
 
 from __future__ import annotations
@@ -54,12 +57,11 @@ CREDENTIALS = (
 )
 
 
-def _absent(text: str, technique_id: str | None) -> ClaimEvidence:
-    claim = ClaimEvidence(
-        claim=text, evidence_ref="[ev_0006] strings", confidence=0.9, technique_id=technique_id
+def _absent(text: str) -> ClaimEvidence:
+    """An absence claim whose id the analyst dropped when asked."""
+    return ClaimEvidence(
+        claim=text, evidence_ref="[ev_0006] strings", confidence=0.9, technique_id=None
     )
-    claim.states_absence = technique_id is not None
-    return claim
 
 
 def _benign_run(*extra_claims: ClaimEvidence) -> tuple[MalwareReport, dict[str, AgentISR]]:
@@ -73,7 +75,7 @@ def _benign_run(*extra_claims: ClaimEvidence) -> tuple[MalwareReport, dict[str, 
                 tactic_name="Defense Evasion",
                 technique_id=tid,
                 technique_name=name,
-                not_published="the only claims that name it say the behaviour is absent",
+                not_published="not published: a rule matched it and no producer claimed it",
             )
             for tid, name in (
                 ("T1070", "Indicator Removal"),
@@ -117,24 +119,19 @@ def _benign_run(*extra_claims: ClaimEvidence) -> tuple[MalwareReport, dict[str, 
         claims=[
             _absent(
                 "The binary does not contain any obvious defense evasion mechanisms in its "
-                "static analysis.",
-                "T1070",
+                "static analysis."
             ),
             _absent(
                 "The binary does not contain any obvious persistence mechanisms in its static "
-                "analysis.",
-                "T1547",
+                "analysis."
             ),
             _absent(
                 "The binary does not contain any obvious credential access mechanisms in its "
-                "static analysis.",
-                "T1555",
+                "static analysis."
             ),
-            # No id, so nothing to ask: its words still say the behaviour is absent.
             _absent(
                 "The binary does not exhibit obvious persistence mechanisms in its static "
-                "imports or strings.",
-                None,
+                "imports or strings."
             ),
             *extra_claims,
         ],
@@ -186,6 +183,22 @@ class TestWhatStillGrounds:
         )
 
         assert _paths(CREDENTIALS, report, isrs) == set()
+
+    def test_a_technique_the_analyst_kept_after_the_question_grounds_the_word(self) -> None:
+        """The platform withholds nothing: a kept id is published, and grounds as published."""
+        kept = ClaimEvidence(
+            claim="The binary does not contain any obvious persistence mechanisms.",
+            evidence_ref="[ev_0006] strings",
+            confidence=0.9,
+            technique_id="T1547",
+            kept_after_absence_question=True,
+        )
+        report, isrs = _benign_run(kept)
+        report.ttp_mappings.append(
+            TTPMapping(technique_id="T1547", technique_name="Boot or Logon Autostart Execution")
+        )
+
+        assert _paths(PERSISTENCE, report, isrs) == set()
 
     def test_a_tool_that_observed_the_behaviour_grounds_the_word(self) -> None:
         report, isrs = _benign_run()

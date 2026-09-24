@@ -24,7 +24,18 @@ from maljan.pipeline.validation import (
     repeated_item_violations,
     section_cut_violation,
 )
-from maljan.reporting.composer import ReportComposer, _ConfigOut, _HostIdentifiersOut
+from maljan.reporting.composer import (
+    _ITEM_IDENTITY,
+    ReportComposer,
+    _C2Out,
+    _CommandsOut,
+    _ConfigOut,
+    _HostIdentifiersOut,
+)
+
+
+def _identity(schema: Any) -> dict[str, tuple[str, ...]]:
+    return _ITEM_IDENTITY[schema]
 
 
 def _identifier(value: str, purpose: str = "") -> dict[str, Any]:
@@ -72,16 +83,28 @@ def _compose(llm: _Answers, schema: Any = _HostIdentifiersOut) -> tuple[Any, Rep
 
 
 class TestTheCheck:
-    def test_it_counts_the_repeats_and_names_the_values(self) -> None:
-        (found,) = repeated_item_violations({"identifiers": _LOOPING}, {"identifiers": ("value",)})
+    def test_it_counts_the_alike_rows_and_names_them(self) -> None:
+        (found,) = repeated_item_violations(
+            {"identifiers": _LOOPING}, {"identifiers": ("kind", "value")}
+        )
 
         assert found.code == REPEATED_ITEMS_CODE
         assert found.path == "identifiers"
-        assert "5 of the 8 items in 'identifiers' repeat an item already written" in found.message
-        assert "3 are distinct" in found.message
-        assert "'state.example.bin' 5 times" in found.message
-        assert "'marker-one' 2 times" in found.message
-        assert "'marker-two'" not in found.message
+        assert "5 of the 8 rows in 'identifiers' are alike in kind, value" in found.message
+        assert "3 differ" in found.message
+        assert '"state.example.bin" 5 times' in found.message
+        assert '"marker-one" 2 times' in found.message
+        assert '"marker-two"' not in found.message
+
+    def test_the_question_asks_whether_they_are_repeats_and_never_to_drop_one(self) -> None:
+        (found,) = repeated_item_violations(
+            {"identifiers": _LOOPING}, {"identifiers": ("kind", "value")}
+        )
+
+        assert "Confirm whether these rows are repeats" in found.message
+        assert "write what tells them apart" in found.message
+        for word in ("drop", "remove", "delete", "omit"):
+            assert word not in found.message.lower()
 
     def test_distinct_items_raise_nothing(self) -> None:
         assert (
@@ -93,7 +116,36 @@ class TestTheCheck:
 
         (found,) = repeated_item_violations({"steps": steps}, {"steps": ()})
 
-        assert "1 of the 2 items" in found.message
+        assert "1 of the 2 rows" in found.message
+        assert "alike in every field" in found.message
+
+    def test_two_commands_with_one_name_and_two_ids_are_two_items(self) -> None:
+        commands = [{"id": "12", "name": "fetch"}, {"id": "18", "name": "fetch"}]
+
+        assert repeated_item_violations({"commands": commands}, _identity(_CommandsOut)) == []
+
+    def test_two_channels_with_one_name_and_two_endpoints_are_two_items(self) -> None:
+        channels = [
+            {"name": "HTTPS", "endpoints": ["a.example.org"]},
+            {"name": "HTTPS", "endpoints": ["b.example.org"]},
+        ]
+
+        assert repeated_item_violations({"channels": channels}, _identity(_C2Out)) == []
+
+    def test_one_value_under_two_kinds_is_two_items(self) -> None:
+        rows = [
+            {"kind": "Mutex", "value": "state-lock"},
+            {"kind": "Scheduled task", "value": "state-lock"},
+        ]
+
+        assert repeated_item_violations({"identifiers": rows}, _identity(_HostIdentifiersOut)) == []
+
+    def test_the_looping_answer_is_still_caught_under_the_finer_identity(self) -> None:
+        (found,) = repeated_item_violations(
+            {"identifiers": _LOOPING}, _identity(_HostIdentifiersOut)
+        )
+
+        assert found.code == REPEATED_ITEMS_CODE
 
     def test_a_configuration_key_with_two_values_is_two_items(self) -> None:
         items = [
@@ -162,8 +214,8 @@ class TestTheCutAnswer:
 
         question = str(llm.seen[1][-1].content)
         assert SECTION_CUT_CODE in question
-        assert "at most 3 of them distinct, so at least" in question
-        assert "repeat an item already written" in question
+        assert "in each of its text fields, at least" in question
+        assert "repeat a value an earlier item already carried" in question
 
     def test_a_cut_answer_of_distinct_items_says_nothing_of_repeats(self) -> None:
         message = section_cut_violation(8192, chars=900, begun=12, distinct=12).message

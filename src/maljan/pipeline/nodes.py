@@ -102,7 +102,7 @@ from maljan.pipeline.validation import (
 )
 from maljan.reporting.ledger_report import section_is_grounded
 from maljan.schemas.evidence import LedgerEntry, apply_budget
-from maljan.schemas.isr_models import AgentISR
+from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, AgentISR
 from maljan.schemas.stix_models import Bundle
 from maljan.schemas.tool_evidence import trim_output
 
@@ -1587,6 +1587,11 @@ def upstream_findings(stage: Any, state: AnalysisState, container: ServiceContai
         lines.append(f"### {agent}")
         for claim in claims:
             technique = getattr(claim, "technique_id", None) or "—"
+            # The same note the judge's summary carries beside the id.
+            if getattr(claim, "technique_id", None) and getattr(
+                claim, "kept_after_absence_question", False
+            ):
+                technique = f"{technique} — {ABSENCE_TECHNIQUE_MARKER}"
             reference = getattr(claim, "evidence_ref", "") or "—"
             confidence = float(getattr(claim, "confidence", 0.0) or 0.0)
             text = " ".join(str(getattr(claim, "claim", "") or "").split())

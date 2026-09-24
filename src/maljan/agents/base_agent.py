@@ -22,6 +22,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
+from dataclasses import replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -43,6 +44,7 @@ from maljan.llm.context_window import (
     window_full_error,
 )
 from maljan.pipeline.validation import (
+    ABSENCE_CLAIM_CODE,
     ALIGNMENT_MARGIN,
     VALIDITY_CODE,
     ValidationTally,
@@ -4963,8 +4965,18 @@ class BaseAnalyst(BudgetMeter, ABC):
                 f"needs {needs:.0f}s at the pace this agent's loop measured"
             )
             self.logger.warning("%s: validation turn %s.", self.name, detail)
-            mark_invalid_technique_ids(isr, initial)
-            self.validation_findings.extend(initial)
+            # An unknown id is a catalogue fact and is marked whether or not it
+            # was asked. An absence reading is a question for the analyst, and
+            # one never sent notes nothing on the claim: the finding is recorded
+            # saying it was not asked, and the technique goes through as claimed.
+            unasked = [
+                replace(v, message=f"{v.message} Not asked: {detail}.", sentence="")
+                if v.code == ABSENCE_CLAIM_CODE
+                else v
+                for v in initial
+            ]
+            mark_invalid_technique_ids(isr, [v for v in unasked if v.code != ABSENCE_CLAIM_CODE])
+            self.validation_findings.extend(unasked)
             BaseAnalyst._note_on_last_loop(self, "validation", detail)  # type: ignore[arg-type]
             return isr
 

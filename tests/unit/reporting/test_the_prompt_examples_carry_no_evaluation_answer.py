@@ -27,9 +27,11 @@ from typing import Any
 import pytest
 
 from maljan.pipeline.validation import (
+    CapabilityGrounding,
     absence_claim_violation,
     repeated_item_violations,
     section_cut_violation,
+    ungrounded_capabilities,
 )
 from maljan.reporting.composer import (
     _EXAMPLES,
@@ -201,6 +203,13 @@ PROMPTS: dict[str, str] = {
         if v is not None
     ),
     "absence marker": ABSENCE_TECHNIQUE_MARKER,
+    "capability questions for the anti-analysis and anti-forensics terms": " ".join(
+        v.message
+        for v in ungrounded_capabilities(
+            "The file uses anti-analysis tricks and anti-forensics routines.",
+            CapabilityGrounding(evidence_keys=frozenset({"pe_header"})),
+        )
+    ),
     "rule-match-only note": RULE_ONLY_NOTE,
 }
 
@@ -254,3 +263,9 @@ def test_the_term_list_is_long_enough_to_mean_something() -> None:
 def test_every_question_built_for_this_scan_has_words_to_scan() -> None:
     """A builder that answered nothing would leave an empty text that passes."""
     assert all(PROMPTS[name].strip() for name in PROMPTS)
+
+
+def test_both_new_capability_terms_are_scanned() -> None:
+    text = PROMPTS["capability questions for the anti-analysis and anti-forensics terms"]
+
+    assert "claims anti-analysis" in text and "claims anti-forensics" in text

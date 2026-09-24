@@ -124,17 +124,19 @@ class _CommandsOut(BaseModel):
     commands: list[CommandRow] = Field(default_factory=list)
 
 
-# What makes two items of a list section the same item, per list: the fields
-# the report prints the item by. An empty tuple is the whole item. Every list
-# section's contract says each item is written once, and an answer that writes
-# one again is asked once (``repeated_item_violations``) and kept as written.
+# Which rows of a list section are alike, per list: the fields that tell one
+# item from another. An empty tuple is the whole item — a flow step compared
+# with its ``order``, so a loop that numbers each repeat anew is not caught,
+# which errs toward asking nothing. Every list section's contract says each
+# item is written once; an answer with alike rows is asked once, as a question
+# whether they are repeats (``repeated_item_violations``), and kept as written.
 _ITEM_IDENTITY: dict[type[BaseModel], dict[str, tuple[str, ...]]] = {
     _FlowOut: {"steps": ()},
     _ConfigOut: {"items": ("key", "value")},
-    _HostIdentifiersOut: {"identifiers": ("value",)},
-    _CommandsOut: {"commands": ("name",)},
+    _HostIdentifiersOut: {"identifiers": ("kind", "value")},
+    _CommandsOut: {"commands": ("id", "name")},
     _CliFlagsOut: {"flags": ("flag",)},
-    _C2Out: {"channels": ("name",)},
+    _C2Out: {"channels": ("name", "endpoints")},
 }
 
 

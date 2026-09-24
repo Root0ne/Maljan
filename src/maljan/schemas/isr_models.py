@@ -20,10 +20,12 @@ from pydantic import BaseModel, Field, PrivateAttr
 # wherever it is printed. One string so the ISR summary the judge reads, the
 # Markdown report and the HTML report cannot word it three different ways.
 UNVERIFIED_TECHNIQUE_MARKER = "technique id not in the ATT&CK catalog"
-# The same for a claim that said the behaviour is absent and kept its id after
-# being asked: the judge reads the id with this beside it, and the publish rule
-# counts no assertion.
-ABSENCE_TECHNIQUE_MARKER = "the claim states the behaviour is absent, so it asserts no technique"
+# The note on a technique whose claim reads as absence and whose analyst kept
+# the id when asked. The technique is published as the analyst stated it; the
+# note travels with it to the judge's summary and the report's ATT&CK table.
+ABSENCE_TECHNIQUE_MARKER = (
+    "the claim naming it reads as absence; the analyst kept the technique when asked"
+)
 
 
 class ClaimEvidence(BaseModel):
@@ -61,13 +63,16 @@ class ClaimEvidence(BaseModel):
         default=True,
         description="False when the technique id is not in the ATT&CK catalogue.",
     )
-    # Whether the claim says the behaviour is absent and kept its technique id
-    # after being asked about it (``pipeline.validation.ABSENCE_CLAIM_CODE``).
-    # The claim and its id stay as written; the publish rule, the evidence
-    # summary and the capability check read the flag and count no assertion.
-    states_absence: bool = Field(
+    # Whether the claim reads as absence and its analyst kept the technique id
+    # after being asked (``pipeline.validation.ABSENCE_CLAIM_CODE``). Set only
+    # when the question was sent. The claim, its id and its publication are
+    # unchanged: the flag is a note the report and the judge print beside the
+    # id, and long-term memory stores no past-case technique from it.
+    kept_after_absence_question: bool = Field(
         default=False,
-        description="True when the claim states the behaviour is absent and kept its id.",
+        description=(
+            "True when the claim reads as absence and the analyst kept its id when asked."
+        ),
     )
     # What the ATT&CK index made of the claim text against the id the analyst
     # chose: the id's own gate score and the index's top candidates with
@@ -237,7 +242,7 @@ class AgentISR(BaseModel):
             tech = f" ({claim.technique_id})" if claim.technique_id else ""
             if claim.technique_id and not claim.technique_id_valid:
                 tech = f" ({claim.technique_id} — {UNVERIFIED_TECHNIQUE_MARKER})"
-            elif claim.technique_id and claim.states_absence:
+            elif claim.technique_id and claim.kept_after_absence_question:
                 tech = f" ({claim.technique_id} — {ABSENCE_TECHNIQUE_MARKER})"
             lines.append(
                 f"  Claim {i}: {claim.claim}{tech}"
