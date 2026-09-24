@@ -26,6 +26,7 @@ from typing import Any
 
 import pytest
 
+from maljan.agents.judge_agent import COMPACT_BUNDLE_RULES, verdict_cut_violation
 from maljan.pipeline.validation import (
     CapabilityGrounding,
     absence_claim_violation,
@@ -227,6 +228,10 @@ PROMPTS: dict[str, str] = {
             CapabilityGrounding(evidence_keys=frozenset({"pe_header"})),
         )
     ),
+    "judge compact bundle rules": COMPACT_BUNDLE_RULES,
+    "judge cut-at-cap question": verdict_cut_violation(
+        8192, '{"type": "bundle", "objects": [{"type": "attack-pattern", "id": "a"}'
+    ).message,
     "absence marker": ABSENCE_TECHNIQUE_MARKER,
     "capability questions for the anti-analysis and anti-forensics terms": " ".join(
         v.message

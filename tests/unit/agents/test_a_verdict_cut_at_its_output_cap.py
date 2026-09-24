@@ -176,7 +176,7 @@ class TestTheRound:
         assert verdict.fed_back == {VERDICT_CUT_CODE: 1}
         feedback = str(llm.calls[1][-1].content)
         assert f"output limit of {_cap()} tokens" in feedback
-        assert "25000 characters" in feedback
+        assert "25,000 characters" in feedback
 
     @pytest.mark.asyncio
     async def test_after_the_retry_the_stated_assessment_is_kept_and_the_fallback_recorded(

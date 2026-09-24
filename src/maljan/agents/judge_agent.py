@@ -67,7 +67,7 @@ from maljan.llm.context_window import (
 )
 from maljan.llm.generation_rate import GenerationRates, model_name_of
 from maljan.memory.long_term_memory import a_past_case_technique
-from maljan.pipeline.events import emit_judge_question, scrub
+from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
 from maljan.pipeline.mediation_models import (
     MediatorVerdict,
     analysts_with_claims,
@@ -116,6 +116,54 @@ _NOT_JSON_FEEDBACK = (
 # before the bundle closed, and the only correction it was given said the
 # answer "was not a JSON STIX bundle" — so it wrote the same bundle again.
 VERDICT_CUT_CODE = "verdict.cut_at_output_cap"
+
+# An object begun in an answer: its ``type`` written as a bundle object's is.
+_OBJECT_TYPE_RE = re.compile(r'"type"\s*:\s*"([a-z][a-z0-9-]*)"')
+# A line an answer indents: a line break and the spaces after it.
+_INDENTED_LINE_RE = re.compile(r"\n[ \t]+")
+
+
+def verdict_cut_violation(cap: int, text: str = "") -> Violation:
+    """What a verdict the cap cut is told: the cap, the answer's size, and what filled it.
+
+    The size is the answer's characters and the objects it began, by type, and
+    how many of its lines were indented: a bundle is cut by the objects it
+    writes and by how it writes them, and the question names both, the way a
+    report section's cut question does. It asks for a shorter bundle — the
+    compact contract's — and never for fewer findings than the evidence holds.
+    """
+    counts: dict[str, int] = {}
+    for found in _OBJECT_TYPE_RE.finditer(text):
+        kind = found.group(1)
+        if kind != "bundle":
+            counts[kind] = counts.get(kind, 0) + 1
+    begun = ", ".join(
+        f"{count} {kind}" for kind, count in sorted(counts.items(), key=lambda item: -item[1])
+    )
+    indented = len(_INDENTED_LINE_RE.findall(text))
+    size = (
+        f" It ran to {len(text):,} characters"
+        + (f" and began {safe_finding_value(begun)} object(s)" if begun else "")
+        + (f", on {indented:,} indented lines" if indented else "")
+        + "."
+        if text
+        else ""
+    )
+    said = f" {safe_finding_value(size.strip())}" if size else ""
+    return Violation(
+        code=VERDICT_CUT_CODE,
+        message=(
+            f"Your previous answer stopped at the output limit of {int(cap)} tokens before "
+            f"the bundle closed, so it could not be read.{said} Any reasoning you write "
+            f"counts against the same limit. Return a bundle that closes well inside "
+            f"{int(cap)} tokens: x_maljan_assessment first, then only the objects the "
+            "evidence supports; no relationship between the malware object and an "
+            "attack-pattern or an indicator, which the platform writes from the confidence, "
+            "basis and sources you put on the object; an attack-pattern with at most one "
+            "short sentence of description; no Indicator whose value you did not read "
+            "verbatim in the evidence; the JSON on one line without indentation. JSON only."
+        ),
+    )
 
 
 def _was_cut(answer: Any, cap: int | None) -> bool:
@@ -335,10 +383,29 @@ class JudgeVerdict(NamedTuple):
     written: dict[str, Any] | None = None
 
 
+# What the judge is asked to write and what it is not: the relationships the
+# platform derives (``judge_postprocess.relate_to_the_sample``) are not asked
+# for, and the bundle is written compactly. A benchmark judge's pretty-printed
+# bundle, a third of it those relationships, was cut at the output cap twice.
+COMPACT_BUNDLE_RULES = (
+    "- Write no Relationship for malware uses attack-pattern or for indicator "
+    "indicates malware: after you answer, the platform relates every "
+    "attack-pattern and every indicator to your malware object that way. On each "
+    "attack-pattern and each indicator set x_maljan_confidence (0.0-1.0) and "
+    "x_maljan_evidence_basis (static|dynamic|network|all|unknown), and list in "
+    "x_maljan_contributing_agents only the sources that named what it is about, "
+    "by the names the EVIDENCE SUMMARY gives them; the relationship the platform "
+    "writes carries them as you wrote them. Write a Relationship yourself only "
+    "for any other relation.\n"
+    "- Keep the bundle short: an attack-pattern is its name, its mitre-attack "
+    "reference and at most one short sentence of description, and the JSON is "
+    "written on one line without indentation.\n"
+)
+
+
 # The judge's system prompt. A module constant so that
 # ``composition.builtin_prompt("judge")`` and ``give_verdict`` cannot disagree
-# about what the judge is told; the text is unchanged from the inline literal
-# it replaces.
+# about what the judge is told.
 JUDGE_VERDICT_SYSTEM = (
     "You are the Chief Malware Judge. Based on the expert reports below, "
     "provide a final verdict: Malware, Benign, or Suspicious.\n\n"
@@ -348,11 +415,7 @@ JUDGE_VERDICT_SYSTEM = (
     '{"source_name": "mitre-attack", "external_id": "T####" or "T####.###"}. '
     "A behaviour you cannot give a technique id is not an AttackPattern: say "
     "what was observed in severity.rationale instead.\n"
-    "- Relate them as malware uses attack-pattern and indicator indicates "
-    "malware. On every Relationship set x_maljan_confidence (0.0-1.0) and "
-    "x_maljan_evidence_basis (static|dynamic|network|all|unknown), and list in "
-    "x_maljan_contributing_agents only the sources that named what it is about, "
-    "by the names the EVIDENCE SUMMARY gives them.\n"
+    f"{COMPACT_BUNDLE_RULES}"
     "- Leave out created, modified, spec_version and valid_from: they are "
     "stamped after you answer.\n"
     "- Give every object an ``id`` of the form ``<type>--<label>``, unique in "
@@ -400,20 +463,14 @@ JUDGE_VERDICT_SYSTEM = (
     "clean sample.\n"
     "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers.\n"
     "\n"
-    "The answer has exactly this shape. Both top-level keys are required, and "
-    "``x_maljan_assessment`` sits beside ``objects`` rather than inside it:\n"
-    "{\n"
-    '  "type": "bundle",\n'
-    '  "id": "bundle--1",\n'
-    '  "x_maljan_assessment": {\n'
-    '    "verdict": "Malware" | "Suspicious" | "Benign",\n'
-    '    "confidence": 0.0-1.0,\n'
-    '    "severity": {"rating": "...", "rationale": "..."},\n'
-    '    "malware_category": "...",\n'
-    '    "family": {"name": "...", "confidence": 0.0-1.0, "evidence_ids": ["ev_0012"]}\n'
-    "  },\n"
-    '  "objects": [ ... ]\n'
-    "}"
+    "The answer has exactly this shape, on one line. Both top-level keys are "
+    "required, and ``x_maljan_assessment`` sits beside ``objects`` rather than "
+    "inside it:\n"
+    '{"type": "bundle", "id": "bundle--1", "x_maljan_assessment": {'
+    '"verdict": "Malware" | "Suspicious" | "Benign", "confidence": 0.0-1.0, '
+    '"severity": {"rating": "...", "rationale": "..."}, "malware_category": "...", '
+    '"family": {"name": "...", "confidence": 0.0-1.0, "evidence_ids": ["ev_0012"]}}, '
+    '"objects": [ ... ]}'
 )
 
 
@@ -1473,6 +1530,7 @@ class JudgeAgent(BudgetMeter):
         not_json = False
         # Whether the output cap ended that answer, and how much of it there was.
         cut_at: int | None = None
+        cut_text = ""
         attempts = 0
         # What the shape pass did to this answer before the schema saw it: an
         # assessment moved to the property it belongs to, an object the bundle
@@ -1488,7 +1546,7 @@ class JudgeAgent(BudgetMeter):
         tally = ValidationTally()
 
         def _parse(answer: Any) -> Bundle:
-            nonlocal not_json, attempts, cut_at
+            nonlocal not_json, attempts, cut_at, cut_text
             attempts += 1
             cut_at = None
             shape.clear()
@@ -1502,7 +1560,8 @@ class JudgeAgent(BudgetMeter):
                 )
             not_json = _is_not_json(answer)
             if not_json and _was_cut(answer, cap):
-                cut_at = len(_answer_text(answer))
+                cut_text = _answer_text(answer)
+                cut_at = len(cut_text)
             if not_json:
                 self.logger.warning(
                     "Judge verdict: the model answered with %d character(s) that are not a JSON "
@@ -1588,21 +1647,7 @@ class JudgeAgent(BudgetMeter):
             if timed_out:
                 return []
             if not_json and cut_at is not None and cap:
-                return [
-                    Violation(
-                        code=VERDICT_CUT_CODE,
-                        message=(
-                            f"Your previous answer stopped at the output limit of {int(cap)} "
-                            f"tokens, after {int(cut_at)} characters and before the bundle "
-                            "closed, so it could not be read. Any reasoning you write counts "
-                            "against the same limit. Return a bundle that closes well inside "
-                            f"{int(cap)} tokens: x_maljan_assessment first, then only the "
-                            "objects the evidence supports — one attack-pattern per technique "
-                            "with a short description, and no Indicator whose value you did "
-                            "not read verbatim in the evidence. JSON only."
-                        ),
-                    )
-                ]
+                return [verdict_cut_violation(int(cap), cut_text)]
             if not_json:
                 return [Violation(code="verdict.not_json", message=_NOT_JSON_FEEDBACK)]
             return [
@@ -1762,6 +1807,7 @@ class JudgeAgent(BudgetMeter):
                 duplicate_label_violations,
                 lift_misplaced_extensions,
                 postprocess_judge_bundle,
+                relate_to_the_sample,
             )
 
             # Before the schema, and before anything that walks the objects: an
@@ -1773,18 +1819,28 @@ class JudgeAgent(BudgetMeter):
                 as_written.append(copy.deepcopy(data))
             # Positions and labels as the judge wrote them, before anything is
             # set aside or folded: the dicts are the same objects after both.
-            written = {
+            written: dict[int, tuple[int | None, str]] = {
                 id(obj): (index, str(obj.get("id") or ""))
                 for index, obj in enumerate(data.get("objects") or [])
                 if isinstance(obj, dict)
             }
+            # The relationships the platform writes rather than asks for. They
+            # are nowhere in the answer as written, so a finding about one is
+            # placed by its position in the checked bundle.
+            for relationship, _related in relate_to_the_sample(data):
+                written[id(relationship)] = (None, "")
             lifted = lift_misplaced_extensions(data)
             if record is not None:
                 record.extend(lifted)
             if record is not None:
                 record.extend(
                     duplicate_label_violations(
-                        data, {key: index for key, (index, _label) in written.items()}
+                        data,
+                        {
+                            key: index
+                            for key, (index, _label) in written.items()
+                            if index is not None
+                        },
                     )
                 )
             data = postprocess_judge_bundle(

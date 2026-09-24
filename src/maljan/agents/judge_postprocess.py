@@ -1,7 +1,12 @@
 """Judge bundle post-processor.
 
-Two helpers that run after the verdict LLM returns a parsed bundle ``dict``
+The helpers that run after the verdict LLM returns a parsed bundle ``dict``
 and before :class:`maljan.schemas.stix_models.Bundle` validation.
+
+:func:`relate_to_the_sample` runs before the others: it writes the two
+relationships the platform derives rather than asks for — the sample uses each
+attack-pattern, each indicator indicates the sample — carrying the judge's own
+annotations from the object they relate.
 
 :func:`lift_misplaced_extensions` runs first and answers one question: what to
 do with an item inside ``objects`` that the Bundle model cannot hold. Until
@@ -294,6 +299,81 @@ def lift_misplaced_extensions(bundle_dict: dict[str, Any]) -> list[Violation]:
 
 
 DUPLICATE_LABEL_CODE = "stix.duplicate_label"
+
+
+# What the judge writes on an attack-pattern or an indicator for the
+# relationship the platform writes from it: its confidence, the evidence basis
+# and the sources it credits.
+RELATION_PROPERTIES = (
+    "x_maljan_confidence",
+    "x_maljan_evidence_basis",
+    "x_maljan_contributing_agents",
+)
+
+
+def relate_to_the_sample(bundle_dict: dict[str, Any]) -> list[tuple[dict[str, Any], Any]]:
+    """Write the two relationships the platform derives, where the judge wrote none.
+
+    ``malware uses attack-pattern`` for every attack-pattern and ``indicator
+    indicates malware`` for every indicator, from the bundle's one malware
+    object; the judge is asked only for what it alone decides. A benchmark
+    judge's bundle ran to 25,000 characters and was cut at its output cap
+    twice, and a third of such a bundle is these relationships, one per
+    object, each restating what its object already says. The judge's
+    confidence, evidence basis and credits written on the object move onto
+    the relationship unchanged. An object the judge already related that way
+    gets no second relationship, and a bundle with no malware object, or with
+    two, gets none: there is nothing, or no one thing, to relate to.
+
+    Returns ``[(relationship, the object it relates)]`` in the order written.
+    """
+    objects = bundle_dict.get("objects")
+    if not isinstance(objects, list):
+        return []
+    malware = [o for o in objects if isinstance(o, dict) and o.get("type") == "malware"]
+    sample = malware[0].get("id") if len(malware) == 1 else None
+    if not isinstance(sample, str) or not sample:
+        return []
+    relationships = [o for o in objects if isinstance(o, dict) and o.get("type") == "relationship"]
+    used = {
+        r.get("target_ref")
+        for r in relationships
+        if r.get("relationship_type") == "uses" and r.get("source_ref") == sample
+    }
+    indicating = {
+        r.get("source_ref")
+        for r in relationships
+        if r.get("relationship_type") == "indicates" and r.get("target_ref") == sample
+    }
+    minted: list[tuple[dict[str, Any], Any]] = []
+    for obj in list(objects):
+        if not isinstance(obj, dict) or not isinstance(obj.get("id"), str):
+            continue
+        kind = obj.get("type")
+        if kind == "attack-pattern" and obj["id"] not in used:
+            source, relation, target = sample, "uses", obj["id"]
+        elif kind == "indicator" and obj["id"] not in indicating:
+            source, relation, target = obj["id"], "indicates", sample
+        else:
+            continue
+        relationship: dict[str, Any] = {
+            "type": "relationship",
+            "id": f"relationship--{uuid.uuid4()}",
+            "relationship_type": relation,
+            "source_ref": source,
+            "target_ref": target,
+        }
+        for key in RELATION_PROPERTIES:
+            if key in obj:
+                relationship[key] = obj.pop(key)
+        objects.append(relationship)
+        minted.append((relationship, obj))
+    if minted:
+        logger.info(
+            "judge_postprocess: related %d object(s) to the sample the judge did not relate.",
+            len(minted),
+        )
+    return minted
 
 
 def _shared_labels(objects: list[Any]) -> set[str]:
