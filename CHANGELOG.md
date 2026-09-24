@@ -893,6 +893,15 @@ change landed on `main`.
   channels, and silently the first 8 citations of a prose subsection; the
   report's ATT&CK external references and the Sigma drafts' tags took the
   first 10 techniques. None of them cuts anything now.
+- **The report models see every published fact.** The narrative round was shown
+  at most 8 techniques (each with its first quote cut to 120 characters), 5
+  sandbox signatures, 8 import categories, 5 capability rules of 4 APIs each, 3
+  domains, 3 IPs, 3 persistence entries (cut to 100 characters) and 5
+  obfuscation indicators; a composer section at most 24 imported DLLs. Each is
+  shown whole now, and the DLL list is always the complete list. The run-state
+  block names every failed tool rather than eight. A narrative prompt larger
+  than what the window leaves after its budget is recorded in the report's
+  degradation reasons, and its calls are held to what the window leaves.
 - **A request's timeout is sized from its output cap and the measured pace.**
   Every derived wait was held under 1,800 s, the client's request timeout, and
   that timeout — which httpx reads as the longest silence, not a deadline for

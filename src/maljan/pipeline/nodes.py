@@ -4445,6 +4445,11 @@ def make_report_node(
             )
         else:
             report = MalwareReportBuilder.apply_fallback_narrative(report, no_summary_because)
+        # What the narrative's prompt could not hold, said where the report says
+        # what it is missing.
+        for _reason in getattr(narrative_agent, "degradations", None) or []:
+            if isinstance(_reason, str) and _reason not in report.degradation_reasons:
+                report.degradation_reasons.append(_reason)
 
         # Section-wise Composer authors the professional
         # spine (background, execution flow, technical-analysis subsections by

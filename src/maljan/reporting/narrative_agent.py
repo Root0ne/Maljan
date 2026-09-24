@@ -167,7 +167,7 @@ _SYSTEM_PROMPT = (
     "   - `priority`: P0, P1 or P2 — P0 only for active C2 / exfiltration / "
     "wiper-grade prevention, P1 for hardening, P2 for hunt / telemetry tasks\n"
     "   - `technique_id`: the ATT&CK technique it defends against, chosen from "
-    "the 'Top ATT&CK techniques' list above (null only if none applies)\n"
+    "the 'Published ATT&CK techniques' list above (null only if none applies)\n"
     "   - `detection`: CONCRETE technical detection guidance — name the "
     "specific API call, registry key, telemetry source (e.g. Sysmon EventID 3 "
     "for network, EventID 13 for registry), or a sigma/yara pointer. Do NOT "
@@ -271,19 +271,11 @@ def _coerce_narrative_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _truncate(value: str, max_len: int) -> str:
-    if not value:
-        return ""
-    if len(value) <= max_len:
-        return value
-    return value[: max_len - 1] + "…"
-
-
 def build_prompt_text(report: MalwareReport) -> str:
     """Return the human-readable prompt body (used by ``_build_prompt`` and tests).
 
-    The text is intentionally compact — token budget ≈ 1.5-3K depending on
-    report content.
+    Every published technique, signature, indicator and persistence entry,
+    each whole: the model reads all of what the run established.
     """
     lines: list[str] = [
         "DETERMINISTIC FINDINGS",
@@ -307,8 +299,13 @@ def build_prompt_text(report: MalwareReport) -> str:
         "",
     ]
 
-    # --- TTPs (top 8) -------------------------------------------------
-    lines.append("Top ATT&CK techniques (max 8):")
+    # Every published fact below is shown whole: no count and no character cut
+    # decides what the model may read. The stage's window accounts for the
+    # prompt (``NarrativeAgent.prompt_chars`` and ``_call_bound``), and a
+    # prompt that does not fit is recorded, not trimmed here.
+
+    # --- TTPs ----------------------------------------------------------
+    lines.append("Published ATT&CK techniques:")
     if not report.ttp_mappings:
         lines.append("  (none mapped)")
     else:
@@ -316,8 +313,8 @@ def build_prompt_text(report: MalwareReport) -> str:
         from maljan.reporting.composer import RULE_ONLY_NOTE
 
         rule_only = rule_match_only(report)
-        for mapping in report.ttp_mappings[:8]:
-            quote = mapping.evidence_quotes[0] if mapping.evidence_quotes else ""
+        for mapping in report.ttp_mappings:
+            quote = " | ".join(q for q in mapping.evidence_quotes if q)
             layers = ",".join(mapping.contributing_layers) or "-"
             rule_note = (
                 f" — {rule_only[mapping.technique_id]}" if mapping.technique_id in rule_only else ""
@@ -325,16 +322,16 @@ def build_prompt_text(report: MalwareReport) -> str:
             lines.append(
                 f"  - {mapping.technique_id} {mapping.technique_name} "
                 f"(conf={confidence_text(mapping.confidence)}, layers={layers}){rule_note}: "
-                f"{_truncate(quote, 120)}"
+                f"{quote}"
             )
-        if any(m.technique_id in rule_only for m in report.ttp_mappings[:8]):
+        if any(m.technique_id in rule_only for m in report.ttp_mappings):
             lines.append(f"  {RULE_ONLY_NOTE}")
     lines.append("")
 
-    # --- Sandbox signatures (top 5 by severity) -----------------------
-    lines.append("Sandbox signatures (top 5):")
+    # --- Sandbox signatures ---------------------------------------------
+    lines.append("Sandbox signatures:")
     if report.dynamic and report.dynamic.sandbox_signatures:
-        for sig in report.dynamic.sandbox_signatures[:5]:
+        for sig in report.dynamic.sandbox_signatures:
             ttps = ",".join(sig.technique_ids) or "-"
             lines.append(f"  - {sig.name} (severity {sig.severity}, ATT&CK={ttps})")
     else:
@@ -349,16 +346,16 @@ def build_prompt_text(report: MalwareReport) -> str:
             cited = ", ".join(report.static.api_capabilities_evidence_ids)
             lines.append(
                 "  "
-                + ", ".join(f"{cat} x{count}" for cat, count in ordered[:8])
+                + ", ".join(f"{cat} x{count}" for cat, count in ordered)
                 + (f" [{cited}]" if cited else "")
             )
         else:
             lines.append("  (none stated)")
         rule_hits = [
             h for h in report.static.api_technique_hits if h.get("source") == "api_capability"
-        ][:5]
+        ]
         for hit in rule_hits:
-            apis = ", ".join(str(a) for a in (hit.get("matched_apis") or [])[:4])
+            apis = ", ".join(str(a) for a in (hit.get("matched_apis") or []))
             cite = f" [{hit['evidence_id']}]" if hit.get("evidence_id") else ""
             # The rule's own label, because a row is a rule: two rules for one
             # technique carry the catalogue's name twice and rendered as two
@@ -371,16 +368,16 @@ def build_prompt_text(report: MalwareReport) -> str:
         lines.append("  (no static analysis)")
     lines.append("")
 
-    # --- Network IOCs (top 3 each) ------------------------------------
+    # --- Network IOCs (the suspicious ones first) ----------------------
     lines.append("Network IOCs:")
     if report.network:
-        sus_domains = [d for d in report.network.domains if d.is_suspicious][:3]
-        if not sus_domains:
-            sus_domains = report.network.domains[:3]
-        for dom in sus_domains:
+        domains = [d for d in report.network.domains if d.is_suspicious] + [
+            d for d in report.network.domains if not d.is_suspicious
+        ]
+        for dom in domains:
             reason = dom.reason or "observed"
             lines.append(f"  - domain: {dom.fqdn} ({reason})")
-        for ip in report.network.ips[:3]:
+        for ip in report.network.ips:
             note = ip.reputation.get("_heuristic_reason") if ip.reputation else None
             tag = note or ("suspicious" if ip.is_suspicious else "observed")
             lines.append(f"  - ip: {ip.address} ({tag})")
@@ -388,13 +385,12 @@ def build_prompt_text(report: MalwareReport) -> str:
         lines.append("  (no network data)")
     lines.append("")
 
-    # --- Persistence (top 3) ------------------------------------------
-    lines.append("Persistence (top 3):")
+    # --- Persistence ---------------------------------------------------
+    lines.append("Persistence:")
     if report.persistence:
-        for mech in report.persistence[:3]:
+        for mech in report.persistence:
             lines.append(
-                f"  - {mech.kind}: {_truncate(mech.target, 100)} "
-                f"({mech.technique_id or 'no-ATT&CK-id'})"
+                f"  - {mech.kind}: {mech.target or ''} ({mech.technique_id or 'no-ATT&CK-id'})"
             )
     else:
         lines.append("  (none detected)")
@@ -405,7 +401,7 @@ def build_prompt_text(report: MalwareReport) -> str:
         if report.static.packer_hint:
             lines.append(f"Packer hint: {report.static.packer_hint}")
         if report.static.obfuscation_indicators:
-            ind = ", ".join(report.static.obfuscation_indicators[:5])
+            ind = ", ".join(report.static.obfuscation_indicators)
             lines.append(f"Obfuscation indicators: {ind}")
         lines.append("")
 
@@ -468,6 +464,9 @@ class NarrativeAgent:
         # narrative runs after the run summary is built, so the report node
         # reads this and folds it in rather than the builder collecting it.
         self.validation_tally = ValidationTally()
+        # What this round's prompt could not hold, in the report's own words;
+        # the report node adds each to the report's degradation reasons.
+        self.degradations: list[str] = []
 
     def attempts(self) -> int:
         """The calls this round may make: its answer and one validation retry,
@@ -525,6 +524,30 @@ class NarrativeAgent:
             return None
         return bound
 
+    def _note_room(self, prompt_chars: int) -> None:
+        """Record, once, a prompt larger than what the window leaves after the budget.
+
+        Every published fact enters the prompt whole; a prompt that does not
+        fit is said, and its calls are held to what the window leaves
+        (:meth:`_call_bound`), rather than a fact being left out.
+        """
+        from maljan.llm.context_window import CHARS_PER_TOKEN
+
+        window = int(getattr(self, "window_tokens", 0) or 0)
+        if window <= 0:
+            return
+        room = max(0, (window - int(getattr(self, "output_cap", 0) or 0)) * CHARS_PER_TOKEN)
+        if int(prompt_chars) <= room:
+            return
+        reason = (
+            f"The narrative round's prompt ({int(prompt_chars)} characters) exceeds the "
+            f"{room} its model's context window leaves after the reply; its answer was "
+            "held to what the window leaves."
+        )
+        if reason not in self.degradations:
+            self.degradations.append(reason)
+            logger.warning("NarrativeAgent: %s", reason)
+
     def prompt_chars(
         self, report: MalwareReport, facts_block: str = "", run_state: str = ""
     ) -> int:
@@ -552,6 +575,7 @@ class NarrativeAgent:
         always rely on the fallback narrative.
         """
         messages = self._build_prompt(report, facts_block, run_state)
+        self._note_room(sum(len(str(message.content)) for message in messages))
         # Where the sentences a check leaves standing are recorded, to be
         # marked where they stand.
         self._report = report

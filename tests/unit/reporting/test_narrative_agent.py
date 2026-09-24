@@ -238,35 +238,60 @@ class TestPromptBuilder:
     def test_prompt_contains_attack_techniques(self) -> None:
         report = _make_report()
         text = build_prompt_text(report)
-        assert "Top ATT&CK techniques" in text
+        assert "Published ATT&CK techniques" in text
 
-    def test_prompt_truncates_evidence_quotes(self) -> None:
+    def test_an_evidence_quote_is_shown_whole(self) -> None:
         report = _make_report()
         long_quote = "x" * 500
         report.ttp_mappings = [
             TTPMapping(
                 technique_id="T1547.001",
                 technique_name="Registry Run Keys",
-                evidence_quotes=[long_quote],
+                evidence_quotes=[long_quote, "second quote"],
                 confidence=0.9,
             )
         ]
         text = build_prompt_text(report)
-        assert long_quote not in text  # truncated
-        assert "x" * 119 in text  # head preserved
+        assert long_quote in text
+        assert "second quote" in text
 
-    def test_prompt_caps_lists(self) -> None:
+    def test_every_published_fact_is_shown(self) -> None:
+        from maljan.reporting.models import (
+            DynamicBehavior,
+            NetworkDomain,
+            NetworkIOCs,
+            NetworkIP,
+            PersistenceMechanism,
+            SandboxSignature,
+            TTPMapping,
+        )
+
         report = _make_report()
-        # Generate fake TTPs above the 8 cap.
-        from maljan.reporting.models import TTPMapping
-
         report.ttp_mappings = [
             TTPMapping(technique_id=f"T999{i}", technique_name=f"Fake-{i}") for i in range(20)
         ]
+        report.dynamic = DynamicBehavior(
+            sandbox_signatures=[SandboxSignature(name=f"sig-{i}", severity=1) for i in range(9)]
+        )
+        report.network = NetworkIOCs(
+            domains=[
+                NetworkDomain(fqdn=f"relay{i}.example.net", source="sandbox") for i in range(7)
+            ],
+            ips=[NetworkIP(address=f"192.0.2.{i}", source="sandbox") for i in range(7)],
+        )
+        report.persistence = [
+            PersistenceMechanism(kind="registry_run", target=f"HKCU\\Example\\{i}" + "y" * 150)
+            for i in range(6)
+        ]
+
         text = build_prompt_text(report)
-        assert "T9990" in text  # first one
-        assert "T9997" in text  # 8th index 7
-        assert "T9998" not in text  # over the cap
+
+        assert all(f"T999{i} " in text for i in range(20))
+        assert all(f"sig-{i} " in text for i in range(9))
+        assert all(f"relay{i}.example.net" in text for i in range(7))
+        assert all(f"192.0.2.{i} " in text for i in range(7))
+        assert all(f"HKCU\\Example\\{i}" + "y" * 150 in text for i in range(6))
+        assert "top " not in text.lower() and "max " not in text.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -654,3 +679,13 @@ class TestTheRoundIsSizedFromItsBudget:
 
         assert agent._call_bound([HumanMessage(content="x" * 3000)]) == 16384 - 1000
         assert self._agent(None, cap=16384, window=0)._call_bound([]) is None
+
+    def test_a_prompt_past_the_room_is_recorded_not_trimmed(self) -> None:
+        agent = self._agent(None, cap=4096, window=8192)
+
+        agent._note_room(20000)
+        agent._note_room(20000)
+
+        (reason,) = agent.degradations
+        assert "prompt (20000 characters) exceeds the 12288" in reason
+        assert self._agent(None, cap=4096, window=0).degradations == []
