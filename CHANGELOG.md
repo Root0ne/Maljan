@@ -8,6 +8,18 @@ change landed on `main`.
 
 ### Added
 
+- **A report sentence the checks left standing is marked where it stands.** A
+  sentence the capability check or the rule-match check asked about, and the
+  retry kept, is recorded on the report (`flagged_statements`) and the
+  Markdown and HTML reports print a mark after it; its words are unchanged.
+  One run printed fifteen flagged sentences with nothing on them.
+- **A technique only a rule match stands behind is not written as an
+  action.** Every section's and the summary's list of published techniques
+  carries its rule-match-only note; a sentence naming one as something the
+  sample does is asked about once (`report.rule_match_as_action`). A report
+  had written "The sample dumps credentials from the target system" for a
+  one-string YARA match.
+
 - **The report model states the host identifiers it read.** The report
   contract gains a composer section, `host_identifiers`
   (`HostIdentifier{kind, value, purpose, evidence_refs}` on
@@ -1819,6 +1831,35 @@ change landed on `main`.
   `MALJAN_FLOSS_PATH` to a missing file unless a test names a build.
 
 ### Fixed
+
+- **A job reaches the queue only after its row is committed.** The API
+  enqueued before the request committed; a worker that dequeued first read
+  "Job not found" and the row stayed `pending` for ever. A failed enqueue now
+  commits the row as `failed`; a worker that finds no row reads again over a
+  bounded backoff (about 15 s) and marks a late row `failed` with the reason.
+- **A report section the output cap cut is asked once for a shorter answer**
+  (`composer.cut_at_output_cap`), instead of being told only that its answer
+  was not JSON; how far each cut answer got is recorded. Both host-identifier
+  answers of two benchmark runs ran to exactly 8,192 tokens and the section
+  was dropped. The host-identifier contract asks for each value once and the
+  kind by what the entry shows (configuration-panel paths had been typed as
+  registry keys).
+- **The triage pack prints digests whole.** It printed 16-character prefixes
+  and the judge copied them out as MD5 indicators.
+- **llama.cpp's own timings reach the measured rates.** The OpenAI-compatible
+  client dropped `timings`, so no prompt reading rate was recorded on the
+  default provider and the generation rate came from the wall clock.
+- **An unquoted value cited to the wrong entry is asked about**, where its
+  shape makes it a value (a host, a path, a digest, an identifier no word is
+  spelt as); a paraphrase stays undecided.
+- **A negation is not read as a claim.** "No evidence of … such as C2
+  callbacks or exfiltration endpoints", "… is absent from the evidence" and
+  "to prevent lateral movement" no longer raise
+  `narrative.ungrounded_capability`.
+- **A cancelled job is recorded where the pipeline was.** The worker wrote
+  "stopped before any check was reached" for runs cancelled minutes in; the
+  record and the `cancelled` event now name the node that was running (or the
+  check that stopped it) and carry `seconds_into_run`.
 
 - **A value is grounded however the tool's answer spells it.** A tool answers
   in JSON and the triage pack quotes decoded strings with its own escapes; the
@@ -4336,6 +4377,14 @@ change landed on `main`.
 - **`reporting.builder.defang`**, replaced by `reporting.defang.defang(value, kind)`.
 
 ### Upgrading
+
+The `cancelled` job event always carries `stopped` now, and a new
+`seconds_into_run`. A report carries `flagged_statements` (empty on a report
+stored before it existed, which renders unmarked). On the `openai` provider
+against llama.cpp, `run_summary.generation` records a prompt reading rate and
+the server's own generation rate (source `llama.cpp timings.predicted_n/
+predicted_ms`) instead of the wall clock's; a timeout derived from the faster
+rate can be shorter, never below the configured value.
 
 `reporting.composer_section_max_tokens` now ships at 0, meaning derived from
 each reporter model's context window. A deployment that stored 900 (or any
