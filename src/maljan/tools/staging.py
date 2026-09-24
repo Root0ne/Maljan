@@ -168,6 +168,37 @@ def job_capture_dir(job_id: str, environ: Mapping[str, str] | None = None) -> Pa
     return job_staging_dir(staging_base(environ), job_id) / CAPTURES_DIRECTORY
 
 
+def job_captures(job_dir: Path) -> list[str]:
+    """The captures in one job's directory, named relative to it, in name order.
+
+    ``captures/<file>``: the form a model is shown a capture in and passes one
+    back in. Never a host path — a name that travels to a prompt, a refusal or
+    the event feed says nothing about where this host keeps its staging.
+    """
+    directory = Path(job_dir) / CAPTURES_DIRECTORY
+    try:
+        files = sorted(entry.name for entry in directory.iterdir() if entry.is_file())
+    except OSError:  # no capture directory: this job fetched no capture
+        return []
+    return [f"{CAPTURES_DIRECTORY}/{name}" for name in files]
+
+
+def job_relative(path: str | Path, environ: Mapping[str, str] | None = None) -> str:
+    """``path`` named relative to the job directory it is in, or by its file name.
+
+    For a file the platform staged for a job — a capture — and is about to
+    name to a model: the job directory's own part (``captures/<file>``) is what
+    the job's sidecars resolve, and anything above it is this host's layout.
+    """
+    target = Path(path)
+    base = Path(os.path.realpath(staging_base(environ)))
+    real = Path(os.path.realpath(target))
+    for parent in real.parents:
+        if parent.parent == base and is_job_directory_name(parent.name):
+            return real.relative_to(parent).as_posix()
+    return target.name
+
+
 def private_dir(path: Path, *, what: str = "staging path") -> Path:
     """``path`` as a directory only this user may enter, or an error.
 

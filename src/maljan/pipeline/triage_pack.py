@@ -768,7 +768,14 @@ class _Pack:
             self.record(tool, {}, partial(call, report))
         capture = _capture_path(report)
         if capture:
-            self.record("pcap_summary", {"path": capture}, lambda: pcap.pcap_summary(capture))
+            # Recorded under the name the job's own sidecars resolve, never the
+            # host path: the entry's arguments reach the evidence index a model
+            # reads, and the network tools take this name back.
+            self.record(
+                "pcap_summary",
+                {"pcap_path": staging.job_relative(capture)},
+                lambda: pcap.pcap_summary(capture),
+            )
 
     def _reputation(self) -> None:
         """The one network call, or the entry that says why there was none.
