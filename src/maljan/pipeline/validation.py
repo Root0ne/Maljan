@@ -101,6 +101,10 @@ class Violation:
     # Carried apart, the bound can only ever shorten the route.
     route: tuple[str, ...] = ()
     sentence: str = ""
+    # The sentences of the checked text this row is about, as written, for a
+    # renderer to mark where they stand. Never shown to the producer and never
+    # stored on the channel: the text they come from is.
+    quoted: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         # A row written by a validator has no route, and its message is its
@@ -1147,6 +1151,10 @@ class CapabilityGrounding:
     technique_ids: frozenset[str] = frozenset()
     evidence_keys: frozenset[str] = frozenset()
     evidence_text: str = ""
+    # The published techniques only a rule match stands behind:
+    # ``(technique id, catalogue name, note)``, the note as the ATT&CK table
+    # prints it (``corroboration.rule_match_only``).
+    rule_only: tuple[tuple[str, str, str], ...] = ()
 
     def grounds(
         self, techniques: Sequence[str], keys: Sequence[str], pattern: re.Pattern[str]
@@ -1184,6 +1192,7 @@ class CapabilityGrounding:
         techniques: set[str] = set()
         keys: set[str] = set()
         words: list[str] = []
+        rule_rows: list[tuple[str, str, str]] = []
         try:
             # A technique only a rule match stands behind — one string of a
             # YARA rule in a large file, with no analyst claiming it — grounds
@@ -1192,7 +1201,15 @@ class CapabilityGrounding:
             # row in the evidence counts.
             from maljan.analysis.corroboration import rule_match_only
 
-            rule_only = set(rule_match_only(report))
+            rule_notes = rule_match_only(report)
+            rule_only = set(rule_notes)
+            names = {
+                str(getattr(m, "technique_id", "") or ""): str(
+                    getattr(m, "technique_name", "") or ""
+                )
+                for m in getattr(report, "ttp_mappings", None) or []
+            }
+            rule_rows = [(tid, names.get(tid, ""), note) for tid, note in rule_notes.items()]
             rule_only_rules = {
                 str(hit.get("rule") or "").lower()
                 for tid in rule_only
@@ -1245,6 +1262,7 @@ class CapabilityGrounding:
             technique_ids=frozenset(techniques),
             evidence_keys=frozenset(keys),
             evidence_text=" ".join(w for w in words if w).lower(),
+            rule_only=tuple(rule_rows),
         )
 
 
@@ -1313,16 +1331,104 @@ _NOT_A_NEGATION = ("no doubt", "not only")
 _NEGATION_WINDOW = 40
 
 
-def _is_negated(text: str, start: int) -> bool:
+# What ends a negation's reach inside one clause: a relative clause or a new
+# statement joined on with its own subject. "No indication of a check was
+# found, as the sample harvests credentials" negates the check, not the
+# harvesting.
+_NEGATION_REACH_END_RE = re.compile(
+    r"\b(?:which|that|as|while|whereas)\b|\band\s+(?:the|it|this|its|then)\b|,\s*then\b",
+    re.IGNORECASE,
+)
+# Words inside a negation that the reach-end words would otherwise read as its
+# end: the complement of "no evidence that …" and the "such as" of a list the
+# negation names. "There is no evidence that the sample exfiltrates data" and
+# "no network activity such as exfiltration" are statements of absence.
+_INSIDE_A_NEGATION_RE = re.compile(
+    r"^\s*(?:evidence|indications?|signs?|traces?)\s+that\b|\bsuch\s+as\b", re.IGNORECASE
+)
+# A noun negation: "no evidence of", "without any sign of". Its reach runs
+# through a ", such as …" list it names, however long, to the end of its clause.
+_NOUN_NEGATION_RE = re.compile(
+    r"\b(?:no|without(?:\s+any)?)\s+(?:evidence|indications?|signs?|traces?)\s+of\b",
+    re.IGNORECASE,
+)
+
+
+# Where a ", such as …" list ends: a comma that no "or"/"and" follows, a
+# coordinating break, or "and" opening a new subject ("and credentials are
+# stolen").
+_LIST_END_RE = re.compile(
+    r",(?!\s*(?:or|and)\b)|\b(?:yet|although|though|so|but)\b"
+    r"|\band\s+\w+\s+(?:is|are|was|were|has|have|had)\b",
+    re.IGNORECASE,
+)
+
+
+def _reach_ends(after_cue: str) -> bool:
+    """Whether a relative clause or a new statement stands after a cue."""
+    return _NEGATION_REACH_END_RE.search(_INSIDE_A_NEGATION_RE.sub(" ", after_cue)) is not None
+
+
+def _in_a_named_list(text: str, start: int) -> bool:
+    """Whether the term at ``start`` is in the ", such as …" list a noun negation names."""
+    head = text[:start]
+    breaks = list(_CLAUSE_BREAK_RE.finditer(head))
+    clause = head[breaks[-1].end() :] if breaks else head
+    cues = list(_NOUN_NEGATION_RE.finditer(clause))
+    if not cues:
+        return False
+    after = clause[cues[-1].end() :]
+    named = re.search(r",\s*such\s+as\b", after, re.IGNORECASE)
+    if named is None or _reach_ends(after):
+        return False
+    # The list ends at its first comma not followed by "or"/"and", or at a
+    # coordinating break; a term past that point is outside the negation.
+    listed = after[named.end() :]
+    if _LIST_END_RE.search(listed):
+        return False
+    # "…, and credentials are stolen": the term itself opens the new subject.
+    return not (
+        re.search(r"\band\s*$", listed, re.IGNORECASE)
+        and re.match(r"\w+(?:\s+\w+)?\s+(?:is|are|was|were|has|have|had)\b", text[start:], re.I)
+    )
+
+
+# A purpose that names the term as its object: "to prevent lateral movement".
+# Only the term right after the verb (a determiner allowed) is negated; another
+# verb of the same sentence is not ("deletes shadow copies to prevent recovery
+# and encrypts every document" still claims encryption).
+_PURPOSE_OBJECT_RE = re.compile(
+    r"\bto\s+(?:prevent|avoid|stop|block)\s+(?:(?:any|the|a|an|further|its|their)\s+)?$",
+    re.IGNORECASE,
+)
+# An absence said of the term as the subject: "Lateral movement is absent from
+# the evidence". "Persistence is missing a cleanup routine" is not one.
+_SUBJECT_ABSENT_RE = re.compile(
+    r"^\s+(?:is|was|are|were|remains?)\s+(?:absent\b|missing\s+from\b)", re.IGNORECASE
+)
+
+
+def _is_negated(text: str, start: int, end: int | None = None) -> bool:
     """Whether the term at ``start`` sits inside a statement of absence.
 
     Read backwards from the match through at most ``_NEGATION_WINDOW``
     characters, stopping at whatever ended the previous clause. A cue in what
-    is left governs this term: "contains no keylogging or credential theft"
-    negates both words, while "no persistence was observed; it injects code"
-    negates only the first, because the semicolon ends the clause the cue was
-    in.
+    is left governs this term unless a relative clause or a new statement
+    stands between them: "contains no keylogging or credential theft" negates
+    both words, while "no persistence was observed; it injects code" negates
+    only the first, because the semicolon ends the clause the cue was in. "No
+    evidence that …" and "such as" do not end it. A noun negation ("no evidence
+    of") also reaches through a ", such as …" list it names to the end of its
+    clause. Two more statements of absence: the term as the object of a
+    purpose ("to prevent lateral movement"), and the term as the subject of
+    "is absent" or "is missing from".
     """
+    if _PURPOSE_OBJECT_RE.search(text[max(0, start - _NEGATION_WINDOW) : start]):
+        return True
+    if end is not None and _SUBJECT_ABSENT_RE.match(text[end:]) and _starts_its_clause(text, start):
+        return True
+    if _in_a_named_list(text, start):
+        return True
     window = text[max(0, start - _NEGATION_WINDOW) : start]
     breaks = list(_CLAUSE_BREAK_RE.finditer(window))
     if breaks:
@@ -1330,8 +1436,44 @@ def _is_negated(text: str, start: int) -> bool:
     lowered = window.lower()
     return any(
         not lowered.startswith(_NOT_A_NEGATION, cue.start())
+        and not _reach_ends(window[cue.end() :])
         for cue in _NEGATION_RE.finditer(window)
     )
+
+
+def _starts_its_clause(text: str, start: int) -> bool:
+    """Whether the term at ``start`` opens its clause, a determiner or adjective allowed."""
+    head = text[:start]
+    breaks = list(_CLAUSE_BREAK_RE.finditer(head))
+    clause = head[breaks[-1].end() :] if breaks else head
+    return len(clause.split()) <= 2
+
+
+# Where one sentence of checked text ends: a stop, a bang or a question mark
+# before a space, or a line break.
+_STATEMENT_END_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def _sentence_around(text: str, position: int) -> str:
+    """The sentence of ``text`` that holds ``position``, as written."""
+    begin = 0
+    for end in _STATEMENT_END_RE.finditer(text):
+        if end.start() >= position:
+            return text[begin : end.start()].strip()
+        begin = end.end()
+    return text[begin:].strip()
+
+
+def _claiming_sentences(pattern: re.Pattern[str], text: str) -> list[str]:
+    """The sentences in which ``pattern`` is claimed rather than reported absent, once each."""
+    found: list[str] = []
+    for match in pattern.finditer(text):
+        if _is_negated(text, match.start(), match.end()):
+            continue
+        sentence = _sentence_around(text, match.start())
+        if sentence and sentence not in found:
+            found.append(sentence)
+    return found
 
 
 def _claimed(pattern: re.Pattern[str], text: str) -> bool:
@@ -1341,7 +1483,9 @@ def _claimed(pattern: re.Pattern[str], text: str) -> bool:
     exfiltrate data in one sentence and does exfiltrate it in another has made
     the claim, and it is the claim that has to be grounded.
     """
-    return any(not _is_negated(text, match.start()) for match in pattern.finditer(text))
+    return any(
+        not _is_negated(text, match.start(), match.end()) for match in pattern.finditer(text)
+    )
 
 
 def _base_technique(technique_id: Any) -> str:
@@ -1373,42 +1517,137 @@ def ungrounded_capabilities(
         # communication was observed" is the prose a thin run should produce,
         # and flagging it spends the one retry arguing against the honest
         # sentence this validator exists to encourage.
-        if not _claimed(pattern, text):
+        sentences = _claiming_sentences(pattern, text)
+        if not sentences:
             continue
         if grounding.grounds(techniques, keys, pattern):
             continue
+        rule_matched = [
+            f"{safe_finding_value(tid)} {safe_finding_value(name)} is published on a "
+            f"{safe_finding_value(note)}"
+            for tid, name, note in grounding.rule_only
+            if _base_technique(tid) in techniques
+        ]
+        rule_line = (
+            f" {'; '.join(rule_matched)}: say that a rule matched, not that the sample does it."
+            if rule_matched
+            else ""
+        )
         violations.append(
             Violation(
                 code=code,
                 message=(
                     f"the text claims {label}, which nothing in this run establishes — "
                     f"no {', '.join(techniques[:3])} technique, no matching evidence "
-                    f"section, and no analyst said it. {grounding.summary()} "
-                    "Describe what was found, or drop the claim."
+                    f"section, and no analyst said it"
+                    f" (in: {safe_finding_value(sentences[0])!r}).{rule_line} "
+                    f"{grounding.summary()} Describe what was found, or drop the claim."
                 ),
                 path=label.replace(" ", "_"),
+                quoted=tuple(sentences),
             )
         )
     return violations
 
 
-def narrative_capability_violations(
-    payload: Any, grounding: CapabilityGrounding
-) -> list[Violation]:
-    """:func:`ungrounded_capabilities` over a narrative answer's prose fields."""
-    if payload is None:
-        return []
-    data = payload if isinstance(payload, dict) else getattr(payload, "__dict__", {}) or {}
-    parts: list[str] = [str(data.get("executive_summary") or "")]
-    for item in data.get("key_findings") or []:
-        parts.append(str(item.get("text") or "") if isinstance(item, dict) else str(item))
-    return ungrounded_capabilities("\n".join(parts), grounding)
+RULE_MATCH_AS_ACTION_CODE = "report.rule_match_as_action"
+
+# The words that make a sentence about a rule match, or an estimate, rather
+# than a statement that the sample does something.
+_RULE_OR_ESTIMATE_RE = re.compile(
+    r"\b(?:rules?|yara|capa|signatures?|match(?:es|ed|ing)?|may|might|could|possibl[ey]|"
+    r"potential(?:ly)?|likely|suggests?|consistent\s+with|indicat\w*|associated\s+with)\b",
+    re.IGNORECASE,
+)
+# The words of a sentence about the report or about defending against a
+# technique, which name it without saying the sample does it.
+_ABOUT_NOT_ACTION_RE = re.compile(
+    r"\b(?:hunt\w*|monitor\w*|detect\w*|defenders?|should|table|appears?|listed|"
+    r"published|without\s+analyst)\b",
+    re.IGNORECASE,
+)
 
 
-def section_capability_violations(payload: Any, grounding: CapabilityGrounding) -> list[Violation]:
-    """:func:`ungrounded_capabilities` over every string a section answer carries."""
-    if payload is None:
+def rule_match_statement_violations(text: str, grounding: CapabilityGrounding) -> list[Violation]:
+    """Sentences that state a technique only a rule match stands behind as an action.
+
+    A technique published on one matched string of a YARA rule, with no
+    analyst claiming it, is a rule match: a benchmark report wrote "The sample
+    dumps credentials from the target system" for one. A sentence that names
+    such a technique — its id or its catalogue name — and says nothing of a
+    rule or an estimate is asked about once. The publish rule is unchanged,
+    and the sentence is never edited. A capability word behind the same
+    technique is the capability check's (:func:`ungrounded_capabilities`).
+    """
+    if not text or not text.strip() or not grounding.rule_only:
         return []
+    violations: list[Violation] = []
+    for tid, name, note in grounding.rule_only:
+        spellings = [re.escape(tid)]
+        if len(name.strip()) >= 4:
+            spellings.append(r"\s+".join(re.escape(word) for word in name.split()))
+        pattern = re.compile(r"(?<![\w.])(?:" + "|".join(spellings) + r")(?![\w])", re.I)
+        sentences = [
+            sentence
+            for sentence in _claiming_sentences(pattern, text)
+            if not _RULE_OR_ESTIMATE_RE.search(sentence)
+            and not _ABOUT_NOT_ACTION_RE.search(sentence)
+            # A field holding the id or the name alone states nothing.
+            and sentence.strip(" .").lower() not in {tid.lower(), name.strip().lower()}
+        ]
+        if not sentences:
+            continue
+        violations.append(
+            Violation(
+                code=RULE_MATCH_AS_ACTION_CODE,
+                message=(
+                    f"{safe_finding_value(sentences[0])!r} states {safe_finding_value(tid)} "
+                    f"{safe_finding_value(name)} as something the sample does; this run "
+                    f"publishes it on a {safe_finding_value(note)}. Say that a rule matched "
+                    "and what it matched, or drop the sentence."
+                ),
+                path=tid,
+                quoted=tuple(sentences),
+            )
+        )
+    return violations
+
+
+def record_flagged_statements(
+    report: Any, violations: Sequence[Violation], *, asked: bool = True
+) -> None:
+    """Put the sentences of the surviving marked-in-place findings on the report. Never raises.
+
+    What a renderer marks where the sentence stands (``MARKED_IN_PLACE``). The
+    sentence is kept as written; the label is the finding's path, the term or
+    the technique the check was about.
+    """
+    rows = getattr(report, "flagged_statements", None)
+    if not isinstance(rows, list):
+        return
+    try:
+        from maljan.reporting.models import FlaggedStatement
+
+        seen = {(row.sentence, row.code, row.label, row.asked) for row in rows}
+        for violation in violations:
+            if violation.code not in MARKED_IN_PLACE:
+                continue
+            label = violation.path.replace("_", " ")
+            for sentence in violation.quoted:
+                key = (sentence, violation.code, label, asked)
+                if key not in seen:
+                    seen.add(key)
+                    rows.append(
+                        FlaggedStatement(
+                            sentence=sentence, code=violation.code, label=label, asked=asked
+                        )
+                    )
+    except Exception as exc:  # noqa: BLE001 — a mark is never worth a report
+        logger.debug("validation: flagged sentences were not recorded (%s).", exc)
+
+
+def prose_of(payload: Any) -> str:
+    """Every string an answer carries, one per line, for the checks that read prose."""
     parts: list[str] = []
 
     def _walk(value: Any, depth: int = 0) -> None:
@@ -1424,7 +1663,35 @@ def section_capability_violations(payload: Any, grounding: CapabilityGrounding) 
                 _walk(item, depth + 1)
 
     _walk(payload)
-    return ungrounded_capabilities("\n".join(parts), grounding, code=UNGROUNDED_CAPABILITY_CODE)
+    return "\n".join(parts)
+
+
+def narrative_capability_violations(
+    payload: Any, grounding: CapabilityGrounding
+) -> list[Violation]:
+    """:func:`ungrounded_capabilities` over a narrative answer's prose fields."""
+    if payload is None:
+        return []
+    data = payload if isinstance(payload, dict) else getattr(payload, "__dict__", {}) or {}
+    parts: list[str] = [str(data.get("executive_summary") or "")]
+    for item in data.get("key_findings") or []:
+        parts.append(str(item.get("text") or "") if isinstance(item, dict) else str(item))
+    text = "\n".join(parts)
+    return [
+        *ungrounded_capabilities(text, grounding),
+        *rule_match_statement_violations(text, grounding),
+    ]
+
+
+def section_capability_violations(payload: Any, grounding: CapabilityGrounding) -> list[Violation]:
+    """:func:`ungrounded_capabilities` and the rule-match check over a section answer's strings."""
+    if payload is None:
+        return []
+    text = prose_of(payload)
+    return [
+        *ungrounded_capabilities(text, grounding, code=UNGROUNDED_CAPABILITY_CODE),
+        *rule_match_statement_violations(text, grounding),
+    ]
 
 
 CITATION_NOT_EVIDENCE_CODE = "report.citation_not_evidence"
@@ -1571,12 +1838,56 @@ def citation_violations(
 UNGROUNDED_FINDING_CODE = "narrative.ungrounded_finding"
 FLOW_VOICE_CODE = "report.flow_voice"
 UNCITED_CONFIGURATION_CODE = "report.configuration_uncited"
+# A report section answer the output cap ended. Its JSON is cut before it
+# closes, so the schema check could only say "not JSON at all" — and a model
+# told that writes the same long answer again, into the same cap. Both answers
+# of a benchmark report's host-identifier section ran to exactly 8,192 tokens.
+SECTION_CUT_CODE = "composer.cut_at_output_cap"
+
+
+# How much of a cut answer its question shows, as a sample of its shape.
+SECTION_CUT_HEAD_CHARS = 160
+
+
+def section_cut_violation(cap: int, *, chars: int = 0, begun: int = 0, head: str = "") -> Violation:
+    """What a section the cap cut is told: the cap, the answer's size, and how it opened.
+
+    The cut answer itself is not sent back (``retry_with_feedback``'s
+    ``drop_answer_for``): it is about a cap's worth of tokens nobody can read,
+    and a retry that carried it had less room to answer in than the first call.
+    """
+    size = (
+        f" It ran to {int(chars):,} characters with {int(begun)} item(s) begun"
+        + (
+            f", and opened with {safe_finding_value(head[:SECTION_CUT_HEAD_CHARS])!r}."
+            if head
+            else "."
+        )
+        if chars
+        else ""
+    )
+    return Violation(
+        code=SECTION_CUT_CODE,
+        message=(
+            f"Your previous answer reached the output limit of {int(cap)} tokens and was "
+            f"cut off before its JSON closed, so none of it could be read.{size} Any "
+            "reasoning you write counts against the same limit. Answer again with an object "
+            f"that closes well inside {int(cap)} tokens: only the items the evidence supports "
+            "best, each written once, every text a short phrase, the JSON on one line "
+            "without indentation."
+        ),
+    )
+
+
 CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
 UNCITED_IDENTIFIER_CODE = "report.identifier_uncited"
 TECHNIQUE_NAME_CODE = "report.technique_name"
 
 # The codes a report round's answer is kept with. A broken shape leaves nothing
 # to print; each of these leaves a printable answer with a finding beside it.
+# The findings whose sentences survive marked where they stand in the report.
+MARKED_IN_PLACE: frozenset[str] = frozenset({UNGROUNDED_CAPABILITY_CODE, RULE_MATCH_AS_ACTION_CODE})
+
 KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
     {
         UNGROUNDED_CAPABILITY_CODE,
@@ -1587,6 +1898,7 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         CITATION_WRONG_ENTRY_CODE,
         UNCITED_IDENTIFIER_CODE,
         TECHNIQUE_NAME_CODE,
+        RULE_MATCH_AS_ACTION_CODE,
     }
 )
 
@@ -1925,6 +2237,189 @@ def quoted_values(text: str) -> list[str]:
     return found
 
 
+# One unquoted token of running text: a run of characters no space, bracket,
+# comma, semicolon or quote mark ends.
+_LITERAL_TOKEN_RE = re.compile(r"[^\s\[\]()<>{},;\"“”`]+")
+# What a token loses at its ends before its shape is read: a sentence's
+# punctuation, and the asterisks and underscores of Markdown emphasis.
+_LITERAL_EDGE = ".,:;!?'*_"
+# A file name: a name, a dot, and an extension a file on a host carries.
+_FILE_NAME_RE = re.compile(r"[a-z0-9][\w.$~-]*\.([a-z0-9]{2,5})", re.I)
+_FILE_EXTENSIONS = frozenset(
+    {
+        "exe",
+        "dll",
+        "sys",
+        "scr",
+        "cpl",
+        "ocx",
+        "drv",
+        "bat",
+        "cmd",
+        "ps1",
+        "psm1",
+        "vbs",
+        "vbe",
+        "js",
+        "jse",
+        "wsf",
+        "hta",
+        "lnk",
+        "msi",
+        "dat",
+        "bin",
+        "tmp",
+        "log",
+        "txt",
+        "ini",
+        "cfg",
+        "conf",
+        "db",
+        "sqlite",
+        "zip",
+        "rar",
+        "7z",
+        "cab",
+        "iso",
+        "img",
+        "doc",
+        "docx",
+        "docm",
+        "xls",
+        "xlsx",
+        "xlsm",
+        "pdf",
+        "rtf",
+        "so",
+        "elf",
+        "sh",
+        "py",
+        "jar",
+        "apk",
+        "dex",
+        "plist",
+        "dylib",
+    }
+)
+# The executables every Windows host carries, named bare. A sentence naming one
+# ("runs cmd.exe") states how the sample works, not a value to look for, and the
+# entry it cites often states the same fact without the name.
+_COMMON_EXECUTABLES = frozenset(
+    {
+        "cmd.exe",
+        "powershell.exe",
+        "pwsh.exe",
+        "explorer.exe",
+        "rundll32.exe",
+        "regsvr32.exe",
+        "svchost.exe",
+        "mshta.exe",
+        "wscript.exe",
+        "cscript.exe",
+        "conhost.exe",
+        "schtasks.exe",
+        "reg.exe",
+        "net.exe",
+        "net1.exe",
+        "whoami.exe",
+        "ipconfig.exe",
+        "nltest.exe",
+        "systeminfo.exe",
+        "tasklist.exe",
+        "taskkill.exe",
+        "wmic.exe",
+        "msiexec.exe",
+        "certutil.exe",
+        "bitsadmin.exe",
+        "vssadmin.exe",
+        "notepad.exe",
+        "lsass.exe",
+        "winlogon.exe",
+        "services.exe",
+        "csrss.exe",
+        "dllhost.exe",
+        "taskhostw.exe",
+        "sc.exe",
+        "at.exe",
+        "curl.exe",
+        "wget.exe",
+    }
+)
+
+
+# Names of software written like a host or a file: a library, not a value.
+_SOFTWARE_NAMES = frozenset(
+    {"node.js", "vue.js", "react.js", "next.js", "express.js", "d3.js", "three.js", "socket.io"}
+)
+
+
+def _host_shaped(token: str) -> bool:
+    """A host name under a real top-level domain, by the strings reader's own test."""
+    from maljan.tools.strings import _looks_like_domain
+
+    return bool(re.fullmatch(r"[a-z0-9-]+(?:\.[a-z0-9-]+)+", token, re.I)) and _looks_like_domain(
+        token
+    )
+
+
+def _literal_shape(token: str) -> bool:
+    """Whether an unquoted token is an indicator by its shape alone.
+
+    A whole digest, a URL, a backslash path or registry key, a mailbox, a host
+    under a real top-level domain, or a file name with a file's extension other
+    than an executable every Windows host carries. Never technical vocabulary:
+    an algorithm, an encoding, an architecture, an API constant or a tool name
+    is written many ways in the entries that state it, and whether one sentence
+    restates an entry is a paraphrase this check cannot judge. When in doubt
+    the token is not a value and nothing is asked.
+    """
+    if token.lower() in _SOFTWARE_NAMES:
+        return False
+    if _WHOLE_DIGEST_RE.fullmatch(token):
+        return True
+    if "://" in token:
+        return True
+    if "\\" in token:
+        return len(token) >= 4 and re.search(r"[a-z]", token, re.I) is not None
+    if "@" in token:
+        local, _, host = token.partition("@")
+        return bool(local) and _host_shaped(host)
+    if _host_shaped(token):
+        return True
+    named = _FILE_NAME_RE.fullmatch(token)
+    return bool(
+        named
+        and named.group(1).lower() in _FILE_EXTENSIONS
+        and token.lower() not in _COMMON_EXECUTABLES
+    )
+
+
+def literal_values(text: str) -> list[str]:
+    """What ``text`` states as a literal value without quoting it, once each, in order.
+
+    The quoted spans are :func:`quoted_values`' and the bracketed citations
+    are not values; both are taken out first. Only a token whose shape makes
+    it a value (:func:`_literal_shape`) and that a text can be said to hold
+    (:func:`decidable`) is kept.
+    """
+    plain = _QUOTED_SPAN_RE.sub(" ", _CODE_SPAN_RE.sub(" ", str(text or "")))
+    plain = re.sub(r"\[[^\]\n]*\]", " ", plain)
+    found: list[str] = []
+    for match in _LITERAL_TOKEN_RE.finditer(plain):
+        token = match.group(0).strip(_LITERAL_EDGE)
+        if (
+            len(token) < 3
+            or _EVIDENCE_ID_RE.fullmatch(token)
+            or _IDENTIFIER_RE.fullmatch(token)
+            or not _literal_shape(token)
+            or not decidable(token)
+        ):
+            continue
+        if token not in found:
+            found.append(token)
+    return found
+
+
 def _ids_in(value: Any) -> list[str]:
     """The evidence ids a citing field carries, lower-cased, in order."""
     items = value if isinstance(value, list | tuple) else [value]
@@ -1957,8 +2452,10 @@ def wrong_entry_citations(
     """Values a text quotes that the entry it cites does not hold, and another entry does.
 
     Decided only where it can be: a value the text states verbatim — in quotes
-    or backticks, or the whole of a record's value — is looked for in the text
-    of each entry cited for it. Found in one of them, the citation stands.
+    or backticks, unquoted where its shape makes it an indicator (a digest, a
+    URL, a path, a host, a file name; :func:`literal_values`), or the
+    whole of a record's value — is looked for in the text of each entry cited
+    for it. Found in one of them, the citation stands.
     Found in none of them but in another entry of the run, the citation points
     a reader at the wrong answer, and the model is asked once, with the entry
     that holds it offered. Found nowhere, nothing is said: a value the run's
@@ -1996,7 +2493,7 @@ def wrong_entry_citations(
 
     def _read_prose(text: Any) -> None:
         for sentence, cited in _sentences_with_citations(str(text or "")):
-            for value in quoted_values(sentence):
+            for value in [*quoted_values(sentence), *literal_values(sentence)]:
                 _ask(value, cited)
 
     def _walk(node: Any, depth: int = 0) -> None:
@@ -2020,8 +2517,8 @@ def wrong_entry_citations(
                 elif refs:
                     if key in _VERBATIM_FIELDS:
                         _ask(value, refs)
-                    for quoted in quoted_values(value):
-                        _ask(quoted, refs)
+                    for stated in [*quoted_values(value), *literal_values(value)]:
+                        _ask(stated, refs)
             elif key in _VERBATIM_FIELDS and isinstance(value, list | tuple) and refs:
                 for item in value:
                     if isinstance(item, str):
@@ -2045,12 +2542,12 @@ def wrong_entry_citations(
         holding = safe_finding_value(", ".join(entries.named(i) for i in holders[:_MAX_NAMED_IDS]))
         message = (
             f"{quoted} is not in {named}, which the text cites for it; this run's evidence "
-            f"holds it in {holding}. Cite the entry that holds what the text quotes."
+            f"holds it in {holding}. Cite the entry that holds the value the text states."
             if len(values) == 1
             else f"{quoted} are not in {named}, which the text cites for them; this run's "
             f"evidence holds them in {holding}"
             f"{' (with ' + safe_finding_value(more) + ' more)' if more > 0 else ''}. "
-            "Cite the entry that holds what the text quotes."
+            "Cite the entry that holds the value the text states."
         )
         violations.append(
             Violation(code=CITATION_WRONG_ENTRY_CODE, message=message, path="citation")
@@ -3647,13 +4144,24 @@ def _collect(parsed: Any, validators: Sequence[Validator]) -> list[Violation]:
     return found
 
 
-def _with_feedback(messages: list[Any], answer: Any, violations: Sequence[Violation]) -> list[Any]:
-    """The conversation plus the model's answer plus the correction turn."""
+def _with_feedback(
+    messages: list[Any],
+    answer: Any,
+    violations: Sequence[Violation],
+    *,
+    keep_answer: bool = True,
+) -> list[Any]:
+    """The conversation plus the model's answer plus the correction turn.
+
+    ``keep_answer=False`` leaves the answer out: the correction describes it
+    instead (a cut section answer, see ``section_cut_violation``).
+    """
     from langchain_core.messages import AIMessage, HumanMessage
 
     content = getattr(answer, "content", None)
     turns = list(messages)
-    turns.append(AIMessage(content=str(content if content is not None else answer)))
+    if keep_answer:
+        turns.append(AIMessage(content=str(content if content is not None else answer)))
     turns.append(HumanMessage(content=feedback_text(violations)))
     return turns
 
@@ -3797,6 +4305,8 @@ async def retry_with_feedback[T](
     sink: EventSink | None = None,
     agent: str = "",
     stage: str = "",
+    drop_answer_for: frozenset[str] = frozenset(),
+    can_retry: Callable[[list[Any]], bool] | None = None,
 ) -> tuple[T, list[Violation], int]:
     """Run, validate, and give the model one chance to fix what it got wrong.
 
@@ -3816,6 +4326,11 @@ async def retry_with_feedback[T](
     loop knows which, including for the violations the retry itself introduced.
     A caller with nobody to tell — the CLI, a test, the report composer —
     passes no sink and nothing is emitted.
+
+    ``drop_answer_for`` names the codes whose correction replaces the answer
+    rather than following it, and ``can_retry`` is asked about the retry's
+    whole conversation before it is sent: answered no, the loop ends there
+    with what it has, and the caller records why.
     """
     feed = _feed(sink, agent, stage)
     turns = list(messages)
@@ -3825,9 +4340,13 @@ async def retry_with_feedback[T](
     retries = 0
     shown: list[Violation] = []
     while violations and retries < max_retries:
+        keep = not any(v.code in drop_answer_for for v in violations)
+        following = _with_feedback(turns, answer, violations, keep_answer=keep)
+        if can_retry is not None and not can_retry(following):
+            break
         _announce_feedback(violations, on_feedback, feed, retries + 1)
         shown.extend(violations)
-        turns = _with_feedback(turns, answer, violations)
+        turns = following
         retries += 1
         answer = await run(turns)
         parsed = parse(answer)

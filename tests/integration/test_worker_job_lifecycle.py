@@ -163,8 +163,13 @@ def _make_sample(
 
 
 @pytest.mark.asyncio
-async def test_job_not_found(mock_ctx: dict[str, Any], mock_db_session: AsyncMock) -> None:
+async def test_job_not_found(
+    mock_ctx: dict[str, Any], mock_db_session: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """If job is missing from DB, return error status."""
+    from app.worker import analysis_worker
+
+    monkeypatch.setattr(analysis_worker, "JOB_ROW_READ_PAUSES", (0.0, 0.0))
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = None
 

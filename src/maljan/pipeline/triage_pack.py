@@ -1066,8 +1066,6 @@ def _left_out(n: int) -> str:
 
 # How many named items a line lists before it says how many more there are.
 _LIST_HEAD = 6
-# How many characters of a hash a line carries.
-_HASH_HEAD = 16
 # How many characters of a failure or a prose answer a line keeps.
 _TEXT_HEAD = 120
 
@@ -1231,14 +1229,18 @@ def _identity(data: dict[str, Any]) -> str:
 
 
 def _hashes(data: dict[str, Any]) -> str:
+    """Every digest whole.
+
+    A digest is a value a reader copies, never a phrase to summarise: the pack
+    once printed each as its first 16 characters and an ellipsis, and the
+    judge copied ``71d29d71641017e5`` out as an MD5 indicator, which the
+    export then refused as no MD5 at all.
+    """
     parts = []
     for key in ("sha256", "md5", "sha1", "imphash", "ssdeep", "tlsh", "telfhash"):
         value = data.get(key)
         if value:
-            text = str(value)
-            parts.append(
-                f"{key} {text[:_HASH_HEAD]}…" if len(text) > _HASH_HEAD else f"{key} {text}"
-            )
+            parts.append(f"{key} {value}")
     return ", ".join(parts) or "none computed"
 
 

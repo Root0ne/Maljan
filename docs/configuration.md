@@ -754,13 +754,21 @@ tokens dropped a live report's payloads section when the model reasoned past
 it.
 
 So each of those calls waits
-`max(configured, min(max_tokens / measured rate × 1.5, 1800 s))`. The rate is
+`max(configured, min(derived, 1800 s))`. Where the model's reading rate is
+measured and the call gives its prompt size (a composer section, the verdict),
+`derived = (prompt_tokens / reading rate + max_tokens / generation rate) × 1.5`;
+otherwise `derived = max_tokens / rate × 1.5` with the rate that includes the
+prompt read. Appendix B prints which one each timeout took. The rates are
 the model's own for this job, read off every answer it has already given
-without a token of its own: Ollama's `eval_count` over `eval_duration`, and on
-an OpenAI-compatible endpoint the answer's output token count over the call's
-wall clock (the client drops llama.cpp's `timings`, and the wall clock includes
-reading the prompt, so that rate is lower than the server's and the wait
-longer). The margin, 1.5, covers the prompt read and the spread between turns.
+without a token of its own: Ollama's `eval_count` over `eval_duration`,
+llama.cpp's `timings.predicted_n` over `predicted_ms` (the openai provider
+carries the `timings` object the OpenAI-compatible client would drop into each
+answer), and on an endpoint that reports neither the answer's output token
+count over the call's wall clock (which includes reading the prompt, so that
+rate is lower than the server's and the wait longer). The reading rate is
+Ollama's `prompt_eval_count` over `prompt_eval_duration` or llama.cpp's
+`timings.prompt_n` over `prompt_ms`. The margin, 1.5, covers the spread between
+turns, and the prompt read where it is not timed on its own.
 The ceiling, 1,800 s, is the HTTP request timeout every provider's client is
 built with (`PROVIDER_REQUEST_TIMEOUT_SECONDS`), so no derived wait outlives the
 request carrying it. A configured value above the ceiling is not lowered, but

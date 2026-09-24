@@ -21,11 +21,14 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
 from maljan.pipeline.validation import (
     CITATION_WRONG_ENTRY_CODE,
     KEPT_WITH_A_FINDING,
     EntryTexts,
     decidable,
+    literal_values,
     quoted_values,
     wrong_entry_citations,
 )
@@ -184,6 +187,117 @@ class TestTheEntryTexts:
 
     def test_quoted_values_skip_an_apostrophe_and_a_short_value(self) -> None:
         assert quoted_values("the sample's `%s` and 'ab' and `example.dat`") == ["example.dat"]
+
+
+class TestUnquotedValues:
+    """An indicator stated without quotes is read too; technical vocabulary never is.
+
+    A benchmark report cited the capability entry for values only another entry
+    held, in plain text; the quoted-value check read none of it. A first
+    widening read hyphen and underscore words as values and asked correct
+    sentences to cite the reputation report for "AES-256".
+    """
+
+    @staticmethod
+    def _texts() -> EntryTexts:
+        decoded = json.dumps(
+            {
+                "strings": [
+                    {"string": "cache.example-cdn.net"},
+                    {"string": "C:\\ProgramData\\ExampleVendor\\state.bin"},
+                    {"string": "payload.example.dat"},
+                    {"string": "utf-16le"},
+                ]
+            }
+        )
+        reputation = json.dumps(
+            {
+                "tags": ["aes-256", "sha-256", "x86-64 pe32+", "utf-16le", "sha-1"],
+                "names": ["pe_info", "page_execute_readwrite", "image_file_dll", "cmd.exe"],
+            }
+        )
+        return EntryTexts.from_ledger(
+            [
+                _entry("ev_0003", "pe_info", json.dumps({"machine": "amd64", "imports": []})),
+                _entry("ev_0008", "capa", json.dumps({"rules": ["encrypt data using aes"]})),
+                _entry("ev_0011", "get_file_report", reputation),
+                _entry("ev_0012", "floss", decoded),
+            ]
+        )
+
+    def test_a_host_a_path_and_a_file_name_are_asked_about(self) -> None:
+        body = (
+            "It contacts cache.example-cdn.net, keeps C:\\ProgramData\\ExampleVendor\\state.bin "
+            "and drops payload.example.dat [ev_0008]."
+        )
+
+        (found,) = wrong_entry_citations({"body": body}, self._texts(), prose=("body",))
+
+        for value in ("cache.example-cdn.net", "state.bin", "payload.example.dat"):
+            assert value in found.message
+        assert "Cite the entry that holds the value the text states." in found.message
+        assert "quotes" not in found.message
+
+    def test_a_record_description_is_read_for_them_too(self) -> None:
+        payload = {
+            "steps": [
+                {
+                    "order": 1,
+                    "action": "Resolves cache.example-cdn.net",
+                    "evidence_refs": ["ev_0008"],
+                }
+            ]
+        }
+
+        assert _codes(wrong_entry_citations(payload, self._texts())) == [CITATION_WRONG_ENTRY_CODE]
+
+    def test_the_right_entry_raises_nothing(self) -> None:
+        body = "It contacts cache.example-cdn.net [ev_0012]."
+
+        assert wrong_entry_citations({"body": body}, self._texts(), prose=("body",)) == []
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "It encrypts its configuration with AES-256 [ev_0008].",
+            "It is a PE32+ x86-64 executable [ev_0003].",
+            "The SHA-256 digest was taken of the whole file [ev_0003].",
+            "Its strings are UTF-16LE encoded [ev_0012].",
+            "The SHA-1 and UTF-8 names are listed [ev_0003].",
+            "It targets x86_64 and Win32-based hosts [ev_0003].",
+            "The base64-encoded blob was built with MSVC-14 [ev_0003].",
+            "COVID-19 themed, IPv4-only [ev_0003].",
+            "The pe_info entry lists its sections [ev_0008].",
+            "It maps pages PAGE_EXECUTE_READWRITE with MEM_COMMIT [ev_0008].",
+            "The header sets IMAGE_FILE_DLL [ev_0008].",
+            "It runs cmd.exe to walk zones (/scan_scope /all_zones) [ev_0008].",
+            "It formats a marker with Example_%04x [ev_0008].",
+            "It is written for Node.js [ev_0008].",
+        ],
+    )
+    def test_technical_vocabulary_raises_no_question(self, body: str) -> None:
+        assert wrong_entry_citations({"body": body}, self._texts(), prose=("body",)) == []
+
+    def test_a_paraphrase_stays_undecided(self) -> None:
+        body = "It scans every zone and queries the environment [ev_0008]."
+
+        assert wrong_entry_citations({"body": body}, self._texts(), prose=("body",)) == []
+
+    def test_what_is_read_as_a_literal(self) -> None:
+        text = (
+            "_Written by the model_ T1027.005 CVE-2021-12345 [ev_0012] e.g. and/or /all the "
+            "/example/ path, C:\\Temp\\x.dll, evil.example.com, a@b.example.com, Example_%x, "
+            "examplemark-7, kernel32.dll, cmd.exe, " + "7d" * 16 + ", 443, 6.0.0.0 and "
+            "`quoted.example.org`."
+        )
+
+        assert literal_values(text) == [
+            "C:\\Temp\\x.dll",
+            "evil.example.com",
+            "a@b.example.com",
+            "kernel32.dll",
+            "7d" * 16,
+        ]
 
 
 class TestWhatCannotBeDecided:

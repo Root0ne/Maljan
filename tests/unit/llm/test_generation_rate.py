@@ -275,7 +275,7 @@ class TestTheRunSummaryRecordsIt:
         assert f"Generation rate of `{SLOW}`: 3.80 tokens/s" in text
         assert "Timeout of `judge:verdict`: 1800s" in text
         assert "= 3234s, at most 1800s" in text
-        assert "8192 tokens at 3.80 tokens/s × 1.5" in text
+        assert "8192 tokens at 3.80 tokens/s (prompt read included) × 1.5" in text
         assert "Timeout of `composer:section`: 355s" in text
 
     def test_the_run_summary_markdown_states_it_too(self) -> None:
@@ -585,3 +585,82 @@ def _appendix_text(run_summary: dict) -> str:
         {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": run_summary}
     )
     return MarkdownRenderer()._appendix_run(report)
+
+
+class TestThePromptReadIsTimedToo:
+    """With the server's own generation rate, the prompt read is added at its own rate.
+
+    The wall clock's rate included the prompt read and the margin covered it.
+    The server's rate leaves it out, so a slow-reading model answering a long
+    prompt to its cap timed out where the wall clock's rate had waited long
+    enough.
+    """
+
+    @staticmethod
+    def _rates(write: float, read: float, whole: float) -> GenerationRates:
+        rates = GenerationRates()
+        rates.observe("m", int(write * 100), 100.0, "llama.cpp timings.predicted_n/predicted_ms")
+        rates.observe_prompt("m", int(read * 100), 100.0, "llama.cpp timings.prompt_n/prompt_ms")
+        rates.observe_whole("m", int(whole * 100), 100.0)
+        return rates
+
+    def test_a_slow_prefill_is_waited_for(self) -> None:
+        # 20 tokens/s written, 100 read: a full 8,192-token answer to a
+        # 24,000-token prompt needs 240 + 410 s.
+        rates = self._rates(write=20.0, read=100.0, whole=15.0)
+
+        applied = rates.call_timeout("composer:section", "m", 120.0, 8192, prompt_tokens=24000)
+
+        needed = 24000 / 100.0 + 8192 / 20.0
+        assert applied == pytest.approx(needed * TIMEOUT_MARGIN)
+        assert applied > 8192 / 20.0 * TIMEOUT_MARGIN
+        row = rates.snapshot()["timeouts"]["composer:section"]
+        assert row["prompt_tokens"] == 24000
+        assert row["prompt_tokens_per_second"] == pytest.approx(100.0)
+        assert row["tokens_per_second"] == pytest.approx(20.0)
+
+    def test_without_a_reading_rate_the_rate_with_the_read_included_is_used(self) -> None:
+        rates = GenerationRates()
+        rates.observe("m", 5700, 100.0, "llama.cpp timings.predicted_n/predicted_ms")
+        rates.observe_whole("m", 4000, 100.0)
+
+        applied = rates.call_timeout("judge:verdict", "m", 60.0, 8192, prompt_tokens=5000)
+
+        assert applied == pytest.approx(8192 / 40.0 * TIMEOUT_MARGIN)
+        assert "prompt_tokens" not in rates.snapshot()["timeouts"]["judge:verdict"]
+
+    def test_the_report_states_the_derivation(self) -> None:
+        from maljan.analysis.run_summary import generation_lines
+
+        rates = self._rates(write=20.0, read=100.0, whole=15.0)
+        rates.call_timeout("composer:section", "m", 120.0, 8192, prompt_tokens=24000)
+
+        text = "\n".join(generation_lines(rates.snapshot()))
+
+        assert (
+            "(24000 prompt tokens read at 100.00 tokens/s + 8192 tokens written at "
+            "20.00 tokens/s) × 1.5"
+        ) in text
+
+    def test_the_meter_records_the_whole_rate_beside_the_server_s(self) -> None:
+        import uuid
+
+        from langchain_core.outputs import ChatGeneration, LLMResult
+
+        from maljan.llm.generation_rate import RateMeter
+
+        rates = GenerationRates()
+        meter = RateMeter(rates, "m")
+        message = AIMessage(
+            content="x",
+            response_metadata={"timings": {"predicted_n": 570, "predicted_ms": 10000}},
+            usage_metadata={"input_tokens": 1, "output_tokens": 570, "total_tokens": 571},
+        )
+        run = uuid.uuid4()
+        meter.on_chat_model_start({}, [], run_id=run)
+        meter._started[run] -= 20.0
+        meter.on_llm_end(LLMResult(generations=[[ChatGeneration(message=message)]]), run_id=run)
+
+        row = rates._models["m"]
+        assert row.rate() == pytest.approx(57.0)
+        assert row.whole_rate() == pytest.approx(570 / 20.0, rel=0.05)

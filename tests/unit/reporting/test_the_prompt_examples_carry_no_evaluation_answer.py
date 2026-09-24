@@ -26,12 +26,14 @@ from typing import Any
 
 import pytest
 
+from maljan.pipeline.validation import section_cut_violation
 from maljan.reporting.composer import (
     _EXAMPLES,
     _INSTRUCTIONS,
     _PROSE_SECTIONS,
     _SYSTEM,
     PUBLISHED_TECHNIQUES_HEADING,
+    RULE_ONLY_NOTE,
     SECTION_SCHEMAS,
     WHERE_QUOTED_LEAD,
     section_contract,
@@ -170,6 +172,8 @@ PROMPTS: dict[str, str] = {
     "composer section titles": " ".join(_PROSE_SECTIONS.values()),
     "composer published-techniques heading": PUBLISHED_TECHNIQUES_HEADING,
     "composer claim note": WHERE_QUOTED_LEAD,
+    "composer cut-at-cap question": section_cut_violation(8192).message,
+    "rule-match-only note": RULE_ONLY_NOTE,
 }
 
 # Each composer section's whole contract — the object, the lines on how to

@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from maljan.pipeline.validation import (
     UNGROUNDED_CAPABILITY_CODE,
     CapabilityGrounding,
@@ -221,6 +223,101 @@ class TestTheKnownLimitsOfTheWindow:
         text = "There is no evidence of keylogging, credential theft, or exfiltration."
 
         assert {v.path for v in ungrounded_capabilities(text, self._thin())} == {"exfiltration"}
+
+
+class TestWhatANegationReaches:
+    """A negation governs the term it precedes in its own clause, and nothing past it."""
+
+    def _thin(self) -> CapabilityGrounding:
+        return CapabilityGrounding.from_report(_report(techniques=("T1082",)))
+
+    def _paths(self, text: str) -> set[str]:
+        return {v.path for v in ungrounded_capabilities(text, self._thin())}
+
+    def test_does_not_perform_is_a_negation(self) -> None:
+        assert self._paths("The sample does not perform lateral movement.") == set()
+
+    def test_the_term_a_purpose_names_is_negated(self) -> None:
+        assert self._paths("Isolate any host running it to prevent lateral movement.") == set()
+
+    def test_the_term_as_the_subject_of_is_absent_is_negated(self) -> None:
+        assert self._paths("Lateral movement is absent from the recorded evidence.") == set()
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "There is no evidence that the sample exfiltrates data.",
+            "We found no network activity such as exfiltration.",
+            "No evidence of malicious command and control infrastructure, such as C2 "
+            "callbacks or exfiltration endpoints, was found in the static analysis.",
+        ],
+    )
+    def test_a_statement_of_absence_is_not_flagged(self, text: str) -> None:
+        assert self._paths(text) == set()
+
+    @pytest.mark.parametrize(
+        ("text", "path"),
+        [
+            (
+                "It deletes shadow copies to prevent recovery and encrypts every document.",
+                "encryption",
+            ),
+            (
+                "It compresses the data to avoid detection and exfiltrates it over HTTPS.",
+                "exfiltration",
+            ),
+            (
+                "It disables the firewall to block defenders, then performs lateral movement.",
+                "lateral_movement",
+            ),
+            (
+                "It uses process hollowing to avoid detection, injecting into explorer.exe.",
+                "process_injection",
+            ),
+            (
+                "No indication of a debugger check was found, as the sample itself harvests "
+                "stored credentials from browsers.",
+                "credential_theft",
+            ),
+            (
+                "There are no signs of packing or anti-analysis code in this binary, which "
+                "exfiltrates the collected files over FTP.",
+                "exfiltration",
+            ),
+            ("Persistence is missing a cleanup routine and uses a scheduled task.", "persistence"),
+            (
+                "Behavioural confirmation of lateral movement is absent from the evidence.",
+                "lateral_movement",
+            ),
+            (
+                "No evidence of packing, such as UPX, yet the sample exfiltrates data over FTP.",
+                "exfiltration",
+            ),
+            (
+                "No evidence of packing was found, such as UPX, although the sample "
+                "exfiltrates data.",
+                "exfiltration",
+            ),
+            (
+                "No evidence of sandbox checks, such as VM artefacts, so the sample freely "
+                "exfiltrates files.",
+                "exfiltration",
+            ),
+            (
+                "There is no evidence of packing, such as UPX sections, and credentials are "
+                "stolen from browsers.",
+                "credential_theft",
+            ),
+            (
+                "Without any sign of user interaction, such as clicks, the sample exfiltrates "
+                "files.",
+                "exfiltration",
+            ),
+            ("It exfiltrates data such as credentials and cookies.", "exfiltration"),
+        ],
+    )
+    def test_a_claim_past_the_negation_is_still_flagged(self, text: str, path: str) -> None:
+        assert path in self._paths(text)
 
 
 class TestWhatTheFeedbackSays:

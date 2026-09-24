@@ -33,9 +33,15 @@ operator can reconfigure.
    is made from a worker thread: a hundred megabytes sent from the event loop
    is a hundred megabytes during which the process answers nothing else, its
    own health check included.
-2. `POST /api/v1/jobs` creates the job row and enqueues `run_analysis` on arq
-   under the same identifier, so the queue job and the database row cannot
-   drift apart. An optional `config` object may override a handful of pipeline
+2. `POST /api/v1/jobs` creates the job row, commits it, and only then
+   enqueues `run_analysis` on arq under the same identifier, so the queue job
+   and the database row cannot drift apart. A worker reads the row from a
+   session of its own and cannot see one still inside the request's
+   transaction: a job enqueued before its commit was read as "Job not found"
+   and left `pending` for ever. An enqueue that fails commits the row as
+   `failed` with the reason. A worker that finds no row reads again after
+   0.5, 1, 2, 4 and 8 s (`JOB_ROW_READ_PAUSES`) before it gives up, and marks
+   a row that arrived meanwhile `failed` with how long it waited. An optional `config` object may override a handful of pipeline
    values, including `profile`, which is validated against the profiles the
    store actually holds.
 3. The worker takes the job, re-reads the configuration from the settings
@@ -183,7 +189,10 @@ instead of turning it into an ordinary error. The heartbeat sets the flag
 before it cancels the pipeline task; a job task that is itself cancelled — by
 SIGTERM or arq's `job_timeout` — sets it, cancels the pipeline and waits for it
 at most `PIPELINE_STOP_GRACE` (10 s). The `cancelled` event says where the
-pipeline stopped (`stopped`). The analysts' model calls — the tool loop, the
+pipeline stopped (`stopped`) and how far into the run (`seconds_into_run`):
+the place a check recorded when a check stopped it, otherwise the graph node
+that was running when the task was cancelled under it (each node records on
+the job's `Cancellation` when it starts, finishes, or is ended by a cancel). The analysts' model calls — the tool loop, the
 salvage, the validation turn, the revision rounds, the view and tier turns —
 all go out as the model's own async call on the agent loop, so each is
 cancelled in flight. A thread still blocked in a call that cannot be — a
@@ -467,12 +476,30 @@ Two producers use it:
   `[Content_Types].xml`, `[System.Convert]::`) are neither. A numbered
   reference such as `[1]` in prose is asked about. A citation or an
   over-claim that survives the retry is printed as written and recorded
-  unresolved; only a broken shape costs the section.
+  unresolved; only a broken shape costs the section. A sentence the capability
+  check flagged and the retry left standing is also recorded on the report
+  (`flagged_statements`), and the Markdown and HTML reports print a mark after
+  each place it stands, in prose and in table cells (**[not established by this
+  run: …]**); its words are unchanged. A finding from the structured-output
+  path, where there is no turn to ask on, is marked with "; not asked". A
+  statement of absence is no claim: a negation governs the term it precedes in
+  its own clause, up to a relative clause or a new statement ("no signs of
+  packing in this binary, which exfiltrates the files" still claims
+  exfiltration), where "no evidence that …" and "such as" end nothing; a noun
+  negation ("no evidence of") also reaches through a ", such as …" list it
+  names to the end of its clause; "to prevent|avoid|stop|
+  block X" negates X only when X is the verb's object; "is absent" and "is
+  missing from" count only with the term as the clause's subject.
 
   Two more questions are asked where they can be decided. **A value cited to
   the wrong entry** (`report.citation_wrong_entry`): a value a sentence states
-  verbatim — in quotes or backticks, or a record's `value` or `endpoints` — is
-  looked for in the text of each entry the sentence (or its record) cites, as
+  verbatim — in quotes or backticks, unquoted where its shape makes it an
+  indicator (`validation.literal_values`: a whole digest, a URL, a backslash
+  path or registry key, a mailbox, a host under a real top-level domain, or a
+  file name with a file's extension other than an executable every Windows host
+  carries; never technical vocabulary such as `AES-256`, `x86-64` or an API
+  constant), or a record's `value` or
+  `endpoints` — is looked for in the text of each entry the sentence (or its record) cites, as
   the run holds it (`validation.EntryTexts`: the corpus copy, else the stored
   output). Held by a cited entry, the citation stands; held only by another
   entry, the model is asked once with that entry named; held by none, nothing
@@ -2232,6 +2259,14 @@ is assembled from what the run gathered rather than recomputed beside it:
   kept as `rule_match_strings`). The publish rule is unchanged. Such a
   technique grounds no capability word: neither its id, its name nor its
   rule's row in the evidence counts toward `narrative.ungrounded_capability`.
+  The report writer is told so per technique — every section's list of
+  published techniques and the summary's carry the note, with a line saying to
+  write that a rule matched — and a sentence that names such a technique by id
+  or catalogue name as something the sample does, with no word of a rule or an
+  estimate, is asked about once (`report.rule_match_as_action`) and, if it
+  survives, marked where it stands (**[a rule match only, stated as an
+  action: …]**). A capability word behind such a technique is told the same in
+  the capability question.
 * **What the models write is asked for as the exact object, with an example,
   and printed as written.** The narrative round answers `executive_summary`,
   `key_findings` (each `{text, evidence_ids}`) — the prompt asks for three to
@@ -2271,7 +2306,21 @@ is assembled from what the run gathered rather than recomputed beside it:
   positive value is the operator's own budget. The derivation is printed in
   Appendix B beside the section's wait ("Output budget of `composer:section`").
   A fixed 900 tokens dropped a section of a live report when the model reasoned
-  past it.
+  past it. An answer the cap cuts is told so — `composer.cut_at_output_cap`,
+  naming the cap, the answer's size (characters, items begun) and its first 160
+  characters, and asking for an object that closes well inside it, each item
+  once, short phrases, one line — and asked once through the existing loop.
+  The question replaces the cut answer rather than following it, so the retry
+  is the first prompt and one short turn; it is sent only when that leaves the
+  section's output budget free in the window, and otherwise the degradation
+  reason says it was not asked. Only this question is sized so; every other
+  question keeps the answer and is sent as before. How far each cut answer got (characters, items begun, how many of them
+  distinct) is logged and, when the retry is cut too, carried into the
+  degradation reason. Every list contract asks for each item once on one line.
+  The host-identifier contract asks for the kind by what the entry shows the
+  value is: a registry key or value only under a registry hive, from one of its
+  top keys (`Software\`, `System\`) or where the entry records a registry
+  access, `String` where it does not show.
 * **When no summary was written, the report says why and writes none.** The
   fallback that filled the summary, the capability paragraphs and a
   recommendation from a template is gone: its sentences read as the report

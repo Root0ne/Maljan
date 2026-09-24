@@ -19,6 +19,7 @@ no evidence, leave it empty — never invent** (the renderer states absence).
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Sequence
 from types import UnionType
 from typing import Any, Literal, Union, get_args, get_origin
@@ -34,6 +35,7 @@ from maljan.core.token_ledger import structured_answer
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
     KEPT_WITH_A_FINDING,
+    SECTION_CUT_CODE,
     CapabilityGrounding,
     EntryTexts,
     ValidationTally,
@@ -46,9 +48,11 @@ from maljan.pipeline.validation import (
     keep_known_keys,
     pack_line_ids,
     quoted_values,
+    record_flagged_statements,
     retry_with_feedback,
     schema_violations,
     section_capability_violations,
+    section_cut_violation,
     technique_name_violations,
     wrong_entry_citations,
 )
@@ -184,9 +188,14 @@ _INSTRUCTIONS: dict[str, str] = {
     ),
     "host_identifiers": (
         "List the identifiers a responder could search a host for — names, file and folder "
-        "paths, registry keys, strings the sample writes or checks — that you read in this "
-        "run's evidence. Write each value as the entry you read it in records it, say what "
-        "the sample uses it for where the evidence says, and cite that entry."
+        "paths, registry keys and values, other strings the sample writes or checks — that "
+        "you read in this run's evidence. Write each value once, as the entry you read it "
+        "in records it, and cite that entry. Name its kind by what the entry shows the "
+        "value is: a registry key or value only when it is written under a registry hive "
+        "or from one of its top keys (Software\\, System\\) or the entry records it as a "
+        "registry access, and 'String' when the entry does "
+        "not show what the value is. Give its purpose in a short phrase where the evidence "
+        "says, and leave the purpose empty where it does not."
     ),
     "commands": "Extract the commands the sample accepts from its operator.",
     "encryption_scheme": "Extract the encryption scheme.",
@@ -326,7 +335,8 @@ def section_contract(section: str, schema: type[BaseModel]) -> str:
         contract += (
             "\nAn item of a list is written only when the evidence gives it a value; an "
             "item the evidence cannot fill is left out of the list, never written with "
-            "null in its fields."
+            "null in its fields. Each item is written once, and the JSON on one line "
+            "without indentation."
         )
     example = _example_for(section, schema)
     if example:
@@ -454,6 +464,12 @@ PUBLISHED_TECHNIQUES_HEADING = (
     "TECHNIQUES THIS REPORT PUBLISHES (its ATT&CK table; the name beside each id is the "
     "catalogue's):"
 )
+# Said under the list when a published technique stands on a rule match alone.
+RULE_ONLY_NOTE = (
+    "A technique marked 'rule match only' was matched by a rule and claimed by no "
+    "analyst: write that the rule matched and what it matched, never that the sample "
+    "does what the technique names."
+)
 WHERE_QUOTED_LEAD = "the run's evidence: "
 
 
@@ -479,19 +495,67 @@ def _where_quoted(line: str, entries: EntryTexts | None) -> str:
 
 def _published_techniques(report: MalwareReport) -> str:
     """The techniques the report publishes, one line each, for every section's prompt."""
+    from maljan.analysis.corroboration import rule_match_only
+
+    rule_only = rule_match_only(report)
     rows = [
         f"- {m.technique_id} {m.technique_name}".rstrip()
+        + (f" — {rule_only[m.technique_id]}" if m.technique_id in rule_only else "")
         for m in (getattr(report, "ttp_mappings", None) or [])
         if getattr(m, "technique_id", "")
     ]
     if not rows:
         return ""
-    return "\n".join([PUBLISHED_TECHNIQUES_HEADING, *rows])
+    return "\n".join(
+        [PUBLISHED_TECHNIQUES_HEADING, *rows, *([RULE_ONLY_NOTE] if rule_only else [])]
+    )
 
 
 # The calls one section may take: its answer and the one retry the validation
 # loop gives an answer that breaks its schema.
 SECTION_ATTEMPTS = 2
+
+
+# A key and the string written under it, in a JSON text that may be cut.
+_JSON_STRING_FIELD_RE = re.compile(r'"([A-Za-z_]+)"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def cut_answer_counts(text: str) -> tuple[int, int, int]:
+    """``(characters, items begun, at most how many distinct)`` of a cut answer.
+
+    The items begun are counted by the string field written most often;
+    "distinct" is the most different values any one string field holds, so
+    items written again and again show as few.
+    """
+    fields = _JSON_STRING_FIELD_RE.findall(text or "")
+    if not fields:
+        return len(text or ""), 0, 0
+    by_key: dict[str, list[str]] = {}
+    for key, value in fields:
+        by_key.setdefault(key, []).append(value)
+    begun = max(len(values) for values in by_key.values())
+    distinct = max(len(set(values)) for values in by_key.values())
+    return len(text or ""), begun, distinct
+
+
+def cut_answer_shape(text: str) -> str:
+    """How far a cut answer got, in words: its length, the items begun and how many differ.
+
+    Read off the text the cap ended, so the record says whether the budget went
+    on many items or on one item written again and again. The items begun are
+    counted by the string field written most often; "distinct" is the most
+    different values any one string field holds, so items written again and
+    again show as few. An answer with no string field says only its length.
+    """
+    chars, begun, distinct = cut_answer_counts(text)
+    length = f"{chars:,} characters"
+    if not begun:
+        return length
+    return f"{length}, {begun} item(s) begun, at most {distinct} of them distinct"
+
+
+# Why a question the validation loop would ask was not sent.
+_UNFIT_QUESTION = "the question would not fit its model's window beside the section's output budget"
 
 
 def _reached_the_cap(answer: Any, cap: int) -> bool:
@@ -604,6 +668,9 @@ class ReportComposer:
         """
         ta = report.technical_analysis or TechnicalAnalysis()
         authored = 0
+        # Where the sentences a check leaves standing are recorded, to be
+        # marked where they stand.
+        self._report = report
         self._facts_block = facts_block
         self._run_state = run_state
         # The ids a section may cite: the ones the run's ledger issued, or,
@@ -799,7 +866,7 @@ class ReportComposer:
             SystemMessage(content=_SYSTEM),
             HumanMessage(content=human),
         ]
-        timeout = self._section_timeout()
+        timeout = self._section_timeout(sum(len(str(message.content)) for message in messages))
         self._start_the_section_clock(timeout)
         try:
             return await asyncio.wait_for(
@@ -878,8 +945,12 @@ class ReportComposer:
         caps = getattr(self, "caps_by_model", None) or {}
         return int(caps.get(model) or getattr(self, "output_cap", 0) or 0)
 
-    def _section_timeout(self) -> float:
+    def _section_timeout(self, prompt_chars: int = 0) -> float:
         """One section's wait: configured, or what its calls need at the model's pace.
+
+        ``prompt_chars`` is the section's prompt, read at the model's measured
+        reading rate where one is measured (``CHARS_PER_TOKEN`` characters a
+        token).
 
         A section is its answer and, when the answer breaks its schema, the one
         retry the validation loop allows: ``SECTION_ATTEMPTS`` calls. Where a
@@ -891,6 +962,7 @@ class ReportComposer:
         rates = getattr(self, "generation_rates", None)
         if rates is None:
             return configured
+        from maljan.llm.context_window import CHARS_PER_TOKEN
         from maljan.llm.generation_rate import model_name_of
 
         per_call = float(
@@ -900,6 +972,7 @@ class ReportComposer:
                 configured,
                 int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0),
                 budget=str(getattr(self, "budget_note", "") or ""),
+                prompt_tokens=-(-int(prompt_chars) // CHARS_PER_TOKEN),
             )
         )
         if per_call <= configured:
@@ -950,7 +1023,7 @@ class ReportComposer:
                 for extra in validators or []:
                     found.extend(extra(answer))
                 self.validation_tally.count(found)
-                self._record_ungrounded(section or schema.__name__, found)
+                self._record_ungrounded(section or schema.__name__, found, asked=False)
                 return result
         except Exception as exc:  # noqa: BLE001
             logger.debug("ReportComposer: structured path failed (%s); manual parse.", exc)
@@ -961,14 +1034,28 @@ class ReportComposer:
         declined = False
         cut = False
         cut_at = 0
+        cut_shapes: list[str] = []
+        cut_text = ""
+        retry_unfit = False
 
         async def _run(turns: list[BaseMessage]) -> Any:
-            nonlocal cut, cut_at
+            nonlocal cut, cut_at, cut_text
             raw = await retry_on_connection_error(
                 lambda: self.llm.ainvoke(turns), what="ReportComposer raw"
             )
-            if _reached_the_cap(raw, self._cap_of(raw)):
-                cut, cut_at = True, self._cap_of(raw)
+            # Per answer: a retry that closes inside the cap is not a cut one.
+            cut = _reached_the_cap(raw, self._cap_of(raw))
+            if cut:
+                cut_at = self._cap_of(raw)
+                cut_text = _message_text(raw)
+                shape = cut_answer_shape(cut_text)
+                cut_shapes.append(shape)
+                logger.warning(
+                    "ReportComposer: section '%s' was cut at its output cap (%d) — %s.",
+                    section or schema.__name__,
+                    cut_at,
+                    shape,
+                )
             if self.token_ledger is not None:
                 try:
                     from maljan.core.token_ledger import record_response_usage
@@ -1021,6 +1108,14 @@ class ReportComposer:
             # again would be arguing with a correct answer.
             if declined:
                 return []
+            if cut and cut_at:
+                # Whatever a repair made of the text, it is the front of an
+                # answer the cap ended: the model is told why, and asked once
+                # for a shorter one.
+                chars, begun, _distinct = cut_answer_counts(cut_text)
+                return [
+                    section_cut_violation(cut_at, chars=chars, begun=begun, head=cut_text.strip())
+                ]
             found = [
                 *schema_violations(schema, payload, code="composer.schema"),
                 *section_capability_violations(payload, self._grounding),
@@ -1032,12 +1127,30 @@ class ReportComposer:
                 found.extend(extra(payload))
             return found
 
+        def _fits(turns: list[BaseMessage]) -> bool:
+            # Only the cut-at-cap question is sized here. It asks for a whole
+            # new answer, so it is sent only when the first prompt and its one
+            # short turn leave the section's output budget free in the window.
+            # Every other question keeps the answer and asks for a fix to it,
+            # and is sent as it always was.
+            nonlocal retry_unfit
+            if not cut:
+                return True
+            room = self._room_chars()
+            if room is None:
+                return True
+            fits = sum(len(_message_text(turn)) for turn in turns) <= room
+            retry_unfit = not fits
+            return fits
+
         payload, violations, retries = await retry_with_feedback(
             _run,
             list(messages),
             [_validate],
             parse=_parse,
             on_feedback=self.validation_tally.count,
+            drop_answer_for=frozenset({SECTION_CUT_CODE}),
+            can_retry=_fits,
         )
         self.validation_tally.retries += retries
         self.validation_tally.count(violations)
@@ -1068,19 +1181,33 @@ class ReportComposer:
             if cut:
                 # The cap ended the answer, not the model: the schema only
                 # failed because the JSON was cut off. Said as what it was.
+                asked = (
+                    "; asked once for a shorter answer, which was cut too"
+                    if retries
+                    else f"; not asked again: {_UNFIT_QUESTION}"
+                    if retry_unfit
+                    else ""
+                )
                 self._note_degradation(
                     f"report section '{section or schema.__name__}' is missing: its answer "
                     f"reached the output cap of {cut_at} tokens and was cut off "
-                    "(the section's output budget, derived in the run summary; a model's "
+                    f"({'; '.join(cut_shapes)}{asked}; "
+                    "the section's output budget, derived in the run summary; a model's "
                     "reasoning counts against it)"
                 )
                 return None
+            skipped = f"; not asked again: {_UNFIT_QUESTION}" if retry_unfit else ""
             self._note_degradation(
                 f"report section '{section or schema.__name__}' is missing: its answer did "
                 f"not fit the schema after {retries} retr{'y' if retries == 1 else 'ies'} "
-                f"({', '.join(sorted({v.code for v in broken}))})"
+                f"({', '.join(sorted({v.code for v in broken}))}){skipped}"
             )
             return None
+        if retry_unfit and ungrounded:
+            self._note_degradation(
+                f"report section '{section or schema.__name__}' kept its findings unasked: "
+                f"{_UNFIT_QUESTION}"
+            )
         self._record_ungrounded(section or schema.__name__, ungrounded)
         return schema.model_validate(payload)
 
@@ -1103,7 +1230,9 @@ class ReportComposer:
         if reason not in self.degradations:
             self.degradations.append(reason)
 
-    def _record_ungrounded(self, section: str, violations: list[Violation]) -> None:
+    def _record_ungrounded(
+        self, section: str, violations: list[Violation], *, asked: bool = True
+    ) -> None:
         """Keep a section's over-claims and stray citations on the record, prose untouched.
 
         Records only. The manual path has already counted these as leftovers of
@@ -1118,6 +1247,7 @@ class ReportComposer:
             ", ".join(v.path for v in violations),
         )
         self.validation_tally.record_unresolved(f"composer:{section}", violations)
+        record_flagged_statements(getattr(self, "_report", None), violations, asked=asked)
 
 
 def _section_declined(payload: Any, schema: type[BaseModel]) -> bool:

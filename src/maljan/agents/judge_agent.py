@@ -1350,7 +1350,10 @@ class JudgeAgent(BudgetMeter):
         # And then held to the model's measured pace: the verdict may take its
         # whole ``judge_max_tokens``, which a slow model cannot generate inside
         # a timeout chosen for a fast one (``llm.generation_rate``).
-        timeout = self._verdict_timeout(float(loop_limits("judge")[0]))
+        timeout = self._verdict_timeout(
+            float(loop_limits("judge")[0]),
+            sum(len(str(getattr(message, "content", ""))) for message in messages),
+        )
         self.logger.info("JudgeAgent invoking verdict LLM (timeout=%ds)...", timeout)
         # A model list's turn deadline is a share of the clock it was last
         # started on — mediation's, by now. The verdict call is its own clock,
@@ -2018,7 +2021,7 @@ class JudgeAgent(BudgetMeter):
         value = getattr(negotiation, "consensus_threshold", None)
         return float(value) if value is not None else CONSENSUS_THRESHOLD
 
-    def _verdict_timeout(self, configured: float) -> float:
+    def _verdict_timeout(self, configured: float, prompt_chars: int = 0) -> float:
         """The verdict call's timeout: configured, or what its budget needs at the model's pace.
 
         ``GenerationRates.call_timeout`` decides and records it; with no rates
@@ -2029,7 +2032,17 @@ class JudgeAgent(BudgetMeter):
         if rates is None:
             return configured
         cap = int(getattr(get_settings().llm, "judge_max_tokens", 0) or 0)
-        return float(rates.call_timeout("judge:verdict", model_name_of(self.llm), configured, cap))
+        from maljan.llm.context_window import CHARS_PER_TOKEN
+
+        return float(
+            rates.call_timeout(
+                "judge:verdict",
+                model_name_of(self.llm),
+                configured,
+                cap,
+                prompt_tokens=-(-int(prompt_chars) // CHARS_PER_TOKEN),
+            )
+        )
 
     def _supports_structured_output(self) -> bool:
         """Delegates to the registry — see ``structured_output_supported``.

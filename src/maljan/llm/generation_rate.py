@@ -12,12 +12,13 @@ The rate costs nothing to learn: every answer already says how many tokens it
 generated and how long that took, and ``RateMeter`` reads it off each call as
 the call returns. Where the provider reports it, the generation time is the
 server's own — Ollama's ``eval_count`` and ``eval_duration``, llama.cpp's
-``timings``. The OpenAI-compatible client drops llama.cpp's ``timings`` before
-the answer reaches this code, so there the output token count is divided by the
-call's wall clock instead; that clock includes reading the prompt, so the rate
-comes out lower than the server's and the timeout longer, which is the safe
-side. Until a model has answered once, no rate is known and the configured
-value stands.
+``timings``, which the openai provider carries into the answer because the
+OpenAI-compatible client would drop it (``openai_provider.with_server_timings``).
+An endpoint that reports neither gives the output token count over the call's
+wall clock instead; that clock includes reading the prompt, so the rate comes
+out lower than the server's and the timeout longer, which is the safe side.
+Until a model has answered once, no rate is known and the configured value
+stands.
 
 The same answers say how fast the model read its prompt, and that is recorded
 beside the generation rate: Ollama's ``prompt_eval_count`` and
@@ -26,7 +27,7 @@ count only the tokens the server actually read — a prefix it had cached is not
 in them — so the rate is the reading speed itself. It is what a request that
 re-sends a whole conversation to a model that must read all of it again is
 sized from (``BaseAnalyst._force_final_synthesis``). Where the provider does
-not report it — the OpenAI-compatible client drops llama.cpp's ``timings`` — no
+not report it — a hosted OpenAI-compatible API sends no ``timings`` — no
 reading rate is known and nothing is sized from one.
 """
 
@@ -43,11 +44,13 @@ from langchain_core.callbacks import BaseCallbackHandler
 
 from maljan.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
 
-# The time a budget takes at the measured rate is multiplied by this before it
-# is compared with the configured timeout. It covers what the rate leaves out
-# — the prompt read before the first token, which on the slow run's 27–36K
-# character prompts is not small — and the spread between turns, which on that
-# run went from about 70 s to 240 s around a typical 100 s.
+# The time a call takes at the measured rates is multiplied by this before it
+# is compared with the configured timeout. Where both of a model's rates are
+# the server's own, the call's time is its prompt read plus its answer, each
+# at its own rate, and the margin covers the spread between turns, which on
+# the slow run went from about 70 s to 240 s around a typical 100 s. Where the
+# reading rate is not measured, the answer alone is timed at the rate that
+# includes the prompt read (the wall clock's, or Ollama's), as before.
 TIMEOUT_MARGIN = 1.5
 
 # No derived timeout goes above this. It is the HTTP request timeout every
@@ -88,28 +91,33 @@ def measured_prompt_read(message: Any) -> tuple[int, float, str] | None:
     return None
 
 
-def measured_generation(message: Any, wall_seconds: float) -> tuple[int, float, str] | None:
+def measured_generation(
+    message: Any, wall_seconds: float, *, server_timings: bool = True
+) -> tuple[int, float, str] | None:
     """``(tokens, seconds, source)`` for one answer, or ``None`` when it says nothing.
 
     Read in the order of how close the number is to the generation itself:
     the server's own generation time first, the call's wall clock last.
+    ``server_timings=False`` skips llama.cpp's ``timings``: the rate a timeout
+    falls back on when no prompt reading rate is measured, which includes the
+    prompt read.
     """
     meta = getattr(message, "response_metadata", None) or {}
     try:
         count, duration = meta.get("eval_count"), meta.get("eval_duration")
         if count and duration and int(count) > 0 and float(duration) > 0:
             return int(count), float(duration) / 1e9, OLLAMA_SOURCE
-        timings = meta.get("timings")
+        timings = meta.get("timings") if server_timings else None
         if isinstance(timings, dict):
             n, ms = timings.get("predicted_n"), timings.get("predicted_ms")
             if n and ms and int(n) > 0 and float(ms) > 0:
                 return int(n), float(ms) / 1000.0, LLAMA_CPP_SOURCE
         usage = getattr(message, "usage_metadata", None) or {}
         out = int(usage.get("output_tokens") or 0) if isinstance(usage, dict) else 0
-        # The llama.cpp path lands here: its ``timings`` do not survive the
-        # OpenAI-compatible client. The wall clock includes reading the prompt,
-        # so this rate is lower than the server's and every timeout sized from
-        # it longer — the safe side, never a call cut short.
+        # An endpoint that reports no generation time lands here. The wall
+        # clock includes reading the prompt, so this rate is lower than the
+        # server's and every timeout sized from it longer — the safe side,
+        # never a call cut short.
         if out > 0 and wall_seconds > 0:
             return out, float(wall_seconds), WALL_CLOCK_SOURCE
     except (TypeError, ValueError):
@@ -127,6 +135,10 @@ class _ModelRate:
     prompt_tokens: int = 0
     prompt_seconds: float = 0.0
     prompt_sources: list[str] = field(default_factory=list)
+    # The same answers measured with their prompt read included: Ollama's own
+    # generation rate, or the wall clock's where the server's timings are read.
+    whole_tokens: int = 0
+    whole_seconds: float = 0.0
 
     def rate(self) -> float | None:
         return self.tokens / self.seconds if self.tokens > 0 and self.seconds > 0 else None
@@ -134,6 +146,11 @@ class _ModelRate:
     def prompt_rate(self) -> float | None:
         if self.prompt_tokens > 0 and self.prompt_seconds > 0:
             return self.prompt_tokens / self.prompt_seconds
+        return None
+
+    def whole_rate(self) -> float | None:
+        if self.whole_tokens > 0 and self.whole_seconds > 0:
+            return self.whole_tokens / self.whole_seconds
         return None
 
 
@@ -159,6 +176,15 @@ class GenerationRates:
             row.calls += 1
             if source not in row.sources:
                 row.sources.append(source)
+
+    def observe_whole(self, model: str, tokens: int, seconds: float) -> None:
+        """One answer measured with its prompt read included."""
+        if tokens <= 0 or seconds <= 0:
+            return
+        with self._lock:
+            row = self._models.setdefault(str(model), _ModelRate())
+            row.whole_tokens += int(tokens)
+            row.whole_seconds += float(seconds)
 
     def observe_prompt(self, model: str, tokens: int, seconds: float, source: str) -> None:
         """One prompt the server read: how many tokens, and how long it took."""
@@ -190,32 +216,59 @@ class GenerationRates:
             return row.prompt_rate() if row is not None else None
 
     def call_timeout(
-        self, call: str, model: str, configured: float, max_tokens: int, *, budget: str = ""
+        self,
+        call: str,
+        model: str,
+        configured: float,
+        max_tokens: int,
+        *,
+        budget: str = "",
+        prompt_tokens: int = 0,
     ) -> float:
         """The seconds one call of ``call`` waits, and a record of how it was reached.
 
-        ``max(configured, min(max_tokens / rate × TIMEOUT_MARGIN, ceiling))``:
-        never shorter than configured, never raised past the ceiling. With no
-        rate or no output budget the configured value stands. ``budget`` is how
-        the caller reached ``max_tokens``, kept with the row so the record says
-        where both numbers came from.
+        With both of the model's server rates measured and the call's prompt
+        size given: ``(prompt_tokens / prompt_rate + max_tokens / rate) ×
+        TIMEOUT_MARGIN``. Otherwise ``max_tokens / whole_rate × TIMEOUT_MARGIN``,
+        the rate that includes the prompt read (the server's rate where no
+        whole one was measured). Never shorter than configured, never raised
+        past the ceiling. With no rate or no output budget the configured value
+        stands. ``budget`` is how the caller reached ``max_tokens``, kept with
+        the row so the record says where both numbers came from.
         """
         configured = float(configured)
-        rate = self.rate(model)
+        with self._lock:
+            row = self._models.get(str(model))
+            rate = row.rate() if row is not None else None
+            prompt_rate = row.prompt_rate() if row is not None else None
+            whole = row.whole_rate() if row is not None else None
         derived: float | None = None
         applied = configured
-        if rate is not None and int(max_tokens or 0) > 0:
-            derived = int(max_tokens) / rate * TIMEOUT_MARGIN
+        used_rate = rate
+        read_rate: float | None = None
+        tokens = int(max_tokens or 0)
+        prompt = int(prompt_tokens or 0)
+        if rate is not None and tokens > 0:
+            if prompt > 0 and prompt_rate is not None:
+                read_rate = prompt_rate
+                derived = (prompt / prompt_rate + tokens / rate) * TIMEOUT_MARGIN
+            else:
+                used_rate = whole or rate
+                derived = tokens / used_rate * TIMEOUT_MARGIN
             applied = max(configured, min(derived, TIMEOUT_CEILING_SECONDS))
         with self._lock:
-            self._timeouts[call] = {
+            record: dict[str, Any] = {
                 "model": str(model),
                 "configured_s": configured,
-                "max_tokens": int(max_tokens or 0),
-                "tokens_per_second": None if rate is None else round(rate, 3),
+                "max_tokens": tokens,
+                "tokens_per_second": None if used_rate is None else round(used_rate, 3),
                 "derived_s": None if derived is None else round(derived, 1),
                 "applied_s": round(applied, 1),
             }
+            if read_rate is not None:
+                record["prompt_tokens"] = prompt
+                record["prompt_tokens_per_second"] = round(read_rate, 3)
+            self._timeouts[call] = record
             if budget:
                 self._timeouts[call]["budget"] = budget
         return applied
@@ -303,6 +356,9 @@ class RateMeter(BaseCallbackHandler):
             )
         if measured is not None:
             self.rates.observe(self.model, *measured)
+        whole = measured_generation(message, wall, server_timings=False)
+        if whole is not None:
+            self.rates.observe_whole(self.model, whole[0], whole[1])
         read = measured_prompt_read(message)
         if read is None and isinstance(info, dict):
             read = measured_prompt_read(SimpleNamespace(response_metadata=info))

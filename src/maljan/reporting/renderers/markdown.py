@@ -2031,6 +2031,19 @@ class _Context:
         self.indicators = indicators
         self._defang = ProseDefanger(indicators)
         self.reputations = _reputations(report)
+        # The report model's sentences a check asked about and the retry left
+        # standing, each with the mark printed after it. Longest first, so a
+        # sentence that holds another is marked as itself.
+        marks: dict[str, list[str]] = {}
+        for row in getattr(report, "flagged_statements", None) or []:
+            if row.sentence.strip():
+                mark = _flag_mark(row.code, row.label, asked=row.asked)
+                if mark not in marks.setdefault(row.sentence, []):
+                    marks[row.sentence].append(mark)
+        self.flagged = sorted(
+            ((sentence, " ".join(found)) for sentence, found in marks.items()),
+            key=lambda pair: -len(pair[0]),
+        )
 
     def source_of(self, evidence_id: str) -> str:
         """Who recorded one ledger entry: its agent and its tool, or that it is unknown."""
@@ -2081,7 +2094,28 @@ class _Context:
         heading or a code fence, which would re-section the report or swallow
         everything after it.
         """
-        return _escape_block(self._defang(text))
+        return _escape_block(self._defang(self.marked(text)))
+
+    def marked(self, text: str) -> str:
+        """``text`` with each flagged sentence followed by its mark; the words are unchanged."""
+        # One pass over positions, keyed by the sentence: every place a flagged
+        # sentence stands gets its own mark, the longest sentence first so one
+        # inside another is marked as itself, and a place already marked is
+        # left alone.
+        claimed: list[tuple[int, int]] = []
+        inserts: list[tuple[int, str]] = []
+        for sentence, mark in self.flagged:
+            start = text.find(sentence)
+            while start != -1:
+                end = start + len(sentence)
+                inside = any(a <= start and end <= b for a, b in claimed)
+                if not inside and not text.startswith(f" {mark}", end):
+                    claimed.append((start, end))
+                    inserts.append((end, mark))
+                start = text.find(sentence, start + 1)
+        for end, mark in sorted(inserts, reverse=True):
+            text = f"{text[:end]} {mark}{text[end:]}"
+        return text
 
     def plain(self, text: str) -> str:
         """A value with the run's network indicators defanged and nothing else changed."""
@@ -2089,11 +2123,16 @@ class _Context:
 
     def line(self, text: Any) -> str:
         """Model prose that has to stay on one line: a list item, a step."""
-        return _one_line(self._defang(str(text or "")))
+        return _one_line(self._defang(self.marked(str(text or ""))))
 
     def cell(self, text: Any) -> str:
         """A model-written table cell: defanged like prose, cut like every cell."""
-        return _truncate(self._defang(str(text or "")), _CELL_LIMIT)
+        raw = str(text or "")
+        cut = _truncate(self._defang(raw), _CELL_LIMIT)
+        # A cell is cut to its width, so its marks follow the cut text rather
+        # than a sentence the cut may have shortened.
+        marks = list(dict.fromkeys(mark for sentence, mark in self.flagged if sentence in raw))
+        return f"{cut} {' '.join(marks)}" if marks else cut
 
     def sandbox_sentence(self) -> str:
         """What the run knows about a sandbox, as one sentence, in the run's own voice.
@@ -2292,6 +2331,24 @@ def _degraded_sentence(report: MalwareReport, ctx: _Context) -> str:
         f"{said[0].upper()}{said[1:]}; the verdict above is tentative. See §13 for what this "
         "run could not examine."
     )
+
+
+# The words of the mark a flagged sentence carries, by the finding's code.
+_FLAG_WORDS = {
+    "narrative.ungrounded_capability": "not established by this run",
+    "report.rule_match_as_action": "a rule match only, stated as an action",
+}
+
+
+def _flag_mark(code: str, label: str, *, asked: bool = True) -> str:
+    """The mark printed after a sentence a check left standing, in the platform's voice.
+
+    ``asked=False`` for an answer that came by a path with no turn to ask on:
+    the mark says the model was not asked.
+    """
+    words = _FLAG_WORDS.get(code, "asked about and kept")
+    said = f"{words}: {label}" if label else words
+    return f"**[{said}; not asked]**" if not asked else f"**[{said}]**"
 
 
 def _findings_beside(rows: list[dict[str, str]]) -> list[str]:

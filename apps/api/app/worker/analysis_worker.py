@@ -1386,6 +1386,91 @@ async def mark_job_failed(
         return False
 
 
+# How long a worker waits for a job row it was handed but cannot read yet, as
+# the pauses between reads. The API commits the row before it enqueues, so the
+# first read finds it; these cover a row whose commit is still reaching the
+# database when the worker dequeues it. About fifteen seconds in all, after
+# which the job is given up with a record of how long was waited.
+JOB_ROW_READ_PAUSES: tuple[float, ...] = (0.5, 1.0, 2.0, 4.0, 8.0)
+
+# What a job the worker could not read says about itself, if its row arrives
+# after the worker gave up on it: it can never start, because the one queued
+# run for it has ended.
+_JOB_ROW_NEVER_READ = (
+    "The worker was handed this job before its row could be read, waited {waited:.1f} s "
+    "over {reads} reads, and gave up; the queued run for it has ended, so it was "
+    "marked failed rather than left pending. Re-submit the sample."
+)
+
+
+async def wait_for_job_row(
+    db_session: async_sessionmaker,
+    job_uuid: uuid.UUID,
+    *,
+    pauses: Iterable[float] | None = None,
+    sleep: Callable[[float], Any] = asyncio.sleep,
+) -> tuple[bool, int, float]:
+    """Read again after each pause until the job's row exists or the pauses run out.
+
+    Called after a first read found nothing. Returns whether the row was found,
+    how many reads this made and how many seconds were spent pausing. Each read
+    is its own short session, so every read sees whatever has been committed by
+    then.
+    """
+    from app.models.job import AnalysisJob
+
+    reads = 0
+    waited = 0.0
+    for pause in JOB_ROW_READ_PAUSES if pauses is None else pauses:
+        if pause:
+            await sleep(pause)
+            waited += pause
+        reads += 1
+        async with db_session() as db:
+            found = (
+                await db.execute(select(AnalysisJob.id).where(AnalysisJob.id == job_uuid))
+            ).scalar_one_or_none()
+            await db.commit()
+        if found is not None:
+            return True, reads, waited
+    return False, reads, waited
+
+
+async def fail_unread_job(
+    db_session: async_sessionmaker, job_uuid: uuid.UUID, reads: int, waited: float
+) -> bool:
+    """Mark a job the worker gave up on as failed, if its row has since arrived.
+
+    Only a ``pending`` row is touched: a row a cancel reached first keeps its
+    own ending. Returns whether a row was marked. Never raises.
+    """
+    from app.models.job import AnalysisJob
+
+    try:
+        async with db_session() as db:
+            result = await db.execute(
+                update(AnalysisJob)
+                .where(AnalysisJob.id == job_uuid, AnalysisJob.status == "pending")
+                .values(
+                    status="failed",
+                    completed_at=func.now(),
+                    error_message=_JOB_ROW_NEVER_READ.format(waited=waited, reads=reads),
+                )
+                .returning(AnalysisJob.id)
+            )
+            marked = result.first() is not None
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001 — the give-up is already logged
+        logger.warning(
+            "Could not mark unread job %s failed (%s).",
+            job_uuid,
+            type(exc).__name__,
+            extra={"job_id": str(job_uuid)},
+        )
+        return False
+    return marked
+
+
 # ── Main analysis task ──────────────────────────────────────────
 
 
@@ -1480,14 +1565,48 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             job = result.scalar_one_or_none()
 
             if not job:
-                logger.error(f"Job not found in database: {job_id}", extra={"job_id": job_id})
-                await _publish_event(redis_conn, job_id, "error", {"message": "Job not found"})
-                return {"status": "error", "message": "Job not found"}
+                # A row not there yet is waited for, a bounded while, before
+                # the job is given up: the queue can hand a job over before
+                # the commit that made its row is visible to this session.
+                # This session's read is ended first, so it is not left idle
+                # in a transaction for the length of the wait.
+                await db.commit()
+                found, reads, waited = await wait_for_job_row(db_session, job_uuid)
+                if found:
+                    result = await db.execute(select(AnalysisJob).where(AnalysisJob.id == job_uuid))
+                    job = result.scalar_one_or_none()
+                if not job:
+                    marked = await fail_unread_job(db_session, job_uuid, reads, waited)
+                    logger.error(
+                        "Job not found in database after %d reads over %.1f s: %s%s",
+                        reads + 1,
+                        waited,
+                        job_id,
+                        "; its row arrived after the last read and was marked failed"
+                        if marked
+                        else "",
+                        extra={"job_id": job_id},
+                    )
+                    await _publish_event(redis_conn, job_id, "error", {"message": "Job not found"})
+                    return {"status": "error", "message": "Job not found"}
 
             if job.status == "cancelled":
                 logger.info(f"Job already cancelled: {job_id}", extra={"job_id": job_id})
                 await _publish_event(redis_conn, job_id, "cancelled", {})
                 return {"status": "cancelled"}
+
+            if job.status in ("failed", "completed"):
+                # Already ended: an enqueue that raised after the queue took the
+                # job commits the row failed and tells the caller so, and
+                # running it anyway would run a job the caller was told was
+                # refused.
+                logger.info(
+                    "Job %s already ended (%s); not run.",
+                    job_id,
+                    job.status,
+                    extra={"job_id": job_id},
+                )
+                return {"status": "skipped", "message": f"job already {job.status}"}
 
             # Read out as plain values rather than carried as ORM objects:
             # the session ends here and an attribute that had to be
@@ -1976,18 +2095,23 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 if not isinstance(sys.exc_info()[1], asyncio.CancelledError):
                     raise asyncio.CancelledError from sys.exc_info()[1]
                 raise
-            _stopped = app.container.cancellation.stopped_at
+            # Worded from where the pipeline was: a check's own record when
+            # one stopped it, otherwise the nodes that were running when the
+            # task was cancelled under them.
+            _stopped = app.container.cancellation.where_stopped()
+            _into = max(0.0, time.time() - start_time)
             logger.info(
-                "Pipeline cancelled by user request: job=%s (stopped %s)",
+                "Pipeline cancelled by user request: job=%s (stopped %s, %.0f s into the run)",
                 job_id,
-                _stopped or "before any check was reached",
+                _stopped,
+                _into,
                 extra={"job_id": job_id},
             )
             await _publish_event(
                 redis_conn,
                 job_id,
                 "cancelled",
-                {"stopped": _stopped} if _stopped else {},
+                {"stopped": _stopped, "seconds_into_run": round(_into, 1)},
             )
             # On a session of its own, like every other outcome this task
             # records: the one it was working through may be the one the
