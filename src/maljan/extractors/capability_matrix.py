@@ -178,7 +178,9 @@ def build_capability_matrix(
                     ABSENCE_TECHNIQUE_MARKER
                     if info.get("noted") and all(info["noted"])
                     else JUDGE_ONLY_TECHNIQUE_MARKER
-                    if info.get("judge_named") and not info.get("analyst_claimed")
+                    if info.get("judge_named")
+                    and not info.get("analyst_claimed")
+                    and not not_published
                     else ""
                 ),
             )

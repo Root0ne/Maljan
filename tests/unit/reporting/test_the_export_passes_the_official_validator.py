@@ -559,6 +559,33 @@ class TestTheFallbackPathExportsAValidBundle:
         assert [o for o in judge.objects if o.type == "note"] == []
         assert judge.x_maljan_fallback_verdict is not None
         assert judge.x_maljan_fallback_verdict.model_only_technique_ids == ["T1486"]
+        # The judge's text the note would have carried stays on the mark.
+        assert judge.x_maljan_fallback_verdict.reasoning == "Benign. T1486 looks likely."
+        assert _errors(exported) == []
+
+    def test_a_malware_fallback_with_claims_and_indicators_exports_a_valid_bundle(self) -> None:
+        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+
+        answer = _CUT_BENIGN_ANSWER.replace('"verdict": "Benign"', '"verdict": "Malware"')
+        claimed = {
+            "static": AgentISR(
+                agent_id="static",
+                domain="static",
+                claims=[
+                    ClaimEvidence(
+                        claim="It packs its code.",
+                        evidence_ref="[ev_0001]",
+                        confidence=0.8,
+                        technique_id="T1027",
+                    )
+                ],
+            )
+        }
+        reader = JudgeAgent(llm=object())  # type: ignore[arg-type]
+        judge = reader._fallback_bundle_from_text(answer, {}, claimed)
+        exported = ExtendedSTIXRenderer().render(_report("Malware", judge), judge)
+
+        assert [o.type for o in judge.objects if o.type == "malware"] == ["malware"]
         assert _errors(exported) == []
 
     def test_a_note_whose_objects_the_export_declines_is_declined_with_a_record(self) -> None:

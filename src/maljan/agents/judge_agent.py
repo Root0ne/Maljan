@@ -2232,6 +2232,9 @@ class JudgeAgent(BudgetMeter):
                     "decision": decision,
                     "source": "extracted" if extracted else "pipeline",
                     **({"model_only_technique_ids": model_only} if model_only else {}),
+                    # With no note written, the judge's text it would have
+                    # carried stays on the mark instead.
+                    **({"reasoning": text_snippet} if note is not None and not objects else {}),
                 },
                 **({"x_maljan_assessment": stated} if stated is not None else {}),
             }

@@ -2405,7 +2405,9 @@ def _reputations(report: MalwareReport) -> dict[str, str]:
                 int(rep.get(k) or 0) for k in ("malicious", "suspicious", "harmless", "undetected")
             )
             name = rep.get("source") or "reputation"
-            said = f"{name}: {int(rep.get('malicious') or 0)} of {total} engines flag it"
+            said = (
+                f"{name}: {int(rep.get('malicious') or 0)} of {total} engines flag it as malicious"
+            )
         except (TypeError, ValueError):
             continue
         stamp = rep.get("last_analysis_date_unix")

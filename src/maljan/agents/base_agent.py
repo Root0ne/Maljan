@@ -5063,8 +5063,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         # conversation it sends leaves the cap free in the window. Every other
         # question keeps the answer and asks for a fix to it, as it always did.
         loop_cut = cuts.get(id(isr))
+        # Measured with the turn that carries every question of this retry,
+        # not the framed conversation alone: fourteen questions are not free.
+        from langchain_core.messages import HumanMessage as _Question
+
+        from maljan.pipeline.validation import feedback_text
+
+        sent = [*messages, _Question(content=feedback_text(initial))]
         if loop_cut is not None and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
-            self, messages, loop_cut[0]
+            self, sent, loop_cut[0]
         ):
             detail = (
                 "not asked: the conversation the question is sent in and the "
@@ -5116,6 +5123,13 @@ class BaseAnalyst(BudgetMeter, ABC):
                 and cuts.get(id(retried)) is None
                 and retried.claims
             ):
+                self.logger.info(
+                    "Validation: '%s' answered the cut-at-cap question whole; its %d claim(s) "
+                    "replace the cut answer's %d.",
+                    self.name,
+                    len(retried.claims),
+                    len(first_answer.claims),
+                )
                 return retried
             if len(retried.claims) < len(first_answer.claims):
                 self.logger.warning(

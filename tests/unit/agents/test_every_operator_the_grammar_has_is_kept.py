@@ -258,6 +258,19 @@ class TestAShapeIsNotAValue:
 
         assert [v for v in found if v.code == "stix.ungrounded_indicator"] == []
 
+    def test_a_fixed_text_too_short_to_say_anything_grounds_nothing(self) -> None:
+        bundle = Bundle.model_validate(
+            {"type": "bundle", "objects": [_indicator("[file:name LIKE '%.ex%']")]}
+        )
+
+        (row,) = [
+            v
+            for v in validate_verdict_bundle(bundle, {"a.exe b.exe"})
+            if v.code == "stix.ungrounded_indicator"
+        ]
+
+        assert "fixes no text of 4 or more characters" in row.message
+
     def test_an_absent_fixed_text_is_named_as_itself(self) -> None:
         bundle = Bundle.model_validate(
             {"type": "bundle", "objects": [_indicator("[url:value LIKE '%one.example%']")]}

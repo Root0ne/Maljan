@@ -242,6 +242,17 @@ class TestAJudgeOnlyTechniqueSaysWhyItIsPublished:
         assert not cell.not_published
         assert "T1003" in [m.technique_id for m in mappings]
 
+    def test_a_judge_only_technique_that_is_not_published_carries_no_note(self) -> None:
+        """The note states the rule a row is published by; an unpublished row has none."""
+        cells, mappings = build_capability_matrix(
+            stix_output=_credited_bundle("T1547.000"), isr_reports=None
+        )
+
+        (cell,) = [c for c in cells if c.technique_id == "T1547.000"]
+        assert cell.not_published
+        assert cell.note == ""
+        assert "T1547.000" not in [m.technique_id for m in mappings]
+
     def test_one_an_analyst_also_claimed_carries_no_note(self) -> None:
         claimed = {
             "static": AgentISR(

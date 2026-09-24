@@ -591,6 +591,9 @@ class FallbackVerdict(_SpecConformantModel):
     # malware object or note carries, kept here on every fallback, because a
     # bundle with nothing for a note to name has no note to carry it.
     model_only_technique_ids: list[str] | None = None
+    # The judge's own text the fallback's note carries, kept here when the
+    # bundle holds nothing for a note to name and so writes no note.
+    reasoning: str | None = None
 
 
 class Bundle(_SpecConformantModel):

@@ -3593,6 +3593,10 @@ def unknown_observable_type_violations(obj: Any, *, path: str) -> list[Violation
 
 SHAPE_NAMES_A_VALUE_CODE = "stix.shape_names_a_value"
 
+# The shortest fixed text of a shape that says anything about which value the
+# evidence holds: shorter runs are found in any evidence at all.
+_SHAPE_TEXT_MIN = 4
+
 
 def shape_names_a_value_violations(
     obj: Any, haystack: Haystack, stated_values: set[str], *, path: str
@@ -3628,7 +3632,9 @@ def shape_names_a_value_violations(
             continue
         value = fixed[0].strip()
         operator = safe_finding_value(comparison.operator.upper())
-        if len(value) < 4 or not (value.lower() in stated_values or haystack.holds_value(value)):
+        if len(value) < _SHAPE_TEXT_MIN or not (
+            value.lower() in stated_values or haystack.holds_value(value)
+        ):
             continue
         out.append(
             Violation(
@@ -4881,6 +4887,14 @@ def _indicator_problem(
                     f"the text {safe_finding_value(missing)!r}, which the pattern's LIKE "
                     f"{safe_finding_value(literal)!r} requires of every value it matches, "
                     "appears nowhere in this run's evidence."
+                )
+            # A run of a character or three is found in any evidence at all, so
+            # it says nothing about which value this run saw.
+            if fixed and not any(len(part.strip()) >= _SHAPE_TEXT_MIN for part in fixed):
+                return (
+                    f"the pattern's LIKE {safe_finding_value(literal)!r} fixes no text of "
+                    f"{_SHAPE_TEXT_MIN} or more characters, so nothing in this run's evidence "
+                    "says which value it names; it matches values this run never saw."
                 )
             grounded = grounded or bool(fixed)
             continue

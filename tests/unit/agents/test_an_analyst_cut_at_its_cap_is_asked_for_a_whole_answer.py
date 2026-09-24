@@ -157,6 +157,29 @@ class TestTheValidationTurn:
         assert analyst.validation_findings == []
 
 
+class TestTheWindowIsMeasuredWithTheQuestions:
+    def test_the_feedback_turn_is_part_of_what_must_fit(self) -> None:
+        analyst = _Analyst([(WHOLE, 300)])
+        measured: list[int] = []
+
+        def _fits(_self: Any, messages: list[Any], _cap: int) -> bool:
+            measured.append(len(messages))
+            return True
+
+        isr = analyst._text_to_isr(FIRST, 0)
+        with (
+            patch("maljan.agents.base_agent.analyst_output_cap", return_value=CAP),
+            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch.object(BaseAnalyst, "_fits_the_window", _fits),
+        ):
+            analyst._record_usage(_message(FIRST, CAP))
+            analyst._validate_isr(isr, "evidence")
+
+        (turns,) = analyst.seen_turns
+        # The conversation it measured is the one the retry sends, question included.
+        assert measured == [len(turns)]
+
+
 class TestTheWindow:
     def test_a_conversation_and_the_cap_that_fit_are_asked(self) -> None:
         analyst = _Analyst([])
