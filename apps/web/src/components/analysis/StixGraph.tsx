@@ -1,18 +1,20 @@
 "use client";
 
-import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import EvidenceChips from "@/components/analysis/EvidenceChips";
 import JsonNode from "@/components/analysis/JsonTree";
 import { downloadBlob, downloadObject } from "@/lib/report-utils";
 import {
   colourForType,
+  fitTransform,
   formatConfidence,
   layoutGraph,
   legendLayout,
   readStixGraph,
   resolveCssVars,
   shortLabel,
+  type Box,
   type GraphEdge,
   type GraphNode,
   type Layout,
@@ -26,8 +28,11 @@ const RADIUS = 9;
 const LABEL_ALL_EDGES_UP_TO = 120;
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 3;
+/** The canvas's own height: fixed, so "Fit" always has a real box to center
+ *  a small graph in rather than one that shrinks to the graph's own size. */
+const CANVAS_HEIGHT = 560;
 
-type Selection = { kind: "node"; id: string } | { kind: "edge"; key: string } | null;
+export type Selection = { kind: "node"; id: string } | { kind: "edge"; key: string } | null;
 
 const BUTTON =
   "px-3 py-1 text-xs text-text-secondary border border-border rounded hover:text-text-primary hover:border-text-muted disabled:opacity-50";
@@ -111,7 +116,9 @@ function Legend({ nodes }: { nodes: GraphNode[] }) {
   );
 }
 
-function Detail({
+/** Exported so a test can render the detail pane directly, with a selection
+ *  already made, rather than simulating the click that would set one. */
+export function Detail({
   graph,
   selection,
   onSelect,
@@ -138,7 +145,7 @@ function Detail({
       <div className="space-y-3">
         <div>
           <p className="text-[11px] font-mono text-text-muted">{node.type}</p>
-          <h3 className="text-sm font-semibold text-text-primary break-words">{node.label}</h3>
+          <h3 className="text-sm font-semibold text-text-primary break-all">{node.label}</h3>
           <p className="text-[11px] font-mono text-text-muted break-all">{node.id}</p>
         </div>
         <EvidenceLine ids={node.evidenceIds} />
@@ -154,7 +161,7 @@ function Detail({
                 <button
                   type="button"
                   onClick={() => onSelect({ kind: "edge", key: e.key })}
-                  className="text-left text-xs text-accent-strong hover:underline break-words"
+                  className="text-left text-xs text-accent-strong hover:underline break-all"
                 >
                   {e.source === node.id
                     ? `${e.label} → ${name(e.target)}`
@@ -175,11 +182,11 @@ function Detail({
     <div className="space-y-3">
       <div>
         <p className="text-[11px] font-mono text-text-muted">{edge.type}</p>
-        <h3 className="text-sm font-semibold text-text-primary break-words">
+        <h3 className="text-sm font-semibold text-text-primary break-all">
           <button
             type="button"
             onClick={() => onSelect({ kind: "node", id: edge.source })}
-            className="text-accent-strong hover:underline text-left"
+            className="text-accent-strong hover:underline text-left break-all"
           >
             {name(edge.source)}
           </button>{" "}
@@ -187,7 +194,7 @@ function Detail({
           <button
             type="button"
             onClick={() => onSelect({ kind: "node", id: edge.target })}
-            className="text-accent-strong hover:underline text-left"
+            className="text-accent-strong hover:underline text-left break-all"
           >
             {name(edge.target)}
           </button>
@@ -218,7 +225,7 @@ function EvidenceLine({ ids }: { ids: string[] }) {
 
 function ObjectJson({ object }: { object: unknown }) {
   return (
-    <div className="p-3 rounded border border-border bg-bg-deep font-mono text-[11px] leading-relaxed overflow-x-auto">
+    <div className="p-3 rounded border border-border bg-bg-deep font-mono text-[11px] leading-relaxed break-all overflow-x-auto">
       <JsonNode data={object} />
     </div>
   );
@@ -396,6 +403,10 @@ function exportMarkup(svg: SVGSVGElement, layout: Layout, types: string[]): stri
     el.setAttribute("style", el.getAttribute("data-plain-style") ?? "");
     el.removeAttribute("data-plain-style");
   });
+  // A saved picture is always the graph at its laid-out size: "Fit"'s
+  // on-screen scale and centering are a canvas-viewing convenience, not
+  // something the export should carry.
+  clone.querySelectorAll("[data-graph-content]").forEach((el) => el.removeAttribute("transform"));
   clone.querySelectorAll("[tabindex], [role], [aria-label], [aria-pressed]").forEach((el) => {
     for (const name of ["tabindex", "role", "aria-label", "aria-pressed", "class"]) {
       el.removeAttribute(name);
@@ -457,19 +468,36 @@ function GraphCanvas({
   const [zoom, setZoom] = useState<number | "fit">("fit");
   const [focused, setFocused] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  // The canvas's own size, read from the DOM once it exists and again on
+  // resize, so "Fit" can center a graph smaller than the canvas instead of
+  // guessing at a size before the box has one.
+  const [box, setBox] = useState<Box | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const measure = () => setBox({ width: el.clientWidth, height: el.clientHeight });
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [layout]);
 
   const selectedNode = selection?.kind === "node" ? selection.id : null;
   const selectedEdge = selection?.kind === "edge" ? selection.key : null;
   const lit = selectedNode ?? focused;
   const labelAll = graph.edges.length <= LABEL_ALL_EDGES_UP_TO;
 
-  const currentScale = () => {
-    if (zoom !== "fit") return zoom;
-    const box = boxRef.current?.clientWidth ?? layout.width;
-    return Math.min(1, box / layout.width);
-  };
+  const canvasBox: Box = box ?? { width: layout.width, height: layout.height };
+  const fit = fitTransform(layout, canvasBox);
+
+  const currentScale = () => (zoom === "fit" ? fit.scale : zoom);
   const zoomBy = (factor: number) =>
     setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, currentScale() * factor)));
 
@@ -515,10 +543,16 @@ function GraphCanvas({
     image.src = url;
   };
 
-  const sized =
-    zoom === "fit"
-      ? { width: "100%" as const, height: undefined }
-      : { width: layout.width * zoom, height: layout.height * zoom };
+  // "Fit" draws in the canvas's own coordinate space and centers the graph
+  // inside it with `fit`'s translate and scale; an explicit zoom instead
+  // sizes the SVG itself to the zoomed graph, in the graph's own coordinate
+  // space, and lets the canvas scroll to it as before.
+  const isFit = zoom === "fit";
+  const sized = isFit
+    ? { width: "100%" as const, height: "100%" as const }
+    : { width: layout.width * zoom, height: layout.height * zoom };
+  const viewBoxDims = isFit ? canvasBox : { width: layout.width, height: layout.height };
+  const contentTransform = isFit ? `translate(${fit.x} ${fit.y}) scale(${fit.scale})` : undefined;
 
   return (
     <div className="space-y-2">
@@ -551,15 +585,16 @@ function GraphCanvas({
         </p>
       )}
       <Legend nodes={graph.nodes} />
-      <div ref={boxRef} className="max-h-[560px] overflow-auto rounded border border-border bg-bg-surface">
+      <div
+        ref={boxRef}
+        style={{ height: CANVAS_HEIGHT }}
+        className="overflow-auto rounded border border-border bg-bg-surface"
+      >
         <svg
           ref={svgRef}
-          viewBox={`0 0 ${layout.width} ${layout.height}`}
+          viewBox={`0 0 ${viewBoxDims.width} ${viewBoxDims.height}`}
           width={sized.width}
           height={sized.height}
-          // Fit shrinks a wide graph to the panel and never enlarges a small
-          // one past the size it was laid out at.
-          style={zoom === "fit" ? { maxWidth: layout.width } : undefined}
           role="group"
           aria-label={`Relationship graph: ${graph.nodes.length} objects, ${graph.edges.length} edges. The tables below list the same.`}
           fontFamily="ui-sans-serif, system-ui, sans-serif"
@@ -578,106 +613,108 @@ function GraphCanvas({
               <path d="M 0 0 L 10 5 L 0 10 z" style={{ fill: "var(--text-muted)" }} />
             </marker>
           </defs>
-          <g>
-            {graph.edges.map((e) => {
-              const s = layout.positions.get(e.source);
-              const t = layout.positions.get(e.target);
-              if (!s || !t) return null;
-              const geo = edgeGeometry(s, t, bend.get(e.key) ?? 0);
-              const on = selectedEdge === e.key;
-              const near = lit !== null && (e.source === lit || e.target === lit);
-              const showLabel = labelAll || on || near;
-              const text = e.confidence ? `${e.label} · ${formatConfidence(e.confidence)}` : e.label;
-              return (
-                <g key={e.key} onClick={() => onSelect({ kind: "edge", key: e.key })} className="cursor-pointer">
-                  <title>{`${e.label}${e.confidence ? `, confidence ${formatConfidence(e.confidence)}` : ""}`}</title>
-                  <path
-                    d={geo.d}
-                    data-export="omit"
-                    style={{ fill: "none", stroke: "transparent", strokeWidth: 10 }}
-                  />
-                  <path
-                    d={geo.d}
-                    markerEnd="url(#stix-graph-arrow)"
-                    data-plain-style={PLAIN_EDGE}
-                    style={{
-                      fill: "none",
-                      stroke: on ? "var(--accent)" : near ? "var(--text-secondary)" : "var(--border)",
-                      strokeWidth: on ? 2.5 : 1.25,
-                    }}
-                  />
-                  {showLabel && (
-                    <text
-                      x={geo.label.x}
-                      y={geo.label.y}
-                      textAnchor="middle"
-                      dominantBaseline="middle"
-                      fontSize={10}
-                      paintOrder="stroke"
-                      data-plain-style={PLAIN_EDGE_LABEL}
-                      // Drawn only because of the selection: not in a saved picture.
-                      data-export={labelAll ? undefined : "omit"}
-                      style={{
-                        fill: on ? "var(--text-primary)" : "var(--text-secondary)",
-                        stroke: "var(--bg-surface)",
-                        strokeWidth: 3,
-                      }}
-                    >
-                      {text}
-                    </text>
-                  )}
-                </g>
-              );
-            })}
-          </g>
-          <g>
-            {graph.nodes.map((n) => {
-              const p = layout.positions.get(n.id);
-              if (!p) return null;
-              const on = selectedNode === n.id;
-              const hasFocus = focused === n.id;
-              return (
-                <g
-                  key={n.id}
-                  tabIndex={0}
-                  role="button"
-                  aria-pressed={on}
-                  aria-label={`${n.type}: ${n.label}`}
-                  onClick={() => onSelect({ kind: "node", id: n.id })}
-                  onKeyDown={(event) => activate(event, () => onSelect({ kind: "node", id: n.id }))}
-                  onFocus={() => setFocused(n.id)}
-                  onBlur={() => setFocused((f) => (f === n.id ? null : f))}
-                  className="cursor-pointer focus:outline-none"
-                >
-                  <title>{`${n.type}: ${n.label}`}</title>
-                  {(on || hasFocus) && (
-                    <circle
+          <g data-graph-content="true" transform={contentTransform}>
+            <g>
+              {graph.edges.map((e) => {
+                const s = layout.positions.get(e.source);
+                const t = layout.positions.get(e.target);
+                if (!s || !t) return null;
+                const geo = edgeGeometry(s, t, bend.get(e.key) ?? 0);
+                const on = selectedEdge === e.key;
+                const near = lit !== null && (e.source === lit || e.target === lit);
+                const showLabel = labelAll || on || near;
+                const text = e.confidence ? `${e.label} · ${formatConfidence(e.confidence)}` : e.label;
+                return (
+                  <g key={e.key} onClick={() => onSelect({ kind: "edge", key: e.key })} className="cursor-pointer">
+                    <title>{`${e.label}${e.confidence ? `, confidence ${formatConfidence(e.confidence)}` : ""}`}</title>
+                    <path
+                      d={geo.d}
                       data-export="omit"
+                      style={{ fill: "none", stroke: "transparent", strokeWidth: 10 }}
+                    />
+                    <path
+                      d={geo.d}
+                      markerEnd="url(#stix-graph-arrow)"
+                      data-plain-style={PLAIN_EDGE}
+                      style={{
+                        fill: "none",
+                        stroke: on ? "var(--accent)" : near ? "var(--text-secondary)" : "var(--border)",
+                        strokeWidth: on ? 2.5 : 1.25,
+                      }}
+                    />
+                    {showLabel && (
+                      <text
+                        x={geo.label.x}
+                        y={geo.label.y}
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        fontSize={10}
+                        paintOrder="stroke"
+                        data-plain-style={PLAIN_EDGE_LABEL}
+                        // Drawn only because of the selection: not in a saved picture.
+                        data-export={labelAll ? undefined : "omit"}
+                        style={{
+                          fill: on ? "var(--text-primary)" : "var(--text-secondary)",
+                          stroke: "var(--bg-surface)",
+                          strokeWidth: 3,
+                        }}
+                      >
+                        {text}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </g>
+            <g>
+              {graph.nodes.map((n) => {
+                const p = layout.positions.get(n.id);
+                if (!p) return null;
+                const on = selectedNode === n.id;
+                const hasFocus = focused === n.id;
+                return (
+                  <g
+                    key={n.id}
+                    tabIndex={0}
+                    role="button"
+                    aria-pressed={on}
+                    aria-label={`${n.type}: ${n.label}`}
+                    onClick={() => onSelect({ kind: "node", id: n.id })}
+                    onKeyDown={(event) => activate(event, () => onSelect({ kind: "node", id: n.id }))}
+                    onFocus={() => setFocused(n.id)}
+                    onBlur={() => setFocused((f) => (f === n.id ? null : f))}
+                    className="cursor-pointer focus:outline-none"
+                  >
+                    <title>{`${n.type}: ${n.label}`}</title>
+                    {(on || hasFocus) && (
+                      <circle
+                        data-export="omit"
+                        cx={p.x}
+                        cy={p.y}
+                        r={RADIUS + 4}
+                        style={{ fill: "none", stroke: "var(--accent)", strokeWidth: 2 }}
+                      />
+                    )}
+                    <circle
                       cx={p.x}
                       cy={p.y}
-                      r={RADIUS + 4}
-                      style={{ fill: "none", stroke: "var(--accent)", strokeWidth: 2 }}
+                      r={RADIUS}
+                      style={{ fill: colourForType(n.type), stroke: "var(--bg-surface)", strokeWidth: 1.5 }}
                     />
-                  )}
-                  <circle
-                    cx={p.x}
-                    cy={p.y}
-                    r={RADIUS}
-                    style={{ fill: colourForType(n.type), stroke: "var(--bg-surface)", strokeWidth: 1.5 }}
-                  />
-                  <text
-                    x={p.x}
-                    y={p.y + RADIUS + 12}
-                    textAnchor="middle"
-                    fontSize={11}
-                    paintOrder="stroke"
-                    style={{ fill: "var(--text-primary)", stroke: "var(--bg-surface)", strokeWidth: 3 }}
-                  >
-                    {shortLabel(n.label)}
-                  </text>
-                </g>
-              );
-            })}
+                    <text
+                      x={p.x}
+                      y={p.y + RADIUS + 12}
+                      textAnchor="middle"
+                      fontSize={11}
+                      paintOrder="stroke"
+                      style={{ fill: "var(--text-primary)", stroke: "var(--bg-surface)", strokeWidth: 3 }}
+                    >
+                      {shortLabel(n.label)}
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
           </g>
         </svg>
       </div>

@@ -4,6 +4,7 @@ import {
   GRAPH_FIRST_LIMIT,
   colourForType,
   evidenceIdsOf,
+  fitTransform,
   formatConfidence,
   labelOf,
   layoutGraph,
@@ -346,6 +347,43 @@ describe("a large bundle", () => {
     const a = layoutGraph(graph.nodes, graph.edges);
     const b = layoutGraph(graph.nodes, graph.edges);
     expect([...a.positions.entries()]).toEqual([...b.positions.entries()]);
+  });
+});
+
+describe("fitting the canvas", () => {
+  it("centers a graph smaller than the canvas instead of pinning it to a corner", () => {
+    const fit = fitTransform({ width: 200, height: 100 }, { width: 800, height: 560 });
+    expect(fit.scale).toBe(1);
+    expect(fit.x).toBe((800 - 200) / 2);
+    expect(fit.y).toBe((560 - 100) / 2);
+  });
+
+  it("never scales a graph above the size it was laid out at", () => {
+    const fit = fitTransform({ width: 200, height: 100 }, { width: 4000, height: 3000 });
+    expect(fit.scale).toBe(1);
+  });
+
+  it("shrinks a graph wider or taller than the canvas to the largest size that still fits, on either axis", () => {
+    const wide = fitTransform({ width: 2000, height: 100 }, { width: 800, height: 560 });
+    expect(wide.scale).toBeCloseTo(800 / 2000);
+    expect(wide.y).toBeCloseTo((560 - 100 * wide.scale) / 2);
+
+    const tall = fitTransform({ width: 200, height: 3000 }, { width: 800, height: 560 });
+    expect(tall.scale).toBeCloseTo(560 / 3000);
+    expect(tall.x).toBeCloseTo((800 - 200 * tall.scale) / 2);
+  });
+
+  it("gives up cleanly on a canvas or layout with no size", () => {
+    expect(fitTransform({ width: 0, height: 0 }, { width: 800, height: 560 })).toEqual({
+      scale: 1,
+      x: 0,
+      y: 0,
+    });
+    expect(fitTransform({ width: 200, height: 100 }, { width: 0, height: 0 })).toEqual({
+      scale: 1,
+      x: 0,
+      y: 0,
+    });
   });
 });
 
