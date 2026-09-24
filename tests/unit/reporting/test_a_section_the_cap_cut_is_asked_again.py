@@ -189,3 +189,18 @@ class TestTheContract:
 
         assert "Each item is written once" in contract
         assert "without indentation" in contract
+
+
+def test_a_schema_question_near_the_room_is_still_asked() -> None:
+    """Only the cut question is sized to the window; a schema question keeps its retry."""
+    broken = AIMessage(
+        content='{"identifiers": [{"kind": "String", "value": null, "evidence_refs": []}]}',
+        response_metadata={"finish_reason": "stop"},
+    )
+    llm = _Answers(broken, _whole())
+
+    result, composer = _compose_in_window(llm, 8900, 4000, 1000)
+
+    assert isinstance(result, _HostIdentifiersOut)
+    assert len(llm.seen) == 2
+    assert composer.degradations == []

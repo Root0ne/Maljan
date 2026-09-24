@@ -554,6 +554,10 @@ def cut_answer_shape(text: str) -> str:
     return f"{length}, {begun} item(s) begun, at most {distinct} of them distinct"
 
 
+# Why a question the validation loop would ask was not sent.
+_UNFIT_QUESTION = "the question would not fit its model's window beside the section's output budget"
+
+
 def _reached_the_cap(answer: Any, cap: int) -> bool:
     """Whether the server stopped this answer at its output cap."""
     from maljan.core.truncation_ledger import completion_tokens_of, hit_length_cap
@@ -1124,9 +1128,14 @@ class ReportComposer:
             return found
 
         def _fits(turns: list[BaseMessage]) -> bool:
-            # The retry is the first prompt and one short turn; it is sent only
-            # when it leaves the section's output budget free in the window.
+            # Only the cut-at-cap question is sized here. It asks for a whole
+            # new answer, so it is sent only when the first prompt and its one
+            # short turn leave the section's output budget free in the window.
+            # Every other question keeps the answer and asks for a fix to it,
+            # and is sent as it always was.
             nonlocal retry_unfit
+            if not cut:
+                return True
             room = self._room_chars()
             if room is None:
                 return True
@@ -1175,8 +1184,7 @@ class ReportComposer:
                 asked = (
                     "; asked once for a shorter answer, which was cut too"
                     if retries
-                    else "; not asked again: the question would not fit its model's window "
-                    "beside the section's output budget"
+                    else f"; not asked again: {_UNFIT_QUESTION}"
                     if retry_unfit
                     else ""
                 )
@@ -1188,12 +1196,18 @@ class ReportComposer:
                     "reasoning counts against it)"
                 )
                 return None
+            skipped = f"; not asked again: {_UNFIT_QUESTION}" if retry_unfit else ""
             self._note_degradation(
                 f"report section '{section or schema.__name__}' is missing: its answer did "
                 f"not fit the schema after {retries} retr{'y' if retries == 1 else 'ies'} "
-                f"({', '.join(sorted({v.code for v in broken}))})"
+                f"({', '.join(sorted({v.code for v in broken}))}){skipped}"
             )
             return None
+        if retry_unfit and ungrounded:
+            self._note_degradation(
+                f"report section '{section or schema.__name__}' kept its findings unasked: "
+                f"{_UNFIT_QUESTION}"
+            )
         self._record_ungrounded(section or schema.__name__, ungrounded)
         return schema.model_validate(payload)
 
