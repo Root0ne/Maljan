@@ -157,11 +157,12 @@ def verdict_cut_violation(cap: int, text: str = "") -> Violation:
             f"the bundle closed, so it could not be read.{said} Any reasoning you write "
             f"counts against the same limit. Return a bundle that closes well inside "
             f"{int(cap)} tokens: x_maljan_assessment first, then only the objects the "
-            "evidence supports; no relationship between the malware object and an "
-            "attack-pattern or an indicator, which the platform writes from the confidence, "
-            "basis and sources you put on the object; an attack-pattern with at most one "
-            "short sentence of description; no Indicator whose value you did not read "
-            "verbatim in the evidence; the JSON on one line without indentation. JSON only."
+            "evidence supports; your confidence, basis and sources on the relationship "
+            "only, never repeated on the object it relates; an attack-pattern with at most "
+            "one sentence of description; no property the platform fills in (created, "
+            "modified, spec_version, valid_from, pattern_type); no Indicator whose value you "
+            "did not read verbatim in the evidence; the JSON on one line without "
+            "indentation. JSON only."
         ),
     )
 
@@ -216,45 +217,89 @@ def stated_assessment_in(text: str) -> Any | None:
     return None
 
 
-_INDICATOR_TYPE_RE = re.compile(r'"type"\s*:\s*"indicator"')
+# Where a bundle begins: the object whose first key says it is one, as the
+# contract's shape writes it.
+_BUNDLE_START_RE = re.compile(r'\{\s*"type"\s*:\s*"bundle"')
 
 
-def stated_indicators_in(text: str) -> list[dict[str, Any]]:
-    """The indicator objects an unreadable answer wrote whole, each as written.
+def _key_value_at(text: str, start: int, key: str) -> int | None:
+    """Where the value of ``key`` begins among the top-level keys of the object at ``start``.
 
-    An answer the output cap cut off has usually written its indicators before
-    the cut, after the assessment. Each one is the JSON object around a
-    ``"type": "indicator"`` that reads whole as written (``json`` alone, no
-    repair) and carries a pattern; an object the cut reached is not read, and
-    nothing is inferred from prose. Once each, in the order written. What is
-    read here is asked every question a bundle's indicator is asked, and the
-    one publish rule after that: the fallback path publishes no more than an
-    answer that closed would have.
+    A scan of the object's own depth, strings skipped whole, so a key of the
+    same name inside a string or a nested object is not the one found.
     """
     import json
 
+    depth = 0
+    index = start
+    decoder = json.JSONDecoder()
+    while index < len(text):
+        char = text[index]
+        if char == '"':
+            try:
+                value, after = decoder.raw_decode(text, index)
+            except ValueError:
+                return None
+            if depth == 1 and value == key:
+                rest = text[after:].lstrip()
+                if rest.startswith(":"):
+                    return len(text) - len(rest) + 1
+            index = after
+            continue
+        if char in "{[":
+            depth += 1
+        elif char in "}]":
+            depth -= 1
+            if depth == 0:
+                return None
+        index += 1
+    return None
+
+
+def stated_indicators_in(text: str) -> list[dict[str, Any]]:
+    """The indicator objects an unreadable answer's bundle wrote whole, each as written.
+
+    Only the items of the bundle's own top-level ``objects`` array are read:
+    the bundle is the last object in the answer that opens with ``"type":
+    "bundle"``, its ``objects`` is found among its own keys, and the array is
+    walked item by item (``json`` alone, no repair) until the first item that
+    does not read whole — the one the output cap reached. An indicator written
+    in reasoning before the bundle, inside a string, or nested inside another
+    object is not read, and nothing is inferred from prose. An item is kept
+    when it is an indicator with a pattern, once each, in the order written.
+    What is read here is asked every question a bundle's indicator is asked,
+    and the one publish rule after that: the fallback path publishes no more
+    than an answer that closed would have.
+    """
+    import json
+
+    starts = list(_BUNDLE_START_RE.finditer(text))
+    if not starts:
+        return []
+    at = _key_value_at(text, starts[-1].start(), "objects")
+    if at is None:
+        return []
+    rest = text[at:].lstrip()
+    if not rest.startswith("["):
+        return []
+    index = len(text) - len(rest) + 1
     decoder = json.JSONDecoder()
     found: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for match in _INDICATOR_TYPE_RE.finditer(text):
-        at = text.rfind("{", 0, match.start())
-        while at >= 0:
-            try:
-                value, end = decoder.raw_decode(text, at)
-            except ValueError:
-                at = text.rfind("{", 0, at)
-                continue
-            if end <= match.start():
-                # A whole object inside this one, closed before the match: the
-                # object around the match opens further back.
-                at = text.rfind("{", 0, at)
-                continue
-            if isinstance(value, dict) and value.get("type") == "indicator":
-                key = json.dumps(value, sort_keys=True)
-                if value.get("pattern") and key not in seen:
-                    seen.add(key)
-                    found.append(value)
+    while True:
+        while index < len(text) and text[index] in " \t\r\n,":
+            index += 1
+        if index >= len(text) or text[index] == "]":
             break
+        try:
+            value, index = decoder.raw_decode(text, index)
+        except ValueError:
+            break
+        if isinstance(value, dict) and value.get("type") == "indicator" and value.get("pattern"):
+            key = json.dumps(value, sort_keys=True)
+            if key not in seen:
+                seen.add(key)
+                found.append(value)
     return found
 
 
@@ -383,23 +428,24 @@ class JudgeVerdict(NamedTuple):
     written: dict[str, Any] | None = None
 
 
-# What the judge is asked to write and what it is not: the relationships the
-# platform derives (``judge_postprocess.relate_to_the_sample``) are not asked
-# for, and the bundle is written compactly. A benchmark judge's pretty-printed
-# bundle, a third of it those relationships, was cut at the output cap twice.
+# How the judge keeps its bundle short without leaving out anything it decides.
+# A benchmark judge's bundle, pretty-printed and with each relationship's
+# confidence, basis and credits written again on the object it relates, was cut
+# at the output cap twice. Every relationship stays the judge's own: which
+# indicator indicates the sample, and which does not, is its decision.
 COMPACT_BUNDLE_RULES = (
-    "- Write no Relationship for malware uses attack-pattern or for indicator "
-    "indicates malware: after you answer, the platform relates every "
-    "attack-pattern and every indicator to your malware object that way. On each "
-    "attack-pattern and each indicator set x_maljan_confidence (0.0-1.0) and "
-    "x_maljan_evidence_basis (static|dynamic|network|all|unknown), and list in "
+    "- Relate them as malware uses attack-pattern and indicator indicates "
+    "malware, and relate an indicator only to what it indicates. On every "
+    "Relationship set x_maljan_confidence (0.0-1.0) and x_maljan_evidence_basis "
+    "(static|dynamic|network|all|unknown), and list in "
     "x_maljan_contributing_agents only the sources that named what it is about, "
-    "by the names the EVIDENCE SUMMARY gives them; the relationship the platform "
-    "writes carries them as you wrote them. Write a Relationship yourself only "
-    "for any other relation.\n"
+    "by the names the EVIDENCE SUMMARY gives them. Write those three on the "
+    "relationship only, never again on the attack-pattern or indicator it "
+    "relates.\n"
     "- Keep the bundle short: an attack-pattern is its name, its mitre-attack "
-    "reference and at most one short sentence of description, and the JSON is "
-    "written on one line without indentation.\n"
+    "reference and at most one sentence of description; leave out pattern_type, "
+    "which is always stix and is filled in; and write the JSON on one line "
+    "without indentation.\n"
 )
 
 
@@ -1807,7 +1853,6 @@ class JudgeAgent(BudgetMeter):
                 duplicate_label_violations,
                 lift_misplaced_extensions,
                 postprocess_judge_bundle,
-                relate_to_the_sample,
             )
 
             # Before the schema, and before anything that walks the objects: an
@@ -1819,16 +1864,11 @@ class JudgeAgent(BudgetMeter):
                 as_written.append(copy.deepcopy(data))
             # Positions and labels as the judge wrote them, before anything is
             # set aside or folded: the dicts are the same objects after both.
-            written: dict[int, tuple[int | None, str]] = {
+            written = {
                 id(obj): (index, str(obj.get("id") or ""))
                 for index, obj in enumerate(data.get("objects") or [])
                 if isinstance(obj, dict)
             }
-            # The relationships the platform writes rather than asks for. They
-            # are nowhere in the answer as written, so a finding about one is
-            # placed by its position in the checked bundle.
-            for relationship, _related in relate_to_the_sample(data):
-                written[id(relationship)] = (None, "")
             lifted = lift_misplaced_extensions(data)
             if record is not None:
                 record.extend(lifted)
@@ -1836,11 +1876,7 @@ class JudgeAgent(BudgetMeter):
                 record.extend(
                     duplicate_label_violations(
                         data,
-                        {
-                            key: index
-                            for key, (index, _label) in written.items()
-                            if index is not None
-                        },
+                        {key: index for key, (index, _label) in written.items()},
                     )
                 )
             data = postprocess_judge_bundle(

@@ -167,6 +167,57 @@ class TestTheIndicatorsAnAnswerWroteWhole:
     def test_prose_names_no_indicator(self) -> None:
         assert stated_indicators_in(f"The C2 is {C2_URL}, an indicator.") == []
 
+    def test_an_example_the_reasoning_rejected_is_not_read(self) -> None:
+        rejected = json.dumps(
+            {
+                "type": "indicator",
+                "pattern": "[domain-name:value = 'update.microsoft.com']",
+                "indicator_types": ["benign"],
+            }
+        )
+        text = f"<think>An example I will NOT include: {rejected} …</think> {_cut_answer()}"
+
+        patterns = [obj["pattern"] for obj in stated_indicators_in(text)]
+
+        assert "[domain-name:value = 'update.microsoft.com']" not in patterns
+        assert patterns[0] == f"[url:value = '{C2_URL}']"
+
+    def test_an_indicator_nested_in_another_object_is_not_read(self) -> None:
+        nested = {
+            "type": "relationship",
+            "id": "relationship--1",
+            "x": _indicator("indicator--9", "[domain-name:value = 'nested.example.org']"),
+        }
+        text = json.dumps({"type": "bundle", "id": "bundle--1", "objects": [nested]})
+
+        assert stated_indicators_in(text) == []
+
+    def test_an_escaped_indicator_in_a_string_is_not_read(self) -> None:
+        inner = json.dumps(_indicator("indicator--9", "[domain-name:value = 'in.example.org']"))
+        text = json.dumps(
+            {
+                "type": "bundle",
+                "x_maljan_assessment": {"verdict": "Malware", "rationale": inner},
+                "objects": [{"type": "malware", "id": "malware--1", "name": "m"}],
+            }
+        )
+
+        assert stated_indicators_in(text) == []
+
+    def test_only_the_bundle_s_own_objects_key_is_read(self) -> None:
+        text = json.dumps(
+            {
+                "type": "bundle",
+                "x_maljan_assessment": {
+                    "verdict": "Malware",
+                    "objects": [_indicator("indicator--8", "[url:value = 'https://a.example/']")],
+                },
+                "objects": [_indicator("indicator--1", f"[url:value = '{C2_URL}']")],
+            }
+        )
+
+        assert [obj["id"] for obj in stated_indicators_in(text)] == ["indicator--1"]
+
 
 class TestTheFallbackPath:
     @pytest.mark.asyncio

@@ -165,9 +165,7 @@ class TestWhatTheRoundDoesWithIt:
 
         verdict = asyncio.run(judge.give_verdict(reports={"static": "it hollows"}, history=[]))
 
-        # All twenty-four, and the relationship the platform writes for each of
-        # the fifteen indicators the answer did not relate.
-        assert len(verdict.bundle.objects) == 24 + 15
+        assert len(verdict.bundle.objects) == 24
         assert verdict.bundle.x_maljan_fallback_verdict is None
         assert VERDICT_FALLBACK_CODE not in [v.code for v in verdict.violations]
 

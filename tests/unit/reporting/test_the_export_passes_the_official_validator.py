@@ -20,12 +20,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from langchain_core.messages import AIMessage
 from stix2validator import ValidationOptions, validate_instance
 
-from maljan.agents.judge_postprocess import (
-    lift_misplaced_extensions,
-    postprocess_judge_bundle,
-)
+from maljan.agents.judge_agent import JudgeAgent
 from maljan.reporting.builder import MalwareReportBuilder
 from maljan.reporting.models import (
     DynamicBehavior,
@@ -72,15 +70,16 @@ _JUDGE_INDICATES: set[str] = set()
 
 
 def _judge(answer: dict[str, Any]) -> Bundle:
-    """The judge's answer read the way the pipeline reads it.
+    """The judge's answer read by the pipeline's own reader.
 
-    The per-object pass runs first, as in ``JudgeAgent._bundle_from_response``:
-    an object the bundle cannot hold is set aside here too, so a fixture never
-    reaches the renderer with something the real path would not.
+    ``JudgeAgent._bundle_from_response`` itself, so every pass the real path
+    makes over an answer — the per-object pass, the post-processor, and anything
+    added to that path later — runs here too, and a fixture never reaches the
+    renderer with something the real path would not.
     """
-    data = json.loads(json.dumps(answer))
-    lift_misplaced_extensions(data)
-    bundle = Bundle.model_validate(postprocess_judge_bundle(data))
+    reader = JudgeAgent(llm=object())  # type: ignore[arg-type]
+    bundle = reader._bundle_from_response(AIMessage(content=json.dumps(answer)), {}, None)
+    assert bundle.x_maljan_fallback_verdict is None, "the fixture must read as a bundle"
     _JUDGE_INDICATES.update(
         str(o.id)
         for o in bundle.objects
