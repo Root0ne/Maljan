@@ -192,7 +192,8 @@ _INSTRUCTIONS: dict[str, str] = {
         "you read in this run's evidence. Write each value once, as the entry you read it "
         "in records it, and cite that entry. Name its kind by what the entry shows the "
         "value is: a registry key or value only when it is written under a registry hive "
-        "or the entry records it as a registry access, and 'String' when the entry does "
+        "or from one of its top keys (Software\\, System\\) or the entry records it as a "
+        "registry access, and 'String' when the entry does "
         "not show what the value is. Give its purpose in a short phrase where the evidence "
         "says, and leave the purpose empty where it does not."
     ),

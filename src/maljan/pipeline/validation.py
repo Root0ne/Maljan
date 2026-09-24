@@ -1501,6 +1501,13 @@ _RULE_OR_ESTIMATE_RE = re.compile(
     r"potential(?:ly)?|likely|suggests?|consistent\s+with|indicat\w*|associated\s+with)\b",
     re.IGNORECASE,
 )
+# The words of a sentence about the report or about defending against a
+# technique, which name it without saying the sample does it.
+_ABOUT_NOT_ACTION_RE = re.compile(
+    r"\b(?:hunt\w*|monitor\w*|detect\w*|defenders?|should|table|appears?|listed|"
+    r"published|without\s+analyst)\b",
+    re.IGNORECASE,
+)
 
 
 def rule_match_statement_violations(text: str, grounding: CapabilityGrounding) -> list[Violation]:
@@ -1526,6 +1533,9 @@ def rule_match_statement_violations(text: str, grounding: CapabilityGrounding) -
             sentence
             for sentence in _claiming_sentences(pattern, text)
             if not _RULE_OR_ESTIMATE_RE.search(sentence)
+            and not _ABOUT_NOT_ACTION_RE.search(sentence)
+            # A field holding the id or the name alone states nothing.
+            and sentence.strip(" .").lower() not in {tid.lower(), name.strip().lower()}
         ]
         if not sentences:
             continue

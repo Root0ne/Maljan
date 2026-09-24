@@ -180,6 +180,7 @@ class TestTheContract:
         text = _INSTRUCTIONS["host_identifiers"]
 
         assert "registry hive" in text
+        assert "Software\\, System\\" in text
         assert "'String' when the entry does not show what the value is" in text
         assert "Write each value once" in text
 

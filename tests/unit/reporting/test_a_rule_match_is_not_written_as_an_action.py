@@ -137,6 +137,18 @@ class TestTheQuestion:
 
         assert rule_match_statement_violations(text, self._grounding()) == []
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "T1055.012 Process Hollowing appears in the ATT&CK table without analyst support.",
+            "Hunt for Process Hollowing activity on hosts that ran the sample.",
+            "Defenders should monitor for T1055.012 behaviour.",
+            "T1055.012",
+        ],
+    )
+    def test_a_sentence_about_the_report_or_defence_is_not_asked(self, text: str) -> None:
+        assert rule_match_statement_violations(text, self._grounding()) == []
+
     def test_a_technique_an_analyst_claimed_is_not_asked(self) -> None:
         text = "The sample performs process hollowing."
 

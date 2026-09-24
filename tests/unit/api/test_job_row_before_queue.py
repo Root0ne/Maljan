@@ -193,3 +193,25 @@ async def test_the_worker_gives_up_a_missing_row_after_the_wait(
     selects = [s for s in statements if str(s).startswith("SELECT")]
     assert len(selects) == 4
     assert any(str(s).startswith("UPDATE analysis_jobs") for s in statements)
+
+
+@pytest.mark.parametrize("status", ["failed", "completed"])
+@pytest.mark.asyncio
+async def test_a_row_already_ended_is_not_run(status: str) -> None:
+    """An enqueue that raised after the queue took the job leaves a failed row behind."""
+    from app.worker import analysis_worker
+
+    job = MagicMock()
+    job.status = status
+    factory, statements = _sessions([_read(job)])
+    redis = MagicMock()
+    redis.publish = AsyncMock()
+    redis.set = AsyncMock()
+    redis.delete = AsyncMock()
+
+    result = await analysis_worker.run_analysis(
+        {"redis": redis, "db_session": factory}, str(uuid.uuid4())
+    )
+
+    assert result["status"] == "skipped"
+    assert not any(str(s).startswith("UPDATE analysis_jobs") for s in statements)

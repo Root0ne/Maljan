@@ -1568,6 +1568,9 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 # A row not there yet is waited for, a bounded while, before
                 # the job is given up: the queue can hand a job over before
                 # the commit that made its row is visible to this session.
+                # This session's read is ended first, so it is not left idle
+                # in a transaction for the length of the wait.
+                await db.commit()
                 found, reads, waited = await wait_for_job_row(db_session, job_uuid)
                 if found:
                     result = await db.execute(select(AnalysisJob).where(AnalysisJob.id == job_uuid))
@@ -1591,6 +1594,19 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                 logger.info(f"Job already cancelled: {job_id}", extra={"job_id": job_id})
                 await _publish_event(redis_conn, job_id, "cancelled", {})
                 return {"status": "cancelled"}
+
+            if job.status in ("failed", "completed"):
+                # Already ended: an enqueue that raised after the queue took the
+                # job commits the row failed and tells the caller so, and
+                # running it anyway would run a job the caller was told was
+                # refused.
+                logger.info(
+                    "Job %s already ended (%s); not run.",
+                    job_id,
+                    job.status,
+                    extra={"job_id": job_id},
+                )
+                return {"status": "skipped", "message": f"job already {job.status}"}
 
             # Read out as plain values rather than carried as ORM objects:
             # the session ends here and an attribute that had to be
