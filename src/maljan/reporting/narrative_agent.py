@@ -613,7 +613,7 @@ class NarrativeAgent:
             logger.error("NarrativeAgent: the validated payload would not build (%s).", exc)
             return None
 
-    def _record_ungrounded(self, violations: list[Violation]) -> None:
+    def _record_ungrounded(self, violations: list[Violation], *, asked: bool = True) -> None:
         """Keep the over-claims and stray citations on the record, without touching the prose."""
         if not violations:
             return
@@ -624,7 +624,7 @@ class NarrativeAgent:
             ", ".join(v.path for v in violations),
         )
         self.validation_tally.record_unresolved("narrative", violations)
-        record_flagged_statements(getattr(self, "_report", None), violations)
+        record_flagged_statements(getattr(self, "_report", None), violations, asked=asked)
 
     def _kept_with_ungrounded_recorded(
         self,
@@ -650,7 +650,7 @@ class NarrativeAgent:
             *technique_name_violations(answer),
         ]
         self.validation_tally.count(found)
-        self._record_ungrounded(found)
+        self._record_ungrounded(found, asked=False)
         return output
 
     def _build_prompt(

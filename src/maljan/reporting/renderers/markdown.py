@@ -2037,7 +2037,7 @@ class _Context:
         marks: dict[str, list[str]] = {}
         for row in getattr(report, "flagged_statements", None) or []:
             if row.sentence.strip():
-                mark = _flag_mark(row.code, row.label)
+                mark = _flag_mark(row.code, row.label, asked=row.asked)
                 if mark not in marks.setdefault(row.sentence, []):
                     marks[row.sentence].append(mark)
         self.flagged = sorted(
@@ -2131,7 +2131,7 @@ class _Context:
         cut = _truncate(self._defang(raw), _CELL_LIMIT)
         # A cell is cut to its width, so its marks follow the cut text rather
         # than a sentence the cut may have shortened.
-        marks = [mark for sentence, mark in self.flagged if sentence in raw]
+        marks = list(dict.fromkeys(mark for sentence, mark in self.flagged if sentence in raw))
         return f"{cut} {' '.join(marks)}" if marks else cut
 
     def sandbox_sentence(self) -> str:
@@ -2340,10 +2340,15 @@ _FLAG_WORDS = {
 }
 
 
-def _flag_mark(code: str, label: str) -> str:
-    """The mark printed after a sentence a check left standing, in the platform's voice."""
+def _flag_mark(code: str, label: str, *, asked: bool = True) -> str:
+    """The mark printed after a sentence a check left standing, in the platform's voice.
+
+    ``asked=False`` for an answer that came by a path with no turn to ask on:
+    the mark says the model was not asked.
+    """
     words = _FLAG_WORDS.get(code, "asked about and kept")
-    return f"**[{words}: {label}]**" if label else f"**[{words}]**"
+    said = f"{words}: {label}" if label else words
+    return f"**[{said}; not asked]**" if not asked else f"**[{said}]**"
 
 
 def _findings_beside(rows: list[dict[str, str]]) -> list[str]:

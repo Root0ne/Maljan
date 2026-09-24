@@ -1593,7 +1593,9 @@ def rule_match_statement_violations(text: str, grounding: CapabilityGrounding) -
     return violations
 
 
-def record_flagged_statements(report: Any, violations: Sequence[Violation]) -> None:
+def record_flagged_statements(
+    report: Any, violations: Sequence[Violation], *, asked: bool = True
+) -> None:
     """Put the sentences of the surviving marked-in-place findings on the report. Never raises.
 
     What a renderer marks where the sentence stands (``MARKED_IN_PLACE``). The
@@ -1606,17 +1608,19 @@ def record_flagged_statements(report: Any, violations: Sequence[Violation]) -> N
     try:
         from maljan.reporting.models import FlaggedStatement
 
-        seen = {(row.sentence, row.code, row.label) for row in rows}
+        seen = {(row.sentence, row.code, row.label, row.asked) for row in rows}
         for violation in violations:
             if violation.code not in MARKED_IN_PLACE:
                 continue
             label = violation.path.replace("_", " ")
             for sentence in violation.quoted:
-                key = (sentence, violation.code, label)
+                key = (sentence, violation.code, label, asked)
                 if key not in seen:
                     seen.add(key)
                     rows.append(
-                        FlaggedStatement(sentence=sentence, code=violation.code, label=label)
+                        FlaggedStatement(
+                            sentence=sentence, code=violation.code, label=label, asked=asked
+                        )
                     )
     except Exception as exc:  # noqa: BLE001 — a mark is never worth a report
         logger.debug("validation: flagged sentences were not recorded (%s).", exc)

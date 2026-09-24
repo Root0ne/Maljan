@@ -1023,7 +1023,7 @@ class ReportComposer:
                 for extra in validators or []:
                     found.extend(extra(answer))
                 self.validation_tally.count(found)
-                self._record_ungrounded(section or schema.__name__, found)
+                self._record_ungrounded(section or schema.__name__, found, asked=False)
                 return result
         except Exception as exc:  # noqa: BLE001
             logger.debug("ReportComposer: structured path failed (%s); manual parse.", exc)
@@ -1230,7 +1230,9 @@ class ReportComposer:
         if reason not in self.degradations:
             self.degradations.append(reason)
 
-    def _record_ungrounded(self, section: str, violations: list[Violation]) -> None:
+    def _record_ungrounded(
+        self, section: str, violations: list[Violation], *, asked: bool = True
+    ) -> None:
         """Keep a section's over-claims and stray citations on the record, prose untouched.
 
         Records only. The manual path has already counted these as leftovers of
@@ -1245,7 +1247,7 @@ class ReportComposer:
             ", ".join(v.path for v in violations),
         )
         self.validation_tally.record_unresolved(f"composer:{section}", violations)
-        record_flagged_statements(getattr(self, "_report", None), violations)
+        record_flagged_statements(getattr(self, "_report", None), violations, asked=asked)
 
 
 def _section_declined(payload: Any, schema: type[BaseModel]) -> bool:

@@ -297,6 +297,65 @@ class TestTheMark:
 
         assert cell == "Sends the host profile out **[not established by this run: x]**"
 
+    def test_a_mark_from_the_structured_path_says_it_was_not_asked(self) -> None:
+        sentence = "The sample exfiltrates documents to its operator."
+        report = _report()
+        report.executive_summary = sentence
+        report.flagged_statements = [
+            FlaggedStatement(
+                sentence=sentence,
+                code=UNGROUNDED_CAPABILITY_CODE,
+                label="exfiltration",
+                asked=False,
+            )
+        ]
+
+        md = MarkdownRenderer().render(report)
+
+        assert f"{sentence} **[not established by this run: exfiltration; not asked]**" in md
+
+    def test_the_structured_path_records_its_findings_as_not_asked(self) -> None:
+        from maljan.pipeline.validation import CapabilityGrounding as _G
+
+        class _Structured:
+            model_name = "m"
+
+            def with_structured_output(self, schema: Any, include_raw: bool = False) -> Any:
+                class _Runner:
+                    async def ainvoke(self, _messages: Any) -> Any:
+                        return schema.model_validate_json(_ACTION)
+
+                return _Runner()
+
+        report = _report()
+        composer = ReportComposer(llm=_Structured(), section_max_tokens=900)  # type: ignore[arg-type]
+        composer._report = report
+        composer._grounding = _G.from_report(report)
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "maljan.reporting.composer.structured_output_supported_for_llm", lambda _l: True
+            )
+            mp.setattr("maljan.reporting.composer.structured_answer", lambda r, *a, **k: r)
+            asyncio.run(
+                composer._invoke([HumanMessage(content="x")], _FlowOut, section="execution_flow")
+            )
+
+        assert report.flagged_statements
+        assert all(row.asked is False for row in report.flagged_statements)
+
+    def test_one_mark_per_cell_for_two_sentences_under_it(self) -> None:
+        from maljan.reporting.renderers.markdown import _Context
+
+        report = _report()
+        report.flagged_statements = [
+            FlaggedStatement(sentence="It sends A", code=UNGROUNDED_CAPABILITY_CODE, label="x"),
+            FlaggedStatement(sentence="It sends B", code=UNGROUNDED_CAPABILITY_CODE, label="x"),
+        ]
+
+        cell = _Context(report).cell("It sends A. It sends B.")
+
+        assert cell.count("**[not established by this run: x]**") == 1
+
     def test_a_report_stored_before_the_field_renders_unmarked(self) -> None:
         report = _report()
         report.executive_summary = "The sample exfiltrates documents."

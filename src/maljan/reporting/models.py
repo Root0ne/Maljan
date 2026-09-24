@@ -885,6 +885,9 @@ class FlaggedStatement(BaseModel):
     sentence: str
     code: str
     label: str = ""
+    # False where the answer came by a path with no turn to ask on (structured
+    # output): the mark then says the model was not asked.
+    asked: bool = True
 
 
 class JudgeIndicator(BaseModel):
