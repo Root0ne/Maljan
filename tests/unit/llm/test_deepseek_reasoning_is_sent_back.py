@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -25,6 +26,7 @@ from pydantic import BaseModel
 from maljan.agents.base_agent import BaseAnalyst, nudge_turns
 from maljan.core.config import Settings
 from maljan.llm.openai_provider import OpenAIProvider, forget_standard_only
+from maljan.pipeline.run_state import RUN_STATE_END, without_run_state_tail
 
 HOSTED = "https://api.deepseek.com"
 LOCAL = "http://127.0.0.1:8080/v1"
@@ -197,8 +199,66 @@ class TestThroughTheAnalystsLoop:
         last = wire.bodies[-1]["messages"]
         thoughts = [m.get("reasoning_content") for m in last if m["role"] == "assistant"]
         assert thoughts == [f"{THOUGHT} (0)", f"{THOUGHT} (1)"]
-        # The run state is last, and everything before it is the next request's front.
+        # The run state ends the last message; without it, the request is the
+        # next one's front, byte for byte, reasoning included.
         for earlier, later in zip(wire.bodies, wire.bodies[1:], strict=False):
-            head = earlier["messages"][:-1]
-            assert "RUN STATE" in earlier["messages"][-1]["content"]
+            head = [dict(m) for m in earlier["messages"]]
+            assert head[-1]["content"].endswith(RUN_STATE_END)
+            head[-1]["content"] = without_run_state_tail(head[-1]["content"])
             assert later["messages"][: len(head)] == head
+            roles = [m["role"] for m in later["messages"]]
+            assert all(
+                not (a == "user" and b == "user") for a, b in zip(roles, roles[1:], strict=False)
+            )
+
+
+class TestOnlyWhereItIsAskedFor:
+    def test_a_request_without_tools_is_sent_without_it(self) -> None:
+        """The guide: not needed without tools, and ignored if sent."""
+        wire = _DeepSeek()
+        model = _model(wire)
+        said = AIMessage(content="an answer", additional_kwargs={"reasoning_content": THOUGHT})
+        model.invoke([HumanMessage(content="task"), said, HumanMessage(content="and now?")])
+        body = wire.bodies[0]
+        assert "tools" not in body
+        assert all("reasoning_content" not in m for m in body["messages"])
+
+    def test_a_turn_that_does_not_line_up_is_said_rather_than_sent_silently(self) -> None:
+        from maljan.llm import openai_provider
+
+        model = _model(_DeepSeek())
+        parent = type(model).__mro__[1]
+        said = AIMessage(content="x", additional_kwargs={"reasoning_content": THOUGHT})
+
+        def _one_message(*_a: Any, **_k: Any) -> dict[str, Any]:
+            return {"messages": [{"role": "user", "content": "t"}], "tools": [1]}
+
+        with (
+            patch.object(parent, "_get_request_payload", _one_message),
+            patch.object(openai_provider, "logger") as logger,
+        ):
+            payload = model._get_request_payload([HumanMessage(content="t"), said])
+        assert logger.warning.called
+        assert "reasoning_content" not in payload["messages"][0]
+
+
+class TestTheCapBoundForOneCall:
+    def test_it_reaches_deepseek_as_max_tokens(self) -> None:
+        wire = _DeepSeek(calls=0)
+        _model(wire).bind(max_tokens=7).invoke([HumanMessage(content="task")])
+        assert wire.bodies[0]["max_tokens"] == 7
+        assert wire.bodies[0]["max_completion_tokens"] == 7
+
+    def test_the_model_s_own_cap_still_does(self) -> None:
+        wire = _DeepSeek(calls=0)
+        _model(wire).invoke([HumanMessage(content="task")])
+        assert wire.bodies[0]["max_tokens"] == 64
+
+
+class TestTheWindowCountsWhatIsSentBack:
+    def test_a_turn_s_reasoning_is_part_of_its_size(self) -> None:
+        from maljan.agents.base_agent import _message_chars
+
+        bare = AIMessage(content="answer")
+        thinking = AIMessage(content="answer", additional_kwargs={"reasoning_content": THOUGHT})
+        assert _message_chars(thinking) == _message_chars(bare) + len(THOUGHT)

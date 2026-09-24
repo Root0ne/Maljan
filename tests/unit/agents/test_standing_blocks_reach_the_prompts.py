@@ -69,11 +69,11 @@ def _system_and_human(messages: list[Any]) -> tuple[str, str]:
     return system, human
 
 
-def _last_turn(messages: list[Any]) -> str:
-    """The last message of a request, where the run-state turn goes."""
-    last = messages[-1]
-    assert isinstance(last, HumanMessage)
-    return str(last.content)
+def _block_on_the_last(messages: list[Any]) -> str:
+    """The run-state block at the end of a request's last message, markers included."""
+    text = str(messages[-1].content)
+    assert text.endswith(RUN_STATE_END)
+    return text[text.rindex(RUN_STATE_BEGIN) :]
 
 
 class TestAnAnalystsPrompt:
@@ -83,8 +83,7 @@ class TestAnAnalystsPrompt:
         agent.execute_tool_loop([("system", "You are a static analyst."), ("human", "Analyse.")])
         system, human = _system_and_human(llm.seen[0])
         assert system == "You are a static analyst."
-        block = _last_turn(llm.seen[0])
-        assert block.startswith(RUN_STATE_BEGIN) and block.endswith(RUN_STATE_END)
+        block = _block_on_the_last(llm.seen[0])
         assert "ledger: 3 entries" in block
         # The loop's whole budget is what the first turn has left.
         assert "budget remaining:" in block
@@ -98,7 +97,7 @@ class TestAnAnalystsPrompt:
         )
         system, human = _system_and_human(messages)
         assert system == "sys"
-        assert _last_turn(messages).startswith(RUN_STATE_BEGIN)
+        assert "ledger: 3 entries" in _block_on_the_last(messages)
         assert human.startswith(PACK_HEADING)
 
     def test_the_validation_feedback_turn_shows_the_ids_it_asks_the_analyst_to_cite(
@@ -136,8 +135,7 @@ class TestAnAnalystsPrompt:
         system, human = _system_and_human(sent[0])
         assert RUN_STATE_BEGIN not in system
         assert any(
-            isinstance(m, HumanMessage) and str(m.content).startswith(RUN_STATE_BEGIN)
-            for m in sent[0]
+            isinstance(m, HumanMessage) and RUN_STATE_BEGIN in str(m.content) for m in sent[0]
         )
         assert human.startswith(PACK_HEADING)
         assert "[ev_0001]" in human

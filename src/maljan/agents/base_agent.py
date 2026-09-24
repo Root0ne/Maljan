@@ -259,6 +259,11 @@ def _message_chars(m: object) -> int:
     calls = getattr(m, "tool_calls", None)
     if calls:
         total += len(str(calls))
+    # A thinking model's reasoning that a provider has sent back with the turn
+    # (``openai_provider.with_reasoning_passback``) is read with it too.
+    reasoning = (getattr(m, "additional_kwargs", None) or {}).get("reasoning_content")
+    if isinstance(reasoning, str):
+        total += len(reasoning)
     return total
 
 
@@ -2190,28 +2195,29 @@ def frame_messages(
 
     ``facts_block`` goes at the head of the first human turn, once: it is the
     triage pack, and the human turn is where the task and the data are.
-    ``run_state`` goes last, as a human turn of its own, and a run-state turn
-    already in the conversation is taken out first — the same conversation
-    framed twice carries one block, the newer, at its end. Last because a tool
-    loop regenerates the block on every turn: anywhere earlier, the changed
-    budget line would change the request's prefix, which voids a hosted
-    provider's prefix cache and makes a local server read the whole
-    conversation again. At the end, each turn's request is the previous one's
-    without its old block, plus the new turns and the new block.
+    ``run_state`` goes at the end of the last message, between its markers —
+    the task on a first turn, the latest tool answer after a tool call, the
+    question a nudge or a retry asks — and a block already at the end of any
+    message is taken off first, leaving that message's bytes exactly as they
+    were: the same conversation framed twice carries one block, the newer, on
+    its last message.
 
-    A separate human turn rather than the tail of the last one: the last turn
-    of one request is a middle turn of the next, and a turn whose text changes
-    between the two is the cache miss this avoids. After a tool result it is
-    the user turn every chat format expects there; after the task it is a
-    second user turn, which OpenAI-compatible servers, Ollama and Gemini take
-    as sent and the Anthropic client merges into the turn before it.
+    At the end because a tool loop regenerates the block on every turn:
+    anywhere earlier, the changed budget line would change the request's
+    prefix, which voids a hosted provider's prefix cache and makes a local
+    server read the whole conversation again. Each turn's request is the
+    previous one's without its block, plus the new turns and the new block.
+    On a message rather than as a turn of its own, so no request has two user
+    turns in a row — which strict chat templates refuse — and no turn that
+    says only the run's state, which a model can take for the question.
 
-    Empty blocks change nothing, so an agent outside a staged run sends
-    exactly what it always sent.
+    Only a human turn or a tool answer carries it; a conversation ending on
+    anything else is sent without it, because the platform does not add
+    words to what a model said. Empty blocks change nothing, so an agent
+    outside a staged run sends exactly what it always sent.
     """
     from langchain_core.messages import HumanMessage
 
-    from maljan.pipeline.run_state import run_state_turn
     from maljan.pipeline.triage_pack import PACK_HEADING
 
     out: list[BaseMessage] = without_run_state(list(messages))
@@ -2222,24 +2228,51 @@ def frame_messages(
                 if PACK_HEADING not in content:
                     out[index] = HumanMessage(content=f"{facts_block}\n\n{content}")
                 break
-    turn = run_state_turn(run_state)
-    if turn:
-        out.append(HumanMessage(content=turn))
+    if run_state and out and _carries_run_state(out[-1]):
+        out[-1] = _with_run_state_on(out[-1], run_state)
     return out
 
 
-def _is_run_state_message(message: Any) -> bool:
-    """Whether ``message`` is a run-state turn ``frame_messages`` added."""
-    from langchain_core.messages import HumanMessage
+def _carries_run_state(message: Any) -> bool:
+    """Whether ``message`` is a turn the run-state block may ride on."""
+    from langchain_core.messages import HumanMessage, ToolMessage
 
-    from maljan.pipeline.run_state import is_run_state_turn
+    return isinstance(message, HumanMessage | ToolMessage)
 
-    return isinstance(message, HumanMessage) and is_run_state_turn(message.content)
+
+def _with_run_state_on(message: Any, body: str) -> Any:
+    """``message`` with the block for ``body`` at its end: text appended, or a text part."""
+    from maljan.pipeline.run_state import run_state_block, with_run_state_tail
+
+    content = message.content
+    if isinstance(content, list):
+        part = {"type": "text", "text": run_state_block(body)}
+        return message.model_copy(update={"content": [*content, part]})
+    return message.model_copy(update={"content": with_run_state_tail(str(content or ""), body)})
+
+
+def _without_run_state_on(message: Any) -> Any:
+    """``message`` as it was before a block was put at its end; itself when none was."""
+    from maljan.pipeline.run_state import is_run_state_block, without_run_state_tail
+
+    if not _carries_run_state(message):
+        return message
+    content = message.content
+    if isinstance(content, list):
+        last = content[-1] if content else None
+        if isinstance(last, dict) and last.get("type") == "text":
+            if is_run_state_block(last.get("text")):
+                return message.model_copy(update={"content": content[:-1]})
+        return message
+    if not isinstance(content, str):
+        return message
+    bare = without_run_state_tail(content)
+    return message if bare == content else message.model_copy(update={"content": bare})
 
 
 def without_run_state(messages: list[Any]) -> list[Any]:
-    """``messages`` with the run-state turn taken out, everything else as it was."""
-    return [m for m in messages if not _is_run_state_message(m)]
+    """``messages`` with the run-state block taken off whichever message carried it."""
+    return [_without_run_state_on(m) for m in messages]
 
 
 def revision_messages(
@@ -3172,11 +3205,12 @@ class BaseAnalyst(BudgetMeter, ABC):
     def _with_current_run_state(
         self, messages: list[Any], steps_left: int | None, seconds_left: float | None
     ) -> list[Any]:
-        """``messages`` ending on this agent's run-state turn as of now; never raises.
+        """``messages`` with this agent's run-state block as of now on the last; never raises.
 
         For the turns sent after a loop — the nudge and the forced synthesis —
-        which resend its conversation: the block they carry is the one the
-        loop's next turn would have read, in the place it read it.
+        which resend its conversation and end on their own question: the block
+        they carry is the one the loop's next turn would have read, at the end
+        of that question.
         """
         try:
             return frame_messages(
@@ -3380,10 +3414,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # such a call says so and keeps what the model actually wrote.
         repairs = ArgumentRepairs()
 
-        # The loop's own conversation starts without the run-state turn: the
-        # refresher adds the current one after the latest turn, every turn, and
-        # a block left here would sit after the task for the rest of the loop
-        # and change the request's prefix on the first turn that dropped it.
+        # The loop's own conversation starts without the block: the refresher
+        # puts the current one on the latest message, every turn, and the
+        # messages the loop keeps are the ones each request is built from.
         messages = without_run_state(prebuilt)
 
         # The loop's budget, readable by an ask made from inside it and
@@ -3996,11 +4029,16 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.logger.warning(
                 "%s: the nudge leaves out a tool call whose arguments never parsed.", self.name
             )
-        # The run state as of now, after the conversation as the loop sent it,
-        # so the nudge reads the same block the loop's turns did.
-        sendable = self._with_current_run_state(sendable, remaining_steps, remaining_time)
-        turns = [*tool_free_turns(sendable), HumanMessage(content=FINAL_ANSWER_NUDGE)]
-        loop_turns = [*sendable, HumanMessage(content=FINAL_ANSWER_NUDGE)]
+        # The run state as of now, at the end of the nudge's own question, the
+        # place the loop's turns carried it.
+        turns = self._with_current_run_state(
+            [*tool_free_turns(sendable), HumanMessage(content=FINAL_ANSWER_NUDGE)],
+            remaining_steps,
+            remaining_time,
+        )
+        loop_turns = self._with_current_run_state(
+            [*sendable, HumanMessage(content=FINAL_ANSWER_NUDGE)], remaining_steps, remaining_time
+        )
         budget = min(remaining_time, float(timeout))
 
         def _ask_with(model: Any, label: str, sent: list[Any] | None = None) -> Any:
@@ -4297,10 +4335,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         }
         try:
             answer = self._invoke_llm_with_timeout(
-                [
-                    *tool_free_turns(self._with_current_run_state(trimmed, None, remaining)),
-                    directive,
-                ],
+                self._with_current_run_state(
+                    [*tool_free_turns(trimmed), directive], None, remaining
+                ),
                 remaining,
             )
         except Exception as exc:  # noqa: BLE001 - best-effort salvage
@@ -4502,7 +4539,7 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         The delegated path (``agents.delegation``): the agent's own system
         prompt, the task as the human turn — framed like every other first
-        turn, with the pack in front and the run state as the last turn —
+        turn, with the pack in front and the run state at the end —
         the tool loop, the parse into claims, and the same checks an answer to
         a stage gets: the consistency gate and the technique check, in this
         agent's own conversation. Returns the loop's text and the checked ISR.
@@ -5222,7 +5259,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         def _run(turns: list[Any]) -> Any:
             if first:
                 return first.pop()
-            return self._invoke_llm_with_timeout(turns, left)
+            # The block moves to the retry's own question, the last message,
+            # and the turn that carried it before is sent as it was written.
+            return self._invoke_llm_with_timeout(
+                frame_messages(turns, run_state=str(getattr(self, "run_state_block", "") or "")),
+                left,
+            )
 
         def _parse(answer: Any) -> AgentISR:
             if isinstance(answer, _PriorAnswer):

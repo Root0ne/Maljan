@@ -20,9 +20,11 @@ change landed on `main`.
   explicit rather than read from the host, because OpenAI's own API refuses
   `max_tokens` beside `max_completion_tokens` for its reasoning models.
   It also keeps each assistant turn's `reasoning_content` exactly as DeepSeek
-  returned it and sends it back on that turn in every later request, which
-  DeepSeek's thinking-mode guide requires on a request with tools (400
-  otherwise) and which the OpenAI client does in neither direction.
+  returned it and sends it back on that turn in every later request that
+  carries tools, which DeepSeek's thinking-mode guide requires (400 otherwise)
+  and which the OpenAI client does in neither direction; the window budget
+  counts it. A cap bound for one call reaches DeepSeek too. `compat` is global,
+  per-agent `openai` entries included.
 - **Cached input and reasoning tokens are recorded where reported.**
   `run_summary.tokens` (and each agent's row) carries `cached_input_tokens` and
   `reasoning_tokens`, each with the calls that reported it, from the client's
@@ -851,16 +853,17 @@ change landed on `main`.
 
 ### Changed
 
-- **The run-state block travels last, so a request's front stays the same.**
-  A tool loop's block, with the budget line that counts down every turn, used
-  to be rewritten at the end of the system turn, and a changed byte there voids
-  a provider's prefix cache (measured on DeepSeek: 0 cached tokens of 3,884
-  with only that line changed, 3,712 with it unchanged) and makes a local
-  server read the whole conversation again. It is now the last turn of each
-  request, a human turn of its own: each turn's request is the previous one's
-  without its old block, plus the new turns and the new block. The text is the
-  same; the nudge and the forced synthesis carry the block as of their own
-  moment.
+- **The run-state block rides at the end of the last message, so a request's
+  front stays the same.** A tool loop's block, with the budget line that counts
+  down every turn, used to be rewritten at the end of the system turn, and a
+  changed byte there voids a provider's prefix cache (measured on DeepSeek: 0
+  cached tokens of 3,884 with only that line changed, 3,712 with it unchanged)
+  and makes a local server read the whole conversation again. It now ends the
+  request's last message — the task, the latest tool answer, or the question a
+  nudge, a synthesis or a retry asks — and comes off it again, byte for byte,
+  once the message is no longer last: each request is the previous one without
+  its block, plus the new turns and the new block. No request has two user
+  turns in a row or a turn holding only the block. The text is the same.
 - **The analysts' and the judge's output caps are derived from the window.**
   `llm.expert_max_tokens` and `llm.judge_max_tokens` ship at 0, which derives
   each agent's cap in three cases: the model's declared maximum output (a model

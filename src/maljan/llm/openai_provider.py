@@ -302,6 +302,20 @@ def _reasoning_of_choice(choice: Any) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _cap_as_max_tokens(payload: dict[str, Any]) -> None:
+    """The request's own cap as ``max_tokens`` too, which is the field DeepSeek reads.
+
+    Taken from the payload rather than from the model, so a cap bound for one
+    call (``llm.bind(max_tokens=…)``) reaches DeepSeek the way the model's
+    own does; ``max_completion_tokens`` beside it is ignored there.
+    """
+    cap = payload.get("max_completion_tokens")
+    if isinstance(cap, int) and not isinstance(cap, bool) and cap > 0:
+        extra = dict(payload.get("extra_body") or {})
+        extra["max_tokens"] = cap
+        payload["extra_body"] = extra
+
+
 def with_reasoning_passback(chat_class: Any) -> Any:
     """``chat_class`` keeping DeepSeek's ``reasoning_content`` and sending it back.
 
@@ -316,9 +330,14 @@ def with_reasoning_passback(chat_class: Any) -> Any:
     * reading an answer, each choice's ``reasoning_content`` is kept in the
       message's ``additional_kwargs``, exactly as returned; ``content`` is not
       touched;
-    * building a request, an assistant message that kept one carries it again
-      under the same key, byte for byte, so a turn sent twice is the same turn
-      and the request's front stays what the provider has cached.
+    * building a request that carries tools, an assistant message that kept
+      one carries it again under the same key, byte for byte, so a turn sent
+      twice is the same turn and the request's front stays what the provider
+      has cached. A request without tools is sent without it: the guide says
+      it is not needed there and is ignored if sent.
+
+    And the request's cap goes out as ``max_tokens`` as well, per request, so
+    a cap bound for one call is the one DeepSeek reads (``_cap_as_max_tokens``).
 
     A streamed answer's pieces are kept the same way; ``AIMessageChunk``
     joins the pieces of a string field when the chunks are added.
@@ -359,11 +378,22 @@ def with_reasoning_passback(chat_class: Any) -> Any:
 
     def _get_request_payload(self: Any, input_: Any, *, stop: Any = None, **kwargs: Any) -> Any:
         payload = base._get_request_payload(self, input_, stop=stop, **kwargs)
+        _cap_as_max_tokens(payload)
         sent = payload.get("messages")
-        if not isinstance(sent, list):
+        # Sent back only with tools. The guide asks for it there; on a request
+        # without tools it says the field is not needed and is ignored if
+        # sent, so there it would be input read for nothing.
+        if not isinstance(sent, list) or not payload.get("tools"):
             return payload
         messages = self._convert_input(input_).to_messages()
         if len(messages) != len(sent):
+            logger.warning(
+                "openai provider: %d message(s) became %d request message(s), so no "
+                "turn's reasoning_content could be matched to its turn and none was sent "
+                "back; DeepSeek may refuse this request.",
+                len(messages),
+                len(sent),
+            )
             return payload
         for message, entry in zip(messages, sent, strict=True):
             reasoning = (getattr(message, "additional_kwargs", None) or {}).get(

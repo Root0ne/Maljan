@@ -1,9 +1,9 @@
 """The run-state block is derived, regenerated, and sent last.
 
-It travels between two markers as the last turn of a request. Framing a
-conversation twice leaves one block, the newer, at the end; the per-turn
-refresher regenerates it after the latest turn, so every earlier byte of the
-request is the previous turn's; and the forced-synthesis trim, which drops
+It travels between two markers at the end of a request's last message.
+Framing a conversation twice leaves one block, the newer, at the end; the
+per-turn refresher regenerates it on the latest turn, so every earlier byte of
+the request is the previous turn's; and the forced-synthesis trim, which drops
 whole tool exchanges to fit a budget, keeps the system turn and the first
 human turn, where the pack is.
 """
@@ -142,10 +142,9 @@ class TestOneBlockPerPrompt:
         messages = [SystemMessage(content="sys"), HumanMessage(content="task")]
         once = frame_messages(messages, facts_block=f"{PACK_HEADING}\n[ev_0001] x", run_state="s1")
         twice = frame_messages(once, facts_block=f"{PACK_HEADING}\n[ev_0001] x", run_state="s2")
-        assert len(twice) == 3
+        assert len(twice) == 2
         assert twice[0].content == "sys"
-        assert isinstance(twice[-1], HumanMessage)
-        assert twice[-1].content == f"{RUN_STATE_BEGIN}\ns2\n{RUN_STATE_END}"
+        assert str(twice[-1].content).endswith(f"task\n\n{RUN_STATE_BEGIN}\ns2\n{RUN_STATE_END}")
         assert sum(str(m.content).count(RUN_STATE_BEGIN) for m in twice) == 1
         assert str(twice[1].content).count(PACK_HEADING) == 1
         assert str(twice[1].content).startswith(PACK_HEADING)
@@ -204,7 +203,8 @@ class TestThePerTurnRefresh:
         refresh = agent._run_state_refresher(max_steps=10, timeout=600.0, started=time.monotonic())
         opening = [SystemMessage(content="sys"), HumanMessage(content="t")]
         first = refresh({"messages": opening})
-        assert first[:2] == opening
+        assert first[0] == opening[0]
+        assert str(first[1].content).startswith("t\n\n" + RUN_STATE_BEGIN)
         line = re.search(r"budget remaining: (\d+) model turns, (\d+) s", str(first[-1].content))
         assert line is not None
         # recursion_limit=10 is five model turns: a turn that calls a tool
@@ -218,6 +218,7 @@ class TestThePerTurnRefresh:
                     AIMessage(content="", tool_calls=[{"name": "t", "args": {}, "id": "1"}]),
                     ToolMessage(content="r", tool_call_id="1"),
                     AIMessage(content="b"),
+                    HumanMessage(content="go on"),
                 ]
             }
         )

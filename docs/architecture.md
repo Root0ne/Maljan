@@ -401,20 +401,27 @@ its suggested label and names listed as `labels …`.
 state — the sample, the identity, hashes, signature and reputation lines out
 of the pack, which stages ran or were skipped and why, how many ledger entries
 exist and which tools failed, and the steps and seconds a tool loop has left —
-and sends them as the last turn of a request, a human turn of their own
-between `=== RUN STATE … ===` markers. It is regenerated on every model turn of
-a tool loop (the executor's prompt hook writes the current budget line) and
-replaced rather than appended, so a prompt carries exactly one block. It goes
-last because it changes every turn: anywhere earlier, the changed line would
-change the front of the request, which voids a hosted provider's prefix cache
+and puts them at the end of a request's last message, between
+`=== RUN STATE … ===` markers: the task on a loop's first turn, the latest tool
+answer after a tool call, the question a nudge, a forced synthesis, a revision
+or a validation retry asks. It is regenerated on every model turn of a tool
+loop (the executor's prompt hook writes the current budget line) and comes off
+a message again, leaving its bytes exactly as they were, once that message is
+no longer last, so a prompt carries exactly one block. It goes at the end
+because it changes every turn: anywhere earlier, the changed line would change
+the front of the request, which voids a hosted provider's prefix cache
 (measured on DeepSeek: 0 cached tokens of 3,884 with only that line changed,
 3,712 with it unchanged) and makes a local server read the whole conversation
-again. At the end, each turn's request is the previous one's without its old
-block, plus the new turns and the new block. The nudge and the forced
-synthesis after a loop carry the block as of that moment, before their own
-question; the forced-synthesis trim keeps the system turn and the first human
-turn, so the pack is never what gets cut. It is read-only to the model: nothing
-a model says is written into it.
+again. At the end, each turn's request is the previous one without its block,
+plus the new turns and the new block, and the cache holds up to the block. It
+rides on a message rather than as a turn of its own so that no request has two
+user turns in a row, which strict chat templates refuse, and no turn that says
+only the run's state, which a model can take for the question. It never rides
+on a model's own turn. The forced-synthesis trim keeps the system turn and the
+first human turn, so the pack is never what gets cut. It is read-only to the
+model: nothing a model says is written into it. The judge's, the narrative's
+and the composer's blocks do not change within their calls and lead their task
+turn, as before.
 
 Agents exchange structured `AgentISR` objects — claims with an `evidence_ref`
 and a confidence — rather than raw text. Objects are built and cached in one
@@ -1328,8 +1335,8 @@ ask anyone, which is what keeps the `default` team's analysts what they were.
 
 Calling it runs the named agent under the same job: the same container, the
 same sample paths (its own provider's mirror first, as a stage agent gets), the
-same triage pack at the head of its first turn and the same run-state block as
-the last turn of each request. The callee's human turn is the task, with the context after it
+same triage pack at the head of its first turn and the same run-state block at
+the end of each request's last message. The callee's human turn is the task, with the context after it
 and the claim format it answers in; it runs its own tool loop, its answer is
 parsed into claims and checked by the technique check in its own conversation,
 and the resulting ISR text — the claims with the ledger ids they cite — is the

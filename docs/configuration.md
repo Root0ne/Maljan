@@ -201,11 +201,23 @@ back on its assistant turn in every later request: DeepSeek's thinking-mode
 guide (https://api-docs.deepseek.com/guides/thinking_mode, on tool calls) says
 the API answers 400 otherwise. The OpenAI client reads it from no answer and
 writes it into no request, so under `deepseek` the provider keeps each turn's
-`reasoning_content` exactly as returned and sends it back on that turn. The
-answer's `content` is untouched, and a turn sent again is sent byte for byte,
-so the request's front stays what DeepSeek has cached. The reasoning's size is
-in the run's token counts (`reasoning_tokens`); its text stays with the turn
-in the loop's conversation and is not published.
+`reasoning_content` exactly as returned and sends it back on that turn, on
+every request that carries tools. A request without tools is sent without it:
+the guide says it is not needed there and is ignored if sent, so it would only
+be input read for nothing. The answer's `content` is untouched, and a turn sent
+again is sent byte for byte, so the request's front stays what DeepSeek has
+cached. The reasoning sent back counts toward the conversation's size in the
+window budget, and its tokens are in the run's counts (`reasoning_tokens`); its
+text stays with the turn in the loop's conversation and is not published. The
+cap goes out as `max_tokens` on each request, so a cap bound for one call
+reaches DeepSeek as the model's own does.
+
+`llm.openai.compat`, like every `llm.openai` setting, is global: it applies to
+every model built on the `openai` provider, per-agent entries and fallbacks at
+their own endpoints included. Under `deepseek`, an `openai` entry pointing at a
+local llama.cpp server gets DeepSeek's fields and none of the llama.cpp extras,
+so a run that mixes the two keeps its local entries on another provider
+(`ollama`) or runs them under `llama_cpp` in a separate configuration.
 
 ### Reasoning effort
 
@@ -217,7 +229,8 @@ https://api-docs.deepseek.com/guides/thinking_mode, maps `xhigh` to `high` and
 shipped value, sends nothing and leaves the endpoint's own default (`high` on
 DeepSeek). A value the endpoint does not know is its own 400, and the `llm`
 connection test asks with the value, so it is found there rather than on a
-job's first call. The setting is global: a per-agent model entry names a
+job's first call. The setting is global, sent to every `openai`-provider model
+including per-agent entries and fallbacks: a per-agent model entry names a
 provider, a model and an endpoint, and carries none of the provider's request
 settings.
 
