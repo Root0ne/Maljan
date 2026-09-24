@@ -746,14 +746,17 @@ def _judge_indicator_unpublished(
 ) -> tuple[str, str] | None:
     """Why the one publish rule declines this judge indicator, or ``None``.
 
-    Every comparison whose value is of a kind the rule answers is asked it,
-    exactly as the report's own row for the value is asked
-    (:func:`judge_value_answer`); one refused value declines the indicator. A
+    Every value a comparison of a kind the rule answers names is asked it,
+    whatever the operator — ``=``, each member of an ``IN`` list, the operand
+    of ``!=``, ``<`` or ``>`` — exactly as the report's own row for the value
+    is asked (:func:`judge_value_answer`); one refused value declines the
+    indicator. The IOC table and ``/iocs`` still read ``=`` alone; the export
+    asks every operator, so no operator carries a value the rule refused. A
     comparison of a kind the IOC table has no row for (a port, a property of a
     process) is left to the host question and the grounding check before this.
     """
     named = safe_finding_value(getattr(indicator, "name", "") or indicator.pattern)
-    for value in pattern_values(indicator.pattern or ""):
+    for value in rule_values(indicator.pattern or ""):
         answer = judge_value_answer(report, value.kind, value.value, corroborating)
         if answer == "yes":
             continue
@@ -2258,6 +2261,28 @@ def pattern_values(pattern: str) -> list[ExportedValue]:
     found: list[ExportedValue] = []
     for comparison in read_comparisons(str(pattern or "")):
         if not comparison.readable or comparison.operator != "=":
+            continue
+        value = comparison.literal.strip()
+        kind, algorithm = _exported_kind(comparison)
+        if kind and value:
+            found.append(ExportedValue(kind=kind, value=value, algorithm=algorithm))
+    return found
+
+
+def rule_values(pattern: str) -> list[ExportedValue]:
+    """Every value a pattern names over a kind the rule answers, whatever the operator.
+
+    :func:`pattern_values` reads ``=`` alone, which is what the IOC table and
+    ``/iocs`` list. This reads what the export asks the rule about: every
+    quoted operand of an operator that compares with a value — ``=``, ``!=``,
+    ``<``, ``>``, ``<=``, ``>=`` and each member of ``IN`` — and never a shape
+    (``LIKE``, ``MATCHES``, ``ISSUBSET``, ``ISSUPERSET``), which names no value.
+    An ``IN`` list, a ``<`` or a ``!=`` used to reach the export with nothing
+    asked, so a value the rule refused as ``=`` was published inside one.
+    """
+    found: list[ExportedValue] = []
+    for comparison in read_comparisons(str(pattern or "")):
+        if not comparison.readable or not _endpoint_is_readable(comparison.operator):
             continue
         value = comparison.literal.strip()
         kind, algorithm = _exported_kind(comparison)

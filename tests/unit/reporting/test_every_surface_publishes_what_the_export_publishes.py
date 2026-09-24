@@ -35,6 +35,7 @@ from maljan.reporting.renderers.stix_renderer import (
     exported_indicator_values,
     indicator_publish_reason,
     publish_answer,
+    rule_values,
 )
 from maljan.schemas.stix_models import Bundle
 
@@ -193,6 +194,10 @@ class TestOneDecision:
             (f"[file:hashes.'SHA-256' = '{SHA256}']", f"[file:hashes.'SHA-256' = '{FOREIGN}']"),
             ("[mutex:name = 'ExampleMarker']", f"[domain-name:value = '{OBSERVED}']"),
             ("[file:name = 'C:\\\\ProgramData\\\\relay.dat']",),
+            (f"[domain-name:value IN ('{OBSERVED}', '{SWEPT}')]",),
+            (f"[domain-name:value IN ('{OBSERVED}')]",),
+            (f"[domain-name:value != '{SWEPT}']",),
+            ("[process:command_line IN ('whoami /all')]",),
         ],
     )
     def test_the_export_and_the_table_agree(self, patterns: tuple[str, ...]) -> None:
@@ -208,8 +213,50 @@ class TestOneDecision:
         published = {(r.kind, r.value.lower()) for r in table if r.published == "yes"}
         carried = {(v.kind, v.value.lower()) for v in exported_indicator_values(exported)}
         judged = {(j.kind, j.value.lower()) for j in report.judge_indicators}
+        # Every value any exported indicator names, whatever its operator.
+        named = {
+            (v.kind, v.value.lower())
+            for obj in exported["objects"]
+            if obj.get("type") == "indicator"
+            for v in rule_values(str(obj.get("pattern") or ""))
+        }
 
         # Every value the export carries is published in the table ...
         assert carried <= published
+        assert named <= published
         # ... and every judge value the table publishes is in the export.
         assert (published & judged) <= carried
+
+
+class TestEveryOperatorIsAskedTheRule:
+    """An ``IN`` list, a ``!=`` or a ``>`` carried the values ``=`` was refused."""
+
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            f"[domain-name:value IN ('{SWEPT}')]",
+            f"[domain-name:value IN ('{OBSERVED}', '{SWEPT}')]",
+            f"[domain-name:value != '{SWEPT}']",
+            "[ipv4-addr:value IN ('45.77.12.9')]",
+            "[process:command_line IN ('whoami /all')]",
+            "[process:command_line > 'whoami']",
+        ],
+    )
+    def test_a_value_the_rule_refuses_is_declined_on_every_operator(self, pattern: str) -> None:
+        judge = _judge(pattern)
+        report = _report(judge)
+        exported, renderer = _export(report, judge)
+
+        assert pattern not in str(exported)
+        assert UNPUBLISHED_VALUE_CODE in [code for code, _why in renderer.declined]
+        # The table and the feed read ``=`` alone and list nothing from it.
+        assert not report.judge_indicators
+
+    def test_an_in_list_of_values_the_rule_publishes_is_carried(self) -> None:
+        pattern = f"[domain-name:value IN ('{OBSERVED}')]"
+        judge = _judge(pattern)
+        report = _report(judge)
+        exported, _renderer = _export(report, judge)
+
+        assert pattern in str(exported)
+        assert _row(report, OBSERVED).published == "yes"
