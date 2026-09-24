@@ -20,6 +20,7 @@ and the drop of an indicator that named a value no tool ever saw.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
@@ -3636,6 +3637,14 @@ def shape_names_a_value_violations(
             value.lower() in stated_values or haystack.holds_value(value)
         ):
             continue
+        written_as = _path_for_the_value(comparison.path, value)
+        # A URL is scrubbed to its scheme and host in any stored sentence, so
+        # the whole URL is named by what it is rather than quoted cut short.
+        suggestion = (
+            "url:value = the whole URL, exactly as the LIKE writes it between its wildcards"
+            if written_as == "url:value"
+            else f"{safe_finding_value(written_as)} = {safe_finding_value(value)!r}"
+        )
         out.append(
             Violation(
                 code=SHAPE_NAMES_A_VALUE_CODE,
@@ -3645,14 +3654,36 @@ def shape_names_a_value_violations(
                     f"{safe_finding_value(comparison.literal)!r}, which names every value that "
                     "fits it; the export publishes values, so it is not exported as written. "
                     f"This run holds {safe_finding_value(value)!r} as a value of its own: if you "
-                    f"mean that value, write {safe_finding_value(comparison.path)} = "
-                    f"{safe_finding_value(value)!r}; or keep the {operator}, and it is not "
+                    f"mean that value, write {suggestion}; or keep the {operator}, and it is not "
                     "exported."
                 ),
                 path=path,
             )
         )
     return out
+
+
+def _path_for_the_value(path: str, value: str) -> str:
+    """The object path a value is written under so the one publish rule can answer for it.
+
+    A host a ``url`` shape was written around is a host, not a URL: written as
+    ``url:value = 'host'`` it is declined as a URL with no host, and the rule is
+    never asked. It is suggested as the type it is — ``domain-name:value``, or
+    the address family an address belongs to — and a whole URL, scheme and all,
+    stays ``url:value``. Every other path is suggested as the shape wrote it.
+    """
+    if path not in ("url:value", "domain-name:value"):
+        return path
+    text = str(value).strip()
+    if "://" in text:
+        return "url:value"
+    try:
+        return f"ipv{ipaddress.ip_address(text.strip('[]')).version}-addr:value"
+    except ValueError:
+        pass
+    from maljan.extractors.network_extractor import host_is_public
+
+    return "domain-name:value" if "/" not in text and host_is_public(text) else path
 
 
 def indicator_type_vocabulary_violations(obj: Any, *, path: str) -> list[Violation]:

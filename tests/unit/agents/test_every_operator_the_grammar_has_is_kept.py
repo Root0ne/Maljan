@@ -225,6 +225,63 @@ class TestAShapeOfAValueIsAskedAbout:
         assert "write domain-name:value = 'one.example'" in message
         assert "keep the LIKE, and it is not exported" in message
 
+    def test_a_host_a_url_shape_was_written_around_is_suggested_as_a_domain(self) -> None:
+        """``url:value = 'host'`` is not a URL and the export declines it as one."""
+        (message,) = self._asked(
+            "[url:value LIKE '%gate9.example.org%']", {"decoded: gate9.example.org"}
+        )
+
+        assert "write domain-name:value = 'gate9.example.org'" in message
+        assert "url:value = 'gate9.example.org'" not in message
+
+    def test_a_whole_url_the_evidence_holds_stays_a_url(self) -> None:
+        (message,) = self._asked(
+            "[url:value LIKE '%https://gate9.example.org/live%']",
+            {"decoded: https://gate9.example.org/live"},
+        )
+
+        assert "write url:value = the whole URL" in message
+        assert "domain-name:value" not in message
+
+    def test_an_address_is_suggested_as_its_family(self) -> None:
+        (message,) = self._asked("[url:value LIKE '%203.0.113.9%']", {"seen 203.0.113.9"})
+
+        assert "write ipv4-addr:value = '203.0.113.9'" in message
+
+    def test_the_suggested_form_written_by_the_judge_is_published_through_the_rule(self) -> None:
+        """The reference case: the host the rule publishes is published once written as asked."""
+        from maljan.reporting.models import NetworkDomain, NetworkIOCs
+
+        (message,) = self._asked(
+            "[url:value LIKE '%gate9.example.org%']", {"decoded: gate9.example.org"}
+        )
+        suggested = "[domain-name:value = 'gate9.example.org']"
+        assert suggested.strip("[]") in message
+
+        report = _report()
+        report.network = NetworkIOCs(
+            domains=[NetworkDomain(fqdn="gate9.example.org", source="sandbox")]
+        )
+        judge = Bundle.model_validate(
+            {
+                "type": "bundle",
+                "objects": [{**_indicator(suggested), "id": f"indicator--{_uuid(1)}"}],
+            }
+        )
+        renderer = ExtendedSTIXRenderer()
+        exported = renderer.render(report, judge)
+
+        assert suggested in [getattr(o, "pattern", "") for o in exported.objects]
+        assert _errors(exported) == []
+
+    def test_a_suggested_form_the_rule_refuses_is_declined_for_the_rule_s_reason(self) -> None:
+        """Not as an impossible URL: the rule is asked, and answers."""
+        suggested = "[domain-name:value = 'gate9.example.org']"
+        exported, renderer = _export(suggested)
+
+        assert suggested not in [getattr(o, "pattern", "") for o in exported.objects]
+        assert [code for code, _why in renderer.declined] == [UNPUBLISHED_VALUE_CODE]
+
     def test_a_value_another_indicator_writes_with_equals_is_named(self) -> None:
         (message,) = self._asked(
             "[process:command_line LIKE '%whoami /all%']",
