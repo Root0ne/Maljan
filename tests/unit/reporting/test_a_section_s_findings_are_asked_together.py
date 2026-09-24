@@ -10,12 +10,14 @@ asked, with the reason, and its marks say so.
 
 from __future__ import annotations
 
+import asyncio
 import json
 
-from langchain_core.messages import AIMessage
+import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 
-from maljan.pipeline.validation import REPEATED_ITEMS_CODE
-from maljan.reporting.composer import ONLY_IN_THE_RETRY
+from maljan.pipeline.validation import REPEATED_ITEMS_CODE, CapabilityGrounding
+from maljan.reporting.composer import ONLY_IN_THE_RETRY, ReportComposer, _HostIdentifiersOut
 from tests.unit.reporting.test_a_repeated_item_is_asked_about_once import (
     _DISTINCT,
     _LOOPING,
@@ -62,6 +64,7 @@ class TestFoundOnlyInTheRetry:
         (row,) = composer.validation_tally.unresolved
         assert row["code"] == REPEATED_ITEMS_CODE
         assert row["message"].endswith(ONLY_IN_THE_RETRY)
+        assert row["asked"] == "false"
 
     def test_a_repeat_that_was_asked_and_kept_reads_as_asked(self) -> None:
         llm = _Answers(_answer(*_LOOPING), _answer(*_LOOPING))
@@ -70,3 +73,36 @@ class TestFoundOnlyInTheRetry:
 
         (row,) = composer.validation_tally.unresolved
         assert ONLY_IN_THE_RETRY not in row["message"]
+        assert "asked" not in row
+
+    def test_a_new_sentence_under_a_term_already_asked_is_not_asked(self) -> None:
+        """Keyed by sentence: the term was asked about, this sentence never was."""
+        first = AIMessage(
+            content=json.dumps(
+                {"identifiers": [{**_DISTINCT[0], "purpose": "It performs keylogging."}]}
+            ),
+            response_metadata={"finish_reason": "stop"},
+        )
+        second = AIMessage(
+            content=json.dumps(
+                {"identifiers": [{**_DISTINCT[0], "purpose": "It records every keystroke."}]}
+            ),
+            response_metadata={"finish_reason": "stop"},
+        )
+        llm = _Answers(first, second)
+        composer = ReportComposer(llm=llm, section_max_tokens=8192)  # type: ignore[arg-type]
+        composer._grounding = CapabilityGrounding(evidence_keys=frozenset({"pe_header"}))
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "maljan.reporting.composer.structured_output_supported_for_llm", lambda _l: False
+            )
+            asyncio.run(
+                composer._invoke(
+                    [HumanMessage(content="x")], _HostIdentifiersOut, section="host_identifiers"
+                )
+            )
+
+        assert len(llm.seen) == 2
+        rows = [r for r in composer.validation_tally.unresolved if r["code"].startswith("narr")]
+        assert rows and all(r["asked"] == "false" for r in rows)
+        assert all(r["message"].endswith(ONLY_IN_THE_RETRY) for r in rows)

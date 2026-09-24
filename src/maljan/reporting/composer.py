@@ -1248,8 +1248,20 @@ class ReportComposer:
                 f"report section '{section or schema.__name__}' kept its findings unasked: "
                 f"{_UNFIT_QUESTION}"
             )
-        asked_about = {(v.code, v.path) for v in shown}
-        late = [v for v in ungrounded if retries and (v.code, v.path) not in asked_about]
+        # By finding and, for a finding about sentences, by sentence: a new
+        # sentence under a term already asked about was not asked either.
+        asked_about: dict[tuple[str, str], set[str]] = {}
+        for v in shown:
+            asked_about.setdefault((v.code, v.path), set()).update(v.quoted)
+        late = [
+            v
+            for v in ungrounded
+            if retries
+            and (
+                (v.code, v.path) not in asked_about
+                or (v.quoted and not set(v.quoted) & asked_about[(v.code, v.path)])
+            )
+        ]
         self._record_ungrounded(
             section or schema.__name__, [v for v in ungrounded if v not in late]
         )
@@ -1295,7 +1307,7 @@ class ReportComposer:
             section,
             ", ".join(v.path for v in violations),
         )
-        self.validation_tally.record_unresolved(f"composer:{section}", violations)
+        self.validation_tally.record_unresolved(f"composer:{section}", violations, asked=asked)
         record_flagged_statements(getattr(self, "_report", None), violations, asked=asked)
 
 
