@@ -817,18 +817,19 @@ change landed on `main`.
 
 ### Changed
 
-- **The judge is asked only for what it alone decides.** The verdict contract
-  asks for no `malware uses attack-pattern` and no `indicator indicates
-  malware` relationship: the platform writes both for every attack-pattern and
-  indicator from the bundle's one malware object
-  (`judge_postprocess.relate_to_the_sample`), carrying the confidence, basis and
-  credits the judge writes on the object, unchanged. The judge writes an
-  attack-pattern with at most one short sentence of description and the JSON
-  on one line. The question after a cut names the answer's characters, the
-  objects it began by type and its indented lines, and asks for the compact
-  bundle. A reference judge's pretty-printed bundle, a third of it those
-  relationships, was cut at its 8,192-token output cap twice and the verdict
-  fell back to text extraction; the output cap is unchanged.
+- **The judge writes a compact bundle.** The verdict contract asks for the
+  JSON on one line, the confidence, basis and credits on the relationship only
+  (never repeated on the indicator or attack-pattern it relates), an
+  attack-pattern with at most one sentence of description, and no
+  `pattern_type` (always `stix`, filled in); created, modified, spec_version
+  and valid_from were already left out. Every relationship is still the
+  judge's own, and an indicator is related only to what it indicates. The
+  question after a cut names the answer's characters, the objects it began by
+  type and its indented lines, and asks for the compact bundle. A reference
+  judge's answer was cut at its 8,192-token output cap twice and the verdict
+  fell back to text extraction; only its first 2,000 characters are stored,
+  pretty-printed, with a relationship's annotations repeated on its indicators.
+  The output cap is unchanged.
 
 - **A composer section's output budget is derived, not fixed.**
   `reporting.composer_section_max_tokens` ships at 0, which gives each model
@@ -1887,7 +1888,9 @@ change landed on `main`.
   the judge's answer was cut twice the fallback bundle carried no indicator,
   so the decoded C2 hosts the answer had written whole were never put to the
   publish rule and `/iocs` and STIX held only the hashes. Each indicator the
-  answer wrote whole (read as written, no repair) is kept with a minted id,
+  answer's bundle wrote whole among its own top-level `objects` (read as
+  written, no repair; never from reasoning, a string or a nested object) is
+  kept with a minted id,
   asked what a bundle's indicator is asked — the findings recorded, an
   ungrounded one dropped — and the export, the IOC table and `/iocs` read the
   one publish rule's answer for it, emulation record and verdict included.
@@ -1899,8 +1902,13 @@ change landed on `main`.
   APIs required for persistence"), and a term after "rather than", "instead
   of" or "prevents confirmation of", is read as absence, by the absence
   question and the mark alike. capa's and YARA's rule names no longer ground a
-  capability word (their sections still count by key), and a sentence that
-  says a rule matched is not a claim. The anti-analysis term reads evading
+  capability word (their sections still count by key), and a sentence whose
+  assertion is only that a rule matched ("YARA rule X matched", "capa reports
+  the rule Y") is not a claim; one that draws a conclusion from a rule ("Based
+  on YARA results, the sample steals credentials") is checked as before. A
+  slash-joined list of words is read; only a path-shaped run is a value. A
+  negated verb of need ("does not require administrator rights for
+  persistence") claims its purpose. The anti-analysis term reads evading
   detection or analysis and packing. A benign control's four marks had sat on
   a configuration path row and two absence sentences, while its keylogging,
   evasion, anti-debugging and "repacked" over-claims went unmarked.
@@ -4491,11 +4499,8 @@ change landed on `main`.
 
 ### Upgrading
 
-A judge bundle's `uses` edges to its attack-patterns and `indicates` edges from
-its indicators may now be the platform's, written from the malware object
-with the judge's `x_maljan_confidence`, `x_maljan_evidence_basis` and
-`x_maljan_contributing_agents` moved from the object; the judge's bundle as
-written (`JudgeVerdict.written`) keeps them where the judge put them. A
+The judge is asked to leave `pattern_type` out of an indicator (the model
+fills in `stix`) and to write its annotations on relationships only. A
 fallback bundle may carry indicator objects. `attck.claim_does_not_describe`
 is a new validation code, counted in `run_summary.validation`; the not-asked
 path appends "Not asked: …" to it as to `attck.absence_claim`. The
@@ -4503,8 +4508,10 @@ path appends "Not asked: …" to it as to `attck.absence_claim`. The
 objects and indented lines. The capability check asks about more report
 sentences where only capa's or YARA's rule names had grounded a word, and about
 fewer where a value, a heading or an absence had been read as a claim. A
-section's findings first raised by its retry are recorded ending
-`composer.ONLY_IN_THE_RETRY`.
+section's findings first raised by its retry — a new sentence under a term
+already asked included — are recorded ending `composer.ONLY_IN_THE_RETRY`, and
+a `run_summary.validation.unresolved` row of a finding never shown to its
+producer carries `"asked": "false"`.
 
 An analyst claim carries `kept_after_absence_question` (false on a stored ISR,
 which is read as before), and a capability matrix cell carries `note` (empty

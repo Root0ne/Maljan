@@ -500,8 +500,15 @@ Two producers use it:
   span, a quoted string, a path or registry key, a record's `value` or
   `endpoints`, and the words of that value its other fields restate ("Configuration path
   for SSH authentication credentials" beside `/SSH/Auth/Credentials`); nor a
-  section's heading. A sentence that says a rule matched ("capa matched …") is
-  not a claim that the sample does what the rule names.
+  section's heading; a slash-joined list of words is not a path, only a run
+  opened by a separator, a drive, a hive or a share, or with a dotted or
+  capitalised component. A sentence whose assertion is only that a rule
+  matched — the matcher, a rule or a signature matched, flagged, hit or
+  reported, and nothing concluded about the sample ("YARA rule X matched",
+  "capa reports the rule Y") — is not a claim that the sample does what the
+  rule names; "Based on YARA results, the sample steals credentials" is. A
+  negated verb of need ("does not require administrator rights for
+  persistence") negates the need, not its purpose.
 
   What grounds a capability word is what the run found: a published technique
   that is not a rule match only, an evidence section's key, and a word said —
@@ -1049,18 +1056,21 @@ other than a bundle has already filed `verdict.fallback` or `verdict.timeout`
 itself, so the summary carries one row and not two.
 
 The verdict prompt states its output budget (`judge_max_tokens`, reasoning
-included) and asks only for what the judge alone decides: no `malware uses
-attack-pattern` and no `indicator indicates malware` relationship, which the
-platform writes for every attack-pattern and indicator from the bundle's one
-malware object (`judge_postprocess.relate_to_the_sample`), moving the
-`x_maljan_confidence`, `x_maljan_evidence_basis` and
-`x_maljan_contributing_agents` the judge wrote on the object onto it
-unchanged; an object the judge related itself gets no second edge, and a
-bundle with no malware object, or two, gets none. An attack-pattern carries at
-most one short sentence of description and the JSON is written on one line. A
-reference judge's bundle — pretty-printed, a third of it those relationships —
-was cut at 8,192 tokens twice; for the objects it wrote, the compact contract
-measures about 14,000 characters, some 5,100 tokens at the answer's own rate.
+included) and a compact bundle (`COMPACT_BUNDLE_RULES`): the JSON on one
+line, the confidence, basis and credits on the relationship only and never
+repeated on the object it relates, an attack-pattern with at most one sentence
+of description, and no property the platform fills in — created, modified,
+spec_version, valid_from, and `pattern_type`, which is always `stix`. Every
+relationship is the judge's own: which indicator indicates the sample, and
+which does not, is its decision, and the platform writes no edge into its
+bundle. A reference judge's answer was cut at 8,192 tokens twice. Only its
+first 2,000 characters are stored; they are pretty-printed (22% of the
+characters are line breaks and indentation) and repeat the relationships'
+annotations on the indicators. Rebuilt from that head and the ids the log
+names, the objects it wrote take about 15% fewer tokens under the compact
+contract. That is an estimate from a reconstruction, not a measurement: the
+answer was cut, so its true length is unknown, and the compact contract alone
+fits it only if it would have closed within about 9,600 tokens as written.
 An answer that stopped at the budget is told so — `verdict.cut_at_output_cap`,
 with the cap, the answer's characters, the objects it began by type and its
 indented lines, asking for the compact bundle — rather than that it was not
@@ -1071,7 +1081,9 @@ reader a whole answer goes through and `JudgeAssessment`, and keeps it only
 when its verdict is one of the three words. The run then publishes that
 verdict with the judge's own confidence, severity and family, still read as
 `fallback` and still filed under `verdict.fallback`. The indicator objects the
-answer wrote whole are kept too, as written with minted ids, asked what a
+answer's bundle wrote whole among its own top-level `objects` are kept too —
+read item by item until the first the cap reached, never from reasoning before
+the bundle, a string or a nested object — as written with minted ids, asked what a
 bundle's indicator is asked — findings recorded, an ungrounded one dropped —
 and put to the one publish rule like any judge indicator, so decoded C2 hosts
 an answer wrote before the cut are published exactly as they would have been
