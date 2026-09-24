@@ -508,6 +508,35 @@ def like_fixed_text(literal: str) -> list[str]:
     return [part for part in _LIKE_WILDCARDS_RE.split(str(literal or "")) if part]
 
 
+# What makes a regular expression more than its text, once its anchors and the
+# escaped dots are read.
+_REGEX_METACHARACTERS = frozenset("\\.^$|?*+()[]{}")
+
+
+def matches_fixed_text(expression: str) -> list[str]:
+    """The one run of text a ``MATCHES`` expression fixes, when it is only that text.
+
+    ``'^host\\.example$'`` fixes ``host.example``: anchors at its ends and
+    escaped characters read as themselves. An expression that is anything more
+    — a class, an alternation, a repetition — fixes no one value, and says so
+    by answering nothing.
+    """
+    text = str(expression or "").removeprefix("^").removesuffix("$")
+    out: list[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "\\" and index + 1 < len(text) and text[index + 1] in _REGEX_METACHARACTERS:
+            out.append(text[index + 1])
+            index += 2
+            continue
+        if char in _REGEX_METACHARACTERS:
+            return []
+        out.append(char)
+        index += 1
+    return ["".join(out)] if out else []
+
+
 # The Cyber-observable object types STIX 2.1 defines. A pattern compares a
 # property of one of these, or of a custom type a producer declared under the
 # ``x-`` prefix; a pattern over any other type names objects no consumer has,

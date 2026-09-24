@@ -2307,6 +2307,17 @@ def rule_values(pattern: str) -> list[ExportedValue]:
     return found
 
 
+def shape_is_asked_the_rule(comparison: Any) -> bool:
+    """Whether a comparison is over an endpoint or a kind the one publish rule answers for.
+
+    The two places a shape (``LIKE``, ``MATCHES``) is declined from the export:
+    the host question's paths and the IOC table's kinds.
+    """
+    if _exported_kind(comparison)[0]:
+        return True
+    return bool(_checked_kind(comparison.object_type, comparison.prop))
+
+
 def _exported_kind(comparison: Any) -> tuple[str, str]:
     """The IOC table's kind for a comparison's path, and a digest's algorithm; ``("", "")``."""
     digest = _HASH_PROPERTY_RE.match(comparison.prop)

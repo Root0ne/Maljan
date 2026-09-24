@@ -468,6 +468,7 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
             "stix.unknown_object_path",
             "stix.unescaped_backslash",
             "stix.pattern_refused",
+            "stix.shape_names_a_value",
             "stix.file_unidentified",
         }
     )

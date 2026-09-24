@@ -283,6 +283,38 @@ PROMPTS: dict[str, str] = {
         )
         if v.code in ("stix.ungrounded_indicator", "stix.unescaped_backslash")
     ),
+    "judge questions about a shape naming a value and a pattern the grammar refuses": " ".join(
+        v.message
+        for v in validate_verdict_bundle(
+            Bundle.model_validate(
+                {
+                    "type": "bundle",
+                    "objects": [
+                        {
+                            "type": "indicator",
+                            "id": "indicator--1",
+                            "pattern": "[domain-name:value LIKE '%one.example%']",
+                            "indicator_types": ["malicious-activity"],
+                        },
+                        {
+                            "type": "indicator",
+                            "id": "indicator--2",
+                            "pattern": "[url:value MATCHES '^two\\\\.example$']",
+                            "indicator_types": ["malicious-activity"],
+                        },
+                        {
+                            "type": "indicator",
+                            "id": "indicator--3",
+                            "pattern": "[file:name =]",
+                            "indicator_types": ["malicious-activity"],
+                        },
+                    ],
+                }
+            ),
+            {"host one.example and two.example seen"},
+        )
+        if v.code in ("stix.shape_names_a_value", "stix.pattern_refused")
+    ),
 }
 
 # Each composer section's whole contract — the object, the lines on how to
@@ -330,6 +362,13 @@ def test_the_guard_would_catch_one() -> None:
 def test_the_term_list_is_long_enough_to_mean_something() -> None:
     assert len(KEY_TERMS) >= 50
     assert len(set(KEY_TERMS)) == len(KEY_TERMS)
+
+
+def test_the_shape_and_refusal_questions_are_both_scanned() -> None:
+    text = PROMPTS["judge questions about a shape naming a value and a pattern the grammar refuses"]
+    assert "write domain-name:value = 'one.example'" in text
+    assert "keep the MATCHES" in text
+    assert "is not a pattern the STIX grammar reads" in text
 
 
 def test_every_question_built_for_this_scan_has_words_to_scan() -> None:

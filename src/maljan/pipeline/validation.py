@@ -3591,6 +3591,64 @@ def unknown_observable_type_violations(obj: Any, *, path: str) -> list[Violation
     return out
 
 
+SHAPE_NAMES_A_VALUE_CODE = "stix.shape_names_a_value"
+
+
+def shape_names_a_value_violations(
+    obj: Any, haystack: Haystack, stated_values: set[str], *, path: str
+) -> list[Violation]:
+    """A ``LIKE`` or ``MATCHES`` whose fixed text is a value this run holds: asked about ``=``.
+
+    A ``LIKE`` names every value that fits it, and the export publishes values:
+    the one publish rule answers for a value, so a shape over an endpoint or a
+    kind the rule answers for is declined. When the text between its wildcards
+    is one run that the evidence holds as a value of its own, or that another
+    of the judge's indicators compares with ``=``, the judge most likely read
+    that value and wrote a shape of it — the reference run wrote every decoded
+    host as ``LIKE '%host%'``. It is asked once whether it means the value; what
+    it keeps is its decision, and a shape it keeps is declined as before.
+    """
+    from maljan.reporting.renderers.stix_renderer import shape_is_asked_the_rule
+    from maljan.schemas.stix_pattern import like_fixed_text, matches_fixed_text
+
+    pattern = str(getattr(obj, "pattern", "") or "")
+    named = str(getattr(obj, "name", "") or "").strip() or pattern
+    out: list[Violation] = []
+    for comparison in read_comparisons(pattern):
+        if comparison.operator not in ("like", "matches") or not comparison.readable:
+            continue
+        if not shape_is_asked_the_rule(comparison):
+            continue
+        fixed = (
+            like_fixed_text(comparison.literal)
+            if comparison.operator == "like"
+            else matches_fixed_text(comparison.literal)
+        )
+        if len(fixed) != 1:
+            continue
+        value = fixed[0].strip()
+        operator = safe_finding_value(comparison.operator.upper())
+        if len(value) < 4 or not (value.lower() in stated_values or haystack.holds_value(value)):
+            continue
+        out.append(
+            Violation(
+                code=SHAPE_NAMES_A_VALUE_CODE,
+                message=(
+                    f"the indicator {safe_finding_value(named)!r} compares "
+                    f"{safe_finding_value(comparison.path)} with {operator} "
+                    f"{safe_finding_value(comparison.literal)!r}, which names every value that "
+                    "fits it; the export publishes values, so it is not exported as written. "
+                    f"This run holds {safe_finding_value(value)!r} as a value of its own: if you "
+                    f"mean that value, write {safe_finding_value(comparison.path)} = "
+                    f"{safe_finding_value(value)!r}; or keep the {operator}, and it is not "
+                    "exported."
+                ),
+                path=path,
+            )
+        )
+    return out
+
+
 def indicator_type_vocabulary_violations(obj: Any, *, path: str) -> list[Violation]:
     """A judge indicator typed with a word outside STIX's indicator-type vocabulary.
 
@@ -3905,11 +3963,23 @@ def validate_verdict_bundle(
     if not haystack:
         how_whole = both_searched(how_whole, NOTHING_SEARCHED)
     not_searched = partial_evidence_note(how_whole)
+    # Every value the bundle's own indicators compare with ``=``: a shape whose
+    # fixed text is one of them names a value the judge already wrote whole.
+    stated_values = {
+        comparison.literal.strip().lower()
+        for obj in objects
+        if str(getattr(obj, "type", "") or "") == "indicator"
+        for comparison in read_comparisons(str(getattr(obj, "pattern", "") or ""))
+        if comparison.operator == "=" and comparison.literal.strip()
+    }
     for index, obj in enumerate(objects):
         where = _object_path(index, origins)
         kind = str(getattr(obj, "type", "") or "")
         if kind == "indicator":
             pattern = str(getattr(obj, "pattern", "") or "")
+            violations.extend(
+                shape_names_a_value_violations(obj, haystack, stated_values, path=where)
+            )
             violations.extend(
                 indicator_type_contradicts_verdict(
                     obj,

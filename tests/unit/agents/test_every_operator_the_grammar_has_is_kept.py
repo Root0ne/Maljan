@@ -27,6 +27,7 @@ from stix2validator import ValidationOptions, validate_instance
 from maljan.agents.judge_postprocess import enforce_bundle_integrity
 from maljan.pipeline.validation import (
     PATTERN_REFUSED_CODE,
+    SHAPE_NAMES_A_VALUE_CODE,
     STRAY_BACKSLASH_CODE,
     validate_verdict_bundle,
 )
@@ -182,6 +183,50 @@ class TestWellFormedness:
         kept = enforce_bundle_integrity(objects)
 
         assert [o["id"] for o in kept] == [o["id"] for o in objects]
+
+
+class TestAShapeOfAValueIsAskedAbout:
+    """A judge that wrote every decoded host as ``LIKE '%host%'`` is asked once about ``=``."""
+
+    def _asked(self, pattern: str, evidence: set[str], *others: str) -> list[str]:
+        objects = [_indicator(p, i) for i, p in enumerate((pattern, *others), start=1)]
+        bundle = Bundle.model_validate({"type": "bundle", "objects": objects})
+        return [
+            v.message
+            for v in validate_verdict_bundle(bundle, evidence)
+            if v.code == SHAPE_NAMES_A_VALUE_CODE and v.path.startswith("objects[0]")
+        ]
+
+    def test_a_host_the_evidence_holds_whole_is_named(self) -> None:
+        (message,) = self._asked(
+            "[domain-name:value LIKE '%one.example%']", {"decoded: one.example"}
+        )
+
+        assert "write domain-name:value = 'one.example'" in message
+        assert "keep the LIKE, and it is not exported" in message
+
+    def test_a_value_another_indicator_writes_with_equals_is_named(self) -> None:
+        (message,) = self._asked(
+            "[process:command_line LIKE '%whoami /all%']",
+            {"nothing"},
+            "[process:command_line = 'whoami /all']",
+        )
+
+        assert "= 'whoami /all'" in message
+
+    def test_a_matches_that_is_only_its_text_is_named(self) -> None:
+        (message,) = self._asked(
+            "[url:value MATCHES '^https://one\\\\.example/gate$']", {"https://one.example/gate"}
+        )
+
+        assert "keep the MATCHES" in message
+
+    def test_a_shape_the_evidence_does_not_hold_whole_is_not(self) -> None:
+        assert self._asked("[domain-name:value LIKE '%one.example%']", {"none"}) == []
+        assert self._asked("[domain-name:value LIKE '%one%example%']", {"one.example"}) == []
+
+    def test_a_shape_over_a_path_the_export_carries_is_not(self) -> None:
+        assert self._asked("[file:size LIKE '%1000%']", {"1000"}) == []
 
 
 class TestAShapeIsNotAValue:
