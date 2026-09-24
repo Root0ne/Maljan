@@ -3544,7 +3544,7 @@ def unknown_observable_type_violations(obj: Any, *, path: str) -> list[Violation
                 code=STRAY_BACKSLASH_CODE,
                 message=(
                     f"the indicator {safe_finding_value(named)!r} quotes "
-                    f"{'a value' if len(stray) == 1 else f'{len(stray)} values'} with a "
+                    f"{len(stray)} value(s) with a "
                     "backslash the pattern grammar cannot read: inside a quoted value a STIX "
                     "pattern "
                     "escapes the quote and the backslash and nothing else, so every backslash "

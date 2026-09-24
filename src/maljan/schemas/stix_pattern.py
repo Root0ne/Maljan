@@ -269,8 +269,8 @@ _LIKE_WILDCARDS_RE = re.compile(r"[%_]+")
 def like_fixed_text(literal: str) -> list[str]:
     """The runs of text a ``LIKE`` value fixes, between its wildcards.
 
-    ``'%skinnyjeanso.com%'`` matches any value that contains
-    ``skinnyjeanso.com``; it is not that value. What a value matching it must
+    ``'%host.example%'`` matches any value that contains
+    ``host.example``; it is not that value. What a value matching it must
     contain is these runs, in order, and nothing else is said by it. A value
     that is all wildcards fixes nothing.
     """
