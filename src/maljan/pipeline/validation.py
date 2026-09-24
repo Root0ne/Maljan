@@ -150,8 +150,15 @@ class ValidationTally:
         for violation in violations:
             self.by_code[violation.code] = self.by_code.get(violation.code, 0) + 1
 
-    def record_unresolved(self, producer: str, violations: Sequence[Violation]) -> None:
+    def record_unresolved(
+        self, producer: str, violations: Sequence[Violation], *, asked: bool = True
+    ) -> None:
         """Keep what survived the retry, as a row naming who was told.
+
+        ``asked=False`` is a finding the producer was never shown — no turn to
+        ask on, or first raised by the answer to its only retry — and the row
+        says so (``"asked": "false"``), so a reader counting rows can tell it
+        from one the producer was told and left.
 
         ``advisory`` travels with it. Rebuilt without the flag, a row the
         platform explicitly declined to act on was stored, printed and drawn as
@@ -164,6 +171,7 @@ class ValidationTally:
                 "code": v.code,
                 "message": v.message,
                 **({"advisory": "true"} if v.advisory else {}),
+                **({} if asked else {"asked": "false"}),
             }
             for v in violations
         )
@@ -446,6 +454,15 @@ def validate_isr(
                 violations.append(
                     Violation(code=PLATFORM_MISMATCH_CODE, message=mismatch, path=path)
                 )
+            else:
+                # A claim that names the behaviour to say it is absent is asked
+                # that question, and an id the sample's platform cannot host is
+                # asked about the platform; one whose sentence never names its
+                # technique is asked this one. The weak-alignment challenge,
+                # when it is on, may still be asked of the same claim.
+                undescribed = claim_does_not_describe_violation(claim, tid, attck, path=path)
+                if undescribed is not None:
+                    violations.append(undescribed)
         weak = _weak_alignment(
             claim,
             tid,
@@ -534,6 +551,10 @@ _CUE_THAT_ASSERTS_RE = re.compile(
     r"^\W*(?:longer|merely|only|just|simply|stops?|ceases?|fails?\s+to\s+stop|end)\b",
     re.IGNORECASE,
 )
+# A negated verb of need: "does not require administrator rights for
+# persistence" says what the behaviour does without, and claims the behaviour.
+# The cue negates the need, not the purpose it names.
+_NEED_VERB_RE = re.compile(r"^\s+(?:require|need|depend|rely)\w*\b", re.IGNORECASE)
 
 
 def _governed_absence(text: str, start: int) -> bool:
@@ -555,7 +576,7 @@ def _governed_absence(text: str, start: int) -> bool:
         if lowered.startswith(_NOT_A_NEGATION, cue.start()):
             continue
         after = window[cue.end() :]
-        if _CUE_THAT_ASSERTS_RE.match(after):
+        if _CUE_THAT_ASSERTS_RE.match(after) or _NEED_VERB_RE.match(after):
             continue
         if _ASSERTION_BETWEEN_RE.search(after) or _reach_ends(after):
             continue
@@ -579,16 +600,22 @@ _NEGATED_NOUN_LIST_RE = re.compile(
 
 
 def _absent_by_its_own_statement(text: str, start: int, end: int) -> bool:
-    """The two readings of absence that do not rest on a cue next to the mention.
+    """The readings of absence that do not rest on a cue next to the mention.
 
-    The mention is the subject of "is absent", "is not present" or "was not
-    observed" and opens its clause; or it is an item of a noun list a cue in
-    its own clause negates, the list ending at its head noun ("does not contain
-    persistence, lateral movement, or exfiltration mechanisms"). The same cue
-    words and clause breaks as the capability check's reader, and a cue that
-    opens an assertion ("no longer") negates no list.
+    The mention is in the subject of "is absent", "is not present" or "was not
+    observed" — opening its clause, or ending the subject's noun phrase ("the
+    specific APIs required for persistence are absent"); it is an item of a
+    noun list a cue in its own clause negates, the list ending at its head noun
+    ("does not contain persistence, lateral movement, or exfiltration
+    mechanisms"); or it ends the object of a negated verb ("does not import the
+    registry APIs required for persistence"). The same cue words and clause
+    breaks as the capability check's reader, and a cue that opens an assertion
+    ("no longer") negates no list and no object. One reading, asked by the
+    absence question and by the capability check alike.
     """
-    if _SUBJECT_ABSENT_RE.match(text[end:]) and _starts_its_clause(text, start):
+    if _subject_is_absent(text, start, end):
+        return True
+    if _in_a_negated_object(text, start):
         return True
     head = text[:start]
     breaks = list(_CLAUSE_BREAK_RE.finditer(head))
@@ -607,6 +634,70 @@ def _absent_by_its_own_statement(text: str, start: int, end: int) -> bool:
         if listed and cue.end() + listed.start("items") <= at < cue.end() + listed.end("items"):
             return True
     return False
+
+
+# What stands right before a mention that ends a noun phrase rather than
+# opening a clause: a preposition attaching it to the noun before it, a
+# determiner or "common"/"typical" allowed ("the APIs required for
+# persistence", "strings associated with common persistence locations").
+_NOUN_COMPLEMENT_BEFORE_RE = re.compile(
+    r"\b(?:for|of|to|with)\s+(?:(?:any|the|its|their|common|typical|such)\s+)?$",
+    re.IGNORECASE,
+)
+
+
+def _subject_is_absent(text: str, start: int, end: int) -> bool:
+    """Whether the mention is in the subject of "is absent" and its like.
+
+    The mention is followed by the absence predicate (a category noun may stand
+    between them) and either opens its clause or ends the subject's noun
+    phrase, attached by a preposition to the noun before it.
+    """
+    if not _SUBJECT_ABSENT_RE.match(text[end:]):
+        return False
+    return _starts_its_clause(text, start) or bool(
+        _NOUN_COMPLEMENT_BEFORE_RE.search(text[max(0, start - _NEGATION_WINDOW) : start])
+    )
+
+
+# A negated verb: "does not import", "did not contain", "never calls".
+_NEGATED_VERB_RE = re.compile(
+    r"\b(?:does|do|did|could|can|will|would|should)\s+not\b"
+    r"|\b(?:doesn't|don't|didn't|cannot|can't|won't|never)\b",
+    re.IGNORECASE,
+)
+# The verb and its object up to the mention: a few words and then the
+# preposition that attaches the mention to the object's head noun.
+_NEGATED_OBJECT_RE = re.compile(
+    r"^\s+[A-Za-z]+\s+(?:[\w./()-]+\s+){0,6}?"
+    r"(?:(?:required|needed|necessary|used|associated|related|linked|typical|indicative"
+    r"|specific)\s+)?(?:for|of|to|with)\s+(?:(?:any|the|its|their|common|typical|such)\s+)?$",
+    re.IGNORECASE,
+)
+
+
+def _in_a_negated_object(text: str, start: int) -> bool:
+    """Whether the mention ends the object of a negated verb in its own clause.
+
+    "It does not import the registry APIs required for persistence" names
+    persistence to say what the sample lacks. The object runs from the verb to
+    the mention with no comma, no coordinator, and nothing that ends the
+    negation's reach between them, and the mention is attached to the object's
+    head noun by a preposition; "does not hide its use of injection" is read as
+    absence too, which costs a flag, never a withheld claim.
+    """
+    head = text[:start]
+    breaks = list(_CLAUSE_BREAK_RE.finditer(head))
+    clause = head[breaks[-1].end() :] if breaks else head
+    cues = list(_NEGATED_VERB_RE.finditer(clause))
+    if not cues:
+        return False
+    after = clause[cues[-1].end() :]
+    if _CUE_THAT_ASSERTS_RE.match(after) or _NEED_VERB_RE.match(after):
+        return False
+    if "," in after or _ASSERTION_BETWEEN_RE.search(after) or _reach_ends(after):
+        return False
+    return bool(_NEGATED_OBJECT_RE.match(after))
 
 
 def states_absence(text: str, pattern: re.Pattern[str] | None) -> bool:
@@ -675,6 +766,115 @@ def absence_claim_violation(
             f"sample does, so {tid} is published as a finding of this run. If the behaviour "
             "is absent, write TECHNIQUE: NONE on this claim; if the sample does do it, keep "
             "the technique and say what the sample does."
+        ),
+        path=path,
+    )
+
+
+CLAIM_DOES_NOT_DESCRIBE_CODE = "attck.claim_does_not_describe"
+
+# The words of a catalogue name that name no behaviour of their own.
+_NAME_FILLER_WORDS = frozenset(
+    {"and", "or", "from", "of", "the", "a", "an", "to", "for", "with", "via", "in", "on", "by"}
+)
+# What a word loses before two words are compared: its common endings, taken
+# off while at least four letters stay, so "obfuscated", "obfuscation" and
+# "obfuscates" are one term and "dumping" and "dumps" another.
+_WORD_ENDINGS = (
+    "ations",
+    "ation",
+    "ating",
+    "ated",
+    "ates",
+    "ions",
+    "ion",
+    "ings",
+    "ing",
+    "ery",
+    "ers",
+    "er",
+    "ies",
+    "es",
+    "ed",
+    "s",
+    "y",
+)
+
+
+def _stem(word: str) -> str:
+    """``word`` lower-cased with its common endings taken off, four letters kept."""
+    stem = word.lower()
+    changed = True
+    while changed:
+        changed = False
+        for ending in _WORD_ENDINGS:
+            if stem.endswith(ending) and len(stem) - len(ending) >= 4:
+                stem = stem[: -len(ending)]
+                changed = True
+                break
+    return stem
+
+
+def _name_terms(technique_id: str, attck: Any) -> tuple[str, set[str]]:
+    """The catalogue name of a technique and the stems of its words, parent's included.
+
+    ``("", set())`` when the catalogue gives no name.
+    """
+    answer = _catalogue_answer(str(technique_id), attck, "attck_lookup")
+    name = str(answer.get("name") or "").strip()
+    if not name:
+        return "", set()
+    names = [name]
+    if "." in str(technique_id):
+        parent = _catalogue_answer(str(technique_id).split(".")[0], attck, "attck_lookup")
+        names.append(str(parent.get("name") or ""))
+    stems = {
+        _stem(word)
+        for text in names
+        for word in re.findall(r"[A-Za-z0-9]+", text)
+        if len(word) >= 3 and word.lower() not in _NAME_FILLER_WORDS
+    }
+    return name, stems
+
+
+def claim_does_not_describe_violation(
+    claim: Any, technique_id: str, attck: Any, *, path: str = ""
+) -> Violation | None:
+    """The question for a claim whose sentence shares no term with the technique it names.
+
+    The technique's vocabulary is the one the absence reader uses
+    (:func:`behaviour_pattern`): the capability terms that list its id, its
+    catalogue name and its tactics as a category phrase. The catalogue name is
+    compared word by word, each word with its common endings off
+    (:func:`_stem`), so a claim that writes "obfuscation" shares a term with
+    "Obfuscated Files or Information". Only a sentence that shares none of them
+    is asked about, once: "accesses the PEB to bypass sandboxing" under OS
+    Credential Dumping. What the analyst answers stands, and a technique kept
+    after the question is published as the analyst stated it. Nothing is
+    decided without the catalogue's name for the id.
+    """
+    text = str(getattr(claim, "claim", "") or "")
+    if not text.strip() or attck is None:
+        return None
+    name, stems = _name_terms(technique_id, attck)
+    if not name:
+        return None
+    pattern = behaviour_pattern(technique_id, attck)
+    if pattern is not None and pattern.search(text):
+        return None
+    if any(_stem(word) in stems for word in re.findall(r"[A-Za-z0-9]+", text) if len(word) >= 3):
+        return None
+    tid = safe_finding_value(technique_id)
+    return Violation(
+        code=CLAIM_DOES_NOT_DESCRIBE_CODE,
+        message=(
+            f"CLAIM {safe_finding_value(text)!r} carries TECHNIQUE {tid} "
+            f"{safe_finding_value(name)}, and its sentence shares no term with that "
+            f"technique: not its name, its tactic or the words that describe it. A technique "
+            f"on a claim is published as something the sample does. Keep {tid} only if the "
+            f"sample does it, and then say in the claim what it does that is {tid}; if the "
+            "claim describes another behaviour, give that behaviour's technique or write "
+            "TECHNIQUE: NONE."
         ),
         path=path,
     )
@@ -1373,9 +1573,17 @@ CAPABILITY_TERMS: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] 
         ("dynamic", "screenshots"),
     ),
     (
+        # Evading detection or analysis and packing are claims of the same
+        # kind: a benign control's report wrote "attempts to evade detection
+        # and debuggers" and "may indicate a repacked legitimate binary", and
+        # neither word was read.
         "anti-analysis",
         r"anti[\s-]?(?:analysis|debug\w*|disassembl\w*|emulation|sandbox|vm)\b"
-        r"|(?:sandbox|virtuali[sz]ation|debugger)[\s-]+evasion",
+        r"|(?:sandbox|virtuali[sz]ation|debugger|detection|analysis)[\s-]+evasion"
+        r"|\bevasion\s+techniques?\b"
+        r"|\bevad\w*\s+(?:\w+\s+){0,2}?(?:detection|analysis|analysts?|debuggers?|sandbox\w*"
+        r"|antivirus|security\s+products?)\b"
+        r"|\bre-?pack\w*|\bpack(?:ed|er|ers|ing)\b",
         ("T1562", "T1564", "T1497", "T1622", "T1027", "T1140", "T1480"),
         ("anti_analysis",),
     ),
@@ -1406,6 +1614,16 @@ _REFERENCE_SECTION_SOURCES: frozenset[str] = frozenset({"tool:api_capability"})
 # Their words are the sample's bytes, not anybody's statement about behaviour.
 _SAMPLE_VALUE_SECTION_SOURCES: frozenset[str] = frozenset(
     {"tool:strings", "tool:iocs_from_file", "tool:floss"}
+)
+
+# The report sections that list what a rule matcher matched. A rule's name is
+# the rule author's word for a pattern of bytes or instructions, not a
+# statement that the sample does it: capa's "log keystrokes via polling" and
+# "check for time delay via GetTickCount" grounded a benign client's
+# "performs keylogging" and "attempts to evade detection and debuggers". The
+# section still counts by its key.
+_RULE_MATCH_SECTION_SOURCES: frozenset[str] = frozenset(
+    {"tool:capa", "tool:yara_scan", "tool:yara"}
 )
 
 
@@ -1533,7 +1751,7 @@ class CapabilityGrounding:
                 # "/SSH/Auth/Credentials" grounded "credential harvesting".
                 # The section still counts by its key.
                 if str(getattr(section, "source", "") or "").strip().lower() in (
-                    _SAMPLE_VALUE_SECTION_SOURCES
+                    _SAMPLE_VALUE_SECTION_SOURCES | _RULE_MATCH_SECTION_SOURCES
                 ):
                     continue
                 words.append(str(getattr(section, "title", "") or ""))
@@ -1596,8 +1814,15 @@ _CLAUSE_BREAK_RE = re.compile(r"[.;:!?\n]|\bbut\b|\bhowever\b|\bwhereas\b", re.I
 # ``free`` is not among them. "free of" is the only construction it would have
 # earned, and it cost a real claim: "a free dynamic-DNS host for command and
 # control" is an over-claim the validator exists to catch.
+#
+# "rather than", "instead of" and "prevents confirmation of" set what follows
+# them aside as well: "standard for a client application rather than a C2
+# agent" and "the absence of a sandbox run prevents confirmation of runtime C2
+# behaviour" claim nothing.
 _NEGATION_RE = re.compile(
-    r"\b(?:no|not|never|without|lack(?:s|ed|ing)?|absence|none)\b|n't\b|\bfailed to\b",
+    r"\b(?:no|not|never|without|lack(?:s|ed|ing)?|absence|none)\b|n't\b|\bfailed to\b"
+    r"|\brather\s+than\b|\binstead\s+of\b"
+    r"|\b(?:prevents?|precludes?)\s+(?:any\s+)?(?:confirmation|observation)\s+of\b",
     re.IGNORECASE,
 )
 
@@ -1706,7 +1931,8 @@ _SUBJECT_ABSENT_RE = re.compile(
     r"^(?:\s+(?:mechanisms?|techniques?|capabilit(?:y|ies)|behaviou?rs?|activit(?:y|ies)"
     r"|functionality|methods?|patterns?))?"
     r"\s+(?:is|was|are|were|remains?)\s+"
-    r"(?:absent\b|missing\s+from\b|not\s+(?:present|observed|seen|found|detected)\b)",
+    r"(?:absent\b|missing\s+from\b"
+    r"|not\s+(?:present|observed|seen|found|detected|supported|established|confirmed)\b)",
     re.IGNORECASE,
 )
 
@@ -1723,12 +1949,14 @@ def _is_negated(text: str, start: int, end: int | None = None) -> bool:
     evidence that …" and "such as" do not end it. A noun negation ("no evidence
     of") also reaches through a ", such as …" list it names to the end of its
     clause. Two more statements of absence: the term as the object of a
-    purpose ("to prevent lateral movement"), and the term as the subject of
-    "is absent" or "is missing from".
+    purpose ("to prevent lateral movement"), and the absence question's own
+    readings (:func:`_absent_by_its_own_statement`): the term in the subject of
+    "is absent" or "is missing from", an item of a negated noun list, and the
+    end of a negated verb's object.
     """
     if _PURPOSE_OBJECT_RE.search(text[max(0, start - _NEGATION_WINDOW) : start]):
         return True
-    if end is not None and _SUBJECT_ABSENT_RE.match(text[end:]) and _starts_its_clause(text, start):
+    if end is not None and _absent_by_its_own_statement(text, start, end):
         return True
     if _in_a_named_list(text, start):
         return True
@@ -1739,6 +1967,7 @@ def _is_negated(text: str, start: int, end: int | None = None) -> bool:
     lowered = window.lower()
     return any(
         not lowered.startswith(_NOT_A_NEGATION, cue.start())
+        and not _NEED_VERB_RE.match(window[cue.end() :])
         and not _reach_ends(window[cue.end() :])
         for cue in _NEGATION_RE.finditer(window)
     )
@@ -1767,11 +1996,69 @@ def _sentence_around(text: str, position: int) -> str:
     return text[begin:].strip()
 
 
-def _claiming_sentences(pattern: re.Pattern[str], text: str) -> list[str]:
-    """The sentences in which ``pattern`` is claimed rather than reported absent, once each."""
+# A value written in running text: a run with no space in it holding two path
+# or key separators ("/SSH/Auth/Credentials", "HKCU\Software\...\Run",
+# "C:\Users\..."). A slash-joined list of words ("injection/hollowing/
+# persistence") has that too, so a run is a value only in a path's shape
+# (:func:`_path_shaped`).
+_PATH_VALUE_RE = re.compile(r"[^\s\"'`“”]*[\\/][^\s\"'`“”]*[\\/][^\s\"'`“”]*")
+# A path's shape: opened by a separator, a drive, a hive or a share, or with a
+# component that holds a dot or begins with a capital letter.
+_PATH_OPENING_RE = re.compile(r"^(?:[\\/]|[A-Za-z]:[\\/]|HK[A-Z_]+\\)")
+_PATH_COMPONENT_RE = re.compile(r"(?:^|[\\/])(?:[^\\/\s]*\.[^\\/\s]+|[A-Z][^\\/\s]*)")
+
+
+def _path_shaped(run: str) -> bool:
+    """Whether a run with two separators reads as a path or key, not a list of words."""
+    return bool(_PATH_OPENING_RE.match(run) or _PATH_COMPONENT_RE.search(run))
+
+
+def masked_values(text: str, own_words: Iterable[str] = ()) -> str:
+    """``text`` with every value it writes blanked, each character a space.
+
+    A value is a code span, a quoted string, a path or a registry key, and in a
+    record, the words of the record's own value (``own_words``) its other
+    fields restate: "Configuration path for SSH authentication credentials" is
+    the purpose of the value "/SSH/Auth/Credentials", not a statement that the
+    sample steals credentials. Positions are kept, so a sentence found in the
+    masked text is quoted from ``text`` as written. The capability check reads
+    no word a value holds.
+    """
+    if not text:
+        return text
+    chars = list(text)
+    spans = [
+        match.span() for regex in (_CODE_SPAN_RE, _QUOTED_SPAN_RE) for match in regex.finditer(text)
+    ]
+    spans.extend(
+        match.span() for match in _PATH_VALUE_RE.finditer(text) if _path_shaped(match.group(0))
+    )
+    words = {w.lower() for w in own_words if len(w) >= 4}
+    if words:
+        spans.extend(
+            match.span()
+            for match in re.finditer(r"[A-Za-z]{4,}", text)
+            if match.group(0).lower() in words
+        )
+    for begin, end in spans:
+        for index in range(begin, end):
+            if chars[index] != "\n":
+                chars[index] = " "
+    return "".join(chars)
+
+
+def _claiming_sentences(
+    pattern: re.Pattern[str], text: str, masked: str | None = None
+) -> list[str]:
+    """The sentences in which ``pattern`` is claimed rather than reported absent, once each.
+
+    ``masked`` is ``text`` with the words to leave unread blanked
+    (:func:`masked_values`); the sentences are quoted from ``text``.
+    """
+    read = text if masked is None or len(masked) != len(text) else masked
     found: list[str] = []
-    for match in pattern.finditer(text):
-        if _is_negated(text, match.start(), match.end()):
+    for match in pattern.finditer(read):
+        if _is_negated(read, match.start(), match.end()):
             continue
         sentence = _sentence_around(text, match.start())
         if sentence and sentence not in found:
@@ -1804,8 +2091,42 @@ def _base_technique(technique_id: Any) -> str:
 _TERM_IDS_SHOWN = 2
 
 
+# A sentence whose assertion is that a rule matched: the matcher, a rule or a
+# signature is its subject, the verb says it matched or reported the rule, and
+# nothing is concluded about the sample. "YARA rule X matched" and "capa
+# reports the rule Y" report the matcher; "Based on YARA results, the sample
+# steals credentials" and "capa confirms that the sample performs keylogging"
+# claim what the sample does and are read like any other sentence. The
+# capability check's own advice for a rule-only technique is to write the first
+# kind.
+_RULE_MATCH_ASSERTION_RE = re.compile(
+    r"(?:\b(?:yara|capa)\b(?:\s+(?:rules?|signatures?))?|\brules?\b|\bsignatures?\b)"
+    r"(?:\s+\S+){0,6}?\s+(?:matched|matches|match|flagged|flags|hit|hits|fired|fires|reports|"
+    r"reported|lists|listed)\b",
+    re.IGNORECASE,
+)
+_CONCLUDES_ABOUT_THE_SAMPLE_RE = re.compile(
+    r"\b(?:so|therefore|thus|hence|because|since|based|indicat\w*|suggest\w*|show\w*|"
+    r"mean\w*|confirm\w*|prov\w*|reveal\w*|demonstrat\w*|consistent)\b"
+    r"|\b(?:the|this|it)\s+(?:sample|binary|malware|file|executable)\s+(?!\.)"
+    r"(?:is|was|has|can|will|may|does|\w+s)\b",
+    re.IGNORECASE,
+)
+
+
+def _says_only_that_a_rule_matched(sentence: str) -> bool:
+    """Whether the sentence's assertion is a rule match and nothing about the sample."""
+    return bool(_RULE_MATCH_ASSERTION_RE.search(sentence)) and not (
+        _CONCLUDES_ABOUT_THE_SAMPLE_RE.search(sentence)
+    )
+
+
 def ungrounded_capabilities(
-    text: str, grounding: CapabilityGrounding, *, code: str = UNGROUNDED_CAPABILITY_CODE
+    text: str,
+    grounding: CapabilityGrounding,
+    *,
+    code: str = UNGROUNDED_CAPABILITY_CODE,
+    masked: str | None = None,
 ) -> list[Violation]:
     """Capability claims in ``text`` that this run's evidence does not support.
 
@@ -1814,6 +2135,11 @@ def ungrounded_capabilities(
     term buys is a reader who can see that the sentence outran the evidence,
     which is worth more than a summary quietly rewritten by a regular
     expression into something no model wrote.
+
+    No word inside a value is read (:func:`masked_values`; ``masked`` is the
+    caller's own masking of ``text``, positions kept), and a sentence whose
+    assertion is only that a rule matched is not a claim that the sample does
+    what the rule names (:func:`_says_only_that_a_rule_matched`).
     """
     if not text or not text.strip():
         return []
@@ -1821,13 +2147,19 @@ def ungrounded_capabilities(
         # Nothing was read, so nothing can be judged ungrounded. See
         # ``CapabilityGrounding.from_report``.
         return []
+    if masked is None or len(masked) != len(text):
+        masked = masked_values(text)
     violations: list[Violation] = []
     for label, pattern, techniques, keys in _COMPILED_CAPABILITY_TERMS:
         # A report of absence is not a claim. Saying "no command-and-control
         # communication was observed" is the prose a thin run should produce,
         # and flagging it spends the one retry arguing against the honest
         # sentence this validator exists to encourage.
-        sentences = _claiming_sentences(pattern, text)
+        sentences = [
+            sentence
+            for sentence in _claiming_sentences(pattern, text, masked)
+            if not _says_only_that_a_rule_matched(sentence)
+        ]
         if not sentences:
             continue
         if grounding.grounds(techniques, keys, pattern):
@@ -1993,13 +2325,63 @@ def narrative_capability_violations(
     ]
 
 
+# The fields of a section answer that name its topic rather than state a finding.
+_TOPIC_FIELDS = frozenset({"title", "heading"})
+
+
+def _prose_and_masked(payload: Any) -> tuple[str, str]:
+    """:func:`prose_of` and the same text with every value blanked, line for line.
+
+    A record's verbatim field (``value``, ``endpoints``) is a value the sample
+    holds and is blanked whole; its other fields are blanked where they restate
+    that value's words (:func:`masked_values`).
+    """
+    texts: list[str] = []
+    masked: list[str] = []
+
+    def _add(value: str, own: Sequence[str]) -> None:
+        texts.append(value)
+        masked.append(masked_values(value, own))
+
+    def _walk(value: Any, depth: int = 0) -> None:
+        if depth > 4:
+            return
+        if isinstance(value, str):
+            _add(value, ())
+        elif isinstance(value, dict):
+            verbatim = [
+                s for key in _VERBATIM_FIELDS if key in value for s in _strings_of(value[key])
+            ]
+            own = [word for s in verbatim for word in re.findall(r"[A-Za-z]{4,}", s)]
+            for key, item in value.items():
+                if key in _TOPIC_FIELDS and isinstance(item, str):
+                    # A heading names a topic ("Persistence") and says nothing
+                    # the sample does.
+                    texts.append(item)
+                    masked.append(re.sub(r"[^\n]", " ", item))
+                elif key in _VERBATIM_FIELDS:
+                    for s in _strings_of(item):
+                        texts.append(s)
+                        masked.append(re.sub(r"[^\n]", " ", s))
+                elif isinstance(item, str) and own:
+                    _add(item, own)
+                else:
+                    _walk(item, depth + 1)
+        elif isinstance(value, list | tuple):
+            for item in value:
+                _walk(item, depth + 1)
+
+    _walk(payload)
+    return "\n".join(texts), "\n".join(masked)
+
+
 def section_capability_violations(payload: Any, grounding: CapabilityGrounding) -> list[Violation]:
     """:func:`ungrounded_capabilities` and the rule-match check over a section answer's strings."""
     if payload is None:
         return []
-    text = prose_of(payload)
+    text, masked = _prose_and_masked(payload)
     return [
-        *ungrounded_capabilities(text, grounding, code=UNGROUNDED_CAPABILITY_CODE),
+        *ungrounded_capabilities(text, grounding, code=UNGROUNDED_CAPABILITY_CODE, masked=masked),
         *rule_match_statement_violations(text, grounding),
     ]
 

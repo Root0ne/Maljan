@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Sequence
+from dataclasses import replace
 from types import UnionType
 from typing import Any, Literal, Union, get_args, get_origin
 
@@ -573,6 +574,14 @@ def cut_answer_shape(text: str) -> str:
 
 # Why a question the validation loop would ask was not sent.
 _UNFIT_QUESTION = "the question would not fit its model's window beside the section's output budget"
+
+# What a finding first raised by the answer to a section's one retry says of
+# itself: the retry was spent on the findings of the first answer, all asked
+# together, and none was left for this one.
+ONLY_IN_THE_RETRY = (
+    "Not asked: it first appeared in the answer to the section's one retry, which had asked "
+    "about the first answer's findings, and no retry was left."
+)
 
 
 def _reached_the_cap(answer: Any, cap: int) -> bool:
@@ -1164,12 +1173,22 @@ class ReportComposer:
             retry_unfit = not fits
             return fits
 
+        # Every finding the section was shown. The one retry asks every
+        # finding of the first answer together; a finding the retry's answer
+        # raises for the first time was never put to the model, and is
+        # recorded as not asked rather than as a question it left unfixed.
+        shown: list[Violation] = []
+
+        def _on_feedback(found: Sequence[Violation]) -> None:
+            shown.extend(found)
+            self.validation_tally.count(found)
+
         payload, violations, retries = await retry_with_feedback(
             _run,
             list(messages),
             [_validate],
             parse=_parse,
-            on_feedback=self.validation_tally.count,
+            on_feedback=_on_feedback,
             drop_answer_for=frozenset({SECTION_CUT_CODE}),
             can_retry=_fits,
         )
@@ -1229,7 +1248,28 @@ class ReportComposer:
                 f"report section '{section or schema.__name__}' kept its findings unasked: "
                 f"{_UNFIT_QUESTION}"
             )
-        self._record_ungrounded(section or schema.__name__, ungrounded)
+        # By finding and, for a finding about sentences, by sentence: a new
+        # sentence under a term already asked about was not asked either.
+        asked_about: dict[tuple[str, str], set[str]] = {}
+        for v in shown:
+            asked_about.setdefault((v.code, v.path), set()).update(v.quoted)
+        late = [
+            v
+            for v in ungrounded
+            if retries
+            and (
+                (v.code, v.path) not in asked_about
+                or (v.quoted and not set(v.quoted) & asked_about[(v.code, v.path)])
+            )
+        ]
+        self._record_ungrounded(
+            section or schema.__name__, [v for v in ungrounded if v not in late]
+        )
+        self._record_ungrounded(
+            section or schema.__name__,
+            [replace(v, message=f"{v.message} {ONLY_IN_THE_RETRY}", sentence="") for v in late],
+            asked=False,
+        )
         return schema.model_validate(payload)
 
     def _kept[T](self, section: str, rows: list[T], limit: int) -> list[T]:
@@ -1267,7 +1307,7 @@ class ReportComposer:
             section,
             ", ".join(v.path for v in violations),
         )
-        self.validation_tally.record_unresolved(f"composer:{section}", violations)
+        self.validation_tally.record_unresolved(f"composer:{section}", violations, asked=asked)
         record_flagged_statements(getattr(self, "_report", None), violations, asked=asked)
 
 

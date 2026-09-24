@@ -26,9 +26,11 @@ from typing import Any
 
 import pytest
 
+from maljan.agents.judge_agent import COMPACT_BUNDLE_RULES, verdict_cut_violation
 from maljan.pipeline.validation import (
     CapabilityGrounding,
     absence_claim_violation,
+    claim_does_not_describe_violation,
     repeated_item_violations,
     section_cut_violation,
     ungrounded_capabilities,
@@ -46,6 +48,7 @@ from maljan.reporting.composer import (
 )
 from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXAMPLE_OBJECT, EXPECTED_OBJECT
 from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, ClaimEvidence
+from maljan.tools import knowledge
 
 # The distinctive terms of the evaluation key: how the scored sample resolves its
 # APIs, checks its host, persists, configures itself, talks to its server and
@@ -202,6 +205,33 @@ PROMPTS: dict[str, str] = {
         ]
         if v is not None
     ),
+    "analyst question for a claim that does not describe its technique": " ".join(
+        v.message
+        for v in [
+            claim_does_not_describe_violation(
+                ClaimEvidence(
+                    claim="The file opens a window.",
+                    evidence_ref="[ev_0001]",
+                    confidence=0.9,
+                    technique_id="T1003",
+                ),
+                "T1003",
+                knowledge,
+            )
+        ]
+        if v is not None
+    ),
+    "capability questions for evading analysis and packing": " ".join(
+        v.message
+        for v in ungrounded_capabilities(
+            "The file tries to evade analysts. It is a repacked build.",
+            CapabilityGrounding(evidence_keys=frozenset({"pe_header"})),
+        )
+    ),
+    "judge compact bundle rules": COMPACT_BUNDLE_RULES,
+    "judge cut-at-cap question": verdict_cut_violation(
+        8192, '{"type": "bundle", "objects": [{"type": "attack-pattern", "id": "a"}'
+    ).message,
     "absence marker": ABSENCE_TECHNIQUE_MARKER,
     "capability questions for the anti-analysis and anti-forensics terms": " ".join(
         v.message

@@ -67,7 +67,7 @@ from maljan.llm.context_window import (
 )
 from maljan.llm.generation_rate import GenerationRates, model_name_of
 from maljan.memory.long_term_memory import a_past_case_technique
-from maljan.pipeline.events import emit_judge_question, scrub
+from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
 from maljan.pipeline.mediation_models import (
     MediatorVerdict,
     analysts_with_claims,
@@ -116,6 +116,55 @@ _NOT_JSON_FEEDBACK = (
 # before the bundle closed, and the only correction it was given said the
 # answer "was not a JSON STIX bundle" — so it wrote the same bundle again.
 VERDICT_CUT_CODE = "verdict.cut_at_output_cap"
+
+# An object begun in an answer: its ``type`` written as a bundle object's is.
+_OBJECT_TYPE_RE = re.compile(r'"type"\s*:\s*"([a-z][a-z0-9-]*)"')
+# A line an answer indents: a line break and the spaces after it.
+_INDENTED_LINE_RE = re.compile(r"\n[ \t]+")
+
+
+def verdict_cut_violation(cap: int, text: str = "") -> Violation:
+    """What a verdict the cap cut is told: the cap, the answer's size, and what filled it.
+
+    The size is the answer's characters and the objects it began, by type, and
+    how many of its lines were indented: a bundle is cut by the objects it
+    writes and by how it writes them, and the question names both, the way a
+    report section's cut question does. It asks for a shorter bundle — the
+    compact contract's — and never for fewer findings than the evidence holds.
+    """
+    counts: dict[str, int] = {}
+    for found in _OBJECT_TYPE_RE.finditer(text):
+        kind = found.group(1)
+        if kind != "bundle":
+            counts[kind] = counts.get(kind, 0) + 1
+    begun = ", ".join(
+        f"{count} {kind}" for kind, count in sorted(counts.items(), key=lambda item: -item[1])
+    )
+    indented = len(_INDENTED_LINE_RE.findall(text))
+    size = (
+        f" It ran to {len(text):,} characters"
+        + (f" and began {safe_finding_value(begun)} object(s)" if begun else "")
+        + (f", on {indented:,} indented lines" if indented else "")
+        + "."
+        if text
+        else ""
+    )
+    said = f" {safe_finding_value(size.strip())}" if size else ""
+    return Violation(
+        code=VERDICT_CUT_CODE,
+        message=(
+            f"Your previous answer stopped at the output limit of {int(cap)} tokens before "
+            f"the bundle closed, so it could not be read.{said} Any reasoning you write "
+            f"counts against the same limit. Return a bundle that closes well inside "
+            f"{int(cap)} tokens: x_maljan_assessment first, then only the objects the "
+            "evidence supports; your confidence, basis and sources on the relationship "
+            "only, never repeated on the object it relates; an attack-pattern with at most "
+            "one sentence of description; no property the platform fills in (created, "
+            "modified, spec_version, valid_from, pattern_type); no Indicator whose value you "
+            "did not read verbatim in the evidence; the JSON on one line without "
+            "indentation. JSON only."
+        ),
+    )
 
 
 def _was_cut(answer: Any, cap: int | None) -> bool:
@@ -168,6 +217,92 @@ def stated_assessment_in(text: str) -> Any | None:
     return None
 
 
+# Where a bundle begins: the object whose first key says it is one, as the
+# contract's shape writes it.
+_BUNDLE_START_RE = re.compile(r'\{\s*"type"\s*:\s*"bundle"')
+
+
+def _key_value_at(text: str, start: int, key: str) -> int | None:
+    """Where the value of ``key`` begins among the top-level keys of the object at ``start``.
+
+    A scan of the object's own depth, strings skipped whole, so a key of the
+    same name inside a string or a nested object is not the one found.
+    """
+    import json
+
+    depth = 0
+    index = start
+    decoder = json.JSONDecoder()
+    while index < len(text):
+        char = text[index]
+        if char == '"':
+            try:
+                value, after = decoder.raw_decode(text, index)
+            except ValueError:
+                return None
+            if depth == 1 and value == key:
+                rest = text[after:].lstrip()
+                if rest.startswith(":"):
+                    return len(text) - len(rest) + 1
+            index = after
+            continue
+        if char in "{[":
+            depth += 1
+        elif char in "}]":
+            depth -= 1
+            if depth == 0:
+                return None
+        index += 1
+    return None
+
+
+def stated_indicators_in(text: str) -> list[dict[str, Any]]:
+    """The indicator objects an unreadable answer's bundle wrote whole, each as written.
+
+    Only the items of the bundle's own top-level ``objects`` array are read:
+    the bundle is the last object in the answer that opens with ``"type":
+    "bundle"``, its ``objects`` is found among its own keys, and the array is
+    walked item by item (``json`` alone, no repair) until the first item that
+    does not read whole — the one the output cap reached. An indicator written
+    in reasoning before the bundle, inside a string, or nested inside another
+    object is not read, and nothing is inferred from prose. An item is kept
+    when it is an indicator with a pattern, once each, in the order written.
+    What is read here is asked every question a bundle's indicator is asked,
+    and the one publish rule after that: the fallback path publishes no more
+    than an answer that closed would have.
+    """
+    import json
+
+    starts = list(_BUNDLE_START_RE.finditer(text))
+    if not starts:
+        return []
+    at = _key_value_at(text, starts[-1].start(), "objects")
+    if at is None:
+        return []
+    rest = text[at:].lstrip()
+    if not rest.startswith("["):
+        return []
+    index = len(text) - len(rest) + 1
+    decoder = json.JSONDecoder()
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    while True:
+        while index < len(text) and text[index] in " \t\r\n,":
+            index += 1
+        if index >= len(text) or text[index] == "]":
+            break
+        try:
+            value, index = decoder.raw_decode(text, index)
+        except ValueError:
+            break
+        if isinstance(value, dict) and value.get("type") == "indicator" and value.get("pattern"):
+            key = json.dumps(value, sort_keys=True)
+            if key not in seen:
+                seen.add(key)
+                found.append(value)
+    return found
+
+
 def _assessment_at(
     text: str, at: int, json_module: Any, extract: Any, repairing: Any
 ) -> dict[str, Any] | None:
@@ -191,6 +326,25 @@ def _assessment_at(
 # will find out why it has none.
 VERDICT_FALLBACK_CODE = "verdict.fallback"
 VERDICT_FALLBACK_REASON = "judge verdict fell back to text extraction"
+
+
+def _indicator_findings(bundle: Any, found: Iterable[Violation]) -> list[Violation]:
+    """The rows of ``found`` about an indicator of ``bundle``, by its position.
+
+    A fallback bundle's other objects are this pipeline's own, built from the
+    analysts' claims; only the indicators are the model's words, so only their
+    rows are the model's findings.
+    """
+    objects = list(getattr(bundle, "objects", None) or [])
+    at = re.compile(r"objects\[(\d+)\]")
+    kept: list[Violation] = []
+    for violation in found:
+        where = at.search(violation.path or "")
+        index = int(where.group(1)) if where else -1
+        if 0 <= index < len(objects) and getattr(objects[index], "type", "") == "indicator":
+            kept.append(violation)
+    return kept
+
 
 # What is recorded when the judge never answered at all. A retry would cost a
 # second full judge timeout and could only produce the same fallback bundle, so
@@ -274,10 +428,30 @@ class JudgeVerdict(NamedTuple):
     written: dict[str, Any] | None = None
 
 
+# How the judge keeps its bundle short without leaving out anything it decides.
+# A benchmark judge's bundle, pretty-printed and with each relationship's
+# confidence, basis and credits written again on the object it relates, was cut
+# at the output cap twice. Every relationship stays the judge's own: which
+# indicator indicates the sample, and which does not, is its decision.
+COMPACT_BUNDLE_RULES = (
+    "- Relate them as malware uses attack-pattern and indicator indicates "
+    "malware, and relate an indicator only to what it indicates. On every "
+    "Relationship set x_maljan_confidence (0.0-1.0) and x_maljan_evidence_basis "
+    "(static|dynamic|network|all|unknown), and list in "
+    "x_maljan_contributing_agents only the sources that named what it is about, "
+    "by the names the EVIDENCE SUMMARY gives them. Write those three on the "
+    "relationship only, never again on the attack-pattern or indicator it "
+    "relates.\n"
+    "- Keep the bundle short: an attack-pattern is its name, its mitre-attack "
+    "reference and at most one sentence of description; leave out pattern_type, "
+    "which is always stix and is filled in; and write the JSON on one line "
+    "without indentation.\n"
+)
+
+
 # The judge's system prompt. A module constant so that
 # ``composition.builtin_prompt("judge")`` and ``give_verdict`` cannot disagree
-# about what the judge is told; the text is unchanged from the inline literal
-# it replaces.
+# about what the judge is told.
 JUDGE_VERDICT_SYSTEM = (
     "You are the Chief Malware Judge. Based on the expert reports below, "
     "provide a final verdict: Malware, Benign, or Suspicious.\n\n"
@@ -287,11 +461,7 @@ JUDGE_VERDICT_SYSTEM = (
     '{"source_name": "mitre-attack", "external_id": "T####" or "T####.###"}. '
     "A behaviour you cannot give a technique id is not an AttackPattern: say "
     "what was observed in severity.rationale instead.\n"
-    "- Relate them as malware uses attack-pattern and indicator indicates "
-    "malware. On every Relationship set x_maljan_confidence (0.0-1.0) and "
-    "x_maljan_evidence_basis (static|dynamic|network|all|unknown), and list in "
-    "x_maljan_contributing_agents only the sources that named what it is about, "
-    "by the names the EVIDENCE SUMMARY gives them.\n"
+    f"{COMPACT_BUNDLE_RULES}"
     "- Leave out created, modified, spec_version and valid_from: they are "
     "stamped after you answer.\n"
     "- Give every object an ``id`` of the form ``<type>--<label>``, unique in "
@@ -339,20 +509,14 @@ JUDGE_VERDICT_SYSTEM = (
     "clean sample.\n"
     "- Return ONLY a valid JSON STIX 2.1 Bundle. No markdown wrappers.\n"
     "\n"
-    "The answer has exactly this shape. Both top-level keys are required, and "
-    "``x_maljan_assessment`` sits beside ``objects`` rather than inside it:\n"
-    "{\n"
-    '  "type": "bundle",\n'
-    '  "id": "bundle--1",\n'
-    '  "x_maljan_assessment": {\n'
-    '    "verdict": "Malware" | "Suspicious" | "Benign",\n'
-    '    "confidence": 0.0-1.0,\n'
-    '    "severity": {"rating": "...", "rationale": "..."},\n'
-    '    "malware_category": "...",\n'
-    '    "family": {"name": "...", "confidence": 0.0-1.0, "evidence_ids": ["ev_0012"]}\n'
-    "  },\n"
-    '  "objects": [ ... ]\n'
-    "}"
+    "The answer has exactly this shape, on one line. Both top-level keys are "
+    "required, and ``x_maljan_assessment`` sits beside ``objects`` rather than "
+    "inside it:\n"
+    '{"type": "bundle", "id": "bundle--1", "x_maljan_assessment": {'
+    '"verdict": "Malware" | "Suspicious" | "Benign", "confidence": 0.0-1.0, '
+    '"severity": {"rating": "...", "rationale": "..."}, "malware_category": "...", '
+    '"family": {"name": "...", "confidence": 0.0-1.0, "evidence_ids": ["ev_0012"]}}, '
+    '"objects": [ ... ]}'
 )
 
 
@@ -1412,6 +1576,7 @@ class JudgeAgent(BudgetMeter):
         not_json = False
         # Whether the output cap ended that answer, and how much of it there was.
         cut_at: int | None = None
+        cut_text = ""
         attempts = 0
         # What the shape pass did to this answer before the schema saw it: an
         # assessment moved to the property it belongs to, an object the bundle
@@ -1427,7 +1592,7 @@ class JudgeAgent(BudgetMeter):
         tally = ValidationTally()
 
         def _parse(answer: Any) -> Bundle:
-            nonlocal not_json, attempts, cut_at
+            nonlocal not_json, attempts, cut_at, cut_text
             attempts += 1
             cut_at = None
             shape.clear()
@@ -1441,7 +1606,8 @@ class JudgeAgent(BudgetMeter):
                 )
             not_json = _is_not_json(answer)
             if not_json and _was_cut(answer, cap):
-                cut_at = len(_answer_text(answer))
+                cut_text = _answer_text(answer)
+                cut_at = len(cut_text)
             if not_json:
                 self.logger.warning(
                     "Judge verdict: the model answered with %d character(s) that are not a JSON "
@@ -1527,21 +1693,7 @@ class JudgeAgent(BudgetMeter):
             if timed_out:
                 return []
             if not_json and cut_at is not None and cap:
-                return [
-                    Violation(
-                        code=VERDICT_CUT_CODE,
-                        message=(
-                            f"Your previous answer stopped at the output limit of {int(cap)} "
-                            f"tokens, after {int(cut_at)} characters and before the bundle "
-                            "closed, so it could not be read. Any reasoning you write counts "
-                            "against the same limit. Return a bundle that closes well inside "
-                            f"{int(cap)} tokens: x_maljan_assessment first, then only the "
-                            "objects the evidence supports — one attack-pattern per technique "
-                            "with a short description, and no Indicator whose value you did "
-                            "not read verbatim in the evidence. JSON only."
-                        ),
-                    )
-                ]
+                return [verdict_cut_violation(int(cap), cut_text)]
             if not_json:
                 return [Violation(code="verdict.not_json", message=_NOT_JSON_FEEDBACK)]
             return [
@@ -1604,6 +1756,23 @@ class JudgeAgent(BudgetMeter):
                 violations.append(
                     Violation(code=VERDICT_FALLBACK_CODE, message=VERDICT_FALLBACK_REASON)
                 )
+            # The indicators the answer wrote whole are asked what every
+            # bundle's indicator is asked. Nobody can be asked again, so what
+            # is wrong is recorded, and an ungrounded one is dropped below
+            # like one that survived a retry.
+            violations.extend(
+                _indicator_findings(
+                    bundle,
+                    validate_verdict_bundle(
+                        bundle,
+                        evidence_corpus,
+                        sample=sample,
+                        shortened_tools=shortened_tools,
+                        searched=searched,
+                        corpus_state=corpus_state,
+                    ),
+                )
+            )
         # The judge's own answer, when the verdict stands on it: what the
         # export does not carry of it is recorded beside the run's findings
         # (never fed back — nothing in it is wrong), and the answer itself is
@@ -1706,7 +1875,8 @@ class JudgeAgent(BudgetMeter):
             if record is not None:
                 record.extend(
                     duplicate_label_violations(
-                        data, {key: index for key, (index, _label) in written.items()}
+                        data,
+                        {key: index for key, (index, _label) in written.items()},
                     )
                 )
             data = postprocess_judge_bundle(
@@ -1992,6 +2162,13 @@ class JudgeAgent(BudgetMeter):
                 }
             )
 
+        # The indicators the answer wrote whole before it went wrong, as it
+        # wrote them, with the ids the platform mints. The one publish rule
+        # decides each of them downstream exactly as it decides an indicator
+        # of an answer that closed; without them a cut answer's decoded
+        # command-and-control hosts were never put to the rule at all.
+        objects.extend(self._stated_indicators(text) if extracted else [])
+
         return Bundle.model_validate(
             {
                 "objects": objects,
@@ -2002,6 +2179,30 @@ class JudgeAgent(BudgetMeter):
                 **({"x_maljan_assessment": stated} if stated is not None else {}),
             }
         )
+
+    def _stated_indicators(self, text: str) -> list[dict[str, Any]]:
+        """:func:`stated_indicators_in` with minted ids, each one the Indicator model reads."""
+        from maljan.schemas.stix_models import Indicator
+
+        kept: list[dict[str, Any]] = []
+        for written in stated_indicators_in(text):
+            obj = {**written, "id": f"indicator--{uuid.uuid4()}"}
+            try:
+                Indicator.model_validate(obj)
+            except Exception as exc:  # noqa: BLE001 — one that does not read is not kept
+                self.logger.info(
+                    "Fallback Bundle: an indicator the answer wrote does not read as one (%s).",
+                    type(exc).__name__,
+                )
+                continue
+            kept.append(obj)
+        if kept:
+            self.logger.info(
+                "Fallback Bundle: %d indicator(s) the answer wrote whole are kept as written, "
+                "for the checks and the publish rule to answer.",
+                len(kept),
+            )
+        return kept
 
     # ------------------------------------------------------------------
     # Private helpers

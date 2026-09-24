@@ -26,10 +26,12 @@ from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.unit.agents.test_delegation import _call, _Container, _Scripted, _settings
 
 HELPER_REPORT = (
-    "CLAIM: the sample opens a raw socket\nEVIDENCE: ev_0001\nCONFIDENCE: 0.7\nTECHNIQUE: T1095\n"
+    "CLAIM: the sample opens a raw socket for its own protocol\n"
+    "EVIDENCE: ev_0001\nCONFIDENCE: 0.7\nTECHNIQUE: T1095\n"
 )
 LEAD_REPORT = (
-    "CLAIM: the helper saw a raw socket\nEVIDENCE: ev_0001\nCONFIDENCE: 0.6\nTECHNIQUE: T1095\n"
+    "CLAIM: the helper saw a raw socket for its own protocol\n"
+    "EVIDENCE: ev_0001\nCONFIDENCE: 0.6\nTECHNIQUE: T1095\n"
 )
 
 ASKS = 3
@@ -43,12 +45,15 @@ AUDITED = ("helper", "helper", "third", "helper", "third", "helper")
 # does not have sends the validator looking for a suggestion, which builds the
 # whole corpus to answer a dictionary question.
 TECHNIQUES = ("T1090", "T1091", "T1092", "T1095")
+# Words each of those techniques is named with, so every claim describes the
+# technique it carries and the validator asks nothing about it.
+DESCRIBED = "through a proxy protocol on removable media"
 
 
 def _report_for(specialist: str, n: int) -> str:
     """One specialist's answer to its nth ask, distinguishable from the others."""
     return (
-        f"CLAIM: {specialist} answered ask {n}\n"
+        f"CLAIM: {specialist} answered ask {n} {DESCRIBED}\n"
         "EVIDENCE: ev_0001\n"
         f"CONFIDENCE: 0.{n + 1}\n"
         f"TECHNIQUE: {TECHNIQUES[n]}\n"
@@ -255,12 +260,15 @@ class TestTheShapeTheAuditSaw:
         promoted = promoted_asks(boss, own)
 
         assert [claim.claim for isr in promoted.values() for claim in isr.claims] == [
-            "helper answered ask 0",
-            "helper answered ask 1",
-            "third answered ask 0",
-            "helper answered ask 2",
-            "third answered ask 1",
-            "helper answered ask 3",
+            f"{answer} {DESCRIBED}"
+            for answer in (
+                "helper answered ask 0",
+                "helper answered ask 1",
+                "third answered ask 0",
+                "helper answered ask 2",
+                "third answered ask 1",
+                "helper answered ask 3",
+            )
         ]
         # The specialist's own numbers, unedited, on the answer it gave.
         assert [claim.confidence for isr in promoted.values() for claim in isr.claims] == [
