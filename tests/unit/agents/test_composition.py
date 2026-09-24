@@ -174,8 +174,13 @@ def test_an_explicit_prompt_wins_over_the_built_in_assembly():
     from maljan.agents.prompt_fragments import tools_statement
 
     resolved = resolve_agent("static_r2", _Container(cfg))
-    # The operator's text, then the platform's sentence about the tools.
-    assert resolved.prompt == "MINE\n\n" + tools_statement(resolved.tools)
+    # The operator's text in place of the built-in head, then the platform's
+    # text: the static provider's fragment and the sentence about the tools.
+    statement = tools_statement(
+        resolved.tools, provider_label="the r2 static provider", provider_expected=True
+    )
+    assert resolved.prompt == "MINE\n\nR2-FRAGMENT\n\n" + statement
+    assert resolved.authored_prompt == "MINE"
 
 
 def test_a_generic_agent_with_no_references_and_no_bound_servers_is_tool_less():

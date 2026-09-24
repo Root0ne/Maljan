@@ -661,3 +661,74 @@ class TestATurnThatCanCallNoToolSaysSo:
         assert TOOL_FREE_TURN_STATEMENT in out[0].content
         assert out[0].content.startswith("HEAD") and out[0].content.endswith("TAIL")
         assert out[1].content == "h"
+
+
+class TestAnOperatorPromptCarriesItsProvidersText:
+    """A console clone of a built-in carries its own text; the provider's is the platform's."""
+
+    def _clone(self, provider: str) -> tuple[Any, Any]:
+        container = _container(provider, "mock", "default")
+        definitions = container.config.agents.definitions
+        definitions["static_copy"] = definitions["static"].model_copy(
+            update={"prompt": "MY OWN STATIC PASS"}
+        )
+        return container, asyncio.run(aresolve_agent("static_copy", container))
+
+    def test_a_clone_on_ghidra_with_its_tools_carries_the_guidance_and_the_workflow(self) -> None:
+        container, resolved = self._clone("ghidra")
+        own = _provider_tools(container, "static", resolved.static_provider_id)
+
+        sent = prompt_for(resolved, container, [*own, *resolved.tools])
+
+        assert sent.startswith("MY OWN STATIC PASS\n\n")
+        assert "VERIFICATION DISCIPLINE" in sent
+        assert "TOOL USAGE WORKFLOW" in sent
+        assert resolved.authored_prompt == "MY OWN STATIC PASS"
+
+    def test_the_same_clone_with_no_tools_carries_the_guidance_only(self) -> None:
+        container, resolved = self._clone("ghidra")
+
+        sent = prompt_for(resolved, container, [])
+
+        assert "VERIFICATION DISCIPLINE" in sent
+        assert "TOOL USAGE WORKFLOW" not in sent
+        assert NO_TOOLS_STATEMENT in sent
+        assert _violations(sent, [], statement_expected=True) == []
+
+    def test_an_operator_agent_with_no_provider_gets_no_provider_text(self) -> None:
+        container = _container("ghidra", "mock", "default")
+        resolved = asyncio.run(aresolve_agent("triage", container))
+
+        for provider_text in ("VERIFICATION DISCIPLINE", "static provider", "MUST cite"):
+            assert provider_text not in resolved.prompt
+
+
+def test_the_second_nudge_keeps_the_loops_system_turn() -> None:
+    """Tools bound and forbidden: the transcript is the loop's, and only the nudge says no tool."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from maljan.agents.prompt_fragments import tools_statement
+
+    agent = _static_agent([_Tool("x", "knowledge")])
+    system = "HEAD\n\n" + tools_statement([_Tool("x", "knowledge")]) + "\n\nTAIL"
+    msgs = [SystemMessage(content=system), HumanMessage(content="task")]
+    seen: dict[str, Any] = {}
+
+    class _Fails:
+        async def ainvoke(self, turns: Any) -> Any:
+            seen["first"] = turns[0].content
+            raise RuntimeError("the server refused the transcript")
+
+    class _Answers:
+        async def ainvoke(self, turns: Any) -> Any:
+            from langchain_core.messages import AIMessage
+
+            seen["second"] = turns[0].content
+            return AIMessage(content="CLAIM: c")
+
+    agent.llm = _Fails()
+    agent._llm_with_tools_withheld = lambda: _Answers()  # type: ignore[method-assign]
+    agent._nudge_for_final_answer(msgs, 600, 0.0, 40)
+
+    assert "The tools attached to this request" not in seen["first"]
+    assert seen["second"] == system

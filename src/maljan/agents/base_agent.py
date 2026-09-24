@@ -3939,11 +3939,14 @@ class BaseAnalyst(BudgetMeter, ABC):
                 "%s: the nudge leaves out a tool call whose arguments never parsed.", self.name
             )
         turns = [*tool_free_turns(sendable), HumanMessage(content=FINAL_ANSWER_NUDGE)]
+        loop_turns = [*sendable, HumanMessage(content=FINAL_ANSWER_NUDGE)]
         budget = min(remaining_time, float(timeout))
 
-        def _ask_with(model: Any, label: str) -> Any:
+        def _ask_with(model: Any, label: str, sent: list[Any] | None = None) -> Any:
+            messages = turns if sent is None else sent
+
             async def _ask() -> Any:
-                return await asyncio.wait_for(model.ainvoke(turns), timeout=budget)
+                return await asyncio.wait_for(model.ainvoke(messages), timeout=budget)
 
             return _run_coro_blocking(_ask(), budget + 5, label=label)
 
@@ -3959,7 +3962,11 @@ class BaseAnalyst(BudgetMeter, ABC):
                 self._nudge_retry_mode = "+".join(modes) or None
                 return None
             try:
-                answer = _ask_with(withheld, f"nudge-tools-none:{self.name}")
+                # The loop's own system turn, unchanged: the tools are bound
+                # here, so the transcript renders as the loop's did and the
+                # server keeps its prefix; the nudge's own words say no tool
+                # can be called.
+                answer = _ask_with(withheld, f"nudge-tools-none:{self.name}", loop_turns)
             except Exception as again:  # noqa: BLE001 — changes nothing
                 self.logger.warning(
                     "%s: the final-answer nudge failed with tools withheld too (%s).",

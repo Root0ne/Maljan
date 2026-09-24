@@ -70,9 +70,10 @@ class ResolvedAgent:
     # out with the path its own server can open.
     path_by_server: dict[str, str] = field(default_factory=dict)
     # What a clone is seeded with: the agent's own text, or its role's assembly
-    # without the provider fragment and the sentence about tools. A copy is
-    # resolved with its own provider and its own list, so it never carries a
-    # sentence about tools that are not its own.
+    # without the provider fragment and the sentence about tools. Both are
+    # platform text, added when the copy is resolved (``_provider_parts``) for
+    # its own provider and its own list, so a copy never carries either for a
+    # provider or tools that are not its own.
     authored_prompt: str = ""
 
 
@@ -281,9 +282,53 @@ def _agent_prompt(
         )
     if definition.role == "judge" or for_a_clone:
         return definition.prompt
+    parts = _provider_parts(definition, container, provider_id, tools, provider_expected)
+    return "\n\n".join([definition.prompt.rstrip(), *(part for part in parts if part)])
+
+
+def _provider_parts(
+    definition: AgentDefinition,
+    container: Any,
+    provider_id: str,
+    tools: Sequence[Any],
+    provider_expected: bool,
+) -> tuple[str, ...]:
+    """What the platform adds after an operator's prompt: provider text, then the tool sentence.
+
+    The provider's text belongs to the provider, not to the prompt: a static
+    agent, and a generic one that reads a static provider, carry that
+    provider's guidance about claims always and its workflow when its tools
+    are in the request, exactly as the built-in assembly does. The dynamic
+    role carries its sandbox's workflow on the same rule. An agent with no
+    provider gets the sentence about tools alone.
+    """
     from maljan.agents.prompt_fragments import tools_statement
 
-    return definition.prompt.rstrip() + "\n\n" + tools_statement(tools)
+    if definition.role == "static" or (
+        definition.role in ("generic", "lead")
+        and any(ref.kind == "provider" for ref in definition.tools)
+    ):
+        from maljan.agents.static_analyst import static_provider_parts
+
+        provider = container.get_static_provider(provider_id)
+        offers = bool(getattr(getattr(provider, "capabilities", None), "provides_tools", False))
+        return static_provider_parts(
+            provider,
+            tools,
+            provider_expected=provider_expected and definition.role == "static" and offers,
+        )
+    if definition.role == "dynamic":
+        from maljan.agents.dynamic_analyst import sandbox_provider_parts
+
+        sandbox = _sandbox_provider(container)
+        offers = sandbox is not None and bool(sandbox.capabilities.provides_tools)
+        return sandbox_provider_parts(
+            tools,
+            provider_fragment=str(sandbox.dynamic_prompt_fragment() or "") if sandbox else "",
+            provider_label=f"the {sandbox.id} sandbox's own tool server" if sandbox else "",
+            provider_expected=provider_expected and offers,
+        )
+    return (tools_statement(tools),)
 
 
 def prompt_for(resolved: ResolvedAgent, container: Any, tools: Sequence[Any]) -> str:

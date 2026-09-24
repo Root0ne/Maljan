@@ -70,6 +70,32 @@ def assemble_dynamic_prompt(
         # What a clone is seeded with: no sandbox workflow and no sentence
         # about tools, both of which it gets for its own list when resolved.
         return _DYN_HEAD + fragment + _DYN_TAIL
+    middle = "\n\n".join(
+        part
+        for part in sandbox_provider_parts(
+            tools,
+            provider_fragment=provider_fragment,
+            provider_label=provider_label,
+            provider_expected=provider_expected,
+        )
+        if part
+    )
+    return _DYN_HEAD + fragment + "\n\n" + middle + _DYN_TAIL
+
+
+def sandbox_provider_parts(
+    tools: Sequence[Any],
+    *,
+    provider_fragment: str = "",
+    provider_label: str = "",
+    provider_expected: bool = False,
+) -> tuple[str, str]:
+    """``(the sandbox's tool workflow or "", the sentence about tools)`` for ``tools``.
+
+    The workflow only when the sandbox's own tools are in the list (or
+    expected). Shared by the built-in assembly and an operator's prompt on the
+    dynamic role.
+    """
     attached = provider_expected or PROVIDER_FAMILY in tool_families(tools)
     workflow = provider_fragment.strip() if attached else ""
     statement = tools_statement(
@@ -77,8 +103,7 @@ def assemble_dynamic_prompt(
         provider_label=provider_label or "the sandbox's own tool server",
         provider_expected=attached,
     )
-    middle = "\n\n".join(part for part in (workflow, statement) if part)
-    return _DYN_HEAD + fragment + "\n\n" + middle + _DYN_TAIL
+    return workflow, statement
 
 
 def _dynamic_prompt(tools: Sequence[Any] = ()) -> str:

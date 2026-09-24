@@ -84,6 +84,21 @@ def assemble_static_prompt(
     """
     if for_a_clone:
         return _ISR_HEAD + fragment + _ISR_TAIL
+    body, statement = static_provider_parts(provider, tools, provider_expected=provider_expected)
+    return _ISR_HEAD + fragment + "\n\n" + body + "\n\n" + statement + _ISR_TAIL
+
+
+def static_provider_parts(
+    provider: Any, tools: Sequence[Any], *, provider_expected: bool = False
+) -> tuple[str, str]:
+    """``(the provider's text, the sentence about tools)`` for a request carrying ``tools``.
+
+    The provider's text is its whole fragment when its tools are in the list
+    (or expected), and otherwise its guidance with the sentence saying it is
+    not attached; a provider that offers no tools always sends its fragment.
+    The built-in assembly and an operator's prompt on a static provider both
+    take these two parts, so the provider says the same thing under either.
+    """
     attached = provider_expected or PROVIDER_FAMILY in tool_families(tools)
     label = str(getattr(provider, "label", "") or getattr(provider, "id", "") or "static")
     offers_tools = bool(getattr(getattr(provider, "capabilities", None), "provides_tools", True))
@@ -105,7 +120,7 @@ def assemble_static_prompt(
         provider_label=f"the {label} static provider",
         provider_expected=attached,
     )
-    return _ISR_HEAD + fragment + "\n\n" + body.rstrip() + "\n\n" + statement + _ISR_TAIL
+    return body.rstrip(), statement
 
 
 def _static_prompt(provider: Any | None = None, tools: Sequence[Any] = ()) -> str:
