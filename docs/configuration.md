@@ -746,9 +746,11 @@ output is declared — by the probe's model list (`max_output_tokens`,
 `max_completion_tokens`, OpenRouter's `top_provider.max_completion_tokens`) or
 by a vendored `max_output` row, each carrying the vendor page it is documented
 on (gpt-4o and gpt-4o-mini 16,384, gpt-4.1 32,768) — the smaller of that and a
-quarter of the window; for a runtime we run (llama.cpp or Ollama on loopback,
-or a server the probe read from `/props`, `/api/show` or `/info`), a quarter of
-the window, since no API limits its output; and for a hosted API that declares
+quarter of the window; for a runtime we run — one that answered the window
+probe as a runtime: llama.cpp `/props`, Ollama `/api/show` or TGI `/info` — a
+quarter of the window, since no API limits its output (a loopback address alone
+is not one: a gateway on `localhost:4000` forwarding to a hosted API has that
+API's limit); and for a hosted API that declares
 no maximum, the documented fallback of 8,192 (never above a quarter of the
 window), which a quarter of a hosted model's window is routinely past.
 On a local 32,768-token window that is 8,192; on a local 131,072, 32,768; on

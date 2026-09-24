@@ -836,7 +836,8 @@ change landed on `main`.
   each agent's cap in three cases: the model's declared maximum output (a model
   list entry, or a vendored `max_output` row sourced from the vendor's page)
   bounded by a quarter of its window; a quarter of the window for a runtime we
-  run; the documented 8,192 for a hosted API that declares no maximum. The
+  run, known by the probe's answer from its own `/props`, `/api/show` or `/info`
+  and never by a loopback address alone; the documented 8,192 for a hosted API that declares no maximum. The
   derivation is recorded in `run_summary.generation.output_caps`. A value above
   0 is used as set. The reply reserve and the composer's section budget follow
   the same rule; a window nobody reported keeps the documented 8,192.

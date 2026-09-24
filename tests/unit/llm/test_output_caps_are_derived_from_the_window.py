@@ -95,12 +95,38 @@ class TestTheThreeCases:
         assert tokens == 16000
         assert "the model's declared maximum output of 16000" in said
 
-    def test_a_local_llama_server_gets_a_quarter_of_its_window(self) -> None:
+    def test_a_llama_server_that_answered_props_on_loopback_gets_a_quarter(self) -> None:
+        from unittest.mock import patch
+
         for window, expected in ((32768, 8192), (131072, 32768)):
-            cap = output_cap_for(_settings(window, base_url=LOCAL), "expert_max_tokens", "static")
+            fact = WindowFact(window, "probed", f"llama.cpp /props reported {window:,} tokens")
+            with patch("maljan.llm.context_window.learn_window", return_value=fact):
+                cap = output_cap_for(
+                    _settings(window, base_url=LOCAL), "expert_max_tokens", "static"
+                )
 
             assert cap.tokens == expected
             assert "served by a runtime with no API output limit" in cap.sentence
+
+    def test_a_loopback_proxy_with_no_runtime_answer_takes_the_hosted_fallback(self) -> None:
+        """A gateway on localhost:4000 forwarding to a hosted API has that API's limit."""
+        cap = output_cap_for(
+            _settings(131072, base_url="http://localhost:4000/v1"), "expert_max_tokens", "static"
+        )
+
+        assert cap.tokens == DEFAULT_REPLY_TOKENS
+        assert "the documented fallback of 8192" in cap.sentence
+        assert "declares no maximum output" in cap.sentence
+
+    def test_a_loopback_proxy_to_a_model_that_declares_its_maximum_takes_it(self) -> None:
+        cap = output_cap_for(
+            _settings(128000, model="gpt-4o", base_url="http://127.0.0.1:4000/v1"),
+            "expert_max_tokens",
+            "static",
+        )
+
+        assert cap.tokens == 16384
+        assert "declared maximum output of 16384" in cap.sentence
 
     def test_a_server_the_probe_read_from_llama_props_is_local_wherever_it_is(self) -> None:
         window = WindowFact(131072, "probed", "llama.cpp /props reported 131,072 tokens")
@@ -146,7 +172,7 @@ class TestTheThreeCases:
 class TestItIsPrinted:
     def test_the_generation_record_carries_each_cap_and_its_derivation(self) -> None:
         rates = GenerationRates()
-        cap = output_cap_for(_settings(16384, base_url=LOCAL), "expert_max_tokens", "static")
+        cap = output_cap_for(_settings(16384, model="gpt-4o"), "expert_max_tokens", "static")
 
         rates.note_output_cap("static", cap.tokens, cap.sentence)
 

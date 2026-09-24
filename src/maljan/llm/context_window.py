@@ -75,7 +75,6 @@ conversation is written in it.
 from __future__ import annotations
 
 import contextlib
-import ipaddress
 import json
 import re
 import threading
@@ -1229,26 +1228,16 @@ _LOCAL_SERVER_ANSWERS = (
 def serves_locally(assignment: Any, window: WindowFact) -> bool:
     """Whether the model is served by a runtime we run rather than a hosted API.
 
-    llama.cpp or Ollama on loopback, or any server whose window the probe read
-    from a runtime's own description (llama.cpp's ``/props``, Ollama's
-    ``/api/show``, Text Generation Inference's ``/info``). A hosted API is
-    asked through a model list or answered from the table, and neither says it
-    is a runtime.
+    Only when the window probe received the runtime's own answer: llama.cpp's
+    ``/props``, Ollama's ``/api/show`` or Text Generation Inference's ``/info``.
+    A loopback address says nothing on its own — a gateway or tunnel on
+    ``localhost:4000`` that forwards to a hosted API has that API's output
+    limit — so an endpoint that did not answer as a runtime is asked for a
+    declared maximum and otherwise takes the hosted fallback. ``assignment`` is
+    kept for callers; what decides is what answered.
     """
-    if window.source == PROBED and str(window.detail).startswith(_LOCAL_SERVER_ANSWERS):
-        return True
-    provider = str(getattr(assignment, "provider", "") or "")
-    if provider not in ("openai", "ollama"):
-        return False
-    try:
-        from urllib.parse import urlparse
-
-        host = urlparse(str(getattr(assignment, "endpoint", "") or "")).hostname or ""
-        if host == "localhost":
-            return True
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
+    del assignment
+    return window.source == PROBED and str(window.detail).startswith(_LOCAL_SERVER_ANSWERS)
 
 
 def derived_reply(

@@ -28,7 +28,8 @@ from maljan.reporting.composer import ReportComposer
 def _composer(window: int, **llm: int) -> Any:
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     settings.llm.provider = "openai"
-    # A llama server we run, on loopback: no API limits its output.
+    # A llama server we run, which answered the probe's /props: no API limits
+    # its output.
     settings.llm.openai.base_url = "http://127.0.0.1:8080/v1"
     settings.llm.openai.expert_model = "local-model"
     settings.llm.openai.judge_model = "local-model"
@@ -39,7 +40,7 @@ def _composer(window: int, **llm: int) -> Any:
     registry = MagicMock()
     registry.build_model_for_agent.return_value = FakeMessagesListChatModel(responses=[])
     container._llm_registry = registry  # type: ignore[assignment]
-    fact = WindowFact(window, "probed", "the server's /props")
+    fact = WindowFact(window, "probed", f"llama.cpp /props reported {window:,} tokens")
     with patch("maljan.llm.context_window.learn_window", return_value=fact):
         composer = container.get_report_composer()
     built = registry.build_model_for_agent.call_args.kwargs["max_tokens_for"]("openai")

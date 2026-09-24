@@ -258,7 +258,8 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Per-call output-token budget for the analyst LLM. 0, the default, derives it: "
             "the model's declared maximum output where one is declared (bounded by a quarter "
             "of its context window), a quarter of the window for a runtime you run "
-            "(llama.cpp or Ollama), and 8,192 for a hosted API that declares no maximum; "
+            "that answered as one (llama.cpp /props, Ollama /api/show), and 8,192 for a "
+            "hosted API that declares no maximum; "
             "printed in the run summary. A value above 0 is used as set; it caps a runaway "
             "decode and sizes the split budget when view_decomposition_views is set."
         ),
@@ -427,7 +428,8 @@ ANNOTATIONS: dict[str, Annotation] = {
             "wall-clock cost instead of relying only on the timeout. 0, the default, "
             "derives it: the model's declared maximum output where one is declared (bounded "
             "by a quarter of its context window), a quarter of the window for a runtime you "
-            "run (llama.cpp or Ollama), and 8,192 for a hosted API that declares no maximum; "
+            "run that answered as one (llama.cpp /props, Ollama /api/show), and 8,192 for "
+            "a hosted API that declares no maximum; "
             "printed in the run summary. A value above 0 is used as set."
         ),
     },
