@@ -2542,6 +2542,47 @@ UNCITED_CONFIGURATION_CODE = "report.configuration_uncited"
 # of a benchmark report's host-identifier section ran to exactly 8,192 tokens.
 SECTION_CUT_CODE = "composer.cut_at_output_cap"
 
+# An analyst's answer the output cap ended. The judge and the composer were
+# asked about theirs; an analyst whose answer stopped at the cap — 42 claims,
+# the last one cut — was asked its other questions over the cut answer, spent
+# the retry's whole cap again, and returned no claim at all.
+ANALYST_CUT_CODE = "isr.cut_at_output_cap"
+
+# A claim begun in an analyst's answer: the label every claim block opens with.
+_CLAIM_BEGUN_RE = re.compile(r"^\s*CLAIM:", re.MULTILINE)
+
+
+def analyst_cut_violation(cap: int, text: str = "") -> Violation:
+    """What an analyst the cap cut is told: the cap, what was begun, and the bound.
+
+    The cut answer is not sent back (``retry_with_feedback_sync``'s
+    ``drop_answer_for``): it is described — its characters and the claims it
+    began — and the length it was cut at is the bound the next answer stays
+    under. It asks once for a whole shorter answer, never for fewer findings
+    than the evidence holds, and the cap it names is the one in force: nothing
+    here raises it.
+    """
+    begun = len(_CLAIM_BEGUN_RE.findall(text))
+    size = (
+        f" It ran to {len(text):,} characters"
+        + (f" and began {begun} CLAIM block(s)" if begun else "")
+        + ", and it is not shown to you again. The whole answer has to be shorter than "
+        f"those {len(text):,} characters, the length at which the limit cut it."
+        if text
+        else ""
+    )
+    return Violation(
+        code=ANALYST_CUT_CODE,
+        message=(
+            f"Your previous answer stopped at the output limit of {int(cap)} tokens before "
+            f"it ended, so its last claim was cut off.{size} Any reasoning you write counts "
+            f"against the same limit. Write the whole answer again so that it ends well inside "
+            f"{int(cap)} tokens: the claims the evidence supports best, each written once, "
+            "each one sentence with its EVIDENCE, CONFIDENCE and TECHNIQUE lines, and nothing "
+            "between the blocks."
+        ),
+    )
+
 
 # How much of a cut answer its question shows, as a sample of its shape.
 SECTION_CUT_HEAD_CHARS = 160
@@ -3503,8 +3544,9 @@ def unknown_observable_type_violations(obj: Any, *, path: str) -> list[Violation
                 code=STRAY_BACKSLASH_CODE,
                 message=(
                     f"the indicator {safe_finding_value(named)!r} quotes "
-                    f"{', '.join(repr(safe_finding_value(v)) for v in stray)} with a backslash "
-                    "the pattern grammar cannot read: inside a quoted value a STIX pattern "
+                    f"{'a value' if len(stray) == 1 else f'{len(stray)} values'} with a "
+                    "backslash the pattern grammar cannot read: inside a quoted value a STIX "
+                    "pattern "
                     "escapes the quote and the backslash and nothing else, so every backslash "
                     "of the value is written twice in the pattern (four times in the JSON "
                     "string that carries it). Write it so, or drop the indicator; an indicator "
@@ -5208,6 +5250,7 @@ def retry_with_feedback_sync[T](
     agent: str = "",
     stage: str = "",
     keep: Callable[[T, T], T] | None = None,
+    drop_answer_for: frozenset[str] = frozenset(),
 ) -> tuple[T, list[Violation], int]:
     """:func:`retry_with_feedback` for the analysts, whose loop is synchronous.
 
@@ -5222,6 +5265,9 @@ def retry_with_feedback_sync[T](
     one of them is published with are then the kept answer's. Chosen after the
     outcome, the conversation said "resolved" for four findings the run kept
     and recorded unresolved.
+
+    ``drop_answer_for`` is :func:`retry_with_feedback`'s: the codes whose
+    correction describes the answer instead of following it.
     """
     feed = _feed(sink, agent, stage)
     turns = list(messages)
@@ -5234,7 +5280,8 @@ def retry_with_feedback_sync[T](
     while violations and retries < max_retries:
         _announce_feedback(violations, on_feedback, feed, retries + 1)
         shown.extend(violations)
-        turns = _with_feedback(turns, answer, violations)
+        keep_answer = not any(v.code in drop_answer_for for v in violations)
+        turns = _with_feedback(turns, answer, violations, keep_answer=keep_answer)
         retries += 1
         answer = run(turns)
         parsed = parse(answer)

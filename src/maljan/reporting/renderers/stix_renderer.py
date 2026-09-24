@@ -415,7 +415,7 @@ def unknown_object_path_sentence(pattern: str, problems: list[str]) -> str:
 
 def stray_backslash_sentence(pattern: str, values: list[str]) -> str:
     """The recorded sentence for a pattern whose value writes a backslash the grammar refuses."""
-    named = ", ".join(repr(safe_finding_value(v)) for v in values)
+    named = "a value" if len(values) == 1 else f"{len(values)} values"
     return (
         f"the indicator {safe_finding_value(pattern)!r} is not in the exported bundle: it "
         f"quotes {named} with a backslash a STIX pattern cannot read — inside a quoted value "
