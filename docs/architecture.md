@@ -570,7 +570,15 @@ Two producers use it:
   longer run; a value that is only a number raises no question (an answer may
   write it another way, and every reputation report holds short numbers), and
   a cited entry whose text is known to be partial is never said to lack one.
-  The id is never rewritten. **A technique written with another technique's name**
+  The id is never rewritten. **An entry said to hold nothing, or one line**
+  (`report.entry_contents_misstated`): a sentence saying a cited entry holds
+  nothing, is empty, or holds only a header, a line or a row is checked against
+  that entry — the one its subject names (`the capture entry` names the
+  capture summary's), or the only one it cites. The statement is false when
+  the entry's text holds a value (or more than one), counted through its JSON
+  with a zero, an empty string and an empty list holding nothing; the model is
+  asked once, a partial entry is never judged, and the sentence is never
+  rewritten. **A technique written with another technique's name**
   (`report.technique_name`): an id followed by a name in brackets whose name
   the vendored ATT&CK table does not give that id — its own name, or its
   parent's name before a sub-technique's, stands — is asked about with the

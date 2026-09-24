@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import Any
 
 from maljan.agents.evidence_recorder import EvidenceRecorder, result_text
+from maljan.analysis.pcap_summary import conversation_line
 from maljan.analysis.technique_ids import technique_ids_in
 from maljan.core.logger import logger
 from maljan.extractors.sample_identity import ARCHIVE_FILE_TYPES, DOCUMENT_FILE_TYPES
@@ -1143,11 +1144,12 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
 
 def _within_room(entry: LedgerEntry, room: int) -> str | None:
     """``entry``'s line in ``room`` characters, when it can say less and still say something."""
-    if entry.tool != "floss" or not entry.ok or not isinstance(entry.structured, dict):
+    shorter = _SHORTER_RENDERERS.get(entry.tool)
+    if shorter is None or not entry.ok or not isinstance(entry.structured, dict):
         return None
-    head = f"[{entry.id}] {_GROUP_LABELS['floss']}: "
+    head = f"[{entry.id}] {_GROUP_LABELS.get(entry.tool, entry.tool)}: "
     try:
-        body = _decoded_strings(entry.structured, max_chars=room - len(head))
+        body = shorter(entry.structured, room - len(head))
     except Exception:  # noqa: BLE001 — a renderer must never cost the block
         return None
     line = head + body
@@ -1495,12 +1497,66 @@ def _sandbox_channels(data: dict[str, Any]) -> str:
     return _names(channels) or "none"
 
 
-def _pcap(data: dict[str, Any]) -> str:
+# The capture line: the packet count, the protocol counts and the external
+# conversations, heaviest first, as many as ``CAPTURE_LINE_CHARS`` holds. It
+# used to be the summary's heading alone, and a report model then wrote that
+# the capture entry "holds only a header line" about an entry listing fifteen
+# conversations.
+CAPTURE_LINE_CHARS = 2000
+
+
+def _pcap(data: dict[str, Any], max_chars: int = CAPTURE_LINE_CHARS) -> str:
+    """The capture's facts on one line, the conversations cut to the room, the cut said.
+
+    ``""`` when not even the counts fit in ``max_chars``.
+    """
     if data.get("empty"):
         return "empty capture"
-    return _short(
-        str(data.get("summary") or "").splitlines()[0] if data.get("summary") else "recorded"
+    conversations = [row for row in (data.get("conversations") or []) if isinstance(row, dict)]
+    if "packets_read" not in data:
+        # An entry recorded before the summary carried its facts: its text,
+        # flattened onto the line.
+        return _short(str(data.get("summary") or "recorded"), max_chars)
+    protocols = data.get("protocols") or {}
+    head = (
+        f"{_n(data.get('packets_read'))} of {_n(data.get('packets_in_capture'))} packets in the "
+        f"capture read, {_n(data.get('bytes'))} bytes over "
+        f"{float(data.get('duration_s') or 0.0):.1f}s; protocols: "
+        + (", ".join(f"{k} {_n(v)}" for k, v in protocols.items()) or "no IP packets")
     )
+    beacons = data.get("beacons") or []
+    tail = "; beaconing: " + (
+        ", ".join(
+            f"{b.get('dst')}:{b.get('dport')}/{b.get('proto')} every ~{b.get('interval_s')}s"
+            for b in beacons
+            if isinstance(b, dict)
+        )
+        if beacons
+        else "no regular interval detected"
+    )
+    budget = min(int(max_chars), CAPTURE_LINE_CHARS)
+
+    def _line(shown: int) -> str:
+        if not conversations:
+            return f"{head}; no external conversations{tail}"
+        total = len(conversations)
+        said = (
+            f"all {_n(total)} external conversations by volume"
+            if shown >= total
+            else (
+                f"{_n(shown)} of {_n(total)} external conversations by volume (the rest are "
+                "in the entry)"
+            )
+        )
+        rows = ", ".join(conversation_line(row) for row in conversations[:shown])
+        return f"{head}; {said}" + (f": {rows}" if shown else "") + tail
+
+    shown = len(conversations)
+    line = _line(shown)
+    while shown > 0 and len(line) > budget:
+        shown -= 1
+        line = _line(shown)
+    return line if len(line) <= budget else ""
 
 
 # The decoded-strings line. The pack is one block every agent reads, cut at
@@ -1801,4 +1857,12 @@ _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "pcap_summary": _pcap,
     "function_matches": _function_matches,
     "floss": _decoded_strings,
+}
+
+# The lines that can say less and still say something, each given the room it
+# has: the decoded strings keep their first strings, the capture its counts and
+# its heaviest conversations.
+_SHORTER_RENDERERS: dict[str, Callable[[dict[str, Any], int], str]] = {
+    "floss": lambda data, room: _decoded_strings(data, max_chars=room),
+    "pcap_summary": lambda data, room: _pcap(data, max_chars=room),
 }

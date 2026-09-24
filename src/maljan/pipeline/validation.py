@@ -2702,6 +2702,7 @@ def repeated_item_violations(
 
 
 CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
+ENTRY_CONTENTS_MISSTATED_CODE = "report.entry_contents_misstated"
 UNCITED_IDENTIFIER_CODE = "report.identifier_uncited"
 TECHNIQUE_NAME_CODE = "report.technique_name"
 
@@ -2718,6 +2719,7 @@ KEPT_WITH_A_FINDING: frozenset[str] = frozenset(
         UNCITED_CONFIGURATION_CODE,
         CITATION_NOT_EVIDENCE_CODE,
         CITATION_WRONG_ENTRY_CODE,
+        ENTRY_CONTENTS_MISSTATED_CODE,
         UNCITED_IDENTIFIER_CODE,
         TECHNIQUE_NAME_CODE,
         RULE_MATCH_AS_ACTION_CODE,
@@ -3374,6 +3376,155 @@ def wrong_entry_citations(
         )
         violations.append(
             Violation(code=CITATION_WRONG_ENTRY_CODE, message=message, path="citation")
+        )
+    return violations
+
+
+# A statement that an entry holds nothing, or one line and no more. Asked of
+# the entry itself: one live report's key finding said the capture entry
+# "holds only a header line with no parsed flows" about an entry listing its
+# packet count, its protocols and fifteen conversations.
+_HOLDING_VERBS = r"(?:holds|held|contains|contained|carries|carried|has|had|records|recorded|returned|returns|shows|showed|lists|listed)"  # noqa: E501
+_HOLDS_NOTHING_RE = re.compile(
+    rf"\b{_HOLDING_VERBS}\s+(?:nothing|no\s+(?:data|content|contents|output|entries|rows|"
+    r"records|values|lines))\b|\b(?:is|was|came\s+back)\s+empty\b",
+    re.IGNORECASE,
+)
+_HOLDS_ONE_LINE_RE = re.compile(
+    rf"\b{_HOLDING_VERBS}\s+(?:only|just|nothing\s+but|no\s+more\s+than)\s+"
+    r"(?:a|an|one|the|its)?\s*(?:single\s+)?(?:header(?:\s+line)?|heading|line|row|record|"
+    r"value|field)\b",
+    re.IGNORECASE,
+)
+# How many words before the verb name what the statement is about.
+_SUBJECT_WORDS = 6
+# Words a statement uses for an entry that its tool's own name does not carry.
+_TOOL_WORDS: dict[str, tuple[str, ...]] = {
+    "pcap": ("capture", "packet", "packets", "pcap"),
+    "floss": ("decoded", "emulation", "floss"),
+    "sigma": ("sigma", "rule", "rules"),
+    "yara": ("yara", "rule", "rules"),
+}
+
+
+def _held_values(text: str) -> int:
+    """How many values an entry's text holds: its non-empty lines, read through its JSON.
+
+    A zero, an empty string and an empty list hold nothing, so an answer that
+    records an absence (``{"registry": [], "total": 0}``) holds none.
+    """
+    import json as _json
+
+    try:
+        parsed: Any = _json.loads(text)
+    except (ValueError, TypeError):
+        return sum(1 for line in str(text).splitlines() if line.strip())
+
+    def _count(node: Any) -> int:
+        if isinstance(node, dict):
+            return sum(_count(value) for value in node.values())
+        if isinstance(node, list | tuple):
+            return sum(_count(item) for item in node)
+        if isinstance(node, bool) or node is None:
+            return 0
+        if isinstance(node, int | float):
+            return 1 if node else 0
+        return sum(1 for line in str(node).splitlines() if line.strip())
+
+    return _count(parsed)
+
+
+def _tool_words(tool: str) -> set[str]:
+    words = {part for part in re.split(r"[_\W]+", tool.lower()) if len(part) >= 3}
+    for part in list(words):
+        words.update(_TOOL_WORDS.get(part, ()))
+    return words
+
+
+def _statement_subject(
+    entries: EntryTexts, sentence: str, verb_at: int, cited: list[str]
+) -> list[str]:
+    """The cited entries the statement is about: the one its subject names, or its only one."""
+    before = re.split(r"[^\w-]+", sentence[:verb_at].lower())
+    subject = {w for word in before[-_SUBJECT_WORDS:] for w in word.split("-") if w}
+    named = [
+        entry_id for entry_id in cited if subject & _tool_words(entries.tools.get(entry_id, ""))
+    ]
+    if named:
+        return named
+    return cited if len(cited) == 1 else []
+
+
+def misstated_entry_contents(
+    payload: Any, entries: EntryTexts | None, *, prose: Sequence[str] = ()
+) -> list[Violation]:
+    """Statements that an entry holds nothing, or one line, where the entry holds more.
+
+    Read sentence by sentence under the brackets each sentence cites. The
+    statement is about the cited entry its subject names (``the capture
+    entry`` names the capture summary's), or about the one entry cited. It is
+    checked against that entry's own text: a statement that it holds nothing is
+    false when the entry holds a value, one that it holds one line when it
+    holds more. An entry whose text is not the whole answer is not judged. The
+    model is asked once; the statement is never rewritten.
+    """
+    if payload is None or entries is None or not entries.texts:
+        return []
+    found: list[tuple[str, str, int, str]] = []
+
+    def _read(text: Any) -> None:
+        for sentence, cited in _sentences_with_citations(str(text or "")):
+            for pattern, most, said in (
+                (_HOLDS_NOTHING_RE, 0, "holds nothing"),
+                (_HOLDS_ONE_LINE_RE, 1, "holds one line and no more"),
+            ):
+                match = pattern.search(sentence)
+                if match is None:
+                    continue
+                known = [i for i in cited if i in entries.texts]
+                for entry_id in _statement_subject(entries, sentence, match.start(), known):
+                    if entry_id in entries.partial:
+                        continue
+                    held = _held_values(entries.texts[entry_id])
+                    if held > most:
+                        found.append((entry_id, said, held, sentence.strip()))
+                break
+
+    def _walk(node: Any, depth: int = 0) -> None:
+        if depth > 4:
+            return
+        if isinstance(node, str):
+            _read(node)
+        elif isinstance(node, list | tuple):
+            for item in node:
+                _walk(item, depth + 1)
+        elif isinstance(node, dict):
+            for value in node.values():
+                _walk(value, depth + 1)
+
+    data = payload if isinstance(payload, dict) else getattr(payload, "__dict__", {}) or {}
+    _walk(data)
+    del prose  # every string is read under the brackets it carries
+
+    violations: list[Violation] = []
+    seen: set[str] = set()
+    for entry_id, said, held, sentence in found:
+        if entry_id in seen:
+            continue
+        seen.add(entry_id)
+        named = safe_finding_value(entries.named(entry_id))
+        violations.append(
+            Violation(
+                code=ENTRY_CONTENTS_MISSTATED_CODE,
+                message=(
+                    f"The text says {named} {safe_finding_value(said)} "
+                    f"({safe_finding_value(sentence[:200])!r}); {named} holds "
+                    f"{safe_finding_value(held)} values in "
+                    "this run. State what the entry holds, or cite the entry the statement is "
+                    "about."
+                ),
+                path="citation",
+            )
         )
     return violations
 

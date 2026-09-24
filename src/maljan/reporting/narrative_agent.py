@@ -43,6 +43,7 @@ from maljan.pipeline.validation import (
     Violation,
     citation_violations,
     key_finding_citation_violations,
+    misstated_entry_contents,
     narrative_capability_violations,
     pack_line_ids,
     record_flagged_statements,
@@ -707,6 +708,7 @@ class NarrativeAgent:
                     lambda p: key_finding_citation_violations(p, known_ids),
                     lambda p: citation_violations(p, citable, prose=NARRATIVE_PROSE),
                     lambda p: wrong_entry_citations(p, evidence, prose=NARRATIVE_PROSE),
+                    lambda p: misstated_entry_contents(p, evidence, prose=NARRATIVE_PROSE),
                     technique_name_violations,
                 ],
                 parse=_narrative_payload,
@@ -780,6 +782,7 @@ class NarrativeAgent:
             *key_finding_citation_violations(answer, known_ids or []),
             *citation_violations(answer, citable, prose=NARRATIVE_PROSE),
             *wrong_entry_citations(answer, evidence, prose=NARRATIVE_PROSE),
+            *misstated_entry_contents(answer, evidence, prose=NARRATIVE_PROSE),
             *technique_name_violations(answer),
         ]
         self.validation_tally.count(found)

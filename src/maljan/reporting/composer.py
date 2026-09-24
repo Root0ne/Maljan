@@ -47,6 +47,7 @@ from maljan.pipeline.validation import (
     flow_voice_violations,
     identifier_citation_violations,
     keep_known_keys,
+    misstated_entry_contents,
     pack_line_ids,
     quoted_values,
     record_flagged_statements,
@@ -1079,6 +1080,7 @@ class ReportComposer:
                     *section_capability_violations(answer, self._grounding),
                     *citation_violations(answer, citable, prose=prose),
                     *wrong_entry_citations(answer, entries, prose=prose),
+                    *misstated_entry_contents(answer, entries, prose=prose),
                     *technique_name_violations(answer),
                     *repeated_item_violations(answer, _ITEM_IDENTITY.get(schema, {})),
                 ]
@@ -1201,6 +1203,7 @@ class ReportComposer:
                 *section_capability_violations(payload, self._grounding),
                 *citation_violations(payload, citable, prose=prose),
                 *wrong_entry_citations(payload, entries, prose=prose),
+                *misstated_entry_contents(payload, entries, prose=prose),
                 *technique_name_violations(payload),
                 *repeated_item_violations(payload, _ITEM_IDENTITY.get(schema, {})),
             ]
