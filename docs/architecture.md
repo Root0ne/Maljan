@@ -479,18 +479,22 @@ Two producers use it:
   unresolved; only a broken shape costs the section. A sentence the capability
   check flagged and the retry left standing is also recorded on the report
   (`flagged_statements`), and the Markdown and HTML reports print a mark after
-  it where it stands (**[not established by this run: …]**); its words are
-  unchanged. A statement of absence is no claim: a negation before the term, a
-  noun negation governing a list ("no evidence of A, such as B or C"), an
-  absence said after the term ("… is absent", "was not observed"), and a
-  defender's purpose ("to prevent lateral movement").
+  each place it stands, in prose and in table cells (**[not established by this
+  run: …]**); its words are unchanged. A statement of absence is no claim: a
+  negation governs the term it precedes in its own clause, up to a relative
+  clause or a new statement ("no signs of packing in this binary, which
+  exfiltrates the files" still claims exfiltration); "to prevent|avoid|stop|
+  block X" negates X only when X is the verb's object; "is absent" and "is
+  missing from" count only with the term as the clause's subject.
 
   Two more questions are asked where they can be decided. **A value cited to
   the wrong entry** (`report.citation_wrong_entry`): a value a sentence states
-  verbatim — in quotes or backticks, unquoted where its shape alone makes it a
-  value (`validation.literal_values`: a whole digest, a URL, a path or registry
-  key, a mailbox, a host or file name, or a token with an underscore, a percent
-  sign, or letters and digits joined by hyphens), or a record's `value` or
+  verbatim — in quotes or backticks, unquoted where its shape makes it an
+  indicator (`validation.literal_values`: a whole digest, a URL, a backslash
+  path or registry key, a mailbox, a host under a real top-level domain, or a
+  file name with a file's extension other than an executable every Windows host
+  carries; never technical vocabulary such as `AES-256`, `x86-64` or an API
+  constant), or a record's `value` or
   `endpoints` — is looked for in the text of each entry the sentence (or its record) cites, as
   the run holds it (`validation.EntryTexts`: the corpus copy, else the stored
   output). Held by a cited entry, the citation stands; held only by another
@@ -2299,14 +2303,19 @@ is assembled from what the run gathered rather than recomputed beside it:
   Appendix B beside the section's wait ("Output budget of `composer:section`").
   A fixed 900 tokens dropped a section of a live report when the model reasoned
   past it. An answer the cap cuts is told so — `composer.cut_at_output_cap`,
-  naming the cap and asking for an object that closes well inside it, each
-  item once, short phrases, one line — and asked once through the existing
-  loop; how far each cut answer got (characters, items begun, how many of them
+  naming the cap, the answer's size (characters, items begun) and its first 160
+  characters, and asking for an object that closes well inside it, each item
+  once, short phrases, one line — and asked once through the existing loop.
+  The question replaces the cut answer rather than following it, so the retry
+  is the first prompt and one short turn; it is sent only when that leaves the
+  section's output budget free in the window, and otherwise the degradation
+  reason says it was not asked. How far each cut answer got (characters, items begun, how many of them
   distinct) is logged and, when the retry is cut too, carried into the
   degradation reason. Every list contract asks for each item once on one line.
   The host-identifier contract asks for the kind by what the entry shows the
-  value is: a registry key or value only under a registry hive or where the
-  entry records a registry access, `String` where it does not show.
+  value is: a registry key or value only under a registry hive, from one of its
+  top keys (`Software\`, `System\`) or where the entry records a registry
+  access, `String` where it does not show.
 * **When no summary was written, the report says why and writes none.** The
   fallback that filled the summary, the capability paragraphs and a
   recommendation from a template is gone: its sentences read as the report

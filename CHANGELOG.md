@@ -1839,7 +1839,9 @@ change landed on `main`.
   bounded backoff (about 15 s) and marks a late row `failed` with the reason.
 - **A report section the output cap cut is asked once for a shorter answer**
   (`composer.cut_at_output_cap`), instead of being told only that its answer
-  was not JSON; how far each cut answer got is recorded. Both host-identifier
+  was not JSON; how far each cut answer got is recorded. The question
+  replaces the cut answer and is sent only when it fits the window beside the
+  section's output budget. Both host-identifier
   answers of two benchmark runs ran to exactly 8,192 tokens and the section
   was dropped. The host-identifier contract asks for each value once and the
   kind by what the entry shows (configuration-panel paths had been typed as
@@ -1850,12 +1852,19 @@ change landed on `main`.
   client dropped `timings`, so no prompt reading rate was recorded on the
   default provider and the generation rate came from the wall clock.
 - **An unquoted value cited to the wrong entry is asked about**, where its
-  shape makes it a value (a host, a path, a digest, an identifier no word is
-  spelt as); a paraphrase stays undecided.
-- **A negation is not read as a claim.** "No evidence of … such as C2
-  callbacks or exfiltration endpoints", "… is absent from the evidence" and
-  "to prevent lateral movement" no longer raise
-  `narrative.ungrounded_capability`.
+  shape makes it an indicator (a digest, a URL, a path or registry key, a
+  mailbox, a host, a file name); technical vocabulary and a paraphrase stay
+  undecided.
+- **A negation is not read as a claim.** "does not perform lateral movement",
+  "to prevent lateral movement" and "Lateral movement is absent from the
+  evidence" no longer raise `narrative.ungrounded_capability`; a negation
+  reaches only the term it governs in its own clause.
+- **A derived timeout times the prompt read.** Where the reading rate is
+  measured, a composer section's and the verdict's wait is (prompt tokens /
+  reading rate + output budget / generation rate) × 1.5.
+- **A job whose row already ended is not run.** An enqueue that raised after
+  the queue accepted the job leaves the row `failed`; the worker no longer
+  runs it.
 - **A cancelled job is recorded where the pipeline was.** The worker wrote
   "stopped before any check was reached" for runs cancelled minutes in; the
   record and the `cancelled` event now name the node that was running (or the
@@ -4383,8 +4392,11 @@ The `cancelled` job event always carries `stopped` now, and a new
 stored before it existed, which renders unmarked). On the `openai` provider
 against llama.cpp, `run_summary.generation` records a prompt reading rate and
 the server's own generation rate (source `llama.cpp timings.predicted_n/
-predicted_ms`) instead of the wall clock's; a timeout derived from the faster
-rate can be shorter, never below the configured value.
+predicted_ms`) instead of the wall clock's. A call that gives its prompt size
+is timed as its prompt read plus its answer at those two rates; without a
+reading rate the rate that includes the prompt read is used as before. A
+derived timeout is never below the configured value. A queued job whose row
+already ended returns `status: skipped` from the worker.
 
 `reporting.composer_section_max_tokens` now ships at 0, meaning derived from
 each reporter model's context window. A deployment that stored 900 (or any
