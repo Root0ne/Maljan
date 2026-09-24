@@ -244,6 +244,18 @@ class TestWhatANegationReaches:
         assert self._paths("Lateral movement is absent from the recorded evidence.") == set()
 
     @pytest.mark.parametrize(
+        "text",
+        [
+            "There is no evidence that the sample exfiltrates data.",
+            "We found no network activity such as exfiltration.",
+            "No evidence of malicious command and control infrastructure, such as C2 "
+            "callbacks or exfiltration endpoints, was found in the static analysis.",
+        ],
+    )
+    def test_a_statement_of_absence_is_not_flagged(self, text: str) -> None:
+        assert self._paths(text) == set()
+
+    @pytest.mark.parametrize(
         ("text", "path"),
         [
             (

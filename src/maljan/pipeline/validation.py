@@ -1339,6 +1339,40 @@ _NEGATION_REACH_END_RE = re.compile(
     r"\b(?:which|that|as|while|whereas)\b|\band\s+(?:the|it|this|its|then)\b|,\s*then\b",
     re.IGNORECASE,
 )
+# Words inside a negation that the reach-end words would otherwise read as its
+# end: the complement of "no evidence that …" and the "such as" of a list the
+# negation names. "There is no evidence that the sample exfiltrates data" and
+# "no network activity such as exfiltration" are statements of absence.
+_INSIDE_A_NEGATION_RE = re.compile(
+    r"^\s*(?:evidence|indications?|signs?|traces?)\s+that\b|\bsuch\s+as\b", re.IGNORECASE
+)
+# A noun negation: "no evidence of", "without any sign of". Its reach runs
+# through a ", such as …" list it names, however long, to the end of its clause.
+_NOUN_NEGATION_RE = re.compile(
+    r"\b(?:no|without(?:\s+any)?)\s+(?:evidence|indications?|signs?|traces?)\s+of\b",
+    re.IGNORECASE,
+)
+
+
+def _reach_ends(after_cue: str) -> bool:
+    """Whether a relative clause or a new statement stands after a cue."""
+    return _NEGATION_REACH_END_RE.search(_INSIDE_A_NEGATION_RE.sub(" ", after_cue)) is not None
+
+
+def _in_a_named_list(text: str, start: int) -> bool:
+    """Whether the term at ``start`` is in the ", such as …" list a noun negation names."""
+    head = text[:start]
+    breaks = list(_CLAUSE_BREAK_RE.finditer(head))
+    clause = head[breaks[-1].end() :] if breaks else head
+    cues = list(_NOUN_NEGATION_RE.finditer(clause))
+    if not cues:
+        return False
+    after = clause[cues[-1].end() :]
+    return re.search(r",\s*such\s+as\b", after, re.IGNORECASE) is not None and not _reach_ends(
+        after
+    )
+
+
 # A purpose that names the term as its object: "to prevent lateral movement".
 # Only the term right after the verb (a determiner allowed) is negated; another
 # verb of the same sentence is not ("deletes shadow copies to prevent recovery
@@ -1362,14 +1396,18 @@ def _is_negated(text: str, start: int, end: int | None = None) -> bool:
     is left governs this term unless a relative clause or a new statement
     stands between them: "contains no keylogging or credential theft" negates
     both words, while "no persistence was observed; it injects code" negates
-    only the first, because the semicolon ends the clause the cue was in. Two
-    more statements of absence: the term as the object of a purpose ("to
-    prevent lateral movement"), and the term as the subject of "is absent" or
-    "is missing from".
+    only the first, because the semicolon ends the clause the cue was in. "No
+    evidence that …" and "such as" do not end it. A noun negation ("no evidence
+    of") also reaches through a ", such as …" list it names to the end of its
+    clause. Two more statements of absence: the term as the object of a
+    purpose ("to prevent lateral movement"), and the term as the subject of
+    "is absent" or "is missing from".
     """
     if _PURPOSE_OBJECT_RE.search(text[max(0, start - _NEGATION_WINDOW) : start]):
         return True
     if end is not None and _SUBJECT_ABSENT_RE.match(text[end:]) and _starts_its_clause(text, start):
+        return True
+    if _in_a_named_list(text, start):
         return True
     window = text[max(0, start - _NEGATION_WINDOW) : start]
     breaks = list(_CLAUSE_BREAK_RE.finditer(window))
@@ -1378,7 +1416,7 @@ def _is_negated(text: str, start: int, end: int | None = None) -> bool:
     lowered = window.lower()
     return any(
         not lowered.startswith(_NOT_A_NEGATION, cue.start())
-        and _NEGATION_REACH_END_RE.search(window[cue.end() :]) is None
+        and not _reach_ends(window[cue.end() :])
         for cue in _NEGATION_RE.finditer(window)
     )
 
