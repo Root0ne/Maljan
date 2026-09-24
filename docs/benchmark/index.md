@@ -2,7 +2,7 @@
 
 This page reports how the `default` team performs on a small set of real
 samples, and how one of its reports compares, item by item, with a published
-human analysis of the same sample. The benchmark ran four times between
+human analysis of the same sample. The benchmark ran six times between
 2026-09-23 and 2026-09-24, with platform fixes between the runs. Every number
 below comes from a single run on a laptop, with **nothing executed**: all runs
 used the mock sandbox, so every finding is static.
@@ -14,13 +14,19 @@ In short:
 - Against the human report, the best run (iteration 4) found 15 of 57 core
   items, partly found 25, missed 17 and got none wrong. Before decoded strings
   and VirusTotal labels reached the model, the same sample scored 3 / 7 / 46 / 1.
-- What Maljan still misses is mostly control flow: the anti-analysis checks, the
-  bot-ID derivation, the beacon interval and the command IDs. Strings alone
-  cannot recover these, and a disassembler did not help in the one run that had
-  one.
-- On the benign control (signed PuTTY), the last run published no ATT&CK
-  techniques and no detection drafts, but its report still carries four
-  malicious-sounding sentences.
+- The score has plateaued within rerun noise. Iterations 5 and 6 found 14 and
+  12 items, and across the five scored runs of the default model found stayed
+  at 12–15 and wrong at 0.
+- The remaining gap is on the model's side. What Maljan still misses is mostly
+  control flow: the anti-analysis checks, the bot-ID derivation, the beacon
+  interval and the command IDs. Strings alone cannot recover these, and a
+  disassembler did not help in the one run that had one. The rest is the
+  purpose of values the report already prints, such as the mutex and the
+  scheduled task's name.
+- On the benign control (signed PuTTY), iterations 4 and 5 published no ATT&CK
+  techniques. In iteration 6 the verdict fell back to text extraction and seven
+  techniques were published from the analyst's hedged claims. No run since
+  iteration 1 has produced detection drafts on it.
 
 ## Method
 
@@ -36,8 +42,7 @@ In short:
 Iteration 1 ran all four samples on both models. Later iterations ran the
 default model only, on the samples that the fixes in between were meant to
 move: iteration 2 ran samples 1–3 and a second run of sample 1 with a
-disassembler attached; iteration 3 ran samples 1 and 3; iteration 4 ran samples
-1 and 3.
+disassembler attached; iterations 3, 4, 5 and 6 ran samples 1 and 3.
 
 ### Models
 
@@ -47,7 +52,7 @@ disassembler attached; iteration 3 ran samples 1 and 3; iteration 4 ran samples
 | Server | ik_llama.cpp, through the OpenAI-compatible provider | Ollama, thinking disabled |
 | Context | 32,768 tokens | 32,768 tokens |
 | Placement | about 10.4 GB resident at load; the experts of blocks 10–39 on the CPU | 19 GB, 76% on the CPU and 24% on the GPU |
-| Iterations | 1, 2, 3 and 4 | 1 only |
+| Iterations | 1 to 6 | 1 only |
 
 The small model was set as both the expert model and the judge model. Every
 timeout and budget stayed as shipped for both models.
@@ -65,9 +70,14 @@ timeout and budget stayed as shipped for both models.
   debate, the judge's verdict and the report. No setting was changed between
   runs of an iteration.
 - **Model server.** From iteration 2 on, llama.cpp ran with a 1 GiB prompt cache
-  instead of the 8 GiB default, to fit the host's memory. Iteration 4 also
-  capped the per-slot context checkpoints at 8 instead of 32. Wall times are
-  therefore not like for like across iterations.
+  instead of the 8 GiB default, to fit the host's memory. Iterations 4 to 6
+  also capped the per-slot context checkpoints at 8 instead of 32. Wall times
+  are therefore like for like only across iterations 4 to 6.
+- **Output caps.** In iterations 5 and 6 the judge's answer was capped at 8,192
+  tokens and each analyst's at 4,096. In iteration 6 the judge's and the report
+  model's 8,192 was derived from the context window (a quarter of 32,768), while
+  the analysts' 4,096 was a value stored in the settings, which wins over the
+  derivation.
 
 ### The human report and the scoring key
 
@@ -122,19 +132,22 @@ but new.
 
 Default model, default profile, one run per cell.
 
-| | Iteration 1 | Iteration 2 | Iteration 3 | Iteration 4 |
-| :-- | :-- | :-- | :-- | :-- |
-| Tree | `dev` @ `9019db82` | `dev` @ `39b07c65` | `dev` @ `872ba234` | `dev` @ `1eb7312f` |
-| Samples completed | Latrodectus, sample A, PuTTY, ELF | Latrodectus, sample A, PuTTY | PuTTY (Latrodectus stopped twice by the 6 GB memory rule) | Latrodectus, PuTTY |
-| Verdicts right | 4 of 4 | 3 of 3 | 1 of 1 | 2 of 2 |
-| Verdict stated in the judge's structured answer | 3 of 4 | 3 of 3 | 1 of 1 | 1 of 2 (Latrodectus: the answer overran its output cap twice and the verdict was read from text) |
-| PuTTY (false-positive control): malicious sentences / techniques published / draft rules | 3 / 3 / 20 | 3 / 0 / 0 | 4 / 13 / 0 | 4 / **0** / 0 |
-| PuTTY wall time | 10.5 min | 19.4 min ¹ | 15.4 min ¹ | 13.2 min ¹ |
-| Model speed recorded | generation 34 tok/s (wall clock) | generation 26–40 tok/s (wall clock) | prompt 463, generation 56 tok/s (llama.cpp timings) | prompt 433–475, generation 55 tok/s (llama.cpp timings) |
+| | Iteration 1 | Iteration 2 | Iteration 3 | Iteration 4 | Iteration 5 | Iteration 6 |
+| :-- | :-- | :-- | :-- | :-- | :-- | :-- |
+| Tree | `dev` @ `9019db82` | `dev` @ `39b07c65` | `dev` @ `872ba234` | `dev` @ `1eb7312f` | `dev` @ `2a93b02d` | `dev` @ `ed57265b` |
+| Samples completed | Latrodectus, sample A, PuTTY, ELF | Latrodectus, sample A, PuTTY | PuTTY (Latrodectus stopped twice by the 6 GB memory rule) | Latrodectus, PuTTY | Latrodectus, PuTTY | Latrodectus, PuTTY |
+| Verdicts right | 4 of 4 | 3 of 3 | 1 of 1 | 2 of 2 | 2 of 2 | 2 of 2 |
+| Verdict stated in the judge's structured answer | 3 of 4 | 3 of 3 | 1 of 1 | 1 of 2 (Latrodectus: the answer overran its output cap twice and the verdict was read from text) | 1 of 2 (PuTTY: overran twice, read from text; Latrodectus: overran once, the compact retry closed) | 1 of 2 (PuTTY: overran twice, read from text; Latrodectus closed at the first attempt) |
+| PuTTY (false-positive control): malicious sentences / techniques published / draft rules | 3 / 3 / 20 | 3 / 0 / 0 | 4 / 13 / 0 | 4 / **0** / 0 | 2 / **0** / 0 | 3 / 7 / 0 |
+| PuTTY wall time | 10.5 min | 19.4 min ¹ | 15.4 min ¹ | 13.2 min ¹ | 17.7 min ¹ | 16.0 min ¹ |
+| Model speed recorded | generation 34 tok/s (wall clock) | generation 26–40 tok/s (wall clock) | prompt 463, generation 56 tok/s (llama.cpp timings) | prompt 433–475, generation 55 tok/s (llama.cpp timings) | prompt 523.7–524.6, generation 55.1–55.5 tok/s (llama.cpp timings) | prompt 536.0–551.0, generation 57.0–57.5 tok/s (llama.cpp timings) |
 
 ¹ From iteration 2 on, llama.cpp ran with a 1 GiB prompt cache instead of the
-8 GiB default, and iteration 4 also bounded the per-slot context checkpoints
-(8 instead of 32). Times are therefore not like for like across iterations.
+8 GiB default, and iterations 4 to 6 also bounded the per-slot context
+checkpoints (8 instead of 32). Times are therefore like for like only across
+iterations 4 to 6. Iteration 5's PuTTY run spent most of its extra time in the
+verdict stage (337 s against 45 s in iteration 4), where the judge's answer ran
+to its output cap twice.
 
 The verdicts per sample: Latrodectus Malware (family Latrodectus), sample A
 Malware, PuTTY Benign (family PuTTY), the ELF Malware (family Snowlight). In
@@ -174,23 +187,25 @@ Latrodectus, 57 core items, found / partly / missed / wrong:
 | Default model, iteration 2, with the r2 disassembler | 11 | 24 | 21 | 1 |
 | Default model, iteration 3 | not scored: the run was stopped by the memory rule on both attempts | | | |
 | **Default model, iteration 4** | **15** | 25 | 17 | 0 |
+| Default model, iteration 5 | 14 | 25 | 18 | 0 |
+| Default model, iteration 6 | 12 | 28 | 17 | 0 |
 
-The same scores by group:
+The same scores by group (found / partly / missed / wrong):
 
-| Group (items) | Baseline | Small, it. 1 | Default, it. 1 | Default, it. 2 | Default + r2, it. 2 | **Default, it. 4** |
-| :-- | :-- | :-- | :-- | :-- | :-- | :-- |
-| K1 identity (5) | 1/2/1/1 | 3/1/1/0 | 3/1/1/0 | 3/1/1/0 | 3/1/1/0 | 2/2/1/0 |
-| K2 execution flow (6) | 0/1/5/0 | 0/4/2/0 | 0/4/2/0 | 0/4/2/0 | 0/3/2/1 | 0/4/2/0 |
-| K3 anti-analysis (7) | 0/2/5/0 | 0/3/4/0 | 0/3/4/0 | 0/3/4/0 | 0/3/4/0 | 0/3/4/0 |
-| K4 identifiers (3) | 0/1/2/0 | 1/2/0/0 | 1/2/0/0 | 1/2/0/0 | 1/2/0/0 | 1/2/0/0 |
-| K5 persistence (3) | 0/0/3/0 | 0/3/0/0 | 0/3/0/0 | 0/3/0/0 | 0/3/0/0 | 1/2/0/0 |
-| K6 C2 (7) | 0/1/6/0 | 2/3/2/0 | 2/3/2/0 | 3/2/2/0 | 2/3/2/0 | 3/2/2/0 |
-| K9 IOCs (8) | 1/0/7/0 | 2/6/0/0 | 2/6/0/0 | 3/5/0/0 | 3/5/0/0 | 4/4/0/0 |
-| **Main (39)** | 2/7/29/1 | 8/22/9/0 | 8/22/9/0 | 10/20/9/0 | 9/20/9/1 | **11/19/9/0** |
-| K7 commands (11) | 0/0/11/0 | 0/6/5/0 | 0/6/5/0 | 0/4/7/0 | 0/3/8/0 | 0/6/5/0 |
-| K8 discovery (1) | 0/0/1/0 | 1/0/0/0 | 1/0/0/0 | 1/0/0/0 | 1/0/0/0 | 1/0/0/0 |
-| K10 ATT&CK (6) | 1/0/5/0 | 1/0/5/0 | 3/1/2/0 | 1/1/4/0 | 1/1/4/0 | 3/0/3/0 |
-| **All core (57)** | **3/7/46/1** | **10/28/19/0** | **12/29/16/0** | **12/25/20/0** | **11/24/21/1** | **15/25/17/0** |
+| Group (items) | Baseline | Small, it. 1 | Default, it. 1 | Default, it. 2 | Default + r2, it. 2 | **Default, it. 4** | Default, it. 5 | Default, it. 6 |
+| :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- |
+| K1 identity (5) | 1/2/1/1 | 3/1/1/0 | 3/1/1/0 | 3/1/1/0 | 3/1/1/0 | 2/2/1/0 | 3/1/1/0 | 2/2/1/0 |
+| K2 execution flow (6) | 0/1/5/0 | 0/4/2/0 | 0/4/2/0 | 0/4/2/0 | 0/3/2/1 | 0/4/2/0 | 1/4/1/0 | 0/5/1/0 |
+| K3 anti-analysis (7) | 0/2/5/0 | 0/3/4/0 | 0/3/4/0 | 0/3/4/0 | 0/3/4/0 | 0/3/4/0 | 0/3/4/0 | 0/3/4/0 |
+| K4 identifiers (3) | 0/1/2/0 | 1/2/0/0 | 1/2/0/0 | 1/2/0/0 | 1/2/0/0 | 1/2/0/0 | 1/2/0/0 | 1/2/0/0 |
+| K5 persistence (3) | 0/0/3/0 | 0/3/0/0 | 0/3/0/0 | 0/3/0/0 | 0/3/0/0 | 1/2/0/0 | 0/3/0/0 | 0/3/0/0 |
+| K6 C2 (7) | 0/1/6/0 | 2/3/2/0 | 2/3/2/0 | 3/2/2/0 | 2/3/2/0 | 3/2/2/0 | 3/2/2/0 | 3/2/2/0 |
+| K9 IOCs (8) | 1/0/7/0 | 2/6/0/0 | 2/6/0/0 | 3/5/0/0 | 3/5/0/0 | 4/4/0/0 | 3/5/0/0 | 3/5/0/0 |
+| **Main (39)** | 2/7/29/1 | 8/22/9/0 | 8/22/9/0 | 10/20/9/0 | 9/20/9/1 | **11/19/9/0** | 11/20/8/0 | 9/22/8/0 |
+| K7 commands (11) | 0/0/11/0 | 0/6/5/0 | 0/6/5/0 | 0/4/7/0 | 0/3/8/0 | 0/6/5/0 | 0/5/6/0 | 0/5/6/0 |
+| K8 discovery (1) | 0/0/1/0 | 1/0/0/0 | 1/0/0/0 | 1/0/0/0 | 1/0/0/0 | 1/0/0/0 | 1/0/0/0 | 1/0/0/0 |
+| K10 ATT&CK (6) | 1/0/5/0 | 1/0/5/0 | 3/1/2/0 | 1/1/4/0 | 1/1/4/0 | 3/0/3/0 | 2/0/4/0 | 2/1/3/0 |
+| **All core (57)** | **3/7/46/1** | **10/28/19/0** | **12/29/16/0** | **12/25/20/0** | **11/24/21/1** | **15/25/17/0** | **14/25/18/0** | **12/28/17/0** |
 
 How much of "partly" sits only in the appendix, and the scores with those items
 counted as missed:
@@ -202,6 +217,8 @@ counted as missed:
 | Default, iteration 2 | 20 | 5 | 12/20/25/0 |
 | Default + r2, iteration 2 | 14 | 10 | 11/14/31/1 |
 | Default, iteration 4 | 23 | 2 | 15/23/19/0 |
+| Default, iteration 5 | 24 | 1 | 14/24/19/0 |
+| Default, iteration 6 | 28 | 0 | 12/28/17/0 |
 
 **Iteration 4 is the best-scored reference run**, with 15 found and 0 wrong
 against 12 and 0 in iteration 2:
@@ -229,7 +246,60 @@ The same run shows what is still weak:
   In the reverse direction the report makes 10 contradicted or unsupported
   claims (iteration 2: 9).
 
+**Iteration 5 scored 14 found and 0 wrong.**
+
+- It gained the loader ("It operates as a DLL loader") and the mutex (the
+  analyst's claim "The malware creates a mutex to ensure only one instance is
+  running.").
+- It lost the scheduled task: `Updater` and `LogonTrigger` appear only as rows
+  labelled "Likely part of a mutex name or identifier", and the prose says
+  persistence is by Startup shortcuts and Run keys. T1053.005 and the task's IOC
+  went with it.
+- The host-identifier section grew to 73 rows, so only one item was left in
+  the appendix alone, but it gave eleven values the same wrong purpose.
+- The judge's answer overran its output cap once and the compact retry closed,
+  so the verdict was stated. The judge wrote the two C2 domains, but as `LIKE`
+  patterns, which the platform then dropped as malformed, so they were not
+  published.
+- 7 of the 15 published techniques had no evidence behind them, two of them
+  (T1003 and T1018) added by the judge with no analyst claim. The report makes
+  11 contradicted or unsupported claims.
+
+**Iteration 6 scored 12 found and 0 wrong.**
+
+- It lost the loader (the report calls the sample a "Trojan/Backdoor"), the
+  mutex (the claim now reads "uses a custom mutex or identifier for its
+  operations", with no single-instance check) and T1218.011 (only the parent
+  T1218 was claimed). It gained T1059.003.
+- No item is left in the appendix alone. The C2 response instructions came
+  nearest yet: `URLS`, `COMMAND`, `ERROR` and `CLEARURL` are read as "Response
+  parsing logic", three of them with the right purpose.
+- The two C2 domains were published again, with a YARA rule and a Suricata DNS
+  rule for them.
+- The report's own claims improved: 7 contradicted or unsupported (iteration 5:
+  11), and 2 of the 13 published techniques unsupported (iteration 5: 7 of 15).
+  No technique was published on the judge's word alone.
+- The static analyst's answer was cut at its 4,096-token cap and so was its
+  retry, so none of the questions put to it was answered and its first answer
+  was kept.
+
+**The score has plateaued.** Across the five scored runs of the default model,
+found has stayed at 12–15, missed at 16–20 and wrong at 0. A move of two or
+three found items between runs is wording in the model's answers: iteration 6
+lost items for wording and gained one the same way, and the platform's handling
+did not cause those moves. The remaining gap is on the model's side:
+
+- **Control flow.** The anti-analysis checks, the bot-ID derivation, the beacon
+  interval, the beacon types and the command IDs need the code read. With a
+  disassembler attached (iteration 2), the model decompiled the right functions
+  but did not turn them into claims.
+- **The purposes of values it already prints.** `runnung`, `Updater`,
+  `Custom_update`, `update_data.dat`, `12345` and `:wtfbbq` are all in the
+  report body, and their roles are unstated or guessed.
+
 Item by item, with the quoted sentence and the human report section for each:
+[iteration 6](scores/latrodectus-iteration6-default.md),
+[iteration 5](scores/latrodectus-iteration5-default.md),
 [iteration 4](scores/latrodectus-iteration4-default.md),
 [iteration 2](scores/latrodectus-iteration2-default.md),
 [iteration 2 with r2](scores/latrodectus-iteration2-r2.md),
@@ -307,6 +377,60 @@ holds them), and the score rose to 15 found. PuTTY published no techniques, but
 the analyst made no absence claim with a technique id in this run, so the drop
 comes from the analyst's different output, not from the new check.
 
+**Iteration 4 to iteration 5.**
+
+- The judge is asked only for what it decides, so its structured answer is
+  shorter. When the answer is cut at the output cap, the retry is told what
+  filled it and asked for a compact answer.
+- When the verdict falls back to text extraction, the indicators the judge's
+  answer wrote in full are kept and still go through the publish rule.
+- The capability check reads the analysts' claims, not the values in the
+  report, so it no longer marks a configuration path or a sentence saying that
+  something is absent. A claim whose sentence does not describe its technique
+  is asked about.
+- A section with repeated rows is asked about instead of only recorded.
+
+Result: 14 found. On Latrodectus the compact retry closed and the verdict was
+stated, where iteration 4 had fallen back; on PuTTY the judge answered the
+compact request with essentially the same over-long text, and the verdict fell
+back on the benign control for the first time. The run also exposed new
+failures:
+
+- The judge wrote the C2 domains as `LIKE` patterns, and the platform kept only
+  patterns containing `=`, so the domains were dropped before the publish rule.
+- The static analyst's answer and its retry both stopped at the analyst's
+  4,096-token cap, and nothing asked about the cut, so none of the questions
+  put to it was answered.
+- PuTTY's fallback STIX export was invalid (a note that referred to no object),
+  the first invalid export of the benchmark.
+- Two techniques the judge added without an analyst claim, T1003 and T1018,
+  were still published.
+
+**Iteration 5 to iteration 6.**
+
+- A STIX pattern is kept whatever its comparison operator. A `LIKE` is read as
+  a shape, every value a pattern names goes through the publish rule, and the
+  official STIX pattern validator decides whether a pattern is valid where it is
+  installed. A `LIKE` whose fixed text is a value the run holds is asked about
+  as `=`.
+- An analyst's answer cut at its output cap is asked once for a whole, shorter
+  one, and the judge's retry no longer carries the cut answer.
+- The fallback STIX export's note names the objects it is about, and the export
+  lists each object once.
+- A technique the judge states with no analyst claim is published as the
+  judge's own claim, and says so.
+- VirusTotal's count is written in words, not as a fraction.
+- When no output cap is set, the analysts' and the judge's caps are derived
+  from the model's context window.
+
+Result: 12 found, within the spread of the earlier runs. Both C2 domains were
+published and drafted as YARA and Suricata rules, both STIX exports were valid,
+and the judge closed at its first attempt on Latrodectus (3,178 tokens). The
+analysts' cap was a stored 4,096 rather than the derived 8,192, so both
+analysts' answers and both retries stopped at 4,096 tokens again and the
+questions put to them went unanswered. On PuTTY the judge ran to its cap twice
+again and the verdict fell back; see the false-positive control below.
+
 ## The disassembler finding
 
 In iteration 2 the reference sample was run a second time with the r2
@@ -328,8 +452,8 @@ single run.
 ## The false-positive control
 
 PuTTY is a signed, benign SSH client. Every run named it Benign with the family
-PuTTY at 0.99, and no indicator was ever typed malicious. What varies is what
-the report says around the verdict:
+PuTTY (at 0.99, or 0.95 in iteration 5), and no indicator was ever typed
+malicious. What varies is what the report says around the verdict:
 
 | Run | Malicious sentences | Techniques published | Detection drafts |
 | :-- | --: | --: | --: |
@@ -338,6 +462,8 @@ the report says around the verdict:
 | Default, iteration 2 | 3 | 0 | 0 |
 | Default, iteration 3 | 4 | 13 | 0 |
 | Default, iteration 4 | 4 | 0 | 0 |
+| Default, iteration 5 | 2 | 0 | 0 |
+| Default, iteration 6 | 3 | **7** | 0 |
 
 - In iteration 1 both models produced the same 20 template Suricata drafts with
   the class `trojan-activity`, one of them titled as a C2 IP for `6.0.0.0`, and
@@ -354,6 +480,43 @@ the report says around the verdict:
   none of them is right: two sit on sentences stating that persistence APIs are
   absent, and two on PuTTY's configuration path `/SSH/Auth/Credentials`. The
   four real over-claims are not marked.
+- Iteration 5's two malicious sentences say that the sample "exhibits
+  behaviors associated with anti-debugging, discovery, evasion, execution,
+  filesystem access, and keylogging" and "implements anti-debugging and evasion
+  mechanisms". Its four marks were better placed: three are right, and the
+  wrong one sits on a sentence restating the API catalogue's measured counts.
+  The report again said "verified clean by 75/75 AV engines". The judge's
+  answer ran to its output cap twice, so the verdict fell back to text for the
+  first time on this sample, and that fallback export failed STIX validation.
+
+**Iteration 6 is a regression on this control.** The verdict fell back again:
+the judge ran to its 8,192-token cap on both attempts, the second time with 58 STIX
+attack-pattern objects begun on a benign file. The static analyst began 33 claims,
+each with a technique id and a sentence that explains the capability away as
+ordinary. T1056 Input Capture, for example, sits on "capabilities associated
+with keylogging, which in the context of a terminal emulator, is likely for
+capturing terminal input, not malicious keys…", and T1055 Process Injection on
+"… common in malware but also in legitimate software for debugging". The
+answer was cut at 4,096 tokens, the retry returned no claims, and the first
+answer was kept. The fallback export carries every technique id that an
+evidence claim carries, so seven techniques from these hedged claims were
+published under a Benign report: T1059, T1547, T1027, T1055, T1010, T1083 and
+T1056. Seven further ids that appeared only in the judge's raw answer were
+withheld.
+
+This is iteration 3's failure again by a different path: a Benign verdict does
+not stop an analyst's technique from being published. The rest of the report:
+
+- Three malicious sentences stand unmarked: "The sample employs anti-debugging
+  and evasion techniques to hinder analysis.", "We assess these capabilities
+  are used for storing settings or establishing persistence mechanisms." and
+  "The sample uses registry modification for persistence-like behavior". The
+  capability check reads claims, and the analyst's claims back each of them.
+- VirusTotal is now stated right: "zero detections among 75 engines" and "0 of
+  75 engines flag it as malicious".
+- The STIX export is valid, and no detection draft was made.
+- The fallback's missing category is printed as text: the title reads "PuTTY
+  None analysis".
 
 ## Limitations
 
@@ -363,18 +526,21 @@ the report says around the verdict:
 - **The other samples have no human report**, and their false positives are
   judged against each run's own evidence.
 - **One run per cell, no variance measured.** The static analyst's output
-  changes shape from run to run (7 to 48 claims), and several movements between
-  iterations are the model's rather than the tree's, such as T1053.005
-  appearing and disappearing. A change of a few items is within what a rerun
-  could produce.
+  changes shape from run to run (on Latrodectus 7, 41, 24, 11, 42 and 36 claims
+  across the iterations), the judge overran its output cap on one sample or the
+  other in iterations 3 to 6, and several movements between iterations are the
+  model's rather than the tree's, such as T1053.005 appearing and disappearing.
+  The 12–15 found range across the five scored runs is the rerun spread of this
+  setup, not a trend.
 - **The model server's settings changed** between iterations (prompt cache from
-  iteration 2, checkpoint budget in iteration 4), so wall times are not like for
-  like.
+  iteration 2, checkpoint budget from iteration 4), so wall times are like for
+  like only across iterations 4 to 6.
 - **Nothing was executed** (mock sandbox). The dynamic and network analysts
   never ran.
 - **The host is a laptop with an 8 GB GPU** shared with other work. Every
-  counted run finished within about 1 GB of the 6 GB memory stop, and in
-  iteration 3 two attempts crossed it.
+  counted run up to iteration 5 finished within about 1 GB of the 6 GB memory
+  stop, and in iteration 3 two attempts crossed it. Iteration 6 had about 1 GB
+  more headroom than iteration 5.
 - **The small model's numbers come from iteration 1 only**, and they reflect
   this host: a GPU that holds the whole model would change its time-cap
   outcome.
@@ -383,6 +549,8 @@ the report says around the verdict:
 
 | File | Run |
 | :-- | :-- |
+| [latrodectus-iteration6-default.md](scores/latrodectus-iteration6-default.md) | Default model, iteration 6 (`dev` @ `ed57265b`) |
+| [latrodectus-iteration5-default.md](scores/latrodectus-iteration5-default.md) | Default model, iteration 5 (`dev` @ `2a93b02d`) |
 | [latrodectus-iteration4-default.md](scores/latrodectus-iteration4-default.md) | Default model, iteration 4 (`dev` @ `1eb7312f`) |
 | [latrodectus-iteration2-default.md](scores/latrodectus-iteration2-default.md) | Default model, iteration 2 (`dev` @ `39b07c65`) |
 | [latrodectus-iteration2-r2.md](scores/latrodectus-iteration2-r2.md) | Default model with the r2 disassembler, iteration 2 |

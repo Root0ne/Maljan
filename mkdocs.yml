@@ -20,6 +20,8 @@ nav:
   - Development: development.md
   - Benchmark:
       - benchmark/index.md
+      - "Score: iteration 6, default model": benchmark/scores/latrodectus-iteration6-default.md
+      - "Score: iteration 5, default model": benchmark/scores/latrodectus-iteration5-default.md
       - "Score: iteration 4, default model": benchmark/scores/latrodectus-iteration4-default.md
       - "Score: iteration 2, default model": benchmark/scores/latrodectus-iteration2-default.md
       - "Score: iteration 2, with r2": benchmark/scores/latrodectus-iteration2-r2.md

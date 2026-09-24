@@ -57,17 +57,17 @@ files.
 
 ## How Maljan compares
 
-We ran the `default` team four times on a small set of samples, with fixes in
+We ran the `default` team six times on a small set of samples, with fixes in
 between, and scored the reference sample's report item by item against a
 published human analysis. Every run used the **mock sandbox**, so nothing was
 executed and every finding is static. The default model is Qwen3.6-35B-A3B on
 llama.cpp, one run per cell.
 
-| | Iteration 1 | Iteration 2 | Iteration 3 | Iteration 4 |
-| :-- | :-- | :-- | :-- | :-- |
-| Samples completed | Latrodectus, sample A, PuTTY, ELF | Latrodectus, sample A, PuTTY | PuTTY (Latrodectus stopped twice by the 6 GB memory rule) | Latrodectus, PuTTY |
-| Verdicts right | 4 of 4 | 3 of 3 | 1 of 1 | 2 of 2 |
-| Signed PuTTY (false-positive control): malicious sentences / techniques published / draft rules | 3 / 3 / 20 | 3 / 0 / 0 | 4 / 13 / 0 | 4 / **0** / 0 |
+| | It. 1 | It. 2 | It. 3 | It. 4 | It. 5 | It. 6 |
+| :-- | :-- | :-- | :-- | :-- | :-- | :-- |
+| Samples completed | Latrodectus, sample A, PuTTY, ELF | Latrodectus, sample A, PuTTY | PuTTY (Latrodectus stopped by the 6 GB memory rule) | Latrodectus, PuTTY | Latrodectus, PuTTY | Latrodectus, PuTTY |
+| Verdicts right | 4 of 4 | 3 of 3 | 1 of 1 | 2 of 2 | 2 of 2 | 2 of 2 |
+| Signed PuTTY (false-positive control): malicious sentences / techniques published / draft rules | 3 / 3 / 20 | 3 / 0 / 0 | 4 / 13 / 0 | 4 / 0 / 0 | 2 / 0 / 0 | 3 / 7 / 0 |
 
 The reference sample is a Latrodectus bot DLL (`6091f258…`) that
 [Bitsight, *Latrodectus, are you coming back?* (João Batista, 2024-06-17)](https://www.bitsight.com/blog/latrodectus-are-you-coming-back)
@@ -82,16 +82,22 @@ from identity and execution flow to C2, IOCs and ATT&CK:
 | Default model, iteration 2 | 12 | 25 | 20 | 0 |
 | Default model, iteration 2, with the r2 disassembler | 11 | 24 | 21 | 1 |
 | **Default model, iteration 4** | **15** | 25 | 17 | 0 |
+| Default model, iteration 5 | 14 | 25 | 18 | 0 |
+| Default model, iteration 6 | 12 | 28 | 17 | 0 |
 
-Iteration 3's reference run was stopped by the host's memory limit and is not
-scored. What Maljan still misses is mostly control flow (anti-analysis checks,
-bot-ID derivation, beacon interval, command IDs); with a disassembler attached,
-the model walked the right code but ran out of steps before reaching it.
+Iteration 4 remains the best-scored reference run; iteration 3's was stopped by
+the host's memory limit and is not scored. The score has plateaued within rerun
+noise (12–15 found, none wrong), and the remaining gap is on the model's side:
+control flow (anti-analysis checks, bot-ID derivation, beacon interval, command
+IDs; with a disassembler attached, the model decompiled the right code but did
+not turn it into claims) and the purposes of values it already prints. In
+iteration 6, PuTTY's verdict fell back to text extraction and seven techniques
+were published from the analyst's hedged claims.
 
 This is one reference sample, one run per cell with no variance measured, on
-an 8 GB-GPU laptop; a change of a few items is within what a rerun could
-produce. The method, the per-group scores, the false-positive control and the
-item-by-item score files are in [docs/benchmark/index.md](docs/benchmark/index.md).
+an 8 GB-GPU laptop. The method, the per-group scores, the false-positive
+control and the item-by-item score files are in
+[docs/benchmark/index.md](docs/benchmark/index.md).
 
 ## The console
 
