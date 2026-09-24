@@ -877,8 +877,9 @@ decides.
    flagged (`ClaimEvidence.states_absence`); the capability matrix counts no
    assertion from it (a technique only such claims name stays in the matrix,
    unpublished, with the reason), the evidence summary and corroboration count
-   it as no source, the judge reads the id with a marker, and it grounds no
-   capability word. A benign control run had published thirteen techniques
+   it as no source, the judge reads the id with a marker, a bundle the
+   pipeline builds from the claims when the judge's answer is not one carries
+   no attack-pattern for it, and it grounds no capability word. A benign control run had published thirteen techniques
    from such claims. The outcome every finding is published with in the
    conversation is the kept answer's: an analyst whose retry lost claims keeps
    its first answer, and the loop checks that answer again before it says what
