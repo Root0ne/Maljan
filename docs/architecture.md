@@ -491,6 +491,21 @@ Two producers use it:
   block X" negates X only when X is the verb's object; "is absent" and "is
   missing from" count only with the term as the clause's subject.
 
+  What grounds a capability word is what the run found: a published technique
+  that is not a rule match only, an evidence section's key, and a word said —
+  not denied, by the same negation reader — in an analyst's claim, a finding's
+  title or a tool's section, one evidence item a line so a cue never reaches
+  the next item. Four things ground nothing: a matrix row the run did not
+  publish, a claim that states the behaviour is absent (words and id), a
+  reference table (`tool:api_capability`, which says what a catalogue lists an
+  import under), and the words of the sample's own strings (`tool:strings`,
+  `tool:iocs_from_file`, `tool:floss`), which count by their section's key. A
+  benign control report's "likely uses these registry APIs to establish
+  persistence" had been grounded by an id published from "does not contain any
+  obvious persistence mechanisms" and by the catalogue row "CreateMutexA |
+  persistence"; its "credential harvesting" by the sample's settings path
+  `/SSH/Auth/Credentials`. The terms include anti-analysis and anti-forensics.
+
   Two more questions are asked where they can be decided. **A value cited to
   the wrong entry** (`report.citation_wrong_entry`): a value a sentence states
   verbatim — in quotes or backticks, unquoted where its shape makes it an
@@ -768,7 +783,12 @@ The export names its producer in STIX's own vocabulary: one `identity` for this
 platform, `identity_class: system`, under an id derived once
 (`stix_renderer.PRODUCER_IDENTITY_ID`) so every export carries the same one,
 and `created_by_ref` naming it on every other object — a copy, so the judge's
-own bundle is not edited. The report object is typed `malware`. Every stored
+own bundle is not edited. The report object's type follows the verdict the
+record states (`stix_renderer.report_types_for`): `malware` under a Malware
+verdict, and `threat-report` under Suspicious or Benign — the `report-type-ov`
+vocabulary has no term for a finding of no threat, and its general entry is the
+one that claims no malware instance. A Benign export was once typed `malware`.
+Every stored
 export before this carried `software` and `malware-analysis`, neither of them
 in its vocabulary, and an identity no object named.
 
@@ -843,6 +863,26 @@ decides.
    catalogue. When the catalogue cannot be read the check says so instead of
    answering "nothing unknown": `run_summary.validation.not_run` lists
    `attck.unknown_id` and the run carries a degradation reason.
+   **A claim that states absence** (`attck.absence_claim`). A claim whose text
+   names the technique's behaviour only to say it is absent — "The binary does
+   not contain any obvious persistence mechanisms" with `T1547` — is asked
+   once whether the behaviour is absent (then `TECHNIQUE: NONE`) or the sample
+   does it. The behaviour is read with the capability check's own negation
+   reader over the technique's vocabulary: the capability terms that list it,
+   and its catalogue name and tactic names (Stealth and Defense Impairment
+   also by their pre-19 name, Defense Evasion). A later mention in the same
+   clause shares the reading of the first ("command and control (C2)"); a
+   mention the reader does not find negated is an assertion. A claim that
+   still reads as absence after the question keeps its words and id and is
+   flagged (`ClaimEvidence.states_absence`); the capability matrix counts no
+   assertion from it (a technique only such claims name stays in the matrix,
+   unpublished, with the reason), the evidence summary and corroboration count
+   it as no source, the judge reads the id with a marker, and it grounds no
+   capability word. A benign control run had published thirteen techniques
+   from such claims. The outcome every finding is published with in the
+   conversation is the kept answer's: an analyst whose retry lost claims keeps
+   its first answer, and the loop checks that answer again before it says what
+   became of each finding (`retry_with_feedback_sync(keep=)`).
 2. **Domain and platform consistency** (`attck.platform_mismatch`, exact). The
    catalogue's domain and platforms for the id against the routed sample —
    a Windows PE is `enterprise`/Windows, an APK `mobile`/Android, an ELF
@@ -2307,7 +2347,8 @@ is assembled from what the run gathered rather than recomputed beside it:
   Appendix B beside the section's wait ("Output budget of `composer:section`").
   A fixed 900 tokens dropped a section of a live report when the model reasoned
   past it. An answer the cap cuts is told so — `composer.cut_at_output_cap`,
-  naming the cap, the answer's size (characters, items begun) and its first 160
+  naming the cap, the answer's size (characters, items begun, and — when fewer
+  differ than were begun — how many repeat an item already written) and its first 160
   characters, and asking for an object that closes well inside it, each item
   once, short phrases, one line — and asked once through the existing loop.
   The question replaces the cut answer rather than following it, so the retry
@@ -2316,7 +2357,13 @@ is assembled from what the run gathered rather than recomputed beside it:
   reason says it was not asked. Only this question is sized so; every other
   question keeps the answer and is sent as before. How far each cut answer got (characters, items begun, how many of them
   distinct) is logged and, when the retry is cut too, carried into the
-  degradation reason. Every list contract asks for each item once on one line.
+  degradation reason. Every list contract asks for each item once on one line,
+  and an answer that writes an item again is asked once
+  (`composer.repeated_items`), with the count of repeats and the values written
+  more than once; what comes back is kept as written, repeats and all, and the
+  finding recorded. Two items are one item by the fields the report prints them
+  by: a host identifier's value, a configuration key and value, a command's
+  name, a flag, a channel's name, a whole flow step.
   The host-identifier contract asks for the kind by what the entry shows the
   value is: a registry key or value only under a registry hive, from one of its
   top keys (`Software\`, `System\`) or where the entry records a registry

@@ -8,6 +8,20 @@ change landed on `main`.
 
 ### Added
 
+- **A claim that states a behaviour is absent is asked about its technique
+  id.** "The binary does not contain any obvious persistence mechanisms" with
+  `T1547` is asked once (`attck.absence_claim`) whether the behaviour is absent
+  (`TECHNIQUE: NONE`) or the sample does it, read with the capability check's
+  own negation reader over the technique's capability terms, catalogue name
+  and tactic names. The claim and its id are never edited.
+- **A section answer that writes an item again is asked once**
+  (`composer.repeated_items`), with the count of repeats and the values written
+  more than once, and kept as written if it stands. The cut-at-cap question
+  now says how many of the items begun repeat one already written. A
+  host-identifier answer had begun 161 items of which at most 19 differed.
+- **Two capability terms**: anti-analysis and anti-forensics, read by the
+  report's capability check and by the absence reader.
+
 - **A report sentence the checks left standing is marked where it stands.** A
   sentence the capability check or the rule-match check asked about, and the
   retry kept, is recorded on the report (`flagged_statements`) and the
@@ -1832,6 +1846,27 @@ change landed on `main`.
 
 ### Fixed
 
+- **Techniques are no longer published from claims that state absence.** A
+  benign control run published thirteen ATT&CK techniques — Rootkit,
+  Credentials from Password Stores, Remote Services among them — from claims
+  that said the behaviour was not there. A claim that still reads as absence
+  after its question is flagged (`states_absence`): the capability matrix
+  keeps the technique unpublished with the reason, the evidence summary and
+  corroboration count no source, and the judge reads the id with a marker.
+- **The conversation and the run summary agree on a kept answer.** An analyst
+  whose retry lost claims keeps its first answer; the conversation used to
+  publish its findings as `resolved` while §13 listed them unresolved (an
+  unknown id asked four times and kept). The kept answer is checked again
+  before any outcome is published.
+- **A capability word is grounded only by what the run found.** A claim of
+  absence, a matrix row the run did not publish, the API catalogue's reference
+  rows and the words of the sample's own strings no longer ground one, and a
+  word in the evidence grounds only where it is said rather than denied. A
+  benign report's "establish persistence", "credential harvesting" and
+  "anti-forensics" sentences had gone neither asked nor marked.
+- **The STIX report object's type follows the verdict.** `malware` under a
+  Malware verdict, `threat-report` under Suspicious or Benign; a Benign export
+  had been typed `malware`.
 - **A job reaches the queue only after its row is committed.** The API
   enqueued before the request committed; a worker that dequeued first read
   "Job not found" and the row stayed `pending` for ever. A failed enqueue now
@@ -4389,6 +4424,15 @@ change landed on `main`.
 - **`reporting.builder.defang`**, replaced by `reporting.defang.defang(value, kind)`.
 
 ### Upgrading
+
+An analyst claim carries `states_absence` (false on a stored ISR, which is
+read as before). Two validation codes are new, `attck.absence_claim` and
+`composer.repeated_items`, both counted in `run_summary.validation`. The
+exported STIX report object of a Suspicious or Benign run is typed
+`threat-report` instead of `malware`. `retry_with_feedback_sync` takes an
+optional `keep(first, last)` that chooses the answer kept before outcomes are
+published. The capability check asks about more report sentences than before:
+see "A capability word is grounded only by what the run found".
 
 The `cancelled` job event always carries `stopped` now, and a new
 `seconds_into_run`. A report carries `flagged_statements` (empty on a report
