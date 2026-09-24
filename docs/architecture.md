@@ -1095,7 +1095,8 @@ from an answer that closed. Nothing is read out of prose. A fallback that
 is not Malware has no malware object, so its record — the degraded path and
 the technique ids only the raw text named — goes on a note about the objects
 the fallback bundle holds; STIX requires a note to name at least one, and a
-fallback that holds none writes no note. The ids are on the bundle's own
+fallback that holds none writes no note, and keeps the judge's text on the
+bundle's own `x_maljan_fallback_verdict.reasoning` instead. The ids are on
 `x_maljan_fallback_verdict.model_only_technique_ids` on every fallback. The
 export declines, with a record, any note, opinion, grouping or report left
 naming nothing, and the integrity pass lists each reference once: a reference
@@ -1104,8 +1105,12 @@ sample's hash indicator twice, and failed the official validator.
 
 A finding the judge was never shown — first raised by the answer to its only
 retry, or recorded on a fallback where no turn was left — is recorded with
-`"asked": "false"` on its `run_summary.validation.unresolved` row, whatever
-position its object had in each answer, and the export's records say which
+`"asked": "false"` on its `run_summary.validation.unresolved` row. A finding
+counts as asked by its code and its `subject` — the technique a credit is for,
+the malware object's name — so a credit the judge renamed in answer to the
+question is still the question it was asked; a finding with no subject is
+compared by its words with its object's position taken out. The row carries
+the subject, and the export's records say which
 happened: "the judge kept the credit when asked" only of a credit it was asked
 about, and "the judge was not asked about it" otherwise; the same for a malware
 object kept without `is_family`.
@@ -1151,7 +1156,8 @@ the loop measured (its final-answer reserve); what it would have asked is then
 recorded as unresolved and `run_summary.budget.<agent>.validation_not_asked`
 says why.
 
-An analyst answer that ended at its output cap (`llm.expert_max_tokens`, by the
+An analyst answer that ended at its output cap (`llm.expert_max_tokens`, or the
+cap derived from the window when it is 0, by the
 server's finish reason or by a generated count equal to the cap, since
 ik_llama.cpp reports `stop` for an answer it cut) is asked once for a whole
 shorter one, the way the judge's and a report section's are:
@@ -1159,9 +1165,10 @@ shorter one, the way the judge's and a report section's are:
 CLAIM blocks it began, and the length it was cut at as the bound to stay under,
 and asks for the claims the evidence supports best, each written once. The cut
 answer is described, not sent back, and the question is asked only when the
-conversation it is sent in and an answer of the cap's size fit the model's
-window; otherwise it is recorded `"asked": "false"` with the reason. A whole
-answer that comes back is the analyst's, fewer claims and all; a retry cut
+conversation it is sent in, with the turn that carries its questions, and an
+answer of the cap's size fit the model's window; otherwise it is recorded `"asked": "false"` with the reason. A whole
+answer that comes back is the analyst's, fewer claims and all, and the log
+says how many claims replaced how many; a retry cut
 again keeps the first answer, as a retry with fewer claims always did, and the
 finding is recorded. The cap is the one in force: nothing raises it. A reference
 static analyst answered with 42 claims in exactly its 4,096 tokens, was asked
@@ -2774,19 +2781,48 @@ reason under `stix.indicator_not_published`: the rule answers for a value, and
 `LIKE '%whoami%'` is not the value `whoami`. The IOC table and `/iocs` read a
 value only from an `=` comparison, so a `LIKE` indicator lists no row there.
 
-**A pattern is kept whatever its operator.** The judge's integrity pass drops
-an indicator only when its pattern is not written whole
-(`schemas.stix_pattern.reads_whole`): it must open an observation expression,
-close every quoted value, bracket and parenthesis it opens, and name an object
-path. Every operator the grammar has passes — `=`, `!=`, `<`, `>`, `<=`, `>=`,
-`LIKE`, `MATCHES`, `IN`, `ISSUBSET`, `ISSUPERSET`, `EXISTS` — and the test
-holds the check to the official pattern validator's answer on each. It used to
-keep only patterns containing `=`, and a reference judge that wrote its
-command-and-control hosts as `[url:value LIKE '%host%']` had twelve of thirteen
-indicators dropped as `empty_pattern`, with their relationships, before any
-rule saw them. The grounding check reads a `LIKE` value for the text between its
+**A pattern is kept whatever its operator, and one the grammar refuses is
+asked about.** The judge's integrity pass drops an indicator only when its
+pattern is empty. It used to keep only patterns containing `=`, and a
+reference judge that wrote its command-and-control hosts as
+`[url:value LIKE '%host%']` had twelve of thirteen indicators dropped as
+`empty_pattern`, with their relationships, before any rule saw them. Whether a
+pattern is one the official validator accepts is
+`schemas.stix_pattern.pattern_refusal`: the STIX 2.1 pattern grammar read over
+the one reader's quoted values — observation expressions, `AND`/`OR`/
+`FOLLOWEDBY`, the three qualifiers, every comparison operator, `IN` lists,
+`EXISTS`, the typed literals — and, where the pinned `stix2-patterns` is
+installed, its validator as the last word. It is a development dependency
+(through `stix2-validator`) and the image installs none, so at runtime the
+grammar answers alone; it agrees with the validator on acceptance for every
+pattern the tests hold it to, and the one thing only the validator sees is a
+digest of the wrong length written as a hex literal (`h'…'`), which the
+grounding check's digest question covers for a quoted digest. Moving
+`stix2-patterns` into the runtime dependencies would make the validator the
+answer everywhere. A pattern the grammar refuses — cut short, `[file:name]`,
+`[file:name =]`, a value in double quotes, text after the expression closed —
+is asked once (`stix.pattern_refused`, in the grammar's words, when no more
+specific pattern question named it) and, kept, declined as
+`stix.unpublishable_pattern`; it is never exported invalid. A trailing
+backslash that escapes a value's closing quote is asked, not dropped.
+
+The publish rule answers for every value a pattern names over a kind it
+covers, whatever the operator: `=`, each member of an `IN` list, and the
+operand of `!=`, `<`, `>`, `<=` and `>=` (`stix_renderer.rule_values`). An `IN`
+list or a `!=` used to reach the export with nothing asked, so a value refused
+as `=` was published inside one. The IOC table and `/iocs` still list `=`
+values alone.
+
+A `LIKE` or `MATCHES` over an endpoint or a kind the rule covers whose fixed
+text — the text between a `LIKE`'s wildcards, or a `MATCHES` expression that is
+only its text (`matches_fixed_text`) — is one run the evidence holds as a value
+of its own, or one another of the judge's indicators writes with `=`, is asked
+once (`stix.shape_names_a_value`) whether the judge means that value: "write
+`domain-name:value = 'host'`, or keep the LIKE and it is not exported". What
+the judge keeps is declined with the record, as before. The grounding check reads a `LIKE` value for the text between its
 wildcards (`like_fixed_text`): each run of it must appear in the evidence, and
-an absence names that text, never the wildcards. A quoted value that writes a
+an absence names that text, never the wildcards; fixed text shorter than four
+characters grounds nothing, because it is found in any evidence. A quoted value that writes a
 backslash the grammar cannot read — STIX escapes only the quote and the
 backslash, so `'Software\Microsoft'` with one backslash is refused whole by the
 official validator — is asked `stix.unescaped_backslash` and, kept, declined as

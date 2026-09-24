@@ -565,8 +565,9 @@ characters, on every answer, whatever the window.
 
 The arithmetic lives in one function (`maljan.llm.context_window`) and reads:
 the served window, less the tokens held back for the model's own reply (the
-larger of `core.llm.expert_max_tokens` and `core.llm.judge_max_tokens`, never
-more than a quarter of the window), less what the conversation already holds,
+larger of `core.llm.expert_max_tokens` and `core.llm.judge_max_tokens` where an
+operator set them, and 8,192 where both are 0, never more than a quarter of the
+window), less what the conversation already holds,
 converted at **3 characters per token**, times the **eighth** of what is left
 that one answer may take. Three characters per token is measured rather than
 assumed — a recorded conversation of about 114,000 characters was reported by
@@ -731,17 +732,29 @@ and the cap is derived from then on.
 ### A call waits as long as its answer takes at the model's pace
 
 Two calls have an output budget of their own: the judge's verdict
-(`core.llm.judge_max_tokens`, 8,192 by default, under the judge definition's
+(`core.llm.judge_max_tokens`, derived from the window by default, under the judge definition's
 timeout — 600 s in the shipped team) and each composer section
 (`core.reporting.composer_section_max_tokens`, under
 `core.reporting.composer_per_section_timeout`, 120 s). A timeout chosen for a
 fast model cuts a slow one off: at 3.8 tokens a second only about 2,280 of the
 judge's tokens fit in 600 s.
 
+**The analysts' and the judge's output caps are derived too.**
+`core.llm.expert_max_tokens` and `core.llm.judge_max_tokens` ship at **0**,
+which derives each agent's cap from the window its model serves: a quarter of
+it, at most 8,192 tokens — the reply reserve's rule. On a 32,768-token window
+that is 8,192; on 16,384, 4,096. A window nothing reported derives nothing and
+leaves 8,192, and the sentence says the window is unknown. A value above 0 is
+the operator's and is used as set; a stored setting keeps its value. Each
+derivation is logged and recorded in `run_summary.generation.output_caps`
+(`{agent: {tokens, derivation}}`), and the judge's is printed beside the
+verdict wait. 0 no longer means unbounded.
+
 A section's budget is not a fixed number. `composer_section_max_tokens` ships
 at **0**, which derives it for each model of the reporter's list the way an
 analyst's reply room is derived: the larger of `llm.expert_max_tokens` and
-`llm.judge_max_tokens` (8,192 each as shipped), at most a quarter of the
+`llm.judge_max_tokens` where an operator set them (both ship at 0, which stands
+for 8,192 here), at most a quarter of the
 context window that model serves (learned as the tool-output cap's window is:
 declared, probed, the vendored table, then the fallback). On a 32,768-token
 window that is 8,192 tokens; on a 16,384-token window, 4,096. Reasoning is
@@ -798,7 +811,7 @@ room. With an operator's own `composer_section_max_tokens`, where the
 reporter's provider has been told to keep reasoning out
 (`llm.ollama.disable_thinking` or `llm.openai.disable_thinking`), the
 composer's model is capped at that value alone; where it has not, the cap is
-that value plus `judge_max_tokens` — the reporter's own room — for the
+that value plus the reporter's own output cap (`judge_max_tokens`, or derived) for the
 reasoning. Each model of the reporter's list is capped by its
 own provider's switch, and the wait is sized from the largest cap: the platform
 cannot tell a reasoning tag from its name, and sending `think: false` to a

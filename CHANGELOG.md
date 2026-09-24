@@ -831,6 +831,12 @@ change landed on `main`.
 
 ### Changed
 
+- **The analysts' and the judge's output caps are derived from the window.**
+  `llm.expert_max_tokens` and `llm.judge_max_tokens` ship at 0, which derives
+  each agent's cap from the window its model serves — a quarter of it, at most
+  8,192 tokens, the reply reserve's rule — and records the derivation in
+  `run_summary.generation.output_caps`. A value above 0 is used as set.
+
 - **The judge writes a compact bundle.** The verdict contract asks for the
   JSON on one line, the confidence, basis and credits on the relationship only
   (never repeated on the indicator or attack-pattern it relates), an
@@ -1902,13 +1908,23 @@ change landed on `main`.
   integrity pass kept only patterns containing `=`, so every `LIKE` a judge
   wrote was dropped as `empty_pattern` with its relationships — twelve of a
   reference judge's thirteen indicators, its command-and-control hosts among
-  them. Well-formedness is read by the one pattern reader
-  (`stix_pattern.reads_whole`) and agrees with the official validator on every
-  operator. A `LIKE` value is grounded by the text between its wildcards, lists
-  no row in the IOC table or `/iocs`, and is declined from the export with the
-  reason when it names an endpoint or a kind the publish rule answers for. A
-  quoted value with a backslash the grammar cannot read is asked about
-  (`stix.unescaped_backslash`) and, kept, declined.
+  them. The pass now drops only an empty pattern. Whether a pattern is one the
+  official validator accepts is `stix_pattern.pattern_refusal`, the STIX 2.1
+  pattern grammar over the one reader (and the pinned validator where it is
+  installed); it agrees with the validator on acceptance. A pattern it refuses
+  is asked once (`stix.pattern_refused`) and, kept, declined — never exported
+  invalid. A `LIKE` value is grounded by the text between its wildcards (four
+  characters at least), lists no row in the IOC table or `/iocs`, and is
+  declined from the export with the reason when it names an endpoint or a kind
+  the publish rule answers for; one whose fixed text is a value the run holds
+  is first asked whether the judge means that value
+  (`stix.shape_names_a_value`). A quoted value with a backslash the grammar
+  cannot read is asked about (`stix.unescaped_backslash`) and, kept, declined.
+- **Every value a judge pattern names is put to the one publish rule, whatever
+  the operator.** An `IN` list, a `!=` or a `>` over a kind the rule covers
+  reached the export with nothing asked, so a value refused as `=` was
+  published inside one. Each member and operand is asked now; the IOC table
+  and `/iocs` still read `=` alone.
 - **The fallback's export is valid.** A non-Malware fallback wrote a note with
   no `object_refs`, which STIX requires, and the report object named the
   sample's hash indicator twice once the judge's copy was folded into the
@@ -1924,7 +1940,9 @@ change landed on `main`.
 - **A record says the judge was asked only when it was.** A finding the judge
   was never shown — first raised by the answer to its only retry — is recorded
   `"asked": "false"`, and the export's credit and `is_family` records say "the
-  judge was not asked about it" instead of "kept … when asked".
+  judge was not asked about it" instead of "kept … when asked". "Asked" is
+  decided by the code and what the finding is about (the technique a credit is
+  for), so a credit renamed in answer to the question counts as asked.
 - **VirusTotal's count is written in words.** The triage pack wrote
   "VirusTotal 0/75 malicious", and a benign control's summary turned it into
   "verified clean by 75/75 AV engines". The pack line and the report's network
@@ -4553,6 +4571,18 @@ change landed on `main`.
   files. The README has a short "How Maljan compares" section that links to it.
 
 ### Upgrading
+
+`llm.expert_max_tokens` and `llm.judge_max_tokens` ship at 0, which now means
+"derived from the window" — no longer "unbounded". A stored setting keeps its
+value; a deployment that relied on 0 for no cap should set a value instead.
+On a 32,768-token window the derived cap is the 8,192 that shipped before; on a
+smaller window it is smaller. `run_summary.generation` may carry
+`output_caps`. Three more validation codes: `stix.pattern_refused`,
+`stix.shape_names_a_value` (both counted in `run_summary.validation`), and a
+judge indicator with an empty pattern is the only one the integrity pass drops,
+so `empty_pattern` no longer counts a cut pattern. An unresolved row may carry
+`subject`. `x_maljan_fallback_verdict` may carry `reasoning`. The network
+reputation cell reads "N of M engines flag it as malicious".
 
 Two validation codes are new, `isr.cut_at_output_cap` and
 `stix.unescaped_backslash`, and `stix.indicator_not_published` also records a
