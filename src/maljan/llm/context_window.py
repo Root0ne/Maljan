@@ -75,6 +75,7 @@ conversation is written in it.
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import json
 import re
 import threading
@@ -1216,14 +1217,60 @@ class OutputBudget:
         return self.derivation
 
 
-def derived_reply(window: WindowFact, configured: int, model: object, what: str) -> tuple[int, str]:
+# What the window probe names when a server we run answered it: a model
+# runtime, which has no API limit on output and caps generation at its context.
+_LOCAL_SERVER_ANSWERS = (
+    "llama.cpp /props",
+    "the Ollama model description",
+    "the server description",
+)
+
+
+def serves_locally(assignment: Any, window: WindowFact) -> bool:
+    """Whether the model is served by a runtime we run rather than a hosted API.
+
+    llama.cpp or Ollama on loopback, or any server whose window the probe read
+    from a runtime's own description (llama.cpp's ``/props``, Ollama's
+    ``/api/show``, Text Generation Inference's ``/info``). A hosted API is
+    asked through a model list or answered from the table, and neither says it
+    is a runtime.
+    """
+    if window.source == PROBED and str(window.detail).startswith(_LOCAL_SERVER_ANSWERS):
+        return True
+    provider = str(getattr(assignment, "provider", "") or "")
+    if provider not in ("openai", "ollama"):
+        return False
+    try:
+        from urllib.parse import urlparse
+
+        host = urlparse(str(getattr(assignment, "endpoint", "") or "")).hostname or ""
+        if host == "localhost":
+            return True
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def derived_reply(
+    window: WindowFact, configured: int, model: object, what: str, *, local: bool = False
+) -> tuple[int, str]:
     """``(tokens, sentence)`` for one reply of a model: the one rule, said out loud.
 
-    A quarter of the learned window; the smaller of that and ``configured``
-    (an operator's cap, named by ``what``) and the model's declared maximum
-    output where they are set. A window nothing reported derives nothing: an
-    operator's cap is used as set, and otherwise the documented fallback of
-    :data:`DEFAULT_REPLY_TOKENS`, and the sentence says the window is unknown.
+    Three cases, each bounded by ``configured`` (an operator's cap, named by
+    ``what``) where it is set:
+
+    1. The model's maximum output is declared — by the probe's model list or
+       the vendored table's sourced ``max_output`` rows — and the reply is the
+       smaller of that and a quarter of the window.
+    2. A runtime we run serves it (``local``, :func:`serves_locally`): no API
+       limits output, and the reply is a quarter of the window.
+    3. A hosted API that declares no maximum: the documented fallback of
+       :data:`DEFAULT_REPLY_TOKENS`, never more than a quarter of the window,
+       because a quarter of a hosted model's window is routinely past what the
+       API accepts and a refused ``max_tokens`` fails every call.
+
+    A window nothing reported derives nothing: an operator's cap is used as
+    set, and otherwise the documented fallback, and the sentence says so.
     """
     from maljan.llm.model_output_limits import declared_output_limit
 
@@ -1231,20 +1278,31 @@ def derived_reply(window: WindowFact, configured: int, model: object, what: str)
     if window.source == FALLBACK:
         if configured > 0:
             return configured, f"{configured} tokens — {what} is set to {configured}"
-        return DEFAULT_REPLY_TOKENS, (
-            f"{DEFAULT_REPLY_TOKENS} tokens — the documented fallback: no window was learned "
-            f"for the model ({window.detail})"
+        tokens = min(DEFAULT_REPLY_TOKENS, declared) if declared > 0 else DEFAULT_REPLY_TOKENS
+        return tokens, (
+            f"{tokens} tokens — the documented fallback: no window was learned for the model "
+            f"({window.detail})"
+            + (f", and it declares a maximum output of {declared}" if declared > 0 else "")
         )
     quarter = max(1, window.tokens // REPLY_RESERVE_DIVISOR)
-    tokens = reply_reserve_tokens(window.tokens, configured, declared)
     parts = [
         f"a quarter ({quarter}) of the model's {window.tokens}-token context window "
         f"({window.source})"
     ]
+    if declared > 0:
+        tokens = reply_reserve_tokens(window.tokens, configured, declared)
+        parts.append(f"the model's declared maximum output of {declared}")
+    elif local:
+        tokens = reply_reserve_tokens(window.tokens, configured)
+        parts[0] += ", served by a runtime with no API output limit"
+    else:
+        tokens = reply_reserve_tokens(window.tokens, configured, DEFAULT_REPLY_TOKENS)
+        parts.append(
+            f"the documented fallback of {DEFAULT_REPLY_TOKENS}, because the hosted API "
+            "declares no maximum output for this model"
+        )
     if configured > 0:
         parts.append(f"{what} of {configured}")
-    if declared > 0:
-        parts.append(f"the model's declared maximum output of {declared}")
     said = parts[0] if len(parts) == 1 else "the smallest of " + ", ".join(parts)
     return tokens, f"{tokens} tokens — {said}"
 
@@ -1265,6 +1323,7 @@ def reply_budget(settings: Any, assignment: Any, *, probe: bool = True) -> Outpu
         cap,
         getattr(assignment, "model", ""),
         "the generation cap (the larger of llm.expert_max_tokens and llm.judge_max_tokens)",
+        local=serves_locally(assignment, window),
     )
     return OutputBudget(tokens=tokens, window=window, generation_cap=cap, derivation=sentence)
 
@@ -1285,9 +1344,11 @@ def output_cap_for(
     ``setting`` is ``expert_max_tokens`` or ``judge_max_tokens``. Above 0 it is
     the operator's value, used as set. At 0, the shipped default, it is derived
     from the smallest window of the models the agent may call — a quarter of
-    it, and the model's declared maximum output where its provider states one
-    — the one rule the reply reserve and the composer's section budget follow
-    (:func:`derived_reply`). Over a fallback list, the smallest of its models.
+    it for a runtime we run, bounded by the model's declared maximum output
+    where one is declared, and the documented fallback for a hosted API that
+    declares none — the one rule the reply reserve and the composer's section
+    budget follow (:func:`derived_reply`). Over a fallback list, the smallest
+    of its models.
     A window nothing reported derives nothing: the documented fallback of
     :data:`DEFAULT_REPLY_TOKENS` applies, and the sentence says so.
 
@@ -1303,7 +1364,13 @@ def output_cap_for(
 
         for assignment in assignment_chain_for(settings, agent, role=role):
             window = window_for_assignment(settings, assignment, probe=probe)
-            answer = derived_reply(window, 0, assignment.model, f"llm.{setting}")
+            answer = derived_reply(
+                window,
+                0,
+                assignment.model,
+                f"llm.{setting}",
+                local=serves_locally(assignment, window),
+            )
             if best is None or answer[0] < best[0]:
                 best = answer
     except Exception as exc:  # noqa: BLE001 — an unreadable assignment learns no window

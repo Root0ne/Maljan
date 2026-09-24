@@ -70,7 +70,9 @@ def declared_output_limit(model: object) -> int:
     """The maximum output ``model``'s provider declares, in tokens, or zero when none does.
 
     What a probe learned from the model list first, then the vendored table's
-    ``max_output`` rows, keyed as its windows are (``context_window.model_family``).
+    ``max_output`` rows. A row answers only for the model it names exactly (its
+    family, as the table's windows are keyed): a snapshot or a sibling the
+    vendor documents apart is not assumed to share its limit.
     """
     from maljan.llm.context_window import model_family
 
@@ -81,12 +83,7 @@ def declared_output_limit(model: object) -> int:
         learned = _learned.get(name, 0)
     if learned > 0:
         return learned
-    rows = _table_rows()
-    family = model_family(name)
-    for key in sorted(rows, key=len, reverse=True):
-        if family.startswith(key):
-            return rows[key]
-    return 0
+    return _table_rows().get(model_family(name), 0)
 
 
 def _table_rows() -> dict[str, int]:
@@ -101,9 +98,10 @@ def _table_rows() -> dict[str, int]:
         rows: dict[str, int] = {}
         try:
             raw = json.loads(Path(resolve_data(TABLE_PATH)).read_text(encoding="utf-8"))
-            for key, value in (raw.get("max_output") or {}).items():
-                if isinstance(value, int) and value > 0:
-                    rows[str(key).lower()] = value
+            for key, row in (raw.get("max_output") or {}).items():
+                tokens = row.get("tokens") if isinstance(row, dict) else None
+                if isinstance(tokens, int) and tokens > 0 and str(row.get("source") or ""):
+                    rows[str(key).lower()] = tokens
         except Exception as exc:  # noqa: BLE001 — a fallback table never fails a run
             logger.debug("the vendored output-limit table could not be read: %s", exc)
         _table = rows

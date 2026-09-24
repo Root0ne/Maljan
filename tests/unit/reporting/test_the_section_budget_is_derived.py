@@ -28,6 +28,10 @@ from maljan.reporting.composer import ReportComposer
 def _composer(window: int, **llm: int) -> Any:
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     settings.llm.provider = "openai"
+    # A llama server we run, on loopback: no API limits its output.
+    settings.llm.openai.base_url = "http://127.0.0.1:8080/v1"
+    settings.llm.openai.expert_model = "local-model"
+    settings.llm.openai.judge_model = "local-model"
     settings.reporting.composer_enabled = True
     for name, value in llm.items():
         setattr(settings.llm, name, value)

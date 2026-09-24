@@ -48,5 +48,20 @@
     "phi-4": 16384,
     "qwen2.5": 32768,
     "qwen3": 32768
+  },
+  "max_output": {
+    "_comment": "The maximum output each model's vendor documents, with the page it is documented on. A model is listed only when its vendor's own documentation states the figure; a model not listed that a hosted API serves takes the documented fallback.",
+    "gpt-4.1": {
+      "tokens": 32768,
+      "source": "https://developers.openai.com/api/docs/models/gpt-4.1"
+    },
+    "gpt-4o": {
+      "tokens": 16384,
+      "source": "https://developers.openai.com/api/docs/models/gpt-4o"
+    },
+    "gpt-4o-mini": {
+      "tokens": 16384,
+      "source": "https://developers.openai.com/api/docs/models/gpt-4o-mini"
+    }
   }
 }
