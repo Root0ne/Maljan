@@ -143,8 +143,29 @@ class TestNarrativeOutputSchema:
         assert rebuilt.executive_summary == out.executive_summary
         assert len(rebuilt.key_findings) == 3
 
+    def test_no_upper_bound_cuts_what_the_evidence_supports(self) -> None:
+        good = _valid_narrative()
+        out = NarrativeOutput(
+            executive_summary="The sample encrypts documents on local drives. " * 100,
+            key_findings=good.key_findings * 5,
+            defensive_recommendations=good.defensive_recommendations * 5,
+        )
+
+        assert len(out.executive_summary) > 4000
+        assert len(out.key_findings) == 15
+        assert len(out.defensive_recommendations) == 15
+
+    def test_the_prompt_asks_for_no_length_or_count(self) -> None:
+        import re
+
+        from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXPECTED_OBJECT
+
+        for text in (_SYSTEM_PROMPT, EXPECTED_OBJECT):
+            assert not re.search(r"\d+\s*(-|to)\s*\d+", text)
+            assert "characters" not in text
+
     def test_two_good_key_findings_are_kept(self) -> None:
-        """Three to six are asked for; two do not cost the round its summary."""
+        """Two findings are a whole answer; the lower bound is what the schema keeps."""
         out = NarrativeOutput(
             executive_summary="A" * 200,
             key_findings=_valid_narrative().key_findings[:2],

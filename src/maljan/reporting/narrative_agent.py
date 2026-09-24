@@ -4,9 +4,9 @@ The deterministic ``MalwareReportBuilder`` produces every section of the
 report except the prose:
 
   - ``executive_summary``        — one paragraph SOC-handover style summary
-  - ``key_findings``             — 3-6 one-sentence bullets, each with the
+  - ``key_findings``             — bullets, each one finding with the
                                    evidence ids it stands on
-  - ``defensive_recommendations``— 3-8 P0/P1/P2 actions
+  - ``defensive_recommendations``— P0/P1/P2 actions
 
 The capability paragraphs this round used to write are the technical-analysis
 subsections the composer writes, one subsection per call, each cited.
@@ -71,19 +71,19 @@ class NarrativeOutput(BaseModel):
     # (e.g. "confidence_in_narrative") does not cause validation to crash.
     model_config = ConfigDict(extra="ignore")
 
-    executive_summary: str = Field(min_length=120, max_length=1200)
-    # The prompt asks for three to six; the schema accepts two, so two good
-    # bullets are kept rather than failing the whole round and losing the
-    # summary with them.
-    key_findings: list[KeyFinding] = Field(min_length=2, max_length=6)
-    defensive_recommendations: list[DefensiveRecommendation] = Field(min_length=3, max_length=8)
+    # Lower bounds only: an answer is as long as its evidence needs, and the
+    # model decides that. A summary, findings and recommendations each have
+    # to be there; no upper bound cuts what the evidence supports.
+    executive_summary: str = Field(min_length=120)
+    key_findings: list[KeyFinding] = Field(min_length=2)
+    defensive_recommendations: list[DefensiveRecommendation] = Field(min_length=3)
 
 
 # The exact object the answer has to be, with an example of every field. A model
 # shown the keys answers with them; a model shown a description of the keys
 # answered with its own names on two unrelated models six times out of six.
 EXPECTED_OBJECT = """{
-  "executive_summary": "One paragraph, 120 to 900 characters.",
+  "executive_summary": "One paragraph.",
   "key_findings": [
     {"text": "One sentence stating one finding.", "evidence_ids": ["ev_0007"]}
   ],
@@ -146,18 +146,18 @@ _SYSTEM_PROMPT = (
     "sandbox entry above records some.\n"
     "2. Every MITRE ATT&CK technique you cite must appear in parentheses with "
     "its ID, e.g. 'inhibit system recovery (T1490)'.\n"
-    "3. executive_summary: 120-900 characters, one paragraph, no headings. This "
+    "3. executive_summary: one paragraph, no headings. This "
     "is a verdict/impact briefing ONLY — state the classification, the severity, "
     "the single most important risk, and the containment call to action. Do NOT "
     "enumerate individual techniques here.\n"
-    '4. key_findings: a JSON ARRAY of 3-6 objects, each {"text": one sentence, '
+    '4. key_findings: a JSON ARRAY of objects, each {"text": one finding, '
     '"evidence_ids": [the ev_ ids it stands on]}. Emit the key ONCE with a list '
     "value. Cover what the sample is, what it does, how it persists, how it talks "
     "to its C2, how it is detected and what is uncertain. Cite only ev_ ids that "
     "appear in the evidence above; leave evidence_ids empty rather than invent one. "
     "A finding may only summarise what the evidence above holds: never introduce a "
     "fact nothing above states.\n"
-    "5. defensive_recommendations: 3-8 entries. Each entry is a JSON object "
+    "5. defensive_recommendations: one entry per action. Each entry is a JSON object "
     "with EXACTLY these six fields, and the first four are REQUIRED:\n"
     "   - `category`: one of firewall, edr_hunting, registry_hardening, gpo, "
     "patching, user_awareness, other\n"
@@ -537,7 +537,7 @@ class NarrativeAgent:
 
         # Manual-parse fallback, through the validation loop. Useful for local
         # llama.cpp servers that occasionally return text wrapped in ```json
-        # fences. ``NarrativeOutput`` carries real constraints — three to six
+        # fences. ``NarrativeOutput`` carries real constraints — at least two
         # key findings, six fields per recommendation — and
         # those are what a model gets wrong; before the loop the first breach
         # discarded the whole answer and the report shipped the deterministic

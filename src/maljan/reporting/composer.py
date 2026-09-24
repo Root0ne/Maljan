@@ -86,13 +86,13 @@ class _StructuredOutputUnavailable(Exception):
 
 class _ProseOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    body: str = Field("", max_length=2500)
+    body: str = Field("")
     evidence_refs: list[str] = Field(default_factory=list)
 
 
 class _IntroOut(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    text: str = Field("", max_length=1800)
+    text: str = Field("")
 
 
 class _CliFlagsOut(BaseModel):
@@ -162,7 +162,7 @@ _SYSTEM = (
     "3. A fact marked 'complete list' is exhaustive. Anything absent from it is "
     "absent from the binary, and a claim that relies on it is false.\n"
     "4. If the evidence does not support a field, leave it empty/null. Never guess.\n"
-    "5. Be concise and technical; cite concrete artifacts (function name, API, "
+    "5. Write technically; cite concrete artifacts (function name, API, "
     "string, tool output) where possible.\n"
     "6. Cite the ev_ ids of the entries a statement rests on: in the evidence_refs "
     "list where the object has one, and in square brackets in prose, e.g. [ev_0007]. "
@@ -195,7 +195,7 @@ _MAX_NAMED_KEYS = 6
 # model is shown: a checklist of the evaluation key's own items ("campaign id",
 # "sleep interval") is a hint as surely as an example is.
 _INSTRUCTIONS: dict[str, str] = {
-    "introduction": "Write a 2-4 sentence intro.",
+    "introduction": "Write the introduction.",
     "execution_flow": (
         "List what the sample does from its entry point to its steady state, in order."
     ),
@@ -212,7 +212,7 @@ _INSTRUCTIONS: dict[str, str] = {
         "value is: a registry key or value only when it is written under a registry hive "
         "or from one of its top keys (Software\\, System\\) or the entry records it as a "
         "registry access, and 'String' when the entry does "
-        "not show what the value is. Give its purpose in a short phrase where the evidence "
+        "not show what the value is. Give its purpose where the evidence "
         "says, and leave the purpose empty where it does not."
     ),
     "commands": "Extract the commands the sample accepts from its operator.",
