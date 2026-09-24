@@ -1331,51 +1331,27 @@ _NOT_A_NEGATION = ("no doubt", "not only")
 _NEGATION_WINDOW = 40
 
 
-# A negation that governs a list: "no evidence of A, B such as C or D". It
-# reaches every item of its list, however long, up to the end of its clause or
-# to a new statement joined on after it. A benchmark summary's "No evidence of
-# malicious command and control infrastructure, such as C2 callbacks or
-# exfiltration endpoints" was read as claiming exfiltration, the last item
-# lying past the window below.
-_LIST_NEGATION_RE = re.compile(
-    r"\b(?:no|without(?:\s+any)?)\s+(?:evidence|indication|sign|signs|trace|traces)\s+of\b",
+# What ends a negation's reach inside one clause: a relative clause or a new
+# statement joined on with its own subject. "No indication of a check was
+# found, as the sample harvests credentials" negates the check, not the
+# harvesting.
+_NEGATION_REACH_END_RE = re.compile(
+    r"\b(?:which|that|as|while|whereas)\b|\band\s+(?:the|it|this|its|then)\b|,\s*then\b",
     re.IGNORECASE,
 )
-# What starts a new statement inside one clause: its own subject after "and".
-_NEW_STATEMENT_RE = re.compile(
-    r",\s*and\b|\band\s+(?:the|it|this|that|its)\b|\bwhile\b", re.IGNORECASE
-)
-
-
-def _in_a_negated_list(text: str, start: int) -> bool:
-    """Whether the term at ``start`` is an item of a list a noun negation governs."""
-    head = text[:start]
-    breaks = list(_CLAUSE_BREAK_RE.finditer(head))
-    clause = head[breaks[-1].end() :] if breaks else head
-    cues = list(_LIST_NEGATION_RE.finditer(clause))
-    if not cues:
-        return False
-    return _NEW_STATEMENT_RE.search(clause[cues[-1].end() :]) is None
-
-
-# What says, after a term, that it was not found: "confirmation of lateral
-# movement is absent", "persistence was not observed". Read to the end of the
-# term's clause.
-_ABSENCE_AFTER_RE = re.compile(
-    r"\b(?:is|are|was|were|remains?)\s+(?:absent|missing|"
-    r"not\s+(?:observed|found|seen|recorded|present|established|confirmed))\b",
+# A purpose that names the term as its object: "to prevent lateral movement".
+# Only the term right after the verb (a determiner allowed) is negated; another
+# verb of the same sentence is not ("deletes shadow copies to prevent recovery
+# and encrypts every document" still claims encryption).
+_PURPOSE_OBJECT_RE = re.compile(
+    r"\bto\s+(?:prevent|avoid|stop|block)\s+(?:(?:any|the|a|an|further|its|their)\s+)?$",
     re.IGNORECASE,
 )
-# A purpose the text gives for a defender's action: "isolate the host to
-# prevent lateral movement" says nothing of what the sample does.
-_PURPOSE_RE = re.compile(r"\bto\s+(?:prevent|stop|block|contain|limit|avoid)\b", re.IGNORECASE)
-
-
-def _absent_after(text: str, end: int) -> bool:
-    """Whether the rest of the term's clause says the term was not found."""
-    rest = text[end:]
-    stop = _CLAUSE_BREAK_RE.search(rest)
-    return _ABSENCE_AFTER_RE.search(rest[: stop.start()] if stop else rest) is not None
+# An absence said of the term as the subject: "Lateral movement is absent from
+# the evidence". "Persistence is missing a cleanup routine" is not one.
+_SUBJECT_ABSENT_RE = re.compile(
+    r"^\s+(?:is|was|are|were|remains?)\s+(?:absent\b|missing\s+from\b)", re.IGNORECASE
+)
 
 
 def _is_negated(text: str, start: int, end: int | None = None) -> bool:
@@ -1383,26 +1359,36 @@ def _is_negated(text: str, start: int, end: int | None = None) -> bool:
 
     Read backwards from the match through at most ``_NEGATION_WINDOW``
     characters, stopping at whatever ended the previous clause. A cue in what
-    is left governs this term: "contains no keylogging or credential theft"
-    negates both words, while "no persistence was observed; it injects code"
-    negates only the first, because the semicolon ends the clause the cue was
-    in.
+    is left governs this term unless a relative clause or a new statement
+    stands between them: "contains no keylogging or credential theft" negates
+    both words, while "no persistence was observed; it injects code" negates
+    only the first, because the semicolon ends the clause the cue was in. Two
+    more statements of absence: the term as the object of a purpose ("to
+    prevent lateral movement"), and the term as the subject of "is absent" or
+    "is missing from".
     """
-    if _in_a_negated_list(text, start):
+    if _PURPOSE_OBJECT_RE.search(text[max(0, start - _NEGATION_WINDOW) : start]):
         return True
-    if end is not None and _absent_after(text, end):
+    if end is not None and _SUBJECT_ABSENT_RE.match(text[end:]) and _starts_its_clause(text, start):
         return True
     window = text[max(0, start - _NEGATION_WINDOW) : start]
     breaks = list(_CLAUSE_BREAK_RE.finditer(window))
     if breaks:
         window = window[breaks[-1].end() :]
-    if _PURPOSE_RE.search(window):
-        return True
     lowered = window.lower()
     return any(
         not lowered.startswith(_NOT_A_NEGATION, cue.start())
+        and _NEGATION_REACH_END_RE.search(window[cue.end() :]) is None
         for cue in _NEGATION_RE.finditer(window)
     )
+
+
+def _starts_its_clause(text: str, start: int) -> bool:
+    """Whether the term at ``start`` opens its clause, a determiner or adjective allowed."""
+    head = text[:start]
+    breaks = list(_CLAUSE_BREAK_RE.finditer(head))
+    clause = head[breaks[-1].end() :] if breaks else head
+    return len(clause.split()) <= 2
 
 
 # Where one sentence of checked text ends: a stop, a bang or a question mark

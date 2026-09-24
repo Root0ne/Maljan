@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from maljan.pipeline.validation import (
     UNGROUNDED_CAPABILITY_CODE,
     CapabilityGrounding,
@@ -216,61 +218,69 @@ class TestTheKnownLimitsOfTheWindow:
 
         assert ungrounded_capabilities(text, self._thin()) == []
 
-    def test_a_long_negative_list_after_a_plain_cue_is_still_flagged_at_its_end(self) -> None:
-        """A bare "no" governs the words next to it; its window stops short of the last item."""
-        text = "The sample shows no keylogging behaviour, credential theft, or exfiltration."
-
-        assert {v.path for v in ungrounded_capabilities(text, self._thin())} == {"exfiltration"}
-
-
-class TestANounNegationGovernsItsList:
-    """ "No evidence of A, such as B or C" reports the absence of every item."""
-
-    def _thin(self) -> CapabilityGrounding:
-        return CapabilityGrounding.from_report(_report(techniques=("T1027",)))
-
-    def test_the_last_item_of_the_list_is_negated(self) -> None:
+    def test_the_last_item_of_a_long_negative_list_is_still_flagged(self) -> None:
+        """The cue is further back than the window reaches."""
         text = "There is no evidence of keylogging, credential theft, or exfiltration."
 
-        assert ungrounded_capabilities(text, self._thin()) == []
-
-    def test_a_summary_s_long_negative_is_not_read_as_a_claim(self) -> None:
-        text = (
-            "No evidence of malicious command and control infrastructure, such as C2 "
-            "callbacks or exfiltration endpoints, was found in the static analysis."
-        )
-
-        assert ungrounded_capabilities(text, self._thin()) == []
-
-    def test_does_not_perform_is_a_negation(self) -> None:
-        text = "The sample does not perform lateral movement."
-
-        assert ungrounded_capabilities(text, self._thin()) == []
-
-    def test_an_absence_said_after_the_term_is_a_negation(self) -> None:
-        text = (
-            "No sandbox ran, so behavioural confirmation of persistence or lateral "
-            "movement is absent from the current evidence."
-        )
-
-        assert ungrounded_capabilities(text, self._thin()) == []
-
-    def test_a_defender_s_purpose_is_not_a_claim(self) -> None:
-        text = "Isolate any host running it to prevent lateral movement."
-
-        assert ungrounded_capabilities(text, self._thin()) == []
-
-    def test_a_new_statement_joined_on_is_still_read(self) -> None:
-        text = "There is no evidence of keylogging, and the sample exfiltrates documents."
-
         assert {v.path for v in ungrounded_capabilities(text, self._thin())} == {"exfiltration"}
 
-    def test_the_next_clause_is_still_read(self) -> None:
-        text = "There is no evidence of keylogging; the sample injects code into a process."
 
-        assert {v.path for v in ungrounded_capabilities(text, self._thin())} == {
-            "process_injection"
-        }
+class TestWhatANegationReaches:
+    """A negation governs the term it precedes in its own clause, and nothing past it."""
+
+    def _thin(self) -> CapabilityGrounding:
+        return CapabilityGrounding.from_report(_report(techniques=("T1082",)))
+
+    def _paths(self, text: str) -> set[str]:
+        return {v.path for v in ungrounded_capabilities(text, self._thin())}
+
+    def test_does_not_perform_is_a_negation(self) -> None:
+        assert self._paths("The sample does not perform lateral movement.") == set()
+
+    def test_the_term_a_purpose_names_is_negated(self) -> None:
+        assert self._paths("Isolate any host running it to prevent lateral movement.") == set()
+
+    def test_the_term_as_the_subject_of_is_absent_is_negated(self) -> None:
+        assert self._paths("Lateral movement is absent from the recorded evidence.") == set()
+
+    @pytest.mark.parametrize(
+        ("text", "path"),
+        [
+            (
+                "It deletes shadow copies to prevent recovery and encrypts every document.",
+                "encryption",
+            ),
+            (
+                "It compresses the data to avoid detection and exfiltrates it over HTTPS.",
+                "exfiltration",
+            ),
+            (
+                "It disables the firewall to block defenders, then performs lateral movement.",
+                "lateral_movement",
+            ),
+            (
+                "It uses process hollowing to avoid detection, injecting into explorer.exe.",
+                "process_injection",
+            ),
+            (
+                "No indication of a debugger check was found, as the sample itself harvests "
+                "stored credentials from browsers.",
+                "credential_theft",
+            ),
+            (
+                "There are no signs of packing or anti-analysis code in this binary, which "
+                "exfiltrates the collected files over FTP.",
+                "exfiltration",
+            ),
+            ("Persistence is missing a cleanup routine and uses a scheduled task.", "persistence"),
+            (
+                "Behavioural confirmation of lateral movement is absent from the evidence.",
+                "lateral_movement",
+            ),
+        ],
+    )
+    def test_a_claim_past_the_negation_is_still_flagged(self, text: str, path: str) -> None:
+        assert path in self._paths(text)
 
 
 class TestWhatTheFeedbackSays:
