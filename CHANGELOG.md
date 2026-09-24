@@ -8,17 +8,21 @@ change landed on `main`.
 
 ### Added
 
-- **A claim that states a behaviour is absent is asked about its technique
-  id.** "The binary does not contain any obvious persistence mechanisms" with
-  `T1547` is asked once (`attck.absence_claim`) whether the behaviour is absent
+- **A claim that reads as absence is asked about its technique id.** "The
+  binary does not contain any obvious persistence mechanisms" with `T1547` is
+  asked once (`attck.absence_claim`) whether the behaviour is absent
   (`TECHNIQUE: NONE`) or the sample does it, read with the capability check's
-  own negation reader over the technique's capability terms, catalogue name
-  and tactic names. The claim and its id are never edited.
-- **A section answer that writes an item again is asked once**
-  (`composer.repeated_items`), with the count of repeats and the values written
-  more than once, and kept as written if it stands. The cut-at-cap question
-  now says how many of the items begun repeat one already written. A
-  host-identifier answer had begun 161 items of which at most 19 differed.
+  own negation reader, held to a stricter reading of which cue governs the
+  behaviour. The claim and its id are never edited, and the platform never
+  withholds a technique the analyst keeps: it is published with a note
+  ("the claim naming it reads as absence; the analyst kept the technique when
+  asked") in the ATT&CK table and the judge's summary.
+- **A section answer with alike rows is asked once whether they are repeats**
+  (`composer.repeated_items`), compared on the fields that tell items apart,
+  and kept as written if it stands; it is never told to remove a row. The
+  cut-at-cap question now says, per text field, how many of the items begun at
+  least repeat a value. A host-identifier answer had begun 161 items of which
+  at most 19 differed.
 - **Two capability terms**: anti-analysis and anti-forensics, read by the
   report's capability check and by the absence reader.
 
@@ -1846,20 +1850,21 @@ change landed on `main`.
 
 ### Fixed
 
-- **Techniques are no longer published from claims that state absence.** A
-  benign control run published thirteen ATT&CK techniques — Rootkit,
-  Credentials from Password Stores, Remote Services among them — from claims
-  that said the behaviour was not there. A claim that still reads as absence
-  after its question is flagged (`states_absence`): the capability matrix
-  keeps the technique unpublished with the reason, the evidence summary and
-  corroboration count no source, and the judge reads the id with a marker.
+- **Techniques are no longer published from absence claims without the
+  analyst being asked.** A benign control run published thirteen ATT&CK
+  techniques — Rootkit, Credentials from Password Stores, Remote Services
+  among them — from claims that said the behaviour was not there, and no one
+  asked. The analyst is now asked, and decides. Long-term memory stores as a
+  past case's techniques only ids with no absence note and a valid catalogue
+  entry, and a noted claim never displaces a positive one when chunk answers
+  are merged.
 - **The conversation and the run summary agree on a kept answer.** An analyst
   whose retry lost claims keeps its first answer; the conversation used to
   publish its findings as `resolved` while §13 listed them unresolved (an
   unknown id asked four times and kept). The kept answer is checked again
   before any outcome is published.
-- **A capability word is grounded only by what the run found.** A claim of
-  absence, a matrix row the run did not publish, the API catalogue's reference
+- **A capability word is grounded only by what the run found.** The words of
+  a claim that deny a behaviour, a matrix row the run did not publish, the API catalogue's reference
   rows and the words of the sample's own strings no longer ground one, and a
   word in the evidence grounds only where it is said rather than denied. A
   benign report's "establish persistence", "credential harvesting" and
@@ -4425,8 +4430,10 @@ change landed on `main`.
 
 ### Upgrading
 
-An analyst claim carries `states_absence` (false on a stored ISR, which is
-read as before). Two validation codes are new, `attck.absence_claim` and
+An analyst claim carries `kept_after_absence_question` (false on a stored ISR,
+which is read as before), and a capability matrix cell carries `note` (empty
+when there is none). A capability question names two of its term's technique
+ids instead of three. Two validation codes are new, `attck.absence_claim` and
 `composer.repeated_items`, both counted in `run_summary.validation`. The
 exported STIX report object of a Suspicious or Benign run is typed
 `threat-report` instead of `malware`. `retry_with_feedback_sync` takes an
