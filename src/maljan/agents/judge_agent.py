@@ -168,6 +168,48 @@ def stated_assessment_in(text: str) -> Any | None:
     return None
 
 
+_INDICATOR_TYPE_RE = re.compile(r'"type"\s*:\s*"indicator"')
+
+
+def stated_indicators_in(text: str) -> list[dict[str, Any]]:
+    """The indicator objects an unreadable answer wrote whole, each as written.
+
+    An answer the output cap cut off has usually written its indicators before
+    the cut, after the assessment. Each one is the JSON object around a
+    ``"type": "indicator"`` that reads whole as written (``json`` alone, no
+    repair) and carries a pattern; an object the cut reached is not read, and
+    nothing is inferred from prose. Once each, in the order written. What is
+    read here is asked every question a bundle's indicator is asked, and the
+    one publish rule after that: the fallback path publishes no more than an
+    answer that closed would have.
+    """
+    import json
+
+    decoder = json.JSONDecoder()
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for match in _INDICATOR_TYPE_RE.finditer(text):
+        at = text.rfind("{", 0, match.start())
+        while at >= 0:
+            try:
+                value, end = decoder.raw_decode(text, at)
+            except ValueError:
+                at = text.rfind("{", 0, at)
+                continue
+            if end <= match.start():
+                # A whole object inside this one, closed before the match: the
+                # object around the match opens further back.
+                at = text.rfind("{", 0, at)
+                continue
+            if isinstance(value, dict) and value.get("type") == "indicator":
+                key = json.dumps(value, sort_keys=True)
+                if value.get("pattern") and key not in seen:
+                    seen.add(key)
+                    found.append(value)
+            break
+    return found
+
+
 def _assessment_at(
     text: str, at: int, json_module: Any, extract: Any, repairing: Any
 ) -> dict[str, Any] | None:
@@ -191,6 +233,25 @@ def _assessment_at(
 # will find out why it has none.
 VERDICT_FALLBACK_CODE = "verdict.fallback"
 VERDICT_FALLBACK_REASON = "judge verdict fell back to text extraction"
+
+
+def _indicator_findings(bundle: Any, found: Iterable[Violation]) -> list[Violation]:
+    """The rows of ``found`` about an indicator of ``bundle``, by its position.
+
+    A fallback bundle's other objects are this pipeline's own, built from the
+    analysts' claims; only the indicators are the model's words, so only their
+    rows are the model's findings.
+    """
+    objects = list(getattr(bundle, "objects", None) or [])
+    at = re.compile(r"objects\[(\d+)\]")
+    kept: list[Violation] = []
+    for violation in found:
+        where = at.search(violation.path or "")
+        index = int(where.group(1)) if where else -1
+        if 0 <= index < len(objects) and getattr(objects[index], "type", "") == "indicator":
+            kept.append(violation)
+    return kept
+
 
 # What is recorded when the judge never answered at all. A retry would cost a
 # second full judge timeout and could only produce the same fallback bundle, so
@@ -1604,6 +1665,23 @@ class JudgeAgent(BudgetMeter):
                 violations.append(
                     Violation(code=VERDICT_FALLBACK_CODE, message=VERDICT_FALLBACK_REASON)
                 )
+            # The indicators the answer wrote whole are asked what every
+            # bundle's indicator is asked. Nobody can be asked again, so what
+            # is wrong is recorded, and an ungrounded one is dropped below
+            # like one that survived a retry.
+            violations.extend(
+                _indicator_findings(
+                    bundle,
+                    validate_verdict_bundle(
+                        bundle,
+                        evidence_corpus,
+                        sample=sample,
+                        shortened_tools=shortened_tools,
+                        searched=searched,
+                        corpus_state=corpus_state,
+                    ),
+                )
+            )
         # The judge's own answer, when the verdict stands on it: what the
         # export does not carry of it is recorded beside the run's findings
         # (never fed back — nothing in it is wrong), and the answer itself is
@@ -1992,6 +2070,13 @@ class JudgeAgent(BudgetMeter):
                 }
             )
 
+        # The indicators the answer wrote whole before it went wrong, as it
+        # wrote them, with the ids the platform mints. The one publish rule
+        # decides each of them downstream exactly as it decides an indicator
+        # of an answer that closed; without them a cut answer's decoded
+        # command-and-control hosts were never put to the rule at all.
+        objects.extend(self._stated_indicators(text) if extracted else [])
+
         return Bundle.model_validate(
             {
                 "objects": objects,
@@ -2002,6 +2087,30 @@ class JudgeAgent(BudgetMeter):
                 **({"x_maljan_assessment": stated} if stated is not None else {}),
             }
         )
+
+    def _stated_indicators(self, text: str) -> list[dict[str, Any]]:
+        """:func:`stated_indicators_in` with minted ids, each one the Indicator model reads."""
+        from maljan.schemas.stix_models import Indicator
+
+        kept: list[dict[str, Any]] = []
+        for written in stated_indicators_in(text):
+            obj = {**written, "id": f"indicator--{uuid.uuid4()}"}
+            try:
+                Indicator.model_validate(obj)
+            except Exception as exc:  # noqa: BLE001 — one that does not read is not kept
+                self.logger.info(
+                    "Fallback Bundle: an indicator the answer wrote does not read as one (%s).",
+                    type(exc).__name__,
+                )
+                continue
+            kept.append(obj)
+        if kept:
+            self.logger.info(
+                "Fallback Bundle: %d indicator(s) the answer wrote whole are kept as written, "
+                "for the checks and the publish rule to answer.",
+                len(kept),
+            )
+        return kept
 
     # ------------------------------------------------------------------
     # Private helpers
