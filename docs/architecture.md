@@ -480,10 +480,14 @@ Two producers use it:
   check flagged and the retry left standing is also recorded on the report
   (`flagged_statements`), and the Markdown and HTML reports print a mark after
   each place it stands, in prose and in table cells (**[not established by this
-  run: …]**); its words are unchanged. A statement of absence is no claim: a
-  negation governs the term it precedes in its own clause, up to a relative
-  clause or a new statement ("no signs of packing in this binary, which
-  exfiltrates the files" still claims exfiltration); "to prevent|avoid|stop|
+  run: …]**); its words are unchanged. A finding from the structured-output
+  path, where there is no turn to ask on, is marked with "; not asked". A
+  statement of absence is no claim: a negation governs the term it precedes in
+  its own clause, up to a relative clause or a new statement ("no signs of
+  packing in this binary, which exfiltrates the files" still claims
+  exfiltration), where "no evidence that …" and "such as" end nothing; a noun
+  negation ("no evidence of") also reaches through a ", such as …" list it
+  names to the end of its clause; "to prevent|avoid|stop|
   block X" negates X only when X is the verb's object; "is absent" and "is
   missing from" count only with the term as the clause's subject.
 
@@ -2309,7 +2313,8 @@ is assembled from what the run gathered rather than recomputed beside it:
   The question replaces the cut answer rather than following it, so the retry
   is the first prompt and one short turn; it is sent only when that leaves the
   section's output budget free in the window, and otherwise the degradation
-  reason says it was not asked. How far each cut answer got (characters, items begun, how many of them
+  reason says it was not asked. Only this question is sized so; every other
+  question keeps the answer and is sent as before. How far each cut answer got (characters, items begun, how many of them
   distinct) is logged and, when the retry is cut too, carried into the
   degradation reason. Every list contract asks for each item once on one line.
   The host-identifier contract asks for the kind by what the entry shows the

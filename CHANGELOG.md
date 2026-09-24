@@ -1857,8 +1857,11 @@ change landed on `main`.
   undecided.
 - **A negation is not read as a claim.** "does not perform lateral movement",
   "to prevent lateral movement" and "Lateral movement is absent from the
-  evidence" no longer raise `narrative.ungrounded_capability`; a negation
-  reaches only the term it governs in its own clause.
+  evidence", "There is no evidence that the sample exfiltrates data" and "No
+  evidence of … such as C2 callbacks or exfiltration endpoints" no longer raise
+  `narrative.ungrounded_capability`; a negation reaches only the term it
+  governs in its own clause. A mark on a finding the model was never asked
+  about (structured output) ends in "; not asked".
 - **A derived timeout times the prompt read.** Where the reading rate is
   measured, a composer section's and the verdict's wait is (prompt tokens /
   reading rate + output budget / generation rate) × 1.5.
