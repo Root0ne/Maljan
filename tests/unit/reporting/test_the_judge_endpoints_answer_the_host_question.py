@@ -392,7 +392,6 @@ class TestAPatternIsNotOneComparison:
 
         assert exported == []
         assert "the STIX pattern grammar refuses it" in declined[0][1]
-        assert "never closes" in declined[0][1]
 
     def test_a_qualifier_timestamp_is_not_read_as_an_endpoint(self) -> None:
         """A qualified pattern, written as the grammar writes it (``t'…'``)."""

@@ -202,10 +202,9 @@ def _read_quoted(text: str, start: int) -> tuple[str, int, bool, bool]:
 def reads_whole(pattern: str) -> bool:
     """Whether ``pattern`` is a pattern the official validator accepts.
 
-    :func:`pattern_refusal` answers the grammar, and the official validator —
-    ``stix2-patterns``, pinned in the runtime dependencies — has the last word:
-    it also refuses what no grammar can see, such as a digest of the wrong
-    length. The grammar answers alone only where the package is absent.
+    The official validator — ``stix2-patterns``, pinned in the runtime
+    dependencies — decides, acceptance and refusal alike. The grammar reader in
+    this module answers only where the package cannot be imported.
     """
     return not pattern_refusal(pattern)
 
@@ -229,24 +228,37 @@ def pattern_refusal(pattern: str) -> str:
     a backslash the grammar cannot read, are asked by
     :func:`object_path_problems` and :func:`stray_backslash_values`.
     """
-    tokens, broken = _pattern_tokens(str(pattern or ""))
+    text = str(pattern or "")
+    if not text.strip():
+        return "it is empty"
+    verdict = _validator_verdict(text)
+    if verdict is not None:
+        return verdict
+    return _grammar_refusal(text)
+
+
+def _grammar_refusal(text: str) -> str:
+    """The grammar reader's refusal, for where the official validator is not installed."""
+    tokens, broken = _pattern_tokens(text)
     if broken:
         return broken
     if not tokens:
         return "it is empty"
-    reader = _PatternGrammar(tokens)
-    refusal = reader.read()
-    if refusal:
-        return refusal
-    return _validator_refusal(str(pattern or ""))
+    return _PatternGrammar(tokens).read()
 
 
-def _validator_refusal(pattern: str) -> str:
-    """The official pattern validator's first refusal, where it is installed; ``""`` otherwise."""
+def _validator_verdict(pattern: str) -> str | None:
+    """The official validator's answer — ``""`` accepted, its first refusal otherwise.
+
+    ``None`` only when ``stix2-patterns`` cannot be imported. Where it can, its
+    answer is the whole answer, acceptance and refusal alike: ``==`` and
+    ``NOT EXISTS`` are the grammar's own, and a reader of the grammar that
+    refused them told a judge its valid pattern was not one.
+    """
     try:
         from stix2patterns.validator import run_validator
     except ImportError:
-        return ""
+        return None
     try:
         errors = run_validator(pattern)
     except Exception:  # noqa: BLE001 — a validator that cannot read it refuses it
@@ -276,11 +288,11 @@ _KEYWORDS = frozenset(
     }
 )
 _COMPARATORS = frozenset(
-    {"=", "!=", "<>", "<", ">", "<=", ">=", "LIKE", "MATCHES", "ISSUBSET", "ISSUPERSET"}
+    {"=", "==", "!=", "<>", "<", ">", "<=", ">=", "LIKE", "MATCHES", "ISSUBSET", "ISSUPERSET"}
 )
 # The operators whose right-hand side the grammar requires to be a quoted string.
 _STRING_COMPARATORS = frozenset({"LIKE", "MATCHES", "ISSUBSET", "ISSUPERSET"})
-_SYMBOL_RE = re.compile(r"<>|!=|<=|>=|=|<|>|\[|\]|\(|\)|,")
+_SYMBOL_RE = re.compile(r"<>|!=|<=|>=|==|=|<|>|\[|\]|\(|\)|,")
 _NUMBER_RE = re.compile(r"[-+]?\d+(?:\.\d+)?")
 _WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -442,6 +454,10 @@ class _PatternGrammar:
                 if self._take("symbol", ")")
                 else f"{self._where()} where a parenthesis should close"
             )
+        if self._peek() == ("keyword", "NOT") and self.tokens[self.at + 1 : self.at + 2] == [
+            ("keyword", "EXISTS")
+        ]:
+            self.at += 1
         if self._take("keyword", "EXISTS"):
             return "" if self._take("path") else "EXISTS is not followed by an object path"
         kind, text = self._peek()

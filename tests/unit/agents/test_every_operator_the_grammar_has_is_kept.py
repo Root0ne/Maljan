@@ -71,6 +71,10 @@ ACCEPTED = (
     "[file:name = 'a.exe'] START t'2026-01-01T00:00:00Z' STOP t'2026-02-01T00:00:00Z'",
     "[windows-registry-key:key LIKE '%Software\\\\Example%']",
     f"[file:hashes.'SHA-256' = '{SHA256}']",
+    # The lexer's EQ is '=' or '==', and EXISTS may be negated: a reader of the
+    # grammar refused both, and the validator accepts them.
+    "[file:name == 'x']",
+    "[NOT EXISTS file:name]",
 )
 
 # What a generation cut short leaves behind, what is not a pattern at all, and
@@ -118,6 +122,22 @@ def _indicator(pattern: str, index: int = 1) -> dict[str, Any]:
     }
 
 
+class TestTheValidatorDecides:
+    @pytest.mark.parametrize("pattern", ["[file:name == 'x']", "[NOT EXISTS file:name]"])
+    def test_what_it_accepts_is_accepted(self, pattern: str) -> None:
+        assert run_validator(pattern) == []
+        assert pattern_refusal(pattern) == ""
+
+    def test_its_answer_stands_over_the_grammar_s(self) -> None:
+        with patch("maljan.schemas.stix_pattern._grammar_refusal", return_value="grammar says no"):
+            assert reads_whole("[file:name = 'x']")
+
+    def test_the_grammar_answers_only_where_it_cannot_be_imported(self) -> None:
+        with patch("maljan.schemas.stix_pattern._validator_verdict", return_value=None):
+            assert pattern_refusal("[file:name]")
+            assert pattern_refusal("[file:name == 'x']") == ""
+
+
 class TestWellFormedness:
     @pytest.mark.parametrize("pattern", ACCEPTED)
     def test_a_pattern_the_official_validator_accepts_is_kept(self, pattern: str) -> None:
@@ -138,7 +158,7 @@ class TestWellFormedness:
     @pytest.mark.parametrize("pattern", ACCEPTED + REFUSED)
     def test_the_grammar_alone_answers_as_the_validator_does(self, pattern: str) -> None:
         """Where ``stix2-patterns`` is not installed — the image installs no dev group."""
-        with patch("maljan.schemas.stix_pattern._validator_refusal", return_value=""):
+        with patch("maljan.schemas.stix_pattern._validator_verdict", return_value=None):
             assert reads_whole(pattern) is not _refused(pattern)
 
     @pytest.mark.parametrize("pattern", REFUSED)
