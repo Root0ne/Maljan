@@ -1571,6 +1571,28 @@ def citation_violations(
 UNGROUNDED_FINDING_CODE = "narrative.ungrounded_finding"
 FLOW_VOICE_CODE = "report.flow_voice"
 UNCITED_CONFIGURATION_CODE = "report.configuration_uncited"
+# A report section answer the output cap ended. Its JSON is cut before it
+# closes, so the schema check could only say "not JSON at all" — and a model
+# told that writes the same long answer again, into the same cap. Both answers
+# of a benchmark report's host-identifier section ran to exactly 8,192 tokens.
+SECTION_CUT_CODE = "composer.cut_at_output_cap"
+
+
+def section_cut_violation(cap: int) -> Violation:
+    """What a section the cap cut is told, with the cap it ran into."""
+    return Violation(
+        code=SECTION_CUT_CODE,
+        message=(
+            f"Your previous answer reached the output limit of {int(cap)} tokens and was "
+            "cut off before its JSON closed, so none of it could be read. Any reasoning you "
+            "write counts against the same limit. Answer again with an object that closes "
+            f"well inside {int(cap)} tokens: only the items the evidence supports best, each "
+            "written once, every text a short phrase, the JSON on one line without "
+            "indentation."
+        ),
+    )
+
+
 CITATION_WRONG_ENTRY_CODE = "report.citation_wrong_entry"
 UNCITED_IDENTIFIER_CODE = "report.identifier_uncited"
 TECHNIQUE_NAME_CODE = "report.technique_name"
@@ -1925,6 +1947,69 @@ def quoted_values(text: str) -> list[str]:
     return found
 
 
+# One unquoted token of running text: a run of characters no space, bracket,
+# comma, semicolon or quote mark ends.
+_LITERAL_TOKEN_RE = re.compile(r"[^\s\[\]()<>{},;\"“”`]+")
+# What a token loses at its ends before its shape is read: a sentence's
+# punctuation, and the asterisks and underscores of Markdown emphasis.
+_LITERAL_EDGE = ".,:;!?'*_"
+# A host or a file name: dotted labels ending in a label of letters.
+_HOST_OR_FILE_RE = re.compile(r"[a-z0-9_-]+(?:\.[a-z0-9_-]+)*\.[a-z][a-z0-9-]*[a-z]", re.I)
+# A path written from the root, or a folder written between two slashes.
+_SLASH_PATH_RE = re.compile(r"(?:~|\.)?/[\w.%$-]+(?:/[\w.%$-]*)*", re.I)
+# Letters and digits joined by hyphens into one token.
+_JOINED_TOKEN_RE = re.compile(r"(?=[^-]*[a-z])(?=.*\d)[a-z0-9]+(?:-[a-z0-9]+)+", re.I)
+
+
+def _literal_shape(token: str) -> bool:
+    """Whether an unquoted token is a value by its shape alone.
+
+    A whole digest, a URL, a path or registry key (a backslash, or a path
+    from the root), a mailbox, a host or file name, or an identifier a word is
+    never spelt as — one with an underscore, a percent sign, or letters and
+    digits joined by hyphens. Ordinary words, command names and switches are
+    not: whether ``queries the domain`` restates an entry is a paraphrase this
+    check cannot judge.
+    """
+    if _WHOLE_DIGEST_RE.fullmatch(token):
+        return True
+    if "://" in token or ("\\" in token and len(token) >= 4):
+        return True
+    if "@" in token and "." in token:
+        return True
+    if _HOST_OR_FILE_RE.fullmatch(token) or _SLASH_PATH_RE.fullmatch(token):
+        return not token.startswith("/") or token.count("/") >= 2 or "_" in token
+    if re.search(r"[a-z]", token, re.I) and ("_" in token or "%" in token):
+        return True
+    return _JOINED_TOKEN_RE.fullmatch(token) is not None
+
+
+def literal_values(text: str) -> list[str]:
+    """What ``text`` states as a literal value without quoting it, once each, in order.
+
+    The quoted spans are :func:`quoted_values`' and the bracketed citations
+    are not values; both are taken out first. Only a token whose shape makes
+    it a value (:func:`_literal_shape`) and that a text can be said to hold
+    (:func:`decidable`) is kept.
+    """
+    plain = _QUOTED_SPAN_RE.sub(" ", _CODE_SPAN_RE.sub(" ", str(text or "")))
+    plain = re.sub(r"\[[^\]\n]*\]", " ", plain)
+    found: list[str] = []
+    for match in _LITERAL_TOKEN_RE.finditer(plain):
+        token = match.group(0).strip(_LITERAL_EDGE)
+        if (
+            len(token) < 3
+            or _EVIDENCE_ID_RE.fullmatch(token)
+            or _IDENTIFIER_RE.fullmatch(token)
+            or not _literal_shape(token)
+            or not decidable(token)
+        ):
+            continue
+        if token not in found:
+            found.append(token)
+    return found
+
+
 def _ids_in(value: Any) -> list[str]:
     """The evidence ids a citing field carries, lower-cased, in order."""
     items = value if isinstance(value, list | tuple) else [value]
@@ -1957,8 +2042,10 @@ def wrong_entry_citations(
     """Values a text quotes that the entry it cites does not hold, and another entry does.
 
     Decided only where it can be: a value the text states verbatim — in quotes
-    or backticks, or the whole of a record's value — is looked for in the text
-    of each entry cited for it. Found in one of them, the citation stands.
+    or backticks, unquoted where its shape makes it a value (a host, a path, a
+    digest, an identifier no word is spelt as; :func:`literal_values`), or the
+    whole of a record's value — is looked for in the text of each entry cited
+    for it. Found in one of them, the citation stands.
     Found in none of them but in another entry of the run, the citation points
     a reader at the wrong answer, and the model is asked once, with the entry
     that holds it offered. Found nowhere, nothing is said: a value the run's
@@ -1996,7 +2083,7 @@ def wrong_entry_citations(
 
     def _read_prose(text: Any) -> None:
         for sentence, cited in _sentences_with_citations(str(text or "")):
-            for value in quoted_values(sentence):
+            for value in [*quoted_values(sentence), *literal_values(sentence)]:
                 _ask(value, cited)
 
     def _walk(node: Any, depth: int = 0) -> None:
@@ -2020,8 +2107,8 @@ def wrong_entry_citations(
                 elif refs:
                     if key in _VERBATIM_FIELDS:
                         _ask(value, refs)
-                    for quoted in quoted_values(value):
-                        _ask(quoted, refs)
+                    for stated in [*quoted_values(value), *literal_values(value)]:
+                        _ask(stated, refs)
             elif key in _VERBATIM_FIELDS and isinstance(value, list | tuple) and refs:
                 for item in value:
                     if isinstance(item, str):

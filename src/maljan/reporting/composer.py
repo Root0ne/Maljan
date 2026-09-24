@@ -50,6 +50,7 @@ from maljan.pipeline.validation import (
     retry_with_feedback,
     schema_violations,
     section_capability_violations,
+    section_cut_violation,
     technique_name_violations,
     wrong_entry_citations,
 )
@@ -498,25 +499,6 @@ def _published_techniques(report: MalwareReport) -> str:
 # The calls one section may take: its answer and the one retry the validation
 # loop gives an answer that breaks its schema.
 SECTION_ATTEMPTS = 2
-
-
-# A section answer the output cap ended. Its JSON is cut before it closes, so
-# the schema check could only say "not JSON at all" — and a model told that
-# writes the same long answer again, into the same cap. Both answers of a
-# benchmark report's host-identifier section ran to exactly 8,192 tokens.
-SECTION_CUT_CODE = "composer.cut_at_output_cap"
-
-
-def section_cut_feedback(cap: int) -> str:
-    """What a section the cap cut is told, with the cap it ran into."""
-    return (
-        f"Your previous answer reached the output limit of {int(cap)} tokens and was cut "
-        "off before its JSON closed, so none of it could be read. Any reasoning you write "
-        "counts against the same limit. Answer again with an object that closes well "
-        f"inside {int(cap)} tokens: only the items the evidence supports best, each "
-        "written once, every text a short phrase, the JSON on one line without "
-        "indentation."
-    )
 
 
 # A key and the string written under it, in a JSON text that may be cut.
@@ -1086,7 +1068,7 @@ class ReportComposer:
                 # Whatever a repair made of the text, it is the front of an
                 # answer the cap ended: the model is told why, and asked once
                 # for a shorter one.
-                return [Violation(code=SECTION_CUT_CODE, message=section_cut_feedback(cut_at))]
+                return [section_cut_violation(cut_at)]
             found = [
                 *schema_violations(schema, payload, code="composer.schema"),
                 *section_capability_violations(payload, self._grounding),

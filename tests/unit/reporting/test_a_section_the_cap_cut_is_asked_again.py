@@ -16,14 +16,13 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
+from maljan.pipeline.validation import SECTION_CUT_CODE, section_cut_violation
 from maljan.reporting.composer import (
     _INSTRUCTIONS,
-    SECTION_CUT_CODE,
     ReportComposer,
     _HostIdentifiersOut,
     cut_answer_shape,
     section_contract,
-    section_cut_feedback,
 )
 
 _CUT_ROW = '{"kind": "String", "value": "same-value", "purpose": "", "evidence_refs": ["ev_0001"]}'
@@ -107,9 +106,9 @@ class TestTheQuestion:
 
 
 def _feedback_turn_for(cap: int) -> str:
-    from maljan.pipeline.validation import Violation, feedback_text
+    from maljan.pipeline.validation import feedback_text
 
-    return feedback_text([Violation(code=SECTION_CUT_CODE, message=section_cut_feedback(cap))])
+    return feedback_text([section_cut_violation(cap)])
 
 
 class TestTheShapeOfACutAnswer:

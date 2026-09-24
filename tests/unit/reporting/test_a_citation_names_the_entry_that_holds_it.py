@@ -26,6 +26,7 @@ from maljan.pipeline.validation import (
     KEPT_WITH_A_FINDING,
     EntryTexts,
     decidable,
+    literal_values,
     quoted_values,
     wrong_entry_citations,
 )
@@ -184,6 +185,93 @@ class TestTheEntryTexts:
 
     def test_quoted_values_skip_an_apostrophe_and_a_short_value(self) -> None:
         assert quoted_values("the sample's `%s` and 'ab' and `example.dat`") == ["example.dat"]
+
+
+class TestUnquotedValues:
+    """A value stated without quotes is read too, where its shape makes it a value.
+
+    A benchmark report listed command switches decoded from the sample under
+    the capability entry, in plain text, while only the decoded-strings entry
+    held them; the quoted-value check read none of it.
+    """
+
+    @staticmethod
+    def _texts() -> EntryTexts:
+        decoded = json.dumps(
+            {
+                "strings": [
+                    {"string": "exampletool /scan_scope /all_zones"},
+                    {"string": "cache.example-cdn.net"},
+                    {"string": "C:\\ProgramData\\ExampleVendor\\state.bin"},
+                    {"string": "Example_%04x"},
+                ]
+            }
+        )
+        return EntryTexts.from_ledger(
+            [
+                _entry("ev_0008", "capa", json.dumps({"rules": ["query environment"]})),
+                _entry("ev_0012", "floss", decoded),
+            ]
+        )
+
+    def test_switches_with_an_underscore_are_asked_about(self) -> None:
+        body = "It runs exampletool to walk zones (/scan_scope /all_zones) [ev_0008]."
+
+        (found,) = wrong_entry_citations({"body": body}, self._texts(), prose=("body",))
+
+        assert "'/scan_scope', '/all_zones'" in found.message
+        assert "ev_0008 (capa)" in found.message and "ev_0012 (floss)" in found.message
+
+    def test_a_host_a_path_and_a_format_token_are_asked_about(self) -> None:
+        body = (
+            "It contacts cache.example-cdn.net, keeps C:\\ProgramData\\ExampleVendor\\state.bin "
+            "and names its marker Example_%04x [ev_0008]."
+        )
+
+        (found,) = wrong_entry_citations({"body": body}, self._texts(), prose=("body",))
+
+        for value in ("cache.example-cdn.net", "state.bin", "Example_%04x"):
+            assert value in found.message
+
+    def test_a_record_description_is_read_for_them_too(self) -> None:
+        payload = {
+            "steps": [
+                {
+                    "order": 1,
+                    "action": "Resolves cache.example-cdn.net",
+                    "evidence_refs": ["ev_0008"],
+                }
+            ]
+        }
+
+        assert _codes(wrong_entry_citations(payload, self._texts())) == [CITATION_WRONG_ENTRY_CODE]
+
+    def test_the_right_entry_raises_nothing(self) -> None:
+        body = "It contacts cache.example-cdn.net (/scan_scope) [ev_0012]."
+
+        assert wrong_entry_citations({"body": body}, self._texts(), prose=("body",)) == []
+
+    def test_a_paraphrase_stays_undecided(self) -> None:
+        body = "It runs exampletool to scan every zone and queries the environment [ev_0008]."
+
+        assert wrong_entry_citations({"body": body}, self._texts(), prose=("body",)) == []
+
+    def test_what_is_read_as_a_literal(self) -> None:
+        text = (
+            "_Written by the model_ T1027.005 CVE-2021-12345 [ev_0012] e.g. and/or /all the "
+            "/example/ path, C:\\Temp\\x.dll, evil.example.com, a@b.example, Example_%x, "
+            "examplemark-7, " + "7d" * 16 + ", 443, 6.0.0.0 and `quoted.example.org`."
+        )
+
+        assert literal_values(text) == [
+            "/example/",
+            "C:\\Temp\\x.dll",
+            "evil.example.com",
+            "a@b.example",
+            "Example_%x",
+            "examplemark-7",
+            "7d" * 16,
+        ]
 
 
 class TestWhatCannotBeDecided:

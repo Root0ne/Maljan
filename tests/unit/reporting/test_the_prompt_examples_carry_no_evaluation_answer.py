@@ -26,6 +26,7 @@ from typing import Any
 
 import pytest
 
+from maljan.pipeline.validation import section_cut_violation
 from maljan.reporting.composer import (
     _EXAMPLES,
     _INSTRUCTIONS,
@@ -35,7 +36,6 @@ from maljan.reporting.composer import (
     SECTION_SCHEMAS,
     WHERE_QUOTED_LEAD,
     section_contract,
-    section_cut_feedback,
 )
 from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXAMPLE_OBJECT, EXPECTED_OBJECT
 
@@ -171,7 +171,7 @@ PROMPTS: dict[str, str] = {
     "composer section titles": " ".join(_PROSE_SECTIONS.values()),
     "composer published-techniques heading": PUBLISHED_TECHNIQUES_HEADING,
     "composer claim note": WHERE_QUOTED_LEAD,
-    "composer cut-at-cap question": section_cut_feedback(8192),
+    "composer cut-at-cap question": section_cut_violation(8192).message,
 }
 
 # Each composer section's whole contract — the object, the lines on how to
