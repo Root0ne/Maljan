@@ -254,6 +254,37 @@ class TestTheMark:
             "**[a rule match only, stated as an action: T1055.012]**"
         ) in md
 
+    def test_two_sentences_under_one_label_are_both_marked(self) -> None:
+        first = "The sample exfiltrates documents over FTP."
+        second = "Stolen data is later exfiltrated to a second server."
+        report = _report()
+        report.executive_summary = f"{first} {second}"
+        report.flagged_statements = [
+            FlaggedStatement(sentence=first, code=UNGROUNDED_CAPABILITY_CODE, label="exfiltration"),
+            FlaggedStatement(
+                sentence=second, code=UNGROUNDED_CAPABILITY_CODE, label="exfiltration"
+            ),
+        ]
+
+        md = MarkdownRenderer().render(report)
+
+        mark = "**[not established by this run: exfiltration]**"
+        assert f"{first} {mark} {second} {mark}" in md
+
+    def test_a_sentence_in_a_table_cell_is_marked(self) -> None:
+        from maljan.reporting.renderers.markdown import _Context
+
+        report = _report()
+        report.flagged_statements = [
+            FlaggedStatement(
+                sentence="Sends the host profile out", code=UNGROUNDED_CAPABILITY_CODE, label="x"
+            )
+        ]
+
+        cell = _Context(report).cell("Sends the host profile out")
+
+        assert cell == "Sends the host profile out **[not established by this run: x]**"
+
     def test_a_report_stored_before_the_field_renders_unmarked(self) -> None:
         report = _report()
         report.executive_summary = "The sample exfiltrates documents."

@@ -2034,12 +2034,14 @@ class _Context:
         # The report model's sentences a check asked about and the retry left
         # standing, each with the mark printed after it. Longest first, so a
         # sentence that holds another is marked as itself.
+        marks: dict[str, list[str]] = {}
+        for row in getattr(report, "flagged_statements", None) or []:
+            if row.sentence.strip():
+                mark = _flag_mark(row.code, row.label)
+                if mark not in marks.setdefault(row.sentence, []):
+                    marks[row.sentence].append(mark)
         self.flagged = sorted(
-            (
-                (row.sentence, _flag_mark(row.code, row.label))
-                for row in getattr(report, "flagged_statements", None) or []
-                if row.sentence.strip()
-            ),
+            ((sentence, " ".join(found)) for sentence, found in marks.items()),
             key=lambda pair: -len(pair[0]),
         )
 
@@ -2096,9 +2098,23 @@ class _Context:
 
     def marked(self, text: str) -> str:
         """``text`` with each flagged sentence followed by its mark; the words are unchanged."""
+        # One pass over positions, keyed by the sentence: every place a flagged
+        # sentence stands gets its own mark, the longest sentence first so one
+        # inside another is marked as itself, and a place already marked is
+        # left alone.
+        claimed: list[tuple[int, int]] = []
+        inserts: list[tuple[int, str]] = []
         for sentence, mark in self.flagged:
-            if sentence in text and mark not in text:
-                text = text.replace(sentence, f"{sentence} {mark}")
+            start = text.find(sentence)
+            while start != -1:
+                end = start + len(sentence)
+                inside = any(a <= start and end <= b for a, b in claimed)
+                if not inside and not text.startswith(f" {mark}", end):
+                    claimed.append((start, end))
+                    inserts.append((end, mark))
+                start = text.find(sentence, start + 1)
+        for end, mark in sorted(inserts, reverse=True):
+            text = f"{text[:end]} {mark}{text[end:]}"
         return text
 
     def plain(self, text: str) -> str:
@@ -2111,7 +2127,12 @@ class _Context:
 
     def cell(self, text: Any) -> str:
         """A model-written table cell: defanged like prose, cut like every cell."""
-        return _truncate(self._defang(str(text or "")), _CELL_LIMIT)
+        raw = str(text or "")
+        cut = _truncate(self._defang(raw), _CELL_LIMIT)
+        # A cell is cut to its width, so its marks follow the cut text rather
+        # than a sentence the cut may have shortened.
+        marks = [mark for sentence, mark in self.flagged if sentence in raw]
+        return f"{cut} {' '.join(marks)}" if marks else cut
 
     def sandbox_sentence(self) -> str:
         """What the run knows about a sandbox, as one sentence, in the run's own voice.
