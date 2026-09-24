@@ -2152,35 +2152,155 @@ _LITERAL_TOKEN_RE = re.compile(r"[^\s\[\]()<>{},;\"“”`]+")
 # What a token loses at its ends before its shape is read: a sentence's
 # punctuation, and the asterisks and underscores of Markdown emphasis.
 _LITERAL_EDGE = ".,:;!?'*_"
-# A host or a file name: dotted labels ending in a label of letters.
-_HOST_OR_FILE_RE = re.compile(r"[a-z0-9_-]+(?:\.[a-z0-9_-]+)*\.[a-z][a-z0-9-]*[a-z]", re.I)
-# A path written from the root, or a folder written between two slashes.
-_SLASH_PATH_RE = re.compile(r"(?:~|\.)?/[\w.%$-]+(?:/[\w.%$-]*)*", re.I)
-# Letters and digits joined by hyphens into one token.
-_JOINED_TOKEN_RE = re.compile(r"(?=[^-]*[a-z])(?=.*\d)[a-z0-9]+(?:-[a-z0-9]+)+", re.I)
+# A file name: a name, a dot, and an extension a file on a host carries.
+_FILE_NAME_RE = re.compile(r"[a-z0-9][\w.$~-]*\.([a-z0-9]{2,5})", re.I)
+_FILE_EXTENSIONS = frozenset(
+    {
+        "exe",
+        "dll",
+        "sys",
+        "scr",
+        "cpl",
+        "ocx",
+        "drv",
+        "bat",
+        "cmd",
+        "ps1",
+        "psm1",
+        "vbs",
+        "vbe",
+        "js",
+        "jse",
+        "wsf",
+        "hta",
+        "lnk",
+        "msi",
+        "dat",
+        "bin",
+        "tmp",
+        "log",
+        "txt",
+        "ini",
+        "cfg",
+        "conf",
+        "db",
+        "sqlite",
+        "zip",
+        "rar",
+        "7z",
+        "cab",
+        "iso",
+        "img",
+        "doc",
+        "docx",
+        "docm",
+        "xls",
+        "xlsx",
+        "xlsm",
+        "pdf",
+        "rtf",
+        "so",
+        "elf",
+        "sh",
+        "py",
+        "jar",
+        "apk",
+        "dex",
+        "plist",
+        "dylib",
+    }
+)
+# The executables every Windows host carries, named bare. A sentence naming one
+# ("runs cmd.exe") states how the sample works, not a value to look for, and the
+# entry it cites often states the same fact without the name.
+_COMMON_EXECUTABLES = frozenset(
+    {
+        "cmd.exe",
+        "powershell.exe",
+        "pwsh.exe",
+        "explorer.exe",
+        "rundll32.exe",
+        "regsvr32.exe",
+        "svchost.exe",
+        "mshta.exe",
+        "wscript.exe",
+        "cscript.exe",
+        "conhost.exe",
+        "schtasks.exe",
+        "reg.exe",
+        "net.exe",
+        "net1.exe",
+        "whoami.exe",
+        "ipconfig.exe",
+        "nltest.exe",
+        "systeminfo.exe",
+        "tasklist.exe",
+        "taskkill.exe",
+        "wmic.exe",
+        "msiexec.exe",
+        "certutil.exe",
+        "bitsadmin.exe",
+        "vssadmin.exe",
+        "notepad.exe",
+        "lsass.exe",
+        "winlogon.exe",
+        "services.exe",
+        "csrss.exe",
+        "dllhost.exe",
+        "taskhostw.exe",
+        "sc.exe",
+        "at.exe",
+        "curl.exe",
+        "wget.exe",
+    }
+)
+
+
+# Names of software written like a host or a file: a library, not a value.
+_SOFTWARE_NAMES = frozenset(
+    {"node.js", "vue.js", "react.js", "next.js", "express.js", "d3.js", "three.js", "socket.io"}
+)
+
+
+def _host_shaped(token: str) -> bool:
+    """A host name under a real top-level domain, by the strings reader's own test."""
+    from maljan.tools.strings import _looks_like_domain
+
+    return bool(re.fullmatch(r"[a-z0-9-]+(?:\.[a-z0-9-]+)+", token, re.I)) and _looks_like_domain(
+        token
+    )
 
 
 def _literal_shape(token: str) -> bool:
-    """Whether an unquoted token is a value by its shape alone.
+    """Whether an unquoted token is an indicator by its shape alone.
 
-    A whole digest, a URL, a path or registry key (a backslash, or a path
-    from the root), a mailbox, a host or file name, or an identifier a word is
-    never spelt as — one with an underscore, a percent sign, or letters and
-    digits joined by hyphens. Ordinary words, command names and switches are
-    not: whether ``queries the domain`` restates an entry is a paraphrase this
-    check cannot judge.
+    A whole digest, a URL, a backslash path or registry key, a mailbox, a host
+    under a real top-level domain, or a file name with a file's extension other
+    than an executable every Windows host carries. Never technical vocabulary:
+    an algorithm, an encoding, an architecture, an API constant or a tool name
+    is written many ways in the entries that state it, and whether one sentence
+    restates an entry is a paraphrase this check cannot judge. When in doubt
+    the token is not a value and nothing is asked.
     """
+    if token.lower() in _SOFTWARE_NAMES:
+        return False
     if _WHOLE_DIGEST_RE.fullmatch(token):
         return True
-    if "://" in token or ("\\" in token and len(token) >= 4):
+    if "://" in token:
         return True
-    if "@" in token and "." in token:
+    if "\\" in token:
+        return len(token) >= 4 and re.search(r"[a-z]", token, re.I) is not None
+    if "@" in token:
+        local, _, host = token.partition("@")
+        return bool(local) and _host_shaped(host)
+    if _host_shaped(token):
         return True
-    if _HOST_OR_FILE_RE.fullmatch(token) or _SLASH_PATH_RE.fullmatch(token):
-        return not token.startswith("/") or token.count("/") >= 2 or "_" in token
-    if re.search(r"[a-z]", token, re.I) and ("_" in token or "%" in token):
-        return True
-    return _JOINED_TOKEN_RE.fullmatch(token) is not None
+    named = _FILE_NAME_RE.fullmatch(token)
+    return bool(
+        named
+        and named.group(1).lower() in _FILE_EXTENSIONS
+        and token.lower() not in _COMMON_EXECUTABLES
+    )
 
 
 def literal_values(text: str) -> list[str]:
@@ -2241,8 +2361,8 @@ def wrong_entry_citations(
     """Values a text quotes that the entry it cites does not hold, and another entry does.
 
     Decided only where it can be: a value the text states verbatim — in quotes
-    or backticks, unquoted where its shape makes it a value (a host, a path, a
-    digest, an identifier no word is spelt as; :func:`literal_values`), or the
+    or backticks, unquoted where its shape makes it an indicator (a digest, a
+    URL, a path, a host, a file name; :func:`literal_values`), or the
     whole of a record's value — is looked for in the text of each entry cited
     for it. Found in one of them, the citation stands.
     Found in none of them but in another entry of the run, the citation points
@@ -2331,12 +2451,12 @@ def wrong_entry_citations(
         holding = safe_finding_value(", ".join(entries.named(i) for i in holders[:_MAX_NAMED_IDS]))
         message = (
             f"{quoted} is not in {named}, which the text cites for it; this run's evidence "
-            f"holds it in {holding}. Cite the entry that holds what the text quotes."
+            f"holds it in {holding}. Cite the entry that holds the value the text states."
             if len(values) == 1
             else f"{quoted} are not in {named}, which the text cites for them; this run's "
             f"evidence holds them in {holding}"
             f"{' (with ' + safe_finding_value(more) + ' more)' if more > 0 else ''}. "
-            "Cite the entry that holds what the text quotes."
+            "Cite the entry that holds the value the text states."
         )
         violations.append(
             Violation(code=CITATION_WRONG_ENTRY_CODE, message=message, path="citation")
