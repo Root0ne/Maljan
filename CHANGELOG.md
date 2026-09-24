@@ -4579,6 +4579,10 @@ change landed on `main`.
   published Latrodectus analysis, the disassembler run, the PuTTY
   false-positive control and the limitations, with the five item-by-item score
   files. The README has a short "How Maljan compares" section that links to it.
+  Iterations 5 and 6 are added to both, with their score files: the reference
+  score plateaued within rerun noise (12–15 found, none wrong), the remaining
+  gap is on the model's side, and iteration 6 published seven techniques on the
+  benign PuTTY control after its verdict fell back.
 
 ### Upgrading
 
