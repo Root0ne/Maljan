@@ -195,6 +195,18 @@ URL is a hosted API like any other, so no cap reaches it: the value is set, not
 guessed from the host. DeepSeek also accepts `chat_template_kwargs` and ignores
 it, so `deepseek` is the only value under which `disable_thinking` reaches it.
 
+A DeepSeek thinking model returns its reasoning as `reasoning_content` beside
+`content`, and on a request that carries tools that reasoning has to be sent
+back on its assistant turn in every later request: DeepSeek's thinking-mode
+guide (https://api-docs.deepseek.com/guides/thinking_mode, on tool calls) says
+the API answers 400 otherwise. The OpenAI client reads it from no answer and
+writes it into no request, so under `deepseek` the provider keeps each turn's
+`reasoning_content` exactly as returned and sends it back on that turn. The
+answer's `content` is untouched, and a turn sent again is sent byte for byte,
+so the request's front stays what DeepSeek has cached. The reasoning's size is
+in the run's token counts (`reasoning_tokens`); its text stays with the turn
+in the loop's conversation and is not published.
+
 ### Reasoning effort
 
 `llm.openai.reasoning_effort` is sent as the request's top-level

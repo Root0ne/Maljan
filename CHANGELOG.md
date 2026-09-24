@@ -19,6 +19,10 @@ change landed on `main`.
   reasoning counted, and `disable_thinking` as DeepSeek's `thinking.type`. It is
   explicit rather than read from the host, because OpenAI's own API refuses
   `max_tokens` beside `max_completion_tokens` for its reasoning models.
+  It also keeps each assistant turn's `reasoning_content` exactly as DeepSeek
+  returned it and sends it back on that turn in every later request, which
+  DeepSeek's thinking-mode guide requires on a request with tools (400
+  otherwise) and which the OpenAI client does in neither direction.
 - **Cached input and reasoning tokens are recorded where reported.**
   `run_summary.tokens` (and each agent's row) carries `cached_input_tokens` and
   `reasoning_tokens`, each with the calls that reported it, from the client's

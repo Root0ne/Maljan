@@ -958,7 +958,19 @@ def nudge_turns(msgs: list) -> tuple[list, bool]:
             # templates render as nothing and a few reject.
             if not content.strip() and not kept_calls:
                 continue
-            out.append(AIMessage(content=message.content, tool_calls=kept_calls))
+            # The reasoning a provider asks to have sent back stays with the
+            # turn it belongs to (``openai_provider.with_reasoning_passback``);
+            # nothing else of the dropped call's raw form is carried.
+            kept_kwargs = {
+                key: value
+                for key, value in (message.additional_kwargs or {}).items()
+                if key == "reasoning_content"
+            }
+            out.append(
+                AIMessage(
+                    content=message.content, tool_calls=kept_calls, additional_kwargs=kept_kwargs
+                )
+            )
             continue
         out.append(message)
     return out, changed
