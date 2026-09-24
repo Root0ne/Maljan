@@ -2224,9 +2224,9 @@ class _AnalystStates:
     ``failed``: the run's failed-analyst list. ``skipped``: an analyst the
     analysis stage records a reason for, or whose own record says it had no
     data, with that reason. ``silent``: an analyst that ran and claimed
-    nothing. A report stored before those records falls back to the two
-    reasons the pipeline writes, ``analyst failures:`` and ``analysts produced
-    no claims:``.
+    nothing. A report stored before those records falls back to the reasons
+    the pipeline writes: ``analyst failures:``, ``analysts skipped (<why>):``
+    and ``analysts produced no claims:``.
     """
 
     def __init__(self, report: MalwareReport) -> None:
@@ -2246,6 +2246,10 @@ class _AnalystStates:
             agent = str(row.get("agent_id") or row.get("domain") or "")
             if agent and row.get("no_data") and agent not in self.failed:
                 skipped.setdefault(agent, "")
+        for why, names in _skipped_after(report.degradation_reasons):
+            for agent in names:
+                if agent not in self.failed:
+                    skipped.setdefault(agent, why)
         self.skipped = skipped
         if stats:
             silent = [
@@ -2284,6 +2288,20 @@ class _AnalystStates:
                 f"the {_joined(self.silent)} analyst{'s' if many else ''} produced no claims"
             )
         return out
+
+
+_SKIPPED_REASON_RE = re.compile(r"^analysts skipped \((?P<why>[^)]*)\): (?P<names>.+)$")
+
+
+def _skipped_after(reasons: list[str]) -> list[tuple[str, list[str]]]:
+    """Each ``analysts skipped (<why>): a, b`` reason, as its cause and its names."""
+    out: list[tuple[str, list[str]]] = []
+    for reason in reasons:
+        match = _SKIPPED_REASON_RE.match(str(reason))
+        if match:
+            names = [n.strip() for n in match.group("names").split(",") if n.strip()]
+            out.append((match.group("why").strip(), names))
+    return out
 
 
 def _named_after(reasons: list[str], prefix: str) -> list[str]:

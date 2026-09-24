@@ -106,10 +106,9 @@ class ISRAgentStats:
     # one says the run was thin, the other says the analyst failed — and they
     # were reported identically until BUG 12.
     #
-    # A flag rather than a second degradation-reason string, deliberately:
-    # readers partition on the literal "analysts produced no claims:" to strip
-    # the starved analysts out of a static-only run. A new reason string would
-    # have made every such run record an unexplained incidental degradation.
+    # A flag as well as a reason: the degradation reasons name a skipped
+    # analyst as "analysts skipped (<why>):", and this row lets a reader that
+    # has only the stats tell the two apart.
     no_data: bool = False
     # What the analyst says about its own answer, when the claim count cannot
     # say it: ``no_claims`` for one that read its data and whose model ended

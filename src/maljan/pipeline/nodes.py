@@ -295,6 +295,21 @@ def _is_placeholder_only(chunks: list, role: str = "") -> bool:
 # The reason a sandbox-fed analyst is skipped when nothing was detonated.
 SYNTHETIC_SANDBOX_REASON = "no sandbox fixture for this sample"
 
+# What a skipped analyst's log line and degradation reason say it lacked.
+NO_SANDBOX_DATA_REASON = "no sandbox data"
+NO_INPUT_DATA_REASON = "no input data"
+
+# The degradation reason's opening for analysts that ran and claimed nothing.
+# Analysts skipped for want of input are named under ``skipped_analysts_reason``
+# instead: "produced no claims" read as if they had run.
+NO_CLAIMS_REASON_PREFIX = "analysts produced no claims:"
+
+
+def skipped_analysts_reason(why: str, names: Sequence[str]) -> str:
+    """The degradation reason for analysts skipped for want of input."""
+    return f"analysts skipped ({why}): {', '.join(names)}"
+
+
 # The roles whose input is the sample itself rather than the sandbox report:
 # the static analyst, and the two roles that are a prompt over the sample and
 # whatever tools the definition gives them. These get the sample path pinned
@@ -767,8 +782,9 @@ def _augment_static_chunks_with_path(
             "note": (
                 "Live analysis run: no pre-extracted static fixture exists "
                 "for this sample. Nothing about the binary is pasted here on "
-                "purpose — call your tools for the section table, the imports "
-                "and the strings, and cite the ids their results carry."
+                "purpose — where your tool list offers them, call tools for the "
+                "section table, the imports and the strings, and cite the ids "
+                "their results carry."
             ),
             "sha256": state.get("file_hash") or "",
         }
@@ -2119,10 +2135,13 @@ def make_stage_agent_node(
                 # is graceful degradation, not failure — emit a [WARN]
                 # report with an empty ISR so the rest of the pipeline
                 # treats the analyst as "absent" rather than "broken".
+                # Said as what happened: the analyst was skipped, and why. "No
+                # data chunks" named the loader's output for a run whose actual
+                # cause was a sandbox report standing in for one that never ran.
                 logger.info(
-                    "Agent '%s': no data chunks available — emitting empty ISR "
-                    "as graceful degradation (no-data path).",
+                    "Agent '%s' skipped: %s — emitting an empty ISR (no-data path).",
                     agent_name,
+                    NO_SANDBOX_DATA_REASON if synthetic else "no input data for this agent",
                 )
                 no_data_text = (
                     f"[WARN] {agent_name}: {SYNTHETIC_SANDBOX_REASON} — analyst skipped."
@@ -3381,16 +3400,10 @@ def make_judge_node(
             # analyst that had nothing to read says the run was thin; one that
             # read everything and claimed nothing says the analyst failed.
             #
-            # The distinction is carried as *data* — a per-agent flag on
-            # ``run_summary.agent_stats`` — and emphatically not as a second
-            # degradation-reason string. ``eval_dynamic_vs_static``'s
-            # ``incidental_reasons`` partitions on the literal "analysts
-            # produced no claims:" to strip the starved analysts out of the
-            # static-only arm's treatment, and that tree is read-only: a rival
-            # string would make every static-only arm record an unexplained
-            # incidental degradation and move the E.1 numbers with nothing
-            # saying so. The reason below is therefore byte-for-byte what it
-            # always was, for every claimless analyst.
+            # The distinction is carried as data — a per-agent flag on
+            # ``run_summary.agent_stats`` — and in the degradation reasons,
+            # which name a skipped analyst as skipped and say what it lacked,
+            # and keep "analysts produced no claims:" for the ones that ran.
             #
             # In a thread: the guard reads the file loader from disk and
             # ``json.dumps`` a whole sandbox slice per analyst, which is
@@ -3497,10 +3510,24 @@ def make_judge_node(
             )
             if _failed_analysts:
                 _degradation_reasons.append(f"analyst failures: {', '.join(_failed_analysts)}")
-            if _empty_analysts:
-                _degradation_reasons.append(
-                    f"analysts produced no claims: {', '.join(_empty_analysts)}"
-                )
+            # Two sentences, each saying what happened: an analyst skipped for
+            # want of input did not run, and one that ran and claimed nothing
+            # did. The first is split by what was missing, so a run whose
+            # sandbox never ran says so of the analysts that read its report.
+            _ran_empty = [name for name in _empty_analysts if name not in _no_data_analysts]
+            _skipped_by_cause: dict[str, list[str]] = {}
+            for name in _empty_analysts:
+                if name in _no_data_analysts:
+                    cause = (
+                        NO_SANDBOX_DATA_REASON
+                        if _sandbox_fed(container.agent_role(name))
+                        else NO_INPUT_DATA_REASON
+                    )
+                    _skipped_by_cause.setdefault(cause, []).append(name)
+            for cause, names in _skipped_by_cause.items():
+                _degradation_reasons.append(skipped_analysts_reason(cause, names))
+            if _ran_empty:
+                _degradation_reasons.append(f"{NO_CLAIMS_REASON_PREFIX} {', '.join(_ran_empty)}")
             # Which of those answered in prose that did not parse into a claim
             # after being asked once for the claim format. The prose is their
             # report; nothing in it was made a claim.
