@@ -125,6 +125,17 @@ _OBJECT_TYPE_RE = re.compile(r'"type"\s*:\s*"([a-z][a-z0-9-]*)"')
 _INDENTED_LINE_RE = re.compile(r"\n[ \t]+")
 
 
+def judge_output_cap() -> Any:
+    """The judge's output cap and how it was reached: ``llm.judge_max_tokens``, or derived.
+
+    Read from what the job has learned (``context_window.output_cap_for``,
+    no request), so it is the cap the container built the judge's model with.
+    """
+    from maljan.llm.context_window import output_cap_for
+
+    return output_cap_for(get_settings(), "judge_max_tokens", "judge", role="judge")
+
+
 def verdict_cut_violation(cap: int, text: str = "") -> Violation:
     """What a verdict the cap cut is told: the cap, the answer's size, and what filled it.
 
@@ -896,7 +907,7 @@ class JudgeAgent(BudgetMeter):
                 # The cap this call was actually built with. Passed because the
                 # local server truncates silently — same token count, same
                 # ``finish_reason: "stop"`` — so the count is the only evidence.
-                cap=getattr(get_settings().llm, "judge_max_tokens", None),
+                cap=judge_output_cap().tokens,
             )
             return str(response.content)
 
@@ -1508,7 +1519,7 @@ class JudgeAgent(BudgetMeter):
         # Built as messages rather than through ``ChatPromptTemplate``: the
         # system turn now contains a JSON skeleton, and a template would read
         # its braces as placeholders and refuse the prompt outright.
-        cap = int(getattr(get_settings().llm, "judge_max_tokens", 0) or 0) or None
+        cap = judge_output_cap().tokens or None
         # The answer's own budget, said where the answer is asked for. Nothing
         # told the judge its bundle had to close inside it, and a bundle that
         # does not close cannot be read at all.
@@ -2279,7 +2290,7 @@ class JudgeAgent(BudgetMeter):
         rates = getattr(self, "generation_rates", None)
         if rates is None:
             return configured
-        cap = int(getattr(get_settings().llm, "judge_max_tokens", 0) or 0)
+        output = judge_output_cap()
         from maljan.llm.context_window import CHARS_PER_TOKEN
 
         return float(
@@ -2287,7 +2298,8 @@ class JudgeAgent(BudgetMeter):
                 "judge:verdict",
                 model_name_of(self.llm),
                 configured,
-                cap,
+                output.tokens,
+                budget=output.sentence,
                 prompt_tokens=-(-int(prompt_chars) // CHARS_PER_TOKEN),
             )
         )

@@ -2252,14 +2252,18 @@ def revision_messages(
     ]
 
 
-def analyst_output_cap() -> int:
-    """The output cap the analysts' calls are built with, in tokens; 0 when unbounded.
+def analyst_output_cap(agent: str = "") -> int:
+    """The output cap an analyst's calls are built with, in tokens.
 
-    ``llm.expert_max_tokens``, as the container binds it on every analyst model.
-    Read, never raised: the cut question names the cap in force.
+    ``llm.expert_max_tokens`` when the operator set it, and otherwise the cap
+    derived from the window the analyst's model serves
+    (``context_window.output_cap_for``), as the container binds it. Read,
+    never raised: the cut question names the cap in force.
     """
     try:
-        return max(0, int(getattr(get_settings().llm, "expert_max_tokens", 0) or 0))
+        from maljan.llm.context_window import output_cap_for
+
+        return output_cap_for(get_settings(), "expert_max_tokens", agent).tokens
     except Exception:  # noqa: BLE001 — an unreadable setting names no cap
         return 0
 
@@ -2384,7 +2388,9 @@ class BudgetMeter:
         )
         # Whether this answer ended at the output cap, kept for the validation
         # turn: the last model answer recorded is the one the turn checks.
-        self._last_answer_cut = answer_cut_at_cap(response, analyst_output_cap())
+        self._last_answer_cut = answer_cut_at_cap(
+            response, analyst_output_cap(str(getattr(self, "name", "") or ""))
+        )
         if announce:
             self._announce_fallback(response)
 

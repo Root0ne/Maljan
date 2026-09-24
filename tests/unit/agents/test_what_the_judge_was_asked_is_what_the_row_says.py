@@ -168,7 +168,10 @@ class TestWhatTheRecordSays:
 class TestTheJudgesRound:
     @pytest.mark.asyncio
     async def test_a_credit_the_retry_raised_first_is_recorded_as_not_asked(self) -> None:
-        cap = int(get_settings().llm.judge_max_tokens)
+        from maljan.agents.judge_agent import judge_output_cap
+
+        assert get_settings() is not None
+        cap = judge_output_cap().tokens
         cut = json.dumps(_credited_bundle())[:-40]
 
         found = await _verdict(

@@ -155,13 +155,17 @@ class TestJudgePerAgentOverride:
             "judge", fallback_role="judge", max_tokens=2048
         )
 
-    def test_the_judge_token_cap_is_still_omitted_when_unset(self) -> None:
+    def test_the_judge_token_cap_is_derived_from_the_window_when_unset(self) -> None:
+        from maljan.llm.context_window import output_cap_for
+
         config = Settings()
         config.llm.judge_max_tokens = 0
         container = self._container(config)
 
         container.get_judge_llm()
 
+        derived = output_cap_for(config, "judge_max_tokens", "", role="judge")
+        assert derived.tokens > 0
         container._llm_registry.build_model_for_agent.assert_called_once_with(
-            "judge", fallback_role="judge"
+            "judge", fallback_role="judge", max_tokens=derived.tokens
         )

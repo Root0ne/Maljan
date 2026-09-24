@@ -64,7 +64,10 @@ def _cut_bundle(chars: int = 25_000) -> str:
 
 
 def _cap() -> int:
-    return int(get_settings().llm.judge_max_tokens)
+    from maljan.agents.judge_agent import judge_output_cap
+
+    assert get_settings() is not None
+    return judge_output_cap().tokens
 
 
 def _answer(text: str, *, tokens: int) -> AIMessage:

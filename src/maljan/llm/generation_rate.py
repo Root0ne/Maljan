@@ -165,6 +165,14 @@ class GenerationRates:
         self._lock = threading.Lock()
         self._models: dict[str, _ModelRate] = {}
         self._timeouts: dict[str, dict[str, Any]] = {}
+        # Per agent, the output cap its calls were built with and how it was
+        # reached, so a derived cap is printed where the timeouts it sizes are.
+        self._output_caps: dict[str, dict[str, Any]] = {}
+
+    def note_output_cap(self, agent: str, tokens: int, sentence: str) -> None:
+        """Record the output cap ``agent``'s model was built with, and its derivation."""
+        with self._lock:
+            self._output_caps[str(agent)] = {"tokens": int(tokens), "derivation": str(sentence)}
 
     def observe(self, model: str, tokens: int, seconds: float, source: str) -> None:
         if tokens <= 0 or seconds <= 0:
@@ -300,6 +308,11 @@ class GenerationRates:
                     for name, row in sorted(self._models.items())
                 },
                 "timeouts": {call: dict(row) for call, row in sorted(self._timeouts.items())},
+                **(
+                    {"output_caps": {a: dict(r) for a, r in sorted(self._output_caps.items())}}
+                    if self._output_caps
+                    else {}
+                ),
             }
 
 

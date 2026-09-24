@@ -209,9 +209,9 @@ ANSWER_SHARE = 0.125
 # ends with the whole reply reserve unspent, which is what the salvage needs.
 MIN_TOOL_OUTPUT_CHARS = 2000
 
-# What is held back for the model's own reply when nothing configures it. The
-# analyst and judge generation caps are both 8,192 tokens, and this is the
-# figure used when both are left unbounded.
+# What is held back for the model's own reply when nothing configures it, and
+# the most a derived analyst or judge output cap takes (``output_cap_for``): a
+# quarter of the window, never more than this.
 DEFAULT_REPLY_TOKENS = 8192
 
 # The reply reserve is never more than this fraction of the window. Without it
@@ -1227,6 +1227,60 @@ def reply_budget(settings: Any, assignment: Any, *, probe: bool = True) -> Outpu
     cap = generation_reserve(settings)
     return OutputBudget(
         tokens=reply_reserve_tokens(window.tokens, cap), window=window, generation_cap=cap
+    )
+
+
+@dataclass(frozen=True)
+class OutputCap:
+    """One agent's output cap in tokens, and the sentence that says how it was reached."""
+
+    tokens: int
+    sentence: str
+
+
+def output_cap_for(
+    settings: Any, setting: str, agent: str = "", *, role: str = "expert", probe: bool = False
+) -> OutputCap:
+    """The output cap ``agent``'s calls are built with: the operator's, or derived.
+
+    ``setting`` is ``expert_max_tokens`` or ``judge_max_tokens``. Above 0 it is
+    the operator's value, used as set. At 0, the shipped default, it is derived
+    from the smallest window of the models the agent may call — a quarter of
+    it, at most :data:`DEFAULT_REPLY_TOKENS` — the rule the reply reserve and
+    the composer's section budget already follow (:func:`reply_reserve_tokens`).
+    A window nothing reported derives nothing: the reply room this platform
+    shipped with applies, and the sentence says the window is unknown.
+
+    ``probe=False`` answers from what is already learned, the table and the
+    declared window, without a request.
+    """
+    configured = int(getattr(getattr(settings, "llm", None), setting, 0) or 0)
+    if configured > 0:
+        return OutputCap(configured, f"{configured} tokens — llm.{setting} is set to {configured}")
+    try:
+        from maljan.core.model_assignments import assignment_chain_for
+
+        facts = [
+            window_for_assignment(settings, assignment, probe=probe)
+            for assignment in assignment_chain_for(settings, agent, role=role)
+        ]
+        window = min(facts, key=lambda fact: fact.tokens) if facts else unknown_window()
+    except Exception as exc:  # noqa: BLE001 — an unreadable assignment learns no window
+        logger.debug("output cap: no window for %r (%s)", agent, exc)
+        window = unknown_window("the model's assignment could not be read")
+    if window.source == FALLBACK:
+        return OutputCap(
+            DEFAULT_REPLY_TOKENS,
+            f"{DEFAULT_REPLY_TOKENS} tokens — llm.{setting} is 0 and no window was learned "
+            f"for the model ({window.detail}), so the reply room this platform ships with "
+            "applies",
+        )
+    tokens = reply_reserve_tokens(window.tokens, 0)
+    return OutputCap(
+        tokens,
+        f"{tokens} tokens — llm.{setting} is 0, so derived: a quarter of the model's "
+        f"{window.tokens}-token context window ({window.source}), at most "
+        f"{DEFAULT_REPLY_TOKENS}",
     )
 
 
