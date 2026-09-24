@@ -46,6 +46,7 @@ from maljan.llm.context_window import (
 from maljan.pipeline.validation import (
     ABSENCE_CLAIM_CODE,
     ALIGNMENT_MARGIN,
+    CLAIM_DOES_NOT_DESCRIBE_CODE,
     VALIDITY_CODE,
     ValidationTally,
     Violation,
@@ -4966,12 +4967,13 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
             self.logger.warning("%s: validation turn %s.", self.name, detail)
             # An unknown id is a catalogue fact and is marked whether or not it
-            # was asked. An absence reading is a question for the analyst, and
-            # one never sent notes nothing on the claim: the finding is recorded
+            # was asked. An absence reading, and a claim whose sentence does not
+            # describe its technique, are questions for the analyst, and one
+            # never sent notes nothing on the claim: the finding is recorded
             # saying it was not asked, and the technique goes through as claimed.
             unasked = [
-                replace(v, message=f"{v.message} Not asked: {detail}.", sentence="")
-                if v.code == ABSENCE_CLAIM_CODE
+                replace(v, message=f"{v.message} {detail[:1].upper()}{detail[1:]}.", sentence="")
+                if v.code in (ABSENCE_CLAIM_CODE, CLAIM_DOES_NOT_DESCRIBE_CODE)
                 else v
                 for v in initial
             ]

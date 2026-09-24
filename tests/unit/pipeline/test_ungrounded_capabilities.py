@@ -250,6 +250,9 @@ class TestWhatANegationReaches:
             "We found no network activity such as exfiltration.",
             "No evidence of malicious command and control infrastructure, such as C2 "
             "callbacks or exfiltration endpoints, was found in the static analysis.",
+            # The term ends the subject of "is absent": the sentence claims
+            # nothing, whatever it leaves open.
+            "Behavioural confirmation of lateral movement is absent from the evidence.",
         ],
     )
     def test_a_statement_of_absence_is_not_flagged(self, text: str) -> None:
@@ -285,10 +288,6 @@ class TestWhatANegationReaches:
                 "exfiltration",
             ),
             ("Persistence is missing a cleanup routine and uses a scheduled task.", "persistence"),
-            (
-                "Behavioural confirmation of lateral movement is absent from the evidence.",
-                "lateral_movement",
-            ),
             (
                 "No evidence of packing, such as UPX, yet the sample exfiltrates data over FTP.",
                 "exfiltration",
