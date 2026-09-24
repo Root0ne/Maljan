@@ -1842,6 +1842,41 @@ def budget_for_settings(settings: Any, agents: list[str], *, probe: bool = True)
     )
 
 
+def upstream_block_chars(configured: int, budget: Any) -> tuple[int, str]:
+    """``(characters, how)`` a stage's upstream findings block and triage pack may take.
+
+    The same three answers as a tool answer's cap (:func:`output_limit`): a
+    positive ``configured`` is the operator's
+    ``core.reporting.upstream_findings_max_chars``, used unchanged; a budget
+    over a measured window derives it — the share one answer may take of what
+    the window leaves after the reply room, measured before the conversation
+    holds anything, because the block is read before a stage starts; and
+    anything else is the documented constant, stated as the fallback.
+    """
+    if int(configured) > 0:
+        chars = int(configured)
+        return chars, f"{chars} characters — reporting.upstream_findings_max_chars is set"
+    if isinstance(budget, ContextBudget) and budget.derives:
+        chars = derive_tool_output_chars(
+            window_tokens=budget.window.tokens,
+            reply_tokens=budget.reply_tokens,
+            chars_per_token=budget.chars_per_token,
+            share=budget.share,
+            floor=budget.floor,
+        )
+        if chars > 0:
+            return chars, (
+                f"{chars} characters — derived from the {budget.window.tokens}-token "
+                f"window ({budget.window.source}) less {budget.reply_tokens} tokens of "
+                f"reply room, at {budget.chars_per_token} characters a token and a "
+                f"share of {budget.share}"
+            )
+    return UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS, (
+        f"{UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS} characters — the documented fallback: no "
+        f"window was learned ({UNKNOWN_WINDOW_REMEDY})"
+    )
+
+
 def output_limit(configured: int, budget: Any) -> int:
     """How many characters of one tool answer may reach the model right now.
 

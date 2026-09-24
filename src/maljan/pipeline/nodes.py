@@ -36,7 +36,7 @@ from maljan.agents.run_evidence_corpus import (
 )
 from maljan.analysis.corroboration import corroboration_row
 from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, PROMPT_ROLES, ReportingConfig
+from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, PROMPT_ROLES
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError
 from maljan.core.logger import logger
@@ -1386,15 +1386,36 @@ def _ledger_servers(state: AnalysisState) -> set[str]:
 def pack_text(state: AnalysisState, container: ServiceContainer) -> str:
     """The triage pack as every agent is shown it, or ``""`` on a run without one.
 
-    Cut at ``reporting.upstream_findings_max_chars``, the same bound the
-    upstream findings block has: both are what a stage is told before it
-    starts, and one budget for the two keeps a long pack from spending a
-    late stage's context.
+    Cut at the same bound the upstream findings block has
+    (:func:`upstream_chars`): both are what a stage is told before it starts,
+    and one budget for the two keeps a long pack from spending a late stage's
+    context.
     """
-    limit = int(ReportingConfig.model_fields["upstream_findings_max_chars"].default)
+    return pack_block(pack_entries(state.get("evidence_ledger") or []), upstream_chars(container))
+
+
+def upstream_chars(container: ServiceContainer) -> int:
+    """How many characters the upstream findings block and the triage pack may take.
+
+    ``reporting.upstream_findings_max_chars`` above 0 is the operator's; at 0,
+    the default, it is derived from the window this job's models serve, as a
+    tool answer's cap is (``context_window.upstream_block_chars``), and with no
+    window learned it is the documented fallback.
+    """
+    from maljan.llm.context_window import upstream_block_chars
+
+    configured = 0
     with suppress(AttributeError, TypeError, ValueError):
-        limit = int(container.config.reporting.upstream_findings_max_chars)
-    return pack_block(pack_entries(state.get("evidence_ledger") or []), limit)
+        configured = int(container.config.reporting.upstream_findings_max_chars)
+    budget: Any = None
+    if configured <= 0:
+        try:
+            budget = container.get_context_budget()
+        except Exception as exc:  # noqa: BLE001 — no window is the documented fallback
+            logger.debug("upstream findings: no context budget (%s)", exc)
+    chars, how = upstream_block_chars(configured, budget)
+    logger.debug("Upstream findings block: %s.", how)
+    return chars
 
 
 def ledger_ids(state: AnalysisState) -> list[str]:
@@ -1626,9 +1647,7 @@ def upstream_findings(stage: Any, state: AnalysisState, container: ServiceContai
     if len(lines) <= 2:
         return ""
     block = "\n".join(lines).rstrip()
-    limit = int(ReportingConfig.model_fields["upstream_findings_max_chars"].default)
-    with suppress(AttributeError, TypeError, ValueError):
-        limit = int(container.config.reporting.upstream_findings_max_chars)
+    limit = upstream_chars(container)
     if limit and len(block) > limit:
         block = block[:limit].rstrip() + "\n\n[upstream findings truncated]"
     return block
