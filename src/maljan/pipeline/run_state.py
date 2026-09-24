@@ -5,10 +5,20 @@ step, and the facts that matter — what the sample is, what has already been
 established, what failed, how much budget is left — end up buried under tool
 output or dropped when the conversation is cut. This block is the answer to
 that: derived from the ledger and the stage results, never written by a model,
-rendered fresh on every turn and put in the system turn between two markers.
-Regenerating it is what keeps it from accumulating: a prompt carries one block,
-the current one, and a trimmed conversation keeps it because the system turn is
-the one message trimming never drops.
+rendered fresh on every turn and put between two markers.
+
+Where it goes is decided by what a provider caches. A tool loop's block
+changes on every turn — its budget line counts down — and a byte that changes
+early in a request voids every byte after it in a provider's prefix cache, and
+makes a local server read the whole conversation again. So the block a loop
+regenerates rides at the end of the request's last message
+(:func:`with_run_state_tail`) — the task on the first turn, the latest tool
+answer after a tool call — and comes off that message again, leaving its bytes
+exactly as they were, once the message is no longer last
+(:func:`without_run_state_tail`). Each turn's request is then the previous one
+without its block, plus the new turns and the new block, and no request has a
+turn that holds only the block. Regenerating it is what keeps it from
+accumulating: a prompt carries one block, the current one.
 """
 
 from __future__ import annotations
@@ -22,8 +32,12 @@ from maljan.pipeline.triage_pack import NOT_RUN_PREFIX, PIPELINE, pack_entries, 
 __all__ = [
     "RUN_STATE_BEGIN",
     "RUN_STATE_END",
+    "is_run_state_block",
     "render_run_state",
+    "run_state_block",
     "with_run_state",
+    "with_run_state_tail",
+    "without_run_state_tail",
 ]
 
 RUN_STATE_BEGIN = "=== RUN STATE (derived from the ledger; regenerated each turn) ==="
@@ -70,6 +84,62 @@ def with_run_state(system_text: str, body: str) -> str:
     if not block:
         return text
     return f"{text.rstrip()}\n\n{block}" if text.strip() else block
+
+
+def run_state_block(body: str) -> str:
+    """``body`` between its markers, or ``""`` for an empty ``body``."""
+    return with_run_state("", body)
+
+
+# What separates the block from the text it is added to.
+_TAIL_SEPARATOR = "\n\n"
+
+
+def with_run_state_tail(text: str, body: str) -> str:
+    """``text`` with the block for ``body`` at its end; ``text`` itself for an empty ``body``.
+
+    The text's own bytes are kept as they are, so
+    :func:`without_run_state_tail` gives them back exactly.
+    """
+    block = run_state_block(body)
+    if not block:
+        return text
+    return f"{text}{_TAIL_SEPARATOR}{block}" if text else block
+
+
+def without_run_state_tail(text: str) -> str:
+    """``text`` without the block :func:`with_run_state_tail` put at its end.
+
+    Exactly the bytes it had before; a text that does not end on a block, or
+    whose block was not put there by that function, is returned unchanged.
+    """
+    if not isinstance(text, str) or not text.endswith(RUN_STATE_END):
+        return text
+    start = text.rfind(RUN_STATE_BEGIN)
+    if start < 0:
+        return text
+    head = text[:start]
+    if not head:
+        return ""
+    if head.endswith(_TAIL_SEPARATOR):
+        return head[: -len(_TAIL_SEPARATOR)]
+    return text
+
+
+def is_run_state_block(text: object) -> bool:
+    """Whether ``text`` is a whole run-state block and nothing else.
+
+    Whole, not containing: a prompt that leads with the block and goes on to
+    its task is a task, and taking it out would take the task with it.
+    """
+    if not isinstance(text, str):
+        return False
+    stripped = text.strip()
+    return (
+        stripped.startswith(RUN_STATE_BEGIN)
+        and stripped.endswith(RUN_STATE_END)
+        and stripped.count(RUN_STATE_BEGIN) == 1
+    )
 
 
 def _lines(

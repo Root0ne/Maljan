@@ -401,12 +401,30 @@ its suggested label and names listed as `labels …`.
 state — the sample, the identity, hashes, signature and reputation lines out
 of the pack, which stages ran or were skipped and why, how many ledger entries
 exist and which tools failed, and the steps and seconds a tool loop has left —
-and puts them in the system turn between `=== RUN STATE … ===` markers. It is
-regenerated on every model turn of a tool loop (the executor's prompt hook
-rewrites the budget line) and replaced rather than appended, so a prompt
-carries exactly one block; the forced-synthesis trim keeps the system turn and
-the first human turn, so neither the block nor the pack is ever what gets cut.
-It is read-only to the model: nothing a model says is written into it.
+and puts them at the end of a request's last message, between
+`=== RUN STATE … ===` markers: the task on a loop's first turn, the latest tool
+answer after a tool call, the question a nudge, a forced synthesis, a revision
+or a validation retry asks. It is regenerated on every model turn of a tool
+loop (the executor's prompt hook writes the current budget line) and comes off
+a message again, leaving its bytes exactly as they were, once that message is
+no longer last, so a prompt carries exactly one block. It goes at the end
+because it changes every turn: anywhere earlier, the changed line would change
+the front of the request, which voids a hosted provider's prefix cache
+(measured on DeepSeek: 0 cached tokens of 3,884 with only that line changed,
+3,712 with it unchanged) and makes a local server read the whole conversation
+again. At the end, each turn's request is the previous one without its block,
+plus the new turns and the new block, and the cache holds up to the block. It
+rides on a message rather than as a turn of its own so that no request has two
+user turns in a row, which strict chat templates refuse, and no turn that says
+only the run's state, which a model can take for the question. For the same
+reason a question asked right after a user turn — a retry that leaves a cut
+answer out, a salvage whose trim kept only the task — ends that turn after a
+blank line (`pipeline.turns.with_question`) instead of following it. It never rides
+on a model's own turn. The forced-synthesis trim keeps the system turn and the
+first human turn, so the pack is never what gets cut. It is read-only to the
+model: nothing a model says is written into it. The judge's, the narrative's
+and the composer's blocks do not change within their calls and lead their task
+turn, as before.
 
 Agents exchange structured `AgentISR` objects — claims with an `evidence_ref`
 and a confidence — rather than raw text. Objects are built and cached in one
@@ -1320,8 +1338,8 @@ ask anyone, which is what keeps the `default` team's analysts what they were.
 
 Calling it runs the named agent under the same job: the same container, the
 same sample paths (its own provider's mirror first, as a stage agent gets), the
-same triage pack at the head of its first turn and the same run-state block in
-its system turn. The callee's human turn is the task, with the context after it
+same triage pack at the head of its first turn and the same run-state block at
+the end of each request's last message. The callee's human turn is the task, with the context after it
 and the claim format it answers in; it runs its own tool loop, its answer is
 parsed into claims and checked by the technique check in its own conversation,
 and the resulting ISR text — the claims with the ledger ids they cite — is the
@@ -1704,8 +1722,14 @@ the model its caller was built on. `run_summary.tokens` holds the sums
 for the run and per agent, and `run_summary.models` the per-agent model count
 and the fallbacks with their reasons. A call whose provider reported no usage
 is counted as *not reported*: its tokens are not estimated, and a figure the
-report prints as a count is always a count a provider gave. There is no price
-table; a cost appears only where the provider reported one.
+report prints as a count is always a count a provider gave. Two parts of a
+call are recorded where the provider reports them: the input read from its
+prompt cache (`cached_input_tokens`, from the client's `cache_read` or
+DeepSeek's `prompt_cache_hit_tokens`) and the output spent reasoning
+(`reasoning_tokens`). Each is part of the input or output count, not added to
+it, carries the number of calls that reported it, and is absent where no call
+did. There is no price table; a cost appears only where the provider reported
+one.
 
 **A tool server that keeps failing.** Each tool server the job's registry
 attaches — the built-in sidecars and every operator-configured server — has one

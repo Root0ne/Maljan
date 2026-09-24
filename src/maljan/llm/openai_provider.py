@@ -70,7 +70,9 @@ def sends_llama_cpp_extras(base_url: str | None, compat: str) -> bool:
     if not base_url:
         # api.openai.com itself, which has always been left alone.
         return False
-    if compat == "standard":
+    if compat in ("standard", "deepseek"):
+        # ``deepseek`` is a hosted API with fields of its own, sent by
+        # ``OpenAIProvider._add_deepseek_fields`` instead.
         return False
     if base_url in _STANDARD_ONLY_ENDPOINTS:
         # What the self-heal learned beats what ``auto`` would guess, and it
@@ -104,6 +106,28 @@ def add_thinking_switch(extra: dict[str, Any], disable_thinking: bool) -> None:
     kwargs = dict(extra.get("chat_template_kwargs") or {})
     kwargs.setdefault("enable_thinking", False)
     extra["chat_template_kwargs"] = kwargs
+
+
+def add_deepseek_thinking_switch(extra: dict[str, Any], disable_thinking: bool) -> None:
+    """Put DeepSeek's own ``thinking: {"type": "disabled"}`` into ``extra`` when asked.
+
+    DeepSeek's switch, not llama.cpp's: it accepts
+    ``chat_template_kwargs.enable_thinking=false`` and ignores it (measured: the
+    model still reasoned). Shared with the settings probe for the reason
+    ``add_thinking_switch`` is. Nothing already in ``extra`` is overwritten.
+    """
+    if disable_thinking:
+        extra.setdefault("thinking", {"type": "disabled"})
+
+
+def reasoning_effort_of(config: Any) -> str | None:
+    """The configured ``llm.openai.reasoning_effort``, or ``None`` when none is set.
+
+    Passed through as written — each API names its own levels — with only the
+    surrounding blanks taken off, so an empty field sends nothing.
+    """
+    value = str(getattr(config, "reasoning_effort", "") or "").strip()
+    return value or None
 
 
 def unsupported_parameter(message: str) -> str | None:
@@ -261,6 +285,142 @@ def with_server_timings(chat_class: Any) -> Any:
     return timed
 
 
+# Where DeepSeek puts a thinking model's reasoning, beside ``content`` on the
+# assistant message, and where it has to be sent back.
+REASONING_CONTENT_KEY = "reasoning_content"
+
+# One subclass per chat class seen, as for ``_TIMED_CLASSES``.
+_REASONING_CLASSES: dict[type, type] = {}
+
+
+def _reasoning_of_choice(choice: Any) -> str | None:
+    """The ``reasoning_content`` of one raw choice, or ``None`` when it carries none."""
+    message = choice.get("message") if isinstance(choice, dict) else None
+    if not isinstance(message, dict):
+        return None
+    value = message.get(REASONING_CONTENT_KEY)
+    return value if isinstance(value, str) else None
+
+
+def _cap_as_max_tokens(payload: dict[str, Any]) -> None:
+    """The request's own cap as ``max_tokens`` too, which is the field DeepSeek reads.
+
+    Taken from the payload rather than from the model, so a cap bound for one
+    call (``llm.bind(max_tokens=…)``) reaches DeepSeek the way the model's
+    own does; ``max_completion_tokens`` beside it is ignored there.
+    """
+    cap = payload.get("max_completion_tokens")
+    if isinstance(cap, int) and not isinstance(cap, bool) and cap > 0:
+        extra = dict(payload.get("extra_body") or {})
+        extra["max_tokens"] = cap
+        payload["extra_body"] = extra
+
+
+def with_reasoning_passback(chat_class: Any) -> Any:
+    """``chat_class`` keeping DeepSeek's ``reasoning_content`` and sending it back.
+
+    DeepSeek returns a thinking model's reasoning as ``reasoning_content`` on
+    the assistant message, and on a request that carries tools it has to be
+    sent back on that assistant message in every later request: its
+    thinking-mode guide says the API answers 400 otherwise, and without it the
+    model continues without its own earlier reasoning. ``langchain-openai``
+    reads neither way — the field is not OpenAI's — so the subclass does both,
+    and nothing else:
+
+    * reading an answer, each choice's ``reasoning_content`` is kept in the
+      message's ``additional_kwargs``, exactly as returned; ``content`` is not
+      touched;
+    * building a request that carries tools, an assistant message that kept
+      one carries it again under the same key, byte for byte, so a turn sent
+      twice is the same turn and the request's front stays what the provider
+      has cached. A request without tools is sent without it: the guide says
+      it is not needed there and is ignored if sent.
+
+    And the request's cap goes out as ``max_tokens`` as well, per request, so
+    a cap bound for one call is the one DeepSeek reads (``_cap_as_max_tokens``).
+
+    A streamed answer's pieces are kept the same way; ``AIMessageChunk``
+    joins the pieces of a string field when the chunks are added.
+    """
+    if not isinstance(chat_class, type) or not hasattr(chat_class, "_create_chat_result"):
+        return chat_class
+    cached = _REASONING_CLASSES.get(chat_class)
+    if cached is not None:
+        return cached
+    base: Any = chat_class
+
+    def _create_chat_result(self: Any, response: Any, generation_info: Any = None) -> Any:
+        result = base._create_chat_result(self, response, generation_info)
+        if isinstance(response, dict):
+            raw = response
+        else:
+            try:
+                raw = response.model_dump(warnings=False)
+            except Exception:  # noqa: BLE001 — an answer is never lost to its reasoning
+                return result
+        choices = raw.get("choices") if isinstance(raw, dict) else None
+        for generation, choice in zip(result.generations, choices or [], strict=False):
+            reasoning = _reasoning_of_choice(choice)
+            message = getattr(generation, "message", None)
+            if reasoning is not None and message is not None:
+                message.additional_kwargs[REASONING_CONTENT_KEY] = reasoning
+        return result
+
+    def _convert_chunk_to_generation_chunk(self: Any, chunk: Any, *args: Any, **kwargs: Any) -> Any:
+        generation = base._convert_chunk_to_generation_chunk(self, chunk, *args, **kwargs)
+        if generation is None or not isinstance(chunk, dict):
+            return generation
+        delta = ((chunk.get("choices") or [{}])[0] or {}).get("delta") or {}
+        piece = delta.get(REASONING_CONTENT_KEY) if isinstance(delta, dict) else None
+        if isinstance(piece, str) and piece:
+            generation.message.additional_kwargs[REASONING_CONTENT_KEY] = piece
+        return generation
+
+    def _get_request_payload(self: Any, input_: Any, *, stop: Any = None, **kwargs: Any) -> Any:
+        payload = base._get_request_payload(self, input_, stop=stop, **kwargs)
+        _cap_as_max_tokens(payload)
+        sent = payload.get("messages")
+        # Sent back only with tools. The guide asks for it there; on a request
+        # without tools it says the field is not needed and is ignored if
+        # sent, so there it would be input read for nothing.
+        if not isinstance(sent, list) or not payload.get("tools"):
+            return payload
+        messages = self._convert_input(input_).to_messages()
+        if len(messages) != len(sent):
+            logger.warning(
+                "openai provider: %d message(s) became %d request message(s), so no "
+                "turn's reasoning_content could be matched to its turn and none was sent "
+                "back; DeepSeek may refuse this request.",
+                len(messages),
+                len(sent),
+            )
+            return payload
+        for message, entry in zip(messages, sent, strict=True):
+            reasoning = (getattr(message, "additional_kwargs", None) or {}).get(
+                REASONING_CONTENT_KEY
+            )
+            if (
+                isinstance(reasoning, str)
+                and isinstance(entry, dict)
+                and entry.get("role") == "assistant"
+            ):
+                entry[REASONING_CONTENT_KEY] = reasoning
+        return payload
+
+    kept = type(
+        chat_class.__name__,
+        (chat_class,),
+        {
+            "_create_chat_result": _create_chat_result,
+            "_convert_chunk_to_generation_chunk": _convert_chunk_to_generation_chunk,
+            "_get_request_payload": _get_request_payload,
+        },
+    )
+    kept.__module__ = __name__
+    _REASONING_CLASSES[chat_class] = kept
+    return kept
+
+
 @register_provider("openai")
 class OpenAIProvider:
     """Builds LangChain ChatOpenAI instances."""
@@ -312,10 +472,19 @@ class OpenAIProvider:
         if base_url:
             build_kwargs["base_url"] = base_url
 
+        # The operator's reasoning effort, on every request of every dialect:
+        # ``ChatOpenAI`` sends it as the top-level ``reasoning_effort`` field,
+        # which is where OpenAI's and DeepSeek's chat completions read it.
+        effort = reasoning_effort_of(self._config.llm.openai)
+        if effort is not None:
+            build_kwargs.setdefault("reasoning_effort", effort)
+
         compat = str(getattr(self._config.llm.openai, "compat", "auto") or "auto")
         local = not force_standard and sends_llama_cpp_extras(base_url, compat)
         if local:
             self._add_llama_cpp_extras(build_kwargs, base_url)
+        elif compat == "deepseek":
+            self._add_deepseek_fields(build_kwargs)
 
         # Explicit ``request_timeout`` and ``max_retries`` so the openai SDK
         # can't silently retry a stalled request three times (3 x default
@@ -343,7 +512,12 @@ class OpenAIProvider:
             if private is not None:
                 build_kwargs["http_async_client"] = private
 
-        built: BaseChatModel = with_server_timings(ChatOpenAI)(**build_kwargs)
+        chat_class = with_server_timings(ChatOpenAI)
+        if compat == "deepseek":
+            # DeepSeek's reasoning is kept and sent back on its assistant turn;
+            # every other dialect's request is left as langchain builds it.
+            chat_class = with_reasoning_passback(chat_class)
+        built: BaseChatModel = chat_class(**build_kwargs)
         if not local:
             return built
         # The rebuild the self-heal needs, carried on the model rather than
@@ -398,6 +572,30 @@ class OpenAIProvider:
         if extra:
             build_kwargs["extra_body"] = extra
         logger.debug("openai provider: sending llama.cpp extras to %s.", base_url)
+
+    def _add_deepseek_fields(self, build_kwargs: dict[str, Any]) -> None:
+        """The two request fields DeepSeek reads where OpenAI's API reads others.
+
+        Output cap: ``ChatOpenAI(max_tokens=N)`` goes on the wire as
+        ``max_completion_tokens``, which DeepSeek's chat completions ignore —
+        measured, a cap of 5 came back as 88 tokens with thinking off and 138
+        with it on, both ending ``stop``. DeepSeek reads ``max_tokens``, with
+        the reasoning counted against it, so the cap is sent there as well,
+        through ``extra_body``; the ``max_completion_tokens`` beside it is
+        ignored. Not sent to OpenAI's own API, which refuses ``max_tokens``
+        beside ``max_completion_tokens`` for its reasoning models: that is why
+        this is a dialect of its own rather than a field every hosted API gets.
+
+        Thinking: ``llm.openai.disable_thinking`` as DeepSeek's own
+        ``thinking.type``, the one switch it honours.
+        """
+        extra = dict(build_kwargs.get("extra_body") or {})
+        cap = build_kwargs.get("max_tokens")
+        if isinstance(cap, int) and cap > 0:
+            extra.setdefault("max_tokens", cap)
+        add_deepseek_thinking_switch(extra, self._config.llm.openai.disable_thinking)
+        if extra:
+            build_kwargs["extra_body"] = extra
 
 
 # Called with (replaced model, healed model) whenever the self-heal swaps one

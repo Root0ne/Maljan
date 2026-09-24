@@ -8,6 +8,28 @@ change landed on `main`.
 
 ### Added
 
+- **`llm.openai.reasoning_effort`**: sent as the request's `reasoning_effort`
+  field, exactly as written, so each API's own levels work (DeepSeek: `low`,
+  `high`, `max`). Empty, the shipped value, sends nothing. The `llm` connection
+  test asks with it.
+- **`llm.openai.compat: deepseek`**: DeepSeek's API ignores
+  `max_completion_tokens`, the only cap field OpenAI's clients send (measured:
+  a cap of 5 came back as 88 and 138 tokens), so no output cap reached it. The
+  dialect sends the cap as `max_tokens` as well, which DeepSeek honours with
+  reasoning counted, and `disable_thinking` as DeepSeek's `thinking.type`. It is
+  explicit rather than read from the host, because OpenAI's own API refuses
+  `max_tokens` beside `max_completion_tokens` for its reasoning models.
+  It also keeps each assistant turn's `reasoning_content` exactly as DeepSeek
+  returned it and sends it back on that turn in every later request that
+  carries tools, which DeepSeek's thinking-mode guide requires (400 otherwise)
+  and which the OpenAI client does in neither direction; the window budget
+  counts it. A cap bound for one call reaches DeepSeek too. `compat` is global,
+  per-agent `openai` entries included.
+- **Cached input and reasoning tokens are recorded where reported.**
+  `run_summary.tokens` (and each agent's row) carries `cached_input_tokens` and
+  `reasoning_tokens`, each with the calls that reported it, from the client's
+  usage details or DeepSeek's `prompt_cache_hit_tokens`; the token sentence
+  names them. Absent where no call reported them.
 - **An analyst answer cut at its output cap is asked for a whole shorter one**
   (`isr.cut_at_output_cap`), as the judge's and a report section's are: the
   question states the cap, the characters the answer ran to, the CLAIM blocks
@@ -831,6 +853,24 @@ change landed on `main`.
 
 ### Changed
 
+- **The run-state block rides at the end of the last message, so a request's
+  front stays the same.** A tool loop's block, with the budget line that counts
+  down every turn, used to be rewritten at the end of the system turn, and a
+  changed byte there voids a provider's prefix cache (measured on DeepSeek: 0
+  cached tokens of 3,884 with only that line changed, 3,712 with it unchanged)
+  and makes a local server read the whole conversation again. It now ends the
+  request's last message — the task, the latest tool answer, or the question a
+  nudge, a synthesis or a retry asks — and comes off it again, byte for byte,
+  once the message is no longer last: each request is the previous one without
+  its block, plus the new turns and the new block. No request has two user
+  turns in a row or a turn holding only the block. The text is the same.
+- **A question asked right after a user turn ends that turn.** The retries
+  after an answer cut at its cap (an analyst's, a report section's, the
+  verdict's) leave the cut answer out, and a forced synthesis whose trim kept
+  only the task follows the task directly; each used to send its question as
+  a second user turn in a row. The question, its text unchanged, now ends the
+  user turn before it after a blank line (`pipeline.turns.with_question`); after
+  a model's turn or a tool answer it is still a turn of its own.
 - **The analysts' and the judge's output caps are derived from the window.**
   `llm.expert_max_tokens` and `llm.judge_max_tokens` ship at 0, which derives
   each agent's cap in three cases: the model's declared maximum output (a model

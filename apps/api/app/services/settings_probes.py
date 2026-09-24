@@ -131,6 +131,7 @@ async def complete_one_turn(
     api_key: str = "",
     disable_thinking: bool = False,
     compat: str = "auto",
+    reasoning_effort: str = "",
     num_ctx: int | None = None,
     keep_alive: str | None = None,
 ) -> tuple[bool | None, str]:
@@ -150,9 +151,9 @@ async def complete_one_turn(
     not a model that is missing, and writing it down as one would lock the
     operator out of their own jobs until they noticed.
 
-    ``disable_thinking`` and ``compat`` are the two OpenAI-compatible settings
-    that decide the request body's shape, carried in so that the turn asked
-    here is the turn an agent would ask. ``num_ctx`` and ``keep_alive`` are
+    ``disable_thinking``, ``compat`` and ``reasoning_effort`` are the
+    OpenAI-compatible settings that decide the request body's shape, carried in
+    so that the turn asked here is the turn an agent would ask. ``num_ctx`` and ``keep_alive`` are
     Ollama's: the server loads a model at the context size the request names
     and keeps it for the time the request names, so a probe asked without them
     leaves the model loaded at the server's own default and the job's first
@@ -171,6 +172,7 @@ async def complete_one_turn(
         api_key,
         disable_thinking=disable_thinking,
         compat=compat,
+        reasoning_effort=reasoning_effort,
         num_ctx=num_ctx,
         keep_alive=keep_alive,
     )
@@ -296,8 +298,10 @@ def _said_something(provider: str, answer: httpx.Response) -> bool:
     return bool(payload)
 
 
-def _openai_extras(base: str, disable_thinking: bool, compat: str) -> dict[str, Any]:
-    """The llama.cpp-only request fields this endpoint would get in a run.
+def _openai_extras(
+    base: str, disable_thinking: bool, compat: str, reasoning_effort: str = ""
+) -> dict[str, Any]:
+    """The request fields beyond OpenAI's basic ones this endpoint would get in a run.
 
     Decided by the provider's own two functions rather than by a second copy of
     the rule here: ``sends_llama_cpp_extras`` says whether this endpoint takes
@@ -311,11 +315,22 @@ def _openai_extras(base: str, disable_thinking: bool, compat: str) -> dict[str, 
     Imported inside the function: this is the API process, and the agents'
     provider module pulls langchain in behind it.
     """
-    from maljan.llm.openai_provider import add_thinking_switch, sends_llama_cpp_extras
+    from maljan.llm.openai_provider import (
+        add_deepseek_thinking_switch,
+        add_thinking_switch,
+        sends_llama_cpp_extras,
+    )
 
     extras: dict[str, Any] = {}
     if sends_llama_cpp_extras(base, str(compat or "auto")):
         add_thinking_switch(extras, bool(disable_thinking))
+    elif compat == "deepseek":
+        add_deepseek_thinking_switch(extras, bool(disable_thinking))
+    # The operator's effort as the run sends it: a value the endpoint does not
+    # know is refused here rather than on the job's first call.
+    effort = str(reasoning_effort or "").strip()
+    if effort:
+        extras["reasoning_effort"] = effort
     return extras
 
 
@@ -327,6 +342,7 @@ def _completion_request(
     *,
     disable_thinking: bool = False,
     compat: str = "auto",
+    reasoning_effort: str = "",
     num_ctx: int | None = None,
     keep_alive: str | None = None,
 ) -> tuple[str | None, dict[str, str], dict[str, Any]]:
@@ -345,7 +361,7 @@ def _completion_request(
                 "model": model,
                 "max_tokens": COMPLETION_MAX_TOKENS,
                 "messages": [{"role": "user", "content": COMPLETION_PROMPT}],
-                **_openai_extras(base, disable_thinking, compat),
+                **_openai_extras(base, disable_thinking, compat, reasoning_effort),
             },
         )
     if provider == "ollama":
@@ -430,6 +446,7 @@ async def _probe_llm_openai(v: dict[str, Any]) -> ProbeResult:
         deadline=deadline,
         disable_thinking=bool(v.get("disable_thinking")),
         compat=str(v.get("compat") or "auto"),
+        reasoning_effort=str(v.get("reasoning_effort") or ""),
     )
     return _completed(t0, reached, broken, untried, f"{len(models)} models listed", models)
 
@@ -545,6 +562,7 @@ async def _complete_each_pair(
     deadline: float,
     disable_thinking: bool = False,
     compat: str = "auto",
+    reasoning_effort: str = "",
     num_ctx: int | None = None,
     keep_alive: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[str], list[str]]:
@@ -579,6 +597,7 @@ async def _complete_each_pair(
             api_key=api_key,
             disable_thinking=disable_thinking,
             compat=compat,
+            reasoning_effort=reasoning_effort,
             num_ctx=num_ctx,
             keep_alive=keep_alive,
         )
@@ -1205,6 +1224,9 @@ async def probe_agent(v: dict[str, Any]) -> ProbeResult:
                     else bool(settings.llm.openai.disable_thinking)
                 ),
                 compat=str(settings.llm.openai.compat or "auto"),
+                reasoning_effort=(
+                    str(settings.llm.openai.reasoning_effort or "") if provider == "openai" else ""
+                ),
                 # Ollama loads a model at the window and for the keep-alive the
                 # request names; asked the way the job asks, the probe leaves
                 # loaded the instance the job's first call will find.
@@ -1552,6 +1574,7 @@ _INPUTS: dict[str, dict[str, str]] = {
         # that asked without them asked a question no agent asks.
         "core.llm.openai.compat": "compat",
         "core.llm.openai.disable_thinking": "disable_thinking",
+        "core.llm.openai.reasoning_effort": "reasoning_effort",
         "core.llm.anthropic.api_key": "anthropic_api_key",
         "core.llm.anthropic.expert_model": "anthropic_expert_model",
         "core.llm.anthropic.judge_model": "anthropic_judge_model",

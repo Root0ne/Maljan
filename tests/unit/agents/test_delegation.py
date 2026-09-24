@@ -327,7 +327,10 @@ class TestAnAskThroughTheRealLoop:
         system = str(first_turn[0].content)
         human = next(str(m.content) for m in first_turn if getattr(m, "type", "") == "human")
         assert system.startswith("You help.")
-        assert "sample: s" in system
+        # The run state travels last, a turn of its own, where a changed
+        # budget line leaves the request's prefix as it was.
+        assert "sample: s" not in system
+        assert "sample: s" in str(first_turn[-1].content)
         assert human.startswith("Facts established before analysis")
         assert "Sample path (use exactly this string" in human
         assert "/samples/s.bin" in human

@@ -5200,16 +5200,19 @@ def _with_feedback(
     """The conversation plus the model's answer plus the correction turn.
 
     ``keep_answer=False`` leaves the answer out: the correction describes it
-    instead (a cut section answer, see ``section_cut_violation``).
+    instead (a cut section answer, see ``section_cut_violation``), and with
+    no answer between them the correction is asked at the end of the user
+    turn before it (``with_question``).
     """
-    from langchain_core.messages import AIMessage, HumanMessage
+    from langchain_core.messages import AIMessage
+
+    from maljan.pipeline.turns import with_question
 
     content = getattr(answer, "content", None)
     turns = list(messages)
     if keep_answer:
         turns.append(AIMessage(content=str(content if content is not None else answer)))
-    turns.append(HumanMessage(content=feedback_text(violations)))
-    return turns
+    return with_question(turns, feedback_text(violations))
 
 
 def _announce_feedback(
