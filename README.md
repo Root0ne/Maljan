@@ -55,6 +55,44 @@ Samples are submitted, tracked and read in a web console; the whole
 configuration of a deployment lives in that console as well, not in environment
 files.
 
+## How Maljan compares
+
+We ran the `default` team four times on a small set of samples, with fixes in
+between, and scored the reference sample's report item by item against a
+published human analysis. Every run used the **mock sandbox**, so nothing was
+executed and every finding is static. The default model is Qwen3.6-35B-A3B on
+llama.cpp, one run per cell.
+
+| | Iteration 1 | Iteration 2 | Iteration 3 | Iteration 4 |
+| :-- | :-- | :-- | :-- | :-- |
+| Samples completed | Latrodectus, sample A, PuTTY, ELF | Latrodectus, sample A, PuTTY | PuTTY (Latrodectus stopped twice by the 6 GB memory rule) | Latrodectus, PuTTY |
+| Verdicts right | 4 of 4 | 3 of 3 | 1 of 1 | 2 of 2 |
+| Signed PuTTY (false-positive control): malicious sentences / techniques published / draft rules | 3 / 3 / 20 | 3 / 0 / 0 | 4 / 13 / 0 | 4 / **0** / 0 |
+
+The reference sample is a Latrodectus bot DLL (`6091f258…`) that
+[Bitsight, *Latrodectus, are you coming back?* (João Batista, 2024-06-17)](https://www.bitsight.com/blog/latrodectus-are-you-coming-back)
+lists among the samples it analysed. From that report we drew 57 core items,
+from identity and execution flow to C2, IOCs and ATT&CK:
+
+| Maljan report on the reference sample | Found | Partly | Missed | Wrong |
+| :-- | --: | --: | --: | --: |
+| Baseline, before decoded strings and VirusTotal labels reached the triage pack | 3 | 7 | 46 | 1 |
+| Small model (qwen3.8:27b), iteration 1 | 10 | 28 | 19 | 0 |
+| Default model, iteration 1 | 12 | 29 | 16 | 0 |
+| Default model, iteration 2 | 12 | 25 | 20 | 0 |
+| Default model, iteration 2, with the r2 disassembler | 11 | 24 | 21 | 1 |
+| **Default model, iteration 4** | **15** | 25 | 17 | 0 |
+
+Iteration 3's reference run was stopped by the host's memory limit and is not
+scored. What Maljan still misses is mostly control flow (anti-analysis checks,
+bot-ID derivation, beacon interval, command IDs); with a disassembler attached,
+the model walked the right code but ran out of steps before reaching it.
+
+This is one reference sample, one run per cell with no variance measured, on
+an 8 GB-GPU laptop; a change of a few items is within what a rerun could
+produce. The method, the per-group scores, the false-positive control and the
+item-by-item score files are in [docs/benchmark/index.md](docs/benchmark/index.md).
+
 ## The console
 
 | | |
@@ -108,6 +146,7 @@ code in this repository. The same set is published as a browsable site at
 | [security.md](docs/security.md) | Authentication, roles, API keys, secret encryption, what an export leaves out, CORS and cookie flags, vulnerability reporting. |
 | [development.md](docs/development.md) | Repository layout, `make` targets, the test suites, CI jobs and the branch workflow. |
 | [api.md](docs/api.md) | Router groups, the evidence endpoint, the run-summary fields, the stage events on the WebSocket, authentication and pagination. |
+| [benchmark/index.md](docs/benchmark/index.md) | The benchmark: samples, models, the scoring key, results across iterations and against a human report, the false-positive control and limitations. |
 
 Release notes are in [CHANGELOG.md](CHANGELOG.md).
 
