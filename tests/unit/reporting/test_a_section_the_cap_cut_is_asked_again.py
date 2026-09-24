@@ -81,7 +81,12 @@ class TestTheQuestion:
         assert retry_turn_is_the_question(retry)
         assert "It ran to 3,550 characters with 40 item(s) begun" in str(retry[-1].content)
         assert all(_CUT not in str(turn.content) for turn in retry), "the cut answer is not re-sent"
-        assert len(retry) == 2
+        # With no answer between them, the question ends the section's own
+        # user turn rather than following it as a second one.
+        assert [turn.type for turn in retry] == [turn.type for turn in llm.seen[0]]
+        roles = [turn.type for turn in retry]
+        assert all(not (a == b == "human") for a, b in zip(roles, roles[1:], strict=False))
+        assert str(retry[-1].content).startswith(str(llm.seen[0][-1].content) + "\n\n")
         assert composer.validation_tally.by_code.get(SECTION_CUT_CODE) == 1
         assert composer.degradations == []
 

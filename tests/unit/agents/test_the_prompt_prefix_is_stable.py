@@ -372,3 +372,102 @@ class TestTheRetries:
         assert str(retry[-1].content).endswith(RUN_STATE_END)
         # The evidence turn the block rode on at first is sent as it was written.
         assert RUN_STATE_BEGIN not in str(retry[1].content)
+
+
+class TestAQuestionAfterAUserTurn:
+    """Where a retry or a salvage asks right after a user turn, it asks at its end."""
+
+    def test_the_question_ends_the_user_turn_with_its_own_text(self) -> None:
+        from maljan.pipeline.turns import with_question
+
+        turns = with_question([SystemMessage(content=SYSTEM), HumanMessage(content="task")], "Q?")
+        assert [t.type for t in turns] == ["system", "human"]
+        assert turns[-1].content == "task\n\nQ?"
+
+    def test_after_a_model_turn_or_a_tool_answer_it_is_a_turn_of_its_own(self) -> None:
+        from maljan.pipeline.turns import with_question
+
+        for last in (AIMessage(content="said"), ToolMessage(content="r", tool_call_id="c")):
+            turns = with_question([HumanMessage(content="task"), last], "Q?")
+            assert turns[-1].type == "human" and turns[-1].content == "Q?"
+            assert turns[-2] is last
+
+    def test_a_block_on_that_turn_comes_off_and_one_block_ends_the_framed_request(self) -> None:
+        from maljan.pipeline.turns import with_question
+
+        framed = frame_messages([HumanMessage(content="task")], run_state=RUN_STATE)
+        asked = frame_messages(with_question(framed, "Q?"), run_state=RUN_STATE)
+        text = str(asked[-1].content)
+        assert text.startswith("task\n\nQ?\n\n" + RUN_STATE_BEGIN)
+        assert text.count(RUN_STATE_BEGIN) == 1
+
+    def test_the_analyst_s_retry_after_an_answer_cut_at_its_cap(self) -> None:
+        from maljan.agents import base_agent
+
+        cap = 64
+        cut = "CLAIM: one\nEVIDENCE: [ev_0001] x\nCONFIDENCE: 0.5\nTECHNIQUE: NONE\n---\nCLAIM: tw"
+        agent = _analyst(_Scripted(seen=[]))
+        agent.pack_ledger_ids = ["ev_0001"]
+        sent: list[list[Any]] = []
+
+        def _capture(turns: list[Any], timeout: float, **_: Any) -> str:
+            sent.append(list(turns))
+            return REPORT
+
+        agent._invoke_llm_with_timeout = _capture  # type: ignore[method-assign]
+        isr = agent._text_to_isr(cut, 0)
+        with (
+            patch.object(base_agent, "analyst_output_cap", return_value=cap),
+            patch.object(base_agent, "validity_check_available", return_value=True),
+            patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
+        ):
+            agent._record_usage(
+                AIMessage(
+                    content=cut,
+                    usage_metadata={
+                        "input_tokens": 10,
+                        "output_tokens": cap,
+                        "total_tokens": 10 + cap,
+                    },
+                )
+            )
+            agent._validate_isr(isr, "evidence")
+        assert sent, "the cut answer was asked about"
+        retry = sent[0]
+        _assert_the_shape_every_template_takes(retry)
+        assert "cut_at_output_cap" in str(retry[-1].content)
+        assert all("CLAIM: tw" not in str(t.content) for t in retry), "the cut answer stays out"
+
+    def test_the_synthesis_when_the_trim_kept_only_the_task(self) -> None:
+        from maljan.agents import base_agent
+
+        with patch.object(base_agent, "_trim_for_synthesis", lambda msgs, _budget: msgs[:2]):
+            requests = _loop(answer="")
+        salvage = requests[-1]
+        _assert_the_shape_every_template_takes(salvage)
+        assert [m.type for m in salvage] == ["system", "human"]
+        assert "Do NOT request" in str(salvage[-1].content)
+        assert str(salvage[-1].content).startswith(f"{FACTS}\n\nAnalyse.\n\n")
+
+    def test_the_judge_s_salvage_when_the_trim_kept_only_the_task(self) -> None:
+        from maljan.agents import judge_agent
+
+        model = _Scripted(seen=[], calls=0, answer="agreement_confidence: 0.8")
+        judge = JudgeAgent(llm=model)
+        gathered = [
+            SystemMessage(content="You mediate."),
+            HumanMessage(content="Expert Reports: x"),
+            AIMessage(content="", tool_calls=[{"name": "lookup", "args": {}, "id": "c0"}]),
+            ToolMessage(content="r", tool_call_id="c0"),
+        ]
+        with (
+            patch.object(judge_agent, "_trim_for_synthesis", lambda msgs, _budget: msgs[:2]),
+            patch.object(judge_agent, "synthesis_budget_chars", return_value=1),
+        ):
+            asyncio.run(judge._reasoning_from_what_was_gathered(gathered, 10.0, None))
+        (request,) = model.seen
+        _assert_the_shape_every_template_takes(request)
+        assert [m.type for m in request] == ["system", "human"]
+        assert str(request[-1].content).startswith(
+            "Expert Reports: x\n\nDo NOT call any more tools."
+        )

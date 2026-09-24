@@ -864,6 +864,13 @@ change landed on `main`.
   once the message is no longer last: each request is the previous one without
   its block, plus the new turns and the new block. No request has two user
   turns in a row or a turn holding only the block. The text is the same.
+- **A question asked right after a user turn ends that turn.** The retries
+  after an answer cut at its cap (an analyst's, a report section's, the
+  verdict's) leave the cut answer out, and a forced synthesis whose trim kept
+  only the task follows the task directly; each used to send its question as
+  a second user turn in a row. The question, its text unchanged, now ends the
+  user turn before it after a blank line (`pipeline.turns.with_question`); after
+  a model's turn or a tool answer it is still a turn of its own.
 - **The analysts' and the judge's output caps are derived from the window.**
   `llm.expert_max_tokens` and `llm.judge_max_tokens` ship at 0, which derives
   each agent's cap in three cases: the model's declared maximum output (a model

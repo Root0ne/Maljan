@@ -76,6 +76,7 @@ from maljan.pipeline.mediation_models import (
     consensus_applies,
 )
 from maljan.pipeline.state import AgentArgument
+from maljan.pipeline.turns import with_question
 from maljan.pipeline.validation import (
     ValidationTally,
     Violation,
@@ -1152,7 +1153,11 @@ class JudgeAgent(BudgetMeter):
             )
         )
         try:
-            response = await asyncio.wait_for(self.llm.ainvoke([*trimmed, directive]), timeout)
+            # Asked at the end of the last user turn when the trim left one
+            # last, rather than as a second user turn after it.
+            response = await asyncio.wait_for(
+                self.llm.ainvoke(with_question(trimmed, str(directive.content))), timeout
+            )
         except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves no reasoning
             self.logger.warning("JudgeAgent reasoning salvage failed (%s).", type(exc).__name__)
             return ""

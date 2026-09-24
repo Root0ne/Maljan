@@ -416,7 +416,10 @@ again. At the end, each turn's request is the previous one without its block,
 plus the new turns and the new block, and the cache holds up to the block. It
 rides on a message rather than as a turn of its own so that no request has two
 user turns in a row, which strict chat templates refuse, and no turn that says
-only the run's state, which a model can take for the question. It never rides
+only the run's state, which a model can take for the question. For the same
+reason a question asked right after a user turn — a retry that leaves a cut
+answer out, a salvage whose trim kept only the task — ends that turn after a
+blank line (`pipeline.turns.with_question`) instead of following it. It never rides
 on a model's own turn. The forced-synthesis trim keeps the system turn and the
 first human turn, so the pack is never what gets cut. It is read-only to the
 model: nothing a model says is written into it. The judge's, the narrative's

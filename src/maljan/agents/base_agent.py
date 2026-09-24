@@ -43,6 +43,7 @@ from maljan.llm.context_window import (
     tool_definition_chars,
     window_full_error,
 )
+from maljan.pipeline.turns import with_question
 from maljan.pipeline.validation import (
     ABSENCE_CLAIM_CODE,
     ALIGNMENT_MARGIN,
@@ -4005,7 +4006,6 @@ class BaseAnalyst(BudgetMeter, ABC):
         against the time the loop has already used. Never raises — a nudge that
         cannot run leaves the answer exactly as the loop left it.
         """
-        from langchain_core.messages import HumanMessage
 
         remaining_steps = model_turns_left(max_steps, list(msgs))
         if remaining_steps < 1:
@@ -4032,12 +4032,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         # The run state as of now, at the end of the nudge's own question, the
         # place the loop's turns carried it.
         turns = self._with_current_run_state(
-            [*tool_free_turns(sendable), HumanMessage(content=FINAL_ANSWER_NUDGE)],
+            with_question(tool_free_turns(sendable), FINAL_ANSWER_NUDGE),
             remaining_steps,
             remaining_time,
         )
         loop_turns = self._with_current_run_state(
-            [*sendable, HumanMessage(content=FINAL_ANSWER_NUDGE)], remaining_steps, remaining_time
+            with_question(sendable, FINAL_ANSWER_NUDGE), remaining_steps, remaining_time
         )
         budget = min(remaining_time, float(timeout))
 
@@ -4336,7 +4336,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         try:
             answer = self._invoke_llm_with_timeout(
                 self._with_current_run_state(
-                    [*tool_free_turns(trimmed), directive], None, remaining
+                    with_question(tool_free_turns(trimmed), str(directive.content)),
+                    None,
+                    remaining,
                 ),
                 remaining,
             )
@@ -5233,11 +5235,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         loop_cut = cuts.get(id(isr))
         # Measured with the turn that carries every question of this retry,
         # not the framed conversation alone: fourteen questions are not free.
-        from langchain_core.messages import HumanMessage as _Question
-
         from maljan.pipeline.validation import feedback_text
 
-        sent = [*messages, _Question(content=feedback_text(initial))]
+        sent = with_question(messages, feedback_text(initial))
         if loop_cut is not None and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
             self, sent, loop_cut[0]
         ):

@@ -189,7 +189,9 @@ class TestTheRound:
         The benign control's retry prompt was its first prompt plus the whole
         8,192-token cut answer plus the question, and the model wrote a
         response one byte shorter than the first. The retry is the first prompt
-        and the question, which describes the answer instead of repeating it.
+        and the question, which describes the answer instead of repeating it —
+        asked at the end of the first prompt's user turn, not as a second user
+        turn after it.
         """
         cut = _cut_bundle()
         llm = _Llm(_answer(cut, tokens=_cap()), _answer(cut, tokens=_cap()))
@@ -197,8 +199,9 @@ class TestTheRound:
         await _verdict(llm)
 
         first, retry = llm.calls
-        assert len(retry) == len(first) + 1
-        assert [str(t.content) for t in retry[:-1]] == [str(t.content) for t in first]
+        assert [t.type for t in retry] == [t.type for t in first]
+        assert [str(t.content) for t in retry[:-1]] == [str(t.content) for t in first[:-1]]
+        assert str(retry[-1].content).startswith(str(first[-1].content) + "\n\n")
         assert cut[:2_000] not in "\n".join(str(t.content) for t in retry)
         assert "It is not shown to you again." in str(retry[-1].content)
 
