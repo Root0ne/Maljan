@@ -409,7 +409,12 @@ def validate_isr(
                     path=path,
                 )
             )
-        if not tid or attck is None:
+        if not tid:
+            continue
+        if attck is None:
+            absence = absence_claim_violation(claim, tid, None, path=path)
+            if absence is not None:
+                violations.append(absence)
             continue
         if not _technique_is_known(tid, attck):
             suggestions = _suggest_techniques(str(getattr(claim, "claim", "") or ""), attck)
@@ -428,9 +433,19 @@ def validate_isr(
                 )
             )
             continue
-        mismatch = platform_mismatch_message(tid, attck, scope)
-        if mismatch:
-            violations.append(Violation(code=PLATFORM_MISMATCH_CODE, message=mismatch, path=path))
+        # A claim that says the behaviour is absent asserts no technique, and
+        # that is the one question its id is asked: where the id sits in the
+        # catalogue is beside the point of a claim that says it is not there.
+        # The index's ranking is still written on the claim, as on every claim.
+        absence = absence_claim_violation(claim, tid, attck, path=path)
+        if absence is not None:
+            violations.append(absence)
+        else:
+            mismatch = platform_mismatch_message(tid, attck, scope)
+            if mismatch:
+                violations.append(
+                    Violation(code=PLATFORM_MISMATCH_CODE, message=mismatch, path=path)
+                )
         weak = _weak_alignment(
             claim,
             tid,
@@ -439,12 +454,122 @@ def validate_isr(
             attck=attck,
             scope=scope,
             margin=alignment_margin,
-            challenge=weak_alignment_challenges,
+            challenge=weak_alignment_challenges and absence is None,
         )
         if weak:
             violations.append(Violation(code=WEAK_ALIGNMENT_CODE, message=weak, path=path))
 
     return violations
+
+
+# ---------------------------------------------------------------------------
+# A claim that states the absence of a behaviour
+# ---------------------------------------------------------------------------
+
+ABSENCE_CLAIM_CODE = "attck.absence_claim"
+
+# The spellings of a tactic a claim may use. The catalogue gives the current
+# name; ATT&CK 19 split Defense Evasion into Stealth and Defense Impairment,
+# and a claim written in the older name is about the same tactic.
+_TACTIC_SPELLINGS: dict[str, tuple[str, ...]] = {
+    "stealth": ("stealth", "defense evasion", "defence evasion"),
+    "defense-impairment": ("defense impairment", "defense evasion", "defence evasion"),
+}
+
+
+def _phrase(words: str) -> str:
+    """``words`` as a pattern: whole words, any run of spaces or hyphens between them."""
+    parts = [re.escape(word) for word in words.split() if word]
+    return r"\b" + r"[\s-]+".join(parts) + r"\b" if parts else ""
+
+
+def behaviour_pattern(technique_id: str, attck: Any = None) -> re.Pattern[str] | None:
+    """The words a claim names a technique's behaviour with, or ``None`` when it has none.
+
+    Three sources, none of them written for a sample: the capability terms the
+    report's prose is checked against that list the technique, and — where the
+    catalogue can be read — the technique's own name and the names of its
+    tactics.
+    """
+    base = _base_technique(technique_id)
+    parts = [
+        pattern for _label, pattern, techniques, _keys in CAPABILITY_TERMS if base in techniques
+    ]
+    if attck is not None:
+        answer = _catalogue_answer(str(technique_id), attck, "attck_lookup")
+        name = _phrase(str(answer.get("name") or ""))
+        if name:
+            parts.append(name)
+        for tactic in answer.get("tactics") or []:
+            slug = str(tactic).strip().lower()
+            for spelling in _TACTIC_SPELLINGS.get(slug, (slug.replace("-", " "),)):
+                phrase = _phrase(spelling)
+                if phrase:
+                    parts.append(phrase)
+    if not parts:
+        return None
+    return re.compile("|".join(f"(?:{part})" for part in parts), re.IGNORECASE)
+
+
+def states_absence(text: str, pattern: re.Pattern[str] | None) -> bool:
+    """Whether ``text`` names the behaviour only to say it is absent.
+
+    The capability check's own reader (:func:`_is_negated`), asked of every
+    place the behaviour is named. A mention the reader finds negated is a
+    statement of absence. A later mention in the same clause — nothing that
+    ends a clause or a negation's reach between the two — is read with the
+    negation that governs the first: "does not contain any command and control
+    (C2) patterns" names the behaviour twice in one negated phrase. Any other
+    mention the reader does not find negated is a claim that the behaviour is
+    there, and one is enough. A text that never names the behaviour states
+    nothing about it.
+    """
+    if not text or pattern is None:
+        return False
+    matches = list(pattern.finditer(text))
+    if not matches:
+        return False
+    negated_to: int | None = None
+    for match in matches:
+        if _is_negated(text, match.start(), match.end()):
+            negated_to = match.end()
+            continue
+        if negated_to is not None:
+            between = text[negated_to : match.start()]
+            if not _CLAUSE_BREAK_RE.search(between) and not _reach_ends(between):
+                negated_to = match.end()
+                continue
+        return False
+    return True
+
+
+def absence_claim_violation(
+    claim: Any, technique_id: str, attck: Any = None, *, path: str = ""
+) -> Violation | None:
+    """The question for a claim that states a behaviour is absent and carries a technique id.
+
+    A technique id on a claim is read everywhere downstream as something the
+    sample does: a benign control run published thirteen techniques from claims
+    such as "does not contain any obvious persistence mechanisms". The analyst
+    is asked once; the claim and its id are never edited. What still reads as
+    absence after the question is flagged on the claim
+    (:func:`mark_invalid_technique_ids`) and the publish rule does not count it.
+    """
+    text = str(getattr(claim, "claim", "") or "")
+    if not states_absence(text, behaviour_pattern(technique_id, attck)):
+        return None
+    tid = safe_finding_value(technique_id)
+    return Violation(
+        code=ABSENCE_CLAIM_CODE,
+        message=(
+            f"CLAIM {safe_finding_value(text)!r} says the behaviour is absent, "
+            f"and carries TECHNIQUE {tid}. A technique on a claim is read as something the "
+            f"sample does, so {tid} would be published as a finding of this run. If the "
+            "behaviour is absent, write TECHNIQUE: NONE on this claim; if the sample does do "
+            "it, say what it does and cite the entry that shows it."
+        ),
+        path=path,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -930,18 +1055,24 @@ def mark_invalid_technique_ids(isr: Any, violations: Iterable[Violation]) -> Non
 
     The id itself is left exactly as the analyst wrote it. What changes is the
     report's description of it: ``technique_id_valid=False`` is how a reader,
-    the STIX minting step and the FP linter learn that this one is not real.
+    the STIX minting step and the FP linter learn that this one is not real,
+    and ``states_absence=True`` is how the publish rule, the evidence summary
+    and the capability check learn that the claim carrying it said the
+    behaviour is absent. One reading, made once in the analyst's loop, and read
+    by every surface after it.
     """
     claims = list(getattr(isr, "claims", None) or [])
     for violation in violations:
-        if violation.code != "attck.unknown_id":
+        if violation.code not in (VALIDITY_CODE, ABSENCE_CLAIM_CODE):
             continue
         index = _claim_index(violation.path)
         if index is None or index >= len(claims):
             continue
         claim = claims[index]
-        if hasattr(claim, "technique_id_valid"):
+        if violation.code == VALIDITY_CODE and hasattr(claim, "technique_id_valid"):
             claim.technique_id_valid = False
+        if violation.code == ABSENCE_CLAIM_CODE and hasattr(claim, "states_absence"):
+            claim.states_absence = True
 
 
 def _claim_index(path: str) -> int | None:
@@ -1132,6 +1263,20 @@ CAPABILITY_TERMS: tuple[tuple[str, str, tuple[str, ...], tuple[str, ...]], ...] 
         ("T1056", "T1113", "T1123", "T1125"),
         ("dynamic", "screenshots"),
     ),
+    (
+        "anti-analysis",
+        r"anti[\s-]?(?:analysis|debug\w*|disassembl\w*|emulation|sandbox|vm)\b"
+        r"|(?:sandbox|virtuali[sz]ation|debugger)[\s-]+evasion",
+        ("T1014", "T1562", "T1564", "T1497", "T1622", "T1027", "T1140", "T1480"),
+        ("anti_analysis",),
+    ),
+    (
+        "anti-forensics",
+        r"anti[\s-]?forensic\w*|indicator[\s-]+removal"
+        r"|(?:clear|wip|eras|delet)\w*\s+(?:the\s+|its\s+)?(?:event\s+)?logs?\b",
+        ("T1070",),
+        ("anti_forensics",),
+    ),
 )
 
 _COMPILED_CAPABILITY_TERMS = tuple(
@@ -1250,6 +1395,11 @@ class CapabilityGrounding:
             values = isr_reports.values() if hasattr(isr_reports, "values") else ()
             for isr in values:
                 for claim in getattr(isr, "claims", None) or []:
+                    # A claim that said the behaviour is absent grounds nothing:
+                    # "does not contain any obvious persistence mechanisms"
+                    # grounded "persistence" by its words and its id alike.
+                    if getattr(claim, "states_absence", False):
+                        continue
                     words.append(str(getattr(claim, "claim", "") or ""))
                     base = _base_technique(str(getattr(claim, "technique_id", "") or ""))
                     if base:

@@ -105,7 +105,8 @@ def build_capability_matrix(
 
     cells: list[CapabilityCell] = []
     mappings: list[TTPMapping] = []
-    for tid, info in techniques.items():
+    for tid, collected in techniques.items():
+        info = _as_recorded(collected)
         (name, tactic_slug), tactic_domain = _resolve_technique_meta(tid)
         evidence = info["evidence"]
         # The highest number any source put on this technique. Taken once, here,
@@ -151,6 +152,8 @@ def build_capability_matrix(
             not_published = "the ATT&CK catalogue has no entry for this id in any domain"
         elif out_of_scope.get(tid):
             not_published = out_of_scope[tid]
+        elif info.get("stated_absent"):
+            not_published = ABSENCE_REASON
         elif not info.get("claimed"):
             not_published = FINDING_ONLY_REASON
         else:
@@ -217,6 +220,15 @@ _JUDGE_SOURCE = "judge"
 # and published nowhere.
 FINDING_ONLY_REASON = (
     "it was named on a finding rather than on a claim, so no check asked what evidence holds it up"
+)
+
+
+# Why an id named only on claims that said the behaviour is absent is not
+# published. Each such claim was asked, in its analyst's own loop, whether the
+# behaviour is absent or the sample does it, and still said it is absent.
+ABSENCE_REASON = (
+    "the only claims that name it say the behaviour is absent, and each was asked "
+    "about and kept, so it asserts no technique"
 )
 
 
@@ -336,6 +348,7 @@ def _collect_techniques(
                 "layers": [],
                 "valid": True,
                 "claimed": False,
+                "absent": {"evidence": [], "confidences": [], "stated_by": [], "layers": []},
             },
         )
 
@@ -388,6 +401,13 @@ def _collect_techniques(
                 if not claim_tid or says_no_technique(claim_tid):
                     continue
                 row = _row(str(claim_tid))
+                # A claim that said the behaviour is absent, and kept its id
+                # after being asked, asserts nothing: what it said is kept
+                # beside the row, and used only when no producer claimed the
+                # technique — then as the row's record, never as a claim.
+                if getattr(claim, "states_absence", False):
+                    _add_claim(row["absent"], claim, isr, agent_name)
+                    continue
                 # The same id on a claim and on a finding is judged as the
                 # claim's: it was asked the questions, and the finding is a
                 # second mention of an answer that already stands.
@@ -398,14 +418,7 @@ def _collect_techniques(
                 # phase replaced; the marker is how a reader learns instead.
                 if not getattr(claim, "technique_id_valid", True):
                     row["valid"] = False
-                row["confidences"].append(float(getattr(claim, "confidence", 0.0) or 0.0))
-                layer = getattr(isr, "domain", None) or agent_name or "agent"
-                row["stated_by"].append(f"the {layer} analyst")
-                if layer and str(layer) not in row["layers"]:
-                    row["layers"].append(str(layer))
-                quote = getattr(claim, "claim", None) or getattr(claim, "evidence_ref", None) or ""
-                if quote and quote not in row["evidence"]:
-                    row["evidence"].append(marked_cut(str(quote), 200))
+                _add_claim(row, claim, isr, agent_name)
             # 3. The findings' own technique ids. An ISR carries ids in two
             # places, and this was the one no check ever saw: the report's
             # Findings table and the corroboration metric are both built from
@@ -445,6 +458,39 @@ def _collect_techniques(
         techniques[tid]["valid"] = False
 
     return techniques
+
+
+def _add_claim(row: dict[str, Any], claim: Any, isr: Any, agent_name: str) -> None:
+    """One analyst claim's number, producer, layer and words, added to ``row``."""
+    row["confidences"].append(float(getattr(claim, "confidence", 0.0) or 0.0))
+    layer = getattr(isr, "domain", None) or agent_name or "agent"
+    row["stated_by"].append(f"the {layer} analyst")
+    if layer and str(layer) not in row["layers"]:
+        row["layers"].append(str(layer))
+    quote = getattr(claim, "claim", None) or getattr(claim, "evidence_ref", None) or ""
+    if quote and quote not in row["evidence"]:
+        row["evidence"].append(marked_cut(str(quote), 200))
+
+
+def _as_recorded(info: dict[str, Any]) -> dict[str, Any]:
+    """The row as the matrix records it: an absence claim's words only where nothing claimed it.
+
+    A technique a producer claimed is recorded from what the producers said;
+    a claim that said the behaviour is absent is not one of them, and its
+    number is not a confidence that the sample does anything. A technique only
+    such claims named is recorded from them, so the row says what was said and
+    why it is not published.
+    """
+    absent = info.get("absent") or {}
+    if info.get("claimed") or not absent.get("stated_by"):
+        return info
+    merged = dict(info)
+    for key in ("confidences", "stated_by"):
+        merged[key] = [*absent.get(key, []), *info.get(key, [])]
+    for key in ("evidence", "layers"):
+        merged[key] = list(dict.fromkeys([*absent.get(key, []), *info.get(key, [])]))
+    merged["stated_absent"] = True
+    return merged
 
 
 def _judge_objects(stix_output: dict[str, Any] | None) -> list[dict[str, Any]]:

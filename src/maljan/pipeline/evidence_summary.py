@@ -99,7 +99,12 @@ def collect(
     for name, isr in (isrs or {}).items():
         source = str(getattr(isr, "agent_id", "") or name)
         for claim in getattr(isr, "claims", None) or []:
-            if not getattr(claim, "technique_id_valid", True):
+            # An id the catalogue does not have, and an id on a claim that
+            # said the behaviour is absent, were each asked about and kept:
+            # neither is a source naming the technique.
+            if not getattr(claim, "technique_id_valid", True) or getattr(
+                claim, "states_absence", False
+            ):
                 continue
             tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
             if tid:
