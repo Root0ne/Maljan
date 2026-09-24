@@ -956,20 +956,69 @@ def persistence_from_ledger(
         for command in data.get("tasks") or []:
             _add("scheduled_task", str(command), "", "T1053.005", entry.id)
 
+    # A Sigma rule that fired is a detection-rule match first. It is a
+    # persistence row only when it names an autostart technique and the event
+    # it matched names the key: the rule's title is what the rule is called,
+    # never a registry target, and one live report filed "LOLBIN Execution From
+    # Abnormal Drive" — a rule with no technique at all — as a Run key.
     for entry, data in _payloads(ledger, "sigma_match", "sigma_match_sandbox"):
         for row in data.get("matches") or []:
             if not isinstance(row, dict):
                 continue
-            techniques = sigma_technique_ids(row)
-            technique = techniques[0] if techniques else None
-            if technique and not technique.startswith("T1547"):
+            technique = next(
+                (t for t in sigma_technique_ids(row) if t.startswith(_AUTOSTART_TECHNIQUE)), None
+            )
+            if technique is None:
+                continue
+            key = _matched_registry_key(row)
+            if not key:
                 continue
             _add(
-                "registry_run",
-                str(row.get("title") or row.get("rule") or row.get("id") or ""),
-                "",
+                _autostart_kind(key) or _SIGMA_AUTOSTART_KINDS.get(technique, "other"),
+                key,
+                _matched_registry_value(row),
                 technique,
                 entry.id,
             )
 
     return out
+
+
+# The ATT&CK technique a Sigma rule has to name to be read as persistence, and
+# the kind each of its sub-techniques is when the key itself does not say.
+_AUTOSTART_TECHNIQUE = "T1547"
+_SIGMA_AUTOSTART_KINDS: dict[str, str] = {
+    "T1547.001": "registry_run",
+    "T1547.002": "lsa_provider",
+    "T1547.004": "winlogon_helper",
+    "T1547.005": "lsa_provider",
+    "T1547.006": "driver",
+}
+
+# The fields a Sigma registry event names its key and its value in.
+_SIGMA_KEY_FIELDS = ("TargetObject", "ObjectName", "RegistryKey", "Key")
+_SIGMA_VALUE_FIELDS = ("Details", "RegistryValueData", "NewValue")
+
+
+def _matched_fields(row: dict[str, Any]) -> dict[str, Any]:
+    fields = row.get("matched_fields")
+    return fields if isinstance(fields, dict) else {}
+
+
+def _matched_registry_key(row: dict[str, Any]) -> str:
+    """The registry key the event a Sigma rule matched names, or ``""``."""
+    fields = _matched_fields(row)
+    for name in _SIGMA_KEY_FIELDS:
+        value = fields.get(name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _matched_registry_value(row: dict[str, Any]) -> str:
+    fields = _matched_fields(row)
+    for name in _SIGMA_VALUE_FIELDS:
+        value = fields.get(name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
