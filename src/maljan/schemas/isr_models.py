@@ -26,6 +26,14 @@ UNVERIFIED_TECHNIQUE_MARKER = "technique id not in the ATT&CK catalog"
 ABSENCE_TECHNIQUE_MARKER = (
     "the claim naming it reads as absence; the analyst kept the technique when asked"
 )
+# The note on a technique the judge named in its bundle and no analyst claimed.
+# The rule it is published by: a technique the judge states is the judge's own
+# claim, asked the catalogue and platform questions every claim is asked, and
+# published with the judge as its source and the judge's own number.
+JUDGE_ONLY_TECHNIQUE_MARKER = (
+    "stated by the judge and claimed by no analyst; a technique the judge states is "
+    "published as its own claim"
+)
 
 
 class ClaimEvidence(BaseModel):

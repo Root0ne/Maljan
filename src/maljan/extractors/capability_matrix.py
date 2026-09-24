@@ -45,7 +45,7 @@ from typing import Any
 from maljan.analysis.technique_ids import attack_reference_id, says_no_technique
 from maljan.core.logger import logger
 from maljan.reporting.models import CapabilityCell, TTPMapping
-from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER
+from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, JUDGE_ONLY_TECHNIQUE_MARKER
 from maljan.schemas.stix_models import stated_confidence
 from maljan.utils.marked_cut import marked_cut
 
@@ -171,8 +171,16 @@ def build_capability_matrix(
                 domain=domain,
                 not_published=not_published,
                 # Every analyst claim naming it reads as absence and was kept
-                # when asked. Published all the same: the analyst decided.
-                note=ABSENCE_TECHNIQUE_MARKER if info.get("noted") and all(info["noted"]) else "",
+                # when asked. Published all the same: the analyst decided. Or
+                # the judge named it and no analyst claimed it: published by the
+                # rule for a technique the judge states, and the row says so.
+                note=(
+                    ABSENCE_TECHNIQUE_MARKER
+                    if info.get("noted") and all(info["noted"])
+                    else JUDGE_ONLY_TECHNIQUE_MARKER
+                    if info.get("judge_named") and not info.get("analyst_claimed")
+                    else ""
+                ),
             )
         )
         if not_published:
@@ -358,6 +366,7 @@ def _collect_techniques(
     for tid in judge_ids:
         row = _row(tid)
         row["claimed"] = True
+        row["judge_named"] = row.get("judge_named", False) or judge_spoke
         if tid in unknown:
             row["valid"] = False
         # The judge is credited as the source. Without it an attack-pattern the
@@ -370,6 +379,7 @@ def _collect_techniques(
     for tid, confidence in judge_relationships:
         row = _row(tid)
         row["claimed"] = True
+        row["judge_named"] = row.get("judge_named", False) or judge_spoke
         if tid in unknown:
             row["valid"] = False
         if confidence is not None:
@@ -396,6 +406,7 @@ def _collect_techniques(
                 # claim's: it was asked the questions, and the finding is a
                 # second mention of an answer that already stands.
                 row["claimed"] = True
+                row["analyst_claimed"] = True
                 # Whether each claim naming it reads as absence and was kept
                 # when asked: a note on the row, and nothing else.
                 row.setdefault("noted", []).append(

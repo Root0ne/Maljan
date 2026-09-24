@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, get_args, get_origin
 
 from pydantic import ValidationError
@@ -105,6 +105,11 @@ class Violation:
     # renderer to mark where they stand. Never shown to the producer and never
     # stored on the channel: the text they come from is.
     quoted: tuple[str, ...] = ()
+    # Whether the producer was shown this finding and asked to fix it. False
+    # for one it never saw: raised first by the answer to its only retry, or
+    # found where no turn was left to ask on. A row that says the producer
+    # "kept" something when asked is only true of a row that was asked.
+    asked: bool = True
 
     def __post_init__(self) -> None:
         # A row written by a validator has no route, and its message is its
@@ -122,6 +127,7 @@ class Violation:
             "advisory": "true" if self.advisory else "",
             "sentence": self.sentence,
             "route": ROUTE_SEPARATOR.join(self.route),
+            **({} if self.asked else {"asked": "false"}),
         }
 
 
@@ -171,7 +177,7 @@ class ValidationTally:
                 "code": v.code,
                 "message": v.message,
                 **({"advisory": "true"} if v.advisory else {}),
-                **({} if asked else {"asked": "false"}),
+                **({} if asked and v.asked else {"asked": "false"}),
             }
             for v in violations
         )
@@ -4915,6 +4921,29 @@ def drop_ungrounded_indicators(
     return dropped
 
 
+# Where a finding names the object it is about. Two answers of one judge
+# write the same object at different positions and under different labels, so
+# a finding about it is the same question whichever answer raised it.
+_OBJECT_PLACE_RE = re.compile(r"objects\[\d+\](?: '[^']*')?")
+
+
+def not_asked(violations: Sequence[Violation], shown: Sequence[Violation]) -> list[Violation]:
+    """``violations``, each one the producer was never shown marked ``asked=False``.
+
+    A finding counts as shown when one of the same code said the same thing,
+    whatever position and label the object it is about had in the answer that
+    raised it. The answer to a retry numbers its objects afresh; the question
+    about a credit it kept is still the question it was asked.
+    """
+    said = {(v.code, _OBJECT_PLACE_RE.sub("objects[]", v.message)) for v in shown}
+    return [
+        v
+        if (v.code, _OBJECT_PLACE_RE.sub("objects[]", v.message)) in said
+        else replace(v, asked=False)
+        for v in violations
+    ]
+
+
 def _object_index(path: str) -> int | None:
     match = re.search(r"objects\[(\d+)\]", path or "")
     return int(match.group(1)) if match else None
@@ -5254,6 +5283,9 @@ def validation_metrics(
                 # platform declined to act on, stored without the flag, reads
                 # downstream as a producer's own unfixed finding.
                 **({"advisory": "true"} if violation.advisory else {}),
+                # And whether the producer was ever shown it: a finding the
+                # answer to the last retry raised first was never a question.
+                **({} if violation.asked else {"asked": "false"}),
             }
         )
     return {

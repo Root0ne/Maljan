@@ -424,29 +424,77 @@ def stray_backslash_sentence(pattern: str, values: list[str]) -> str:
     )
 
 
-def _without_unconfirmed_credit(obj: Any, credit: Any) -> tuple[Any, Declined]:
-    """A copy of a judge relationship carrying only the credits a source stands behind."""
+def _unasked_findings(report: Any, code: str) -> list[str]:
+    """The run's unresolved judge findings under ``code`` the judge was never shown.
+
+    Read from ``run_summary.validation.unresolved``, where a finding the answer
+    to the judge's only retry raised first is recorded ``"asked": "false"``.
+    """
+    summary = getattr(report, "run_summary", None)
+    validation = summary.get("validation") if isinstance(summary, dict) else None
+    rows = validation.get("unresolved") if isinstance(validation, dict) else None
+    return [
+        str(row.get("message") or "")
+        for row in rows or []
+        if isinstance(row, dict)
+        and row.get("code") == code
+        and str(row.get("agent") or "judge") == "judge"
+        and str(row.get("asked") or "") == "false"
+    ]
+
+
+def _names_the_technique(sentence: str, technique: str) -> bool:
+    """Whether ``sentence`` names ``technique`` as an id of its own, not a prefix."""
+    return bool(re.search(rf"(?<![\w.]){re.escape(technique)}(?![\w.]\w)", sentence))
+
+
+def _without_unconfirmed_credit(
+    obj: Any, credit: Any, *, asked: bool = True
+) -> tuple[Any, Declined]:
+    """A copy of a judge relationship carrying only the credits a source stands behind.
+
+    ``asked`` is whether the judge was shown the credit question. The sentence
+    says which: "kept the credit when asked" of a credit it was never asked
+    about is a statement the run's record does not support.
+    """
     from maljan.pipeline.validation import credited_agents
 
     kept = [name for name in credited_agents(obj) if name not in credit.uncredited]
     copy = crediting_only(obj, kept)
     names = ", ".join(repr(safe_finding_value(n)) for n in credit.uncredited)
+    what_the_judge_did = (
+        "the judge kept the credit when asked"
+        if asked
+        else "the judge was not asked about it: the credit first appeared in an answer no "
+        "turn was left to question"
+    )
     return copy, Declined(
         UNPUBLISHABLE_CREDIT_CODE,
         f"the credit to {names} for {safe_finding_value(credit.technique)} is not in the "
-        "exported bundle: no source by that name named the technique in this run, and the "
-        "judge kept the credit when asked. It is unchanged in the judge's own bundle.",
+        f"exported bundle: no source by that name named the technique in this run, and "
+        f"{what_the_judge_did}. It is unchanged in the judge's own bundle.",
     )
 
 
-def _missing_what_the_standard_requires(obj: Any) -> str:
-    """The recorded sentence for a judge object the standard refuses as written, or ``""``."""
+def _missing_what_the_standard_requires(obj: Any, unasked: Sequence[str] = ()) -> str:
+    """The recorded sentence for a judge object the standard refuses as written, or ``""``.
+
+    ``unasked`` is the run's ``stix.is_family_missing`` findings the judge was
+    never shown; the sentence says it was asked only when it was.
+    """
     kind = str(getattr(obj, "type", "") or "")
     label = safe_finding_value(getattr(obj, "name", "") or getattr(obj, "id", ""))
     if kind == "malware" and getattr(obj, "is_family", None) is None:
+        named = f"{safe_finding_value(str(getattr(obj, 'name', '') or '').strip())!r}"
+        what_the_judge_did = (
+            "the judge was not asked about it: it first appeared in an answer no turn was "
+            "left to question"
+            if any(named in sentence for sentence in unasked)
+            else "the judge kept it absent when asked"
+        )
         return (
             f"the malware object {label!r} is not in the exported bundle: it does not say "
-            "is_family, which STIX requires, and the judge kept it absent when asked. The "
+            f"is_family, which STIX requires, and {what_the_judge_did}. The "
             "export stands the platform's own sample object in for it, and the judge's "
             "relationships that named it move onto that object unchanged. It is unchanged "
             "in the judge's own bundle."
@@ -860,10 +908,19 @@ class ExtendedSTIXRenderer:
                 credit.index: credit
                 for credit in unconfirmed_credits(base_bundle, technique_sources)
             }
+            unasked_credits = _unasked_findings(report, "stix.credit_without_claim")
             for position, obj in enumerate(base_bundle.objects):
                 kind = getattr(obj, "type", "")
                 if position in unconfirmed:
-                    obj, row = _without_unconfirmed_credit(obj, unconfirmed[position])
+                    credit = unconfirmed[position]
+                    obj, row = _without_unconfirmed_credit(
+                        obj,
+                        credit,
+                        asked=not any(
+                            _names_the_technique(sentence, str(credit.technique))
+                            for sentence in unasked_credits
+                        ),
+                    )
                     self.declined.append(row)
                 if kind == "attack-pattern":
                     continue
@@ -879,7 +936,9 @@ class ExtendedSTIXRenderer:
                         )
                     )
                     continue
-                incomplete = _missing_what_the_standard_requires(obj)
+                incomplete = _missing_what_the_standard_requires(
+                    obj, _unasked_findings(report, "stix.is_family_missing")
+                )
                 if incomplete:
                     self.declined.append(Declined(UNPUBLISHABLE_OBJECT_CODE, incomplete))
                     continue

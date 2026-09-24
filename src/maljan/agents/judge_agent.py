@@ -30,6 +30,7 @@ import contextlib
 import re
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -82,6 +83,7 @@ from maljan.pipeline.validation import (
     assessment_conflict_violations,
     assessment_violations,
     drop_ungrounded_indicators,
+    not_asked,
     retry_with_feedback,
     stated_verdict_violations,
     unsupported_benign_violations,
@@ -1718,17 +1720,27 @@ class JudgeAgent(BudgetMeter):
                 *_verdict_checks(bundle),
             ]
 
+        # What the judge was shown. A finding its retry's answer raised first
+        # was never put to it, and a row saying it "kept" something "when
+        # asked" is only true of one that was.
+        shown: list[Violation] = []
+
+        def _told(found: Sequence[Violation]) -> None:
+            shown.extend(found)
+            tally.count(found)
+
         bundle, violations, retries = await retry_with_feedback(
             _run,
             messages,
             [_validate],
             max_retries=_VERDICT_RETRIES,
             parse=_parse,
-            on_feedback=tally.count,
+            on_feedback=_told,
             sink=self._event_sink(),
             agent="judge",
             stage=str(getattr(self, "pipeline_stage", "") or "verdict"),
         )
+        violations = not_asked(violations, shown)
         _from_the_loop = list(violations)
         if timed_out:
             # No answer at all, so there is nothing to feed back and nothing
@@ -1761,7 +1773,8 @@ class JudgeAgent(BudgetMeter):
             # is wrong is recorded, and an ungrounded one is dropped below
             # like one that survived a retry.
             violations.extend(
-                _indicator_findings(
+                replace(finding, asked=False)
+                for finding in _indicator_findings(
                     bundle,
                     validate_verdict_bundle(
                         bundle,
