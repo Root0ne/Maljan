@@ -1892,6 +1892,11 @@ class JudgeAgent(BudgetMeter):
             for name, isr in isr_reports.items():
                 source = str(getattr(isr, "agent_id", "") or name)
                 for claim in isr.claims:
+                    # A claim that said the behaviour is absent claimed no
+                    # technique, and a bundle built from the claims carries
+                    # none for it.
+                    if claim.states_absence:
+                        continue
                     if claim.technique_id and _VALID_TID_RE.match(claim.technique_id):
                         tids.add(claim.technique_id)
                         agents = claimed_by.setdefault(claim.technique_id, [])

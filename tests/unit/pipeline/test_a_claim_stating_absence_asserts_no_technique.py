@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from maljan.agents.base_agent import BaseAnalyst
+from maljan.agents.judge_agent import JudgeAgent
 from maljan.extractors.capability_matrix import ABSENCE_REASON, build_capability_matrix
 from maljan.pipeline.evidence_summary import collect
 from maljan.pipeline.validation import (
@@ -259,6 +260,25 @@ class TestThePublishRule:
         isr = _isr(_flagged(*PUTTY_ABSENCE_CLAIMS[0]), _claim(*POSITIVE_CLAIMS[3]))
 
         assert set(collect({"static": isr})) == {"T1055"}
+
+    def test_a_bundle_built_from_the_claims_carries_no_absence_claims_technique(self) -> None:
+        """A judge that never answered leaves a bundle built from the analysts' claims."""
+        isrs = {"static": _isr(_flagged(*PUTTY_ABSENCE_CLAIMS[0]), _claim(*POSITIVE_CLAIMS[3]))}
+        bundle = JudgeAgent(llm=MagicMock())._fallback_bundle_from_text(
+            "Verdict: Benign.", {}, isrs
+        )
+
+        named = {
+            ref.get("external_id")
+            for obj in bundle.model_dump(mode="json")["objects"]
+            if obj.get("type") == "attack-pattern"
+            for ref in obj.get("external_references") or []
+        }
+        assert "T1547" not in named
+        _cells, mappings = build_capability_matrix(
+            stix_output=bundle.model_dump(mode="json"), isr_reports=isrs
+        )
+        assert [m.technique_id for m in mappings] == ["T1055"]
 
     def test_the_judge_reads_the_id_with_what_the_claim_said(self) -> None:
         summary = _isr(_flagged(*PUTTY_ABSENCE_CLAIMS[0])).to_text_summary()
