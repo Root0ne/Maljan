@@ -1551,13 +1551,14 @@ curl -s -X POST http://localhost:8000/api/v1/settings/import \
   -d @merged.json
 ```
 
-What the team needs besides the document: a `qu1cksc0pe` entry under
+What the team needs besides the document: an enabled `qu1cksc0pe` entry under
 `core.mcp.servers` (the import refuses a reference to a server that does not
 exist), Ghidra enabled over http with its URL and token (see *A team that needs
-Ghidra waits for it* above), r2mcp findable (see *Where r2mcp is looked for*),
-and, so that each static analyst reads a tool of its own, `core.static.provider`
-set to `none` — with the global provider on Ghidra the `static` analyst opens
-Ghidra as well. Run it by naming it on the job (`{"config": {"profile":
+Ghidra waits for it* above), `core.static.r2.enabled` on and r2mcp findable
+(see *Where r2mcp is looked for*; switched off, r2 attaches nothing and the
+clone runs on its two servers alone), and, so that each static analyst reads a
+tool of its own, `core.static.provider` set to `none` — with the global
+provider on Ghidra the `static` analyst opens Ghidra as well. Run it by naming it on the job (`{"config": {"profile":
 "all_tools"}}`) or by making it `core.agents.profile`. A test
 (`tests/api/test_the_all_tools_team_document.py`) loads the document through
 the import's validation and resolves every agent against stub servers.

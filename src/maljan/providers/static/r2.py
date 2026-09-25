@@ -288,7 +288,8 @@ class R2StaticProvider(GenericMCPStaticProvider):
         was found. Not found is a failure that says where it looked; r2
         degrades, so the analyst goes on without it and the run records why.
         """
-        if not self._handle.is_open:
+        # Switched off, the handle attaches nothing; there is nothing to find.
+        if not self._handle.is_open and self._handle.config.enabled:
             configured = str(self._handle.config.command or "r2mcp")
             binary = resolve_r2_binary(configured)
             if binary.path is None:

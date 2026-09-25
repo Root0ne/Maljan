@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -99,14 +100,41 @@ def _nowhere(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.delenv(variable, raising=False)
 
 
+def _enabled() -> Any:
+    """Settings with the r2 provider switched on; it ships switched off."""
+    from maljan.core.config import Settings
+
+    return Settings(_env_file=None, static={"r2": {"enabled": True}})
+
+
+def test_a_switched_off_r2_looks_for_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Switched off, the handle attaches nothing, so there is no binary to miss."""
+    from maljan.core.config import Settings
+    from maljan.providers.base import StaticJobContext
+    from maljan.providers.static import r2
+
+    _nowhere(monkeypatch, tmp_path)
+    looked: list[str] = []
+    monkeypatch.setattr(
+        r2, "resolve_r2_binary", lambda configured, env=None: looked.append(configured)
+    )
+    provider = R2StaticProvider.from_settings(Settings(_env_file=None))
+
+    provider.open(StaticJobContext())
+
+    assert looked == []
+    assert provider.get_tools() == []
+
+
 def test_opening_with_no_r2mcp_anywhere_fails_with_the_places_and_the_remedy(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from maljan.core.config import Settings
     from maljan.providers.base import StaticJobContext
 
     _nowhere(monkeypatch, tmp_path)
-    provider = R2StaticProvider.from_settings(Settings(_env_file=None))
+    provider = R2StaticProvider.from_settings(_enabled())
 
     with pytest.raises(R2BinaryNotFound) as caught:
         provider.open(StaticJobContext())
@@ -124,11 +152,10 @@ def test_the_analyst_records_the_miss_as_the_run_s_reason(
     import logging
 
     from maljan.agents.static_analyst import StaticAnalyst
-    from maljan.core.config import Settings
     from maljan.providers.base import StaticJobContext
 
     _nowhere(monkeypatch, tmp_path)
-    provider = R2StaticProvider.from_settings(Settings(_env_file=None))
+    provider = R2StaticProvider.from_settings(_enabled())
 
     class _Registry:
         degradation_reasons: list[str] = []
