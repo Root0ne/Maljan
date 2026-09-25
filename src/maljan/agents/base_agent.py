@@ -2394,9 +2394,12 @@ class _PriorAnswer:
 
     def __init__(self, isr: AgentISR) -> None:
         self.isr = isr
-        # An answer that parsed into nothing is shown back as the prose it was,
-        # so the question about its format is asked over what was written.
-        self.content = isr.unparsed_answer or isr.to_text_summary()
+        # The answer as the model wrote it, CLAIM blocks and findings block
+        # included: shown a summary of its parsed claims, a model answered
+        # again in the summary's shape, and nothing in that shape is a claim.
+        # The summary stands only for an ISR no single answer produced — a
+        # merge of chunks.
+        self.content = isr.answer_text or isr.unparsed_answer or isr.to_text_summary()
 
 
 def alignment_gate(knowledge: Any, cfg_validation: Any, log: Any, name: str) -> Any | None:
@@ -4167,6 +4170,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             block = parse_findings_block(content)
             if not block:
                 return content
+            # The prose goes on to the parser; the answer it came out of is
+            # what the validation turn shows back (``_text_to_isr``).
+            self._last_written_answer = (block.prose, content)
             self._findings_buffer.extend(block.findings)
             self._artifacts_buffer.extend(block.artifacts)
             self.logger.info(
@@ -5167,6 +5173,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         if nudged:
             self.validation_findings.extend(parse_violations(isr))
 
+        # The findings and artifacts the answer being checked carried are its
+        # own from here on: a retry's are kept apart (``_parse``) and go with
+        # the retry only if the retry is the answer kept.
+        if isinstance(getattr(self, "_findings_buffer", None), list) and isinstance(
+            getattr(self, "_artifacts_buffer", None), list
+        ):
+            BaseAnalyst._drain_findings(self, isr)  # type: ignore[arg-type]
+
         try:
             initial = _validator(isr)
         except Exception as exc:  # noqa: BLE001
@@ -5239,9 +5253,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         loop_cut = cuts.get(id(isr))
         # Measured with the turn that carries every question of this retry,
         # not the framed conversation alone: fourteen questions are not free.
-        from maljan.pipeline.validation import feedback_text
+        from maljan.pipeline.validation import ANALYST_FEEDBACK_CLOSING, feedback_text
 
-        sent = with_question(messages, feedback_text(initial))
+        sent = with_question(messages, feedback_text(initial, closing=ANALYST_FEEDBACK_CLOSING))
         if loop_cut is not None and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
             self, sent, loop_cut[0]
         ):
@@ -5274,12 +5288,56 @@ class BaseAnalyst(BudgetMeter, ABC):
             if isinstance(answer, _PriorAnswer):
                 return answer.isr
             text = str(getattr(answer, "content", answer))
-            parsed = self._text_to_isr(self._capture_findings(text), isr.revision_round)
+            self.logger.debug(
+                "%s: the validation retry answered %d character(s):\n%s",
+                self.name,
+                len(text),
+                text,
+            )
+            # The retry's findings block is read into the buffers like any
+            # answer's and taken straight back out onto the retry's own ISR, so
+            # an answer ``_keep`` discards takes its findings with it.
+            findings = getattr(self, "_findings_buffer", None)
+            artifacts = getattr(self, "_artifacts_buffer", None)
+            f_mark = len(findings) if isinstance(findings, list) else 0
+            a_mark = len(artifacts) if isinstance(artifacts, list) else 0
+            prose = self._capture_findings(text)
+            parsed = self._text_to_isr(prose, isr.revision_round)
+            if isinstance(findings, list):
+                parsed.findings = findings[f_mark:]
+                del findings[f_mark:]
+            if isinstance(artifacts, list):
+                parsed.artifacts = artifacts[a_mark:]
+                del artifacts[a_mark:]
             cuts[id(parsed)] = getattr(self, "_last_answer_cut", None)
             self._last_answer_cut = None
             return parsed
 
         def _keep(first_answer: AgentISR, retried: AgentISR) -> AgentISR:
+            kept = _choose(first_answer, retried)
+            self.logger.info(
+                "Validation: the retry for '%s' answered %d claim(s), the first answer %d; "
+                "the %s answer is kept.",
+                self.name,
+                len(retried.claims),
+                len(first_answer.claims),
+                "retry's" if kept is retried else "first",
+            )
+            # How many claims the retry answered with, beside the first
+            # answer's, on the loop's record: a retry that answered none
+            # is otherwise a warning in a log.
+            BaseAnalyst._note_on_last_loop(  # type: ignore[arg-type]
+                self,
+                "validation_retry",
+                {
+                    "first_claims": len(first_answer.claims),
+                    "retry_claims": len(retried.claims),
+                    "kept": "retry" if kept is retried else "first",
+                },
+            )
+            return kept
+
+        def _choose(first_answer: AgentISR, retried: AgentISR) -> AgentISR:
             # A retry that came back with fewer claims than it started with
             # lost work. ``_text_to_isr`` over a garbled second answer parses
             # to an empty ISR just as happily as over a good one, and taking it
@@ -5332,6 +5390,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
                 keep=_keep,
                 drop_answer_for=frozenset({ANALYST_CUT_CODE}),
+                closing=ANALYST_FEEDBACK_CLOSING,
             )
         except Exception as exc:  # noqa: BLE001 — a retry that fails keeps the first answer
             self.logger.warning("Validation retry failed (%s); keeping the first answer.", exc)
@@ -5426,7 +5485,13 @@ class BaseAnalyst(BudgetMeter, ABC):
                     len(isr.claims),
                     self.name,
                 )
-            return isr.model_copy(update={"claims": kept})
+            gated = isr.model_copy(update={"claims": kept})
+            if dropped:
+                # The written answer still holds the claims the gate removed,
+                # and shown back it would ask the analyst to fix them: what
+                # stands is shown instead.
+                gated.note_answer_text("")
+            return gated
         except Exception as exc:  # noqa: BLE001 — gate must never break the run
             self.logger.warning("Consistency gate skipped (%s).", exc)
             return isr
@@ -5568,7 +5633,23 @@ class BaseAnalyst(BudgetMeter, ABC):
         return isr
 
     def _text_to_isr(self, text: str, revision_round: int) -> AgentISR:
-        """Convert a free-text report into a minimal AgentISR."""
+        """Convert a free-text report into a minimal AgentISR.
+
+        The ISR carries the answer it was parsed from as the model wrote it
+        (``AgentISR.answer_text``): the findings block ``_capture_findings``
+        took out of ``text`` is put back, because the validation turn shows the
+        analyst its own answer and the block is part of it.
+        """
+        written = text
+        last = getattr(self, "_last_written_answer", None)
+        if isinstance(last, tuple) and len(last) == 2 and last[0] == text:
+            written = str(last[1])
+        isr = self._parse_answer_text(text, revision_round)
+        isr.note_answer_text(written)
+        return isr
+
+    def _parse_answer_text(self, text: str, revision_round: int) -> AgentISR:
+        """The ISR the claim parser reads out of ``text``, for :meth:`_text_to_isr`."""
         domain = self._infer_domain()
 
         # A model that writes its tool calls into

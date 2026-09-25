@@ -209,11 +209,26 @@ class AgentISR(BaseModel):
     # nobody stated is not put on one.
     _unparsed_answer: str = PrivateAttr(default="")
     _blocks_without_confidence: int = PrivateAttr(default=0)
+    # The answer this ISR was parsed from, as the model wrote it: its CLAIM
+    # blocks and its findings block included. What the validation turn shows
+    # the analyst as its own previous answer; a rendering of the parsed claims
+    # in another shape is copied back in that shape, and the parser reads none
+    # of it.
+    _answer_text: str = PrivateAttr(default="")
 
     @property
     def unparsed_answer(self) -> str:
         """The prose of an answer that parsed into no claim, or ``""``."""
         return self._unparsed_answer
+
+    @property
+    def answer_text(self) -> str:
+        """The answer this ISR was parsed from, as written, or ``""`` when it has none."""
+        return self._answer_text
+
+    def note_answer_text(self, text: str) -> None:
+        """Record the answer this ISR was parsed from, as the model wrote it."""
+        self._answer_text = str(text or "")
 
     @property
     def blocks_without_confidence(self) -> int:

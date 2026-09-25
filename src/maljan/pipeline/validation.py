@@ -71,6 +71,16 @@ MAX_SCHEMA_VIOLATIONS = 6
 # send it and a test reads it.
 FEEDBACK_PREAMBLE = "Your previous answer had these problems:"
 FEEDBACK_CLOSING = "Fix them and answer again in the same format."
+# The analyst's closing names the format its parser reads. "The same format"
+# was read as the shape of the previous answer as it was shown back, and an
+# answer written in any shape but CLAIM blocks parses into no claim at all.
+ANALYST_FEEDBACK_CLOSING = (
+    "Fix them and write your whole answer again in the format it is read in: every claim "
+    "as its own block of CLAIM:, EVIDENCE:, CONFIDENCE: and TECHNIQUE: lines, the blocks "
+    "separated by a line of three dashes (---), then your fenced maljan-findings block if "
+    "your answer had one. Only CLAIM blocks are read as claims: a claim written another "
+    "way, or left out, is not in the answer."
+)
 
 
 # What joins the agents of a route inside one serialised row. A unit separator
@@ -225,13 +235,13 @@ Validator = Callable[[Any], list[Violation]]
 # ---------------------------------------------------------------------------
 
 
-def feedback_text(violations: Sequence[Violation]) -> str:
-    """The retry turn's text for a set of violations."""
+def feedback_text(violations: Sequence[Violation], *, closing: str = FEEDBACK_CLOSING) -> str:
+    """The retry turn's text for a set of violations, ending on ``closing``."""
     lines = [FEEDBACK_PREAMBLE]
     for violation in violations:
         where = f" ({violation.path})" if violation.path else ""
         lines.append(f"- [{violation.code}]{where} {violation.message}")
-    lines.append(FEEDBACK_CLOSING)
+    lines.append(closing)
     return "\n".join(lines)
 
 
@@ -5362,6 +5372,7 @@ def _with_feedback(
     violations: Sequence[Violation],
     *,
     keep_answer: bool = True,
+    closing: str = FEEDBACK_CLOSING,
 ) -> list[Any]:
     """The conversation plus the model's answer plus the correction turn.
 
@@ -5378,7 +5389,7 @@ def _with_feedback(
     turns = list(messages)
     if keep_answer:
         turns.append(AIMessage(content=str(content if content is not None else answer)))
-    return with_question(turns, feedback_text(violations))
+    return with_question(turns, feedback_text(violations, closing=closing))
 
 
 def _announce_feedback(
@@ -5584,6 +5595,7 @@ def retry_with_feedback_sync[T](
     stage: str = "",
     keep: Callable[[T, T], T] | None = None,
     drop_answer_for: frozenset[str] = frozenset(),
+    closing: str = FEEDBACK_CLOSING,
 ) -> tuple[T, list[Violation], int]:
     """:func:`retry_with_feedback` for the analysts, whose loop is synchronous.
 
@@ -5600,7 +5612,9 @@ def retry_with_feedback_sync[T](
     and recorded unresolved.
 
     ``drop_answer_for`` is :func:`retry_with_feedback`'s: the codes whose
-    correction describes the answer instead of following it.
+    correction describes the answer instead of following it. ``closing`` is
+    the retry turn's last line; the analysts' names the block format their
+    parser reads (``ANALYST_FEEDBACK_CLOSING``).
     """
     feed = _feed(sink, agent, stage)
     turns = list(messages)
@@ -5614,7 +5628,7 @@ def retry_with_feedback_sync[T](
         _announce_feedback(violations, on_feedback, feed, retries + 1)
         shown.extend(violations)
         keep_answer = not any(v.code in drop_answer_for for v in violations)
-        turns = _with_feedback(turns, answer, violations, keep_answer=keep_answer)
+        turns = _with_feedback(turns, answer, violations, keep_answer=keep_answer, closing=closing)
         retries += 1
         answer = run(turns)
         parsed = parse(answer)
