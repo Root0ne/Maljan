@@ -570,7 +570,15 @@ Two producers use it:
   longer run; a value that is only a number raises no question (an answer may
   write it another way, and every reputation report holds short numbers), and
   a cited entry whose text is known to be partial is never said to lack one.
-  The id is never rewritten. **A technique written with another technique's name**
+  The id is never rewritten. **An entry said to hold nothing, or one line**
+  (`report.entry_contents_misstated`): a sentence saying a cited entry holds
+  nothing, is empty, or holds only a header, a line or a row is checked against
+  that entry — the one its subject names (`the capture entry` names the
+  capture summary's, and so does the entry's id), never merely the one it cites. The statement is false when
+  the entry's text holds a value (or more than one), counted through its JSON
+  with a zero, an empty string and an empty list holding nothing; the model is
+  asked once, a partial entry is never judged, and the sentence is never
+  rewritten. **A technique written with another technique's name**
   (`report.technique_name`): an id followed by a name in brackets whose name
   the vendored ATT&CK table does not give that id — its own name, or its
   parent's name before a sub-technique's, stands — is asked about with the
@@ -2405,6 +2413,65 @@ is assembled from what the run gathered rather than recomputed beside it:
   the STIX bundle, MISP and `/reports/{id}/iocs` carry every value live, and
   the indicator section says so under its tables. A §7 string is printed as
   the file's bytes are, and says it is not an observed endpoint.
+* **A sandbox row is the sample's when the sample's process tree made it.**
+  The Triage mapping carries each flow's `procid`, `pid` and AS facts into its
+  tcp/udp row and states `sample_process_tree`: true when the flow's process
+  is the sample or a descendant of it through `procid_parent`, false when the
+  report names another process, absent when it does not say. The sample is the
+  process Triage marks `orig` and only that one; a report that marks none
+  names it by a file the process runs whose name equals the submitted name, or
+  is the sample's digest with an extension — equal, never contained, so a
+  guest's `MicrosoftEdgeUpdate.exe` is not a sample submitted as `update.exe`.
+  **CAPE, REST and mock reports carry no process on a flow**, so every address
+  they record is unattributed and is published only when a model keeps it. The
+  network block is projected from the job's whole report, never from a paged
+  view; the in-process sandbox views answer every row and page on request, and
+  their answers go through the MCP toolkit's own guardrail
+  (`ServerRegistry.answer_sizer`: the job's limit and ledger, the context
+  budget charged, a JSON answer shortened as a document whose notice names
+  `offset` and `limit`), and an address somebody watched is kept whatever its class and answered
+  with `no:` when it cannot be published. The sandbox view marks public DNS
+  resolvers, and the network block carries the attribution, the resolver fact,
+  `kept_by` and `mentioned_by` (an analyst's claim holding the value). A value
+  is kept by an analyst's artifact (`ledger_projection.kept_network_values`)
+  of a keeping kind only — `endpoints`, `network`, `iocs`, `c2` and their plain
+  spellings (`network_iocs`, `c2_endpoints`, `indicators`); a table of
+  contacted hosts is an observation and keeps nothing. A row has one type
+  cell: the column a heading names `type`, or else the first short cell (at
+  most three words; a longer one is a note) naming a type, read by its last
+  word with a `:port` taken off ("C2 domain" is `domain`, "ip:port" is `ip`).
+  The type applies to one value cell — the heading's value column, or the cell
+  after the type cell, or the one before it when the type comes last or the
+  cell after it is no value of that type — and a network type (`ip`, `ipv4`, `ipv6`, `address`,
+  `domain`, `host`, `hostname`, `fqdn`, `url`, `uri`) keeps that value. A row
+  whose type cell is a file, a path, a mutex, a registry key, a hash or
+  anything else keeps nothing; a note cell never drops a typed row. Every
+  other cell is read untyped, and only in an endpoints or C2 list: an address
+  is kept, a name only when it could be a host and has no file extension. A name the
+  model typed as a domain, host or URL is kept as written, whatever its TLD
+  (`.zip`, `.mov` and `.app` are real ones). The value is
+  read tolerantly: a port taken off, IPv6 brackets, any case, a URL's host. The judge's URL indicator keeps its
+  host the same way. A well-known benign host is kept only as itself, never
+  through a URL on it. `FINDINGS_BLOCK_FRAGMENT` states the shape it asks for
+  (`ENDPOINTS_ROW_SHAPE`). The publish rule
+  (`stix_renderer.sandbox_row_kwargs`, asked through `emulation_kwargs` by the
+  table, the export, `/iocs` and the judge's values alike) holds back a
+  sandbox address the tree did not make, and a well-known benign name the
+  guest resolved — Windows resolves through its DNS service, so a name is
+  judged by what it is — until a model keeps it as an indicator: an analyst's
+  artifact or the judge's indicator. A claim that mentions the value keeps
+  nothing (one run's analysts named two background addresses in claims calling
+  them noise). Otherwise the row reads `no: <reason>, and no model kept it as
+  an indicator`, naming any claim that only mentioned it, with the resolver and
+  AS facts in the reason and the table's context. The drafts read the table's
+  answer, the Sigma selection included. **A published URL carries its name.**
+  The host of every URL the rule publishes — the network block's and the
+  judge's — follows the URL's decision (`published_url_hosts`,
+  `in_published_url`), except a well-known benign host, which is published
+  only when a model keeps the host itself; the table, the export and `/iocs`
+  add it as a domain row and indicator when nothing else did. The export
+  carries every row the table publishes, whatever their number. The rule's report-wide lookups
+  are built once per table, export or feed (`one_reading`).
 * **The IOC table is the one publish rule's answer, row by row.**
   `build_consolidated_iocs` stores every indicator live with its kind, who
   recorded it and `published`: `yes`, or `no:` and the half of
@@ -3031,21 +3098,16 @@ analysis page, and none of them is an event, so none of them was covered by the
 scrubbing the publisher does: a model echoing a credentialled URL into the
 verdict field put the credential in the stored report and drew it on the page.
 
-`MAX_TOTAL_INDICATORS` is applied where the indicators are rendered into the
-bundle, over every indicator that would be in it rather than over the ones the
-renderer happened to mint. The integrity pass runs *first*: a corroborated
-string row and the network row that corroborated it are one indicator written
-twice, and capping before the dedupe spent slots on rows it then deleted, so a
-bundle over the cap shipped under it and lost five observed addresses to
-duplicates. Deduplicated first, the cap keeps exactly as many as there is room
-for, in four bands — the sample's own hashes, then the network indicators
-ordered by how strong their origin is (observed, then asserted by an agent or
-the judge, then string-derived and corroborated), then the other hashes the
-judge carried, then the file names. A string-derived row never outranks the
-observed row it duplicates, and when they are the same indicator the queue
-order makes the observation the one that survives the dedupe. The renderer and
-the linter read the one constant. The integrity pass then runs a second time,
-to sweep the relationships the cap left pointing at nothing, and what it takes
-out there is counted in the truncation ledger under `cap_orphan` — its own
-reason, because it is the cap's loss rather than a defect of anybody's bundle,
-and because that pass used to run with no ledger at all.
+No count bounds the indicators the export carries: it carries every value the
+one publish rule publishes, which is every `yes` row of the IOC table, and no
+band ranking drops any of them. A total cap of fifteen (`MAX_TOTAL_INDICATORS`)
+and a cap of ten file names used to drop the lowest-ranked indicators, so the
+table and `/iocs` said `yes` for values the bundle did not carry, and a slice
+of fifty string rows stopped the string path early. The integrity pass still
+runs over the assembled bundle, deduplicating an indicator written twice (a
+corroborated string row and the network row that corroborated it; the queue
+order makes the observation the one that survives). The two constants are now
+the report linter's counts: its C4 warning states how many file names and how
+many indicators a bundle carries when it passes them, and drops nothing. The
+run summary's "STIX indicators over the cap" row reads 0 for a run exported
+this way.

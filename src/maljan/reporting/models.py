@@ -359,6 +359,14 @@ class NetworkDomain(BaseModel):
     source: Literal["sandbox", "analyst", "strings"] | None = None
     # Filled asynchronously by the threat-intel enrichment worker.
     reputation: dict[str, Any] | None = None
+    # Which analyst kept this value as an indicator (an artifact of endpoints,
+    # network values or IOCs), in the words the publish rule reports. A sandbox
+    # row the rule would not publish on the observation alone is published
+    # when a model keeps it (``stix_renderer.sandbox_row_kwargs``).
+    kept_by: list[str] = Field(default_factory=list)
+    # Which analysts' claims mention the value without keeping it. Stated in
+    # the reason a row is not published; it publishes nothing.
+    mentioned_by: list[str] = Field(default_factory=list)
 
 
 class NetworkIP(BaseModel):
@@ -380,6 +388,18 @@ class NetworkIP(BaseModel):
     # ``None`` for a producer that does not record it.
     source: Literal["sandbox", "analyst", "strings"] | None = None
     reputation: dict[str, Any] | None = None
+    # Whether the sandbox saw the sample's own process tree reach this address:
+    # ``True`` when a flow to it came from the sample or a process it started,
+    # ``False`` when every flow the report attributes came from another
+    # process, ``None`` when the report does not say. A platform fact read
+    # from the sandbox report's own process records, right or absent.
+    sample_process_tree: bool | None = None
+    # Whether the address is a public DNS resolver's, which a sandbox guest
+    # reaches whatever the sample does.
+    public_resolver: bool = False
+    # Who kept the value, and who only mentioned it; see ``NetworkDomain``.
+    kept_by: list[str] = Field(default_factory=list)
+    mentioned_by: list[str] = Field(default_factory=list)
 
 
 class NetworkURL(BaseModel):

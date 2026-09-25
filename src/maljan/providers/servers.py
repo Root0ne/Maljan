@@ -1143,6 +1143,25 @@ class ServerRegistry:
         # missing, rather than the report simply being thinner than the last.
         self.degradation_reasons: list[str] = []
 
+    def answer_sizer(self) -> Any:
+        """The MCP toolkit's own answer guardrail, for an in-process tool's answer.
+
+        An in-process tool — the sandbox report's views — has no server and so
+        no toolkit, and its answers used to reach the model at whatever size
+        they had. This is the same guardrail an MCP answer goes through, with
+        this job's limit, ledger and context budget: the size measured against
+        the room the conversation has, a JSON answer shortened as a document
+        with its bookkeeping key, and the budget charged. One path, not a copy.
+        """
+        from maljan.agents.mcp_client import MCPLangChainToolkit
+
+        return MCPLangChainToolkit(
+            None,
+            max_output_chars=self._max_output_chars,
+            truncation_ledger=self._truncation_ledger,
+            context_budget=self._context_budget,
+        )
+
     def _rested(self, record: dict[str, Any]) -> None:
         """Keep one breaker opening for the run summary and announce it."""
         from maljan.pipeline.events import emit_tool_server_rested

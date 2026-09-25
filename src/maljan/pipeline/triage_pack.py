@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import Any
 
 from maljan.agents.evidence_recorder import EvidenceRecorder, result_text
+from maljan.analysis.pcap_summary import conversation_line
 from maljan.analysis.technique_ids import technique_ids_in
 from maljan.core.logger import logger
 from maljan.extractors.sample_identity import ARCHIVE_FILE_TYPES, DOCUMENT_FILE_TYPES
@@ -768,7 +769,14 @@ class _Pack:
             self.record(tool, {}, partial(call, report))
         capture = _capture_path(report)
         if capture:
-            self.record("pcap_summary", {"path": capture}, lambda: pcap.pcap_summary(capture))
+            # Recorded under the name the job's own sidecars resolve, never the
+            # host path: the entry's arguments reach the evidence index a model
+            # reads, and the network tools take this name back.
+            self.record(
+                "pcap_summary",
+                {"pcap_path": staging.job_relative(capture)},
+                lambda: pcap.pcap_summary(capture),
+            )
 
     def _reputation(self) -> None:
         """The one network call, or the entry that says why there was none.
@@ -1136,11 +1144,12 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
 
 def _within_room(entry: LedgerEntry, room: int) -> str | None:
     """``entry``'s line in ``room`` characters, when it can say less and still say something."""
-    if entry.tool != "floss" or not entry.ok or not isinstance(entry.structured, dict):
+    shorter = _SHORTER_RENDERERS.get(entry.tool)
+    if shorter is None or not entry.ok or not isinstance(entry.structured, dict):
         return None
-    head = f"[{entry.id}] {_GROUP_LABELS['floss']}: "
+    head = f"[{entry.id}] {_GROUP_LABELS.get(entry.tool, entry.tool)}: "
     try:
-        body = _decoded_strings(entry.structured, max_chars=room - len(head))
+        body = shorter(entry.structured, room - len(head))
     except Exception:  # noqa: BLE001 — a renderer must never cost the block
         return None
     line = head + body
@@ -1488,12 +1497,73 @@ def _sandbox_channels(data: dict[str, Any]) -> str:
     return _names(channels) or "none"
 
 
-def _pcap(data: dict[str, Any]) -> str:
+# The capture line: the packet count, the protocol counts and every external
+# conversation, heaviest first. It used to be the summary's heading alone, and
+# a report model then wrote that the capture entry "holds only a header line"
+# about an entry listing fifteen conversations. The line is cut only by the
+# pack's own room (``_within_room``), and then says how many it shows.
+
+
+def _pcap(data: dict[str, Any], max_chars: int | None = None) -> str:
+    """The capture's facts on one line, the conversations cut to ``max_chars``, the cut said.
+
+    ``None`` is no cut. ``""`` when not even the counts fit.
+    """
     if data.get("empty"):
         return "empty capture"
-    return _short(
-        str(data.get("summary") or "").splitlines()[0] if data.get("summary") else "recorded"
+    conversations = [row for row in (data.get("conversations") or []) if isinstance(row, dict)]
+    if "packets_read" not in data:
+        # An entry recorded before the summary carried its facts: its text,
+        # flattened onto the line.
+        text = " ".join(str(data.get("summary") or "recorded").split())
+        return text if max_chars is None else _short(text, max_chars)
+    protocols = data.get("protocols") or {}
+    head = (
+        f"{_n(data.get('packets_read'))} of {_n(data.get('packets_in_capture'))} packets in the "
+        f"capture read, {_n(data.get('bytes'))} bytes over "
+        f"{float(data.get('duration_s') or 0.0):.1f}s; protocols: "
+        + (", ".join(f"{k} {_n(v)}" for k, v in protocols.items()) or "no IP packets")
     )
+    periodic = data.get("beacons") or []
+    tail = "; contacts at a regular interval: " + (
+        ", ".join(
+            f"{b.get('dst')}:{b.get('dport')}/{b.get('proto')} every ~{b.get('interval_s')}s"
+            for b in periodic
+            if isinstance(b, dict)
+        )
+        if periodic
+        else "none detected"
+    )
+
+    def _line(shown: int) -> str:
+        if not conversations:
+            return f"{head}; no external conversations{tail}"
+        total = len(conversations)
+        said = (
+            f"all {_n(total)} external conversations by volume"
+            if shown >= total
+            else (
+                f"{_n(shown)} of {_n(total)} external conversations by volume (the rest are "
+                "in the entry)"
+            )
+        )
+        rows = ", ".join(conversation_line(row) for row in conversations[:shown])
+        return f"{head}; {said}" + (f": {rows}" if shown else "") + tail
+
+    whole = _line(len(conversations))
+    if max_chars is None or len(whole) <= max_chars:
+        return whole
+    # The most conversations that fit, found by halving rather than by
+    # dropping one at a time: a capture can hold thousands of them.
+    low, high = 0, len(conversations)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if len(_line(middle)) <= max_chars:
+            low = middle
+        else:
+            high = middle - 1
+    line = _line(low)
+    return line if len(line) <= max_chars else ""
 
 
 # The decoded-strings line. The pack is one block every agent reads, cut at
@@ -1794,4 +1864,12 @@ _RENDERERS: dict[str, Callable[[dict[str, Any]], str]] = {
     "pcap_summary": _pcap,
     "function_matches": _function_matches,
     "floss": _decoded_strings,
+}
+
+# The lines that can say less and still say something, each given the room it
+# has: the decoded strings keep their first strings, the capture its counts and
+# its heaviest conversations.
+_SHORTER_RENDERERS: dict[str, Callable[[dict[str, Any], int], str]] = {
+    "floss": lambda data, room: _decoded_strings(data, max_chars=room),
+    "pcap_summary": lambda data, room: _pcap(data, max_chars=room),
 }

@@ -16,6 +16,7 @@ consumer can iterate a fresh ``SandboxReport()`` without a null check.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal, cast
 from urllib.parse import urlsplit
 
@@ -390,6 +391,106 @@ def _split_host_port(value: str) -> tuple[str, int | None]:
     return value, None
 
 
+# The key a flow row states its attribution under: ``True`` when the process
+# that made the flow is the sample's or one it started, ``False`` when the
+# report names that process and it is neither, and absent when the report does
+# not say. A platform fact, so it is right or it is not there.
+SAMPLE_TREE_KEY = "sample_process_tree"
+
+
+def _basename(path: str) -> str:
+    return re.split(r"[\\/]", path.strip().strip('"').strip("'"))[-1].lower()
+
+
+def _named_files(proc: dict[str, Any]) -> set[str]:
+    """The file names a process record runs: its image, and each path its command line names.
+
+    Whole file names, never slices: a command line's first word and every
+    comma- or space-separated path in it (``rundll32.exe <dll>,#1`` runs the
+    DLL), each cut to its file name.
+    """
+    names = {_basename(str(proc.get("image") or ""))}
+    for token in re.split(r"[\s,]+", str(proc.get("cmd") or "")):
+        cleaned = token.strip().strip('"').strip("'")
+        if cleaned:
+            names.add(_basename(cleaned))
+    return {name for name in names if name}
+
+
+def _is_the_sample(proc: dict[str, Any], sample: dict[str, Any]) -> bool:
+    """Whether a process record with no ``orig`` mark runs the submitted file.
+
+    A file name the process runs equals the name the sample was submitted
+    under, or is the sample's digest with an extension (a sandbox names the
+    staged copy by its hash). An equal name, never a contained one: a guest's
+    ``MicrosoftEdgeUpdate.exe`` is not a sample submitted as ``update.exe``.
+    """
+    target = _basename(str(sample.get("target") or ""))
+    digest = str(sample.get("sha256") or "").strip().lower()
+    for name in _named_files(proc):
+        if target and name == target:
+            return True
+        if digest and name.rsplit(".", 1)[0] == digest:
+            return True
+    return False
+
+
+def _sample_process_tree(
+    task: dict[str, Any], sample: dict[str, Any]
+) -> tuple[frozenset[Any], frozenset[Any]]:
+    """The ``procid``s of the sample's process tree in one task, and every ``procid`` listed.
+
+    The tree is the sample's own processes and every process whose parent
+    chain (``procid_parent``) reaches one. Empty when no process is the sample,
+    which leaves every flow of the task unattributed rather than attributed to
+    nothing.
+    """
+    processes = [p for p in task.get("processes") or [] if isinstance(p, dict)]
+    parent = {p.get("procid"): p.get("procid_parent") for p in processes if p.get("procid")}
+    # Triage's own mark, when it gave one, is the answer and the only one; the
+    # file names are read only for a report that marks nothing.
+    marked = {p.get("procid") for p in processes if p.get("procid") and p.get("orig") is True}
+    roots = marked or {
+        p.get("procid") for p in processes if p.get("procid") and _is_the_sample(p, sample)
+    }
+    tree: set[Any] = set()
+    for procid in parent:
+        seen: set[Any] = set()
+        current = procid
+        while current and current not in seen:
+            if current in roots:
+                tree.add(procid)
+                break
+            seen.add(current)
+            current = parent.get(current)
+    return frozenset(tree), frozenset(parent)
+
+
+def _flow_attribution(
+    flow: dict[str, Any], in_tree: frozenset[Any], listed: frozenset[Any]
+) -> dict[str, Any]:
+    """What one Triage flow says about the process that made it, and its network facts.
+
+    ``procid`` and ``pid`` as the flow gives them; ``sample_process_tree`` only
+    where the report settles it (see ``SAMPLE_TREE_KEY``); the destination's AS
+    number, AS organisation and country where Triage recorded them.
+    """
+    out: dict[str, Any] = {}
+    procid = flow.get("procid")
+    if procid not in (None, ""):
+        out["procid"] = procid
+        if in_tree and procid in in_tree:
+            out[SAMPLE_TREE_KEY] = True
+        elif in_tree and procid in listed:
+            out[SAMPLE_TREE_KEY] = False
+    if flow.get("pid") not in (None, ""):
+        out["pid"] = flow.get("pid")
+    for key in ("as_num", "as_org", "country"):
+        if flow.get(key) not in (None, ""):
+            out[key] = flow[key]
+    return out
+
+
 def triage_overview_to_sandbox_report(
     overview: dict[str, Any],
     *,
@@ -436,6 +537,7 @@ def triage_overview_to_sandbox_report(
     network = SandboxNetwork()
     hosts_by_ip: dict[str, dict[str, Any]] = {}
     for task in (task_reports or {}).values():
+        in_tree, listed = _sample_process_tree(task, sample)
         for proc in task.get("processes") or []:
             if not isinstance(proc, dict):
                 continue
@@ -460,7 +562,8 @@ def triage_overview_to_sandbox_report(
             dst_host, dst_port = _split_host_port(str(flow.get("dst") or ""))
             if not dst_host:
                 continue
-            row = {"dst": dst_host, "dport": dst_port}
+            row: dict[str, Any] = {"dst": dst_host, "dport": dst_port}
+            row.update(_flow_attribution(flow, in_tree, listed))
             if proto == "tcp":
                 network.tcp.append(row)
             elif proto == "udp":

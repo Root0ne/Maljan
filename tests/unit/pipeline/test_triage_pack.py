@@ -370,7 +370,8 @@ class TestTheSandboxSteps:
         report = {**SANDBOX_REPORT, "network": {"pcap_local_path": str(capture)}}
         result = _pack(_write(tmp_path, "s.exe", _pe()), "pe", sandbox_report=report)
         (summary,) = [entry for entry in result.entries if entry.tool == "pcap_summary"]
-        assert summary.args == {"path": str(capture)}
+        # The name the network tools take back, never the host path.
+        assert summary.args == {"pcap_path": "run.pcap"}
         assert summary.structured["summary"] == "1 flow"
 
     def test_no_report_means_none_of_them(self, tmp_path: Path) -> None:

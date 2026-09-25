@@ -30,6 +30,7 @@ from maljan.agents.base_agent import FINAL_ANSWER_NUDGE
 from maljan.agents.judge_agent import COMPACT_BUNDLE_RULES, verdict_cut_violation
 from maljan.agents.network_analyst import NO_PACKET_TOOL_LINE, OTHER_TOOLS_THEN_ANALYZE
 from maljan.agents.prompt_fragments import (
+    ENDPOINTS_ROW_SHAPE,
     NO_TOOLS_STATEMENT,
     TOOL_FREE_TURN_STATEMENT,
     tools_statement,
@@ -45,6 +46,12 @@ from maljan.agents.static_analyst import (
     _reframe_static_raw_data,
     _tool_use_line,
 )
+from maljan.agents.tool_pinning import (
+    UNREADABLE_FILLED_CAPTURE,
+    UNREADABLE_FILLED_CAPTURE_REMEDIATION,
+)
+from maljan.analysis.pcap_summary import CaptureRead
+from maljan.pipeline import triage_pack
 from maljan.pipeline.nodes import (
     NO_SANDBOX_DATA_REASON,
     NO_STATIC_FIXTURE_NOTE,
@@ -52,9 +59,11 @@ from maljan.pipeline.nodes import (
 )
 from maljan.pipeline.validation import (
     CapabilityGrounding,
+    EntryTexts,
     absence_claim_violation,
     analyst_cut_violation,
     claim_does_not_describe_violation,
+    misstated_entry_contents,
     repeated_item_violations,
     section_cut_violation,
     ungrounded_capabilities,
@@ -63,6 +72,7 @@ from maljan.pipeline.validation import (
 from maljan.providers.base import STATIC_EVIDENCE_INSTRUCTIONS, absent_provider_fragment
 from maljan.providers.static.ghidra import GHIDRA_GUIDANCE
 from maljan.providers.static.null import NullStaticProvider
+from maljan.providers.static.r2 import r2_error_reply
 from maljan.reporting.composer import (
     _EXAMPLES,
     _INSTRUCTIONS,
@@ -75,6 +85,13 @@ from maljan.reporting.composer import (
     section_contract,
 )
 from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXAMPLE_OBJECT, EXPECTED_OBJECT
+from maljan.reporting.renderers.stix_renderer import (
+    BENIGN_NAME_IN_A_URL,
+    BENIGN_NAME_RESOLVED,
+    FLOW_OUTSIDE_THE_TREE,
+    UNATTRIBUTED_FLOW,
+    not_kept_reason,
+)
 from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
@@ -82,6 +99,7 @@ from maljan.schemas.isr_models import (
 )
 from maljan.schemas.stix_models import Bundle
 from maljan.tools import knowledge
+from maljan.tools.errors import CAPTURES_REMEDIATION, NO_CAPTURE_REMEDIATION
 
 # The distinctive terms of the evaluation key: how the scored sample resolves its
 # APIs, checks its host, persists, configures itself, talks to its server and
@@ -343,6 +361,52 @@ PROMPTS: dict[str, str] = {
         ]
     ),
     "network packet-tool lines": f"{NO_PACKET_TOOL_LINE} {OTHER_TOOLS_THEN_ANALYZE}",
+    "question for an entry said to hold one line": " ".join(
+        v.message
+        for v in misstated_entry_contents(
+            {"body": "The capture entry holds only a header line [ev_0001]."},
+            EntryTexts(
+                texts={"ev_0001": '{"summary": "a\\nb", "packets_read": 3}'},
+                tools={"ev_0001": "pcap_summary"},
+            ),
+        )
+    ),
+    "publish rule reasons for a sandbox row": " ".join(
+        [
+            UNATTRIBUTED_FLOW,
+            FLOW_OUTSIDE_THE_TREE,
+            BENIGN_NAME_RESOLVED,
+            BENIGN_NAME_IN_A_URL,
+            not_kept_reason("x", "a claim by the network analyst"),
+        ]
+    ),
+    "failure of a capture the platform filled in": " ".join(
+        [UNREADABLE_FILLED_CAPTURE, UNREADABLE_FILLED_CAPTURE_REMEDIATION]
+    ),
+    "capture line in the pack": triage_pack._pcap(
+        {
+            "packets_read": 10,
+            "packets_in_capture": 12,
+            "bytes": 900,
+            "duration_s": 3.0,
+            "protocols": {"tcp": 10},
+            "conversations": [{"dst": "d", "dport": 1, "proto": "tcp", "packets": 1, "bytes": 1}],
+            "beacons": [],
+        }
+    ),
+    "capture read statement": CaptureRead(
+        packets_read=10, packets_in_capture=12, limit=10
+    ).statement(),
+    "analyst findings block's endpoints row shape": ENDPOINTS_ROW_SHAPE,
+    "capture refusal remediations": " ".join(
+        [
+            NO_CAPTURE_REMEDIATION.format(argument="pcap_path"),
+            CAPTURES_REMEDIATION.format(argument="pcap_path", names="captures/a.pcap"),
+        ]
+    ),
+    "radare2 refusal remediation": r2_error_reply(
+        "list_functions", "No file is currently open. Call open_file first."
+    )["error"]["remediation"],
     "final-answer nudge": FINAL_ANSWER_NUDGE,
     "skipped-analyst degradation reason": skipped_analysts_reason(
         NO_SANDBOX_DATA_REASON, ["dynamic", "network"]

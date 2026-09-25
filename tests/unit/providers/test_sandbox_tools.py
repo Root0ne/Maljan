@@ -107,14 +107,26 @@ class TestNetwork:
             "udp": [],
         }
 
-    def test_a_busy_kind_is_bounded_and_says_how_many_there_were(self, monkeypatch) -> None:
-        monkeypatch.setattr(sandbox_tools, "_ROW_LIMIT", 3)
-        report = {"network": {"dns": [{"request": f"h{i}.example"} for i in range(10)]}}
+    def test_every_row_comes_back_when_no_page_is_asked_for(self) -> None:
+        report = {"network": {"dns": [{"request": f"h{i}.example"} for i in range(500)]}}
 
         result = sandbox_tools.sandbox_network(report)
 
-        assert len(result["dns"]) == 3
+        assert len(result["dns"]) == 500
+        assert "dns_total" not in result
+
+    def test_a_page_says_how_many_there_were_and_where_the_next_starts(self) -> None:
+        report = {"network": {"dns": [{"request": f"h{i}.example"} for i in range(10)]}}
+
+        result = sandbox_tools.sandbox_network(report, offset=3, limit=3)
+
+        assert [row["request"] for row in result["dns"]] == [
+            "h3.example",
+            "h4.example",
+            "h5.example",
+        ]
         assert result["dns_total"] == 10
+        assert result["dns_next_offset"] == 6
 
 
 class TestSignatures:
@@ -168,11 +180,19 @@ class TestReportSection:
         assert "no section" in result["error"]
         assert "behavior" in result["sections"]
 
-    def test_a_list_section_is_bounded_and_counted(self, monkeypatch) -> None:
-        monkeypatch.setattr(sandbox_tools, "_ROW_LIMIT", 2)
-        result = sandbox_tools.sandbox_report_section({"strings": list(range(9))}, "strings")
+    def test_a_list_section_comes_back_whole_and_counted(self) -> None:
+        result = sandbox_tools.sandbox_report_section({"strings": list(range(900))}, "strings")
+        assert result["rows"] == list(range(900))
+        assert result["total"] == 900
+
+    def test_a_page_of_a_list_section_names_the_next_offset(self) -> None:
+        result = sandbox_tools.sandbox_report_section(
+            {"strings": list(range(9))}, "strings", offset=0, limit=2
+        )
         assert result["rows"] == [0, 1]
         assert result["total"] == 9
+        assert result["shown"] == "2 of 9 rows, from offset 0"
+        assert result["next_offset"] == 2
 
 
 class TestApiCalls:
@@ -239,7 +259,7 @@ class TestApiCalls:
         )
 
         fields = set(tool.args_schema.model_fields)
-        assert fields == {"process", "name", "limit"}
+        assert fields == {"process", "name", "offset", "limit"}
         assert "api_capability" in tool.description
 
 

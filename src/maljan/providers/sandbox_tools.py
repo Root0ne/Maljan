@@ -27,10 +27,36 @@ from maljan.pipeline.sandbox_status import NOT_RUN, sandbox_status
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
-# How many rows one tool call returns. A busy CAPE report holds tens of
-# thousands of API calls; a tool that returned them all would blow the context
-# it was meant to save.
-_ROW_LIMIT = 200
+# Every list a tool answers with is the whole list unless the caller asks for
+# a page: ``offset`` is where the page starts and ``limit`` how many rows it
+# holds, 0 for all of them. A page that stops short says so — ``N of M rows``
+# and the ``next_offset`` to ask for — and how much of an answer a model reads
+# at once is the platform's tool-answer sizing to decide, which says what it
+# cut. A fixed row count used to cut every view at 200 rows without a word to
+# the projection that read it, and an address past row 200 never reached the
+# report.
+
+
+def _page(rows: list[Any], offset: Any = 0, limit: Any = 0) -> tuple[list[Any], dict[str, Any]]:
+    """One page of ``rows`` and what it says about itself when it is not all of them."""
+    start = max(0, _count(offset))
+    wanted = _count(limit)
+    stop = start + wanted if wanted > 0 else len(rows)
+    shown = rows[start:stop]
+    if start == 0 and len(shown) == len(rows):
+        return shown, {}
+    meta: dict[str, Any] = {"shown": f"{len(shown)} of {len(rows)} rows, from offset {start}"}
+    if stop < len(rows):
+        meta["next_offset"] = stop
+    return shown, meta
+
+
+def _count(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
 
 _NO_REPORT = {"error": "no sandbox report for this job", "tool": "sandbox"}
 
@@ -80,7 +106,9 @@ def _behavior(report: dict[str, Any]) -> dict[str, Any]:
     return behavior if isinstance(behavior, dict) else {}
 
 
-def sandbox_report_section(report: dict[str, Any] | None, section: str) -> dict[str, Any]:
+def sandbox_report_section(
+    report: dict[str, Any] | None, section: str, offset: int = 0, limit: int = 0
+) -> dict[str, Any]:
     """One top-level section of the report, bounded.
 
     The escape hatch for a section the other tools do not model — ``target``,
@@ -98,11 +126,28 @@ def sandbox_report_section(report: dict[str, Any] | None, section: str) -> dict[
         }
     value = report[key]
     if isinstance(value, list):
-        return {"section": key, "rows": value[:_ROW_LIMIT], "total": len(value)}
-    return {"section": key, "value": value}
+        rows, meta = _page(value, offset, limit)
+        return {"section": key, "rows": rows, "total": len(value), **meta}
+    return {"section": key, "value": _without_host_paths(value)}
 
 
-def sandbox_processes(report: dict[str, Any] | None) -> dict[str, Any]:
+# Where the platform recorded the capture it fetched beside the report. A host
+# path, written by the platform and not by the sandbox, and a section answer is
+# read by a model: it is named the way the job's capture tools take it back.
+_CAPTURE_KEY = "pcap_local_path"
+
+
+def _without_host_paths(value: Any) -> Any:
+    if not isinstance(value, dict) or not value.get(_CAPTURE_KEY):
+        return value
+    from maljan.tools.staging import job_relative
+
+    return {**value, _CAPTURE_KEY: job_relative(str(value[_CAPTURE_KEY]))}
+
+
+def sandbox_processes(
+    report: dict[str, Any] | None, offset: int = 0, limit: int = 0
+) -> dict[str, Any]:
     """The process tree: pid, parent, name and command line, one row each.
 
     Without the API calls. The call list is where a behaviour report's bulk
@@ -114,8 +159,9 @@ def sandbox_processes(report: dict[str, Any] | None) -> dict[str, Any]:
         return _no_report(report)
     processes = _behavior(report).get("processes")
     rows: list[dict[str, Any]] = []
-    if isinstance(processes, list):
-        for proc in processes[:_ROW_LIMIT]:
+    page, meta = _page(processes if isinstance(processes, list) else [], offset, limit)
+    if page:
+        for proc in page:
             if not isinstance(proc, dict):
                 continue
             rows.append(
@@ -128,14 +174,19 @@ def sandbox_processes(report: dict[str, Any] | None) -> dict[str, Any]:
                     "call_count": len(proc.get("calls") or []),
                 }
             )
-    return {"processes": rows, "total": len(processes) if isinstance(processes, list) else 0}
+    total = len(processes) if isinstance(processes, list) else 0
+    return {"processes": rows, "total": total, **meta}
 
 
-def sandbox_network(report: dict[str, Any] | None) -> dict[str, Any]:
+def sandbox_network(
+    report: dict[str, Any] | None, offset: int = 0, limit: int = 0
+) -> dict[str, Any]:
     """DNS lookups, hosts, HTTP requests, TCP/UDP endpoints and TLS, per kind.
 
-    Per-kind bounds rather than one shared budget: a sample that made a
-    thousand DNS lookups must not push its two HTTP requests out of the answer.
+    Every row of every kind. A page (``offset``/``limit``) is taken per kind, so
+    a sample that made a thousand DNS lookups cannot push its two HTTP requests
+    off the page, and a kind cut short says ``<kind>_total`` and
+    ``<kind>_next_offset``.
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
@@ -146,13 +197,35 @@ def sandbox_network(report: dict[str, Any] | None) -> dict[str, Any]:
     for key in ("dns", "hosts", "http", "tcp", "udp", "domains", "icmp", "tls"):
         rows = network.get(key)
         if isinstance(rows, list):
-            out[key] = rows[:_ROW_LIMIT]
-            if len(rows) > _ROW_LIMIT:
+            page, meta = _page(rows, offset, limit)
+            out[key] = [_with_resolver_fact(row) for row in page]
+            if meta:
                 out[f"{key}_total"] = len(rows)
+                if "next_offset" in meta:
+                    out[f"{key}_next_offset"] = meta["next_offset"]
     return out
 
 
-def sandbox_signatures(report: dict[str, Any] | None) -> dict[str, Any]:
+def _with_resolver_fact(row: Any) -> Any:
+    """A flow or host row, marked ``public_resolver`` when it names a public DNS resolver.
+
+    A platform fact beside the sandbox's own: a sandbox's guest resolves
+    through a public resolver whatever the sample does, so an analyst reading
+    a row to one is told what the address is before it reads it as a contact.
+    """
+    if not isinstance(row, dict):
+        return row
+    from maljan.extractors.network_extractor import is_public_resolver
+
+    address = row.get("dst") or row.get("ip") or row.get("address")
+    if isinstance(address, str) and is_public_resolver(address):
+        return {**row, "public_resolver": True}
+    return row
+
+
+def sandbox_signatures(
+    report: dict[str, Any] | None, offset: int = 0, limit: int = 0
+) -> dict[str, Any]:
     """The sandbox's own signature hits, with their severity.
 
     Reported as what they are — one detection engine's opinion — not folded
@@ -163,8 +236,9 @@ def sandbox_signatures(report: dict[str, Any] | None) -> dict[str, Any]:
         return _no_report(report)
     signatures = report.get("signatures")
     rows: list[dict[str, Any]] = []
-    if isinstance(signatures, list):
-        for sig in signatures[:_ROW_LIMIT]:
+    page, meta = _page(signatures if isinstance(signatures, list) else [], offset, limit)
+    if page:
+        for sig in page:
             if not isinstance(sig, dict):
                 continue
             rows.append(
@@ -176,10 +250,13 @@ def sandbox_signatures(report: dict[str, Any] | None) -> dict[str, Any]:
                     "references": list(sig.get("references") or [])[:5],
                 }
             )
-    return {"signatures": rows, "total": len(signatures) if isinstance(signatures, list) else 0}
+    total = len(signatures) if isinstance(signatures, list) else 0
+    return {"signatures": rows, "total": total, **meta}
 
 
-def sandbox_dropped_files(report: dict[str, Any] | None) -> dict[str, Any]:
+def sandbox_dropped_files(
+    report: dict[str, Any] | None, offset: int = 0, limit: int = 0
+) -> dict[str, Any]:
     """Files the sample wrote, with the hashes the sandbox computed for them."""
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
@@ -187,8 +264,9 @@ def sandbox_dropped_files(report: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(dropped, list):
         dropped = report.get("dropped_files")
     rows: list[dict[str, Any]] = []
-    if isinstance(dropped, list):
-        for entry in dropped[:_ROW_LIMIT]:
+    page, meta = _page(dropped if isinstance(dropped, list) else [], offset, limit)
+    if page:
+        for entry in page:
             if not isinstance(entry, dict):
                 continue
             rows.append(
@@ -200,7 +278,8 @@ def sandbox_dropped_files(report: dict[str, Any] | None) -> dict[str, Any]:
                     "type": entry.get("type"),
                 }
             )
-    return {"dropped": rows, "total": len(dropped) if isinstance(dropped, list) else 0}
+    total = len(dropped) if isinstance(dropped, list) else 0
+    return {"dropped": rows, "total": total, **meta}
 
 
 # Registry APIs, and what each one does to the key it names. A call the table
@@ -279,7 +358,9 @@ def _summary_list(report: dict[str, Any], key: str) -> list[str]:
     return [str(v) for v in values if isinstance(v, str)] if isinstance(values, list) else []
 
 
-def sandbox_registry_ops(report: dict[str, Any] | None, limit: int = _ROW_LIMIT) -> dict[str, Any]:
+def sandbox_registry_ops(
+    report: dict[str, Any] | None, limit: int = 0, offset: int = 0
+) -> dict[str, Any]:
     """Registry keys the sample touched, with the operation and the value written.
 
     Two sources, because sandboxes fill them unevenly: the behaviour summary's
@@ -290,7 +371,6 @@ def sandbox_registry_ops(report: dict[str, Any] | None, limit: int = _ROW_LIMIT)
     """
     if report is None or _no_sandbox_ran(report):
         return _no_report(report)
-    bound = max(0, int(limit))
     rows: dict[str, dict[str, Any]] = {}
     for key in _summary_list(report, "keys"):
         rows.setdefault(key, {"key": key, "operation": "access", "value": None})
@@ -305,7 +385,8 @@ def sandbox_registry_ops(report: dict[str, Any] | None, limit: int = _ROW_LIMIT)
         value = _argument(call, _REGISTRY_VALUE_ARGS)
         rows[key] = {"key": key, "operation": operation, "value": value or None}
     ordered = list(rows.values())
-    return {"registry": ordered[:bound], "total": len(ordered)}
+    page, meta = _page(ordered, offset, limit)
+    return {"registry": page, "total": len(ordered), **meta}
 
 
 # How many of an API's calling processes one row names, in name order.
@@ -335,7 +416,8 @@ def sandbox_api_calls(
     report: dict[str, Any] | None,
     process: str | None = None,
     name: str | None = None,
-    limit: int = 300,
+    limit: int = 0,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """The API-call histogram, with the first call of each API.
 
@@ -417,10 +499,13 @@ def sandbox_api_calls(
                 "first_seen": str(seen) if seen not in (None, "") else None,
             }
         )
-    return {"apis": rows[: max(0, int(limit))], "total": len(rows)}
+    page, meta = _page(rows, offset, limit)
+    return {"apis": page, "total": len(rows), **meta}
 
 
-def sandbox_mutexes(report: dict[str, Any] | None) -> dict[str, Any]:
+def sandbox_mutexes(
+    report: dict[str, Any] | None, offset: int = 0, limit: int = 0
+) -> dict[str, Any]:
     """The named mutexes the sample created or opened.
 
     A mutex name is often the one durable string a family carries across
@@ -436,10 +521,13 @@ def sandbox_mutexes(report: dict[str, Any] | None) -> dict[str, Any]:
         name = _argument(call, _MUTEX_ARGS)
         if name and name not in names:
             names.append(name)
-    return {"mutexes": names[:_ROW_LIMIT], "total": len(names)}
+    page, meta = _page(names, offset, limit)
+    return {"mutexes": page, "total": len(names), **meta}
 
 
-def sandbox_services_and_tasks(report: dict[str, Any] | None) -> dict[str, Any]:
+def sandbox_services_and_tasks(
+    report: dict[str, Any] | None, offset: int = 0, limit: int = 0
+) -> dict[str, Any]:
     """Services installed or started, scheduled tasks, and the commands run.
 
     Three answers in one call because they are one question — what did the
@@ -461,15 +549,20 @@ def sandbox_services_and_tasks(report: dict[str, Any] | None) -> dict[str, Any]:
             if name and name not in services:
                 services.append(name)
     deduped_services = list(dict.fromkeys(services))
-    return {
-        "services": deduped_services[:_ROW_LIMIT],
-        "tasks": tasks[:_ROW_LIMIT],
-        "commands": commands[:_ROW_LIMIT],
-        "total": len(deduped_services) + len(tasks) + len(commands),
-    }
+    out: dict[str, Any] = {"total": len(deduped_services) + len(tasks) + len(commands)}
+    for key, rows in (("services", deduped_services), ("tasks", tasks), ("commands", commands)):
+        page, meta = _page(rows, offset, limit)
+        out[key] = page
+        if meta:
+            out[f"{key}_total"] = len(rows)
+            if "next_offset" in meta:
+                out[f"{key}_next_offset"] = meta["next_offset"]
+    return out
 
 
-def sandbox_channels(report: dict[str, Any] | None, name: str = "") -> dict[str, Any]:
+def sandbox_channels(
+    report: dict[str, Any] | None, name: str = "", offset: int = 0, limit: int = 0
+) -> dict[str, Any]:
     """The platform-namespaced channels a non-Windows guest publishes.
 
     ``android.permissions``, ``linux.systemd``, ``macos.launchd`` and whatever
@@ -489,7 +582,8 @@ def sandbox_channels(report: dict[str, Any] | None, name: str = "") -> dict[str,
     rows = channels.get(key)
     if not isinstance(rows, list):
         return {"error": f"no channel {key!r}", "channels": available}
-    return {"channel": key, "rows": rows[:_ROW_LIMIT], "total": len(rows)}
+    page, meta = _page(rows, offset, limit)
+    return {"channel": key, "rows": page, "total": len(rows), **meta}
 
 
 def sandbox_tools(container: Any) -> list[BaseTool]:
@@ -502,60 +596,145 @@ def sandbox_tools(container: Any) -> list[BaseTool]:
 
     report = _report_of(container)
 
-    def _report_section(section: str) -> dict[str, Any]:
-        """Read one top-level section of the sandbox report by name."""
-        return sandbox_report_section(report, section)
+    def _report_section(section: str, offset: int = 0, limit: int = 0) -> dict[str, Any]:
+        """Read one top-level section of the sandbox report by name.
 
-    def _processes() -> dict[str, Any]:
-        """List the processes the sandbox observed, with their command lines."""
-        return sandbox_processes(report)
+        ``offset`` and ``limit`` ask for one page (0 = every row); a page that
+        stops short names the next offset.
+        """
+        return sandbox_report_section(report, section, offset, limit)
 
-    def _network() -> dict[str, Any]:
-        """List the DNS lookups, hosts, HTTP requests and endpoints observed."""
-        return sandbox_network(report)
+    def _processes(offset: int = 0, limit: int = 0) -> dict[str, Any]:
+        """List the processes the sandbox observed, with their command lines.
 
-    def _signatures() -> dict[str, Any]:
-        """List the sandbox's own signature hits and their severity."""
-        return sandbox_signatures(report)
+        ``offset`` and ``limit`` ask for one page (0 = every row); a page that
+        stops short names the next offset.
+        """
+        return sandbox_processes(report, offset, limit)
 
-    def _dropped_files() -> dict[str, Any]:
-        """List the files the sample wrote, with their hashes."""
-        return sandbox_dropped_files(report)
+    def _network(offset: int = 0, limit: int = 0) -> dict[str, Any]:
+        """List the DNS lookups, hosts, HTTP requests and endpoints observed.
 
-    def _channels(name: str = "") -> dict[str, Any]:
-        """List the platform channels, or read one of them by name."""
-        return sandbox_channels(report, name)
+        ``offset`` and ``limit`` ask for one page (0 = every row); a page that
+        stops short names the next offset.
+        """
+        return sandbox_network(report, offset, limit)
 
-    def _registry_ops(limit: int = _ROW_LIMIT) -> dict[str, Any]:
-        """List the registry keys the sample touched, with what it did to each."""
-        return sandbox_registry_ops(report, limit)
+    def _signatures(offset: int = 0, limit: int = 0) -> dict[str, Any]:
+        """List the sandbox's own signature hits and their severity.
 
-    def _api_calls(process: str = "", name: str = "", limit: int = 300) -> dict[str, Any]:
+        ``offset`` and ``limit`` ask for one page (0 = every row); a page that
+        stops short names the next offset.
+        """
+        return sandbox_signatures(report, offset, limit)
+
+    def _dropped_files(offset: int = 0, limit: int = 0) -> dict[str, Any]:
+        """List the files the sample wrote, with their hashes.
+
+        ``offset`` and ``limit`` ask for one page (0 = every row); a page that
+        stops short names the next offset.
+        """
+        return sandbox_dropped_files(report, offset, limit)
+
+    def _channels(name: str = "", offset: int = 0, limit: int = 0) -> dict[str, Any]:
+        """List the platform channels, or read one of them by name.
+
+        ``offset`` and ``limit`` ask for one page (0 = every row); a page that
+        stops short names the next offset.
+        """
+        return sandbox_channels(report, name, offset, limit)
+
+    def _registry_ops(offset: int = 0, limit: int = 0) -> dict[str, Any]:
+        """List the registry keys the sample touched, with what it did to each.
+
+        ``offset`` and ``limit`` ask for one page (0 = every row); a page that
+        stops short names the next offset.
+        """
+        return sandbox_registry_ops(report, limit, offset)
+
+    def _api_calls(
+        process: str = "", name: str = "", offset: int = 0, limit: int = 0
+    ) -> dict[str, Any]:
         """List the API calls observed, by frequency, with each API's first call.
 
         ``process`` narrows to one pid or process name, ``name`` to APIs whose
         name contains the text. Rows carry what the sandbox recorded; ask
         api_capability what an API is used for.
+
+        ``offset`` and ``limit`` ask for one page (0 = every row); a page that
+        stops short names the next offset.
         """
-        return sandbox_api_calls(report, process or None, name or None, limit)
+        return sandbox_api_calls(report, process or None, name or None, limit, offset)
 
-    def _mutexes() -> dict[str, Any]:
-        """List the named mutexes the sample created or opened."""
-        return sandbox_mutexes(report)
+    def _mutexes(offset: int = 0, limit: int = 0) -> dict[str, Any]:
+        """List the named mutexes the sample created or opened.
 
-    def _services_and_tasks() -> dict[str, Any]:
-        """List services installed or started, scheduled tasks, and commands run."""
-        return sandbox_services_and_tasks(report)
+        ``offset`` and ``limit`` ask for one page (0 = every row); a page that
+        stops short names the next offset.
+        """
+        return sandbox_mutexes(report, offset, limit)
 
+    def _services_and_tasks(offset: int = 0, limit: int = 0) -> dict[str, Any]:
+        """List services installed or started, scheduled tasks, and commands run.
+
+        ``offset`` and ``limit`` ask for one page (0 = every row); a page that
+        stops short names the next offset.
+        """
+        return sandbox_services_and_tasks(report, offset, limit)
+
+    sizer = _answer_sizer(container)
     return [
-        StructuredTool.from_function(func=_report_section, name="sandbox_report_section"),
-        StructuredTool.from_function(func=_processes, name="sandbox_processes"),
-        StructuredTool.from_function(func=_network, name="sandbox_network"),
-        StructuredTool.from_function(func=_signatures, name="sandbox_signatures"),
-        StructuredTool.from_function(func=_dropped_files, name="sandbox_dropped_files"),
-        StructuredTool.from_function(func=_registry_ops, name="sandbox_registry_ops"),
-        StructuredTool.from_function(func=_api_calls, name="sandbox_api_calls"),
-        StructuredTool.from_function(func=_mutexes, name="sandbox_mutexes"),
-        StructuredTool.from_function(func=_services_and_tasks, name="sandbox_services_and_tasks"),
-        StructuredTool.from_function(func=_channels, name="sandbox_channels"),
+        StructuredTool.from_function(func=_sized(func, sizer), name=name)
+        for func, name in (
+            (_report_section, "sandbox_report_section"),
+            (_processes, "sandbox_processes"),
+            (_network, "sandbox_network"),
+            (_signatures, "sandbox_signatures"),
+            (_dropped_files, "sandbox_dropped_files"),
+            (_registry_ops, "sandbox_registry_ops"),
+            (_api_calls, "sandbox_api_calls"),
+            (_mutexes, "sandbox_mutexes"),
+            (_services_and_tasks, "sandbox_services_and_tasks"),
+            (_channels, "sandbox_channels"),
+        )
     ]
+
+
+def _answer_sizer(container: Any) -> Any:
+    """The job's answer guardrail (``ServerRegistry.answer_sizer``), or ``None`` without one."""
+    get_registry = getattr(container, "get_server_registry", None)
+    if not callable(get_registry):
+        return None
+    try:
+        return get_registry().answer_sizer()
+    except Exception as exc:  # noqa: BLE001 — a view answered unsized is still an answer
+        logger.warning("sandbox tools: no answer guardrail for this job (%s).", exc)
+        return None
+
+
+# The arguments every view pages by, named in the notice a shortened answer
+# carries so the rows it left out are one call away.
+_PAGING = ("offset", "limit")
+
+
+def _sized(func: Any, sizer: Any) -> Any:
+    """``func``, its answer sent through the MCP toolkit's guardrail when there is one.
+
+    The same sizing an MCP tool's answer gets: measured against the room the
+    conversation has, shortened as a JSON document whose bookkeeping says what
+    was left out, the budget charged. The recorder's notice then names
+    ``offset`` and ``limit``, so every row stays reachable a page at a time.
+    """
+    import functools
+    import json
+
+    if sizer is None:
+        return func
+
+    @functools.wraps(func)
+    def _answer(*args: Any, **kwargs: Any) -> Any:
+        value = func(*args, **kwargs)
+        text = json.dumps(value, default=str)
+        return sizer._apply_output_guardrail(text, _PAGING)
+
+    return _answer

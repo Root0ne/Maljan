@@ -487,6 +487,9 @@ def _brief_callee(caller: Any, callee: Any, *, stage: str, round_index: int) -> 
         or None
     )
     callee._path_by_server = dict(getattr(resolved, "path_by_server", {}) or {})
+    # The job's captures are the job's, whoever is asked: a callee's capture
+    # tools read the same file its caller's would.
+    callee._captures = tuple(getattr(caller, "_captures", ()) or ())
 
 
 # What ``_brief_callee`` writes onto the callee, and so what is given back to
@@ -502,6 +505,7 @@ _BRIEFED_STATE = (
     "sample_format",
     "_analysis_file_path",
     "_path_by_server",
+    "_captures",
     "withheld_by_the_chain",
 )
 

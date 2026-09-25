@@ -155,15 +155,12 @@ URL_DENY_HOSTS: tuple[str, ...] = (
 )
 
 
-# Maximum number of file:name indicators kept per report. Beyond this we
-# truncate, sorted by surviving evidence corroboration.
+# The counts above which the report's linter says how many file:name
+# indicators, and how many indicators in all, a bundle carries. Counts to
+# state, never limits: the export carries every value the one publish rule
+# publishes, and a cap here used to drop values the IOC table and /iocs said
+# were published.
 MAX_FILE_NAME_INDICATORS: int = 10
-
-# Hard cap on the total number of indicator SDOs in the STIX bundle.
-# A Linux ELF audit hit 19 indicators (4
-# hashes + 5 network + 10 file:name) and broke the downstream-
-# tractability assertion. Applied by the STIX renderer with priority
-# order: hashes (sha256 always) -> network IOCs -> file:name.
 MAX_TOTAL_INDICATORS: int = 15
 
 

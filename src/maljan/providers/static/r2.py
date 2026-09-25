@@ -11,15 +11,104 @@ connection test cannot report a different tool set than a job sees.
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
+from maljan.core.logger import logger
 from maljan.providers.base import MirrorSpec
 from maljan.providers.registry import register_static_provider
 from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
+from maljan.tools.errors import BAD_ARGUMENT, TOOL_FAILED, tool_error
 
 if TYPE_CHECKING:
+    from langchain_core.tools import BaseTool
+
     from maljan.core.config import Settings
+
+# The replies r2mcp gives in place of an answer, as it writes them. r2mcp sends
+# these as an ordinary text result rather than as an MCP error, so without this
+# list the ledger filed "Invalid regex used in filter parameter, try a simpler
+# expression" as a successful ``list_strings`` whose output was that sentence.
+# Matched against the whole reply, never a line inside one: a listing of the
+# sample's own strings can hold any sentence, and a string the sample carries is
+# not the tool failing.
+_R2_OPEN_FILE_FIRST = "call open_file with the path you are given, then call this tool again"
+_R2_ERROR_REPLIES: tuple[tuple[re.Pattern[str], str, str | None], ...] = (
+    (re.compile(r"Invalid regex used in filter parameter\b.*"), BAD_ARGUMENT, None),
+    (re.compile(r"Invalid parameter '[^']*':.*"), BAD_ARGUMENT, None),
+    (re.compile(r"Invalid params:.*"), BAD_ARGUMENT, None),
+    (re.compile(r"Missing required parameter:.*"), BAD_ARGUMENT, None),
+    (re.compile(r"Unknown tool: .*"), BAD_ARGUMENT, None),
+    (re.compile(r"Unknown decompiler\b.*"), BAD_ARGUMENT, None),
+    (
+        re.compile(r"Cannot run (?:commands|script files) without calling the `open_file` tool.*"),
+        TOOL_FAILED,
+        _R2_OPEN_FILE_FIRST,
+    ),
+    (re.compile(r"No file is currently open\..*"), TOOL_FAILED, _R2_OPEN_FILE_FIRST),
+    (
+        re.compile(r"Failed to (?:open file|initialize r(?:adare)?2(?: core)?)\b.*"),
+        TOOL_FAILED,
+        None,
+    ),
+    (re.compile(r"Error: command returned NULL"), TOOL_FAILED, None),
+)
+
+
+def r2_error_reply(tool: str, reply: Any) -> dict[str, Any] | None:
+    """The structured failure for one r2mcp reply that is an error, else ``None``.
+
+    ``None`` for anything that is not one of r2mcp's own error sentences as the
+    whole reply, so every answer keeps exactly what it said. The message is
+    r2mcp's sentence, unchanged.
+    """
+    if not isinstance(reply, str):
+        return None
+    text = reply.strip()
+    if not text or "\n" in text:
+        return None
+    for pattern, code, remediation in _R2_ERROR_REPLIES:
+        if pattern.fullmatch(text):
+            return tool_error(code, text, tool=tool, remediation=remediation)
+    return None
+
+
+def _reading_error_replies(tool: Any) -> Any:
+    """``tool``, rebuilt so an r2mcp error reply comes back as the structured failure.
+
+    The ledger's rule for a returned error (``schemas.evidence.build_entry``)
+    reads the structured shape, so an error reply is then a failed entry with
+    r2mcp's own message. A tool that cannot be rebuilt faithfully is returned
+    as it is.
+    """
+    from langchain_core.tools import StructuredTool
+
+    coroutine = getattr(tool, "coroutine", None)
+    args_schema = getattr(tool, "args_schema", None)
+    if coroutine is None or args_schema is None:
+        return tool
+    name = str(getattr(tool, "name", "") or "")
+
+    async def _call(**kwargs: Any) -> Any:
+        reply = await coroutine(**kwargs)
+        failure = r2_error_reply(name, reply)
+        return json.dumps(failure) if failure is not None else reply
+
+    try:
+        return StructuredTool.from_function(
+            func=None,
+            coroutine=_call,
+            name=name,
+            description=getattr(tool, "description", ""),
+            args_schema=args_schema,
+            infer_schema=False,
+            metadata=dict(getattr(tool, "metadata", None) or {}),
+        )
+    except Exception as exc:  # noqa: BLE001 — reading a reply never costs a tool
+        logger.warning("r2: tool '%s' kept as it is (%s).", name, exc)
+        return tool
 
 
 async def enumerate_r2_tools(command: str) -> list[str]:
@@ -99,6 +188,13 @@ class R2StaticProvider(GenericMCPStaticProvider):
         )
         provider._mirror_dir = r2.mirror_dir
         return provider
+
+    def open(self, job: Any) -> None:
+        super().open(job)
+        self.tools = self.get_tools()
+
+    def get_tools(self) -> list[BaseTool]:
+        return [_reading_error_replies(tool) for tool in super().get_tools()]
 
     def mirror_spec(self) -> MirrorSpec:
         return MirrorSpec(work_subdir=Path(self._mirror_dir).name, container_prefix="")

@@ -2853,6 +2853,12 @@ def _endpoint(value: str) -> str:
     )
 
 
+# What the purpose cell says when the report model gave none. A dash read as a
+# cell nobody filled in; the model was asked for a purpose where the evidence or
+# an analyst's claim states one, so an empty one is a purpose not stated.
+PURPOSE_NOT_STATED = "not stated"
+
+
 def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
     """The identifiers the report model read, as it wrote them, each with its entries.
 
@@ -2871,7 +2877,7 @@ def _host_identifier_table(identifiers: list[Any], ctx: _Context) -> list[str]:
             _row(
                 ctx.cell(item.kind),
                 f"`{_one_line(item.value)}`",
-                ctx.cell(item.purpose) if item.purpose else "-",
+                ctx.cell(item.purpose) if item.purpose.strip() else PURPOSE_NOT_STATED,
                 cited,
             )
         )

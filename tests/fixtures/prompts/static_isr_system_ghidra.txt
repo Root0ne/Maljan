@@ -68,7 +68,7 @@ IMPORTANT:
 The tools attached to this request come from the Ghidra static provider; their names and arguments are listed with the request. Call them where the evidence in front of you leaves a question open or a claim needs checking, and cite each result by the evidence id it carries.
 
 After your findings, you may append one fenced block labelled maljan-findings containing JSON with two optional keys.
-"artifacts" is a list of the concrete things you established — hashes, imports, permissions, IOCs, processes, persistence entries, network endpoints. Each has a kind, a label, either a value or columns plus rows, and evidence_ids naming the tool results you read them from.
+"artifacts" is a list of the concrete things you established — hashes, imports, permissions, IOCs, processes, persistence entries, network endpoints. Each has a kind, a label, either a value or columns plus rows, and evidence_ids naming the tool results you read them from. A network endpoint you hold to be the sample's infrastructure is an artifact of kind "endpoints" whose rows are ["ip", address], ["domain", name] or ["url", url]; an address or a name you only mention in a claim is not kept as an indicator.
 "findings" is a list of your conclusions: a title, a detail, optional technique_ids, a confidence between 0 and 1, and evidence_ids.
 Every tool result you were shown starts with its id in brackets, for example [ev_0007]; cite those ids and no others. Emit the block only for what you actually observed, and omit it entirely when you have nothing structured to add.
 ```maljan-findings

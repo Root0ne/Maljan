@@ -47,6 +47,7 @@ from maljan.pipeline.validation import (
     flow_voice_violations,
     identifier_citation_violations,
     keep_known_keys,
+    misstated_entry_contents,
     pack_line_ids,
     quoted_values,
     record_flagged_statements,
@@ -212,8 +213,9 @@ _INSTRUCTIONS: dict[str, str] = {
         "value is: a registry key or value only when it is written under a registry hive "
         "or from one of its top keys (Software\\, System\\) or the entry records it as a "
         "registry access, and 'String' when the entry does "
-        "not show what the value is. Give its purpose where the evidence "
-        "says, and leave the purpose empty where it does not."
+        "not show what the value is. Give its purpose where the evidence or an analyst "
+        "claim above says what the sample uses the value for, in that claim's sense, and "
+        "leave the purpose empty where neither says."
     ),
     "commands": "Extract the commands the sample accepts from its operator.",
     "encryption_scheme": "Extract the encryption scheme.",
@@ -1079,6 +1081,7 @@ class ReportComposer:
                     *section_capability_violations(answer, self._grounding),
                     *citation_violations(answer, citable, prose=prose),
                     *wrong_entry_citations(answer, entries, prose=prose),
+                    *misstated_entry_contents(answer, entries, prose=prose),
                     *technique_name_violations(answer),
                     *repeated_item_violations(answer, _ITEM_IDENTITY.get(schema, {})),
                 ]
@@ -1201,6 +1204,7 @@ class ReportComposer:
                 *section_capability_violations(payload, self._grounding),
                 *citation_violations(payload, citable, prose=prose),
                 *wrong_entry_citations(payload, entries, prose=prose),
+                *misstated_entry_contents(payload, entries, prose=prose),
                 *technique_name_violations(payload),
                 *repeated_item_violations(payload, _ITEM_IDENTITY.get(schema, {})),
             ]

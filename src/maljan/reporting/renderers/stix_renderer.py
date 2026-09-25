@@ -22,7 +22,9 @@ from __future__ import annotations
 import ipaddress
 import re
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,14 +34,11 @@ from maljan.agents._indicator_denylists import (
     HASH_HEX_LENGTHS,
     IOC_FILE_EXTENSIONS,
     IOC_OS_RESOURCE_PREFIXES,
-    MAX_FILE_NAME_INDICATORS,
-    MAX_TOTAL_INDICATORS,
     URL_DENY_HOSTS,
     malformed_hash_in,
     whole_value_in,
 )
 from maljan.analysis.technique_ids import attack_reference_id
-from maljan.core.logger import logger
 from maljan.extractors.network_extractor import (
     address_is_publishable,
     corroboration_reason,
@@ -276,36 +275,6 @@ def _record_indicator_cap(ledger: Any | None, *, removed: int) -> None:
         ledger.record_indicator_cap(removed=removed)
     except Exception:  # noqa: BLE001 — telemetry must never break an export
         return
-
-
-def _within_the_indicator_cap(
-    objects: list[Any], order: dict[str, tuple[int, int, int]], ledger: Any | None = None
-) -> list[Any]:
-    """``objects`` with the lowest-priority indicators removed, or ``objects`` itself.
-
-    The cap is over every indicator the bundle would carry, whoever minted it,
-    and it is spent in the order the report's own linter describes: the
-    sample's hashes, the network indicators somebody observed or a second
-    source knows, the other hashes the judge carried, the file names. An
-    indicator nothing queued — one that arrived in the judge's bundle and was
-    merged into another by the integrity pass keeps the first writer's id, so
-    this is rare — sorts last rather than raising.
-    """
-    indicators = [obj for obj in objects if getattr(obj, "type", "") == "indicator"]
-    if len(indicators) <= MAX_TOTAL_INDICATORS:
-        _record_indicator_cap(ledger, removed=0)
-        return objects
-    last = (_BAND_FILE_NAME + 1, 0, len(order))
-    ranked = sorted(indicators, key=lambda obj: order.get(obj.id, last))
-    kept = {obj.id for obj in ranked[:MAX_TOTAL_INDICATORS]}
-    _record_indicator_cap(ledger, removed=len(indicators) - MAX_TOTAL_INDICATORS)
-    logger.warning(
-        "stix_renderer: total indicator cap (%d) exceeded by %d; the lowest-priority "
-        "indicator(s) are not exported.",
-        MAX_TOTAL_INDICATORS,
-        len(indicators) - MAX_TOTAL_INDICATORS,
-    )
-    return [obj for obj in objects if getattr(obj, "type", "") != "indicator" or obj.id in kept]
 
 
 class Declined(tuple[str, str]):
@@ -867,6 +836,28 @@ class ExtendedSTIXRenderer:
         A family id it does not hold is recorded as
         ``stix.evidence_ref_not_in_ledger`` and left out.
         """
+        with one_reading(report):
+            return self._render(
+                report,
+                base_bundle,
+                ledger=ledger,
+                corpus=corpus,
+                technique_sources=technique_sources,
+                technique_evidence=technique_evidence,
+                ledger_ids=ledger_ids,
+            )
+
+    def _render(
+        self,
+        report: MalwareReport,
+        base_bundle: Bundle | None = None,
+        *,
+        ledger: Any | None = None,
+        corpus: Any = None,
+        technique_sources: Any = None,
+        technique_evidence: Mapping[str, Sequence[str]] | None = None,
+        ledger_ids: Sequence[str] | None = None,
+    ) -> Bundle:
         objects: list[Any] = []
         self.unlinked = []
         self.declined = []
@@ -1097,11 +1088,11 @@ class ExtendedSTIXRenderer:
         #    integrity pass keeps whichever was queued first, and the one worth
         #    keeping is the one that carries the observation.
         if report.network is not None:
-            for ip in report.network.ips[:40]:
+            for ip in report.network.ips:
                 ip_ind = _indicator_for_ip(ip, report.verdict, report)
                 if ip_ind is not None:
                     _queue(ip_ind, _BAND_NETWORK, ip.source)
-            for url in report.network.urls[:40]:
+            for url in report.network.urls:
                 url_ind = _indicator_for_url(url, report)
                 if url_ind is not None:
                     # The source the publish rule was given, so the order and
@@ -1121,7 +1112,7 @@ class ExtendedSTIXRenderer:
                             by=url.source,
                         )
                     )
-            for domain in report.network.domains[:40]:
+            for domain in report.network.domains:
                 dom_ind = _indicator_for_domain(domain, report.verdict, report)
                 if dom_ind is not None:
                     _queue(dom_ind, _BAND_NETWORK, domain.source)
@@ -1138,6 +1129,35 @@ class ExtendedSTIXRenderer:
                             by=domain.source,
                         )
                     )
+
+        # 5.5) The host of every URL this run publishes, where the network
+        #      block has no row for it: the host follows the URL's decision.
+        #      The judge's own URL indicators count, which is the case that
+        #      published two C2 URLs and neither of their names.
+        listed_domains = {
+            d.fqdn.strip().lower().rstrip(".")
+            for d in (report.network.domains if report.network is not None else [])
+        }
+        for host, (_url, source) in published_url_hosts(report).items():
+            if host in listed_domains:
+                continue
+            admitted = indicator_publish_reason(
+                "domain", host, source, **emulation_kwargs(report, "domain", host)
+            )
+            pattern = indicator_pattern("domain", host)
+            if admitted is None or pattern is None:
+                continue
+            _queue(
+                Indicator(
+                    name=f"Domain {host}",
+                    pattern=pattern,
+                    pattern_type="stix",
+                    indicator_types=[minted_indicator_type(report.verdict, suspicious=True)],
+                    description=admitted,
+                ),
+                _BAND_NETWORK,
+                source,
+            )
 
         # 6) StringIOC → Indicator.
         #
@@ -1159,7 +1179,7 @@ class ExtendedSTIXRenderer:
         # FP reappears for every sample that bundles NDK-compiled libraries.
         if report.static is not None:
             file_name_kept = 0
-            for ioc in report.static.interesting_strings[:50]:
+            for ioc in report.static.interesting_strings:
                 pattern = _stix_pattern_for_string_ioc(ioc)
                 if pattern is None:
                     continue
@@ -1282,27 +1302,15 @@ class ExtendedSTIXRenderer:
         # renderer's synthesized set, and prunes any ref dangling from upstream
         # drops. See judge_postprocess.enforce_bundle_integrity.
         #
-        # It runs *before* the cap, which is the whole reason the cap moved
-        # here. A string row and the network row it was corroborated by are the
-        # same indicator written twice; capping first spent two of fifteen
-        # slots on a pair this pass then folded into one, so a bundle over the
-        # cap shipped under it and the rows it lost were the ones the priority
-        # order exists to keep — five observed C2 addresses, on the probe that
-        # found this. Deduplicated first, the cap keeps exactly as many
-        # indicators as there is room for.
+        # No count bounds the indicators after it. The export carries every
+        # value the one publish rule publishes, which is every ``yes`` row of
+        # the report's IOC table: a total cap of fifteen used to drop the
+        # lowest-ranked of them, so the table and ``/iocs`` said ``yes`` for
+        # values the bundle did not carry.
         from maljan.agents.judge_postprocess import enforce_bundle_integrity
 
         objects = enforce_bundle_integrity(objects, ledger=ledger)
-        capped = _within_the_indicator_cap(objects, order, ledger=ledger)
-        if capped is not objects:
-            # Only what the cap orphaned is left to sweep, and it is the cap's
-            # doing rather than a defect of anybody's bundle — so it is counted
-            # under a reason of its own. Counted it must be: the pass used to
-            # run here with no ledger at all, so this sweep's losses appeared in
-            # no total. The cap's own removals are counted beside them, under
-            # ``indicator_cap_removed``, so every object that left this bundle
-            # left under a name.
-            objects = enforce_bundle_integrity(capped, ledger=ledger, dropped_as=CAP_ORPHAN_REASON)
+        _record_indicator_cap(ledger, removed=0)
         # A note, opinion, grouping or report is about the objects it names,
         # and STIX requires it to name at least one. The passes above take out
         # references to what the export declined; one left naming nothing is
@@ -1805,8 +1813,27 @@ def indicator_publish_reason(
     recovered: str = "",
     verdict: Any = None,
     also_plain: str = "",
+    unattributed: str = "",
+    kept_by: str = "",
+    mentioned_by: str = "",
+    in_published_url: str = "",
 ) -> str | None:
     """Why this run may publish one indicator of ``kind``, or ``None``.
+
+    ``in_published_url`` names a URL this run publishes whose host is this
+    domain (:func:`published_url_hosts`). The domain follows that URL's
+    decision: one live run published two C2 URLs and neither of their names,
+    because the judge wrote URL indicators only and nothing carried a
+    published URL's host to a row of its own. A well-known benign host does
+    not follow its URL: it is published only when a model kept the host itself.
+
+    ``unattributed`` is why a sandbox row is not the sample's own observation
+    — a flow the report does not attribute to the sample's process tree, a
+    well-known benign name the guest resolved — and ``kept_by`` the models
+    that kept the value as an indicator (:func:`sandbox_row_kwargs`): an
+    analyst's artifact or the judge's indicator. Such a row is published only
+    when a model kept it; the observation alone is the guest's traffic, and a
+    claim that only mentions the value (``mentioned_by``) keeps nothing.
 
     One rule for every kind the platform mints, and every minting path asks it:
     the network block's own rows, the string rows that reach the bundle through
@@ -1839,10 +1866,16 @@ def indicator_publish_reason(
     if kind == "domain":
         if not host_is_public(value):
             return None
+        if in_published_url and not is_well_known_benign_host(value):
+            return f"the host of {in_published_url}, which this run publishes"
+        if in_published_url or unattributed:
+            return _kept_by_a_model(kept_by)
         return corroboration_reason(source, reputation, value) or _emulation_admits(
             value, recovered, verdict
         )
     if kind == "ip":
+        if unattributed and address_is_publishable(value, source):
+            return _kept_by_a_model(kept_by)
         admitted = ip_corroboration_reason(value, source, reputation)
         if admitted or not address_is_publishable(value, source):
             return admitted
@@ -1888,6 +1921,236 @@ def indicator_publish_reason(
     if str(source or "").strip().lower() not in ("", "strings"):
         return str(source)
     return corroborated_by or None
+
+
+def published_url_hosts(report: Any) -> dict[str, tuple[str, str]]:
+    """``{host: (url, source)}`` for every URL this report publishes whose host is a name.
+
+    The URLs of the network block the rule publishes, and the judge's URL
+    values the rule publishes (source ``judge``), in that order; the first URL
+    to carry a host is the one named. An address host is not a name and is
+    not carried: it is an ``ip`` row's to answer. Built once per reading
+    (:func:`one_reading`).
+    """
+    return _memo(report, "url_hosts", lambda: _published_url_hosts(report))  # type: ignore[no-any-return]
+
+
+def _published_url_hosts(report: Any) -> dict[str, tuple[str, str]]:
+    out: dict[str, tuple[str, str]] = {}
+
+    def _carry(url: str, source: str) -> None:
+        host = url_host(url)
+        if not host or not host_is_public(host):
+            return
+        try:
+            ipaddress.ip_address(host.strip("[]"))
+        except ValueError:
+            out.setdefault(host, (url, source))
+
+    network = _field(report, "network")
+    for row in (_field(network, "urls") or []) if network is not None else []:
+        url = str(_field(row, "url") or "").strip()
+        source = str(_field(row, "source") or "strings")
+        if url and (
+            indicator_publish_reason(
+                "url",
+                url,
+                source,
+                _host_reputation(report, url_host(url)),
+                **emulation_kwargs(report, "url", url),
+            )
+            is not None
+        ):
+            _carry(url, source)
+    judged = [
+        str(_field(item, "value") or "").strip()
+        for item in _field(report, "judge_indicators") or []
+        if str(_field(item, "kind") or "") == "url"
+    ]
+    if judged:
+        corroborating = _corroborating_values(report)
+        for url in judged:
+            if url and judge_value_answer(report, "url", url, corroborating) == "yes":
+                _carry(url, "judge")
+    return out
+
+
+def _kept_by_a_model(kept_by: str) -> str | None:
+    return f"kept as an indicator by {kept_by}" if kept_by else None
+
+
+def not_kept_reason(why: str, mentioned_by: str = "") -> str:
+    """The ``no:`` a row waiting for a model reads, naming any claim that only mentioned it."""
+    said = f"no: {why}, and no model kept it as an indicator"
+    if mentioned_by:
+        said += f" ({mentioned_by} mentions it and does not keep it)"
+    return said
+
+
+# What the rule says of a well-known benign name a published URL carries.
+BENIGN_NAME_IN_A_URL = "a well-known benign name carried by a published URL"
+
+
+# Why a sandbox row is not the sample's own observation, as the rule reports it.
+UNATTRIBUTED_FLOW = "the sandbox report does not say which process made the flows to it"
+FLOW_OUTSIDE_THE_TREE = (
+    "the sandbox report attributes its flows to a process outside the sample's process tree"
+)
+BENIGN_NAME_RESOLVED = "a well-known benign name the sandbox's guest resolved"
+
+
+def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
+    """``unattributed``, ``kept_by`` and ``mentioned_by`` for one value's sandbox row, or nothing.
+
+    Asked of the report's network block. An address the sandbox saw is the
+    sample's own observation when a flow to it came from the sample's process
+    tree; one no flow of the tree reached — the report attributes its flows
+    elsewhere, or says nothing about which process made them — is the guest's
+    traffic, and so is a well-known benign name a DNS lookup asked for (Windows
+    resolves through its DNS service, never through the sample's tree, so a
+    name is judged by what it is). Either is published only when a model kept
+    it as an indicator: an analyst's artifact, or the judge's indicator. The
+    public resolver and AS facts are stated in the reason. Rows are found
+    through one index per report, so a table of any size is read once.
+    """
+    network = _field(report, "network")
+    if network is None or kind not in ("ip", "domain"):
+        return {}
+    key = _value_key(kind, value)
+    row = _network_index(report).get((kind, key))
+    if kind == "ip":
+        if row is None or _field(row, "source") != "sandbox":
+            return {}
+        if _field(row, "sample_process_tree") is True:
+            return {}
+        why = (
+            FLOW_OUTSIDE_THE_TREE
+            if _field(row, "sample_process_tree") is False
+            else UNATTRIBUTED_FLOW
+        )
+        if _field(row, "public_resolver"):
+            why += "; it is a public DNS resolver"
+        if _field(row, "asn"):
+            why += f"; AS {_field(row, 'asn')}"
+    else:
+        if row is None or _field(row, "source") != "sandbox":
+            return {}
+        if not is_well_known_benign_host(key):
+            return {}
+        why = BENIGN_NAME_RESOLVED
+    return {"unattributed": why, **kept_kwargs(report, kind, key, row)}
+
+
+def _value_key(kind: str, value: Any) -> str:
+    """One spelling of a value for lookups: an address canonical, a name lower-cased."""
+    text = str(value or "").strip()
+    if kind == "ip":
+        try:
+            return str(ipaddress.ip_address(text.strip("[]")))
+        except ValueError:
+            return text.lower()
+    return text.lower().rstrip(".")
+
+
+def kept_kwargs(report: Any, kind: str, key: str, row: Any = None) -> dict[str, str]:
+    """``kept_by`` and ``mentioned_by`` for one value: who kept it, whose claim only mentions it."""
+    kept = [str(by) for by in (_field(row, "kept_by") or [])] if row is not None else []
+    if (kind, key) in _judge_index(report):
+        kept.append("the judge's indicator")
+    elif (kind, key) in _judge_url_hosts(report) and not is_well_known_benign_host(key):
+        # A well-known host a URL carries is kept only as itself (a CDN's
+        # name is not the sample's C2 because a URL on it was).
+        kept.append("the judge's URL indicator")
+    mentioned = [str(by) for by in (_field(row, "mentioned_by") or [])] if row is not None else []
+    return {
+        "kept_by": ", ".join(dict.fromkeys(kept)),
+        "mentioned_by": ", ".join(dict.fromkeys(mentioned)),
+    }
+
+
+# One reading of a report's lookups at a time. The IOC table, the export and
+# the feed each ask the publish rule once per row, and every answer used to
+# rescan the network block and recompute every published URL's host — which
+# made a table of a few hundred rows take seconds. Inside ``one_reading`` each
+# lookup is built once per report; outside it, each is built per call.
+_READING: ContextVar[dict[str, Any] | None] = ContextVar("maljan_stix_reading", default=None)
+
+
+@contextmanager
+def one_reading(report: Any) -> Iterator[None]:
+    """Hold the report's lookups for the duration of one table, export or feed."""
+    token = _READING.set({"report": id(report)})
+    try:
+        yield
+    finally:
+        _READING.reset(token)
+
+
+def _memo(report: Any, name: str, build: Any) -> Any:
+    reading = _READING.get()
+    if reading is None or reading.get("report") != id(report):
+        return build()
+    if name not in reading:
+        reading[name] = build()
+    return reading[name]
+
+
+def _network_index(report: Any) -> dict[tuple[str, str], Any]:
+    """``{(kind, key): row}`` for the report's network block, first row of each value."""
+
+    def _build() -> dict[tuple[str, str], Any]:
+        network = _field(report, "network")
+        out: dict[tuple[str, str], Any] = {}
+        if network is None:
+            return out
+        for row in _field(network, "ips") or []:
+            out.setdefault(("ip", _value_key("ip", _field(row, "address"))), row)
+        for row in _field(network, "domains") or []:
+            out.setdefault(("domain", _value_key("domain", _field(row, "fqdn"))), row)
+        return out
+
+    return _memo(report, "network_index", _build)  # type: ignore[no-any-return]
+
+
+def _judge_index(report: Any) -> frozenset[tuple[str, str]]:
+    """The ``(kind, key)`` of every value the judge's indicators name."""
+
+    def _build() -> frozenset[tuple[str, str]]:
+        return frozenset(
+            (
+                str(_field(item, "kind") or ""),
+                _value_key(str(_field(item, "kind") or ""), _field(item, "value")),
+            )
+            for item in _field(report, "judge_indicators") or []
+        )
+
+    return _memo(report, "judge_index", _build)  # type: ignore[no-any-return]
+
+
+def _judge_url_hosts(report: Any) -> frozenset[tuple[str, str]]:
+    """The ``(kind, key)`` of the host — address or name — of every URL the judge kept.
+
+    A URL the judge kept keeps its host: the address or the name in it is the
+    infrastructure the judge pointed at.
+    """
+
+    def _build() -> frozenset[tuple[str, str]]:
+        out: set[tuple[str, str]] = set()
+        for item in _field(report, "judge_indicators") or []:
+            if str(_field(item, "kind") or "") != "url":
+                continue
+            host = url_host(str(_field(item, "value") or ""))
+            if not host:
+                continue
+            try:
+                ipaddress.ip_address(host.strip("[]"))
+            except ValueError:
+                out.add(("domain", _value_key("domain", host)))
+            else:
+                out.add(("ip", _value_key("ip", host.strip("[]"))))
+        return frozenset(out)
+
+    return _memo(report, "judge_url_hosts", _build)  # type: ignore[no-any-return]
 
 
 # What the rule writes for a value emulation recovered, before the entry id.
@@ -2084,16 +2347,31 @@ def emulation_kwargs(
     any) and ``verdict`` for a value only emulation recovered; ``also_plain``
     (the sweep's entry) for one the static sweep read too; nothing otherwise.
     The verdict is read as stated only when the judge gave it a confidence.
+    A sandbox row's ``unattributed``, ``kept_by`` and ``mentioned_by`` (:func:`sandbox_row_kwargs`)
+    ride along, so every surface that asks the rule of a network value — the
+    IOC table, the export, ``/iocs``, the judge's values — reads one decision.
     """
     if kind not in ("domain", "ip", "url"):
         return {}
+    observed: dict[str, str] = (
+        dict(sandbox_row_kwargs(report, kind, value)) if report is not None else {}
+    )
+    if kind == "domain" and report is not None:
+        key = _value_key("domain", value)
+        carried_by = published_url_hosts(report).get(key)
+        if carried_by:
+            observed["in_published_url"] = carried_by[0]
+            if "kept_by" not in observed:
+                observed.update(
+                    kept_kwargs(report, "domain", key, _network_index(report).get(("domain", key)))
+                )
     found = emulation_record(report) if record is None else record
     key = str(value or "").strip().lower().rstrip(".")
     if key in found.plain:
-        return {"also_plain": found.plain[key] or "the strings entry"}
+        return {"also_plain": found.plain[key] or "the strings entry", **observed}
     entry = found.values.get(key)
     if not entry:
-        return {}
+        return dict(observed)
     reason = f"{RECOVERED_BY_EMULATION}, {entry}"
     if found.partial:
         reason += f" (the record is partial: {found.partial})"
@@ -2101,6 +2379,7 @@ def emulation_kwargs(
     return {
         "recovered": reason,
         "verdict": _field(report, "verdict") if stated else UNSTATED_VERDICT,
+        **observed,
     }
 
 
@@ -2124,6 +2403,10 @@ def publish_answer(
     recovered: str = "",
     verdict: Any = None,
     also_plain: str = "",
+    unattributed: str = "",
+    kept_by: str = "",
+    mentioned_by: str = "",
+    in_published_url: str = "",
 ) -> str:
     """The publish rule's answer for one row, as the report prints it.
 
@@ -2149,6 +2432,10 @@ def publish_answer(
         corroborated_by=corroborated,
         recovered=recovered,
         verdict=verdict,
+        unattributed=unattributed,
+        kept_by=kept_by,
+        mentioned_by=mentioned_by,
+        in_published_url=in_published_url,
     ):
         return "yes"
     if kind == "domain" and not host_is_public(text):
@@ -2157,6 +2444,10 @@ def publish_answer(
         return "no: its host does not resolve outside the analysed network"
     if kind == "ip" and not address_is_publishable(text, source):
         return "no: not an address this run may publish"
+    if kind == "domain" and in_published_url and is_well_known_benign_host(text):
+        return not_kept_reason(f"{BENIGN_NAME_IN_A_URL} ({in_published_url})", mentioned_by)
+    if unattributed and kind in ("ip", "domain"):
+        return not_kept_reason(unattributed, mentioned_by)
     if kind == "email" and not email_is_publishable(text):
         return "no: not a mailbox at a host that could exist"
     if (
@@ -2208,6 +2499,11 @@ def judge_value_answer(report: Any, kind: str, value: str, corroborating: str) -
     text = str(value or "").strip()
     network = getattr(report, "network", None)
     emulated = emulation_kwargs(report, kind, text)
+    if emulated.get("unattributed") or emulated.get("in_published_url"):
+        # The value is the judge's own: a model kept it, which is what a row
+        # the observation alone does not publish waits for.
+        kept = [by for by in str(emulated.get("kept_by") or "").split(", ") if by]
+        emulated["kept_by"] = ", ".join(dict.fromkeys([*kept, "the judge's indicator"]))
     if kind == "domain" and network is not None:
         for row in network.domains:
             if row.fqdn.strip().lower().rstrip(".") == text.lower().rstrip("."):
@@ -2543,12 +2839,10 @@ def _accept_string_ioc(
         if host and any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
             return False
 
-    # file:name: acceptance-based admission + per-report cap, asked before the
-    # publish rule because its answer is about the shape of the value and the
-    # budget, not about who saw it.
+    # file:name: acceptance-based admission, asked before the publish rule
+    # because its answer is about the shape of the value, not about who saw it.
+    # No count bounds it: a file name the rule publishes is exported.
     if stripped.startswith("[file:name"):
-        if file_name_kept >= MAX_FILE_NAME_INDICATORS:
-            return False
         if not value:
             return False
         if COMPILE_ARTIFACT_RE.search(value):

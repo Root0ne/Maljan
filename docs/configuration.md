@@ -1671,6 +1671,21 @@ This job's, not the base: a path that resolves into another job's staging
 directory is refused even when a sample root happens to contain the base, so
 the job directory is the boundary whatever the roots are configured as.
 
+A capture is named relative to the job's own directory wherever a model sees
+it (`captures/<file>`), never by host path. When the job has exactly one
+capture, `pcap_path` is hidden from the schema the built-in servers' tools are
+bound with and filled in by the platform, the way the sample's own path is
+(`agents.tool_pinning`); with several it stays the model's to give, a relative
+value is read inside the job's directory, and a refusal lists the job's
+captures by those names — or says there is none — instead of advising a caller
+to leave out an argument the tool requires. A filled-in capture the server
+cannot read comes back as that failure, naming the capture by its job-relative
+name and saying the platform filled it in. Every capture tool reads the whole
+capture as a stream and states the packets it read and the packets in the
+capture; `packet_limit` has no default and applies only when a caller passes
+it, and `read_pcap_summary` with none answers the capture's facts rather than
+a line per packet.
+
 `carved_path` on the `analysis` sidecar is narrower than both, because it is
 the one file argument a *model* chooses rather than the platform: it is held to
 `<staging>/job-<id>/carved/<sha256 of the file the call is pinned to>/` and to

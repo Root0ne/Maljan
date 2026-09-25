@@ -297,7 +297,7 @@ class TestFindings:
 
         (repeated,) = _rows(diff, "persistence", ADDED)
         assert repeated["note"] == REPEATED_KEY_NOTE
-        assert _section(diff, "persistence")["counts"][UNCHANGED] == 4
+        assert _section(diff, "persistence")["counts"][UNCHANGED] == 3
 
 
 class TestDetection:

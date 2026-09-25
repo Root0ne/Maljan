@@ -50,6 +50,7 @@ from maljan.reporting.models import (
     StringIOC,
 )
 from maljan.schemas.evidence import build_entry, format_entry_id
+from maljan.schemas.sandbox_report import SAMPLE_TREE_KEY
 
 if TYPE_CHECKING:
     from maljan.schemas.evidence import LedgerEntry
@@ -680,9 +681,18 @@ _DOMAIN_SOURCE_RANK: dict[str, int] = {"strings": 0, "analyst": 1, "sandbox": 2}
 
 
 def network_from_ledger(
-    ledger: list[LedgerEntry], isrs: dict[str, AgentISR] | None = None
+    ledger: list[LedgerEntry],
+    isrs: dict[str, AgentISR] | None = None,
+    sandbox_report: dict[str, Any] | None = None,
 ) -> NetworkIOCs | None:
     """``NetworkIOCs`` from the sandbox network tool and the IOC tools.
+
+    ``sandbox_report`` is the job's whole report. When it holds an observation
+    the sandbox rows are read from it, every row, rather than from the views a
+    model paged through: which process made a flow is a fact about the whole
+    report, and an address a paged view never showed is still an address the
+    sample's guest reached. Without it the ledger's views are read, and a page
+    of a view states no attribution but the sample's own.
 
     Domains are scored by the same assessor the DGA layer reads
     (``extractors.network_extractor``), so ``is_suspicious``, ``dga_score`` and
@@ -741,6 +751,7 @@ def network_from_ledger(
             domains[value] = domain
             network.domains.append(domain)
         elif kind == "ip":
+            value = address_key(value)
             known_ip = ips.get(value)
             if known_ip is not None:
                 # The same address from a second source, read the way a
@@ -748,11 +759,14 @@ def network_from_ledger(
                 if _DOMAIN_SOURCE_RANK[source] > _DOMAIN_SOURCE_RANK[known_ip.source or "strings"]:
                     known_ip.source = source
                 return
-            # The classes nothing could act on are out here, which is where
-            # they always were; a private address is kept when somebody watched
-            # the sample reach it, because that is lateral movement, and
-            # dropped when a string sweep produced it.
-            if not address_is_publishable(value, source):
+            # A run of digits only the string sweep produced, in a class nothing
+            # could act on, is not an address anybody saw and is left out. An
+            # address somebody watched is kept whatever its class, the way a
+            # watched reserved name is: the export refuses to publish it and
+            # the table says so, rather than the address vanishing.
+            if source == "strings" and not address_is_publishable(value, source):
+                return
+            if not _parses_as_an_address(value):
                 return
             created_ip = NetworkIP(address=value, source=source)
             ips[value] = created_ip
@@ -773,7 +787,13 @@ def network_from_ledger(
             urls[value] = created
             network.urls.append(created)
 
-    for _entry, data in _payloads(ledger, "sandbox_network"):
+    # What the sandbox's own records say about each address it saw: whether a
+    # flow to it came from the sample's process tree, from another process, or
+    # from a process the report does not name.
+    attributed: dict[str, list[bool | None]] = {}
+    host_facts: dict[str, dict[str, Any]] = {}
+
+    for data, whole in _sandbox_views(ledger, sandbox_report):
         for key in ("dns", "domains"):
             for row in data.get(key) or []:
                 _add("domain", _first_str(row, "request", "hostname", "domain", "name"), "sandbox")
@@ -782,10 +802,23 @@ def network_from_ledger(
         # though a string sweep had produced it, which is the weakest claim
         # there is and the one the publish rule holds back.
         for row in data.get("hosts") or []:
-            _add("ip", _first_str(row, "ip", "address", "host"), "sandbox")
+            address = address_key(_first_str(row, "ip", "address", "host"))
+            _add("ip", address, "sandbox")
+            if isinstance(row, dict) and address:
+                host_facts.setdefault(address, {}).update(
+                    {k: row[k] for k in ("asn", "country_name") if row.get(k)}
+                )
         for key in ("tcp", "udp"):
             for row in data.get(key) or []:
-                _add("ip", _first_str(row, "dst", "ip", "address"), "sandbox")
+                address = address_key(_first_str(row, "dst", "ip", "address"))
+                _add("ip", address, "sandbox")
+                if isinstance(row, dict) and address:
+                    stated = row.get(SAMPLE_TREE_KEY)
+                    # A page of a view cannot say that no flow to an address
+                    # came from the tree: the one that did may be on another.
+                    attributed.setdefault(address, []).append(
+                        stated if whole or stated is True else None
+                    )
         for row in data.get("http") or []:
             host = _first_str(row, "host", "hostname")
             _add("domain", host, "sandbox")
@@ -799,12 +832,470 @@ def network_from_ledger(
             if isinstance(row, dict):
                 _add(str(row.get("kind") or ""), str(row.get("value") or ""), "strings")
 
-    for artifact in _artifacts(isrs, "endpoints", "network", "iocs"):
-        for row in _rows_of(artifact):
-            if len(row) >= 2:
-                _add(row[0].strip().lower(), row[1], "analyst")
+    kept: dict[tuple[str, str], list[str]] = {}
+    for artifact in (
+        a for isr in (isrs or {}).values() for a in getattr(isr, "artifacts", None) or []
+    ):
+        source = str(getattr(artifact, "source", "") or "").strip()
+        by = f"an artifact of the {source} analyst" if source else "an analyst artifact"
+        for kind, value in kept_network_values(artifact):
+            _add(kind, value, "analyst")
+            kept_key = (kind, value.strip().lower().rstrip("."))
+            if by not in kept.setdefault(kept_key, []):
+                kept[kept_key].append(by)
 
+    _state_sandbox_facts(network, attributed, host_facts)
+    _state_who_kept(network, kept, isrs)
     return network if (network.domains or network.ips or network.urls) else None
+
+
+# The artifact kinds that keep a network value as an indicator: the analyst's
+# structured list of what it holds to be infrastructure. Nothing else keeps —
+# a table of contacted hosts is a transcription of what the sandbox saw, and one
+# live run's analysts wrote exactly such observations down while calling them
+# noise. Tolerance is on the values, never on the kinds.
+_KEEPING_KINDS = frozenset(
+    {
+        "endpoints",
+        "endpoint",
+        "network",
+        "iocs",
+        "ioc",
+        "indicators",
+        "c2",
+        "network_iocs",
+        "c2_endpoints",
+    }
+)
+# The kinds where an untyped cell is read as an address, a name or a URL: a
+# list of endpoints is nothing but those. An IOC list holds file names, hashes
+# and mutexes beside them, so its rows are read only where typed.
+_BARE_VALUE_KINDS = frozenset({"endpoints", "endpoint", "c2", "c2_endpoints"})
+# The words a row names its value's type by, network and otherwise.
+_TYPE_ALIASES = {
+    "ip": "ip",
+    "ipv4": "ip",
+    "ipv6": "ip",
+    "address": "ip",
+    "ip_address": "ip",
+    "ip address": "ip",
+    "addr": "ip",
+    "domain": "domain",
+    "host": "domain",
+    "hostname": "domain",
+    "fqdn": "domain",
+    "domain name": "domain",
+    "url": "url",
+    "uri": "url",
+}
+_OTHER_TYPES = frozenset(
+    {
+        "file",
+        "filename",
+        "file_name",
+        "file name",
+        "path",
+        "file_path",
+        "filepath",
+        "mutex",
+        "registry",
+        "registry_key",
+        "key",
+        "hash",
+        "md5",
+        "sha1",
+        "sha256",
+        "process",
+        "command",
+        "string",
+        "email",
+        "other",
+    }
+)
+# A name whose last label is a file's extension is a file, not a host,
+# including the extensions that are also top-level domains.
+_FILE_LABELS = frozenset(
+    {
+        "exe",
+        "dll",
+        "sys",
+        "bat",
+        "cmd",
+        "ps1",
+        "psm1",
+        "vbs",
+        "js",
+        "jse",
+        "hta",
+        "wsf",
+        "dat",
+        "bin",
+        "txt",
+        "log",
+        "tmp",
+        "ini",
+        "cfg",
+        "conf",
+        "json",
+        "xml",
+        "lnk",
+        "scr",
+        "ocx",
+        "drv",
+        "msi",
+        "jar",
+        "zip",
+        "rar",
+        "7z",
+        "gz",
+        "tar",
+        "iso",
+        "img",
+        "cab",
+        "py",
+        "pyc",
+        "sh",
+        "so",
+        "pl",
+        "rs",
+        "md",
+        "ps",
+        "mov",
+        "app",
+        "apk",
+        "dmg",
+        "pkg",
+        "deb",
+        "rpm",
+        "elf",
+        "doc",
+        "docx",
+        "docm",
+        "xls",
+        "xlsx",
+        "xlsm",
+        "ppt",
+        "pptx",
+        "pdf",
+        "rtf",
+        "html",
+        "htm",
+        "php",
+        "asp",
+        "aspx",
+        "db",
+        "sqlite",
+        "png",
+        "jpg",
+        "gif",
+        "mp4",
+        "mp3",
+        "bak",
+        "vbe",
+        "cpl",
+    }
+)
+_HOST_PORT_RE = re.compile(r"^\[?([0-9a-fA-F:.]+?)\]?:(\d{1,5})$")
+
+
+def _kind_of(artifact: Any) -> str:
+    return re.sub(r"[\s-]+", "_", str(getattr(artifact, "kind", "") or "").strip().lower())
+
+
+# The headings that name a table's type column and its value column.
+_TYPE_HEADINGS = frozenset({"type", "kind", "category", "ioc type", "indicator type"})
+_VALUE_HEADINGS = frozenset(
+    {"value", "indicator", "ioc", "observable", "address", "host", "domain", "url", "endpoint"}
+)
+_PORT_SUFFIX_RE = re.compile(r"[:/]\s*port$")
+# The most words a type cell holds; a longer cell is a note.
+_TYPE_CELL_WORDS = 3
+
+
+def _of_kind(found: list[tuple[str, str]], hint: str) -> list[tuple[str, str]]:
+    """``found`` when it holds a value of the row's type, else nothing.
+
+    A URL row's value may be a bare name, which the model typed as the host.
+    """
+    wanted = ("url", "domain") if hint == "url" else (hint,)
+    return found if any(kind in wanted for kind, _value in found) else []
+
+
+def _type_word(cell: str) -> str | None:
+    """The type a cell names, normalised, or ``None`` when it names none.
+
+    Lower-cased, a ``:port`` or ``/port`` suffix taken off and the last word
+    read, so "C2 domain" is ``domain``, "IP Address" is ``address`` and
+    "ip:port" is ``ip``.
+    """
+    text = _PORT_SUFFIX_RE.sub("", str(cell or "").strip().lower()).strip()
+    if not text:
+        return None
+    if text in _TYPE_ALIASES or text in _OTHER_TYPES:
+        return text
+    words = text.split()
+    if len(words) > _TYPE_CELL_WORDS:
+        # A sentence that happens to end in a type word is a note, not a type:
+        # "C2 of the dropped file" types nothing.
+        return None
+    last = words[-1]
+    return last if last in _TYPE_ALIASES or last in _OTHER_TYPES else None
+
+
+def _heading_columns(artifact: Any) -> tuple[int, int] | None:
+    """The type column and the value column a table's headings name, when they name both."""
+    headings = [str(h or "").strip().lower() for h in getattr(artifact, "columns", None) or []]
+    typed = next((i for i, h in enumerate(headings) if h in _TYPE_HEADINGS), None)
+    valued = next((i for i, h in enumerate(headings) if h in _VALUE_HEADINGS), None)
+    if typed is None or valued is None or typed == valued:
+        return None
+    return typed, valued
+
+
+def kept_network_values(artifact: Any) -> list[tuple[str, str]]:
+    """The addresses, names and URLs an analyst's artifact keeps, each as ``(kind, value)``.
+
+    Only an artifact of a keeping kind (``endpoints``, ``network``, ``iocs``,
+    ``c2`` and their plain spellings) keeps anything. A row has at most one
+    type cell: the column a heading names ``type``, or else the first cell that
+    names a type ("C2 domain", "IP Address", "ip:port" included). A type
+    applies to one value cell only — the heading's value column, or the cell
+    after the type cell (before it when the type is the last cell) — and a name
+    typed as a domain, host or URL is the model's statement, kept whatever its
+    TLD. A row whose type cell names a non-network type (a file, a path, a
+    hash) keeps nothing. Every other cell, and every cell of an untyped row, is
+    read untyped, and only in an endpoints or C2 list: an address is kept, a
+    name only when it could be a host and does not end in a file's extension.
+    """
+    kind = _kind_of(artifact)
+    if kind not in _KEEPING_KINDS:
+        return []
+    bare = kind in _BARE_VALUE_KINDS
+    rows = _rows_of(artifact)
+    single = getattr(artifact, "value", None)
+    if not rows and single and bare:
+        rows = [[str(single)]]
+    headed = _heading_columns(artifact)
+    out: list[tuple[str, str]] = []
+
+    def _keep(found: list[tuple[str, str]]) -> None:
+        for item in found:
+            if item not in out:
+                out.append(item)
+
+    for row in rows:
+        type_at: int | None
+        value_at: int | None
+        if headed is not None and max(headed) < len(row):
+            type_at, value_at = headed
+            word = _type_word(row[type_at])
+        else:
+            type_at = next((i for i, cell in enumerate(row) if _type_word(cell)), None)
+            word = _type_word(row[type_at]) if type_at is not None else None
+            if type_at is None:
+                value_at = None
+            elif type_at + 1 < len(row):
+                value_at = type_at + 1
+            else:
+                value_at = type_at - 1 if type_at > 0 else None
+        if word in _OTHER_TYPES:
+            continue
+        hint = _TYPE_ALIASES.get(word) if word else None
+        if hint is not None and value_at is not None:
+            typed = _of_kind(_cell_values(row[value_at], hint), hint)
+            if not typed and headed is None and type_at and value_at == type_at + 1:
+                # Value first, a note after the type ("relay.top", "domain",
+                # "C2"): the cell after the type is no value of it, so the
+                # value is the one before.
+                value_at = type_at - 1
+                typed = _of_kind(_cell_values(row[value_at], hint), hint)
+            _keep(typed)
+        if not bare:
+            continue
+        for index, cell in enumerate(row):
+            if index in (type_at, value_at) and hint is not None:
+                continue
+            if index == type_at:
+                continue
+            _keep(_cell_values(cell, None))
+    return out
+
+
+def _cell_values(cell: str, hint: str | None) -> list[tuple[str, str]]:
+    """What one cell holds: a URL and its host, an address, or a name; nothing otherwise."""
+    from maljan.extractors.network_extractor import (
+        host_is_public,
+        is_well_known_benign_host,
+        url_host,
+    )
+
+    text = str(cell or "").strip().strip("'\"`")
+    if not text or " " in text:
+        return []
+    if "://" in text:
+        host = url_host(text)
+        out = [("url", text)]
+        as_address = _address_of(host) if host else ""
+        if as_address:
+            out.append(("ip", as_address))
+        elif host and not is_well_known_benign_host(host):
+            # A well-known host is kept only as itself, never through a URL on it.
+            out.append(("domain", host))
+        return out
+    as_address = _address_of(text)
+    if as_address:
+        return [("ip", as_address)]
+    name = text.lower().rstrip(".")
+    if ":" in name:
+        name = name.rsplit(":", 1)[0] if name.rsplit(":", 1)[1].isdigit() else name
+    if hint in ("domain", "url"):
+        # Typed by the row itself: the model's own statement, kept as written —
+        # a private-use name, and a name under a TLD that is also a file extension
+        # (.zip, .mov, .app), included. The export's own rule answers the rest.
+        return [("domain", name)] if "." in name else []
+    # Untyped, in an endpoints or C2 list: a name is a host only when it could
+    # be one and does not end in a file's extension.
+    if "." not in name or not host_is_public(name):
+        return []
+    if name.rsplit(".", 1)[-1] in _FILE_LABELS:
+        return []
+    return [("domain", name)]
+
+
+def _address_of(text: str) -> str:
+    """``text`` as a canonical address, with a port or brackets taken off, or ``""``."""
+    candidate = text.strip()
+    match = _HOST_PORT_RE.match(candidate)
+    if match and (candidate.startswith("[") or candidate.count(":") == 1):
+        candidate = match.group(1)
+    candidate = candidate.strip("[]")
+    return address_key(candidate) if _parses_as_an_address(candidate) else ""
+
+
+def _state_sandbox_facts(
+    network: NetworkIOCs,
+    attributed: dict[str, list[bool | None]],
+    host_facts: dict[str, dict[str, Any]],
+) -> None:
+    """Each address's process attribution, resolver fact and AS, as the sandbox recorded them.
+
+    Attributed to the sample's tree when any flow to it came from the tree; to
+    another process when every flow the report attributes did; unattributed
+    when the report attributes none. A fact the report does not state stays
+    ``None``.
+    """
+    from maljan.extractors.network_extractor import is_public_resolver
+
+    for ip in network.ips:
+        answers = attributed.get(ip.address, [])
+        if any(answer is True for answer in answers):
+            ip.sample_process_tree = True
+        elif answers and all(answer is False for answer in answers):
+            ip.sample_process_tree = False
+        ip.public_resolver = is_public_resolver(ip.address)
+        facts = host_facts.get(ip.address, {})
+        if facts.get("asn") and not ip.asn:
+            ip.asn = str(facts["asn"])
+        if facts.get("country_name") and not ip.geo:
+            ip.geo = str(facts["country_name"])
+
+
+def _state_who_kept(
+    network: NetworkIOCs,
+    kept: dict[tuple[str, str], list[str]],
+    isrs: dict[str, AgentISR] | None,
+) -> None:
+    """Which model kept each address and name as an indicator, and which only mentioned it.
+
+    Kept is an analyst's artifact of endpoints, network values or IOCs: the
+    structured place an analyst puts what it holds to be infrastructure. A
+    claim holding the value in its text mentions it and keeps nothing: one
+    live run's analysts wrote two background addresses into claims calling
+    them noise, and reading a mention as a keep published what they discarded.
+    The judge sees every claim and keeps what it keeps in its own indicators.
+    """
+    from maljan.agents._indicator_denylists import whole_value_in
+
+    claims = [
+        (str(agent), f"{getattr(c, 'claim', '')} {getattr(c, 'evidence_ref', '')}".lower())
+        for agent, isr in (isrs or {}).items()
+        for c in getattr(isr, "claims", None) or []
+    ]
+
+    def _mentions(value: str) -> list[str]:
+        key = value.strip().lower().rstrip(".")
+        return list(
+            dict.fromkeys(
+                f"a claim by the {agent} analyst"
+                for agent, text in claims
+                if whole_value_in(key, text)
+            )
+        )
+
+    for ip in network.ips:
+        ip.kept_by = list(kept.get(("ip", ip.address.lower()), []))
+        ip.mentioned_by = _mentions(ip.address)
+    for domain in network.domains:
+        domain.kept_by = list(kept.get(("domain", domain.fqdn.lower().rstrip(".")), []))
+        domain.mentioned_by = _mentions(domain.fqdn)
+
+
+def _parses_as_an_address(value: str) -> bool:
+    import ipaddress
+
+    try:
+        ipaddress.ip_address(str(value).strip().strip("[]"))
+    except ValueError:
+        return False
+    return True
+
+
+def address_key(value: Any) -> str:
+    """An address as one spelling: an IP in its compressed lower-case form, anything else stripped.
+
+    A sandbox may write an IPv6 address in capitals and a model in lower case;
+    both are one address, and every lookup keyed on an address uses this form.
+    """
+    import ipaddress
+
+    text = str(value or "").strip()
+    try:
+        return str(ipaddress.ip_address(text.strip("[]")))
+    except ValueError:
+        return text
+
+
+def _sandbox_views(
+    ledger: list[LedgerEntry], sandbox_report: dict[str, Any] | None
+) -> list[tuple[dict[str, Any], bool]]:
+    """The sandbox network views to project, each with whether it is a whole view.
+
+    The job's report read whole when it holds an observation; otherwise every
+    ``sandbox_network`` answer in the ledger, a paged one marked as a page.
+    """
+    if isinstance(sandbox_report, dict) and sandbox_report:
+        from maljan.providers.sandbox_tools import sandbox_network
+
+        view = sandbox_network(sandbox_report)
+        if isinstance(view, dict) and not view.get("error"):
+            return [(view, True)]
+    views: list[tuple[dict[str, Any], bool]] = []
+    for entry, data in _payloads(ledger, "sandbox_network"):
+        args = entry.args if isinstance(entry.args, dict) else {}
+        paged = any(_as_int(args.get(k)) for k in ("offset", "limit")) or any(
+            str(k).endswith("_total") or k in ("next_offset", "shortened", "truncated")
+            for k in data
+        )
+        # A shortened or truncated answer is a part of the view, like a page.
+        views.append((data, not paged and not getattr(entry, "truncated", False)))
+    return views
+
+
+def _as_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def network_from_sandbox_report(report: dict[str, Any] | None) -> NetworkIOCs | None:
@@ -956,20 +1447,69 @@ def persistence_from_ledger(
         for command in data.get("tasks") or []:
             _add("scheduled_task", str(command), "", "T1053.005", entry.id)
 
+    # A Sigma rule that fired is a detection-rule match first. It is a
+    # persistence row only when it names an autostart technique and the event
+    # it matched names the key: the rule's title is what the rule is called,
+    # never a registry target, and one live report filed "LOLBIN Execution From
+    # Abnormal Drive" — a rule with no technique at all — as a Run key.
     for entry, data in _payloads(ledger, "sigma_match", "sigma_match_sandbox"):
         for row in data.get("matches") or []:
             if not isinstance(row, dict):
                 continue
-            techniques = sigma_technique_ids(row)
-            technique = techniques[0] if techniques else None
-            if technique and not technique.startswith("T1547"):
+            technique = next(
+                (t for t in sigma_technique_ids(row) if t.startswith(_AUTOSTART_TECHNIQUE)), None
+            )
+            if technique is None:
+                continue
+            key = _matched_registry_key(row)
+            if not key:
                 continue
             _add(
-                "registry_run",
-                str(row.get("title") or row.get("rule") or row.get("id") or ""),
-                "",
+                _autostart_kind(key) or _SIGMA_AUTOSTART_KINDS.get(technique, "other"),
+                key,
+                _matched_registry_value(row),
                 technique,
                 entry.id,
             )
 
     return out
+
+
+# The ATT&CK technique a Sigma rule has to name to be read as persistence, and
+# the kind each of its sub-techniques is when the key itself does not say.
+_AUTOSTART_TECHNIQUE = "T1547"
+_SIGMA_AUTOSTART_KINDS: dict[str, str] = {
+    "T1547.001": "registry_run",
+    "T1547.002": "lsa_provider",
+    "T1547.004": "winlogon_helper",
+    "T1547.005": "lsa_provider",
+    "T1547.006": "driver",
+}
+
+# The fields a Sigma registry event names its key and its value in.
+_SIGMA_KEY_FIELDS = ("TargetObject", "ObjectName", "RegistryKey", "Key")
+_SIGMA_VALUE_FIELDS = ("Details", "RegistryValueData", "NewValue")
+
+
+def _matched_fields(row: dict[str, Any]) -> dict[str, Any]:
+    fields = row.get("matched_fields")
+    return fields if isinstance(fields, dict) else {}
+
+
+def _matched_registry_key(row: dict[str, Any]) -> str:
+    """The registry key the event a Sigma rule matched names, or ``""``."""
+    fields = _matched_fields(row)
+    for name in _SIGMA_KEY_FIELDS:
+        value = fields.get(name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _matched_registry_value(row: dict[str, Any]) -> str:
+    fields = _matched_fields(row)
+    for name in _SIGMA_VALUE_FIELDS:
+        value = fields.get(name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""

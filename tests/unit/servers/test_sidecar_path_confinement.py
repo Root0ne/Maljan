@@ -514,33 +514,3 @@ class TestAnArgumentIsBoundedBeforeItIsRead:
 
         assert answer.get("error") is None, answer
         assert (staging / "carved" / hashlib.sha256(blob).hexdigest()).is_dir()
-
-
-class TestACaptureIsReadInBoundedPieces:
-    def test_every_packet_walking_tool_takes_a_limit(self, network: Any) -> None:
-        import inspect
-
-        for tool in ("read_pcap_summary", "extract_dns", "extract_http", "pcap_summary"):
-            parameters = inspect.signature(getattr(network, tool)).parameters
-            assert "packet_limit" in parameters, tool
-            assert int(parameters["packet_limit"].default) > 0, tool
-
-    def test_the_limit_reaches_the_reader(
-        self, network: Any, staging: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """``rdpcap`` with no count reads the whole capture into memory."""
-        asked: list[Any] = []
-
-        def _fake_rdpcap(path: str, count: int = -1) -> list[Any]:
-            asked.append(count)
-            return []
-
-        monkeypatch.setattr(network, "rdpcap", _fake_rdpcap)
-        monkeypatch.setattr(network, "_SCAPY_MISSING", None)
-        capture = staging / "c.pcap"
-        capture.write_bytes(b"\xd4\xc3\xb2\xa1" + b"\x00" * 20)
-
-        network.extract_dns(str(capture))
-        network.extract_http(str(capture), packet_limit=7)
-
-        assert asked == [network.DEFAULT_PACKET_LIMIT, 7]

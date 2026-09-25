@@ -129,6 +129,11 @@ class TestTheStringScanAsksTheSameRule:
                 "sandbox_network",
                 {
                     "hosts": [{"ip": "185.99.133.7"}, {"ip": "10.0.0.5"}],
+                    # The sample's own process tree made both flows.
+                    "tcp": [
+                        {"dst": "185.99.133.7", "dport": 443, "sample_process_tree": True},
+                        {"dst": "10.0.0.5", "dport": 445, "sample_process_tree": True},
+                    ],
                     "dns": [{"request": "c2.example.com"}],
                 },
             ),

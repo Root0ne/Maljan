@@ -2741,6 +2741,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # in a test or a script exactly what it was.
         self._analysis_file_path: str | None = None
         self._path_by_server: dict[str, str] = {}
+        # The job's packet captures, host paths the tool layer fills in and no
+        # prompt names. Assigned per sample by ``pipeline.nodes.brief_agent``.
+        self._captures: tuple[str, ...] = ()
         # The ``ResolvedAgent`` the container built this agent from — its own
         # prompt, tools and static provider id, so a clone never has to
         # re-derive what it already knows about itself.
@@ -3136,6 +3139,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             default_path=self._analysis_file_path,
             path_by_server=self._path_by_server,
             agent_name=self.name,
+            captures=tuple(getattr(self, "_captures", ()) or ()),
         )
 
     def _run_state_body(self, steps_left: int | None, seconds_left: float | None) -> str:

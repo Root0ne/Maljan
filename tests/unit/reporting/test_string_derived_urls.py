@@ -445,7 +445,7 @@ class TestWhatTheBundleCarries:
         assert len(renderer.declined[0][1]) < 400
 
 
-class TestTheCapHoldsAtTheRenderer:
+class TestNothingCapsTheExport:
     @staticmethod
     def _judge_indicators(count: int) -> list[dict[str, Any]]:
         return [
@@ -458,33 +458,21 @@ class TestTheCapHoldsAtTheRenderer:
             for n in range(count)
         ]
 
-    def test_the_judge_indicators_count_against_the_budget(self) -> None:
+    def test_every_published_value_is_carried_whatever_their_number(self) -> None:
+        """No total cap: fifteen used to be the most a bundle carried."""
         base = Bundle.model_validate({"objects": self._judge_indicators(4)})
         report = _report(
-            [
-                NetworkURL(url=f"https://host{n}.example.org/p", source="sandbox")
-                for n in range(MAX_TOTAL_INDICATORS)
-            ]
-        )
-
-        bundle = ExtendedSTIXRenderer().render(report, base_bundle=base)
-
-        assert len(_patterns(bundle)) == MAX_TOTAL_INDICATORS
-
-    def test_the_priority_order_is_hashes_then_network_then_file_names(self) -> None:
-        base = Bundle.model_validate({"objects": self._judge_indicators(MAX_TOTAL_INDICATORS)})
-        report = _report(
-            [
-                NetworkURL(url=f"https://host{n}.example.org/p", source="sandbox")
-                for n in range(MAX_TOTAL_INDICATORS)
-            ]
+            [NetworkURL(url=f"https://host{n}.example.org/p", source="sandbox") for n in range(20)]
         )
 
         patterns = _patterns(ExtendedSTIXRenderer().render(report, base_bundle=base))
 
-        assert len(patterns) == MAX_TOTAL_INDICATORS
+        for n in range(20):
+            assert f"[url:value = 'https://host{n}.example.org/p']" in patterns
+            assert f"[domain-name:value = 'host{n}.example.org']" in patterns
+        for n in range(4):
+            assert f"[file:name = 'judge{n}.exe']" in patterns
         assert patterns[0].startswith("[file:hashes")
-        assert all(p.startswith("[url:value") for p in patterns[1:])
 
     def test_a_bundle_under_the_cap_keeps_everything(self) -> None:
         base = Bundle.model_validate({"objects": self._judge_indicators(2)})
@@ -492,9 +480,12 @@ class TestTheCapHoldsAtTheRenderer:
 
         patterns = _patterns(ExtendedSTIXRenderer().render(report, base_bundle=base))
 
+        # The sample's hash, the URL and the judge's two file names. The URL's
+        # host is a well-known one, which does not follow its URL unless a
+        # model kept the host itself.
         assert len(patterns) == 4
 
-    def test_the_sample_own_hash_is_never_pushed_out_by_the_judge_hashes(self) -> None:
+    def test_every_judge_hash_is_carried_beside_the_sample_s_own(self) -> None:
         judged = [
             {
                 "type": "indicator",
@@ -502,7 +493,7 @@ class TestTheCapHoldsAtTheRenderer:
                 "pattern": f"[file:hashes.'SHA-1' = '{n:040x}']",
                 "pattern_type": "stix",
             }
-            for n in range(MAX_TOTAL_INDICATORS + 5)
+            for n in range(20)
         ]
         report = _report([])
 
@@ -512,7 +503,7 @@ class TestTheCapHoldsAtTheRenderer:
             )
         )
 
-        assert len(patterns) == MAX_TOTAL_INDICATORS
+        assert len(patterns) == 21
         assert patterns[0] == f"[file:hashes.'SHA-256' = '{'b' * 64}']"
 
     def test_a_compound_hash_pattern_is_read_as_a_hash(self) -> None:
@@ -567,12 +558,14 @@ class TestWhatTheCapSpendsItsBudgetOn:
         )
         return report, Bundle.model_validate(judged)
 
-    def test_a_bundle_over_the_cap_ships_exactly_at_it(self) -> None:
+    def test_a_crowded_bundle_carries_every_observed_domain(self) -> None:
         report, base = self._crowded()
 
         patterns = _patterns(ExtendedSTIXRenderer().render(report, base_bundle=base))
 
-        assert len(patterns) == MAX_TOTAL_INDICATORS
+        for n in range(8):
+            assert f"[domain-name:value = 'c2-{n}.example.org']" in patterns
+        assert len(patterns) > 15
 
     def test_the_observed_addresses_and_urls_are_kept(self) -> None:
         report, base = self._crowded()
