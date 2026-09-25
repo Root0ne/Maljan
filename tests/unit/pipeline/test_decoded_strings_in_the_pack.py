@@ -192,15 +192,24 @@ class TestTheStep:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         fake = _installed(monkeypatch, _answer(ROWS))
-        entry = _floss_entry(_pack(tmp_path))
+        entry = _floss_entry(_pack(tmp_path, budget_s=600.0))
         (call,) = fake.calls
         assert call["limit"] == triage_pack.DECODED_STRINGS_ROWS
-        assert call["timeout_s"] == emulated_strings.FLOSS_TIMEOUT_S
+        # What is left of the pack's own budget, never a fixed number.
+        assert 1 <= call["timeout_s"] <= 600
         assert entry.args == {
             "path": call["path"],
             "limit": triage_pack.DECODED_STRINGS_ROWS,
-            "timeout_s": emulated_strings.FLOSS_TIMEOUT_S,
+            "timeout_s": call["timeout_s"],
         }
+
+    def test_a_pack_with_no_budget_gives_floss_no_wall_clock(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake = _installed(monkeypatch, _answer(ROWS))
+        _floss_entry(_pack(tmp_path, budget_s=0.0))
+        (call,) = fake.calls
+        assert call["timeout_s"] is None
 
     def test_it_runs_in_the_job_s_staging_directory_with_the_server_s_environment(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

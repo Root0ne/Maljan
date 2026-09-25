@@ -59,8 +59,15 @@ mcp = FastMCP("AnalysisMCP")
 # ``timeout_s: null`` for a scan that gives up after a minute has been told
 # something untrue by the structure whose premise is that it was computed.
 YARA_TIMEOUT_S = 60
-CAPA_TIMEOUT_S = 300
-FLOSS_TIMEOUT_S = emulated_strings.FLOSS_TIMEOUT_S
+# capa and FLOSS have no wall clock of the server's own: what bounds a call is
+# the ``timeout_s`` its caller passes — the triage pack passes the operator's
+# ``static.capa.timeout_seconds`` and what is left of ``triage.budget_seconds``
+# — and a call that passes none is bounded by the job's timeout. Their time
+# grows with the sample's code, not with anything the server can know in
+# advance, and a fixed ceiling stopped a large sample's emulation half-way
+# whatever the operator had allowed. The manifest declares ``timeout_s: null``.
+CAPA_TIMEOUT_S: int | None = None
+FLOSS_TIMEOUT_S: int | None = emulated_strings.FLOSS_TIMEOUT_S
 
 TOOL_NEEDS: list[ToolNeeds] = [
     ToolNeeds("identify_file"),
@@ -151,18 +158,22 @@ _ABSENT_WORDS = frozenset({"null", "None"})
 _ABSENT_CHARACTERS = " \t\r\n\"'"
 
 
-def _within(asked: Any, declared: int) -> int:
+def _within(asked: Any, declared: int | None) -> int | None:
     """One tool's wall clock, held to the value its own manifest declares.
 
     A model that asks for a day gets the minute the manifest promised: the
     declared value is what every reader of ``capabilities`` was told, and a
     tool that quietly took more would make that structure untrue. Asking for
-    less is allowed — a caller in a hurry is entitled to be.
+    less is allowed — a caller in a hurry is entitled to be. A tool that
+    declares none (``None``) runs as long as its caller asked, or with no
+    wall clock of its own when the caller asked for none.
     """
     try:
         wanted = int(asked)
     except (TypeError, ValueError):
         return declared
+    if declared is None:
+        return max(1, wanted)
     return max(1, min(wanted, declared))
 
 
@@ -918,7 +929,10 @@ def sigma_match_sandbox(report: dict[str, Any], ruleset: str = "default") -> dic
 @mcp.tool()
 @reads_a_carved_file
 def capa(
-    path: str, timeout_s: int = CAPA_TIMEOUT_S, backend: str = "auto", carved_path: str = ""
+    path: str,
+    timeout_s: int | None = CAPA_TIMEOUT_S,
+    backend: str = "auto",
+    carved_path: str = "",
 ) -> dict[str, Any]:
     """Run capa and report the capabilities it finds, with ATT&CK and MBC metadata."""
     return _guard(
@@ -942,7 +956,7 @@ def floss(
     limit: int = DEFAULT_STRINGS_LIMIT,
     offset: int = 0,
     pattern: str | None = None,
-    timeout_s: int = FLOSS_TIMEOUT_S,
+    timeout_s: int | None = FLOSS_TIMEOUT_S,
 ) -> dict[str, Any]:
     """Recover the strings a PE only builds at run time: decoded, stack and tight strings.
 

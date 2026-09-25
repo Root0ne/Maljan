@@ -735,10 +735,11 @@ ANNOTATIONS: dict[str, Annotation] = {
     "negotiation.max_iterations": {
         "title": "Max negotiation rounds",
         "description": (
-            "Hard ceiling on negotiation rounds between agents. Not the expected round "
-            "count — the primary exit is adaptive termination on the rolling standard "
-            "deviation of confidence history; this ceiling only stops a runaway loop "
-            "when that convergence fails."
+            "Hard ceiling on negotiation rounds between agents, kept as an explicit "
+            "setting. Not the expected round count — the primary exit is adaptive "
+            "termination on the rolling standard deviation of confidence history; this "
+            "ceiling only stops a runaway loop when that convergence fails, which nothing "
+            "else stops when no spend ceiling is set."
         ),
     },
     "openai_api_key": {

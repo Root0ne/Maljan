@@ -61,11 +61,6 @@ MAX_SUGGESTIONS = 3
 # ``tests/fixtures/attck_alignment_recorded.json`` and docs/architecture.md.
 ALIGNMENT_MARGIN = 0.20
 
-# How many schema complaints one feedback turn carries. A model that answered
-# with the wrong shape produces one error per field, and a wall of them reads
-# as noise rather than as a correction.
-MAX_SCHEMA_VIOLATIONS = 6
-
 
 # What the question says of the claims the consistency gate set aside from an
 # answer that is shown back whole.
@@ -1508,8 +1503,10 @@ def schema_violations(model: Any, payload: Any, *, code: str) -> list[Violation]
                 message=_schema_message(model, error),
                 path=".".join(str(part) for part in error.get("loc") or ()),
             )
+            # Every complaint: a count cap here hid the seventh broken field,
+            # and the retry then came back with it still broken.
             for error in exc.errors()
-        ][:MAX_SCHEMA_VIOLATIONS]
+        ]
     except Exception as exc:  # noqa: BLE001 — a coercion failure is still a finding
         return [Violation(code=code, message=safe_finding_value(exc))]
     return []

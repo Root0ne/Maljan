@@ -8,7 +8,7 @@ multiplied together.
 
 from __future__ import annotations
 
-from maljan.pipeline.evidence_summary import MAX_TECHNIQUES, collect, summarise
+from maljan.pipeline.evidence_summary import collect, summarise
 from maljan.schemas.evidence import LedgerEntry
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence, Finding
 
@@ -103,12 +103,12 @@ class TestSummarise:
 
         assert block.index("T1071") < block.index("T1055")
 
-    def test_a_long_tail_is_counted_rather_than_printed(self):
-        claims = [_claim(f"T{2000 + n}") for n in range(MAX_TECHNIQUES + 5)]
+    def test_every_technique_is_named_however_many(self):
+        claims = [_claim(f"T{2000 + n}") for n in range(40)]
         block = summarise({"static": _isr("static", *claims)}, [])
 
-        assert block.count("source(s)") == MAX_TECHNIQUES
-        assert "+5 further techniques not listed" in block
+        assert block.count("source(s)") == 40
+        assert "not listed" not in block
 
     def test_nothing_named_a_technique_produces_no_block(self):
         assert summarise({}, []) == ""

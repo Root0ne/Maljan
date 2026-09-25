@@ -460,41 +460,43 @@ class TestAnArgumentIsBoundedBeforeItIsRead:
             rules.capa(sample, timeout_s=asked, rules_dir=str(corpus), signatures_dir=str(corpus))
         assert capa_timeouts == [1, 1, 30]
 
-    def test_a_capa_timeout_cannot_exceed_the_declared_one(
+    def test_capa_runs_with_what_its_caller_asks_and_no_ceiling_of_its_own(
         self, analysis: Any, staging: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        asked: list[int] = []
+        asked: list[Any] = []
 
         def _fake_capa(**kwargs: Any) -> dict[str, Any]:
-            asked.append(int(kwargs["timeout_s"]))
+            asked.append(kwargs["timeout_s"])
             return {"capabilities": [], "meta": {}}
 
         monkeypatch.setattr(analysis.rule_tools, "capa", _fake_capa)
 
         analysis.capa(_pe(staging / "s.bin"), timeout_s=86_400)
+        analysis.capa(_pe(staging / "t.bin"))
 
-        assert asked == [analysis.CAPA_TIMEOUT_S]
+        assert asked == [86_400, None]
 
     def test_the_declared_timeout_is_what_the_manifest_says(self, analysis: Any) -> None:
         declared = {tool["name"]: tool.get("timeout_s") for tool in analysis.CAPABILITIES["tools"]}
         assert declared["yara_scan"] == analysis.YARA_TIMEOUT_S
-        assert declared["capa"] == analysis.CAPA_TIMEOUT_S
-        assert declared["floss"] == analysis.FLOSS_TIMEOUT_S
+        assert declared["capa"] is None and analysis.CAPA_TIMEOUT_S is None
+        assert declared["floss"] is None and analysis.FLOSS_TIMEOUT_S is None
 
-    def test_a_floss_timeout_cannot_exceed_the_declared_one(
+    def test_floss_runs_with_what_its_caller_asks_and_no_ceiling_of_its_own(
         self, analysis: Any, staging: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        asked: list[int] = []
+        asked: list[Any] = []
 
         def _fake_floss(**kwargs: Any) -> dict[str, Any]:
-            asked.append(int(kwargs["timeout_s"]))
+            asked.append(kwargs["timeout_s"])
             return {"strings": []}
 
         monkeypatch.setattr(analysis.emulated_strings, "floss", _fake_floss)
 
         analysis.floss(_pe(staging / "s.bin"), timeout_s=86_400)
+        analysis.floss(_pe(staging / "t.bin"))
 
-        assert asked == [analysis.FLOSS_TIMEOUT_S]
+        assert asked == [86_400, None]
 
     def test_carving_never_holds_the_whole_sample_in_memory(
         self, analysis: Any, staging: Path

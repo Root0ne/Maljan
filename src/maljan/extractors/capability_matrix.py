@@ -59,7 +59,6 @@ from maljan.schemas.stix_models import (
     TechniqueReview,
     stated_confidence,
 )
-from maljan.utils.marked_cut import marked_cut
 
 # Fallback MITRE ATT&CK Enterprise tactic catalogue (pre-v19 names). Used only
 # when the live bundle's tactic catalogue is unavailable. ``kill_chain_phases``
@@ -198,7 +197,8 @@ def build_capability_matrix(
                 tactic_name=tactic_name or "Unknown",
                 technique_id=tid,
                 technique_name=name,
-                evidence=evidence[:6],
+                # Every statement whole: the matrix may wrap, never cut.
+                evidence=list(evidence),
                 confidence=confidence,
                 confidence_source=stated_by,
                 contributing_layers=layers,
@@ -223,7 +223,7 @@ def build_capability_matrix(
                 technique_name=name,
                 tactic=tactic_id,
                 tactic_name=tactic_name,
-                evidence_quotes=evidence[:8],
+                evidence_quotes=list(evidence),
                 confidence=confidence,
                 contributing_layers=layers,
                 is_corroborated=len([lyr for lyr in layers if lyr != _JUDGE_SOURCE]) >= 2,
@@ -451,7 +451,7 @@ def _collect_techniques(
                     row["layers"].append(str(layer))
                 quote = getattr(claim, "claim", None) or getattr(claim, "evidence_ref", None) or ""
                 if quote and quote not in row["evidence"]:
-                    row["evidence"].append(marked_cut(str(quote), 200))
+                    row["evidence"].append(str(quote))
             # 3. The findings' own technique ids. An ISR carries ids in two
             # places, and this was the one no check ever saw: the report's
             # Findings table and the corroboration metric are both built from
@@ -480,7 +480,7 @@ def _collect_techniques(
                     if layer and str(layer) not in row["layers"]:
                         row["layers"].append(str(layer))
                     if title and title not in row["evidence"]:
-                        row["evidence"].append(marked_cut(title, 200))
+                        row["evidence"].append(title)
 
     # The catalogue question, asked of every id still standing. A claim was
     # asked it in the analyst's own loop and carries the answer; an id that

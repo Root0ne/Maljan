@@ -5044,7 +5044,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         # multi-chunk evidence (a claim from one chunk grounded by another is
         # still grounded in the sample). No-op when the gate is off.
         evidence = "\n".join(c.content for c in chunks)
-        return self._validate_isr(self._apply_consistency_gate(merged, evidence), evidence)
+        # Under the agent's lock, as the single-chunk path runs it: the
+        # validation turn marks and slices the findings buffer in ``_parse``,
+        # and a delegated ask of this agent landing between the mark and the
+        # slice would move its own findings onto this ISR, or these onto its.
+        with lock_for(self):
+            return self._validate_isr(self._apply_consistency_gate(merged, evidence), evidence)
 
     # ------------------------------------------------------------------
     # View-decomposition (findings-log §3.6) — text path only

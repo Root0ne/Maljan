@@ -2,7 +2,7 @@
 
 Tests:
   - chunk_merger.merge_chunk_isrs() — deduplication, confidence selection,
-    dissent reconciliation, MAX_MERGED_CLAIMS cap
+    dissent reconciliation, every claim kept
   - BaseAnalyst.safe_analyze_isr_chunked() — single chunk fast path, multi
     chunk merge path, partial failure handling
   - ServiceContainer.load_chunked() — single text fast path, chunked path
@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.analysis.chunk_merger import MAX_MERGED_CLAIMS, merge_chunk_isrs
+from maljan.analysis.chunk_merger import merge_chunk_isrs
 from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 
@@ -178,37 +178,22 @@ class TestMergeChunkISRsUnkeyedDedup:
 
 
 # ---------------------------------------------------------------------------
-# merge_chunk_isrs — MAX_MERGED_CLAIMS cap
+# merge_chunk_isrs — every claim is kept
 # ---------------------------------------------------------------------------
 
 
-class TestMergeChunkISRsCap:
-    def test_excess_claims_capped(self) -> None:
-        # Create MAX_MERGED_CLAIMS + 5 unique claims
-        claims = [_claim(f"T{1000 + i:04d}", 0.5) for i in range(MAX_MERGED_CLAIMS + 5)]
-        isrs = [_make_isr(claims=claims)]
-        merge_chunk_isrs(isrs)  # single ISR returns unchanged — no cap triggered
-        # Wrap in two ISRs to trigger merge path
-        isrs2 = [
-            _make_isr(claims=claims[: MAX_MERGED_CLAIMS + 3]),
-            _make_isr(claims=claims[MAX_MERGED_CLAIMS + 3 :]),
-        ]
-        result2 = merge_chunk_isrs(isrs2)
-        assert len(result2.claims) <= MAX_MERGED_CLAIMS
+class TestMergeChunkISRsKeepsEveryClaim:
+    def test_no_claim_is_dropped_for_a_count(self) -> None:
+        claims = [_claim(f"T{1000 + i:04d}", 0.5) for i in range(45)]
+        result = merge_chunk_isrs([_make_isr(claims=claims[:30]), _make_isr(claims=claims[30:])])
+        assert {c.technique_id for c in result.claims} == {c.technique_id for c in claims}
 
-    def test_highest_confidence_claims_survive_cap(self) -> None:
-        # Low-confidence claims should be dropped first
+    def test_low_confidence_claims_are_kept_after_the_high_ones(self) -> None:
         low = [_claim(f"T{2000 + i:04d}", 0.1) for i in range(5)]
-        high = [_claim(f"T{3000 + i:04d}", 0.9) for i in range(MAX_MERGED_CLAIMS)]
-        isrs = [
-            _make_isr(claims=high),
-            _make_isr(claims=low),
-        ]
-        result = merge_chunk_isrs(isrs)
-        surviving_ids = {c.technique_id for c in result.claims}
-        # All high-confidence TTP claims should survive
-        for h in high[:MAX_MERGED_CLAIMS]:
-            assert h.technique_id in surviving_ids
+        high = [_claim(f"T{3000 + i:04d}", 0.9) for i in range(25)]
+        result = merge_chunk_isrs([_make_isr(claims=high), _make_isr(claims=low)])
+        assert len(result.claims) == 30
+        assert [c.confidence for c in result.claims[:25]] == [0.9] * 25
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +313,44 @@ class TestSafeAnalyzeISRChunked:
         result = analyst.safe_analyze_isr_chunked(chunks)
         # Merged ISR should have claims from both chunks
         assert len(result.claims) >= 1
+
+    def test_the_merged_validation_runs_under_the_agent_s_lock(
+        self, analyst: _ConcreteAnalyst
+    ) -> None:
+        """A delegated ask of the same agent waits until the validation turn is done.
+
+        The validation turn marks the findings buffer and slices it in
+        ``_parse``; an ask landing in between would carry this ISR's findings
+        onto its own answer, or its findings onto this one.
+        """
+        import threading
+        import time
+
+        from maljan.agents.base_agent import lock_for
+
+        analyst.delegation_lock = threading.RLock()
+        order: list[str] = []
+        validating = threading.Event()
+
+        def _validate(isr: AgentISR, evidence: str) -> AgentISR:
+            order.append("validation starts")
+            validating.set()
+            time.sleep(0.3)
+            order.append("validation ends")
+            return isr
+
+        def _ask() -> None:
+            validating.wait(5)
+            with lock_for(analyst):
+                order.append("ask")
+
+        analyst._validate_isr = _validate  # type: ignore[method-assign]
+        asker = threading.Thread(target=_ask)
+        asker.start()
+        analyst.safe_analyze_isr_chunked([_make_chunk(i, 2) for i in range(2)])
+        asker.join(5)
+
+        assert order == ["validation starts", "validation ends", "ask"]
 
 
 # ---------------------------------------------------------------------------

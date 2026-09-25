@@ -168,7 +168,7 @@ def run_capa_document(
     rules_dir: str,
     signatures_dir: str,
     backend_name: str,
-    timeout_seconds: float,
+    timeout_seconds: float | None,
     target: _CapaWorker | None = None,
 ) -> dict[str, Any] | None:
     """Run the capa pipeline in a subprocess, killed if it overruns its budget.
@@ -214,7 +214,11 @@ def run_capa_document(
         # the rest of the same budget.
         while kind == "peak":
             note_capa_peak(payload)
-            left = max(0.001, timeout_seconds - (time.monotonic() - started))
+            left = (
+                None
+                if timeout_seconds is None
+                else max(0.001, timeout_seconds - (time.monotonic() - started))
+            )
             kind, payload = queue.get(timeout=left)
     except Exception:  # noqa: BLE001 - stdlib queue.Empty, or a crashed child
         logger.warning(

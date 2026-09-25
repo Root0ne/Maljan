@@ -1233,9 +1233,7 @@ class MarkdownRenderer:
             seen.add(tid)
             folded = rules_by_tid.get(tid, [])
             procedure = (
-                ctx.cell(_truncate(mapping.evidence_quotes[0], 160))
-                if mapping.evidence_quotes
-                else "-"
+                ctx.cell(str(mapping.evidence_quotes[0])) if mapping.evidence_quotes else "-"
             )
             lines.append(
                 _row(
@@ -2986,7 +2984,8 @@ def _attack_row(
     if notes:
         status += "; unresolved: " + ", ".join(dict.fromkeys(notes))
     tactic = f"{cell.tactic_name} ({cell.tactic})" if cell.tactic else cell.tactic_name
-    procedure = ctx.cell(_truncate(cell.evidence[0], 160)) if cell.evidence else "-"
+    # The statement whole: a table cell wraps, it is never cut.
+    procedure = ctx.cell(str(cell.evidence[0])) if cell.evidence else "-"
     evidence = list(dict.fromkeys(_ids_in(cell.evidence) + _rule_ids(rules, capa_ids)))
     return _row(
         tactic,
@@ -3315,7 +3314,7 @@ def _mbc_lines(report: MalwareReport) -> list[str]:
             _item(
                 f"{cell.technique_id}"
                 + (f" {name}" if name else "")
-                + (f": {_truncate(cell.evidence[0], 160)}" if cell.evidence else "")
+                + (f": {_one_line(cell.evidence[0])}" if cell.evidence else "")
                 + f" (claimed by {source}"
                 + (f"; {', '.join(said)}" if said else "")
                 + "; not an ATT&CK technique, not published)"

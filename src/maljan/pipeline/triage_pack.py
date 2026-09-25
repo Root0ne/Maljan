@@ -48,7 +48,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from maljan.agents.evidence_recorder import EvidenceRecorder, result_text
 from maljan.analysis.pcap_summary import conversation_line
@@ -368,7 +368,9 @@ class FlossSettings:
 
     environ: Mapping[str, str] | None = None
     job_id: str = ""
-    timeout_s: int = emulated_strings.FLOSS_TIMEOUT_S
+    # ``None``: FLOSS is given what is left of the pack's own budget, and no
+    # wall clock when the pack has none.
+    timeout_s: int | None = None
 
 
 @dataclass(frozen=True)
@@ -843,18 +845,36 @@ class _Pack:
             return
         self.record("function_matches", args, lambda: value, started=started)
 
+    def _floss_timeout(self) -> int | None:
+        """FLOSS's wall clock: the caller's, else what is left of the pack's budget, else none.
+
+        Worked out once, when the step first asks, so the entry's arguments
+        say the clock the call was given.
+        """
+        cached = getattr(self, "_floss_seconds", ())
+        if cached != ():
+            return cast("int | None", cached)
+        timeout = self.inputs.floss.timeout_s
+        if timeout is None:
+            budget = float(self.inputs.budget_s or 0)
+            if budget > 0:
+                timeout = max(1, int(budget - (time.monotonic() - self.started)))
+        else:
+            timeout = max(1, int(timeout))
+        self._floss_seconds = timeout
+        return timeout
+
     def _floss_args(self) -> dict[str, Any]:
-        timeout = max(1, int(self.inputs.floss.timeout_s))
         return {
             "path": self.inputs.sample_path,
             "limit": DECODED_STRINGS_ROWS,
-            "timeout_s": timeout,
+            "timeout_s": self._floss_timeout(),
         }
 
     def _floss_call(self) -> Callable[[], dict[str, Any]]:
         settings = self.inputs.floss
         path = self.inputs.sample_path
-        timeout = max(1, int(settings.timeout_s))
+        timeout = self._floss_timeout()
 
         def call() -> dict[str, Any]:
             scratch = (

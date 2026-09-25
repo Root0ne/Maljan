@@ -84,9 +84,6 @@ SECONDS_KEPT_FOR_THE_CALLER = 15.0
 # for a busy callee. A caller inside a loop waits what its own budget allows.
 SECONDS_WAITING_OUTSIDE_A_LOOP = 300.0
 
-# How much of a callee's raw answer is shown when it carried no claim.
-_ANSWER_WITHOUT_CLAIMS_CHARS = 2000
-
 
 class DelegationRefused(Exception):
     """An ask that is not made, with the reason in the words the model reads."""
@@ -841,8 +838,8 @@ def _answer_text(isr: AgentISR, text: str) -> str:
     body = (text or "").strip()
     if not body:
         return f"{summary}\n  No claim in the CLAIM format{note}."
-    if len(body) > _ANSWER_WITHOUT_CLAIMS_CHARS:
-        body = body[:_ANSWER_WITHOUT_CLAIMS_CHARS] + "…"
+    # Whole: the answer reaches the caller as a tool answer, which the
+    # caller's context budget sizes like every other, with its notice.
     return f"{summary}\n  No claim in the CLAIM format{note}. The agent's answer follows.\n{body}"
 
 

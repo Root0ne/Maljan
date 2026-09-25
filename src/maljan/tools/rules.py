@@ -348,16 +348,17 @@ def sigma_match_sandbox(report: dict[str, Any] | None, ruleset: str = "default")
 
 def capa(
     path: str,
-    timeout_s: int = 300,
+    timeout_s: int | None = None,
     backend: str = "auto",
     rules_dir: str = DEFAULT_CAPA_RULES,
     signatures_dir: str = DEFAULT_CAPA_SIGNATURES,
 ) -> dict[str, Any]:
     """The capabilities capa finds, each with its ATT&CK and MBC metadata.
 
-    capa runs in a spawned subprocess with a hard budget, exactly as the
-    provider runs it: vivisect's disassembly loop has no cancellation point, so
-    a thread-based timeout can report an overrun while the work keeps running.
+    capa runs in a spawned subprocess with the caller's budget, exactly as the
+    provider runs it (``None``, the default, is no wall clock of its own):
+    vivisect's disassembly loop has no cancellation point, so a thread-based
+    timeout can report an overrun while the work keeps running.
     A child process can actually be killed, and on expiry this one is.
     """
     target = Path(path)
@@ -375,7 +376,7 @@ def capa(
         rules_dir=str(rules),
         signatures_dir=str(resolve_data(signatures_dir)),
         backend_name=backend_name,
-        timeout_seconds=max(1, int(timeout_s)),
+        timeout_seconds=None if timeout_s is None else max(1, int(timeout_s)),
     )
     if document is None:
         return {"error": "capa produced no result within its budget", "tool": "capa"}

@@ -24,13 +24,9 @@ from maljan.analysis.technique_ids import (
     technique_ids_in,
 )
 
-# How many techniques the block names. The judge's prompt is already a
-# multi-kilobyte assembly and the tail of a confidence-ordered list is noise;
-# the count of what was left out is printed instead.
-MAX_TECHNIQUES = 25
-
-# How many sources are listed per technique before the rest are counted.
-MAX_SOURCES_PER_TECHNIQUE = 6
+# Every technique and every source is named. The judge's prompt this block
+# goes into is sized from the judge's own window, and it is shortened there,
+# with a notice, only when the window cannot hold it.
 
 # The tools whose technique id is a statement about this sample, and the name a
 # corroboration row gives each: a capa rule, a Sigma rule or a YARA TTP rule
@@ -62,17 +58,12 @@ def summarise(isrs: dict[str, Any] | None, ledger: Sequence[Any] | None = None) 
         "verdict's confidence is yours to set.",
     ]
     shown = sorted(rows.items(), key=lambda item: (-len(item[1]), item[0]))
-    for tid, sources in shown[:MAX_TECHNIQUES]:
-        head = sources[:MAX_SOURCES_PER_TECHNIQUE]
-        rest = len(sources) - len(head)
+    for tid, sources in shown:
         rendered = "; ".join(
             f"{name} ({confidence:.2f})" if confidence is not None else name
-            for name, confidence in head
+            for name, confidence in sources
         )
-        tail = f"; +{rest} more" if rest > 0 else ""
-        lines.append(f"- {tid}: {len(sources)} source(s) — {rendered}{tail}")
-    if len(shown) > MAX_TECHNIQUES:
-        lines.append(f"- (+{len(shown) - MAX_TECHNIQUES} further techniques not listed)")
+        lines.append(f"- {tid}: {len(sources)} source(s) — {rendered}")
     return "\n".join(lines)
 
 
