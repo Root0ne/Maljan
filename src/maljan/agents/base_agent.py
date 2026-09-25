@@ -36,7 +36,7 @@ from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
 from maljan.core.logger import logger
-from maljan.core.spend import LOOP_TURN_CALL, SPEND_CAP, SpendCeilingStop
+from maljan.core.spend import LOOP_TURN_CALL, SPEND_CAP, SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.llm.context_window import (
     CHARS_PER_TOKEN,
@@ -4360,7 +4360,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                 cap_tokens=analyst_output_cap(str(getattr(self, "name", "") or "")),
                 slot=slot,
                 holdable=accepts_output_bound(target) if holdable is None else holdable,
-                deadline_s=deadline_s,
+                # The call's own deadline where the caller has one, else the
+                # whole-call deadline its request is sent with.
+                deadline_s=call_deadline_of(target, messages) if deadline_s is None else deadline_s,
             ),
         )
 

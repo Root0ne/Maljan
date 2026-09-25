@@ -65,7 +65,7 @@ from maljan.agents.judge_postprocess import (
 from maljan.agents.prompt_fragments import tools_statement
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
-from maljan.core.spend import SpendCeilingStop
+from maljan.core.spend import SpendCeilingStop, call_deadline_of
 from maljan.core.token_ledger import TokenLedger, structured_answer
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
 from maljan.llm.context_window import (
@@ -1313,7 +1313,11 @@ class JudgeAgent(BudgetMeter):
                 cap_tokens=int(judge_output_cap().tokens or 0),
                 slot=slot,
                 holdable=holdable,
-                deadline_s=deadline_s,
+                # The call's own deadline where the caller has one, else the
+                # whole-call deadline its request is sent with.
+                deadline_s=(
+                    call_deadline_of(self.llm, messages) if deadline_s is None else deadline_s
+                ),
             ),
         )
 

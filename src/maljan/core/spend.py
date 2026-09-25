@@ -126,6 +126,22 @@ def spend_ceiling_set(ledger: Any) -> bool:
     return meter is not None and meter.ceiling_usd is not None
 
 
+def call_deadline_of(llm: Any, messages: Any = None) -> float | None:
+    """How long one request of ``llm`` may run: its sized whole-call deadline, or ``None``.
+
+    The request timeout the model's client sends it with — its output cap at
+    the model's measured pace where one is measured, the client's own timeout
+    otherwise (``generation_rate.call_deadline``). The horizon a call is
+    priced over at admission.
+    """
+    try:
+        from maljan.llm.generation_rate import call_deadline
+
+        return float(call_deadline(llm, messages or [], {}))
+    except Exception:  # noqa: BLE001 — a deadline that cannot be sized is the default one
+        return None
+
+
 def _holdable(llm: Any) -> bool:
     from maljan.llm.context_window import accepts_output_bound
 
@@ -157,6 +173,7 @@ def spend_bound(
         cap_tokens=int(cap_tokens),
         slot=slot,
         holdable=_holdable(llm),
+        deadline_s=call_deadline_of(llm),
     )
 
 
@@ -177,6 +194,7 @@ def spend_preview(ledger: Any, llm: Any, prompt_chars: int, cap_tokens: int) -> 
             prompt_chars=int(prompt_chars),
             cap_tokens=int(cap_tokens),
             holdable=_holdable(llm),
+            deadline_s=call_deadline_of(llm),
         )
     except Exception:  # noqa: BLE001 — a preview is a question, never a failure
         return None
@@ -231,6 +249,7 @@ def admitted(
             cap_tokens=int(cap_tokens),
             slot=slot,
             holdable=_holdable(llm) if holdable is None else bool(holdable),
+            deadline_s=call_deadline_of(llm),
         )
     finally:
         meter.release(slot)
