@@ -8,6 +8,22 @@ change landed on `main`.
 
 ### Added
 
+- **The judge decides the techniques its bundle does not carry.** After the
+  verdict the judge is asked once, in one tool-free question sized like the
+  verdict call, about each technique an analyst claimed that its bundle
+  carries on no attack-pattern and no edge, and each one named only on a
+  finding, with the claim or finding text and its evidence ids: keep or drop,
+  with a reason. The answer is kept on the judge's bundle
+  (`x_maljan_technique_review`) and the capability matrix publishes per it. A
+  dropped technique reads "not published: the judge dropped it (<reason>)"; a
+  kept one is published, a finding's technique included, with the judge's
+  reason on its row. With no answer nothing is withheld: each technique is
+  what it was before, and a published one is marked "not confirmed by the
+  judge".
+- **A call that reports no usage is named.** The token ledger records the
+  agent, the call and the model of every call whose provider reported no
+  usage; `run_summary.tokens.unreported` carries the rows beside
+  `unreported_calls`, and the token sentence names them.
 - **DeepSeek's declared maximum output.** `deepseek-flash` and
   `deepseek-v4-pro` have `max_output` rows of 393,216 (384K on
   https://api-docs.deepseek.com/quick_start/pricing) in the vendored table.
@@ -2029,6 +2045,22 @@ change landed on `main`.
   `MALJAN_FLOSS_PATH` to a missing file unless a test names a build.
 
 ### Fixed
+
+- **An analyst's validation retry answers in claims.** The retry was shown the
+  first answer as a summary of its parsed claims and told to "answer again in
+  the same format"; the model answered in the summary's shape, the parser read
+  no claim, and the first answer was kept with its findings unresolved. The
+  first answer now goes back as the model wrote it, CLAIM blocks and findings
+  block included, the closing line names the block format the parser reads,
+  the retry's text is logged at debug and its claim count is recorded on the
+  loop's budget record (`validation_retry`).
+- **Findings follow the answer that is kept.** A retry's findings block was
+  read into the agent's buffer before the kept answer was chosen, so a
+  discarded retry's findings were published with the first answer. They now
+  travel on the retry's own ISR and go with it only if it is kept.
+- **The judge's text is kept whole.** The fallback verdict's reasoning was cut
+  to 2,000 characters with its line breaks folded, and the text mediation
+  summary to 500, neither with a mark. Both are stored as written.
 
 - **The network analyst gets the capture.** With exactly one capture in the
   job, `pcap_path` is hidden from the schema the built-in network tools are

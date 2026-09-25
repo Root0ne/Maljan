@@ -455,7 +455,18 @@ Two producers use it:
   `tools.knowledge.resolve_technique`), a confidence outside `[0, 1]`, and a
   claim citing no evidence. An id that survives the retry keeps the analyst's
   spelling and is flagged `technique_id_valid=False`; the report, the STIX
-  minting step and the FP linter read the flag.
+  minting step and the FP linter read the flag. The first answer goes back into
+  the retry's conversation as the model wrote it (`AgentISR.answer_text`: its
+  CLAIM blocks and its findings block, not a summary of the parsed claims —
+  shown the summary, a model answered in the summary's shape and the parser
+  read no claim), unless it was cut at the output cap, which is described
+  rather than repeated. The analyst's closing line
+  (`ANALYST_FEEDBACK_CLOSING`) names the block format the parser reads in place
+  of "the same format". The retry's text is logged at debug, and its claim
+  count beside the first answer's, with which one was kept, goes on the loop's
+  budget record (`validation_retry`). A retry's findings block travels on the
+  retry's own ISR: findings and artifacts follow the answer that is kept, and a
+  discarded retry takes its findings with it.
 
 * **The judge** (`agents/judge_agent.py`) — `validate_verdict_bundle` reports an
   indicator whose pattern names a value no tool in the run saw, an
@@ -1123,7 +1134,10 @@ is not Malware has no malware object, so its record — the degraded path and
 the technique ids only the raw text named — goes on a note about the objects
 the fallback bundle holds; STIX requires a note to name at least one, and a
 fallback that holds none writes no note, and keeps the judge's text on the
-bundle's own `x_maljan_fallback_verdict.reasoning` instead. The ids are on
+bundle's own `x_maljan_fallback_verdict.reasoning` instead. The judge's text
+is kept whole and as written wherever the fallback stores it (it was cut to
+2,000 characters with its line breaks folded), and so is the mediator's text
+where the text path makes it the mediation summary (it was cut to 500). The ids are on
 `x_maljan_fallback_verdict.model_only_technique_ids` on every fallback. The
 export declines, with a record, any note, opinion, grouping or report left
 naming nothing, and the integrity pass lists each reference once: a reference
@@ -1736,7 +1750,11 @@ the model its caller was built on. `run_summary.tokens` holds the sums
 for the run and per agent, and `run_summary.models` the per-agent model count
 and the fallbacks with their reasons. A call whose provider reported no usage
 is counted as *not reported*: its tokens are not estimated, and a figure the
-report prints as a count is always a count a provider gave. Two parts of a
+report prints as a count is always a count a provider gave. Each such call is
+recorded by the agent that made it, the call it was (`tool loop turn`,
+`verdict`, `mediation`, `report section`, …) and the model that answered, in
+`run_summary.tokens.unreported`, and the token sentence names them beside the
+count. Two parts of a
 call are recorded where the provider reports them: the input read from its
 prompt cache (`cached_input_tokens`, from the client's `cache_read` or
 DeepSeek's `prompt_cache_hit_tokens`) and the output spent reasoning
@@ -2237,7 +2255,23 @@ is assembled from what the run gathered rather than recomputed beside it:
   one whose ATT&CK domain or platforms the routed sample cannot host
   (`attck.platform_mismatch`, asked with the same
   `platform_mismatch_message` the analyst and the judge were shown, and
-  falling open for a sample whose platform is unknown or cross-domain). An APK
+  falling open for a sample whose platform is unknown or cross-domain).
+  **The judge has the last word on what it did not name.** After the verdict
+  the judge node asks the judge once (`JudgeAgent.decide_techniques`), in one
+  tool-free question with the verdict's framing and sizing, about the
+  techniques an analyst claimed that its bundle carries on no attack-pattern
+  and no edge, and the ones named only on a finding
+  (`capability_matrix.techniques_for_the_judge`), each with the claim or
+  finding text and its evidence ids: keep or drop, with a reason, one line per
+  technique. The answer is kept on the judge's bundle
+  (`x_maljan_technique_review`, never exported) and the matrix publishes per
+  it: a dropped technique is not published and reads "the judge dropped it
+  (<reason>)", a kept one is published — a finding's technique included — with
+  "kept by the judge when asked (<reason>)" on its row. With no answer — the
+  question timed out or failed, the verdict itself timed out, or no line of
+  the answer is in the form asked — nothing is withheld: each technique is what
+  it would have been without the question, and a published one is marked "not
+  confirmed by the judge". An APK
   run published enterprise-only `T1027` and `T1005` on all three surfaces with
   both mismatches unresolved; they are in the matrix, with the reason, and on
   none of the three now. The check's own carve-outs decide what survives, and
