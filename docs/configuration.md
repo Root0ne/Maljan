@@ -476,6 +476,15 @@ Each sandbox is asked for the options its format needs:
 - **Hatching Triage.** `sandbox.triage.profile_by_format` maps a file type to a
   VM profile, with `*` as its fallback and `sandbox.triage.profile` behind
   that, so an operator who never touches the map keeps the profile they had.
+  `sandbox.triage.analysis_seconds` is how long the VM runs the sample, sent
+  as the submission's `defaults.timeout`; empty, the default, sends nothing
+  and Triage's own default applies. `sandbox.triage.timeout_seconds`, how long
+  the platform waits for the report, must be longer: the wait covers the run
+  and Triage's processing of it, and settings validation refuses one that is
+  not. A value the account does not allow is refused by Triage, and the
+  submission error quotes Triage's own words and names the setting. The run
+  summary states the run time Triage reports for the task (its behavioural
+  tasks' `timeout` in the overview), never the value that was asked for.
 - **The REST DSL.** `sandbox.rest.submit.submit_fields` is passed through
   verbatim as extra multipart fields, beside the existing `extra_fields`.
   `sandbox.rest.mapping.channels` maps an operator-chosen channel name to a
@@ -1066,54 +1075,102 @@ deployment budget (`core.mcp.breaker.call_timeout_seconds`, derived as that
 row says), or as long as Ghidra takes with none.
 
 **The spend ceiling.** `core.llm.max_spend_usd_per_job` is the most one job may
-spend on its models, in US dollars; empty, the default, is none. Spend is each
-call's provider-reported usage — the input tokens read from the prompt cache,
-the other input tokens and the output tokens — at the prices of the model that
-answered: `core.llm.model_prices` first, keyed by the model name the provider
-serves:
+spend on its models, in US dollars; empty, the default, is none. It is a hard
+bound: nothing is sent that could take the job past it.
+
+*What a call costs* is what it was charged. Where the provider reports the
+call's cost in its answer (an OpenRouter-style `cost`), that figure is used and
+no price is read. Otherwise the call's provider-reported usage — the input
+tokens read from the prompt cache, the other input tokens and the output
+tokens, reasoning included — is priced at the rates in force *when its request
+was sent* (every model client stamps its answers with that time), from
+`core.llm.model_prices` first, keyed by the model name the provider serves:
 
 ```json
-{"deepseek-v4-pro": {"input_usd_per_mtok": 1.32,
-                     "cached_input_usd_per_mtok": 0.044,
-                     "output_usd_per_mtok": 3.96,
-                     "source": "our contract"}}
+{"deepseek-v4-pro": {"input_usd_per_mtok": 0.66,
+                     "cached_input_usd_per_mtok": 0.022,
+                     "output_usd_per_mtok": 1.98,
+                     "source": "our contract",
+                     "windows": [{"utc_from": "01:00", "utc_to": "04:00",
+                                  "days": ["mon", "tue", "wed", "thu", "fri"],
+                                  "input_usd_per_mtok": 1.32,
+                                  "cached_input_usd_per_mtok": 0.044,
+                                  "output_usd_per_mtok": 3.96,
+                                  "source": "our contract, peak hours"}]}}
 ```
 
 then a `prices` row of the vendored model table
 (`data/model_context_windows_v1.json`), which carries DeepSeek's documented
-peak prices for `deepseek-flash` and `deepseek-v4-pro` with the page they are
-documented on — data, not a limit, and the peak rate so the figure is never
-below what a call cost. A price key keeps a model's tag (`qwen3:8b` and
-`qwen3:32b` are two models); the base name answers only where no row names
-the tag. A call whose provider reported no usage is counted, and the spend is
-then said as "at least X; N calls reported no usage"; a model that never
-reports usage cannot trip the ceiling, and the log says so once. DeepSeek's off-peak rate is half the peak one, so a run
-priced at the vendored rates off-peak reads up to twice what it was billed; the
-run summary says "priced at the vendored rates" beside each such model, and an
-operator's `model_prices` row replaces the vendored one. The ceiling is checked twice. Before each model call, the call's
-worst case — its whole prompt as uncached input and its whole output cap as
-output — is priced; a call whose worst case would pass what is left is not
-made, unless it is the verdict, a report section or the answer a tool loop the
-ceiling ended writes from what it gathered, which are made with their output
-cap lowered to what the remaining spend pays for, so the verdict and the
-report are never lost. The first
-call refused or held this way exhausts the spend: from then on every gate
-reads it as the ceiling reached, `run_summary.spend` says `exhausted` with
-when and why, and a held call is given what is left or 8,192 output tokens,
-whichever is more (its own cap when that is smaller), the overshoot recorded. Each such
-decision is logged and listed in `run_summary.spend.held_calls`. After each
-model turn the spend so far — this loop's running turns included — is
-compared with the ceiling. When it is reached every running tool loop ends its
-tool phase and its agent writes its answer from what it gathered; no further
-negotiation round, chunk or tool loop is started, an ask is refused, and only
-the verdict and the report run, tool-free. The ceiling is a trip: a turn
-already in flight when it is reached is not recalled, so set it below the true
-limit by the cost of the verdict and the report. The run summary's degradation reasons say the
-ceiling ended the tool phases, and `run_summary.spend` carries the ceiling, the
-spend, whether it was reached and where each model's prices came from. A model
-with no price is named once in the log and in `run_summary.spend`
+prices for `deepseek-flash` and `deepseek-v4-pro` with the page they are
+documented on — data, not a limit. A row's own figures are its price outside
+every window; a window is a span of the day in UTC (its start in it, its end
+not; a window whose end is before its start runs past midnight), on the
+weekdays it names (none is every day), with its own figures and source. The
+vendored rows carry DeepSeek's peak hours, 01:00–04:00 and 06:00–10:00 UTC
+Monday to Friday, at twice the off-peak rate of every other hour. DeepSeek
+also takes Chinese public holidays out of its peak hours, which no window
+names, so a call in a peak window on such a day is counted at the peak rate,
+above what it cost; its page does not say whether a request is timed at its
+start or its end, and the platform times it at its start. A price key keeps a
+model's tag (`qwen3:8b` and `qwen3:32b` are two models); the base name answers
+only where no row names the tag. `run_summary.spend.prices_from` names, per
+model, every rate its calls were priced at, or `provider-reported`. A call
+whose provider reported no usage is counted, and the spend is then said as "at
+least X; N calls reported no usage"; a model that never reports usage cannot
+trip the ceiling, and the log says so once. A model with no price and no
+reported cost is named once in the log and in `run_summary.spend`
 (`unpriced_models`), and its calls are not counted: the figure compared is what
 the job spent at least. Nothing is guessed.
+
+*Before each call* its output cap is held to what the spend it may use pays for
+at its model's output price, after its prompt priced as uncached input. The
+call is refused only when that is below the smallest answer it can give: the
+largest output (reasoning and answer together) this job has measured of that
+model so far, or, with none measured yet, the call's own configured output
+cap — there is no fixed floor. A call that cannot be handed a cap of its own
+(the judge's mediation turns, the structured technique question) is made only
+at its whole cap. Each hold and each refusal is logged with its numbers and
+listed in `run_summary.spend.held_calls`. Every admitted call reserves its
+worst case — its prompt and its held cap — until it returns and is settled at
+what it was charged, so calls running at the same time never spend the same
+remainder. A tool loop's turn also keeps room for the loop's closing answer:
+it is sent only when what is left after it still pays for the smallest answer.
+
+*The reserve for the verdict and the report.* At the start of a job the
+verdict call and the report calls (one per section the composer writes, and
+the narrative round) are planned, and every other call — tool-loop turns,
+revisions, negotiation rounds, asks — spends only above what those calls would
+cost. That reserve is derived from this job's own calls, with no fixed
+fraction: for each planned call still to come, its input is the largest prompt
+the window accounting has measured for that kind of call (a verdict or report
+prompt once one was sent, before that the largest single-shot prompt such as a
+revision's, before that the largest tool-loop prompt), priced as uncached
+input, and its answer is the largest answer measured of its model (of any
+model while its own has none), at the rates in force; the reserve is their sum,
+and it shrinks as each planned call is made. Until the job has measured an
+answer the reserve is not sized, and every call is admitted only at its whole
+configured cap. The verdict and the report spend the reserve.
+`run_summary.spend.reserve` shows the derivation as it stood when the summary
+was written.
+
+The first refusal exhausts the spend: from then on every gate reads it as the
+ceiling reached, `run_summary.spend` says `exhausted` with when and why, no
+further negotiation round, chunk or tool loop is started, an ask is refused,
+every running tool loop ends its tool phase and its agent writes its answer
+from what it gathered, and only the verdict, the report and a loop's closing
+answer are made, each where it fits. A revision that is not made leaves the
+analyst's answer in force standing. A report section whose call is refused is
+recorded as not written, with the refusal's numbers. The run summary's
+degradation reasons say the ceiling ended the tool phases.
+
+A report section's call is held to the smallest of three limits, and the log
+line for the call names the one that applied: the section's output budget
+(and how it was derived), what the model's window leaves after the prompt, or
+the spend ceiling's hold. A section whose answer is cut at that limit with no
+text written — a reasoning model that spent the whole allowance thinking — is
+asked again only when the second call would have more room; otherwise it is
+recorded as not written, with the limit and where it came from. The platform
+does not lower a model's reasoning effort to make an answer fit.
 
 **What the judge and the pack are shown.** The judge's verdict prompt and its
 technique question show every analyst's report, the evidence summary (every
