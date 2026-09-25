@@ -2168,10 +2168,10 @@ class JudgeAgent(BudgetMeter):
         # ``report_node`` and the user-visible description should reflect
         # the final verdict, not the intermediate fallback. The judge
         # rationale is preserved in ``x_maljan_fallback_reasoning`` for
-        # debug consumers.
-        text_snippet = (text[:2000] if text else "No structured output available.").replace(
-            "\n", " "
-        )
+        # debug consumers — whole and as written: it is the judge's text, and
+        # a cut at a fixed length ended its reasoning mid-sentence with
+        # nothing saying so.
+        text_snippet = text if text else "No structured output available."
         objects: list[dict[str, Any]] = []
         malware_id = ""
         if decision == "Malware":
@@ -2383,9 +2383,12 @@ class JudgeAgent(BudgetMeter):
                 reasoning_text.strip()[:200],
             )
             confidence = _UNREADABLE_AGREEMENT
+        # The mediator's reasoning whole: it is what the next round's
+        # analysts and the judge read as the mediation, and a cut at a fixed
+        # length removed its conclusion without a mark.
         return MediatorVerdict(
             contradictions=[],
-            resolution_summary=reasoning_text[:500],
+            resolution_summary=reasoning_text,
             confidence=confidence,
         )
 
