@@ -136,15 +136,51 @@ class TestThePackEveryAgentReads:
         assert "routine 0x7000" in block
 
     def test_a_pack_that_must_say_less_names_how_many_addresses_it_left_out(self) -> None:
-        from maljan.pipeline.triage_pack import _DETAIL, PackDetail, _capa
+        from maljan.pipeline.triage_pack import _RULE_ADDRESSES, _capa
 
         capa = {"capabilities": _capa_capabilities(_capa_document())}
-        token = _DETAIL.set(PackDetail.at(2))
+        token = _RULE_ADDRESSES.set(2)
         try:
             line = _capa(capa)
         finally:
-            _DETAIL.reset(token)
+            _RULE_ADDRESSES.reset(token)
         assert "parse PE header @ 0x1a20 0x2b40 (+1 more)" in line
+
+    def test_with_no_room_a_rule_says_how_many_places_it_matched(self) -> None:
+        from maljan.pipeline.triage_pack import _RULE_ADDRESSES, _capa
+
+        capa = {"capabilities": _capa_capabilities(_capa_document())}
+        token = _RULE_ADDRESSES.set(0)
+        try:
+            line = _capa(capa)
+        finally:
+            _RULE_ADDRESSES.reset(token)
+        assert "parse PE header @ 3 places" in line
+
+    def test_many_addresses_do_not_cost_the_other_lines_their_detail(self) -> None:
+        """The shared level is fitted without the addresses, which take what is left."""
+        document = _capa_document()
+        many = [[{"type": "absolute", "value": BASE + 0x10000 + i * 0x10}, {}] for i in range(400)]
+        document["rules"]["parse PE header"]["matches"] = many
+        capa = {"capabilities": _capa_capabilities(document), "meta": {}}
+        bare = {"capabilities": _capa_capabilities(_capa_document()), "meta": {}}
+
+        def floss_line(payload: dict[str, Any], room: int) -> str:
+            entries = pack_entries([_entry("capa", payload, 1), _entry("floss", FLOSS, 2)])
+            return [line for line in pack_block(entries, room).splitlines() if "[ev_0002]" in line][
+                0
+            ]
+
+        room = len(_pack()) - 60
+        assert floss_line(capa, room) == floss_line(bare, room)
+        capa_line = [
+            line
+            for line in pack_block(
+                pack_entries([_entry("capa", capa, 1), _entry("floss", FLOSS, 2)]), room
+            ).splitlines()
+            if "[ev_0001]" in line
+        ][0]
+        assert "parse PE header @" in capa_line
 
     def test_the_agent_brief_carries_the_pack(self) -> None:
         from maljan.pipeline.nodes import brief_agent

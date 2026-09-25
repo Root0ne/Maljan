@@ -166,3 +166,15 @@ class TestAClonesMissingToolListIsItsRoleSeeds:
     def test_the_helper_only_fills_a_missing_list(self) -> None:
         assert with_the_role_seed_tools({"role": "static", "tools": []})["tools"] == []
         assert with_the_role_seed_tools({"role": "generic"}) == {"role": "generic"}
+
+
+def test_the_team_preview_reads_a_staged_clone_as_the_save_will() -> None:
+    from app.services.agent_map import staged_definitions
+
+    staged = staged_definitions({"static_r2": {"role": "static", "static_provider": "r2"}})
+    assert [ref["server"] for ref in staged["static_r2"]["tools"]] == [
+        "analysis",
+        "knowledge",
+        "virustotal",
+    ]
+    assert staged_definitions({"bare": {"role": "static", "tools": []}})["bare"]["tools"] == []

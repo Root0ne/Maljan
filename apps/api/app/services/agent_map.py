@@ -430,6 +430,10 @@ def staged_definitions(value: Any) -> dict[str, Any]:
             name = str(key)
             if isinstance(entry, dict) and name in seeds:
                 out[name] = {**seeds[name], **as_stored_builtin(name, entry)}
+            elif isinstance(entry, dict):
+                # The clone rule the save applies: no tool list is the role
+                # seed's, so the preview shows the tools the run will read.
+                out[name] = with_the_role_seed_tools(entry)
             else:
                 out[name] = entry
     return out
