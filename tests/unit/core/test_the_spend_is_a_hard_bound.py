@@ -109,9 +109,11 @@ class TestTheReserveForTheVerdictAndTheReport:
 
     def test_is_sized_from_the_measured_prompt_and_answer(self) -> None:
         snapshot = self._planned().snapshot()
-        # Five calls of 20,000 prompt tokens at 1.0 and 10,000 answer tokens at
-        # 4.0 per million: 0.06 USD each.
-        assert snapshot["reserve_usd"] == pytest.approx(0.30)
+        # The verdict and the first report call: 20,000 prompt tokens uncached at
+        # 1.0 and 10,000 answer tokens at 4.0 per million, 0.06 USD each. The three
+        # report calls after the first share its prefix: its prompt at the cached
+        # 0.1 while no share is measured, 0.042 USD each.
+        assert snapshot["reserve_usd"] == pytest.approx(0.246)
         rows = {row["kind"]: row for row in snapshot["reserve"]}
         assert rows["report"]["calls"] == 4 and rows["report"]["prompt_tokens"] == 20_000
         assert rows["verdict"]["answer_tokens"] == 10_000
@@ -119,16 +121,16 @@ class TestTheReserveForTheVerdictAndTheReport:
     def test_other_calls_spend_only_above_it(self) -> None:
         meter = self._planned()  # 0.96 left, 0.30 kept
         held = meter.admit(kind="loop turn", model=MODEL, prompt_chars=0, cap_tokens=393_216)
-        # 0.66 USD above the reserve, less the closing answer's 0.04 USD.
-        assert held is not None and abs(held - 155_000) <= 1
+        # 0.714 USD above the reserve, less the closing answer's 0.04 USD.
+        assert held is not None and abs(held - 168_500) <= 1
         assert (
-            "0.3000 USD being kept for the verdict and the report"
+            "0.2460 USD being kept for the verdict and the report"
             in (meter.snapshot()["held_calls"][-1])
         )
 
     def test_the_verdict_and_the_report_spend_it(self) -> None:
         meter = self._planned()
-        meter.settle({"input_tokens": 660_000, "output_tokens": 0}, MODEL)  # 0.30 left
+        meter.settle({"input_tokens": 710_000, "output_tokens": 0}, MODEL)  # 0.25 left
         with pytest.raises(SpendCeilingStop, match="kept for the verdict and the report"):
             meter.admit(kind="revision", model=MODEL, prompt_chars=0, cap_tokens=10_000)
         assert meter.admit(kind="verdict", model=MODEL, prompt_chars=0, cap_tokens=10_000) is None

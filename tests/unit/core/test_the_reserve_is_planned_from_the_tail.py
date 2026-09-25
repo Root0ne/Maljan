@@ -3,11 +3,14 @@
 The first reserve priced the largest prompt the job had sent — a tool-loop
 turn of 200,000 tokens — as uncached input for every one of the eighteen
 planned calls, and at peak it kept 1.64 of a 2.00 USD ceiling from the tool
-phases. The reserve is now the next planned call's worst case plus the expected
-charge of the others: each at its own kind's prompt (the window accounting's
-allowance, or the prompt actually sent), its input at the job's measured
-cache-hit share, and the answer measured of single-shot calls. A planned call
-spends only above the share of the planned calls after it.
+phases. The reserve is now the next planned call's worst case (what its
+admission will demand) plus the expected charge of the others: each at its own
+kind's prompt (the window accounting's allowance, or the prompt actually sent),
+the first of a kind uncached and the ones after it at the cache-hit share
+measured over calls that were not the first of their conversation — the cached
+rate of their shared prefix until one is measured — and the answer measured of
+single-shot calls. A planned call spends only above the share of the planned
+calls after it.
 """
 
 from __future__ import annotations
@@ -27,9 +30,10 @@ ALLOWED = WINDOW - CAP  # what the window leaves a verdict or section prompt
 # A weekday afternoon (off-peak), and the same weekday inside a peak window.
 FRIDAY_OFF_PEAK = datetime(2026, 9, 25, 17, 0, tzinfo=UTC)
 FRIDAY_PEAK = datetime(2026, 9, 25, 8, 0, tzinfo=UTC)
-# What run2's tool-loop turns cost (the root-cause report's Defect 2 table).
-RUN2_LOOPS_OFF_PEAK = 0.51
-RUN2_LOOPS_PEAK = 1.01
+# What the tool-loop turns of a long paid run on this model cost, off-peak and
+# at the peak rate: what the tool phases of such a job must be left.
+LONG_RUN_LOOPS_OFF_PEAK = 0.51
+LONG_RUN_LOOPS_PEAK = 1.01
 
 
 def _turn(prompt: int, cached: int, answer: int) -> AIMessage:
@@ -44,40 +48,45 @@ def _turn(prompt: int, cached: int, answer: int) -> AIMessage:
     )
 
 
-def _run2_shaped(
+def _plan(meter: SpendMeter) -> None:
+    meter.plan_tail({"verdict": (FLASH, 1, ALLOWED, CAP), "report": (FLASH, 17, ALLOWED, CAP)})
+
+
+def _a_long_paid_run(
     when: datetime, loop_prompt: int = 200_000, single_answer: int = 9_000
 ) -> SpendMeter:
-    """Run2's shape: a 2.00 USD ceiling, 18 planned tail calls, 200k-token loop turns."""
+    """A 2.00 USD ceiling, 18 planned calls, and a loop of 200k-token turns 85% cached."""
     meter = SpendMeter(2.00, clock=lambda: when)
-    meter.plan_tail({"verdict": (FLASH, 1, ALLOWED), "report": (FLASH, 17, ALLOWED)})
-    # A loop running: its turns are 85% cached, and reasoning answers of 26k tokens.
+    _plan(meter)
+    # A loop running: its first turn read nothing from the cache, the ones
+    # after it 85%, with reasoning answers of 26k tokens.
     meter.note_loop(
-        "reverser", [_turn(loop_prompt, int(loop_prompt * 0.85), 26_000) for _ in range(3)], FLASH
+        "reverser",
+        [
+            _turn(loop_prompt, 0, 26_000),
+            *[_turn(loop_prompt, int(loop_prompt * 0.85), 26_000) for _ in range(3)],
+        ],
+        FLASH,
     )
     if single_answer:
         # A validation retry: a single-shot call of 46k prompt tokens.
-        meter.admit(
-            kind="validation retry",
-            model=FLASH,
-            prompt_chars=46_000 * CHARS_PER_TOKEN,
-            cap_tokens=CAP,
-        )
         meter.settle(
-            {"input_tokens": 46_000, "cached_input_tokens": 39_100, "output_tokens": single_answer},
+            {"input_tokens": 46_000, "cached_input_tokens": 0, "output_tokens": single_answer},
             FLASH,
         )
+        meter._largest_prompt["single"] = 46_000
     return meter
 
 
-class TestARun2ShapedJob:
+class TestALongPaidRun:
     @pytest.mark.parametrize(
         ("when", "needed"),
-        [(FRIDAY_OFF_PEAK, RUN2_LOOPS_OFF_PEAK), (FRIDAY_PEAK, RUN2_LOOPS_PEAK)],
+        [(FRIDAY_OFF_PEAK, LONG_RUN_LOOPS_OFF_PEAK), (FRIDAY_PEAK, LONG_RUN_LOOPS_PEAK)],
     )
-    def test_the_tool_phases_keep_what_run2_s_loops_spent(
+    def test_the_tool_phases_keep_what_a_long_paid_run_s_loops_spent(
         self, when: datetime, needed: float
     ) -> None:
-        meter = _run2_shaped(when)
+        meter = _a_long_paid_run(when)
         snapshot = meter.snapshot()
         reserve = snapshot["reserve_usd"]
         assert 2.00 - reserve >= needed, snapshot["reserve"]
@@ -85,19 +94,92 @@ class TestARun2ShapedJob:
             assert reserve < 1.00, "off-peak the tool phases keep most of the ceiling"
 
     def test_the_reserve_does_not_grow_with_a_loop_s_conversation(self) -> None:
-        small = _run2_shaped(FRIDAY_OFF_PEAK, loop_prompt=100_000).snapshot()["reserve_usd"]
-        large = _run2_shaped(FRIDAY_OFF_PEAK, loop_prompt=238_000).snapshot()["reserve_usd"]
+        small = _a_long_paid_run(FRIDAY_OFF_PEAK, loop_prompt=100_000).snapshot()["reserve_usd"]
+        large = _a_long_paid_run(FRIDAY_OFF_PEAK, loop_prompt=238_000).snapshot()["reserve_usd"]
         # Only the cache-hit share moves, and it is the same 85% in both.
         assert large == pytest.approx(small, rel=0.01)
 
     def test_its_derivation_is_stated(self) -> None:
-        rows = {row["kind"]: row for row in _run2_shaped(FRIDAY_OFF_PEAK).snapshot()["reserve"]}
+        rows = {row["kind"]: row for row in _a_long_paid_run(FRIDAY_OFF_PEAK).snapshot()["reserve"]}
         assert rows["report"]["prompt_tokens"] == ALLOWED
         assert "window accounting allows" in rows["report"]["prompt_from"]
         assert rows["verdict"]["prompt_tokens"] == 46_000
         assert rows["report"]["answer_tokens"] == 9_000
         assert "single-shot" in rows["report"]["answer_from"]
+        # The loop's first turn, which read nothing from the cache, is left out.
         assert rows["report"]["cache_hit_share"] == pytest.approx(0.85, abs=0.001)
+
+
+class TestTheFirstCallsOfAJob:
+    """A job's first calls read nothing from the cache; they do not price the plan."""
+
+    def test_three_analysts_starting_at_once_are_all_admitted(self) -> None:
+        meter = SpendMeter(2.00, clock=lambda: FRIDAY_OFF_PEAK)
+        _plan(meter)
+        # One triage turn first: a conversation's first call, nothing cached.
+        meter.note_loop("triage", [_turn(20_000, 0, 3_000)], FLASH)
+        meter.forget_loop("triage")
+        meter.settle({"input_tokens": 20_000, "output_tokens": 3_000}, FLASH, LOOP_TURN_CALL)
+        # Three analysts start in parallel, each on its first, uncached turn.
+        slots = [object(), object(), object()]
+        for slot in slots:
+            meter.admit(
+                kind="loop turn",
+                model=FLASH,
+                prompt_chars=20_000 * CHARS_PER_TOKEN,
+                cap_tokens=CAP,
+                slot=slot,
+            )
+        for index, slot in enumerate(slots):
+            meter.note_loop(slot, [_turn(20_000, 0, 3_000)], FLASH)
+            # And their second turns.
+            meter.admit(
+                kind="loop turn",
+                model=FLASH,
+                prompt_chars=40_000 * CHARS_PER_TOKEN,
+                cap_tokens=CAP,
+                slot=(slot, index),
+            )
+        assert meter.exhausted() is False
+        reserve = meter.snapshot()["reserve_usd"]
+        # The plan with no share measured: the verdict at what its admission
+        # demands, the first report call uncached and the rest at the cached rate.
+        assert reserve < 0.60
+        assert reserve == pytest.approx(
+            _a_long_paid_run(FRIDAY_OFF_PEAK).snapshot()["reserve_usd"],
+            abs=0.10,
+        )
+
+    def test_at_the_peak_rate_the_plan_still_leaves_the_tool_phases_the_most(self) -> None:
+        meter = SpendMeter(2.00, clock=lambda: FRIDAY_PEAK)
+        _plan(meter)
+        meter.settle({"input_tokens": 20_000, "output_tokens": 3_000}, FLASH, LOOP_TURN_CALL)
+        assert 2.00 - meter.snapshot()["reserve_usd"] >= LONG_RUN_LOOPS_PEAK
+
+
+class TestTheVerdictsRowCoversItsAdmission:
+    def test_with_no_single_shot_answer_the_verdict_is_planned_at_its_whole_cap(self) -> None:
+        meter = SpendMeter(2.00, clock=lambda: FRIDAY_OFF_PEAK)
+        _plan(meter)
+        meter.settle({"input_tokens": 1_000, "output_tokens": 3_000}, FLASH, LOOP_TURN_CALL)
+        # The tool phases spend down to the reserve (uncached input at 0.15 a million).
+        down_to = 2.00 - meter.snapshot()["reserve_usd"] - meter.spent()
+        meter.settle(
+            {"input_tokens": int(down_to / 0.15 * 1e6) - 1, "output_tokens": 0},
+            FLASH,
+            LOOP_TURN_CALL,
+        )
+        # What the verdict's admission demands — its prompt and its whole cap,
+        # no single-shot answer being measured — is what was kept: it is made.
+        assert (
+            meter.admit(
+                kind="verdict",
+                model=FLASH,
+                prompt_chars=ALLOWED * CHARS_PER_TOKEN,
+                cap_tokens=CAP,
+            )
+            is None
+        )
 
 
 class TestAPlannedCallSpendsItsOwnShare:

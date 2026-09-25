@@ -1365,26 +1365,36 @@ class ServiceContainer:
                 from maljan.reporting.composer import COMPOSED_SECTIONS
 
                 report_calls += len(COMPOSED_SECTIONS)
+            judge_chain = assignment_chain_for(self.config, "judge", role="judge")
+            reporter_chain = assignment_chain_for(self.config, REPORTER_AGENT_KEY, role="judge")
             meter.plan_tail(
                 {
                     "verdict": (
                         model_label_for(self.config, "judge", role="judge"),
                         1,
-                        self._prompt_allowance(
-                            assignment_chain_for(self.config, "judge", role="judge")
-                        ),
+                        self._prompt_allowance(judge_chain),
+                        self._output_cap_of(judge_chain),
                     ),
                     "report": (
                         self._reporter_model_label(),
                         report_calls,
-                        self._prompt_allowance(
-                            assignment_chain_for(self.config, REPORTER_AGENT_KEY, role="judge")
-                        ),
+                        self._prompt_allowance(reporter_chain),
+                        self._output_cap_of(reporter_chain),
                     ),
                 }
             )
         except Exception as exc:  # noqa: BLE001 — a plan never costs a job
             logger.debug("the verdict and report were not planned for the spend meter: %s", exc)
+
+    def _output_cap_of(self, chain: list[Any]) -> int:
+        """The report-stage output cap of the first model of ``chain``, or ``0`` unknown.
+
+        What a verdict or report call is admitted with (``llm.judge_max_tokens``,
+        or its derivation), so the reserve plans the answer its admission demands.
+        """
+        if not chain:
+            return 0
+        return max(0, int(report_stage_budget(self.config, chain[0], probe=False).tokens))
 
     def _prompt_allowance(self, chain: list[Any]) -> int:
         """The prompt tokens the first model of ``chain`` leaves room for, or ``0`` unknown.

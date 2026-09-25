@@ -625,11 +625,6 @@ class SpendMeter:
                 with self._lock:
                     group = "loop" if call == LOOP_TURN_CALL else "single"
                     self._measure_locked(usage, name, group)
-                    total_in = int(usage.get("input_tokens") or 0)
-                    cached = min(total_in, int(usage.get("cached_input_tokens") or 0))
-                    sums = self._inputs.setdefault(name, [0, 0])
-                    sums[0] += total_in
-                    sums[1] += cached
             cost = self._cost(usage, model)
             if cost is not None:
                 with self._lock:
@@ -650,9 +645,11 @@ class SpendMeter:
             total = 0.0
             inputs: dict[str, list[int]] = {}
             measured: list[tuple[Mapping[str, Any], str]] = []
+            answered = 0
             for turn in turns:
                 if getattr(turn, "type", "") != "ai":
                     continue
+                answered += 1
                 answered_by, _fallback = turn_model(turn, model)
                 if not answered_by:
                     metadata = getattr(turn, "response_metadata", None) or {}
@@ -663,6 +660,9 @@ class SpendMeter:
                 name = _clean(answered_by)
                 if name:
                     measured.append((usage, name))
+                if name and answered > 1:
+                    # The share a conversation reads from the cache is measured
+                    # after its first call, which has nothing cached to read.
                     total_in = int(usage.get("input_tokens") or 0)
                     sums = inputs.setdefault(name, [0, 0])
                     sums[0] += total_in
@@ -681,10 +681,16 @@ class SpendMeter:
             logger.debug("in-flight spend not noted (%s).", exc)
 
     def forget_loop(self, key: Any) -> None:
-        """A loop whose turns the ledger now holds (or never will)."""
+        """A loop whose turns the ledger now holds (or never will).
+
+        What its turns after the first read from the cache stays measured.
+        """
         with self._lock:
             self._in_flight.pop(key, None)
-            self._loop_inputs.pop(key, None)
+            for name, (total, cached) in (self._loop_inputs.pop(key, None) or {}).items():
+                sums = self._inputs.setdefault(name, [0, 0])
+                sums[0] += total
+                sums[1] += cached
             self._reserved.pop(key, None)
 
     def release(self, slot: Any) -> None:
@@ -720,16 +726,18 @@ class SpendMeter:
     def plan_tail(self, calls: Mapping[str, tuple[Any, ...]]) -> None:
         """The verdict and report calls this job will make.
 
-        ``{kind: (model, calls[, prompt tokens])}``: the prompt is what the
-        window accounting allows that kind of call (its window less its output
-        budget), ``0`` where no window is known.
+        ``{kind: (model, calls[, prompt tokens[, output cap]])}``: the prompt is
+        what the window accounting allows that kind of call (its window less
+        its output budget), ``0`` where no window is known; the cap is the
+        output cap the call is admitted with, ``0`` unknown.
         """
         with self._lock:
             for kind, row in calls.items():
                 model, count = row[0], int(row[1])
                 allowed = int(row[2]) if len(row) > 2 and row[2] else 0
+                cap = int(row[3]) if len(row) > 3 and row[3] else 0
                 if kind in TAIL_KINDS and count > 0:
-                    self._tail[kind] = [str(model or ""), count, max(0, allowed)]
+                    self._tail[kind] = [str(model or ""), count, max(0, allowed), max(0, cap)]
 
     def _cache_share_locked(self, name: str) -> float | None:
         total, cached = self._inputs.get(name, [0, 0])
@@ -779,14 +787,21 @@ class SpendMeter:
 
         ``taking`` is the kind of a planned call being admitted now: its own
         planned share is not in the reserve it is admitted against.
+
+        The first call of each kind is priced with its prompt uncached; the
+        ones after it — which share the first one's prefix — at the cache-hit
+        share measured over calls that were not the first of their conversation,
+        and at the cached rate of that prefix while none is measured. The
+        verdict is planned at the answer its admission will demand (its
+        configured cap until a single-shot answer is measured); a report call at
+        the planned answer.
         """
         total = 0.0
         rows: list[dict[str, Any]] = []
-        first = True
         for kind in _TAIL_ORDER:
             if kind not in self._tail:
                 continue
-            model, count, allowed = self._tail[kind]
+            model, count, allowed, cap = self._tail[kind]
             if kind == taking and count > 0:
                 count -= 1
             if count <= 0:
@@ -798,27 +813,44 @@ class SpendMeter:
             name = _clean(model)
             prompt, prompt_said = self._tail_prompt_locked(kind, int(allowed))
             answer, answer_said = self._planned_answer_locked(name)
-            if not answer:
-                continue
             share = self._cache_share_locked(name)
-            input_rate = (
-                price.input if share is None else share * price.cached + (1 - share) * price.input
+            later_rate = (
+                price.cached
+                if share is None
+                else (share * price.cached + (1 - share) * price.input)
             )
-            expected = (prompt * input_rate + answer * price.output) / MILLION
-            worst = (prompt * price.input + answer * price.output) / MILLION
-            usd = (worst + expected * (count - 1)) if first else expected * count
-            first = False
+            calls: list[float] = []
+            # The verdict is planned at what its admission will demand, so the
+            # reserve kept for it is what it needs to be made.
+            size = answer
+            if kind == "verdict":
+                demanded, _said = self._minimum_locked(kind, name, int(cap))
+                size = demanded or answer
+            for index in range(count):
+                if not size:
+                    continue
+                rate = price.input if index == 0 else later_rate
+                calls.append((prompt * rate + size * price.output) / MILLION)
+            if not calls:
+                continue
+            usd = sum(calls)
             total += usd
             rows.append(
                 {
                     "kind": kind,
                     "model": name,
                     "calls": count,
+                    "priced_calls": len(calls),
                     "prompt_tokens": prompt,
                     "prompt_from": prompt_said,
                     "answer_tokens": answer,
                     "answer_from": answer_said,
                     "cache_hit_share": None if share is None else round(share, 4),
+                    "cache_hit_share_from": (
+                        "the cached rate of the shared prefix (no share measured yet)"
+                        if share is None
+                        else "calls after the first of their conversation"
+                    ),
                     "usd": round(usd, 6),
                 }
             )
