@@ -122,7 +122,6 @@ class TestTheExportCarriesEveryPublishedRow:
         self, monkeypatch: Any
     ) -> None:
         """The one indicator cap is the export's only bound, and it records what it drops."""
-        monkeypatch.setattr(stix_renderer, "MAX_TOTAL_INDICATORS", 10_000)
         report = _report(
             NetworkIOCs(
                 urls=[

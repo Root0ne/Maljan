@@ -2080,11 +2080,18 @@ change landed on `main`.
   no model kept; the IOC table, the export and `/iocs` add it as a domain row
   and indicator where nothing else did. A live run published two C2 URLs from
   the judge's bundle and neither host.
-- **Nothing cuts the sandbox views or the export's network rows.** The sandbox
-  tools answer every row unless a caller pages them (`offset`, `limit`, with
-  the total and the next offset stated), where they cut every view at 200 rows;
-  the STIX export no longer slices the network block at 40 rows per kind; and
-  an address a sandbox watched is kept whatever its class, answered `no:`.
+- **Nothing cuts the sandbox views or the export.** The sandbox tools answer
+  every row unless a caller pages them (`offset`, `limit`, with the total and
+  the next offset stated), where they cut every view at 200 rows. The STIX
+  export carries every value the publish rule publishes — every `yes` row of
+  the IOC table — with no total cap, no band ranking that drops, no cap on
+  file names and no slice of the network block or the string rows. An address
+  a sandbox watched is kept whatever its class, answered `no:`.
+  **Upgrading:** an export used to carry at most 15 indicators
+  (`MAX_TOTAL_INDICATORS`) and 10 file names; a consumer that relied on that
+  bound now receives every published indicator. The two numbers are now only
+  the linter's C4 counts, which warn and drop nothing, and the run summary's
+  "STIX indicators over the cap" reads 0.
 - **Any MCP error reply is a failed ledger entry.** The client's failure
   markers are JSON (`mcp_client.tool_error_marker`); an `isError` reply was
   written as a Python repr and an exception message with a quote broke the

@@ -34,14 +34,11 @@ from maljan.agents._indicator_denylists import (
     HASH_HEX_LENGTHS,
     IOC_FILE_EXTENSIONS,
     IOC_OS_RESOURCE_PREFIXES,
-    MAX_FILE_NAME_INDICATORS,
-    MAX_TOTAL_INDICATORS,
     URL_DENY_HOSTS,
     malformed_hash_in,
     whole_value_in,
 )
 from maljan.analysis.technique_ids import attack_reference_id
-from maljan.core.logger import logger
 from maljan.extractors.network_extractor import (
     address_is_publishable,
     corroboration_reason,
@@ -278,36 +275,6 @@ def _record_indicator_cap(ledger: Any | None, *, removed: int) -> None:
         ledger.record_indicator_cap(removed=removed)
     except Exception:  # noqa: BLE001 — telemetry must never break an export
         return
-
-
-def _within_the_indicator_cap(
-    objects: list[Any], order: dict[str, tuple[int, int, int]], ledger: Any | None = None
-) -> list[Any]:
-    """``objects`` with the lowest-priority indicators removed, or ``objects`` itself.
-
-    The cap is over every indicator the bundle would carry, whoever minted it,
-    and it is spent in the order the report's own linter describes: the
-    sample's hashes, the network indicators somebody observed or a second
-    source knows, the other hashes the judge carried, the file names. An
-    indicator nothing queued — one that arrived in the judge's bundle and was
-    merged into another by the integrity pass keeps the first writer's id, so
-    this is rare — sorts last rather than raising.
-    """
-    indicators = [obj for obj in objects if getattr(obj, "type", "") == "indicator"]
-    if len(indicators) <= MAX_TOTAL_INDICATORS:
-        _record_indicator_cap(ledger, removed=0)
-        return objects
-    last = (_BAND_FILE_NAME + 1, 0, len(order))
-    ranked = sorted(indicators, key=lambda obj: order.get(obj.id, last))
-    kept = {obj.id for obj in ranked[:MAX_TOTAL_INDICATORS]}
-    _record_indicator_cap(ledger, removed=len(indicators) - MAX_TOTAL_INDICATORS)
-    logger.warning(
-        "stix_renderer: total indicator cap (%d) exceeded by %d; the lowest-priority "
-        "indicator(s) are not exported.",
-        MAX_TOTAL_INDICATORS,
-        len(indicators) - MAX_TOTAL_INDICATORS,
-    )
-    return [obj for obj in objects if getattr(obj, "type", "") != "indicator" or obj.id in kept]
 
 
 class Declined(tuple[str, str]):
@@ -1212,7 +1179,7 @@ class ExtendedSTIXRenderer:
         # FP reappears for every sample that bundles NDK-compiled libraries.
         if report.static is not None:
             file_name_kept = 0
-            for ioc in report.static.interesting_strings[:50]:
+            for ioc in report.static.interesting_strings:
                 pattern = _stix_pattern_for_string_ioc(ioc)
                 if pattern is None:
                     continue
@@ -1335,27 +1302,15 @@ class ExtendedSTIXRenderer:
         # renderer's synthesized set, and prunes any ref dangling from upstream
         # drops. See judge_postprocess.enforce_bundle_integrity.
         #
-        # It runs *before* the cap, which is the whole reason the cap moved
-        # here. A string row and the network row it was corroborated by are the
-        # same indicator written twice; capping first spent two of fifteen
-        # slots on a pair this pass then folded into one, so a bundle over the
-        # cap shipped under it and the rows it lost were the ones the priority
-        # order exists to keep — five observed C2 addresses, on the probe that
-        # found this. Deduplicated first, the cap keeps exactly as many
-        # indicators as there is room for.
+        # No count bounds the indicators after it. The export carries every
+        # value the one publish rule publishes, which is every ``yes`` row of
+        # the report's IOC table: a total cap of fifteen used to drop the
+        # lowest-ranked of them, so the table and ``/iocs`` said ``yes`` for
+        # values the bundle did not carry.
         from maljan.agents.judge_postprocess import enforce_bundle_integrity
 
         objects = enforce_bundle_integrity(objects, ledger=ledger)
-        capped = _within_the_indicator_cap(objects, order, ledger=ledger)
-        if capped is not objects:
-            # Only what the cap orphaned is left to sweep, and it is the cap's
-            # doing rather than a defect of anybody's bundle — so it is counted
-            # under a reason of its own. Counted it must be: the pass used to
-            # run here with no ledger at all, so this sweep's losses appeared in
-            # no total. The cap's own removals are counted beside them, under
-            # ``indicator_cap_removed``, so every object that left this bundle
-            # left under a name.
-            objects = enforce_bundle_integrity(capped, ledger=ledger, dropped_as=CAP_ORPHAN_REASON)
+        _record_indicator_cap(ledger, removed=0)
         # A note, opinion, grouping or report is about the objects it names,
         # and STIX requires it to name at least one. The passes above take out
         # references to what the export declined; one left naming nothing is
@@ -2854,12 +2809,10 @@ def _accept_string_ioc(
         if host and any(host.endswith(d) or d in host for d in URL_DENY_HOSTS):
             return False
 
-    # file:name: acceptance-based admission + per-report cap, asked before the
-    # publish rule because its answer is about the shape of the value and the
-    # budget, not about who saw it.
+    # file:name: acceptance-based admission, asked before the publish rule
+    # because its answer is about the shape of the value, not about who saw it.
+    # No count bounds it: a file name the rule publishes is exported.
     if stripped.startswith("[file:name"):
-        if file_name_kept >= MAX_FILE_NAME_INDICATORS:
-            return False
         if not value:
             return False
         if COMPILE_ARTIFACT_RE.search(value):

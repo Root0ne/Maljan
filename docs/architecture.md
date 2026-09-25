@@ -2446,8 +2446,7 @@ is assembled from what the run gathered rather than recomputed beside it:
   `in_published_url`), except a well-known benign host, which is published
   only when a model keeps the host itself; the table, the export and `/iocs`
   add it as a domain row and indicator when nothing else did. The export
-  carries every network row the table publishes, bounded only by the one
-  indicator cap, which records what it drops. The rule's report-wide lookups
+  carries every row the table publishes, whatever their number. The rule's report-wide lookups
   are built once per table, export or feed (`one_reading`).
 * **The IOC table is the one publish rule's answer, row by row.**
   `build_consolidated_iocs` stores every indicator live with its kind, who
@@ -3075,21 +3074,16 @@ analysis page, and none of them is an event, so none of them was covered by the
 scrubbing the publisher does: a model echoing a credentialled URL into the
 verdict field put the credential in the stored report and drew it on the page.
 
-`MAX_TOTAL_INDICATORS` is applied where the indicators are rendered into the
-bundle, over every indicator that would be in it rather than over the ones the
-renderer happened to mint. The integrity pass runs *first*: a corroborated
-string row and the network row that corroborated it are one indicator written
-twice, and capping before the dedupe spent slots on rows it then deleted, so a
-bundle over the cap shipped under it and lost five observed addresses to
-duplicates. Deduplicated first, the cap keeps exactly as many as there is room
-for, in four bands — the sample's own hashes, then the network indicators
-ordered by how strong their origin is (observed, then asserted by an agent or
-the judge, then string-derived and corroborated), then the other hashes the
-judge carried, then the file names. A string-derived row never outranks the
-observed row it duplicates, and when they are the same indicator the queue
-order makes the observation the one that survives the dedupe. The renderer and
-the linter read the one constant. The integrity pass then runs a second time,
-to sweep the relationships the cap left pointing at nothing, and what it takes
-out there is counted in the truncation ledger under `cap_orphan` — its own
-reason, because it is the cap's loss rather than a defect of anybody's bundle,
-and because that pass used to run with no ledger at all.
+No count bounds the indicators the export carries: it carries every value the
+one publish rule publishes, which is every `yes` row of the IOC table, and no
+band ranking drops any of them. A total cap of fifteen (`MAX_TOTAL_INDICATORS`)
+and a cap of ten file names used to drop the lowest-ranked indicators, so the
+table and `/iocs` said `yes` for values the bundle did not carry, and a slice
+of fifty string rows stopped the string path early. The integrity pass still
+runs over the assembled bundle, deduplicating an indicator written twice (a
+corroborated string row and the network row that corroborated it; the queue
+order makes the observation the one that survives). The two constants are now
+the report linter's counts: its C4 warning states how many file names and how
+many indicators a bundle carries when it passes them, and drops nothing. The
+run summary's "STIX indicators over the cap" row reads 0 for a run exported
+this way.

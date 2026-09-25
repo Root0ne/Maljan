@@ -247,9 +247,8 @@ class TestRoundTrip:
         assert _types(rebuilt) == _types(bundle)
 
 
-class TestTotalIndicatorCap:
-    """Wave 9: cap total indicator count to MAX_TOTAL_INDICATORS with
-    priority hashes > network > file:name."""
+class TestNoCountBoundsTheIndicators:
+    """The export carries every value the publish rule publishes, whatever their number."""
 
     def _packed_report(self) -> MalwareReport:
         from maljan.reporting.models import StaticAnalysis, StringIOC
@@ -272,13 +271,13 @@ class TestTotalIndicatorCap:
         )
         return report
 
-    def test_total_capped_to_15(self) -> None:
-        from maljan.agents._indicator_denylists import MAX_TOTAL_INDICATORS
-
+    def test_every_published_domain_is_carried_past_the_old_cap_of_fifteen(self) -> None:
         report = self._packed_report()
         bundle = ExtendedSTIXRenderer().render(report, base_bundle=None)
         indicators = [obj for obj in bundle.objects if isinstance(obj, Indicator)]
-        assert len(indicators) == MAX_TOTAL_INDICATORS == 15
+        domains = [i for i in indicators if "domain-name:value" in i.pattern]
+        assert len(domains) == 20
+        assert len(indicators) > 15
 
     def test_priority_keeps_hash_and_network_first(self) -> None:
         report = self._packed_report()
