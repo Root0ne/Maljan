@@ -192,6 +192,66 @@ def test_the_same_name_untyped_in_an_endpoints_list_is_not_a_domain() -> None:
     assert kept_network_values(Artifact(kind="endpoints", rows=[["update.zip"]])) == []
 
 
+class TestATypeAppliesToItsValueCellOnly:
+    def test_a_process_or_file_column_beside_a_typed_value_is_no_domain(self) -> None:
+        artifact = Artifact(
+            kind="endpoints",
+            columns=["Type", "Value", "Process"],
+            rows=[
+                ["domain", "relay-alpha-7f3c.top", "loader.py"],
+                ["url", "https://relay-alpha-7f3c.top/live/", "update.app"],
+            ],
+        )
+
+        assert kept_network_values(artifact) == [
+            ("domain", "relay-alpha-7f3c.top"),
+            ("url", "https://relay-alpha-7f3c.top/live/"),
+        ]
+
+    def test_the_same_rows_with_no_headings_keep_only_the_typed_value(self) -> None:
+        artifact = Artifact(
+            kind="endpoints",
+            rows=[
+                ["domain", "relay-alpha-7f3c.top", "loader.py"],
+                ["url", "https://relay-alpha-7f3c.top/live/", "update.app"],
+            ],
+        )
+
+        assert kept_network_values(artifact) == [
+            ("domain", "relay-alpha-7f3c.top"),
+            ("url", "https://relay-alpha-7f3c.top/live/"),
+        ]
+
+    def test_an_address_in_another_cell_of_an_endpoints_row_is_still_kept(self) -> None:
+        artifact = Artifact(kind="endpoints", rows=[["domain", "relay-alpha-7f3c.top", CONTACT]])
+
+        assert kept_network_values(artifact) == [
+            ("domain", "relay-alpha-7f3c.top"),
+            ("ip", CONTACT),
+        ]
+
+    def test_a_note_cell_naming_another_type_never_drops_a_typed_row(self) -> None:
+        for note in ("string", "key", "other", "process", "command"):
+            artifact = Artifact(kind="iocs", rows=[["domain", "relay-alpha-7f3c.top", note]])
+            assert kept_network_values(artifact) == [("domain", "relay-alpha-7f3c.top")], note
+
+    def test_compound_type_words_are_read_by_their_last_word(self) -> None:
+        artifact = Artifact(
+            kind="iocs",
+            rows=[["C2 domain", "relay-alpha-7f3c.top"], ["ip:port", f"{CONTACT}:443"]],
+        )
+
+        assert kept_network_values(artifact) == [
+            ("domain", "relay-alpha-7f3c.top"),
+            ("ip", CONTACT),
+        ]
+
+    def test_a_row_whose_type_cell_is_a_file_keeps_nothing(self) -> None:
+        artifact = Artifact(kind="endpoints", rows=[["file", "relay-alpha-7f3c.top"]])
+
+        assert kept_network_values(artifact) == []
+
+
 def test_a_well_known_host_is_not_kept_through_a_url_on_it() -> None:
     artifact = Artifact(kind="endpoints", rows=[["url", "https://www.googleapis.com/x"]])
 

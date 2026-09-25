@@ -2069,10 +2069,11 @@ change landed on `main`.
   well-known benign name the guest resolved, is published only when a model
   keeps it as an indicator (an analyst's artifact, or the judge's indicator);
   a claim that mentions it keeps nothing and is named in the reason. Only an
-  `endpoints`, `network`, `iocs` or `c2` artifact keeps; in it a row keeps a
-  value typed as a network value (type aliases, either column order), a row
-  typed as a file, path or hash keeps nothing, and an untyped value counts only
-  in an endpoints or C2 list, never as a file name there; a name typed as a
+  `endpoints`, `network`, `iocs` or `c2` artifact keeps; in it a row's one
+  type cell ("C2 domain", "ip:port" and aliases read by their last word)
+  types one value cell, a row typed as a file, path or hash keeps nothing, and
+  every other cell is read untyped, only in an endpoints or C2 list and never
+  as a file name there; a name typed as a
   domain, host or URL is the model's statement and is kept whatever its TLD. The value is read
   tolerantly (a port, IPv6 brackets, case, a URL's host), the judge's URL
   indicator keeps its host, and the analysts' findings block states the

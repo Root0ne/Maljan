@@ -1002,17 +1002,54 @@ def _kind_of(artifact: Any) -> str:
     return re.sub(r"[\s-]+", "_", str(getattr(artifact, "kind", "") or "").strip().lower())
 
 
+# The headings that name a table's type column and its value column.
+_TYPE_HEADINGS = frozenset({"type", "kind", "category", "ioc type", "indicator type"})
+_VALUE_HEADINGS = frozenset(
+    {"value", "indicator", "ioc", "observable", "address", "host", "domain", "url", "endpoint"}
+)
+_PORT_SUFFIX_RE = re.compile(r"[:/]\s*port$")
+
+
+def _type_word(cell: str) -> str | None:
+    """The type a cell names, normalised, or ``None`` when it names none.
+
+    Lower-cased, a ``:port`` or ``/port`` suffix taken off and the last word
+    read, so "C2 domain" is ``domain``, "IP Address" is ``address`` and
+    "ip:port" is ``ip``.
+    """
+    text = _PORT_SUFFIX_RE.sub("", str(cell or "").strip().lower()).strip()
+    if not text:
+        return None
+    if text in _TYPE_ALIASES or text in _OTHER_TYPES:
+        return text
+    last = text.split()[-1]
+    return last if last in _TYPE_ALIASES or last in _OTHER_TYPES else None
+
+
+def _heading_columns(artifact: Any) -> tuple[int, int] | None:
+    """The type column and the value column a table's headings name, when they name both."""
+    headings = [str(h or "").strip().lower() for h in getattr(artifact, "columns", None) or []]
+    typed = next((i for i, h in enumerate(headings) if h in _TYPE_HEADINGS), None)
+    valued = next((i for i, h in enumerate(headings) if h in _VALUE_HEADINGS), None)
+    if typed is None or valued is None or typed == valued:
+        return None
+    return typed, valued
+
+
 def kept_network_values(artifact: Any) -> list[tuple[str, str]]:
     """The addresses, names and URLs an analyst's artifact keeps, each as ``(kind, value)``.
 
     Only an artifact of a keeping kind (``endpoints``, ``network``, ``iocs``,
-    ``c2`` and their plain spellings) keeps anything. In it, a row keeps a
-    value when a cell types it as a network value (``ip``, ``ipv4``,
-    ``ipv6``, ``address``, ``domain``, ``host``, ``hostname``, ``fqdn``,
-    ``url``, ``uri``), in either column order; a row typed as anything else
-    (a file, a path, a mutex, a hash) keeps nothing; and an untyped row is
-    read only in an endpoints or C2 list. The value itself is read
-    tolerantly: a port taken off, IPv6 brackets, any case, a URL's host.
+    ``c2`` and their plain spellings) keeps anything. A row has at most one
+    type cell: the column a heading names ``type``, or else the first cell that
+    names a type ("C2 domain", "IP Address", "ip:port" included). A type
+    applies to one value cell only — the heading's value column, or the cell
+    after the type cell (before it when the type is the last cell) — and a name
+    typed as a domain, host or URL is the model's statement, kept whatever its
+    TLD. A row whose type cell names a non-network type (a file, a path, a
+    hash) keeps nothing. Every other cell, and every cell of an untyped row, is
+    read untyped, and only in an endpoints or C2 list: an address is kept, a
+    name only when it could be a host and does not end in a file's extension.
     """
     kind = _kind_of(artifact)
     if kind not in _KEEPING_KINDS:
@@ -1022,21 +1059,42 @@ def kept_network_values(artifact: Any) -> list[tuple[str, str]]:
     single = getattr(artifact, "value", None)
     if not rows and single and bare:
         rows = [[str(single)]]
+    headed = _heading_columns(artifact)
     out: list[tuple[str, str]] = []
+
+    def _keep(found: list[tuple[str, str]]) -> None:
+        for item in found:
+            if item not in out:
+                out.append(item)
+
     for row in rows:
-        words = [cell.strip().lower() for cell in row]
-        if any(word in _OTHER_TYPES for word in words):
+        type_at: int | None
+        value_at: int | None
+        if headed is not None and max(headed) < len(row):
+            type_at, value_at = headed
+            word = _type_word(row[type_at])
+        else:
+            type_at = next((i for i, cell in enumerate(row) if _type_word(cell)), None)
+            word = _type_word(row[type_at]) if type_at is not None else None
+            if type_at is None:
+                value_at = None
+            elif type_at + 1 < len(row):
+                value_at = type_at + 1
+            else:
+                value_at = type_at - 1 if type_at > 0 else None
+        if word in _OTHER_TYPES:
             continue
-        hints = [_TYPE_ALIASES[word] for word in words if word in _TYPE_ALIASES]
-        hint = hints[0] if hints else None
-        if hint is None and not bare:
+        hint = _TYPE_ALIASES.get(word) if word else None
+        if hint is not None and value_at is not None:
+            _keep(_cell_values(row[value_at], hint))
+        if not bare:
             continue
-        for cell in row:
-            if cell.strip().lower() in _TYPE_ALIASES:
+        for index, cell in enumerate(row):
+            if index in (type_at, value_at) and hint is not None:
                 continue
-            for found in _cell_values(cell, hint):
-                if found not in out:
-                    out.append(found)
+            if index == type_at:
+                continue
+            _keep(_cell_values(cell, None))
     return out
 
 
