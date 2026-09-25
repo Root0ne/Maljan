@@ -2213,7 +2213,7 @@ change landed on `main`.
   logged inside a `<log>…</log>` envelope, and `<log> [ERROR] Cannot find
   function in 0x00003ce4 </log>` was recorded as a successful
   `decompile_function`. A reply that is only such an envelope, of radare2 log
-  lines with an `[ERROR]` among them, is now a failed call whose message is
+  lines with an `[ERROR]` or `[FATAL]` among them, is now a failed call whose message is
   radare2's lines.
 - **The tool-call threshold is worded as the warning it is.** The log line read
   "spent 83 tool calls (budget=20 …)", an overrun of a limit that does not

@@ -121,6 +121,24 @@ def test_a_log_envelope_of_an_error_is_a_failed_call_in_radare2_s_words() -> Non
         assert json.loads(answered)["error"]["code"] == "tool_failed"
 
 
+def test_a_fatal_or_mixed_failure_envelope_is_a_failed_call() -> None:
+    for reply, words in (
+        ("<log>\n[FATAL] Cannot open file\n</log>", "[FATAL] Cannot open file"),
+        (
+            "<log>\n[ERROR] Cannot seek\n[FATAL] Aborting\n</log>",
+            "[ERROR] Cannot seek\n[FATAL] Aborting",
+        ),
+        (
+            "<log>\n[WARN] Relocs not applied\n[FATAL] Aborting\n</log>",
+            "[WARN] Relocs not applied\n[FATAL] Aborting",
+        ),
+    ):
+        failure = r2.r2_error_reply("decompile_function", reply)
+        assert failure is not None, reply
+        assert failure["error"]["code"] == "tool_failed"
+        assert failure["error"]["message"] == words
+
+
 def test_an_envelope_of_warnings_alone_or_in_front_of_an_answer_is_no_failure() -> None:
     assert r2.r2_error_reply("list_strings", "<log>\n[WARN] Relocs not applied\n</log>") is None
     assert (

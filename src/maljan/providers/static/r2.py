@@ -64,10 +64,12 @@ _R2_ERROR_REPLIES: tuple[tuple[re.Pattern[str], str, str | None], ...] = (
 
 # r2mcp hands back what radare2 logged while running a command inside a
 # ``<log>…</log>`` envelope. A reply that is that envelope and nothing else, and
-# whose lines are all radare2 log lines with at least one ``[ERROR]``, is radare2
-# saying the command failed ("[ERROR] Cannot find function in 0x…") with no
-# answer beside it. An envelope in front of an answer is not a failure.
+# whose lines are all radare2 log lines with at least one ``[ERROR]`` or
+# ``[FATAL]``, is radare2 saying the command failed ("[ERROR] Cannot find
+# function in 0x…") with no answer beside it. An envelope in front of an answer is not a failure.
 _R2_LOG_ENVELOPE = re.compile(r"<log>(?P<body>.*)</log>", re.DOTALL)
+# The levels radare2 logs a failure at; ``FATAL`` is the more severe of the two.
+_R2_FAILURE_LEVELS = frozenset({"ERROR", "FATAL"})
 _R2_LOG_LINE = re.compile(r"\[(?P<level>[A-Z]+)\]\s*\S.*")
 
 
@@ -80,7 +82,7 @@ def _r2_logged_error(text: str) -> str | None:
     matched = [_R2_LOG_LINE.fullmatch(line) for line in lines]
     if not lines or not all(matched):
         return None
-    if not any(m is not None and m.group("level") == "ERROR" for m in matched):
+    if not any(m is not None and m.group("level") in _R2_FAILURE_LEVELS for m in matched):
         return None
     return "\n".join(lines)
 
@@ -90,7 +92,7 @@ def r2_error_reply(tool: str, reply: Any) -> dict[str, Any] | None:
 
     ``None`` for anything that is not one of r2mcp's own error sentences as the
     whole reply, or a log envelope holding nothing but radare2's log lines with
-    an ``[ERROR]`` among them, so every answer keeps exactly what it said. The
+    an ``[ERROR]`` or ``[FATAL]`` among them, so every answer keeps exactly what it said. The
     message is r2mcp's sentence, or radare2's log lines, unchanged.
     """
     if not isinstance(reply, str):
