@@ -12,12 +12,17 @@ connection test cannot report a different tool set than a job sees.
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from maljan.core.logger import logger
 from maljan.providers.base import MirrorSpec
+from maljan.providers.errors import ProviderError
 from maljan.providers.registry import register_static_provider
 from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
 from maljan.tools.errors import BAD_ARGUMENT, TOOL_FAILED, tool_error
@@ -111,6 +116,90 @@ def _reading_error_replies(tool: Any) -> Any:
         return tool
 
 
+# What a run publishes about an r2mcp it could not find: the remedy, not the
+# directories searched. The directories name the worker's user and its home,
+# which the log keeps and a published degradation reason has no need of.
+R2_NOT_FOUND_REMEDIATION = (
+    "install r2mcp with `r2pm -ci r2mcp`, or set core.static.r2.binary_path to "
+    "the absolute path of the r2mcp executable"
+)
+
+
+@dataclass(frozen=True)
+class R2Binary:
+    """Where the configured r2mcp was found, or every place it was looked for."""
+
+    path: str | None
+    looked: tuple[str, ...]
+
+    def described(self) -> str:
+        """The places looked, as one sentence for a log or a connection test."""
+        return "; ".join(self.looked) or "nowhere"
+
+
+class R2BinaryNotFound(ProviderError):
+    """The configured r2mcp is not on PATH nor in radare2's own install places."""
+
+    def __init__(self, configured: str, looked: str) -> None:
+        super().__init__(f"r2mcp {configured!r} was not found; looked in: {looked}")
+        self.remediation = R2_NOT_FOUND_REMEDIATION
+
+
+def _r2pm_bin_dirs(env: Mapping[str, str]) -> list[str]:
+    """Where ``r2pm`` puts the executables it installs, most specific first.
+
+    radare2's package manager installs under its prefix, ``R2PM_PREFIX``,
+    whose default is ``radare2/prefix`` under the user's data directory —
+    ``$XDG_DATA_HOME``, else ``.local/share`` in the home directory — and puts
+    executables in ``bin`` beneath it, unless ``R2PM_BINDIR`` says otherwise.
+    Every one of these is read from the environment or the home directory:
+    nothing about one host is written here.
+    """
+    dirs: list[str] = []
+    if env.get("R2PM_BINDIR"):
+        dirs.append(env["R2PM_BINDIR"])
+    if env.get("R2PM_PREFIX"):
+        dirs.append(os.path.join(env["R2PM_PREFIX"], "bin"))
+    home = env.get("HOME") or os.path.expanduser("~")
+    data_home = env.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share")
+    dirs.append(os.path.join(data_home, "radare2", "prefix", "bin"))
+    return list(dict.fromkeys(dirs))
+
+
+def _executable(path: str) -> bool:
+    return os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def resolve_r2_binary(configured: str, env: Mapping[str, str] | None = None) -> R2Binary:
+    """The r2mcp to launch for ``static.r2.binary_path``, and where it was looked for.
+
+    A value with a directory in it is the operator's own path and is used as
+    it is, when it is an executable file. A bare name is looked up on the
+    worker's PATH, then in the directories ``r2pm`` installs into (see
+    ``_r2pm_bin_dirs``), because ``r2pm -ci r2mcp`` puts it there and does not
+    touch PATH. Nothing is guessed past those: when none holds it the answer
+    is ``None`` with every place looked.
+    """
+    environ: Mapping[str, str] = os.environ if env is None else env
+    name = str(configured or "r2mcp").strip() or "r2mcp"
+    if name.startswith("~"):
+        home = environ.get("HOME") or os.path.expanduser("~")
+        name = home + name[1:]
+    if os.sep in name or (os.altsep and os.altsep in name):
+        return R2Binary(name if _executable(name) else None, (name,))
+    path_value = environ.get("PATH", "")
+    looked: list[str] = [f"PATH ({path_value})" if path_value else "PATH (empty)"]
+    on_path = shutil.which(name, path=path_value) if path_value else None
+    if on_path:
+        return R2Binary(on_path, tuple(looked))
+    for directory in _r2pm_bin_dirs(environ):
+        candidate = os.path.join(directory, name)
+        looked.append(candidate)
+        if _executable(candidate):
+            return R2Binary(candidate, tuple(looked))
+    return R2Binary(None, tuple(looked))
+
+
 async def enumerate_r2_tools(command: str) -> list[str]:
     """Names of the tools an r2mcp at ``command`` offers, over one stdio handshake.
 
@@ -190,6 +279,26 @@ class R2StaticProvider(GenericMCPStaticProvider):
         return provider
 
     def open(self, job: Any) -> None:
+        """Find r2mcp, then attach to it as the generic adapter does.
+
+        ``static.r2.binary_path`` defaults to the bare name ``r2mcp``, which a
+        worker whose PATH does not hold radare2's install directory could not
+        start. It is resolved here, at the start of the provider, through PATH
+        and the places ``r2pm`` installs into, and the handle launches what
+        was found. Not found is a failure that says where it looked; r2
+        degrades, so the analyst goes on without it and the run records why.
+        """
+        if not self._handle.is_open:
+            configured = str(self._handle.config.command or "r2mcp")
+            binary = resolve_r2_binary(configured)
+            if binary.path is None:
+                raise R2BinaryNotFound(configured, binary.described())
+            if binary.path != configured:
+                logger.info("r2: launching r2mcp from %s.", binary.path)
+                self._handle.config = self._handle.config.model_copy(
+                    update={"command": binary.path}
+                )
+                self._cfg = self._handle.config
         super().open(job)
         self.tools = self.get_tools()
 
