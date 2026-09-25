@@ -418,8 +418,12 @@ run resolves it: the team's forced provider, the definition's own
 `static_provider`, the job's `static_provider`, or `core.static.provider`.
 Each distinct provider that does not degrade is asked whether it is ready:
 Ghidra over http answers when `GET <url>/mcp/schema` with the configured token
-returns below 400, which loads and analyses nothing; Ghidra over stdio is
-started by the job itself and has nothing to reach before it. The refusal
+returns below 400, which loads and analyses nothing. Ghidra over stdio is
+started by the job itself, so what is checked is that `core.static.ghidra.command`
+is set and names an executable the API host finds (by its last path segment in
+the refusal). The shipped transport is `stdio` with no command, so an operator
+who switches Ghidra on without setting `transport` to `http` is told that here
+rather than when the agent starts. The refusal
 names each agent, the provider and its address as scheme and host:
 
 ```

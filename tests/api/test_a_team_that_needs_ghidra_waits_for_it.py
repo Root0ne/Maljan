@@ -200,6 +200,36 @@ class TestTheCheck:
         assert _check(Settings(_env_file=None), "nope") == []
 
 
+class TestAStdioGhidra:
+    """Switched on with the transport left at its shipped stdio and no command."""
+
+    def _stdio(self, command: str) -> Settings:
+        settings = _team_settings(_closed_port())
+        settings.static.ghidra.transport = "stdio"
+        settings.static.ghidra.command = command
+        return settings
+
+    def test_no_command_is_said_with_what_to_set(self) -> None:
+        refusals = _check(self._stdio(""))
+        assert len(refusals) == 1
+        assert "agent 'reverser_ghidra'" in refusals[0]
+        assert "with no command" in refusals[0]
+        assert "core.static.ghidra.transport to 'http'" in refusals[0]
+
+    def test_a_command_that_is_not_there_is_refused_by_its_name_only(self, tmp_path) -> None:
+        missing = str(tmp_path / "bin" / "ghidra-mcp-stdio")
+        refusals = _check(self._stdio(missing))
+        assert len(refusals) == 1
+        assert "'ghidra-mcp-stdio' is not an executable" in refusals[0]
+        assert str(tmp_path) not in refusals[0], "a host path does not reach the refusal"
+
+    def test_an_executable_command_is_ready(self, tmp_path) -> None:
+        binary = tmp_path / "ghidra-mcp-stdio"
+        binary.write_text("#!/bin/sh\n")
+        binary.chmod(0o755)
+        assert _check(self._stdio(str(binary))) == []
+
+
 class TestSubmitting:
     @pytest.fixture
     def client(self) -> Any:

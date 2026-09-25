@@ -515,13 +515,38 @@ class GhidraStaticProvider(StaticProvider):
         """Whether a job on Ghidra can start: its schema answering, and no analysis.
 
         Over http the schema endpoint with the configured token is the check —
-        the first call a job makes. Over stdio the server is started by the
-        job itself and there is nothing to reach before then. Switched off is
-        ``switched_off``'s answer, not this one's.
+        the first call a job makes. Over stdio the job starts the server
+        itself, so what can be checked before then is that there is a command
+        and that it names an executable. The shipped transport is stdio with no
+        command, which an operator who switched Ghidra on and left the
+        transport alone meets as a run that fails when the agent starts; it is
+        said here instead. Switched off is ``switched_off``'s answer.
         """
-        if self._cfg.transport != "http":
-            return ProviderProbe(ok=True, detail="stdio: started with the job")
-        return await self.probe()
+        if self._cfg.transport == "http":
+            return await self.probe()
+        command = str(self._cfg.command or "").strip()
+        if not command:
+            return ProviderProbe(
+                ok=False,
+                detail=(
+                    f"transport is {self._cfg.transport!r} with no command; set "
+                    "core.static.ghidra.transport to 'http' and its url for the "
+                    "Ghidra container"
+                ),
+            )
+        import os
+        import shutil
+
+        # Named by its last segment only: the refusal reaches any user, and a
+        # command is a path on this host.
+        name = os.path.basename(command)
+        found = shutil.which(command)
+        if found is None:
+            return ProviderProbe(
+                ok=False,
+                detail=f"stdio command {name!r} is not an executable this host finds",
+            )
+        return ProviderProbe(ok=True, detail=f"stdio: {name!r} is started with the job")
 
     def switched_off(self) -> bool:
         """``core.static.ghidra.enabled`` is false: the provider attaches nothing."""
