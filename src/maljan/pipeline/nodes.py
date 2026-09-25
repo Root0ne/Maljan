@@ -1943,9 +1943,11 @@ def announce_finished(
 def make_join_node(stage: Any, container: ServiceContainer, finishes: tuple[str, ...] = ()) -> Any:
     """The barrier at the end of a parallel analysis stage.
 
-    Does nothing but exist. LangGraph waits for every predecessor of a node, so
-    one node behind the stage's agents is a fan-in; the stage's own result is
-    already in the state, written by each agent through the merging reducer.
+    Does nothing but exist. The builder enters it through one list edge from
+    all of the stage's agents, which waits for every one of them, so one node
+    behind the agents is a fan-in; the stage's own result is already in the
+    state, written by each agent through the merging reducer. A debate that
+    leaves through one is entered from the router's ``judge`` branch.
     """
 
     async def node_fn(state: AnalysisState) -> dict[str, Any]:
@@ -4106,16 +4108,20 @@ def make_judge_node(
                             total_techniques=_technique_count,
                             has_analyst_errors=bool(_failed_analysts),
                         )
-                        memory_store.store(case)
+                        # Held, not written: the case is stored once the
+                        # job has completed (``remember_the_run``), so a job
+                        # that fails after its judge leaves no entry behind.
+                        container.pending_memory_case = case
                         logger.info(
-                            "LTM: stored case '%s' (category=%s, techniques=%d).",
+                            "LTM: case '%s' (category=%s, techniques=%d) is stored "
+                            "when the job completes.",
                             case.sample_id,
                             case.malware_category,
                             len(case.technique_ids),
                         )
                     except Exception as e:
                         logger.warning(
-                            "LTM store failed (%s). Analysis result is unaffected.",
+                            "LTM case could not be built (%s). Analysis result is unaffected.",
                             e,
                         )
 
@@ -4171,9 +4177,18 @@ def make_judge_node(
                         )
                         # Write side: only persist under a grounded family so an
                         # UNKNOWN verdict cannot pollute the attribution corpus.
+                        # Held, not written: the corpus learns this sample once
+                        # the job has completed (``remember_the_run``), so a job
+                        # that fails after its judge files nothing under a
+                        # family nobody kept.
                         _family = _assessed_family(bundle)
                         if _family:
-                            _fh_store.upsert_sample(_sample_id, _family, _funcs)
+                            container.pending_function_hashes = (
+                                _fh_store,
+                                _sample_id,
+                                _family,
+                                list(_funcs),
+                            )
             except Exception as _e:
                 logger.warning("Function-hash attribution skipped (%s). Verdict unaffected.", _e)
 

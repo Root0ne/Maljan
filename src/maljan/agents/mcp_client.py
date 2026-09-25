@@ -231,10 +231,20 @@ class MCPLangChainToolkit:
             await stack.aclose()
         except RuntimeError as exc:
             # anyio raises this when the stack is closed from a task other than
-            # the one that entered it — the ordinary case here, since agents
-            # enter on the shared agent loop and may be closed from elsewhere.
+            # the one that entered it — the ordinary case here, since a
+            # registry's close runs as a task of its own on the owning loop.
+            # The refusal is anyio's task-group bookkeeping, not the transport:
+            # the stack's exits still run, a stdio transport still closes the
+            # server's stdin, waits for it and terminates it if it does not
+            # exit, and no process or task is left behind
+            # (``tests/unit/agents/test_mcp_cleanup_from_another_task.py``).
             if "cancel scope" in str(exc).lower():
-                logger.warning("MCP cleanup cancel-scope warning (non-fatal): %s", exc)
+                logger.info(
+                    "MCP connection closed from a different task than the one that "
+                    "opened it; anyio reported %r, and the transport's own shutdown "
+                    "still ran, so nothing is left open.",
+                    str(exc),
+                )
             else:
                 logger.warning("MCP cleanup failed (non-fatal): %s", exc)
         except BaseException as exc:  # noqa: BLE001 — teardown must not propagate

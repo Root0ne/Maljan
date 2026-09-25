@@ -276,6 +276,11 @@ function AnalysesList() {
                           {timeAgo(row.createdAt)}
                           {row.durationSeconds ? ` / ${duration}` : ""}
                         </p>
+                        {/* A report kept from a run that failed after it was
+                            built, marked as the analysis header marks it. */}
+                        {row.incompleteReason && (
+                          <p className="text-xs text-status-orange">{row.incompleteReason}</p>
+                        )}
                       </div>
                       {row.verdict && (
                         <span className={`ml-auto text-xs ${verdictTone(row.verdict).text}`}>

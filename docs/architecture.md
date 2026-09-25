@@ -54,6 +54,32 @@ operator can reconfigure.
    record.
 5. The report is written to Postgres and becomes available under
    `/api/v1/reports/...` in every rendering the report service supports.
+   A run that fails after its report was built keeps the report. The graph
+   runs as a stream (`astream` in the modes `ainvoke` itself uses, so a run
+   that completes ends in the same state), and `MaljanApp.built_report` holds
+   what the report node returned, merged into the state it was built from,
+   from the moment it returns. When the graph then raises — a later node, or
+   LangGraph refusing the writes of the report's own step — the worker marks
+   the job `failed` as for any failure and stores that report against it,
+   with its findings, ledger and transcript, and with
+   `analysis_reports.incomplete_reason` set to one sentence: where the run
+   failed (`node <name>`, or the graph step whose nodes' writes were refused),
+   the exception's class and the error id, never its message. The same
+   sentence is added to the report's and the run summary's degradation
+   reasons, so the console's degraded banner, the header notice beside the
+   failure note and the markdown and HTML renderings all say the report is
+   incomplete. The job stays `failed`. A graph that returned and a result the
+   worker then refused — an absent analysis, a report node that answered with
+   an error — keeps nothing. Neither does a run that was cancelled, by the
+   operator or by arq's job timeout, after its report was built: both reach
+   the pipeline as a cancellation (`CancelledError`, `JobCancelled`), not as a
+   failure, and the job ends `cancelled` or is swept, not `failed`. A report
+   stored against it would be a result for a run somebody stopped, and the
+   worker leaving on a timeout is a process going down with no session to
+   store it in. Only the report node's own update is merged into the state it
+   was built from: the report stage waits for every stage it depends on, so
+   no node of a team finishes in the report's step (the stage-graph test pins
+   that the report runs in a step of its own).
 6. Threat-intelligence enrichment runs afterwards as its own job, on the
    enrichment worker's queue, so it delays neither the verdict nor the next
    analysis.
@@ -1462,6 +1488,23 @@ is where the graph starts, and every other stage without a dependency follows
 it instead of `START`, so a team gains the pack by having the stage inserted
 and nothing else rewritten.
 
+**A node runs once, after every stage it depends on.** In LangGraph, separate
+single-source edges into one node are separate triggers: the node runs in the
+superstep after *any* of them finishes. A stage that depends on two stages of
+unequal depth — detonation after static and reversing, network after all three
+— would run once per upstream stage, and everything after it again, up to two
+judges and a report sharing a superstep with the second one. So the builder
+enters a node with more than one upstream tail through one list edge,
+`add_edge([tails], head)`, which is a barrier that waits for all of them. The
+debate's `revision → negotiation` loop edge and its router stay single-source,
+so a loop pass never waits for a tail that already ran. The router's edge is
+conditional and a barrier cannot wait on it: a debate whose next stage also
+depends on another stage leaves through its own `<stage>__join`, and that node
+is the tail the next stage joins. A stage whose condition declines still runs
+its node, so every barrier fills. `tests/unit/pipeline/test_every_node_runs_once.py`
+runs the compiled graph of every seeded team and the all-tools example with
+stub nodes and counts.
+
 The default team therefore builds exactly the graph the project has always
 built, node for node and edge for edge — `tests/fixtures/golden/graph_default.json`
 pins it in both analyst modes.
@@ -1864,6 +1907,16 @@ the neighbour count and the Qdrant endpoint are settings. The ATT&CK corpus and
 its embeddings are cached on disk; on the compose stack that cache is a named
 volume, because rebuilding it costs the judge node about a gigabyte of resident
 memory and a minute and a half on the first analysis.
+
+The case a run adds to long-term memory, and the function hashes it files
+under the judge's family in the attribution corpus, are decided by the judge
+and written once, after the job is recorded as completed: the judge holds both
+on the container (`pending_memory_case`, `pending_function_hashes`), and the
+worker, once the completed row is committed and the `completed` event is
+published, calls `MaljanApp.remember_the_run`, as the command line does once
+its run returns. A job that fails after its judge — a later node, or the worker
+storing its report — leaves neither, so a verdict nobody kept does not reach
+the next run's few-shot prior block or its family matches.
 
 A cached vector records what produced it, and is reused only by the same
 thing. `maljan.memory.embeddings` has two backends — the sentence model and a

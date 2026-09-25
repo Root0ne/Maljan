@@ -49,6 +49,11 @@ class AnalysisReport(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # field directly to consumers.
     malware_report: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
+    # Set on a report kept from a run that failed after the report was built:
+    # the sentence saying where the run failed and under which error id. The
+    # job is ``failed``; ``NULL`` is a report of a completed run.
+    incomplete_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Relationships
     job = relationship("AnalysisJob", back_populates="report")
     agent_findings = relationship(

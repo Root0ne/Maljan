@@ -16,16 +16,23 @@ nodes import the builder that imports them.
     agent key is already unique across the graph.
   * A parallel analysis stage contributes a barrier ``<stage>__join`` when its
     dependents start at more than one node, and when nothing depends on it at
-    all. With a single downstream entry the barrier is redundant — LangGraph
-    already waits for every predecessor of a node — and adding it would have
-    renamed the fan-in of the default profile. With no downstream at all there
-    is nowhere the stage could be closed from, and each of its agents would
-    announce the stage finished from its own half of the merged result.
+    all. With a single downstream entry the barrier node is redundant: the
+    builder enters a node with several upstream tails through one list edge,
+    which waits for all of them, and adding the node would have renamed the
+    fan-in of the default profile. LangGraph does not wait on its own —
+    separate single-source edges into one node are separate triggers, and the
+    node runs once per trigger — which is why the builder always groups the
+    tails. With no downstream at all there is nowhere the stage could be
+    closed from, and each of its agents would announce the stage finished from
+    its own half of the merged result.
   * A debate stage contributes ``negotiation`` and ``revision``, prefixed
     ``<stage>__`` when a profile holds more than one debate, and a barrier
     ``<stage>__join`` when nothing depends on it — the router's way out has to
-    lead somewhere that sees the finished debate. One debate is the
-    overwhelmingly common case and the one the console was written against.
+    lead somewhere that sees the finished debate — or when the stage after it
+    also depends on another stage: the router's edge is conditional and a
+    list edge cannot wait on it, so the debate's barrier is the tail the next
+    stage joins. One debate is the overwhelmingly common case and the one the
+    console was written against.
   * The verdict stage is ``judge`` and the report stage is ``report``. A
     profile has exactly one of the first and at most one of the second, so
     neither can collide.
@@ -217,7 +224,18 @@ def _stage_nodes(
         return StageNodes(stage, agents, entry, agents)
     if stage.kind == "debate":
         negotiation, revision = debate_nodes(profile, stage)
-        if any(dependent.key in live_keys for dependent in dependents(profile, stage.key)):
+        following = [d for d in dependents(profile, stage.key) if d.key in live_keys]
+        # The router's way out is a conditional edge, which a barrier cannot
+        # wait on. A debate hands over straight to the next stage only when
+        # that stage waits for nothing else; otherwise it leaves through a
+        # barrier of its own, and that barrier is one of the tails the next
+        # stage joins.
+        joins_others = any(
+            key != stage.key and key in live_keys
+            for dependent in following
+            for key in dependent.depends_on
+        )
+        if following and not joins_others:
             return StageNodes(stage, (negotiation, revision), entry, ())
         barrier = join_node(stage)
         return StageNodes(stage, (negotiation, revision, barrier), entry, (barrier,))

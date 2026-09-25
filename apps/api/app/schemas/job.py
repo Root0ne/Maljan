@@ -275,6 +275,10 @@ class ReportDetailResponse(BaseModel):
     # produced before the report feature shipped. Frontend tabs fall back
     # to the legacy fields above when this is missing.
     malware_report: dict | None = None
+    # A report kept from a run that failed after the report was built says so
+    # here: where the run failed and the error id. ``None`` on a report of a
+    # completed run.
+    incomplete_reason: str | None = None
     agent_findings: list[AgentFindingResponse]
     # The conversation itself, ordered by ``seq``. Empty for reports written
     # before ``agent_messages`` existed (migration 20260726020000) — the

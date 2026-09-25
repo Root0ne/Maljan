@@ -2182,6 +2182,52 @@ change landed on `main`.
 
 ### Fixed
 
+- **A stage runs once, after every stage it depends on.** The builder wired one
+  edge per upstream tail, and in LangGraph separate edges into one node are
+  separate triggers. In the all-tools team, detonation (after static and
+  reversing) ran twice and network (after static, reversing and detonation)
+  three times, the first passes without the reverser's findings; negotiation
+  ran three times, the judge twice, and the report shared a superstep with the
+  second judge, so the run ended in `InvalidUpdateError` on `run_summary`
+  after the report was built. A node with more than one upstream tail is now
+  entered through one list edge that waits for all of them, and a debate whose
+  next stage also depends on another stage leaves through its own
+  `<stage>__join`. The seeded teams' graphs are unchanged. `run_summary` keeps
+  no reducer: two verdicts must never be merged into one.
+- **A report that was built survives a later step failing.** The graph ran
+  with `ainvoke` and no checkpointer, and the worker stored a report only on
+  success, so a run that failed after its report node finished lost the report
+  (in the all-tools run, 234,362 characters and 55 STIX objects). The graph now
+  runs as a stream in the modes `ainvoke` uses, the app keeps what the report
+  node returned the moment it returns, and a job whose graph then raises stores
+  that report against the failed job with `analysis_reports.incomplete_reason`
+  (migration `20261001000000`): where the run failed, the exception's class and
+  the error id. The sentence is also among the report's degradation reasons,
+  and the console shows it in the analysis header. The job stays `failed`.
+- **The long-term-memory case is written once, for a completed job.** The
+  judge wrote the case from inside its node, so a failed job still taught the
+  next run its verdict, and a judge that ran twice wrote it twice with two
+  different categories. The judge now holds the case and the worker writes it
+  after the completed row is committed and the `completed` event is published.
+  The function hashes the judge files under its family in the attribution
+  corpus are held and written the same way, so a failed job files none.
+- **radare2's logged errors are failed calls.** r2mcp hands back what radare2
+  logged inside a `<log>…</log>` envelope, and `<log> [ERROR] Cannot find
+  function in 0x00003ce4 </log>` was recorded as a successful
+  `decompile_function`. A reply that is only such an envelope, of radare2 log
+  lines with an `[ERROR]` or `[FATAL]` among them, is now a failed call whose message is
+  radare2's lines.
+- **The tool-call threshold is worded as the warning it is.** The log line read
+  "spent 83 tool calls (budget=20 …)", an overrun of a limit that does not
+  exist; it now reads "made 83 tool calls, past the tool-call warning threshold
+  of 20 (not a limit; …)".
+- **The MCP close from another task says what it means.** Every job ended with
+  "MCP cleanup cancel-scope warning (non-fatal)" once per server. A test that
+  opens a stub stdio server and closes it from another task shows the server
+  process gone (one that ignores its closed stdin is terminated by the
+  transport) and no task left, so nothing leaks: the refusal is anyio's
+  task-group bookkeeping. The line is now an info line saying the connection
+  was closed from a different task and the transport's own shutdown still ran.
 - **A Ghidra that cannot open the job's sample stops its agent.** With
   `GHIDRA_CONTAINER_SAMPLES_PATH` set to a host path the container cannot see,
   `load_program` answered HTTP 200 with `{"error": "File not found: ..."}`,

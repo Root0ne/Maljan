@@ -4116,9 +4116,13 @@ class BaseAnalyst(BudgetMeter, ABC):
         slowest = slowest_call(recorder.entries)
         cfg_obj = get_settings()
         _budget = getattr(cfg_obj, "react_agent_tool_call_budget", 20)
+        # ``react_agent_tool_call_budget`` is a warning threshold, never a
+        # limit: the loop was not stopped at it, and the line says so rather
+        # than reading as an overrun of something enforced.
         if tool_call_count > _budget:
             self.logger.warning(
-                "%s ReAct loop spent %d tool calls (budget=%d, elapsed=%.1fs)%s.",
+                "%s ReAct loop made %d tool calls, past the tool-call warning "
+                "threshold of %d (not a limit; elapsed=%.1fs)%s.",
                 self.name,
                 tool_call_count,
                 _budget,
