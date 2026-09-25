@@ -481,10 +481,12 @@ Each sandbox is asked for the options its format needs:
   and Triage's own default applies. `sandbox.triage.timeout_seconds`, how long
   the platform waits for the report, must be longer: the wait covers the run
   and Triage's processing of it, and settings validation refuses one that is
-  not. A value the account does not allow is refused by Triage, and the
-  submission error quotes Triage's own words and names the setting. The run
-  summary states the run time Triage reports for the task (its behavioural
-  tasks' `timeout` in the overview), never the value that was asked for.
+  not; no margin for the processing is guessed, so leave room for it. A value
+  the account does not allow is refused by Triage, and the submission error
+  quotes Triage's own words and names the setting. The run summary states the
+  run-time limit Triage set for the task (its behavioural tasks' `timeout` in
+  the overview): a limit, not a measured duration, and never the value that was
+  asked for.
 - **The REST DSL.** `sandbox.rest.submit.submit_fields` is passed through
   verbatim as extra multipart fields, beside the existing `extra_fields`.
   `sandbox.rest.mapping.channels` maps an operator-chosen channel name to a
@@ -1076,7 +1078,12 @@ row says), or as long as Ghidra takes with none.
 
 **The spend ceiling.** `core.llm.max_spend_usd_per_job` is the most one job may
 spend on its models, in US dollars; empty, the default, is none. It is a hard
-bound: nothing is sent that could take the job past it.
+bound against the platform's own measure of a prompt — its characters over
+three, the measure the window accounting uses — so nothing is sent that could
+take the job past it by that measure. A prompt that tokenises denser than that
+(long runs of hex or base64) costs more input than was reserved for it, and the
+job can pass the ceiling by that difference; the charged cost is what is
+settled either way.
 
 *What a call costs* is what it was charged. Where the provider reports the
 call's cost in its answer (an OpenRouter-style `cost`), that figure is used and
@@ -1122,14 +1129,26 @@ reported cost is named once in the log and in `run_summary.spend`
 (`unpriced_models`), and its calls are not counted: the figure compared is what
 the job spent at least. Nothing is guessed.
 
-*Before each call* its output cap is held to what the spend it may use pays for
-at its model's output price, after its prompt priced as uncached input. The
-call is refused only when that is below the smallest answer it can give: the
-largest output (reasoning and answer together) this job has measured of that
-model so far, or, with none measured yet, the call's own configured output
-cap — there is no fixed floor. A call that cannot be handed a cap of its own
-(the judge's mediation turns, the structured technique question) is made only
-at its whole cap. Each hold and each refusal is logged with its numbers and
+*Before each call* — every model call the platform makes, each tool-loop turn,
+revision, mediation, verdict, report section and function summary — its output
+cap is held to what the spend it may use pays for at its model's output price,
+after its prompt priced as uncached input, both at the highest rate in force
+between now and the call's deadline (so a call sent across a window's edge
+never settles above its reservation). The call is refused only when that is
+below the smallest answer it can give, measured per group: for a tool-loop turn
+the largest turn (reasoning and answer together) this job has measured of that
+model, for any other call the largest single-shot or verdict/report answer
+measured of it, and with none of its group measured the call's own configured
+output cap — there is no fixed floor. A call that cannot be handed a cap of
+its own (a model that takes no output cap per call, the judge's mediation
+turns, the structured technique question and mediation extraction) is made
+only at its whole cap. A call the ceiling refuses is not sent: a revision leaves
+the analyst's answer in force, the mediator's fast path leaves no reasoning
+(no agreement), the extraction falls back to reading the text, a summary keeps
+the raw text, a report section is recorded as not written, and a verdict the
+ceiling refuses takes the judge node's fallback for a verdict call that fails:
+a conservative Suspicious verdict written by the pipeline, not a model, with
+the run marked degraded and the report saying why. Each hold and each refusal is logged with its numbers and
 listed in `run_summary.spend.held_calls`. Every admitted call reserves its
 worst case — its prompt and its held cap — until it returns and is settled at
 what it was charged, so calls running at the same time never spend the same
@@ -1138,20 +1157,30 @@ it is sent only when what is left after it still pays for the smallest answer.
 
 *The reserve for the verdict and the report.* At the start of a job the
 verdict call and the report calls (one per section the composer writes, and
-the narrative round) are planned, and every other call — tool-loop turns,
-revisions, negotiation rounds, asks — spends only above what those calls would
-cost. That reserve is derived from this job's own calls, with no fixed
-fraction: for each planned call still to come, its input is the largest prompt
-the window accounting has measured for that kind of call (a verdict or report
-prompt once one was sent, before that the largest single-shot prompt such as a
-revision's, before that the largest tool-loop prompt), priced as uncached
-input, and its answer is the largest answer measured of its model (of any
-model while its own has none), at the rates in force; the reserve is their sum,
-and it shrinks as each planned call is made. Until the job has measured an
-answer the reserve is not sized, and every call is admitted only at its whole
-configured cap. The verdict and the report spend the reserve.
-`run_summary.spend.reserve` shows the derivation as it stood when the summary
-was written.
+the narrative round) are planned, each with the prompt the window accounting
+allows it: its model's window less its report-stage output budget, from what is
+already known of the window. The reserve is derived from that plan and this
+job's own calls, with no fixed fraction:
+
+- the next planned call's worst case: its prompt as uncached input plus its
+  planned answer;
+- plus, for every other planned call, its expected charge: its prompt at this
+  job's measured cache-hit share for the model (cached input tokens over input
+  tokens, settled calls and running loops together; uncached until one is
+  measured) plus its planned answer.
+
+A planned call's prompt is the largest prompt of its own kind once one was
+sent; before that the verdict's is the largest single-shot prompt sent (a
+revision's prompt carries the same reports), bounded by its allowance, and a
+report call's is its allowance. A tool loop's conversation is never used. The
+planned answer is the largest single-shot or verdict/report answer measured of
+the model, else its largest tool-loop turn; with no answer measured the reserve
+is not sized. All at the rates in force. Tool-loop turns, revisions,
+negotiation rounds, asks and summaries spend only above the whole reserve; a
+verdict or report call spends above the reserve of the planned calls after it,
+so the verdict cannot take the report's share and an unplanned retry spends
+only what is left above the plan. `run_summary.spend.reserve` shows the
+derivation, row by row, as it stood when the summary was written.
 
 The first refusal exhausts the spend: from then on every gate reads it as the
 ceiling reached, `run_summary.spend` says `exhausted` with when and why, no

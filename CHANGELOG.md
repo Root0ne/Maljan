@@ -13,15 +13,18 @@ change landed on `main`.
   Triage's own default applies) is sent as the submission's
   `defaults.timeout`. Settings validation refuses a
   `sandbox.triage.timeout_seconds` that does not outlast it. A refusal is
-  reported in Triage's own words and names the setting. The run time Triage
-  reports for its behavioural tasks is `SandboxReport.run_seconds`, rendered
-  as `info.duration`, and the run summary states it
-  (`run_summary.sandbox_run_seconds`, **Sandbox run time**).
+  reported in Triage's own words and names the setting. The run-time limit
+  Triage set for its behavioural tasks is `SandboxReport.run_limit_seconds`, and the
+  run summary states it as the run-time limit Triage set for the task
+  (`run_summary.sandbox_run_limit`, **Sandbox run-time limit**): a limit, not a
+  measured duration. `timeout_seconds` must also cover Triage's processing; no
+  margin for it is guessed.
 - **Prices carry their time windows.** A `llm.model_prices` row (and a
   vendored `prices` row) may carry `windows`: spans of the day in UTC, on
   named weekdays, with their own prices and source. The vendored DeepSeek rows
   now carry DeepSeek's documented peak hours (01:00-04:00 and 06:00-10:00 UTC,
-  Monday to Friday) over its off-peak rate.
+  Monday to Friday) over its off-peak rate, and the legacy name
+  `deepseek-v4-flash` the page still accepts is priced as `deepseek-flash`.
 
 - **The worker states the Ghidra samples path it uses.** One line at start,
   `Ghidra samples path: <path> (<source>)`, with the source either
@@ -945,19 +948,33 @@ change landed on `main`.
 
 ### Changed
 
-- **The spend ceiling counts what a call was charged and is a hard bound.** A
-  call is settled at the cost its provider reported with the answer, else at
-  the rates in force when its request was sent (every model client stamps the
-  send time on its answers). Before a call its output cap is held to what the
-  spend it may use pays for; it is refused only when that is below the
-  smallest answer it can give, the largest answer this job has measured of the
-  model or, with none measured, its configured cap. `MIN_ANSWER_TOKENS` and
-  its 8,192-token overshoot are gone. Calls in flight reserve their worst case,
-  a loop's turn keeps room for its closing answer, and the verdict and report
-  calls are planned at the start of the job and kept aside at this job's
-  measured prompt and answer sizes (`run_summary.spend.reserve`).
+- **The spend ceiling counts what a call was charged and is a hard bound**
+  against the platform's prompt estimate (characters over three). A call is
+  settled at the cost its provider reported with the answer, else at the rates
+  in force when its request was sent (every model client stamps the send time
+  on its answers), and is reserved at the highest rate in force before its
+  deadline. Every model call is admitted first: tool-loop turns, revisions,
+  the mediator's fast path and extraction, the judge's salvage, the verdict,
+  report sections, the narrative and the function summariser. Before a call its
+  output cap is held to what the spend it may use pays for; it is refused only
+  when that is below the smallest answer it can give (the largest of its group
+  this job has measured of the model: tool-loop turns for a loop turn,
+  single-shot and verdict/report answers otherwise; its configured cap until
+  one is measured). A model that takes no per-call output cap is admitted only
+  at its whole cap. `MIN_ANSWER_TOKENS` and its 8,192-token overshoot are gone.
+  Calls in flight reserve their worst case until their cost is on the ledger,
+  and a loop's turn keeps room for its closing answer. The verdict and report
+  calls are planned at the start of the job with their window allowance; the
+  reserve is the next planned call's worst case plus the expected charge of the
+  others at the job's cache-hit share (`run_summary.spend.reserve`), and a
+  planned call spends only above the share of the ones after it.
   `run_summary.spend.prices_from` lists every rate a model's calls were priced
   at.
+- **Under a spend ceiling the composer and the narrative round use the manual
+  path.** The structured-output path takes no per-call cap, so its calls could
+  not be held to what the spend pays for; with a ceiling set every section and
+  the narrative go by the manual JSON path, where the held cap is sent with the
+  call. Without a ceiling nothing changes.
 - **A report call's log line names the limit that set its cap**: the section's
   output budget, what the window leaves after the prompt, or the spend
   ceiling's hold. It used to name the window whatever set it.
@@ -2221,11 +2238,15 @@ change landed on `main`.
   one, and the judge then weighed no technique. The answer in force now stands
   whole, the revision's ledger entries and budget rows are still kept, and the
   debate line names the analyst by its label with its real claim count: a
-  25-character agent key was published as `***` inside the sentence.
+  25-character agent key was published as `***` inside the sentence. An agent
+  with no label and a key of 24 characters or more is named as the analyst of
+  its stage.
 - **Numbered claims are read.** The claim parser reads `CLAIM 3:`,
   `CLAIM 4 (REVISED):` and `CLAIM 5 -` headings and claims written one after
   another with no `---` line between them; a revision written that way was
-  read as having no claims.
+  read as having no claims. A heading opens a block only where one can begin
+  (first, after the open block's CONFIDENCE line, or after a separator line),
+  and nothing under DISPUTES is read as the analyst's own claim.
 - **A report section cut with no text is not asked again at the same cap.** It
   is asked again only when the second call has more room, and is otherwise
   recorded as not written, with the limit that applied and its source.
