@@ -34,6 +34,7 @@ from maljan.core.config import REPORTER_AGENT_KEY
 from maljan.core.logger import logger
 from maljan.core.spend import (
     SpendCeilingStop,
+    admitted,
     spend_bound,
     spend_ceiling_set,
     spend_left_said,
@@ -1130,15 +1131,26 @@ class ReportComposer:
             ):
                 raise _StructuredOutputUnavailable
             structured = self.llm.with_structured_output(schema, include_raw=True)
-            result = structured_answer(
-                await retry_on_connection_error(
-                    lambda: structured.ainvoke(messages), what="ReportComposer structured"
-                ),
+            # Taken only with no spend ceiling set, and admitted like every
+            # model call: at its whole cap, the structured path taking none.
+            with admitted(
                 self.token_ledger,
-                agent=REPORTER_AGENT_KEY,
+                kind="report",
+                llm=self.llm,
                 model=self.model_label,
-                call="report section",
-            )
+                prompt_chars=sum(len(_message_text(message)) for message in messages),
+                cap_tokens=int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0),
+                holdable=False,
+            ):
+                result = structured_answer(
+                    await retry_on_connection_error(
+                        lambda: structured.ainvoke(messages), what="ReportComposer structured"
+                    ),
+                    self.token_ledger,
+                    agent=REPORTER_AGENT_KEY,
+                    model=self.model_label,
+                    call="report section",
+                )
             if isinstance(result, dict):
                 result = schema.model_validate(result)
             if isinstance(result, schema):

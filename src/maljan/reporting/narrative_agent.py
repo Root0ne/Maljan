@@ -35,6 +35,7 @@ from maljan.core.config import REPORTER_AGENT_KEY
 from maljan.core.logger import logger
 from maljan.core.spend import (
     SpendCeilingStop,
+    admitted,
     spend_bound,
     spend_ceiling_set,
     spend_left_said,
@@ -659,15 +660,27 @@ class NarrativeAgent:
         ):
             try:
                 structured = self.llm.with_structured_output(NarrativeOutput, include_raw=True)
-                result = structured_answer(
-                    await retry_on_connection_error(
-                        lambda: structured.ainvoke(messages), what="NarrativeAgent structured"
-                    ),
+                # Taken only with no spend ceiling set, and admitted like every
+                # model call: at its whole cap, the structured path taking none.
+                with admitted(
                     self.token_ledger,
-                    agent=REPORTER_AGENT_KEY,
+                    kind="report",
+                    llm=self.llm,
                     model=self.model_label,
-                    call="narrative",
-                )
+                    prompt_chars=sum(len(str(message.content)) for message in messages),
+                    cap_tokens=int(getattr(self, "output_cap", 0) or 0),
+                    holdable=False,
+                ):
+                    result = structured_answer(
+                        await retry_on_connection_error(
+                            lambda: structured.ainvoke(messages),
+                            what="NarrativeAgent structured",
+                        ),
+                        self.token_ledger,
+                        agent=REPORTER_AGENT_KEY,
+                        model=self.model_label,
+                        call="narrative",
+                    )
                 if isinstance(result, NarrativeOutput):
                     return self._kept_with_ungrounded_recorded(
                         result, grounding, known_ids, citable, evidence

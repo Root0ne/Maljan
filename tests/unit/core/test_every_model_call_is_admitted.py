@@ -3,10 +3,11 @@
 The mediator's fast path, the judge's reasoning salvage, the structured
 mediation extraction and the function summariser went out without being
 admitted: nothing held them, nothing reserved them, and one of them could take
-the job past its ceiling. Every site that calls a chat model now sits in a
-function that asks the meter first. The guard below reads the source for
-every ``invoke``/``ainvoke`` of a model and fails for one outside such a
-function; the tests after it drive the judge's paths through a meter.
+the job past its ceiling. The guard below reads the source for every
+``invoke``/``ainvoke`` call and fails for one that is not preceded, in its own
+function or a function around it, by a call that admits it. The only calls it
+leaves alone are the tool calls listed by name. The tests after it drive the
+judge's paths through a meter.
 """
 
 from __future__ import annotations
@@ -23,32 +24,67 @@ from maljan.core.spend import Price, SpendMeter, _clean
 from maljan.core.token_ledger import TokenLedger
 
 SRC = Path(__file__).resolve().parents[3] / "src" / "maljan"
-# Where model calls are made. The provider layer (``llm/``) is the model
-# client itself; the pipeline's calls are tool calls.
-SCANNED = ("agents", "reporting", "analysis", "loaders", "memory", "preprocessing")
-# What a function that admits its calls names.
-ADMISSION = ("_spend_admits", "spend_bound", "_call_limit", "admitted(", ".admit(")
+# Where calls are made. The provider layer (``llm/``) is the model client
+# itself, and forwards calls already admitted.
+SCANNED = ("agents", "reporting", "analysis", "loaders", "memory", "preprocessing", "pipeline")
+# The calls that admit a model call: the meter's own, and the wrappers around it.
+ADMISSION = frozenset({"_spend_admits", "spend_bound", "_call_limit", "admitted", "admit", "held"})
+# The calls of tools, not models, by file and receiver.
+TOOL_CALLS = frozenset({("agents/sample_staging.py", "tool"), ("pipeline/nodes.py", "tools[0]")})
+
+Function = ast.FunctionDef | ast.AsyncFunctionDef
 
 
-def _receiver(node: ast.expr) -> str:
-    return ast.unparse(node)
+def _called_name(node: ast.Call) -> str:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return ""
 
 
-def _outermost_functions(tree: ast.Module) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
-    """Module functions and methods, not the closures inside them.
-
-    A closure's admission is in the method around it: the verdict's call is
-    made in a nested coroutine the method admits before awaiting.
-    """
-    found: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
-    pending: list[ast.AST] = [tree]
+def _own_nodes(function: Function) -> list[ast.AST]:
+    """Every node of ``function`` outside the functions nested in it (lambdas are its own)."""
+    found: list[ast.AST] = []
+    pending: list[ast.AST] = list(ast.iter_child_nodes(function))
     while pending:
         node = pending.pop()
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        found.append(node)
+        pending.extend(ast.iter_child_nodes(node))
+    return found
+
+
+def unadmitted_in(source: str, where: str = "<source>") -> list[str]:
+    """The model calls in ``source`` no admission precedes in their function or one around it."""
+    tree = ast.parse(source)
+    found: list[str] = []
+
+    def visit(node: ast.AST, around: list[Function]) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
-                found.append(child)
-            elif not isinstance(child, ast.Lambda):
-                pending.append(child)
+                visit(child, [*around, child])
+                continue
+            if (
+                isinstance(child, ast.Call)
+                and isinstance(child.func, ast.Attribute)
+                and child.func.attr in ("invoke", "ainvoke")
+            ):
+                receiver = ast.unparse(child.func.value)
+                if (where, receiver) not in TOOL_CALLS and not any(
+                    isinstance(seen, ast.Call)
+                    and _called_name(seen) in ADMISSION
+                    and seen.lineno < child.lineno
+                    for function in around
+                    for seen in _own_nodes(function)
+                ):
+                    name = around[-1].name if around else "<module>"
+                    found.append(f"{where}:{child.lineno} {name}: {receiver}")
+            visit(child, around)
+
+    visit(tree, [])
     return found
 
 
@@ -56,24 +92,8 @@ def _unadmitted() -> list[str]:
     found: list[str] = []
     for folder in SCANNED:
         for path in sorted((SRC / folder).rglob("*.py")):
-            source = path.read_text(encoding="utf-8")
-            tree = ast.parse(source)
-            for top in _outermost_functions(tree):
-                body = ast.get_source_segment(source, top) or ""
-                for node in ast.walk(top):
-                    if not (
-                        isinstance(node, ast.Call)
-                        and isinstance(node.func, ast.Attribute)
-                        and node.func.attr in ("invoke", "ainvoke")
-                    ):
-                        continue
-                    receiver = _receiver(node.func.value)
-                    if "tool" in receiver.lower():
-                        continue
-                    if not any(mark in body for mark in ADMISSION):
-                        found.append(
-                            f"{path.relative_to(SRC)}:{node.lineno} {top.name}: {receiver}"
-                        )
+            where = str(path.relative_to(SRC))
+            found.extend(unadmitted_in(path.read_text(encoding="utf-8"), where))
     return found
 
 
@@ -81,12 +101,52 @@ def test_no_model_is_called_outside_an_admitted_function() -> None:
     assert _unadmitted() == []
 
 
-def test_the_guard_sees_a_call_site() -> None:
-    # The guard reads real call sites: the verdict's is one of them.
-    sites = []
-    for path in (SRC / "agents").rglob("judge_agent.py"):
-        sites.extend(line for line in path.read_text().splitlines() if ".ainvoke(" in line)
-    assert len(sites) >= 5
+class TestTheGuard:
+    def test_catches_a_bare_call(self) -> None:
+        assert unadmitted_in("async def f(llm, m):\n    return await llm.ainvoke(m)\n")
+
+    def test_catches_a_call_beside_an_admitted_one(self) -> None:
+        source = (
+            "async def give(self, turns):\n"
+            "    async def _ask(turns):\n"
+            "        self._spend_admits('verdict', turns)\n"
+            "        return await self.llm.ainvoke(turns)\n"
+            "    first = await _ask(turns)\n"
+            "    return await self.llm.ainvoke(turns)\n"
+        )
+        (found,) = unadmitted_in(source)
+        assert ":6 give: self.llm" in found
+
+    def test_catches_a_call_before_its_admission(self) -> None:
+        source = (
+            "async def f(self, m):\n"
+            "    answer = await self.llm.ainvoke(m)\n"
+            "    self._spend_admits('x', m)\n"
+            "    return answer\n"
+        )
+        assert unadmitted_in(source)
+
+    def test_catches_a_model_named_like_a_tool(self) -> None:
+        source = "async def f(tool_llm, m):\n    return await tool_llm.ainvoke(m)\n"
+        assert unadmitted_in(source)
+
+    def test_a_mention_in_a_docstring_admits_nothing(self) -> None:
+        source = (
+            'async def f(llm, m):\n    """Calls _spend_admits first."""\n'
+            "    return await llm.ainvoke(m)\n"
+        )
+        assert unadmitted_in(source)
+
+    def test_passes_an_admitted_call_in_a_closure(self) -> None:
+        source = (
+            "async def f(self, m):\n"
+            "    slot = object()\n"
+            "    bound = self._spend_admits('x', m, slot=slot)\n"
+            "    async def _ask():\n"
+            "        return await self.llm.ainvoke(m)\n"
+            "    return await _ask()\n"
+        )
+        assert unadmitted_in(source) == []
 
 
 def _priced_judge(ceiling: float, answered: str = "agreement_confidence: 0.95"):
