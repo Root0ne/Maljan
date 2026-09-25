@@ -37,6 +37,7 @@ from maljan.agents.delegation import (
     WAITING_ON_EACH_OTHER_REFUSAL,
     _what_an_ask_gets_sentence,
 )
+from maljan.agents.ghidra_http_client import no_program_as_error
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
     EVIDENCE_SHORTENED_NOTICE,
@@ -100,7 +101,11 @@ from maljan.pipeline.validation import (
     validate_verdict_bundle,
 )
 from maljan.providers.base import STATIC_EVIDENCE_INSTRUCTIONS, absent_provider_fragment
-from maljan.providers.static.ghidra import GHIDRA_GUIDANCE
+from maljan.providers.static.ghidra import (
+    GHIDRA_GUIDANCE,
+    ghidra_not_answering,
+    sample_not_opened,
+)
 from maljan.providers.static.null import NullStaticProvider
 from maljan.providers.static.r2 import r2_error_reply
 from maljan.reporting.composer import (
@@ -443,6 +448,15 @@ PROMPTS: dict[str, str] = {
     "static provider sentence when none is attached": NullStaticProvider.NO_PROVIDER_FRAGMENT[
         len(STATIC_EVIDENCE_INSTRUCTIONS) :
     ],
+    "a Ghidra that could not open the job's sample, as an ask's caller reads it": str(
+        sample_not_opened("File not found: /data/samples/.work/a.bin")
+    ),
+    "a Ghidra that gave no answer to the load, as an ask's caller reads it": str(
+        ghidra_not_answering("http://localhost:8089", "HTTP 401")
+    ),
+    "a Ghidra answer with no program current": no_program_as_error(
+        "No program loaded.", "get_function_count"
+    ),
     "static provider sentence when its tools did not attach": absent_provider_fragment("Ghidra")[
         len(STATIC_EVIDENCE_INSTRUCTIONS) :
     ],

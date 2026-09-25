@@ -669,6 +669,10 @@ def _body_within_bounds(answer: httpx.Response, what: str) -> bytes | None:
     legitimate one is a couple of megabytes, and a broken or hostile endpoint's
     is unbounded. Checking the length after ``.content`` would already have
     downloaded whatever was sent, on a machine that is also running a model.
+
+    For an answer a synchronous client sent. One an ``httpx.AsyncClient`` sent
+    carries an asynchronous stream, which ``iter_bytes`` refuses, and is read
+    by ``_abody_within_bounds``.
     """
     held = bytearray()
     for chunk in answer.iter_bytes():
@@ -676,6 +680,24 @@ def _body_within_bounds(answer: httpx.Response, what: str) -> bytes | None:
         if len(held) > MAX_METADATA_BYTES:
             logger.debug("context window: %s answered with more than the probe reads", what)
             answer.close()
+            return None
+    return bytes(held)
+
+
+async def _abody_within_bounds(answer: httpx.Response, what: str) -> bytes | None:
+    """``_body_within_bounds`` for an answer an ``httpx.AsyncClient`` sent.
+
+    The settings probe runs on the API's loop and its answers stream
+    asynchronously. Read with the synchronous reader, every one of them raised
+    inside the probe's catch-all, and the console showed the fallback window
+    for a model whose server reports its own.
+    """
+    held = bytearray()
+    async for chunk in answer.aiter_bytes():
+        held.extend(chunk)
+        if len(held) > MAX_METADATA_BYTES:
+            logger.debug("context window: %s answered with more than the probe reads", what)
+            await answer.aclose()
             return None
     return bytes(held)
 
@@ -691,7 +713,19 @@ def _read_answer(ask: Ask, answer: httpx.Response, model: str) -> tuple[int, str
     if answer.status_code >= 400:
         answer.close()
         return 0, ""
-    body = _body_within_bounds(answer, ask.what)
+    return _window_in(ask, _body_within_bounds(answer, ask.what), model)
+
+
+async def _aread_answer(ask: Ask, answer: httpx.Response, model: str) -> tuple[int, str]:
+    """``_read_answer`` for an answer an ``httpx.AsyncClient`` sent."""
+    if answer.status_code >= 400:
+        await answer.aclose()
+        return 0, ""
+    return _window_in(ask, await _abody_within_bounds(answer, ask.what), model)
+
+
+def _window_in(ask: Ask, body: bytes | None, model: str) -> tuple[int, str]:
+    """The window a read body reports, or zero, and the sentence for a refused one."""
     if body is None:
         return 0, ""
     try:
@@ -811,7 +845,7 @@ async def aprobe_window(
                 except httpx.HTTPError as exc:
                     logger.debug("context window: %s did not answer (%s)", ask.what, type(exc))
                     continue
-                tokens, said = _read_answer(ask, answer, model)
+                tokens, said = await _aread_answer(ask, answer, model)
                 if tokens > 0:
                     return _probed(ask, tokens)
                 refused = refused or said

@@ -39,7 +39,7 @@ from maljan.analysis.corroboration import corroboration_row
 from maljan.analysis.run_summary import RunSummaryBuilder
 from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, PROMPT_ROLES
 from maljan.core.container import ServiceContainer
-from maljan.core.exceptions import AnalystError, LLMError
+from maljan.core.exceptions import AnalystError, LLMError, SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.spend import SpendCeilingStop
 from maljan.memory.long_term_memory import build_stored_case
@@ -2489,7 +2489,7 @@ def make_stage_agent_node(
                     **stage_record(
                         stage,
                         ran=True,
-                        reason=f"{agent_name} failed",
+                        reason=_failed_reason(agent_name, e),
                         agents=(agent_name,),
                         duration_ms=_elapsed_ms(),
                     ),
@@ -2712,9 +2712,45 @@ def _agents_that_ran(container: ServiceContainer, state: AnalysisState) -> list[
     return names
 
 
+# The per-agent reason an analyst is recorded with when its static provider
+# could not open the job's sample. The debate reads it: such an agent has no
+# report to revise, and every revision round would only fail it again.
+SAMPLE_NOT_OPENED_REASON = "stopped: its static provider could not open the job's sample"
+
+
+def _failed_reason(agent_name: str, exc: BaseException) -> str:
+    """The stage's per-agent reason for an analyst that failed."""
+    if isinstance(exc, SampleNotOpened):
+        return f"{agent_name} {SAMPLE_NOT_OPENED_REASON}"
+    return f"{agent_name} failed"
+
+
+def stopped_agents(state: AnalysisState) -> set[str]:
+    """The analysts a stage recorded as stopped because their sample did not open."""
+    stopped: set[str] = set()
+    for record in (state.get("stage_results") or {}).values():
+        if not isinstance(record, dict):
+            continue
+        for name, reason in (record.get("agent_reasons") or {}).items():
+            if reason == f"{name} {SAMPLE_NOT_OPENED_REASON}":
+                stopped.add(str(name))
+    return stopped
+
+
 def _debate_participants(
     container: ServiceContainer, stage: Any, state: AnalysisState
 ) -> list[str]:
+    """Whose reports this debate argues over, without an analyst that was stopped.
+
+    An analyst whose static provider could not open the sample is recorded as
+    failed once, by its stage, and left out here: its revision would fail the
+    same way every round and say so every round.
+    """
+    stopped = stopped_agents(state)
+    return [name for name in _debate_roster(container, stage, state) if name not in stopped]
+
+
+def _debate_roster(container: ServiceContainer, stage: Any, state: AnalysisState) -> list[str]:
     """Whose reports this debate argues over.
 
     Every agent of the analysis stages upstream of it, and only the ones that

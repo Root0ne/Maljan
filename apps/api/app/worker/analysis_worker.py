@@ -165,6 +165,26 @@ def build_job_settings(
     return build_settings(merged)
 
 
+def ghidra_samples_path_line(api_settings: Any) -> str:
+    """The line the worker states at start: the Ghidra samples path and where it came from.
+
+    The path is the one the Ghidra container sees the samples directory at,
+    and the worker hands Ghidra every sample under it. A host path here makes
+    every load answer "File not found" from inside the container, so the
+    value and its source are said once, where an operator reads the start.
+    """
+    path = str(api_settings.ghidra_container_samples_path)
+    if "ghidra_container_samples_path" in api_settings.model_fields_set:
+        source = "from GHIDRA_CONTAINER_SAMPLES_PATH"
+    else:
+        source = "the default; GHIDRA_CONTAINER_SAMPLES_PATH is not set"
+    return (
+        f"Ghidra samples path: {path} ({source}). Ghidra is handed each sample under "
+        "this path, which is the samples directory as the Ghidra container sees it, "
+        "not a path on this host."
+    )
+
+
 def mirror_target_for(provider: Any, *, sha256: str, extension: str) -> tuple[Path, str] | None:
     """Where this sample has to be copied for the static provider to read it.
 
@@ -3099,6 +3119,8 @@ async def startup(ctx: dict) -> None:
     except BootstrapProblem as exc:
         logger.critical(str(exc))
         raise
+
+    logger.info(ghidra_samples_path_line(settings), extra={"component": "worker.lifecycle"})
 
     # Clear stale private sample copies left behind by a worker that was
     # killed mid-job (no finally ran) before this one starts taking jobs.

@@ -55,6 +55,26 @@ Every published port binds to `BIND_ADDRESS`, which the example file sets to
 `127.0.0.1`. The stack is unreachable from the network until that is changed
 deliberately, behind a firewall or a reverse proxy you control.
 
+## The Ghidra samples path
+
+The worker copies each sample into `data/samples/.work/` on the host, and the
+`ghidra-mcp` service mounts `../data/samples` at `/data/samples` inside its
+container (read-only). `GHIDRA_CONTAINER_SAMPLES_PATH` is the path INSIDE the
+Ghidra container, `/data/samples` with this Compose file, and never the host
+directory. The API and worker services set it; a worker started outside
+Compose (`bootstrap.env`, a supervisor, a shell) needs it set to
+`/data/samples` too, or left unset, since that is the default.
+
+Set to the host path, Ghidra answers every load with `File not found: ...`,
+the Ghidra agent stops before its first model turn with "Ghidra could not open
+the job's sample: ...; check GHIDRA_CONTAINER_SAMPLES_PATH / the container
+mount", and the rest of the team runs without it. The worker's first lines
+say which path it uses and where it came from:
+
+```text
+Ghidra samples path: /data/samples (from GHIDRA_CONTAINER_SAMPLES_PATH). ...
+```
+
 ## Rotating the JWT signing secret
 
 Three steps and one wait. The wait is the part a rotation is usually forgotten

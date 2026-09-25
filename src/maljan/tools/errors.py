@@ -39,6 +39,11 @@ NOT_CONFIGURED = "not_configured"
 SERVER_RESTING = "server_resting"
 TOOL_FAILED = "tool_failed"
 
+# How much of a server's own error text a failure marker or a failure
+# sentence quotes. A quote length for text about a failure, not a limit on
+# anything a model reads whole.
+SERVER_WORDS_LIMIT = 300
+
 
 REMEDIATIONS: dict[str, str] = {
     MISSING_DEPENDENCY: (

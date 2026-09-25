@@ -1712,8 +1712,8 @@ one provider object per id. Everything that depends on the provider follows
 the agent rather than `core.static.provider`: the worker mirrors the sample
 once per provider any such agent of the team (or any agent they can ask)
 opens, so a reverser on Ghidra under another global provider has a path the
-Ghidra container can read; the sink-reachability pre-pass
-(`providers.static.ghidra.sink_priority_hint`) runs for every agent on
+Ghidra container can read; the load of the sample and the sink-reachability
+pre-pass (`providers.static.ghidra.prepare_sample`) run for every agent on
 Ghidra over http and for no other; and submitting a job checks every such
 provider that does not degrade (*A team that needs Ghidra waits for it* in
 [configuration.md](configuration.md)). A provider that degrades and does not
@@ -1722,6 +1722,44 @@ without it, and the run summary names it as `static provider '<id>'
 unavailable: …` with the remedy.
 
 ### When a provider fails
+
+**A Ghidra that cannot open the job's sample.** Before an agent on Ghidra
+over http starts its loop, the load of its sample is made once, and the sink
+pre-pass reads the program it opened. Ghidra answers a load it could not make
+with HTTP 200 and `{"error": "File not found: ..."}` — the path is one its
+container cannot see, most often `GHIDRA_CONTAINER_SAMPLES_PATH` set to a host
+directory — and every call after it answers "No program loaded". So a load
+that opens nothing raises `SampleNotOpened` with "Ghidra could not open the
+job's sample: <the server's words>; check GHIDRA_CONTAINER_SAMPLES_PATH / the
+container mount", before any model turn. The same holds inside a loop over
+stdio, or on a later load: the pinned `load_program` of the held path that
+answers with an error is filed on the ledger as a failed call with the
+server's words, and the exception ends the loop at once, with nothing
+salvaged from calls made against no program. The provider remembers the path,
+so no later loop of the job (another chunk, an ask) calls Ghidra for it. The
+stage records the agent as failed with the sentence, the run's degradation
+reasons name the analyst failure, and the rest of the team runs. An agent that
+asked the stopped one reads a failed ask and carries on. Any Ghidra reply of
+the shape `{"error": ...}`, a bare "No program loaded" answer and an HTTP
+error are failed calls on the ledger in the server's words.
+
+A load that got no answer from Ghidra at all is a different failure and says
+so: "Ghidra at <scheme://host:port> did not answer the load of the job's
+sample (<the error or HTTP status>); check the Ghidra container is running at
+that address and core.static.ghidra.auth_token matches its
+GHIDRA_MCP_AUTH_TOKEN". A connection that failed is asked once more first; an
+HTTP error (a 5xx, a refused token) is not. Such a failure stops the agent the
+same way but is not remembered, so a Ghidra that comes back is asked again by
+the next loop. The failed ledger entry of a pinned load records the path the
+platform sent, not the one the model wrote. An agent stopped this way is
+recorded once, by its stage, with the reason "stopped: its static provider
+could not open the job's sample", and is left out of the debate's rounds.
+
+The load before the loop imports the sample into Ghidra once more than the
+model's own `load_program` does: about a second and a half and one more copy
+of the program in the container's memory for a small binary. Nothing closes
+the superseded copy yet; a large sample that shows memory growth is where
+that would be added.
 
 **A model that fails as a provider.** An agent's entry under `llm.agents` may
 name an ordered list of models (`fallbacks`), held as one model object

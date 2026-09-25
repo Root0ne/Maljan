@@ -1,4 +1,4 @@
-"""A load that failed must produce no hint, not a hint about another binary.
+"""A load that failed must produce no hint, and no loop either.
 
 `load_program` answers **HTTP 200** with `{"error": "Failed to load program
 from: ..."}` when it cannot open a file, so `raise_for_status()` sees nothing
@@ -6,15 +6,14 @@ wrong. The pre-pass then carried on and built its priority hint from whichever
 program was still current — a hint about a completely different sample, handed
 to the analyst as guidance for this one.
 
-Observed 2026-08-10 while measuring hint frequency: the Ghidra server started
-refusing loads after roughly thirty in one container lifetime (JVM at 5.15 GB),
-and every subsequent sample produced a call graph of exactly 75,426 characters
-— the last binary that had loaded successfully. Sixty-six samples of identical
-"data", none of it about the sample named in the result.
+Observed while measuring hint frequency: the Ghidra server started refusing
+loads after roughly thirty in one container lifetime (JVM at 5.15 GB), and
+every subsequent sample produced a call graph of exactly 75,426 characters —
+the last binary that had loaded successfully.
 
-No hint is better than a wrong hint: the analyst falls back to its normal
-behaviour, which is the documented fail-safe, instead of being pointed at
-functions that do not exist in the binary it is looking at.
+The load is now the precondition of the agent's loop: a load that opens
+nothing raises ``SampleNotOpened`` with the server's words, and nothing after
+it runs — no analysis, no graph, no model turn.
 """
 
 from __future__ import annotations
@@ -26,6 +25,7 @@ import pytest
 from pydantic import SecretStr
 
 from maljan.analysis.ghidra_program import program_name_from_load
+from maljan.core.exceptions import SampleNotOpened
 
 
 class TestALoadErrorIsNotASuccess:
@@ -102,14 +102,16 @@ def _patch_settings(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class TestThePrePassStopsOnAFailedLoad:
-    def test_a_failed_load_yields_no_hint(
+    def test_a_failed_load_stops_the_agent_with_the_servers_words(
         self, analyst: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _patch_settings(monkeypatch)
         client = _Client(json.dumps({"error": "Failed to load program from: /data/samples/x.exe"}))
         monkeypatch.setattr("httpx.Client", lambda **kw: client)
 
-        assert analyst._compute_sink_priority_hint("/data/samples/x.exe") == ""
+        with pytest.raises(SampleNotOpened) as stopped:
+            analyst._compute_sink_priority_hint("/data/samples/x.exe")
+        assert "Failed to load program from: /data/samples/x.exe" in str(stopped.value)
 
     def test_a_failed_load_does_not_analyse_or_fetch_a_graph(
         self, analyst: Any, monkeypatch: pytest.MonkeyPatch
@@ -121,7 +123,8 @@ class TestThePrePassStopsOnAFailedLoad:
         client = _Client(json.dumps({"error": "Failed to load program from: /data/samples/x.exe"}))
         monkeypatch.setattr("httpx.Client", lambda **kw: client)
 
-        analyst._compute_sink_priority_hint("/data/samples/x.exe")
+        with pytest.raises(SampleNotOpened):
+            analyst._compute_sink_priority_hint("/data/samples/x.exe")
         assert client.paths == ["load_program"], client.paths
 
 

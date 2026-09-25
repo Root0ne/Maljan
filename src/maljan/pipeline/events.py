@@ -472,6 +472,12 @@ _SCHEME_AND_SECRET = re.compile(r"(?i)\b(bearer|basic|token)\s+" + _UNTIL_CHARS 
 # stopped at ``[A-Za-z0-9_-]`` read the run as ending at the first of them and
 # then failed its own whole-run anchor.
 _CREDENTIAL_RUN = re.compile(r"(?:[A-Fa-f0-9]{24,}|[A-Za-z0-9+/_\-]{24,}={0,2})\Z")
+# The environment variables the platform's own sentences name, which the rule
+# above takes for keys by their length. Named one by one rather than by shape:
+# an upper-case run with underscores in it is also what a key can look like,
+# and the remedy "check GHIDRA_CONTAINER_SAMPLES_PATH" read "check ***" on the
+# console, for the one failure whose remedy is that variable.
+_OWN_VARIABLE_NAMES = frozenset({"GHIDRA_CONTAINER_SAMPLES_PATH"})
 # A JSON Web Token, which no length rule can see: it is three base64url runs
 # with dots between them, and this project's own access token is one. The
 # segments are held to a floor so that a dotted module name or a hostname is
@@ -683,7 +689,7 @@ def _looks_like_a_credential(token: str) -> bool:
     publishing would not be a redaction rule. ``docs/configuration.md`` tells
     an operator to keep keys short; no shipped key is close to the floor.
     """
-    if _DIGEST.match(token) or _IDENTIFIER.match(token):
+    if _DIGEST.match(token) or _IDENTIFIER.match(token) or token in _OWN_VARIABLE_NAMES:
         return False
     lowered = token.lower()
     if any(lowered.startswith(prefix) for prefix in _CREDENTIAL_PREFIXES):
