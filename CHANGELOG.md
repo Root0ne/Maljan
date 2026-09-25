@@ -2209,6 +2209,12 @@ change landed on `main`.
   next run its verdict, and a judge that ran twice wrote it twice with two
   different categories. The judge now holds the case and the worker writes it
   after the completed row is committed.
+- **radare2's logged errors are failed calls.** r2mcp hands back what radare2
+  logged inside a `<log>…</log>` envelope, and `<log> [ERROR] Cannot find
+  function in 0x00003ce4 </log>` was recorded as a successful
+  `decompile_function`. A reply that is only such an envelope, of radare2 log
+  lines with an `[ERROR]` among them, is now a failed call whose message is
+  radare2's lines.
 - **A Ghidra that cannot open the job's sample stops its agent.** With
   `GHIDRA_CONTAINER_SAMPLES_PATH` set to a host path the container cannot see,
   `load_program` answered HTTP 200 with `{"error": "File not found: ..."}`,

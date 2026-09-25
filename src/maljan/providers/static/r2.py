@@ -62,16 +62,43 @@ _R2_ERROR_REPLIES: tuple[tuple[re.Pattern[str], str, str | None], ...] = (
 )
 
 
+# r2mcp hands back what radare2 logged while running a command inside a
+# ``<log>…</log>`` envelope. A reply that is that envelope and nothing else, and
+# whose lines are all radare2 log lines with at least one ``[ERROR]``, is radare2
+# saying the command failed ("[ERROR] Cannot find function in 0x…") with no
+# answer beside it. An envelope in front of an answer is not a failure.
+_R2_LOG_ENVELOPE = re.compile(r"<log>(?P<body>.*)</log>", re.DOTALL)
+_R2_LOG_LINE = re.compile(r"\[(?P<level>[A-Z]+)\]\s*\S.*")
+
+
+def _r2_logged_error(text: str) -> str | None:
+    """radare2's own error lines, when ``text`` is only a log envelope of them."""
+    envelope = _R2_LOG_ENVELOPE.fullmatch(text)
+    if envelope is None:
+        return None
+    lines = [line.strip() for line in envelope.group("body").splitlines() if line.strip()]
+    matched = [_R2_LOG_LINE.fullmatch(line) for line in lines]
+    if not lines or not all(matched):
+        return None
+    if not any(m is not None and m.group("level") == "ERROR" for m in matched):
+        return None
+    return "\n".join(lines)
+
+
 def r2_error_reply(tool: str, reply: Any) -> dict[str, Any] | None:
     """The structured failure for one r2mcp reply that is an error, else ``None``.
 
     ``None`` for anything that is not one of r2mcp's own error sentences as the
-    whole reply, so every answer keeps exactly what it said. The message is
-    r2mcp's sentence, unchanged.
+    whole reply, or a log envelope holding nothing but radare2's log lines with
+    an ``[ERROR]`` among them, so every answer keeps exactly what it said. The
+    message is r2mcp's sentence, or radare2's log lines, unchanged.
     """
     if not isinstance(reply, str):
         return None
     text = reply.strip()
+    logged = _r2_logged_error(text)
+    if logged is not None:
+        return tool_error(TOOL_FAILED, logged, tool=tool)
     if not text or "\n" in text:
         return None
     for pattern, code, remediation in _R2_ERROR_REPLIES:
