@@ -2068,11 +2068,14 @@ change landed on `main`.
   `mentioned_by`. A sandbox address the sample's tree did not make, and a
   well-known benign name the guest resolved, is published only when a model
   keeps it as an indicator (an analyst's artifact, or the judge's indicator);
-  a claim that mentions it keeps nothing and is named in the reason. An
-  artifact is read tolerantly — any network-named kind or type-named row, type
-  aliases, either column order, an address with its port or in IPv6 bracket
-  form, a URL's host — and the judge's URL indicator keeps its host; the
-  analysts' findings block states the `endpoints` row shape. Otherwise
+  a claim that mentions it keeps nothing and is named in the reason. Only an
+  `endpoints`, `network`, `iocs` or `c2` artifact keeps; in it a row keeps a
+  value typed as a network value (type aliases, either column order), a row
+  typed as a file, path or hash keeps nothing, and an untyped value counts only
+  in an endpoints or C2 list, never as a file name. The value is read
+  tolerantly (a port, IPv6 brackets, case, a URL's host), the judge's URL
+  indicator keeps its host, and the analysts' findings block states the
+  `endpoints` row shape. Otherwise
   the IOC table carries it as `no: <reason>, and no model kept it as an
   indicator`, and the STIX bundle, `/iocs` and the YARA, Sigma and Suricata
   drafts read that answer. **Upgrading:** CAPE, REST and mock reports carry no

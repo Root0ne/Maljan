@@ -2433,13 +2433,16 @@ is assembled from what the run gathered rather than recomputed beside it:
   with `no:` when it cannot be published. The sandbox view marks public DNS
   resolvers, and the network block carries the attribution, the resolver fact,
   `kept_by` and `mentioned_by` (an analyst's claim holding the value). A value
-  is kept by an analyst's artifact read tolerantly
-  (`ledger_projection.kept_network_values`): every cell of an artifact whose
-  kind names network values (`endpoints`, `network`, `iocs`, `c2`,
-  `network_iocs` and the like) or of a row whose first cell names a type (`ip`,
-  `ipv4`, `ipv6`, `address`, `domain`, `host`, `hostname`, `fqdn`, `url`,
-  `uri`), in either column order, an address with its port or in IPv6 bracket
-  form, and a URL together with its host. The judge's URL indicator keeps its
+  is kept by an analyst's artifact (`ledger_projection.kept_network_values`)
+  of a keeping kind only — `endpoints`, `network`, `iocs`, `c2` and their plain
+  spellings (`network_iocs`, `c2_endpoints`, `indicators`); a table of
+  contacted hosts is an observation and keeps nothing. In it a row keeps a
+  value typed as a network value (`ip`, `ipv4`, `ipv6`, `address`, `domain`,
+  `host`, `hostname`, `fqdn`, `url`, `uri`) in either column order, a row typed
+  as a file, a path, a mutex, a registry key, a hash or anything else keeps
+  nothing, and an untyped value is read only in an endpoints or C2 list, a
+  name there being a domain only when it has no file extension. The value is
+  read tolerantly: a port taken off, IPv6 brackets, any case, a URL's host. The judge's URL indicator keeps its
   host the same way. A well-known benign host is kept only as itself, never
   through a URL on it. `FINDINGS_BLOCK_FRAGMENT` states the shape it asks for
   (`ENDPOINTS_ROW_SHAPE`). The publish rule

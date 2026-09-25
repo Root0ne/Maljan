@@ -296,3 +296,24 @@ class TestTheWholeReportIsRead:
         network = network_from_ledger([page])
 
         assert network is not None and network.ips[0].sample_process_tree is None
+
+    def test_a_shortened_view_never_states_it_either(self) -> None:
+        shortened = build_entry(
+            entry_id="ev_0003",
+            seq=3,
+            agent="dynamic",
+            tool="sandbox_network",
+            args={},
+            server=None,
+            output=json.dumps(
+                {
+                    "tcp": [{"dst": CONTACT, "dport": 80, "sample_process_tree": False}],
+                    "shortened": {"/tcp": {"kept": 1, "omitted": 40}},
+                    "truncated": True,
+                }
+            ),
+        )
+
+        network = network_from_ledger([shortened])
+
+        assert network is not None and network.ips[0].sample_process_tree is None

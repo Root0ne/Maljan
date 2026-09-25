@@ -6,6 +6,12 @@ keeps it as an indicator. "Kept" used to be one exact row shape —
 C2 kept with its port, under ``ipv4``, in an ``Address | Port`` table, in a
 ``c2`` artifact, or inside a URL stayed ``no:``. Each such shape now keeps it,
 and so does the host of a URL the judge kept.
+
+The tolerance is on the value, never on the kind: only an ``endpoints``,
+``network``, ``iocs`` or ``c2`` artifact (and their plain spellings) keeps, a
+row keeps only a value typed as a network value — or, in an endpoints or C2
+list, an untyped one — and a row typed as a file, a path or a hash keeps
+nothing. A table of contacted hosts is an observation, not a keep.
 """
 
 from __future__ import annotations
@@ -71,7 +77,8 @@ def _answer(artifact: Artifact | None, address: str = CONTACT, **extra: Any) -> 
         Artifact(kind="network_iocs", rows=[["address", CONTACT]]),
         Artifact(kind="endpoints", rows=[["url", f"http://{CONTACT}/gate.php"]]),
         Artifact(kind="c2", value=f"{CONTACT}:8443"),
-        Artifact(kind="notes", rows=[["ip", CONTACT]]),
+        Artifact(kind="iocs", rows=[["ipv4", f"{CONTACT}:443"]]),
+        Artifact(kind="c2_endpoints", rows=[[f"http://{CONTACT}/gate.php"]]),
     ],
     ids=[
         "ip",
@@ -83,7 +90,8 @@ def _answer(artifact: Artifact | None, address: str = CONTACT, **extra: Any) -> 
         "network-iocs-kind",
         "url-host",
         "single-value",
-        "typed-row-in-any-kind",
+        "typed-row-in-iocs",
+        "untyped-url-in-c2-endpoints",
     ],
 )
 def test_each_shape_keeps_the_address(artifact: Artifact) -> None:
@@ -117,14 +125,61 @@ def test_a_table_of_imports_keeps_no_host() -> None:
     assert kept_network_values(artifact) == []
 
 
+def test_a_typed_row_in_a_kind_that_does_not_keep_keeps_nothing() -> None:
+    """Formerly kept through any kind; the ruling holds kinds to the keeping set."""
+    assert _answer(Artifact(kind="notes", rows=[["ip", CONTACT]])).startswith("no: ")
+
+
+def test_a_table_of_contacted_hosts_is_an_observation_and_keeps_nothing() -> None:
+    artifact = Artifact(
+        kind="contacted_hosts",
+        rows=[["svchost.exe", "9.9.9.9:53"], ["rundll32.exe", "198.51.100.9:443"]],
+    )
+
+    assert kept_network_values(artifact) == []
+    assert _answer(artifact, "9.9.9.9").startswith("no: ")
+
+
+def test_file_names_in_an_ioc_list_are_never_domains() -> None:
+    artifact = Artifact(
+        kind="iocs",
+        rows=[
+            ["file", "payload.zip"],
+            ["file", "loader.py"],
+            ["file", "run.sh"],
+            ["file", "stage2.cab"],
+            ["path", "C:\\Temp\\a.exe"],
+            ["hash", "a" * 64],
+        ],
+    )
+
+    assert kept_network_values(artifact) == []
+
+
+def test_an_untyped_value_in_an_ioc_list_is_not_read() -> None:
+    assert kept_network_values(Artifact(kind="iocs", rows=[["relay-alpha-7f3c.top"]])) == []
+
+
+def test_a_host_artifact_kind_keeps_nothing() -> None:
+    artifact = Artifact(kind="host_artifacts", rows=[["file", "config.zip"]])
+
+    assert kept_network_values(artifact) == []
+
+
+def test_a_file_name_in_an_endpoints_list_is_not_a_domain() -> None:
+    artifact = Artifact(kind="endpoints", rows=[["config.zip"], ["loader.py"], ["evil.com"]])
+
+    assert kept_network_values(artifact) == [("domain", "evil.com")]
+
+
 def test_a_kind_that_only_spells_ip_inside_a_word_is_not_a_network_table() -> None:
     artifact = Artifact(kind="scripts", rows=[["stage.ps1", "relay-alpha-7f3c.top"]])
 
     assert kept_network_values(artifact) == []
 
 
-def test_a_file_name_in_a_network_table_is_not_a_host() -> None:
-    artifact = Artifact(kind="network", rows=[["payload.dll", "relay-alpha-7f3c.top"]])
+def test_a_file_name_beside_a_typed_domain_is_not_a_host() -> None:
+    artifact = Artifact(kind="network", rows=[["domain", "payload.dll", "relay-alpha-7f3c.top"]])
 
     assert kept_network_values(artifact) == [("domain", "relay-alpha-7f3c.top")]
 

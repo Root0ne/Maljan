@@ -849,29 +849,29 @@ def network_from_ledger(
     return network if (network.domains or network.ips or network.urls) else None
 
 
-# The words an artifact's kind carries when it holds network values, and the
-# words a row's first cell names its value's type by. Read tolerantly: a model
-# writes "ipv4" as readily as "ip", a C2 table as readily as "endpoints", and
-# an address with its port; a value it kept is kept however it was written.
-# Matched against the kind's words, a word starting with one of the first
-# set or equal to one of the second: "network_iocs" and "c2_endpoints" hold
-# network values, "scripts" and "zip_members" do not.
-_NETWORK_ARTIFACT_WORDS = (
-    "endpoint",
-    "network",
-    "ioc",
-    "indicator",
-    "c2",
-    "host",
-    "domain",
-    "url",
-    "address",
-    "contact",
-    "infra",
-    "beacon",
-    "server",
+# The artifact kinds that keep a network value as an indicator: the analyst's
+# structured list of what it holds to be infrastructure. Nothing else keeps —
+# a table of contacted hosts is a transcription of what the sandbox saw, and one
+# live run's analysts wrote exactly such observations down while calling them
+# noise. Tolerance is on the values, never on the kinds.
+_KEEPING_KINDS = frozenset(
+    {
+        "endpoints",
+        "endpoint",
+        "network",
+        "iocs",
+        "ioc",
+        "indicators",
+        "c2",
+        "network_iocs",
+        "c2_endpoints",
+    }
 )
-_NETWORK_ARTIFACT_TOKENS = frozenset({"ip", "ips", "ipv4", "ipv6", "cnc"})
+# The kinds where an untyped cell is read as an address, a name or a URL: a
+# list of endpoints is nothing but those. An IOC list holds file names, hashes
+# and mutexes beside them, so its rows are read only where typed.
+_BARE_VALUE_KINDS = frozenset({"endpoints", "endpoint", "c2", "c2_endpoints"})
+# The words a row names its value's type by, network and otherwise.
 _TYPE_ALIASES = {
     "ip": "ip",
     "ipv4": "ip",
@@ -888,7 +888,32 @@ _TYPE_ALIASES = {
     "url": "url",
     "uri": "url",
 }
-# A name whose last label is a file's extension is a file, not a host.
+_OTHER_TYPES = frozenset(
+    {
+        "file",
+        "filename",
+        "file_name",
+        "file name",
+        "path",
+        "file_path",
+        "filepath",
+        "mutex",
+        "registry",
+        "registry_key",
+        "key",
+        "hash",
+        "md5",
+        "sha1",
+        "sha256",
+        "process",
+        "command",
+        "string",
+        "email",
+        "other",
+    }
+)
+# A name whose last label is a file's extension is a file, not a host,
+# including the extensions that are also top-level domains.
 _FILE_LABELS = frozenset(
     {
         "exe",
@@ -897,8 +922,12 @@ _FILE_LABELS = frozenset(
         "bat",
         "cmd",
         "ps1",
+        "psm1",
         "vbs",
         "js",
+        "jse",
+        "hta",
+        "wsf",
         "dat",
         "bin",
         "txt",
@@ -906,6 +935,7 @@ _FILE_LABELS = frozenset(
         "tmp",
         "ini",
         "cfg",
+        "conf",
         "json",
         "xml",
         "lnk",
@@ -914,33 +944,92 @@ _FILE_LABELS = frozenset(
         "drv",
         "msi",
         "jar",
+        "zip",
+        "rar",
+        "7z",
+        "gz",
+        "tar",
+        "iso",
+        "img",
+        "cab",
+        "py",
+        "pyc",
+        "sh",
+        "so",
+        "pl",
+        "rs",
+        "md",
+        "ps",
+        "mov",
+        "app",
+        "apk",
+        "dmg",
+        "pkg",
+        "deb",
+        "rpm",
+        "elf",
+        "doc",
+        "docx",
+        "docm",
+        "xls",
+        "xlsx",
+        "xlsm",
+        "ppt",
+        "pptx",
+        "pdf",
+        "rtf",
+        "html",
+        "htm",
+        "php",
+        "asp",
+        "aspx",
+        "db",
+        "sqlite",
+        "png",
+        "jpg",
+        "gif",
+        "mp4",
+        "mp3",
+        "bak",
+        "vbe",
+        "cpl",
     }
 )
 _HOST_PORT_RE = re.compile(r"^\[?([0-9a-fA-F:.]+?)\]?:(\d{1,5})$")
 
 
+def _kind_of(artifact: Any) -> str:
+    return re.sub(r"[\s-]+", "_", str(getattr(artifact, "kind", "") or "").strip().lower())
+
+
 def kept_network_values(artifact: Any) -> list[tuple[str, str]]:
     """The addresses, names and URLs an analyst's artifact keeps, each as ``(kind, value)``.
 
-    Every cell of an artifact whose kind names network values, in any column
-    order; for any other artifact, the rows whose first cell names a network
-    type. A cell is read by what it parses as: a URL (and its host, address or
-    name, beside it), an address with or without its port, or a name. A type
-    word in a cell is the row's hint, never a value.
+    Only an artifact of a keeping kind (``endpoints``, ``network``, ``iocs``,
+    ``c2`` and their plain spellings) keeps anything. In it, a row keeps a
+    value when a cell types it as a network value (``ip``, ``ipv4``,
+    ``ipv6``, ``address``, ``domain``, ``host``, ``hostname``, ``fqdn``,
+    ``url``, ``uri``), in either column order; a row typed as anything else
+    (a file, a path, a mutex, a hash) keeps nothing; and an untyped row is
+    read only in an endpoints or C2 list. The value itself is read
+    tolerantly: a port taken off, IPv6 brackets, any case, a URL's host.
     """
-    kind = str(getattr(artifact, "kind", "") or "").strip().lower()
-    networkish = any(
-        token.startswith(_NETWORK_ARTIFACT_WORDS) or token in _NETWORK_ARTIFACT_TOKENS
-        for token in re.split(r"[^a-z0-9]+", kind)
-    )
+    kind = _kind_of(artifact)
+    if kind not in _KEEPING_KINDS:
+        return []
+    bare = kind in _BARE_VALUE_KINDS
     rows = _rows_of(artifact)
     single = getattr(artifact, "value", None)
-    if not rows and single and networkish:
+    if not rows and single and bare:
         rows = [[str(single)]]
     out: list[tuple[str, str]] = []
     for row in rows:
-        hint = _TYPE_ALIASES.get(row[0].strip().lower()) if row else None
-        if not networkish and hint is None:
+        words = [cell.strip().lower() for cell in row]
+        if any(word in _OTHER_TYPES for word in words):
+            continue
+        hints = [_TYPE_ALIASES[word] for word in words if word in _TYPE_ALIASES]
+        hint = hints[0] if hints else None
+        if hint is None and not bare:
             continue
         for cell in row:
             if cell.strip().lower() in _TYPE_ALIASES:
@@ -981,7 +1070,8 @@ def _cell_values(cell: str, hint: str | None) -> list[tuple[str, str]]:
     if hint == "domain":
         # Named a domain by the row itself: kept as written, a private-use
         # name included, and the export's own rule answers whether it publishes.
-        return [("domain", name)] if "." in name else []
+        is_file = name.rsplit(".", 1)[-1] in _FILE_LABELS
+        return [("domain", name)] if "." in name and not is_file else []
     if "." not in name or not host_is_public(name):
         return []
     if name.rsplit(".", 1)[-1] in _FILE_LABELS:
@@ -1110,9 +1200,11 @@ def _sandbox_views(
     for entry, data in _payloads(ledger, "sandbox_network"):
         args = entry.args if isinstance(entry.args, dict) else {}
         paged = any(_as_int(args.get(k)) for k in ("offset", "limit")) or any(
-            str(k).endswith("_total") or k == "next_offset" for k in data
+            str(k).endswith("_total") or k in ("next_offset", "shortened", "truncated")
+            for k in data
         )
-        views.append((data, not paged))
+        # A shortened or truncated answer is a part of the view, like a page.
+        views.append((data, not paged and not getattr(entry, "truncated", False)))
     return views
 
 
