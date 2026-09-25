@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
 from maljan.core.config import get_settings
-from maljan.core.exceptions import AgentLoopCancelled, AnalystError
+from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.spend import SPEND_CAP, SpendCeilingStop
 from maljan.core.token_ledger import TokenLedger, record_response_usage
@@ -3128,6 +3128,45 @@ class BaseAnalyst(BudgetMeter, ABC):
         """The provider's degrade policy, or None for an analyst without one."""
         return None
 
+    def _own_static_provider(self) -> Any | None:
+        """This agent's own static provider, when the agent's tools include its tools.
+
+        Read from the job's container by the agent's resolution, the same
+        lookup the analyst node pins the sample path through. ``None`` for an
+        agent built outside a container and for one that reads no provider.
+        """
+        from maljan.agents.prompt_fragments import PROVIDER_FAMILY, tool_families
+
+        container = getattr(self, "_container", None)
+        if container is None:
+            return None
+        if PROVIDER_FAMILY not in tool_families(list(getattr(self, "tools", None) or [])):
+            return None
+        resolved = getattr(self, "_resolved", None)
+        provider_id = getattr(resolved, "static_provider_id", None) if resolved else None
+        try:
+            if provider_id:
+                return container.get_static_provider(str(provider_id))
+            return container.get_static_provider()
+        except Exception as exc:  # noqa: BLE001 — a lookup is never worth a lost loop
+            self.logger.debug("%s: no static provider to ask (%s).", self.name, exc)
+            return None
+
+    def _stop_if_the_sample_did_not_open(self) -> None:
+        """Raise the failure this agent's provider met opening the job's sample, if it met one.
+
+        Asked before a tool loop starts, so a later loop of the job — a second
+        chunk, an ask of this agent — spends no model turn on a provider with
+        no program loaded. Only a provider that keeps such a record answers.
+        """
+        known = getattr(self._own_static_provider(), "sample_failure", None)
+        failure = known() if callable(known) else None
+        if not isinstance(failure, SampleNotOpened):
+            return
+        failure.stopped_agent = self.name
+        self.logger.error("%s: %s; its loop is not started.", self.name, failure)
+        raise failure
+
     def _server_registry(self) -> Any | None:
         """The job's tool-server registry, or None when this agent runs bare."""
         container = getattr(self, "_container", None)
@@ -3556,6 +3595,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.steps_spent += 1
             self._record_budget(plain, [], None)
             return self._capture_findings(answer)
+
+        self._stop_if_the_sample_did_not_open()
 
         from langgraph.errors import GraphRecursionError
         from langgraph.prebuilt import create_react_agent
@@ -5028,6 +5069,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 if salvaged is not None and salvaged.claims:
                     isr = salvaged
             return self._validate_isr(self._apply_consistency_gate(isr, truncated), truncated)
+        except SampleNotOpened:
+            # Nothing to salvage: every call the loop made was against no
+            # program, and writing it up would be a report about nothing.
+            raise
         except AnalystError:
             salvaged = self._salvaged_isr(truncated)
             if salvaged is not None:
@@ -5196,6 +5241,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                     chunk.total,
                     len(isr.claims),
                 )
+            except SampleNotOpened:
+                # The sample did not open, so no later chunk can read it either.
+                raise
             except Exception as exc:
                 errors.append(f"chunk {chunk.index + 1}: {exc}")
                 self.logger.warning("Chunk %d/%d failed: %s.", chunk.index + 1, chunk.total, exc)

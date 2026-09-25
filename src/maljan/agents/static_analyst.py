@@ -303,21 +303,28 @@ class StaticAnalyst(BaseAnalyst):
         return self._provider().capabilities
 
     def _compute_sink_priority_hint(self, file_path: str) -> str:
-        """Maltracker-style pre-pass: rank functions reachable to sensitive sinks.
+        """Open the sample on Ghidra, then rank functions reachable to sensitive sinks.
 
         Runs when *this agent's* static provider is Ghidra, whatever the
         globally configured one is: a clone of the static analyst on Ghidra in
         a team whose global provider is r2 is as much a Ghidra run as the
-        default one. The pre-pass itself is the Ghidra provider module's
-        (``providers.static.ghidra.sink_priority_hint``), shared with a generic
-        agent that reads Ghidra. Deterministic and fail-safe: any error, or a
-        stripped binary with no named sink APIs, returns an empty string and
-        the analyst proceeds with its normal behaviour.
+        default one. Both halves are the Ghidra provider module's
+        (``providers.static.ghidra.prepare_sample``), shared with a generic
+        agent that reads Ghidra. The load is a precondition: a sample Ghidra
+        cannot open raises :class:`SampleNotOpened` before the loop starts.
+        The ranking is fail-safe: any error in it, or a stripped binary with no
+        named sink APIs, returns an empty string.
         """
         from maljan.core.config import get_settings
-        from maljan.providers.static.ghidra import sink_priority_hint
+        from maljan.providers.static.ghidra import prepare_sample
 
-        return sink_priority_hint(get_settings(), self._provider_id(), file_path, self.logger)
+        return prepare_sample(
+            get_settings(),
+            self._provider_id(),
+            file_path,
+            self.logger,
+            provider=self._own_static_provider(),
+        )
 
     def _provider_id(self) -> str:
         """This agent's own static provider id: its resolution's, else the global one.

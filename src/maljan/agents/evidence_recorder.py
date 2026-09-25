@@ -24,6 +24,7 @@ import time
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
+from maljan.core.exceptions import SampleNotOpened
 from maljan.core.logger import logger
 from maljan.llm.context_window import answering_for
 from maljan.pipeline.events import (
@@ -665,7 +666,8 @@ def _record_tool(
     Fail-safe in both directions: a tool this cannot rebuild faithfully is
     returned exactly as it was, and a tool that raises is recorded as a failed
     entry whose error text goes back to the model rather than being turned
-    into an exception the loop has to survive.
+    into an exception the loop has to survive. The one exception handed on
+    after it is filed is :class:`SampleNotOpened`, which ends the loop.
     """
     from langchain_core.tools import StructuredTool
 
@@ -876,6 +878,26 @@ def _record_tool(
         _note(kwargs, entry.id)
         return f"[{entry.id}] tool call failed: {message}{_steering(kwargs, repeated, failed=True)}"
 
+    def _stopped(
+        kwargs: dict[str, Any],
+        started: float,
+        wall_clock: float,
+        exc: SampleNotOpened,
+        repeated: str | None,
+    ) -> str:
+        """File a call that met an unopenable sample, and end this loop if it is this agent's.
+
+        The entry is a failed call with the provider's sentence, as any raised
+        call is. Then the exception goes on and ends this agent's loop — unless
+        it already ended another agent's: an ask of an agent whose sample did
+        not open is a failed ask for the agent that asked, which carries on.
+        """
+        stamped = _stamp_error(kwargs, started, wall_clock, exc, repeated)
+        if exc.stopped_agent in (None, recorder.agent):
+            exc.stopped_agent = recorder.agent
+            raise exc
+        return stamped
+
     wrapped_func = None
     wrapped_coroutine = None
     if func is not None:
@@ -904,6 +926,8 @@ def _record_tool(
                 with answering_for(recorder.agent):
                     value = func(**kwargs)
                 return _stamp(kwargs, started, wall_clock, value, repeated)
+            except SampleNotOpened as exc:
+                return _stopped(kwargs, started, wall_clock, exc, repeated)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
                 return _stamp_error(kwargs, started, wall_clock, exc, repeated)
 
@@ -931,6 +955,8 @@ def _record_tool(
                 with answering_for(recorder.agent):
                     value = await coroutine(**kwargs)
                 return _stamp(kwargs, started, wall_clock, value, repeated)
+            except SampleNotOpened as exc:
+                return _stopped(kwargs, started, wall_clock, exc, repeated)
             except Exception as exc:  # noqa: BLE001 — a failed call is evidence
                 return _stamp_error(kwargs, started, wall_clock, exc, repeated)
 

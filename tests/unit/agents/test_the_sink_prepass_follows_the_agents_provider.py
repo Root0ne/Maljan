@@ -174,11 +174,11 @@ class TestAGenericAgentOnGhidra:
     ) -> None:
         seen: dict[str, Any] = {}
 
-        def fake(cfg: Any, provider_id: str, path: str, log: Any = None) -> str:
+        def fake(cfg: Any, provider_id: str, path: str, log: Any = None, **_: Any) -> str:
             seen.update(provider=provider_id, path=path)
             return "PRIORITY FUNCTIONS: entry"
 
-        monkeypatch.setattr("maljan.providers.static.ghidra.sink_priority_hint", fake)
+        monkeypatch.setattr("maljan.providers.static.ghidra.prepare_sample", fake)
         monkeypatch.setattr("maljan.core.config.get_settings", lambda: _settings("r2"))
         analyst = _generic("ghidra", provider_tools=True)
 
@@ -187,7 +187,7 @@ class TestAGenericAgentOnGhidra:
 
     def test_the_hint_reaches_the_human_turn(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "maljan.providers.static.ghidra.sink_priority_hint",
+            "maljan.providers.static.ghidra.prepare_sample",
             lambda *a, **k: "PRIORITY FUNCTIONS: entry",
         )
         monkeypatch.setattr("maljan.core.config.get_settings", lambda: _settings("r2"))
@@ -219,7 +219,7 @@ class TestAGenericAgentOnGhidra:
     ) -> None:
         called: list[bool] = []
         monkeypatch.setattr(
-            "maljan.providers.static.ghidra.sink_priority_hint",
+            "maljan.providers.static.ghidra.prepare_sample",
             lambda *a, **k: called.append(True) or "hint",
         )
         analyst = _generic(provider_id, provider_tools=provider_tools)
@@ -231,10 +231,10 @@ def test_the_pre_pass_waits_what_one_tool_call_may_take(
     client: _Client, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """No fixed request timeout: the deployment's call budget, or none."""
-    from maljan.providers.static.ghidra import sink_priority_hint
+    from maljan.providers.static.ghidra import prepare_sample
 
     settings = _settings("ghidra")
-    sink_priority_hint(settings, "ghidra", "/data/samples/x.exe")
+    prepare_sample(settings, "ghidra", "/data/samples/x.exe")
 
     class _Breaker:
         call_timeout_seconds = 900.0
@@ -243,5 +243,5 @@ def test_the_pre_pass_waits_what_one_tool_call_may_take(
         breaker = _Breaker()
 
     settings.mcp = _Mcp()
-    sink_priority_hint(settings, "ghidra", "/data/samples/x.exe")
+    prepare_sample(settings, "ghidra", "/data/samples/x.exe")
     assert client.timeouts == [None, 900.0]

@@ -40,6 +40,29 @@ class AgentLoopCancelled(AnalystError):
     """
 
 
+class SampleNotOpened(AnalystError):
+    """A static provider that does not degrade could not open the job's sample.
+
+    Raised by the load an agent's provider makes before its loop, or by the
+    pinned load inside it. Either way that agent's loop ends at once: nothing
+    is salvaged from calls made against no program, no further call reaches
+    the provider from that agent, the stage records the failure and the rest
+    of the team runs.
+
+    ``remediation`` is the whole sentence, because that is what a published
+    failure may carry (``pipeline.events.describe_exception``, which scrubs
+    any path in it). ``stopped_agent`` is the agent whose loop it ended, set
+    by the first loop it passes through: an agent that asked this one for help
+    reads the failure as a failed ask and carries on.
+    """
+
+    def __init__(self, sentence: str, *, provider: str = "") -> None:
+        super().__init__(sentence)
+        self.provider = provider
+        self.remediation = sentence
+        self.stopped_agent: str | None = None
+
+
 class LLMError(MaljanError):
     """Raised when the LLM service returns an invalid or empty response."""
 

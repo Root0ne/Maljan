@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import BaseTool
 
+from maljan.core.exceptions import SampleNotOpened
 from maljan.core.logger import logger
 from maljan.core.settings_overrides import redact_url
 from maljan.providers.base import (
@@ -112,106 +113,186 @@ GHIDRA_PROMPT_FRAGMENT: str = (
 )
 
 
-def sink_priority_hint(cfg: Settings, provider_id: str, file_path: str, log: Any = None) -> str:
-    """The sink-reachability pre-pass for one agent: a priority-functions hint, or ``""``.
+# What an agent on Ghidra is stopped with when the job's sample does not open.
+# The server's own words go in the middle; the check names the two things that
+# decide whether the container can see the file.
+SAMPLE_NOT_OPENED: str = (
+    "Ghidra could not open the job's sample: {words}; "
+    "check GHIDRA_CONTAINER_SAMPLES_PATH / the container mount"
+)
 
-    Loads and auto-analyses the binary on the headless Ghidra server, pulls
-    the whole call graph and renders the functions that reach sensitive sinks,
-    so the agent's loop decompiles the malicious core first. It runs for any
-    agent whose own static provider is Ghidra — the static analyst, a clone
-    of it, a generic agent given Ghidra's tools — and for no other: the calls
-    are Ghidra's REST API, which no other provider speaks. Ghidra configured
-    for stdio has no REST API either, so the transport must be ``http``.
+# How much of the server's answer the sentence quotes. Its failures are one
+# line; an answer that is not one is quoted this far and no further.
+SERVER_WORDS_LIMIT = 300
+
+
+def sample_not_opened(words: str) -> SampleNotOpened:
+    """The failure for a load of the job's sample that opened nothing."""
+    said = " ".join(str(words or "").split())[:SERVER_WORDS_LIMIT] or "an empty answer"
+    return SampleNotOpened(SAMPLE_NOT_OPENED.format(words=said), provider="ghidra")
+
+
+def load_error_words(load_output: str) -> str | None:
+    """What a ``load_program`` answer says went wrong, or ``None`` when it says nothing did.
+
+    Read with the one rule the ledger uses for a returned error
+    (``tools.errors.error_parts``): Ghidra's ``{"error": "File not found: ..."}``,
+    answered with HTTP 200, and a client's ``{"tool_error": ...}`` marker. An
+    answer that is neither a program nor an error — the guardrail's sentence
+    for a conversation with no room left — is not read as a failed load.
+    """
+    from maljan.analysis.ghidra_program import program_name_from_load
+    from maljan.tools.errors import error_parts
+
+    if program_name_from_load(load_output):
+        return None
+    parts = error_parts(load_output)
+    return parts[1] if parts is not None else None
+
+
+def _ghidra_over_http(cfg: Settings, provider_id: str) -> bool:
+    """Whether this agent's provider is a switched-on Ghidra reached over its REST API."""
+    ghidra = cfg.static.ghidra
+    return (
+        provider_id == "ghidra"
+        and ghidra.transport == "http"
+        and bool(getattr(ghidra, "enabled", True))
+    )
+
+
+def prepare_sample(
+    cfg: Settings,
+    provider_id: str,
+    file_path: str,
+    log: Any = None,
+    provider: Any = None,
+) -> str:
+    """Open the job's sample on Ghidra, then the sink pre-pass: a priority hint, or ``""``.
+
+    The load is the precondition of the agent's loop. A load that opens
+    nothing — Ghidra answers HTTP 200 with ``{"error": "File not found: ..."}``
+    when the path is not one its container can see — raises
+    :class:`SampleNotOpened` with the server's words before any model turn is
+    spent, and ``provider`` (the agent's Ghidra provider, when the caller has
+    it) remembers it, so no later loop of the job calls Ghidra for that path.
+    A request that fails outright is the same failure in the client's words.
+    A load that opens the program makes it the current one.
+
+    Then, with ``preprocessing.use_sink_reachability`` on, the pre-pass:
+    auto-analysis, the whole call graph, and the functions that reach
+    sensitive sinks rendered as a hint, so the loop decompiles the malicious
+    core first. The pre-pass is fail-safe: any error in it, or a binary with
+    no named sink reachable, returns ``""``.
+
+    Only for an agent whose own static provider is Ghidra over ``http``: the
+    calls are Ghidra's REST API, which no other provider speaks and Ghidra
+    over stdio does not serve. Anything else returns ``""`` and calls nothing.
 
     Each request waits what one tool call of this deployment may take
     (``core.mcp.breaker.call_timeout_seconds``, else the longest tool budget
     configured), and with neither set, as long as Ghidra takes.
-
-    Deterministic and fail-safe: disabled, not Ghidra, a failed load or any
-    error returns ``""`` and the agent proceeds without a hint.
     """
     import logging
 
     logger_ = log if log is not None else logging.getLogger(__name__)
-    if not getattr(cfg.preprocessing, "use_sink_reachability", False):
+    if not _ghidra_over_http(cfg, provider_id):
         return ""
+    known = _known_failure(provider, file_path)
+    if known is not None:
+        raise known
+
+    import httpx
+
+    from maljan.analysis.ghidra_program import (
+        SWITCH_PARAM,
+        SWITCH_PATH,
+        program_name_from_load,
+    )
+    from maljan.providers.server_guard import deployment_call_budget
+
     ghidra = cfg.static.ghidra
-    if provider_id != "ghidra" or ghidra.transport != "http":
-        return ""  # the pre-pass speaks the headless REST API directly
-    if not getattr(ghidra, "enabled", True):
-        return ""
-
-    try:
-        import httpx
-
-        from maljan.analysis.ghidra_program import (
-            SWITCH_PARAM,
-            SWITCH_PATH,
-            program_name_from_load,
-        )
-        from maljan.analysis.sink_reachability import build_priority_hint
-        from maljan.providers.server_guard import deployment_call_budget
-
-        base = ghidra.url.rstrip("/")
-        token = ghidra.auth_token.get_secret_value()
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
-        call_budget = deployment_call_budget(cfg)
-        with httpx.Client(
-            timeout=call_budget if call_budget > 0 else None, headers=headers
-        ) as http:
+    base = ghidra.url.rstrip("/")
+    token = ghidra.auth_token.get_secret_value()
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    call_budget = deployment_call_budget(cfg)
+    with httpx.Client(timeout=call_budget if call_budget > 0 else None, headers=headers) as http:
+        try:
             loaded = http.post(f"{base}/load_program", json={"file": file_path})
             loaded.raise_for_status()
-            # Loading is not looking. `load_program` sets Ghidra's current
-            # program only when nothing is current yet, so from the second
-            # sample of a container's lifetime onwards a pre-pass without the
-            # switch described the *first* binary it ever loaded.
-            name = program_name_from_load(loaded.text)
-            if not name:
-                # A failed load answers **200** with
-                # {"error": "Failed to load program from: ..."}, so
-                # raise_for_status sees nothing wrong. Carrying on would
-                # analyse and describe whichever program is still current — a
-                # hint about a different binary. No hint is better than a
-                # wrong hint.
-                logger_.warning(
-                    "Sink-reachability pre-pass: load_program did not yield a program "
-                    "for '%s' (%s) — skipping the hint rather than describing whichever "
-                    "binary is still loaded.",
-                    file_path,
-                    " ".join(loaded.text.split())[:200],
-                )
-                return ""
+        except httpx.HTTPError as exc:
+            failure = sample_not_opened(f"{type(exc).__name__}: {exc}")
+            _remember_failure(provider, file_path, failure)
+            logger_.error("%s", failure)
+            raise failure from exc
+        name = program_name_from_load(loaded.text)
+        if not name:
+            # A failed load answers **200**, so raise_for_status sees nothing
+            # wrong. Carrying on would hand the model a Ghidra with no program,
+            # or with whichever program is still current: every call after it
+            # answers about nothing, or about a different binary.
+            failure = sample_not_opened(load_error_words(loaded.text) or loaded.text)
+            _remember_failure(provider, file_path, failure)
+            logger_.error("%s", failure)
+            raise failure
+        # Loading is not looking. `load_program` sets Ghidra's current program
+        # only when nothing is current yet, so from the second sample of a
+        # container's lifetime onwards the switch is what makes it this one.
+        try:
             http.post(f"{base}{SWITCH_PATH}", params={SWITCH_PARAM: name}, json={})
-            http.post(f"{base}/run_analysis", json={}).raise_for_status()
-            resp = http.get(
-                f"{base}/get_full_call_graph",
-                params={"format": "json", "limit": 20000},
-            )
-            resp.raise_for_status()
-            graph_text = resp.text
+        except httpx.HTTPError as exc:
+            logger_.warning("Ghidra switch_program failed for '%s' (non-fatal): %s", name, exc)
+        if not getattr(cfg.preprocessing, "use_sink_reachability", False):
+            return ""
+        return _sink_priority_hint(cfg, http, base, file_path, logger_)
 
-        hint = build_priority_hint(
-            graph_text, max_funcs=cfg.preprocessing.sink_reachability_max_funcs
+
+def _sink_priority_hint(cfg: Settings, http: Any, base: str, file_path: str, log: Any) -> str:
+    """The sink-reachability pre-pass over the program just opened. Fail-safe: ``""``."""
+    try:
+        from maljan.analysis.sink_reachability import build_priority_hint
+
+        http.post(f"{base}/run_analysis", json={}).raise_for_status()
+        resp = http.get(
+            f"{base}/get_full_call_graph",
+            params={"format": "json", "limit": 20000},
         )
-        if hint:
-            logger_.info(
-                "Sink-reachability pre-pass: priority-functions hint built (%d chars) for '%s'.",
-                len(hint),
-                file_path,
-            )
-        else:
-            logger_.info(
-                "Sink-reachability pre-pass: no named sink APIs reachable "
-                "(stripped/static binary?) — no hint emitted."
-            )
-        return hint
+        resp.raise_for_status()
+        hint = build_priority_hint(
+            resp.text, max_funcs=cfg.preprocessing.sink_reachability_max_funcs
+        )
     except Exception as exc:  # fail-safe: never break analysis over a hint
-        logger_.warning(
+        log.warning(
             "Sink-reachability pre-pass failed (%s: %s); continuing without hint.",
             type(exc).__name__,
             exc,
         )
         return ""
+    if hint:
+        log.info(
+            "Sink-reachability pre-pass: priority-functions hint built (%d chars) for '%s'.",
+            len(hint),
+            file_path,
+        )
+    else:
+        log.info(
+            "Sink-reachability pre-pass: no named sink APIs reachable "
+            "(stripped/static binary?) — no hint emitted."
+        )
+    return hint
+
+
+def _known_failure(provider: Any, path: str) -> SampleNotOpened | None:
+    """The failure ``provider`` already met opening ``path``, as a fresh exception."""
+    known = getattr(provider, "sample_failure", None)
+    failure = known(path) if callable(known) else None
+    return failure if isinstance(failure, SampleNotOpened) else None
+
+
+def _remember_failure(provider: Any, path: str, failure: SampleNotOpened) -> None:
+    """Tell ``provider`` that ``path`` did not open, when the caller handed one over."""
+    remember = getattr(provider, "note_sample_failure", None)
+    if callable(remember):
+        remember(path, failure)
 
 
 @register_static_provider("ghidra")
@@ -245,6 +326,9 @@ class GhidraStaticProvider(StaticProvider):
         # attach whose job context names none: a generic agent's provider is
         # opened at resolution, before any sample path exists.
         self._pinned_path: str | None = None
+        # The sentence each path this provider could not open was stopped
+        # with, so a later loop of the job is stopped before it calls Ghidra.
+        self._sample_failures: dict[str, str] = {}
         self._toolkit: Any = None
         self._all_tools: list[Any] = []
         self.tools: list[Any] = []
@@ -407,6 +491,30 @@ class GhidraStaticProvider(StaticProvider):
         """
         self._pinned_path = path or None
 
+    def _held_path(self) -> str | None:
+        """The path ``load_program`` is held to: the pin, else the job's mirror."""
+        pinned = getattr(self, "_pinned_path", None) or getattr(
+            getattr(self, "_job", None), "mirror_sample_path", None
+        )
+        return pinned if isinstance(pinned, str) and pinned else None
+
+    def sample_failure(self, path: str | None = None) -> SampleNotOpened | None:
+        """The failure this provider met opening ``path`` (the held path by default).
+
+        A fresh exception each time, because each one ends a different loop
+        and says whose. ``None`` when that path opened, or was never tried.
+        """
+        wanted = path or self._held_path()
+        said = getattr(self, "_sample_failures", {}).get(wanted) if wanted else None
+        return SampleNotOpened(said, provider="ghidra") if said else None
+
+    def note_sample_failure(self, path: str, failure: SampleNotOpened) -> None:
+        """Remember that ``path`` did not open, and the sentence that says so."""
+        if path:
+            if not hasattr(self, "_sample_failures"):
+                self._sample_failures = {}
+            self._sample_failures[path] = str(failure)
+
     def _pin_load_program_path(self, tools: list[Any]) -> list[Any]:
         """Wrap ``load_program`` so a hallucinated ``file`` arg is overridden.
 
@@ -435,6 +543,12 @@ class GhidraStaticProvider(StaticProvider):
         A fresh tool is built rather than mutating ``tool.coroutine`` in
         place — the original lives in the client's own tool list, and
         in-place mutation would leak the wrapper across samples.
+
+        A load of the held path that answers with an error raises
+        :class:`SampleNotOpened`: the evidence recorder files the call as
+        failed with the server's words and hands the exception on, which ends
+        the agent's loop. A held path that already failed raises without a
+        call. With no held path the model's own call runs as it was made.
         """
         from langchain_core.tools import StructuredTool
 
@@ -445,17 +559,30 @@ class GhidraStaticProvider(StaticProvider):
         provider = self
 
         async def pinned_load_program(**kwargs: Any) -> str:
-            pinned = getattr(provider, "_pinned_path", None) or getattr(
-                provider._job, "mirror_sample_path", None
-            )
-            if isinstance(pinned, str) and pinned and kwargs.get("file") != pinned:
+            pinned = provider._held_path()
+            if pinned is None:
+                return str(await inner(**kwargs))
+            known = provider.sample_failure(pinned)
+            if known is not None:
+                raise known
+            if kwargs.get("file") != pinned:
                 logger.warning(
                     "load_program: overriding model-supplied path %r with known container path %r.",
                     kwargs.get("file"),
                     pinned,
                 )
                 kwargs["file"] = pinned
-            return str(await inner(**kwargs))
+            answer = str(await inner(**kwargs))
+            # The job's own sample did not open. Every Ghidra call after this
+            # one would answer "No program loaded", or about whichever program
+            # is still current, for as long as the model kept asking.
+            words = load_error_words(answer)
+            if words is not None:
+                failure = sample_not_opened(words)
+                provider.note_sample_failure(pinned, failure)
+                logger.error("%s", failure)
+                raise failure
+            return answer
 
         return StructuredTool.from_function(
             func=None,

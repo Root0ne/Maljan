@@ -2182,6 +2182,30 @@ change landed on `main`.
 
 ### Fixed
 
+- **A Ghidra that cannot open the job's sample stops its agent.** With
+  `GHIDRA_CONTAINER_SAMPLES_PATH` set to a host path the container cannot see,
+  `load_program` answered HTTP 200 with `{"error": "File not found: ..."}`,
+  every call after it answered "No program loaded", the sink pre-pass was
+  skipped quietly, and with no default loop limits a reverser would have
+  called Ghidra with nothing loaded until the spend ceiling. The load the
+  pre-pass makes is now the precondition of an agent's loop on Ghidra over
+  http, made whether or not the pre-pass is on: a load that opens nothing, or
+  a request that fails, raises `SampleNotOpened` with "Ghidra could not open
+  the job's sample: <the server's words>; check GHIDRA_CONTAINER_SAMPLES_PATH
+  / the container mount" before any model turn. Inside a loop the pinned
+  `load_program` of the held path that answers with an error is filed as a
+  failed call and ends the loop at once, with nothing salvaged. The provider
+  remembers the path, so no later loop of the job (another chunk, an ask)
+  calls Ghidra for it. The stage records the agent as failed with the
+  sentence, the run's degradation reasons name the analyst failure, the rest
+  of the team runs, and an agent that asked the stopped one reads a failed
+  ask. The live feed keeps the variable's name in the sentence
+  (`GHIDRA_CONTAINER_SAMPLES_PATH` is no longer read as a credential).
+- **Every Ghidra error reply is a failed call on the ledger.** A bare
+  "No program loaded" answer and an HTTP error are handed on as JSON markers
+  (`tool_error_marker`) with the server's words, the way the MCP client hands
+  on an error reply, so the ledger files them `ok=false`; a
+  `{"error": ...}` reply already was.
 - **The console's context window read the fallback for a model whose server
   lists its own.** `GET /api/v1/settings/context-window` probes on the API's
   loop, and its answers stream asynchronously; the body was read with the
