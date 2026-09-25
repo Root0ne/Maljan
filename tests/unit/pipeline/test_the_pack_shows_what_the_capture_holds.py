@@ -120,6 +120,28 @@ class TestAStatementThatAnEntryHoldsNothing:
 
         assert misstated_entry_contents(payload, self._entries()) == []
 
+    def test_a_sentence_naming_the_entry_by_its_id_is_judged(self) -> None:
+        payload = {"body": "ev_0017 holds only a header line [ev_0017]."}
+
+        [violation] = misstated_entry_contents(payload, self._entries())
+
+        assert "ev_0017" in violation.message
+
+    def test_true_sentences_about_the_sample_are_never_asked(self) -> None:
+        entries = EntryTexts.from_ledger(
+            [
+                _entry("floss", {"strings": [{"string": "a"}, {"string": "b"}]}, 5),
+                _entry("capa", {"rules": [{"name": "x"}, {"name": "y"}]}, 7),
+            ]
+        )
+        for sentence in (
+            "The sample exits when the Recycle Bin is empty [ev_0005].",
+            "The decrypted config buffer was empty until routine 0xae78 ran [ev_0005].",
+            "The mutex check returns nothing when another instance runs [ev_0007].",
+            "Its C2 reply parser has no data validation [ev_0005].",
+        ):
+            assert misstated_entry_contents({"body": sentence}, entries) == [], sentence
+
     def test_a_partial_entry_is_never_said_to_hold_more(self) -> None:
         entries = self._entries()
         partial = EntryTexts(

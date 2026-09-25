@@ -3444,15 +3444,30 @@ def _tool_words(tool: str) -> set[str]:
 def _statement_subject(
     entries: EntryTexts, sentence: str, verb_at: int, cited: list[str]
 ) -> list[str]:
-    """The cited entries the statement is about: the one its subject names, or its only one."""
-    before = re.split(r"[^\w-]+", sentence[:verb_at].lower())
+    """The cited entries the statement's subject names, and none when it names none.
+
+    Named by its id written in the subject, or by a word for a recorded answer
+    (``entry``, ``output``, ``result``, ``summary``, ``view``, ``answer``)
+    beside a word of the entry's tool. A sentence about the sample — "the
+    config buffer was empty until the routine ran" — names no entry, whatever
+    it cites, and is not judged.
+    """
+    window = sentence[:verb_at].lower()
+    before = re.split(r"[^\w-]+", window)
     subject = {w for word in before[-_SUBJECT_WORDS:] for w in word.split("-") if w}
-    named = [
+    by_id = [entry_id for entry_id in cited if entry_id.lower() in subject]
+    if by_id:
+        return by_id
+    if not subject & _ENTRY_NOUNS:
+        return []
+    return [
         entry_id for entry_id in cited if subject & _tool_words(entries.tools.get(entry_id, ""))
     ]
-    if named:
-        return named
-    return cited if len(cited) == 1 else []
+
+
+# The words a sentence names a recorded answer by, rather than something the
+# sample holds or does.
+_ENTRY_NOUNS = frozenset({"entry", "output", "result", "summary", "view", "answer", "capture"})
 
 
 def misstated_entry_contents(
@@ -3462,7 +3477,7 @@ def misstated_entry_contents(
 
     Read sentence by sentence under the brackets each sentence cites. The
     statement is about the cited entry its subject names (``the capture
-    entry`` names the capture summary's), or about the one entry cited. It is
+    entry`` names the capture summary's, as does its id), and about no other. It is
     checked against that entry's own text: a statement that it holds nothing is
     false when the entry holds a value, one that it holds one line when it
     holds more. An entry whose text is not the whole answer is not judged. The
