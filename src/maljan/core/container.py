@@ -406,6 +406,10 @@ class ServiceContainer:
         self._judge_agent_cache: dict[str, Any] = {}
         self._data_cache: dict[tuple[str, str], str] = {}
         self._memory_store_cache: MemoryStore | None = None
+        # The long-term-memory case the judge built for this job, held until
+        # the job completes (``remember_the_run``). A job that fails after its
+        # judge leaves no entry behind.
+        self.pending_memory_case: Any = None
         self._sandbox_provider_cache: SandboxProvider | None = None
         self._static_provider_cache: dict[str, StaticProvider] = {}
         self._server_registry_cache: ServerRegistry | None = None
@@ -720,6 +724,31 @@ class ServiceContainer:
                     self._memory_store_cache = InMemoryStore()
                     logger.info("LTM backend: InMemoryStore (in-process, non-persistent).")
             return self._memory_store_cache
+
+    def remember_the_run(self) -> bool:
+        """Store the case the judge built, now that the job has completed. Never raises.
+
+        The judge builds the case and this writes it, once: the caller calls
+        this only after the job is recorded as completed, so a job that fails
+        later — in a later node, or while the worker stores its report — leaves
+        no case teaching the next run a verdict nobody kept. Returns whether a
+        case was stored.
+        """
+        case, self.pending_memory_case = self.pending_memory_case, None
+        if case is None:
+            return False
+        try:
+            self.get_memory_store().store(case)
+        except Exception as exc:  # noqa: BLE001 — memory never costs a completed job
+            logger.warning("LTM store failed (%s). The completed job is unaffected.", exc)
+            return False
+        logger.info(
+            "LTM: stored case '%s' (category=%s, techniques=%d).",
+            case.sample_id,
+            case.malware_category,
+            len(case.technique_ids),
+        )
+        return True
 
     def get_sandbox_provider(self) -> SandboxProvider:
         """The configured sandbox adapter, or the mock one in mock mode.

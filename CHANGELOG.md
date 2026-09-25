@@ -2204,6 +2204,11 @@ change landed on `main`.
   (migration `20261001000000`): where the run failed, the exception's class and
   the error id. The sentence is also among the report's degradation reasons,
   and the console shows it in the analysis header. The job stays `failed`.
+- **The long-term-memory case is written once, for a completed job.** The
+  judge wrote the case from inside its node, so a failed job still taught the
+  next run its verdict, and a judge that ran twice wrote it twice with two
+  different categories. The judge now holds the case and the worker writes it
+  after the completed row is committed.
 - **A Ghidra that cannot open the job's sample stops its agent.** With
   `GHIDRA_CONTAINER_SAMPLES_PATH` set to a host path the container cannot see,
   `load_program` answered HTTP 200 with `{"error": "File not found: ..."}`,

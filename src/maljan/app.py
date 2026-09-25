@@ -80,6 +80,14 @@ class MaljanApp:
         except Exception as exc:  # noqa: BLE001 — teardown never propagates
             logger.warning("MaljanApp.aclose failed (non-fatal): %s", exc)
 
+    def remember_the_run(self) -> bool:
+        """Store this run's long-term-memory case, once its job has completed.
+
+        The judge builds the case and holds it; a caller that has recorded the
+        job as completed calls this. Never raises.
+        """
+        return self.container.remember_the_run()
+
     async def __aenter__(self) -> MaljanApp:
         return self
 

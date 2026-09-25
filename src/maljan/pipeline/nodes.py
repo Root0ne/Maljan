@@ -4108,16 +4108,20 @@ def make_judge_node(
                             total_techniques=_technique_count,
                             has_analyst_errors=bool(_failed_analysts),
                         )
-                        memory_store.store(case)
+                        # Held, not written: the case is stored once the
+                        # job has completed (``remember_the_run``), so a job
+                        # that fails after its judge leaves no entry behind.
+                        container.pending_memory_case = case
                         logger.info(
-                            "LTM: stored case '%s' (category=%s, techniques=%d).",
+                            "LTM: case '%s' (category=%s, techniques=%d) is stored "
+                            "when the job completes.",
                             case.sample_id,
                             case.malware_category,
                             len(case.technique_ids),
                         )
                     except Exception as e:
                         logger.warning(
-                            "LTM store failed (%s). Analysis result is unaffected.",
+                            "LTM case could not be built (%s). Analysis result is unaffected.",
                             e,
                         )
 

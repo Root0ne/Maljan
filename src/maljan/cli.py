@@ -74,6 +74,8 @@ def analyze(
     try:
         maljan_app = MaljanApp(config=config, mock=mock)
         result = maljan_app.run(file_hash=file_hash, file_name=file_name, sample_path=sample_path)
+        # The run completed: the case its judge built may now teach the next.
+        maljan_app.remember_the_run()
     except Exception as e:
         logger.error(f"Pipeline execution failed: {e}")
         raise typer.Exit(code=1) from None

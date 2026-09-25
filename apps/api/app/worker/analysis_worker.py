@@ -2383,6 +2383,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             report_confidence = report.overall_confidence
             report_has_malware_report = bool(report.malware_report)
 
+        # The job is recorded as completed: the long-term-memory case its
+        # judge built may now teach the next run. Written here and not by the
+        # judge, so a job that fails after its judge leaves no case behind.
+        # Off the loop: the store may be a Qdrant server.
+        await asyncio.to_thread(app.remember_the_run)
+
         await _publish_event(
             redis_conn,
             job_id,
