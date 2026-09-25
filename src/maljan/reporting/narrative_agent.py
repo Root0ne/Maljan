@@ -719,7 +719,7 @@ class NarrativeAgent:
             slot = object()
             bound, why = self._call_limit(turns, slot=slot)
             if bound is not None:
-                logger.info("NarrativeAgent: this call may write %d tokens — %s.", bound, why)
+                logger.info("NarrativeAgent: output limit on this call: %d — %s.", bound, why)
             try:
                 raw = await retry_on_connection_error(
                     (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))

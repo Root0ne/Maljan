@@ -1197,7 +1197,7 @@ class ReportComposer:
             bound, why = self._call_limit(turns, slot=slot)
             if bound is not None:
                 logger.info(
-                    "ReportComposer: section '%s' may write %d tokens on this call — %s.",
+                    "ReportComposer: section '%s' output limit on this call: %d — %s.",
                     section or schema.__name__,
                     bound,
                     why,

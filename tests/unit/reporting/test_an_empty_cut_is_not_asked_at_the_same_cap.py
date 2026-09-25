@@ -100,7 +100,9 @@ class TestAnEmptyCutAtTheSpendHold:
         (reason,) = composer.degradations
         assert reason.startswith("report section 'host_identifiers' is not written:")
         assert "no text written" in reason and "the spend ceiling's hold" in reason
-        said = [r.getMessage() for r in caplog.records if "may write" in r.getMessage()]
+        said = [
+            r.getMessage() for r in caplog.records if "output limit on this call" in r.getMessage()
+        ]
         assert said and "the spend ceiling's hold" in said[0]
         assert "window" not in said[0]
 
