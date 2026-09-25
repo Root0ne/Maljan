@@ -193,7 +193,7 @@ class TestNoToolsFallbackTimeout:
 
         def _capturing_info(fmt, *args, **kwargs):  # type: ignore[no-untyped-def]
             if "no-tools fallback, timeout=" in str(fmt) and args:
-                observed_timeout.append(int(args[0]))
+                observed_timeout.append(int(str(args[0]).removesuffix("s")))
             return original_info(fmt, *args, **kwargs)
 
         with patch.object(agent.logger, "info", side_effect=_capturing_info):
@@ -288,12 +288,32 @@ class TestPerAgentMaxStepsOverride:
     def test_non_overridden_agent_uses_global_default(self) -> None:
         assert self._capture_recursion_limit("network") == 10
 
-    def test_config_default_pins_static_override(self) -> None:
+    def test_the_config_has_no_default_limit(self) -> None:
         from maljan.core.config import Settings
 
         s = Settings()
-        assert s.react_agent_max_steps == 10
-        assert s.react_agent_max_steps_overrides.get("static") == 40
+        assert s.react_agent_max_steps is None and s.react_agent_timeout is None
+        assert s.react_agent_max_steps_overrides == {} and s.react_agent_timeout_overrides == {}
+        assert s.agents.delegation_steps is None and s.agents.delegation_timeout_seconds is None
+        assert all(
+            d.max_steps is None and d.timeout_seconds is None for d in s.agents.definitions.values()
+        )
+
+    def test_no_limit_is_an_unbounded_recursion_limit(self) -> None:
+        import sys
+
+        with patch("maljan.agents.base_agent.loop_limits", return_value=(None, None)):
+            captured: dict[str, int] = {}
+
+            class _FakeExecutor:
+                async def astream(self, inputs, config, stream_mode="values"):  # type: ignore[no-untyped-def]
+                    captured["recursion_limit"] = int(config.get("recursion_limit"))
+                    yield {"messages": [MagicMock(content="done", tool_calls=[])]}
+
+            agent = self._make_tool_agent("static")
+            with patch("langgraph.prebuilt.create_react_agent", return_value=_FakeExecutor()):
+                agent.execute_tool_loop([("system", "s"), ("human", "h")])
+        assert captured["recursion_limit"] == sys.maxsize
 
 
 class TestABudgetBelongsToTheAgentThatSpendsIt:
@@ -360,10 +380,10 @@ class TestABudgetBelongsToTheAgentThatSpendsIt:
 
         assert self._limits(cfg, "scout") == (70, 7)
 
-    def test_the_seeded_lead_carries_its_own(self) -> None:
+    def test_the_seeded_lead_has_no_limit_of_its_own(self) -> None:
         cfg = self._settings()
 
-        assert self._limits(cfg, "lead") == (1800, 40)
+        assert self._limits(cfg, "lead") == (None, None)
 
     def test_a_stored_budget_the_field_would_refuse_is_read_as_absent(self) -> None:
         """A whole settings build must not fail over one agent's number.

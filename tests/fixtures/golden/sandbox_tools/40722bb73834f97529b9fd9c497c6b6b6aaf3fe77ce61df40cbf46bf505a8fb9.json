@@ -7,6 +7,7 @@
         "dll": null,
         "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'StartRoutine', 'value': '0x180002aa4'}, {'name': 'Parameter', 'value': '0x00000000'}, {'name': 'CreationFlags', 'value': '0x00000000'}, {'name': 'ThreadId', 'value': '1740'}, {'name': 'ProcessId', 'value': '2608'}]",
         "first_seen": "2026-08-10 23:52:12,356",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -15,6 +16,7 @@
         "dll": null,
         "first_args": "[{'name': 'NotificationReason', 'value': 'load'}, {'name': 'DllName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\40722bb73834f97529b9.exe'}, {'name': 'DllBase', 'value': '0x7ff9fd8c0000'}]",
         "first_seen": "2026-08-10 23:51:57,387",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -23,6 +25,7 @@
         "dll": null,
         "first_args": "[{'name': 'Module', 'value': '0x7ff7c6a50000'}, {'name': 'Type', 'value': '#14'}, {'name': 'Name', 'value': '#100'}, {'name': 'Language', 'value': '0x00000000'}]",
         "first_seen": "2026-08-10 23:51:57,387",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -31,6 +34,7 @@
         "dll": null,
         "first_args": "",
         "first_seen": "2026-08-10 23:52:12,527",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -39,6 +43,7 @@
         "dll": null,
         "first_args": "[{'name': 'Name', 'value': 'nipsontaz.com'}, {'name': 'ServiceName', 'value': ''}]",
         "first_seen": "2026-08-10 23:52:12,887",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -47,6 +52,7 @@
         "dll": null,
         "first_args": "[{'name': 'ComputerName', 'value': 'DESKTOP-D7VMOBK'}]",
         "first_seen": "2026-08-10 23:52:12,449",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -55,6 +61,7 @@
         "dll": null,
         "first_args": "",
         "first_seen": "2026-08-10 23:51:57,543",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -63,6 +70,7 @@
         "dll": null,
         "first_args": "[{'name': 'Name', 'value': 'Admin'}]",
         "first_seen": "2026-08-10 23:52:12,465",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -71,6 +79,7 @@
         "dll": null,
         "first_args": "",
         "first_seen": "2026-08-10 23:51:57,418",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -79,6 +88,7 @@
         "dll": null,
         "first_args": "[{'name': 'FileName', 'value': 'C:\\\\Windows\\\\System32\\\\rundll32.exe'}, {'name': 'ModuleHandle', 'value': '0x7ff7c6a50000'}]",
         "first_seen": "2026-08-10 23:51:57,387",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -87,6 +97,7 @@
         "dll": null,
         "first_args": "[{'name': 'ModuleName', 'value': '40722bb73834f97529b9.exe.dll'}, {'name': 'ModuleHandle', 'value': '0x7ff9fd8c0000'}, {'name': 'FunctionName', 'value': ''}, {'name': 'Ordinal', 'value': '1'}, {'name': 'FunctionAddress', 'value': '0x7ff9fd8c1030'}]",
         "first_seen": "2026-08-10 23:51:57,387",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -95,6 +106,7 @@
         "dll": null,
         "first_args": "[{'name': 'Flags', 'value': '0x00000000'}, {'name': 'FileName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\40722bb73834f97529b9.exe.dll'}, {'name': 'BaseAddress', 'value': '0x7ff9fd8c0000'}]",
         "first_seen": "2026-08-10 23:51:57,387",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -103,6 +115,7 @@
         "dll": null,
         "first_args": "[{'name': 'MappedPath', 'value': '\\\\Device\\\\HarddiskVolume2\\\\Windows\\\\System32\\\\imagehlp'}, {'name': 'BaseAddress', 'value': '0x7ffa09b00000'}, {'name': 'InitRoutine', 'value': '0x7ffa09b023b0'}, {'name': 'Reason', 'value': '1'}]",
         "first_seen": "2026-08-10 23:51:57,246",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -111,6 +124,7 @@
         "dll": null,
         "first_args": "[{'name': 'lpLibFileName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\40722bb73834f97529b9.exe.dll'}, {'name': 'dwFlags', 'value': '0x00000008'}]",
         "first_seen": "2026-08-10 23:51:57,387",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -119,6 +133,7 @@
         "dll": null,
         "first_args": "[{'name': 'Module', 'value': '0x7ff7c6a50000'}, {'name': 'ResourceInfo', 'value': '0x7ff7c6a632b8'}]",
         "first_seen": "2026-08-10 23:51:57,387",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -127,6 +142,7 @@
         "dll": null,
         "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x1a1cb437000'}, {'name': 'RegionSize', 'value': '0x00001000'}, {'name': 'Protection', 'value': '0x00000004', 'pretty_value': 'PAGE_READWRITE'}, {'name': 'StackPivoted', 'value': 'no'}]",
         "first_seen": "2026-08-10 23:51:57,246",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -135,22 +151,25 @@
         "dll": null,
         "first_args": "[{'name': 'Handle', 'value': '0x0000020c'}]",
         "first_seen": "2026-08-10 23:51:57,371",
+        "process_count": 0,
         "processes": []
       },
       {
         "api": "NtCreateFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x00000334'}, {'name': 'DesiredAccess', 'value': '0x80100080', 'pretty_value': 'GENERIC_READ|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Windows\\\\Globalization\\\\Sorting\\\\sortdefault.nls'}, {'name': 'CreateDisposition', 'value': '1', 'pretty_value': 'FILE_OPEN'}, {'name': 'ShareAccess', 'value': '1', 'pretty_value': 'FILE_SHARE_READ'}, {'",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000334'}, {'name': 'DesiredAccess', 'value': '0x80100080', 'pretty_value': 'GENERIC_READ|FILE_READ_ATTRIBUTES|SYNCHRONIZE'}, {'name': 'FileName', 'value': 'C:\\\\Windows\\\\Globalization\\\\Sorting\\\\sortdefault.nls'}, {'name': 'CreateDisposition', 'value': '1', 'pretty_value': 'FILE_OPEN'}, {'name': 'ShareAccess', 'value': '1', 'pretty_value': 'FILE_SHARE_READ'}, {\u2026",
         "first_seen": "2026-08-10 23:52:12,777",
+        "process_count": 0,
         "processes": []
       },
       {
         "api": "NtCreateKey",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000300'}, {'name': 'DesiredAccess', 'value': '0x00000010', 'pretty_value': 'KEY_NOTIFY'}, {'name': 'ObjectAttributesHandle', 'value': '0x0000027c'}, {'name': 'ObjectAttributesName', 'value': 'TenantRestrictions\\\\Payload'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Policies\\\\Microsoft\\\\Windows\\\\TenantRestrictions\\\\Payload'}, {'name': '",
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000300'}, {'name': 'DesiredAccess', 'value': '0x00000010', 'pretty_value': 'KEY_NOTIFY'}, {'name': 'ObjectAttributesHandle', 'value': '0x0000027c'}, {'name': 'ObjectAttributesName', 'value': 'TenantRestrictions\\\\Payload'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Policies\\\\Microsoft\\\\Windows\\\\TenantRestrictions\\\\Payload'}, {'name':\u2026",
         "first_seen": "2026-08-10 23:55:13,012",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -159,6 +178,7 @@
         "dll": null,
         "first_args": "[{'name': 'Handle', 'value': '0x000001fc'}, {'name': 'MutexName', 'value': 'Local\\\\SM0:2608:304:WilStaging_02'}, {'name': 'InitialOwner', 'value': '0'}]",
         "first_seen": "2026-08-10 23:51:57,543",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -167,6 +187,7 @@
         "dll": null,
         "first_args": "[{'name': 'SectionHandle', 'value': '0x00000210'}, {'name': 'DesiredAccess', 'value': '0x00000004', 'pretty_value': 'SECTION_MAP_READ'}, {'name': 'ObjectAttributes', 'value': ''}, {'name': 'FileHandle', 'value': '0x00000220'}, {'name': 'FileName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\40722bb73834f97529b9.exe.dll'}]",
         "first_seen": "2026-08-10 23:51:57,340",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -175,6 +196,7 @@
         "dll": null,
         "first_args": "[{'name': 'ThreadHandle', 'value': '0x0000022c'}, {'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'StartAddress', 'value': '0x180002aa4'}, {'name': 'Parameter', 'value': '0x00000000'}, {'name': 'CreateFlags', 'value': '0x00000001'}, {'name': 'ThreadId', 'value': '1740'}, {'name': 'ProcessId', 'value': '2608'}]",
         "first_seen": "2026-08-10 23:52:12,356",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -183,14 +205,16 @@
         "dll": null,
         "first_args": "[{'name': 'Milliseconds', 'value': '1000'}]",
         "first_seen": "2026-08-10 23:52:12,356",
+        "process_count": 0,
         "processes": []
       },
       {
         "api": "NtDeviceIoControlFile",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'FileHandle', 'value': '0x00000250'}, {'name': 'HandleName', 'value': '\\\\Device\\\\Nsi'}, {'name': 'IoControlCode', 'value': '0x00120007'}, {'name': 'InputBuffer', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xb1\\\\xcc\\\\x07\\\\xfa\\\\x7f\\\\x00\\\\x00\\\\x08\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x01\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x",
+        "first_args": "[{'name': 'FileHandle', 'value': '0x00000250'}, {'name': 'HandleName', 'value': '\\\\Device\\\\Nsi'}, {'name': 'IoControlCode', 'value': '0x00120007'}, {'name': 'InputBuffer', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xb1\\\\xcc\\\\x07\\\\xfa\\\\x7f\\\\x00\\\\x00\\\\x08\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x01\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\\u2026",
         "first_seen": "2026-08-10 23:52:12,902",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -199,6 +223,7 @@
         "dll": null,
         "first_args": "[{'name': 'SourceProcessHandle', 'value': '0x0000022c'}, {'name': 'SourceHandle', 'value': '0x00000224'}, {'name': 'TargetProcessHandle', 'value': '0x0000022c'}, {'name': 'TargetHandle', 'value': '0x00000228'}, {'name': 'Options', 'value': '0x00000002'}]",
         "first_seen": "2026-08-10 23:51:57,543",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -207,6 +232,7 @@
         "dll": null,
         "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x1a1cfc50000'}, {'name': 'RegionSize', 'value': '0x0000e000'}, {'name': 'FreeType', 'value': '0x00004000'}]",
         "first_seen": "2026-08-10 23:52:12,277",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -215,6 +241,7 @@
         "dll": null,
         "first_args": "[{'name': 'SectionHandle', 'value': '0x00000210'}, {'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x1a1ccec0000'}, {'name': 'SectionOffset', 'value': '0x00000000'}, {'name': 'ViewSize', 'value': '0x00037000'}, {'name': 'Win32Protect', 'value': '0x00000002', 'pretty_value': 'PAGE_READONLY'}, {'name': 'StackPivoted', 'value': 'no'}]",
         "first_seen": "2026-08-10 23:51:57,340",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -223,6 +250,7 @@
         "dll": null,
         "first_args": "[{'name': 'DirectoryHandle', 'value': '0x0000036c'}, {'name': 'DesiredAccess', 'value': '0x00020001', 'pretty_value': 'FILE_READ_ACCESS|READ_CONTROL'}, {'name': 'ObjectAttributes', 'value': 'C:\\\\RPC Control'}]",
         "first_seen": "2026-08-10 23:52:12,902",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -231,22 +259,25 @@
         "dll": null,
         "first_args": "[{'name': 'FileHandle', 'value': '0x00000220'}, {'name': 'DesiredAccess', 'value': '0x001200a9', 'pretty_value': 'FILE_GENERIC_READ|FILE_GENERIC_EXECUTE'}, {'name': 'FileName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\40722bb73834f97529b9.exe.dll'}, {'name': 'ShareAccess', 'value': '5', 'pretty_value': 'FILE_SHARE_READ|FILE_SHARE_DELETE'}]",
         "first_seen": "2026-08-10 23:51:57,262",
+        "process_count": 0,
         "processes": []
       },
       {
         "api": "NtOpenKey",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyHandle', 'value': '0x0000020c'}, {'name': 'DesiredAccess', 'value': '0x00020019', 'pretty_value': 'KEY_READ'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000000'}, {'name': 'ObjectAttributesName', 'value': '\\\\Registry\\\\MACHINE\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\SideBySide'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\Software\\\\Microsoft\\\\Windows\\\\Cur",
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x0000020c'}, {'name': 'DesiredAccess', 'value': '0x00020019', 'pretty_value': 'KEY_READ'}, {'name': 'ObjectAttributesHandle', 'value': '0x00000000'}, {'name': 'ObjectAttributesName', 'value': '\\\\Registry\\\\MACHINE\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\SideBySide'}, {'name': 'ObjectAttributes', 'value': 'HKEY_LOCAL_MACHINE\\\\Software\\\\Microsoft\\\\Windows\\\\Cu\u2026",
         "first_seen": "2026-08-10 23:51:57,371",
+        "process_count": 0,
         "processes": []
       },
       {
         "api": "NtOpenKeyEx",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000210'}, {'name': 'DesiredAccess', 'value': '0x00000001', 'pretty_value': 'KEY_QUERY_VALUE'}, {'name': 'ObjectAttributesHandle', 'value': '0x0000020c'}, {'name': 'ObjectAttributesName', 'value': 'SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Themes\\\\Personalize'}, {'name': 'ObjectAttributes', 'value': 'HKEY_CURRENT_USER\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVe",
+        "first_args": "[{'name': 'KeyHandle', 'value': '0x00000210'}, {'name': 'DesiredAccess', 'value': '0x00000001', 'pretty_value': 'KEY_QUERY_VALUE'}, {'name': 'ObjectAttributesHandle', 'value': '0x0000020c'}, {'name': 'ObjectAttributesName', 'value': 'SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Themes\\\\Personalize'}, {'name': 'ObjectAttributes', 'value': 'HKEY_CURRENT_USER\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentV\u2026",
         "first_seen": "2026-08-10 23:51:57,418",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -255,6 +286,7 @@
         "dll": null,
         "first_args": "[{'name': 'ProcessHandle', 'value': '0x0000022c'}, {'name': 'DesiredAccess', 'value': '0x00000040', 'pretty_value': 'PROCESS_DUP_HANDLE'}, {'name': 'ProcessIdentifier', 'value': '2608'}]",
         "first_seen": "2026-08-10 23:51:57,543",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -263,6 +295,7 @@
         "dll": null,
         "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'DesiredAccess', 'value': '0x00000008'}, {'name': 'TokenHandle', 'value': '0x00000210'}]",
         "first_seen": "2026-08-10 23:51:57,387",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -271,6 +304,7 @@
         "dll": null,
         "first_args": "[{'name': 'SectionHandle', 'value': '0x00000210'}, {'name': 'DesiredAccess', 'value': '0x0000000d'}, {'name': 'ObjectAttributes', 'value': 'MSCTF.dll'}]",
         "first_seen": "2026-08-10 23:51:57,527",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -279,14 +313,16 @@
         "dll": null,
         "first_args": "[{'name': 'ThreadHandle', 'value': '0x00000338'}, {'name': 'DesiredAccess', 'value': '0x00100010', 'pretty_value': 'THREAD_SET_CONTEXT|0x00100000'}, {'name': 'ProcessId', 'value': '2608'}, {'name': 'ThreadId', 'value': '18446744071860909224'}]",
         "first_seen": "2026-08-10 23:52:12,777",
+        "process_count": 0,
         "processes": []
       },
       {
         "api": "NtProtectVirtualMemory",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x7ff7c6a62000'}, {'name': 'ModuleName', 'value': 'rundll32.exe'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000004', 'pretty_value': 'PAGE_READWRITE'}, {'name': 'OldAccessProtection', 'value': '0x00000002",
+        "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x7ff7c6a62000'}, {'name': 'ModuleName', 'value': 'rundll32.exe'}, {'name': 'NumberOfBytesProtected', 'value': '0x00001000'}, {'name': 'MemoryType', 'value': '0x00000000'}, {'name': 'NewAccessProtection', 'value': '0x00000004', 'pretty_value': 'PAGE_READWRITE'}, {'name': 'OldAccessProtection', 'value': '0x0000000\u2026",
         "first_seen": "2026-08-10 23:51:57,387",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -295,6 +331,7 @@
         "dll": null,
         "first_args": "[{'name': 'FileName', 'value': 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\40722bb73834f97529b9.exe.dll.manifest'}]",
         "first_seen": "2026-08-10 23:51:57,246",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -303,14 +340,16 @@
         "dll": null,
         "first_args": "[{'name': 'ThreadHandle', 'value': '0xfffffffe'}, {'name': 'ThreadInformationClass', 'value': '12'}, {'name': 'ThreadInformation', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00'}, {'name': 'ThreadId', 'value': '1236'}]",
         "first_seen": "2026-08-10 23:52:56,668",
+        "process_count": 0,
         "processes": []
       },
       {
         "api": "NtQueryInformationToken",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'TokenInformationClass', 'value': '25'}, {'name': 'TokenInformation', 'value': '\\\\x00\\\\xe3^\\\\x91<\\\\x00\\\\x00\\\\x00`\\\\x00\\\\x00\\\\x00<\\\\x00\\\\x00\\\\x00\\\\x01\\\\x01\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x10\\\\x000\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xa0\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x88\\\\xe6^\\\\x91<\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00k\\\\xed-\\\\x0b\\\\xfa\\\\x7f\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00<\\\\x00",
+        "first_args": "[{'name': 'TokenInformationClass', 'value': '25'}, {'name': 'TokenInformation', 'value': '\\\\x00\\\\xe3^\\\\x91<\\\\x00\\\\x00\\\\x00`\\\\x00\\\\x00\\\\x00<\\\\x00\\\\x00\\\\x00\\\\x01\\\\x01\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x10\\\\x000\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\xa0\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x88\\\\xe6^\\\\x91<\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00k\\\\xed-\\\\x0b\\\\xfa\\\\x7f\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00<\\\\x0\u2026",
         "first_seen": "2026-08-10 23:51:57,371",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -319,6 +358,7 @@
         "dll": null,
         "first_args": "[{'name': 'KeyHandle', 'value': '0x0000020c'}, {'name': 'KeyInformation', 'value': '\\\\x00\\\\x00\\\\x00\\\\x00'}, {'name': 'KeyInformationClass', 'value': '7'}]",
         "first_seen": "2026-08-10 23:51:57,418",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -327,6 +367,7 @@
         "dll": null,
         "first_args": "[{'name': 'SystemInformationClass', 'value': '164'}]",
         "first_seen": "2026-08-10 23:51:57,246",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -335,6 +376,7 @@
         "dll": null,
         "first_args": "",
         "first_seen": "2026-08-10 23:52:12,324",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -343,6 +385,7 @@
         "dll": null,
         "first_args": "[{'name': 'KeyHandle', 'value': '0x0000020c'}, {'name': 'ValueName', 'value': 'PreferExternalManifest'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\SideBySide\\\\PreferExternalManifest'}]",
         "first_seen": "2026-08-10 23:51:57,371",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -351,6 +394,7 @@
         "dll": null,
         "first_args": "[{'name': 'ProcessId', 'value': '2608'}, {'name': 'ThreadId', 'value': '5056'}, {'name': 'ThreadHandle', 'value': '0x00000338'}, {'name': 'ApcRoutine', 'value': '0x7ffa0b01ded0'}, {'name': 'Module', 'value': 'sechost.dll'}]",
         "first_seen": "2026-08-10 23:52:12,777",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -359,6 +403,7 @@
         "dll": null,
         "first_args": "[{'name': 'Handle', 'value': '0x000001fc'}]",
         "first_seen": "2026-08-10 23:51:57,543",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -367,6 +412,7 @@
         "dll": null,
         "first_args": "[{'name': 'ProcessInformationClass', 'value': '93'}, {'name': 'ProcessInformation', 'value': '\\\\x7f7\\\\x9e}'}]",
         "first_seen": "2026-08-10 23:51:57,527",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -375,6 +421,7 @@
         "dll": null,
         "first_args": "[{'name': 'ThreadHandle', 'value': '0x00000000'}, {'name': 'ExitStatus', 'value': '0x00000000'}, {'name': 'ThreadId', 'value': '0'}, {'name': 'ProcessId', 'value': '0'}]",
         "first_seen": "2026-08-10 23:52:56,668",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -383,6 +430,7 @@
         "dll": null,
         "first_args": "",
         "first_seen": "2026-08-10 23:51:57,246",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -391,6 +439,7 @@
         "dll": null,
         "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x1a1ccec0000'}, {'name': 'RegionSize', 'value': '0x00037000'}]",
         "first_seen": "2026-08-10 23:51:57,371",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -399,6 +448,7 @@
         "dll": null,
         "first_args": "[{'name': 'ProcessHandle', 'value': '0xffffffff'}, {'name': 'BaseAddress', 'value': '0x1a1ccee0000'}, {'name': 'RegionSize', 'value': '0x00001000'}, {'name': 'Flags', 'value': '0'}]",
         "first_seen": "2026-08-10 23:51:57,543",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -407,6 +457,7 @@
         "dll": null,
         "first_args": "[{'name': 'Handle', 'value': '0x000001fc'}, {'name': 'Milliseconds', 'value': '18446744073709551615'}, {'name': 'Status', 'value': 'Infinite'}]",
         "first_seen": "2026-08-10 23:51:57,543",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -415,6 +466,7 @@
         "dll": null,
         "first_args": "[{'name': 'MachineName', 'value': ''}, {'name': 'DatabaseName', 'value': ''}, {'name': 'DesiredAccess', 'value': '0x00000001', 'pretty_value': 'SC_MANAGER_CONNECT'}]",
         "first_seen": "2026-08-10 23:52:12,777",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -423,6 +475,7 @@
         "dll": null,
         "first_args": "[{'name': 'ServiceControlManager', 'value': '0x1a1cb4b34e0'}, {'name': 'ServiceName', 'value': 'WinHttpAutoProxySvc'}, {'name': 'DesiredAccess', 'value': '0x00000094', 'pretty_value': 'SERVICE_QUERY_STATUS|SERVICE_START|SERVICE_INTERROGATE'}]",
         "first_seen": "2026-08-10 23:52:12,777",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -431,14 +484,16 @@
         "dll": null,
         "first_args": "[{'name': 'Handle', 'value': '0x00000210'}]",
         "first_seen": "2026-08-10 23:51:57,527",
+        "process_count": 0,
         "processes": []
       },
       {
         "api": "RegCreateKeyExW",
         "count": 0,
         "dll": null,
-        "first_args": "[{'name': 'Registry', 'value': '0x00000284'}, {'name': 'SubKey', 'value': 'TenantRestrictions\\\\Payload'}, {'name': 'Class', 'value': ''}, {'name': 'Access', 'value': '0x00000010', 'pretty_value': 'KEY_NOTIFY'}, {'name': 'Handle', 'value': '0x00000298'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Policies\\\\Microsoft\\\\Windows\\\\TenantRestrictions\\\\Payload'}, {'name': 'Disposition', ",
+        "first_args": "[{'name': 'Registry', 'value': '0x00000284'}, {'name': 'SubKey', 'value': 'TenantRestrictions\\\\Payload'}, {'name': 'Class', 'value': ''}, {'name': 'Access', 'value': '0x00000010', 'pretty_value': 'KEY_NOTIFY'}, {'name': 'Handle', 'value': '0x00000298'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Policies\\\\Microsoft\\\\Windows\\\\TenantRestrictions\\\\Payload'}, {'name': 'Disposition',\u2026",
         "first_seen": "2026-08-10 23:52:12,684",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -447,6 +502,7 @@
         "dll": null,
         "first_args": "[{'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\Policies\\\\Microsoft\\\\Windows\\\\TenantRestrictions\\\\Payload\\\\'}, {'name': 'NotifyFilter', 'value': '0x10000004'}, {'name': 'WatchSubtree', 'value': '1'}, {'name': 'Asynchronous', 'value': '1'}]",
         "first_seen": "2026-08-10 23:52:12,684",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -455,6 +511,7 @@
         "dll": null,
         "first_args": "[{'name': 'Registry', 'value': '0x80000002', 'pretty_value': 'HKEY_LOCAL_MACHINE'}, {'name': 'SubKey', 'value': 'System\\\\CurrentControlSet\\\\Services\\\\WinSock2\\\\Parameters'}, {'name': 'Handle', 'value': '0x00000374'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\System\\\\CurrentControlSet\\\\Services\\\\WinSock2\\\\Parameters'}]",
         "first_seen": "2026-08-10 23:52:12,887",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -463,6 +520,7 @@
         "dll": null,
         "first_args": "[{'name': 'KeyHandle', 'value': '0x000002a4'}, {'name': 'Class', 'value': ''}, {'name': 'SubKeyCount', 'value': '0'}, {'name': 'MaxSubKeyLength', 'value': '0'}, {'name': 'MaxClassLength', 'value': '0'}, {'name': 'ValueCount', 'value': '0'}, {'name': 'MaxValueNameLength', 'value': '0'}, {'name': 'MaxValueLength', 'value': '0'}]",
         "first_seen": "2026-08-10 23:52:12,684",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -471,6 +529,7 @@
         "dll": null,
         "first_args": "[{'name': 'Handle', 'value': '0x00000374'}, {'name': 'ValueName', 'value': 'WinSock_Registry_Version'}, {'name': 'Data', 'value': '2.0'}, {'name': 'FullName', 'value': 'HKEY_LOCAL_MACHINE\\\\SYSTEM\\\\ControlSet001\\\\Services\\\\WinSock2\\\\Parameters\\\\WinSock_Registry_Version'}]",
         "first_seen": "2026-08-10 23:52:12,887",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -479,6 +538,7 @@
         "dll": null,
         "first_args": "[{'name': 'Handle', 'value': '0x00000210'}, {'name': 'ValueName', 'value': 'AppsUseLightTheme'}, {'name': 'Data', 'value': '0'}, {'name': 'FullName', 'value': 'HKEY_CURRENT_USER\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Themes\\\\Personalize\\\\AppsUseLightTheme'}]",
         "first_seen": "2026-08-10 23:51:57,527",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -487,6 +547,7 @@
         "dll": null,
         "first_args": "[{'name': 'StartAddress', 'value': '0x7ff7c6a5a0d0'}, {'name': 'Parameter', 'value': '0x3c91734000'}]",
         "first_seen": "2026-08-10 23:51:57,246",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -495,6 +556,7 @@
         "dll": null,
         "first_args": "[{'name': 'ExceptionFilter', 'value': '0x7ff7c6a5a4f0'}]",
         "first_seen": "2026-08-10 23:51:57,246",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -503,6 +565,7 @@
         "dll": null,
         "first_args": "[{'name': 'Action', 'value': '0x00000042'}, {'name': 'uiParam', 'value': '0x00000010'}]",
         "first_seen": "2026-08-10 23:51:57,543",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -511,6 +574,7 @@
         "dll": null,
         "first_args": "[{'name': 'SessionHandle', 'value': '0x1a1cb476840'}, {'name': 'ServerName', 'value': 'nipsontaz.com'}, {'name': 'ServerPort', 'value': '80'}]",
         "first_seen": "2026-08-10 23:52:12,684",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -519,6 +583,7 @@
         "dll": null,
         "first_args": "[{'name': 'UserAgent', 'value': ''}, {'name': 'ProxyName', 'value': ''}, {'name': 'ProxyBypass', 'value': ''}, {'name': 'AccessType', 'value': '0x00000000'}, {'name': 'Flags', 'value': '0x00000000'}]",
         "first_seen": "2026-08-10 23:52:12,684",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -527,6 +592,7 @@
         "dll": null,
         "first_args": "[{'name': 'InternetHandle', 'value': '0x1a1cb484530'}, {'name': 'Verb', 'value': 'GET'}, {'name': 'ObjectName', 'value': '/'}, {'name': 'Version', 'value': ''}, {'name': 'Referrer', 'value': ''}, {'name': 'Flags', 'value': '0x00000000'}]",
         "first_seen": "2026-08-10 23:52:12,684",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -535,6 +601,7 @@
         "dll": null,
         "first_args": "[{'name': 'InternetHandle', 'value': '0x1a1cb484a70'}, {'name': 'Headers', 'value': 'Cookie: __gads=3447045697:1:281:75; _gat=10.0.19045.64; _ga=1.198313.1970169159.182; _u=4445534B544F502D4437564D4F424B:41646D696E:43304433433932463333383744334232; __io=21_1795187001_776152809_4276559823; _gid=61BAF688B13D'}, {'name': 'Optional', 'value': ''}]",
         "first_seen": "2026-08-10 23:52:12,902",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -543,6 +610,7 @@
         "dll": null,
         "first_args": "[{'name': 'socket', 'value': '872'}]",
         "first_seen": "2026-08-10 23:52:12,902",
+        "process_count": 0,
         "processes": []
       },
       {
@@ -551,6 +619,7 @@
         "dll": null,
         "first_args": "[{'name': 'af', 'value': '23', 'pretty_value': 'AF_INET6'}, {'name': 'type', 'value': '2', 'pretty_value': 'SOCK_DGRAM'}, {'name': 'protocol', 'value': '0'}, {'name': 'socket', 'value': '872'}]",
         "first_seen": "2026-08-10 23:52:12,902",
+        "process_count": 0,
         "processes": []
       }
     ],

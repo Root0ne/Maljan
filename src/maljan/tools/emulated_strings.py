@@ -69,11 +69,14 @@ FLOSS_REMEDIATION = (
     "analysis server's env"
 )
 
-# The wall clock one emulation may take. A 60 KB DLL was measured at under
-# forty seconds on a laptop; a large one takes many minutes, and past this
-# FLOSS is stopped and the caller told so rather than left waiting on a stage
-# budget.
-FLOSS_TIMEOUT_S = 600
+# The wall clock one emulation may take when its caller names none: none. A
+# 60 KB DLL was measured at under forty seconds on a laptop and a large one
+# takes many minutes; how many grows with the sample's code, so a fixed number
+# stopped large samples half-way. A caller that wants a bound passes
+# ``timeout_s`` (the triage pack passes what is left of its budget), and past
+# it FLOSS is stopped and the caller told so; the address-space limit below
+# bounds its memory either way, and the job's timeout its time.
+FLOSS_TIMEOUT_S: int | None = None
 
 # The address space the child may map. On a 60 KB DLL with 150 functions the
 # standalone build peaked at 814 MB resident and 836 MB of address space (the
@@ -132,7 +135,7 @@ _SCRATCH_DIRECTORY = "floss"
 _KILLED_BY = frozenset({-signal.SIGABRT, -signal.SIGSEGV, -signal.SIGKILL})
 _OUT_OF_MEMORY_WORDS = ("MemoryError", "Cannot allocate memory", "std::bad_alloc")
 
-Runner = Callable[[Sequence[str], float], "subprocess.CompletedProcess[str]"]
+Runner = Callable[[Sequence[str], float | None], "subprocess.CompletedProcess[str]"]
 
 
 def user_tools_dir() -> Path:
@@ -275,9 +278,14 @@ def _verified_copy(source: Path, directory: Path) -> Path:
     return target
 
 
+def _seconds(timeout_s: int | None) -> int | None:
+    """A caller's wall clock as whole seconds of at least one, or ``None`` for none."""
+    return None if timeout_s is None else max(1, int(timeout_s))
+
+
 def _run(
     argv: Sequence[str],
-    timeout: float,
+    timeout: float | None,
     pinned: Path | None = None,
     scratch: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
@@ -306,7 +314,9 @@ def _run(
         shutil.rmtree(run, ignore_errors=True)
 
 
-def _spawn(command: list[str], timeout: float, workdir: str) -> subprocess.CompletedProcess[str]:
+def _spawn(
+    command: list[str], timeout: float | None, workdir: str
+) -> subprocess.CompletedProcess[str]:
     """One child in its own session, in ``workdir``, its group killed if it overruns."""
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
@@ -324,6 +334,14 @@ def _spawn(command: list[str], timeout: float, workdir: str) -> subprocess.Compl
         cwd=workdir,
         start_new_session=True,
         preexec_fn=_limit_address_space,  # noqa: PLW1509 - one setrlimit call
+    )
+    # Its own session, so its group is what the server kills when every caller
+    # of this run has gone (``tools.children``).
+    from maljan.tools import children
+
+    # Only while it runs: a reaped child's pid can be another session's.
+    children.register(
+        lambda: children.kill_process_group(process.pid) if process.poll() is None else None
     )
     try:
         stdout, stderr = process.communicate(timeout=timeout)
@@ -454,11 +472,14 @@ def _ran_out_of_memory(finished: subprocess.CompletedProcess[str]) -> bool:
 
 
 def _emulate(
-    executable: str, target: Path, min_len: int, timeout_s: int, runner: Runner
+    executable: str, target: Path, min_len: int, timeout_s: int | None, runner: Runner
 ) -> dict[str, Any] | str:
     """One FLOSS run over ``target``: its result document, or the sentence saying why not."""
     try:
-        finished = runner(_floss_argv(executable, target, min_len), float(timeout_s))
+        finished = runner(
+            _floss_argv(executable, target, min_len),
+            None if timeout_s is None else float(timeout_s),
+        )
     except subprocess.TimeoutExpired:
         return f"FLOSS produced no result within its budget ({timeout_s} s) and was stopped"
     except OSError as exc:
@@ -486,7 +507,7 @@ def _emulate(
 
 
 def _document(
-    executable: str, target: Path, min_len: int, timeout_s: int, runner: Runner
+    executable: str, target: Path, min_len: int, timeout_s: int | None, runner: Runner
 ) -> dict[str, Any] | str:
     """FLOSS's result document for this file, emulated once however many ask."""
     info = target.stat()
@@ -526,7 +547,7 @@ def floss(
     limit: int = DEFAULT_STRINGS_LIMIT,
     offset: int = 0,
     pattern: str | None = None,
-    timeout_s: int = FLOSS_TIMEOUT_S,
+    timeout_s: int | None = FLOSS_TIMEOUT_S,
     runner: Runner | None = None,
     environ: Mapping[str, str] | None = None,
     scratch: str | Path | None = None,
@@ -577,9 +598,9 @@ def floss(
                 MISSING_DEPENDENCY, reason, tool="floss", remediation=FLOSS_REMEDIATION
             )
         pinned = partial(_run, pinned=executable, scratch=Path(scratch) if scratch else None)
-        document = _document(str(executable), target, minimum, max(1, int(timeout_s)), pinned)
+        document = _document(str(executable), target, minimum, _seconds(timeout_s), pinned)
     else:
-        document = _document("floss", target, minimum, max(1, int(timeout_s)), runner)
+        document = _document("floss", target, minimum, _seconds(timeout_s), runner)
     if isinstance(document, str):
         return _error(document)
 

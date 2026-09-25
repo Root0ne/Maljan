@@ -57,6 +57,45 @@ def truncation_target(limit: int) -> int:
     return max(0, int(limit) - len(TRUNCATION_MARKER))
 
 
+def next_request_id(session: Any) -> Any:
+    """The id the session will give its next request, or ``None`` where it cannot say.
+
+    The ``mcp`` client has no public way to learn a request's id, so this is
+    the one place its private counter is read: ``BaseSession._request_id``,
+    which ``send_request`` takes as the request's id before its first await,
+    and ``ClientSession.call_tool`` reaches ``send_request`` with no await in
+    between. Read immediately before the call, it is that call's id, which is
+    how a call this client gives up on is cancelled at the server by name. A
+    test pins that behaviour to the installed version.
+    """
+    value = getattr(session, "_request_id", None)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+async def _cancel_at_the_server(session: Any, request_id: Any, reason: str) -> None:
+    """Tell the server to stop the request this client gave up on. Never raises.
+
+    The client library abandons a request it times out or is cancelled on and
+    says nothing to the server, which then works on with no one waiting — a
+    capa or FLOSS child of a large sample for as long as it takes. The server
+    cancels the request's work when told, and a long-running tool kills its
+    child process with it (``tools.children``).
+    """
+    if request_id is None:
+        return
+    try:
+        from mcp import types
+
+        note = types.ClientNotification(
+            types.CancelledNotification(
+                params=types.CancelledNotificationParams(requestId=request_id, reason=reason)
+            )
+        )
+        await asyncio.shield(asyncio.wait_for(session.send_notification(note), 5.0))
+    except BaseException as exc:  # noqa: BLE001 — a notice that cannot be sent changes nothing
+        logger.debug("the cancellation of request %s was not sent (%s).", request_id, exc)
+
+
 class MCPLangChainToolkit:
     """Toolkit that connects to an MCP server and exposes its tools to LangChain."""
 
@@ -334,17 +373,30 @@ class MCPLangChainToolkit:
             timing: dict[str, Any] = (
                 {"read_timeout_seconds": timedelta(seconds=deadline)} if deadline else {}
             )
+            long_running = guard is not None and guard.long_running(tool_name)
+            request_id = next_request_id(session)
             try:
                 result = await session.call_tool(tool_name, arguments=args, **timing)
             except asyncio.CancelledError:
-                # The caller's own budget ran out while this call was with the
-                # server: a call the server did not answer in the time there
-                # was, counted as one rather than let go as abandoned.
-                if guard is not None and not settled:
+                await _cancel_at_the_server(session, request_id, "the caller stopped waiting")
+                # A long-running tool still at work when its caller stopped
+                # waiting is not a server that failed to answer.
+                if guard is not None and not settled and not long_running:
+                    # The caller's own budget ran out while this call was with
+                    # the server: a call the server did not answer in the time
+                    # there was, counted as one rather than let go as abandoned.
                     guard.failed(
                         "the call did not finish within its caller's budget",
                         trial=trial,
                     )
+                    settled = True
+                raise
+            except Exception as exc:
+                if transport_failure(exc) is not None:
+                    await _cancel_at_the_server(session, request_id, "the client gave up")
+                if long_running and guard is not None and not settled:
+                    # Its own deadline passed: the server was still working.
+                    guard.abandoned(trial=trial)
                     settled = True
                 raise
             if guard is not None:

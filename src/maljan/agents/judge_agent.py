@@ -31,7 +31,7 @@ import re
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -42,14 +42,17 @@ from maljan.agents.base_agent import (
     TOOL_LOOP_TURN_CALL,
     BudgetMeter,
     LoopBudget,
+    _message_chars,
     _trim_for_synthesis,
     _turn_key,
     counted_window_tokens,
     is_model_turn,
     is_the_graph_s_step_stop,
+    limit_text,
     loop_limits,
     note_a_window_that_moved,
     nudge_turns,
+    recursion_limit,
     request_chars,
     retry_on_connection_error,
     run_on_agent_loop,
@@ -62,6 +65,7 @@ from maljan.agents.judge_postprocess import (
 from maljan.agents.prompt_fragments import tools_statement
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
+from maljan.core.spend import SpendCeilingStop
 from maljan.core.token_ledger import TokenLedger, structured_answer
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
 from maljan.llm.context_window import (
@@ -69,7 +73,7 @@ from maljan.llm.context_window import (
     tool_definition_chars,
     window_full_error,
 )
-from maljan.llm.generation_rate import GenerationRates, model_name_of
+from maljan.llm.generation_rate import GenerationRates, ModelCallDeadline, model_name_of
 from maljan.memory.long_term_memory import a_past_case_technique
 from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
 from maljan.pipeline.mediation_models import (
@@ -436,33 +440,32 @@ _AGREEMENT_RE = re.compile(
 )
 
 
-# How much of the evidence summary reaches the prompt. The block is one line
-# per technique and the tail of it is the techniques one source mentioned once;
-# a bound keeps a chatty run from crowding out the analysts' own text.
-_EVIDENCE_SUMMARY_CHARS = 2000
+# The notice a judge prompt carries when its parts did not fit the judge's
+# window whole. Said in the prompt, where the model reads it, and recorded as
+# a degradation reason, where the reader of the report does.
+PROMPT_SHORTENED_NOTICE = (
+    "NOTE: this prompt did not fit this model's window whole. {cut} of {total} parts "
+    "({names}) were shortened to {width} characters each, largest first; a shortened "
+    "part ends in …."
+)
 
 
-def verdict_reports_text(
+def verdict_report_parts(
     reports: Mapping[str, str],
     isr_reports: Mapping[str, AgentISR] | None,
     evidence_summary: str = "",
     degradation_note: str = "",
-) -> str:
-    """The analysts' reports as the verdict call is shown them.
+) -> dict[str, str]:
+    """The parts the analysts' reports are shown to the judge in, each whole, in order.
 
-    One function for the verdict and the technique question asked after it,
-    so the question is asked over what the verdict was drawn from.
+    Keyed by what a shortening notice calls them: each analyst's report
+    under its name, then the ISR summaries, the evidence summary and the
+    degradation note. Nothing here is cut; :func:`fit_prompt_parts` does
+    that, and only when the judge's window cannot hold them.
     """
-    # Build compact reports to avoid context bloat.
-    # Full reports can exceed 15K tokens; we truncate each to ~500 chars
-    # and only keep ISR claims + the evidence summary.
-    report_parts: list[str] = []
+    parts: dict[str, str] = {}
     for name, report in reports.items():
-        truncated = report[:500] + "..." if len(report) > 500 else report
-        report_parts.append(f"--- {name.upper()} ANALYST ---\n{truncated}")
-    reports_text = "\n\n".join(report_parts)
-
-    # Include ISR summaries (compact)
+        parts[f"{name} report"] = f"--- {name.upper()} ANALYST ---\n{report}"
     if isr_reports:
         isr_block = "\n".join(
             f"[{name}] domain={isr.domain} | "
@@ -472,14 +475,90 @@ def verdict_reports_text(
             if isr.claims
         )
         if isr_block:
-            reports_text += f"\n\n=== ISR SUMMARIES ===\n{isr_block}"
-
+            parts["ISR summaries"] = f"=== ISR SUMMARIES ===\n{isr_block}"
     if evidence_summary:
-        reports_text = f"{reports_text}\n\n{evidence_summary[:_EVIDENCE_SUMMARY_CHARS]}"
-
+        parts["evidence summary"] = evidence_summary
     if degradation_note:
-        reports_text = f"{reports_text}\n\n{degradation_note}"
-    return reports_text
+        parts["degradation note"] = degradation_note
+    return parts
+
+
+def join_prompt_parts(parts: Mapping[str, str]) -> str:
+    """The parts as one block, a blank line between each."""
+    return "\n\n".join(text for text in parts.values() if text)
+
+
+def verdict_reports_text(
+    reports: Mapping[str, str],
+    isr_reports: Mapping[str, AgentISR] | None,
+    evidence_summary: str = "",
+    degradation_note: str = "",
+) -> str:
+    """The analysts' reports as the verdict call is shown them, whole.
+
+    One function for the verdict and the technique question asked after it,
+    so the question is asked over what the verdict was drawn from. Each report
+    is whole: a fixed cut at 500 characters used to leave the judge the first
+    paragraph of every analyst and the ends of none.
+    """
+    return join_prompt_parts(
+        verdict_report_parts(reports, isr_reports, evidence_summary, degradation_note)
+    )
+
+
+def fit_prompt_parts(parts: Mapping[str, str], room: int | None) -> tuple[dict[str, str], str]:
+    """``parts`` whole when they fit ``room`` characters; else the largest shortened first.
+
+    The shortening the tool answers get, for text: characters come off the
+    largest parts first, down to one width every shortened part shares, so a
+    short part is never cut to make room for a long one. A cut ends in the cut
+    mark. Returns the parts and the notice saying what was shortened (``""``
+    when nothing was). ``room`` of ``None`` is no window to measure against:
+    everything goes whole.
+    """
+    from maljan.utils.marked_cut import CUT_MARK, marked_cut
+
+    texts = {key: str(text or "") for key, text in parts.items()}
+    total = sum(len(text) for text in texts.values())
+    if room is None or total <= room or not texts:
+        return texts, ""
+    budget = max(0, int(room))
+    lengths = sorted(len(text) for text in texts.values())
+    # The width every part longer than it is cut to: the largest width at
+    # which the parts at or under it, whole, and the rest, at it, fit.
+    width = 0
+    kept = 0
+    for index, length in enumerate(lengths):
+        longer = len(lengths) - index
+        candidate = (budget - kept) // longer
+        if candidate < length:
+            width = max(0, candidate)
+            break
+        kept += length
+    else:  # pragma: no cover — every part fitted whole, which the total ruled out
+        return texts, ""
+    shown: dict[str, str] = {}
+    cut: list[str] = []
+    for key, text in texts.items():
+        if len(text) <= width:
+            shown[key] = text
+            continue
+        cut.append(key)
+        shown[key] = (
+            marked_cut(text, width) if width > len(CUT_MARK) else f"{CUT_MARK} (no room left)"
+        )
+    notice = PROMPT_SHORTENED_NOTICE.format(
+        cut=len(cut), total=len(texts), names=", ".join(cut), width=width
+    )
+    return shown, notice
+
+
+# The key the negotiation history is fitted under beside the report parts.
+_HISTORY_PART = "negotiation history"
+# Kept back for the shortening notice itself, which is written only once the
+# parts are fitted: the notice names the parts it cut, so its length is known
+# only then, and this is more than any notice over a dozen parts needs.
+_NOTICE_ROOM = 600
 
 
 class JudgeVerdict(NamedTuple):
@@ -1110,6 +1189,11 @@ def _who_is_asked(message: Any) -> str | None:
     return None
 
 
+def _seconds_or_none(value: Any) -> float | None:
+    """``value`` as seconds, or ``None`` for no limit."""
+    return None if value is None else float(value)
+
+
 class JudgeAgent(BudgetMeter):
     """Chief controller responsible for mediation, consensus detection, and final verdict.
 
@@ -1159,6 +1243,10 @@ class JudgeAgent(BudgetMeter):
         # never ran.
         self.tools: list[Any] = []
         self.degradation_reasons: list[Any] = []
+        # The notice the last verdict prompt carried when its parts did not
+        # fit the judge's window whole, or ``""``; the judge node records it
+        # as a degradation reason.
+        self.verdict_prompt_notice: str = ""
         # The judge calls tools too — threat intel on a disputed indicator, an
         # ATT&CK or family lookup — and a verdict that cites one has to be
         # checkable the same way an analyst's claim is. Same counter as the
@@ -1189,6 +1277,26 @@ class JudgeAgent(BudgetMeter):
         # What the tool definitions of the current loop weigh with each
         # request, for the budget record and the ticks; none before a loop.
         self._tool_definition_chars: int = 0
+
+    def _spend_admits(self, kind: str, messages: list[Any]) -> int | None:
+        """The spend ceiling's word on one judge call before it is made (``SpendMeter.admit``)."""
+        from maljan.core.spend import SpendMeter
+
+        meter = getattr(getattr(self, "token_ledger", None), "spend", None)
+        if not isinstance(meter, SpendMeter):
+            return None
+        return cast(
+            "int | None",
+            meter.admit(
+                kind=kind,
+                model=self._model_label() or model_name_of(self.llm),
+                # As an analyst's call is measured: tool calls and reasoning
+                # counted with the text, and the tool definitions sent with it.
+                prompt_chars=sum(_message_chars(m) for m in messages)
+                + max(0, int(getattr(self, "_tool_definition_chars", 0) or 0)),
+                cap_tokens=int(judge_output_cap().tokens or 0),
+            ),
+        )
 
     def _model_label(self) -> str:
         """The label of the model this instance calls first, or ``""`` outside a job."""
@@ -1354,21 +1462,45 @@ class JudgeAgent(BudgetMeter):
             elif role == "human":
                 messages_pre.append(HumanMessage(content=content))
 
-        if not getattr(self, "tools", None):
-            self.logger.warning("No tools initialized. Falling back to standard LLM invoke.")
+        # The job's spend meter: a loop that starts after its ceiling was
+        # reached runs no tool phase, and one running ends its tool phase there.
+        from maljan.core.spend import SpendMeter
+
+        spend_meter = getattr(getattr(self, "token_ledger", None), "spend", None)
+        if not isinstance(spend_meter, SpendMeter):
+            spend_meter = None
+        spent_out = bool(spend_meter is not None and spend_meter.exhausted() is True)
+        if spent_out:
+            self.logger.warning(
+                "JudgeAgent: the job's spend ceiling is reached; answering without tools."
+            )
+        if not getattr(self, "tools", None) or spent_out:
+            if not spent_out:
+                self.logger.warning("No tools initialized. Falling back to standard LLM invoke.")
+            else:
+                from maljan.agents.base_agent import SPEND_CEILING_QUESTION
+
+                # Said, as the analysts' tool-free turn says it: the prompt
+                # described tools, and this call carries none.
+                messages_pre = with_question(messages_pre, SPEND_CEILING_QUESTION)
             # Wrap the no-tools ainvoke in the
             # same hard timeout used by the tools path so a stalled / queued
             # llama-server cannot freeze the judge node.
             no_tools_timeout = loop_limits("judge")[0]
             # Sticky for this call only, with a deadline shorter than its clock.
-            restart_models(self.llm, loop_seconds=float(no_tools_timeout), share=self._turn_share())
+            restart_models(self.llm, loop_seconds=no_tools_timeout, share=self._turn_share())
+            try:
+                self._spend_admits("mediation", messages_pre)
+            except SpendCeilingStop as stop:
+                self.logger.warning("JudgeAgent: %s.", stop)
+                return ""
             response = await asyncio.wait_for(
                 retry_on_connection_error(
                     lambda: self.llm.ainvoke(messages_pre),
                     what="Judge no-tools path",
                     log=self.logger,
                 ),
-                timeout=float(no_tools_timeout),
+                timeout=None if no_tools_timeout is None else float(no_tools_timeout),
             )
             self._record_usage(response, call="no-tools answer")
             record_judge_response(
@@ -1403,17 +1535,19 @@ class JudgeAgent(BudgetMeter):
         messages = messages_pre
 
         settings = get_settings()
-        timeout = settings.react_agent_timeout
+        # The judge's own budget, read the way every other agent's is: its
+        # definition, then the deprecated override maps, then the
+        # deployment's values — ``None`` in either dimension is no limit.
+        timeout, max_steps = loop_limits("judge")
         # Sticky for this loop only, with a turn deadline shorter than its clock;
         # the judge's next loop starts at its first model.
-        restart_models(self.llm, loop_seconds=float(timeout), share=self._turn_share())
-        max_steps = int(settings.react_agent_max_steps)
+        restart_models(self.llm, loop_seconds=timeout, share=self._turn_share())
         # The judge is an agent by every other measure here — its ledger
         # entries carry its name, it binds servers by role, the console draws
         # it as a step — so its loop is metered like one. Without this the one
         # loop with a hard wall-clock timeout was the only one that never said
         # a cap had ended it.
-        budget = LoopBudget(max_steps, float(timeout))
+        budget = LoopBudget(max_steps, timeout)
         cap: str | None = None
         turns: list[Any] = []
 
@@ -1427,7 +1561,13 @@ class JudgeAgent(BudgetMeter):
         # after the analysts had finished was none, so each reputation answer
         # got the widest cap and nothing could say the room was gone.
         room = self._context_budget()
-        recorded = record_tools(self.tools, recorder, context_budget=room)
+        # The analysts' repeat guard, on the judge's tools too: a judge that
+        # re-asks the same lookup is ended there, as an analyst is, rather than
+        # left to fill its window.
+        from maljan.agents.evidence_recorder import RepeatGuard
+
+        repeats = RepeatGuard()
+        recorded = record_tools(self.tools, recorder, repeats, context_budget=room)
         definitions = tool_definition_chars(recorded)
         # On the budget record and the ticks, as the analysts' loop puts it.
         self._tool_definition_chars = definitions
@@ -1475,13 +1615,16 @@ class JudgeAgent(BudgetMeter):
             budget.note_turns(conversation)
             budget.own_steps += 1
             _note_the_conversation(conversation)
+            # The spend ceiling's word on the turn about to be sent.
+            self._spend_admits("mediation turn", conversation)
             self._publish_questions(conversation, asked)
             return conversation
 
         agent_executor = create_react_agent(self.llm, recorded, prompt=_count_the_turns)
         self.logger.info(
-            "JudgeAgent invoking ReAct (timeout=%ds, tools=%d)...",
-            timeout,
+            "JudgeAgent invoking ReAct (timeout=%s, steps=%s, tools=%d)...",
+            limit_text(timeout, "s"),
+            limit_text(max_steps),
             len(self.tools),
         )
         # Streamed rather than awaited whole, for the analysts' reason: a loop
@@ -1489,21 +1632,55 @@ class JudgeAgent(BudgetMeter):
         # conversation as it stands, and a server that says the window is full
         # leaves behind what was gathered rather than nothing.
         latest: dict[str, Any] = {"messages": list(messages)}
-        ended: dict[str, bool] = {"no_room": False, "window_full": False}
+        ended: dict[str, bool] = {
+            "no_room": False,
+            "window_full": False,
+            "spend": False,
+            "repeats": False,
+            "call_deadline": False,
+        }
+        # The sentence of a model call deadline that ended the tool phase.
+        deadline_said: dict[str, str] = {"why": ""}
+        spend_key = object()
 
         async def _until_it_answers_or_runs_out() -> None:
             stream: Any = agent_executor.astream(
                 {"messages": messages},
-                {"recursion_limit": max_steps},
+                {"recursion_limit": recursion_limit(max_steps)},
                 stream_mode="values",
             )
             async with contextlib.aclosing(stream) as snapshots:
                 try:
                     async for snapshot in snapshots:
                         latest.update(snapshot)
+                        if repeats.ending_the_loop():
+                            ended["repeats"] = True
+                            break
                         if _out_of_room():
                             ended["no_room"] = True
                             break
+                        if spend_meter is not None:
+                            # Priced under the judge's own model label, as an
+                            # analyst's turns are: a lone model stamps nothing
+                            # on its answers, and a turn priced as "" costs 0.
+                            spend_meter.note_loop(
+                                spend_key,
+                                list(latest.get("messages") or [])[len(messages) :],
+                                self._model_label() or model_name_of(self.llm),
+                            )
+                            if spend_meter.exhausted():
+                                ended["spend"] = True
+                                break
+                except SpendCeilingStop:
+                    ended["spend"] = True
+                except ModelCallDeadline as exc:
+                    # One model call ran past its whole-call deadline: a failed
+                    # turn, not the loop's clock. With something gathered the
+                    # reasoning is written from it, as an analyst's is.
+                    deadline_said["why"] = f"model call deadline: {exc}"
+                    if not recorder.entries:
+                        raise
+                    ended["call_deadline"] = True
                 except Exception as exc:
                     # Only a provider's own full-window answer, and only once
                     # something was gathered; anything else fails the judge's
@@ -1521,12 +1698,17 @@ class JudgeAgent(BudgetMeter):
             if turns_recorded:
                 return
             turns_recorded = True
+            if spend_meter is not None:
+                spend_meter.forget_loop(spend_key)
             for _m in list(latest.get("messages") or [])[len(messages) :]:
                 if is_model_turn(_m):
                     self._record_usage(_m, call=TOOL_LOOP_TURN_CALL)
 
         try:
-            await asyncio.wait_for(_until_it_answers_or_runs_out(), timeout=timeout)
+            await asyncio.wait_for(
+                _until_it_answers_or_runs_out(),
+                timeout=None if timeout is None else float(timeout),
+            )
             _msgs = list(latest.get("messages") or [])
             turns = list(_msgs)
             msg_count = len(_msgs)
@@ -1536,10 +1718,30 @@ class JudgeAgent(BudgetMeter):
             # TokenLedger (the tools path previously recorded nothing — only
             # the no-tools fallback above did).
             _record_the_turns()
-            if ended["no_room"] or ended["window_full"]:
-                cap = "no_room"
+            if (
+                ended["no_room"]
+                or ended["window_full"]
+                or ended["spend"]
+                or ended["repeats"]
+                or ended["call_deadline"]
+            ):
+                cap = (
+                    "spend"
+                    if ended["spend"]
+                    else "repeats"
+                    if ended["repeats"]
+                    else "time"
+                    if ended["call_deadline"]
+                    else "no_room"
+                )
                 why = (
-                    "the model server reported its context window full"
+                    "the job's spend ceiling was reached"
+                    if ended["spend"]
+                    else deadline_said["why"]
+                    if ended["call_deadline"]
+                    else f"{repeats.served_repeats} repeated tool call(s)"
+                    if ended["repeats"]
+                    else "the model server reported its context window full"
                     if ended["window_full"]
                     else "the conversation had no room left for a tool answer"
                 )
@@ -1559,8 +1761,15 @@ class JudgeAgent(BudgetMeter):
                 cap = "steps"
                 return ""
             return str(_msgs[-1].content) if _msgs else ""
+        except ModelCallDeadline:
+            # A model call's own deadline with nothing gathered: that call
+            # failed, recorded as the call deadline it was, not the loop's clock.
+            self.logger.error("JudgeAgent ReAct ended: %s.", deadline_said["why"])
+            cap = "time"
+            _record_the_turns()
+            raise
         except TimeoutError:
-            self.logger.error("JudgeAgent ReAct timed out after %ds.", timeout)
+            self.logger.error("JudgeAgent ReAct timed out after %s.", limit_text(timeout, "s"))
             cap = "time"
             # The turns the loop took before its clock ran out were answered
             # and spent; they are on the ledger like the turns of a loop that
@@ -1576,12 +1785,15 @@ class JudgeAgent(BudgetMeter):
             # mediation that timed out still made the calls it made.
             self._evidence_entries.extend(recorder.entries)
             details = {
-                "time": f"the loop did not answer within {timeout}s",
+                "time": deadline_said["why"]
+                or f"the loop did not answer within {limit_text(timeout, 's')}",
                 "no_room": (
                     "the model server reported its context window full"
                     if ended["window_full"]
                     else "the conversation had no room left for a tool answer"
                 ),
+                "spend": str(spend_meter.reason()) if spend_meter is not None else "",
+                "repeats": f"{repeats.served_repeats} repeated tool call(s)",
             }
             self._record_budget(budget, turns, cap, detail=details.get(cap or "", ""))
             self._budget_tick(budget, turns, final=True, ledger_entries=len(recorder.entries))
@@ -1591,7 +1803,7 @@ class JudgeAgent(BudgetMeter):
                     room.forget_conversation(recorder.agent)
 
     async def _reasoning_from_what_was_gathered(
-        self, msgs: list[Any], timeout: float, settings: Any, window_tokens: int = 0
+        self, msgs: list[Any], timeout: float | None, settings: Any, window_tokens: int = 0
     ) -> str:
         """The judge's reasoning, asked for once from what its loop gathered.
 
@@ -1601,7 +1813,7 @@ class JudgeAgent(BudgetMeter):
         salvage that fails leaves the reasoning empty, which mediation reads
         as no agreement.
         """
-        if timeout < 1.0:
+        if timeout is not None and timeout < 1.0:
             self.logger.warning("JudgeAgent reasoning salvage skipped: no time left.")
             return ""
         sendable, _dropped = nudge_turns(msgs)
@@ -1849,7 +2061,7 @@ class JudgeAgent(BudgetMeter):
                         what="Mediator fast path",
                         log=self.logger,
                     ),
-                    timeout=float(get_settings().react_agent_timeout),
+                    timeout=_seconds_or_none(loop_limits("judge")[0]),
                 )
             except TimeoutError:
                 self.logger.error("Mediator fast-path timed out. Falling back to tool loop.")
@@ -1980,19 +2192,19 @@ class JudgeAgent(BudgetMeter):
         """
         self.logger.info("Formulating final malware verdict with MITRE ATT&CK mapping...")
 
-        reports_text = verdict_reports_text(
-            reports, isr_reports, evidence_summary, degradation_note
-        )
+        parts = verdict_report_parts(reports, isr_reports, evidence_summary, degradation_note)
 
-        # Long-term memory — inject top-K similar past cases as
-        # weighted priors. The block is bounded (~1.2 KB worst case for
-        # top_k=3) and degrades gracefully to an empty string when the store
-        # is empty or retrieval fails.
+        # Long-term memory — inject top-K similar past cases as weighted
+        # priors, each case's summary whole. Degrades gracefully to an empty
+        # string when the store is empty or retrieval fails.
         memory_block = self._build_memory_context(
             isr_reports, memory_store, current_sample_id=current_sample_id
         )
         if memory_block:
-            reports_text = f"{reports_text}\n\n{memory_block}"
+            parts["long-term memory"] = memory_block
+        # The negotiation history whole, as its own part: a fixed cut at 800
+        # characters kept the first round and none of the ones that decided.
+        history_text = str(history)
 
         # Built as messages rather than through ``ChatPromptTemplate``: the
         # system turn now contains a JSON skeleton, and a template would read
@@ -2007,17 +2219,33 @@ class JudgeAgent(BudgetMeter):
             if cap
             else ""
         )
+        lead = f"{_standing_blocks(run_state, facts_block)}{_identity_prefix(sample)}"
+        tail = f"Return a JSON STIX 2.1 Bundle.{within}"
+
+        def _human(fitted: Mapping[str, str], notice: str) -> str:
+            shown = dict(fitted)
+            history_shown = shown.pop(_HISTORY_PART, "")
+            note = f"{notice}\n\n" if notice else ""
+            return (
+                f"{lead}{note}"
+                f"Expert Reports:\n{join_prompt_parts(shown)}\n\n"
+                f"Negotiation History:\n{history_shown}\n\n"
+                f"{tail}"
+            )
+
+        # Everything whole when the judge's window holds it, with its output
+        # cap kept free; otherwise the largest parts shortened first, the
+        # prompt saying so and the run recording it.
+        whole = {**parts, _HISTORY_PART: history_text}
+        fixed = len(JUDGE_VERDICT_SYSTEM) + len(_human(dict.fromkeys(whole, ""), ""))
+        room = self._question_room(fixed + _NOTICE_ROOM, int(cap or 0))
+        fitted, notice = fit_prompt_parts(whole, room)
+        self.verdict_prompt_notice = notice
+        if notice:
+            self.logger.warning("JudgeAgent verdict prompt: %s", notice)
         messages: list[Any] = [
             SystemMessage(content=JUDGE_VERDICT_SYSTEM),
-            HumanMessage(
-                content=(
-                    f"{_standing_blocks(run_state, facts_block)}"
-                    f"{_identity_prefix(sample)}"
-                    f"Expert Reports:\n{reports_text}\n\n"
-                    f"Negotiation History:\n{str(history)[:800]}\n\n"
-                    f"Return a JSON STIX 2.1 Bundle.{within}"
-                )
-            ),
+            HumanMessage(content=_human(fitted, notice)),
         ]
 
         # Resolved the same way an analyst's loop is: the judge definition's
@@ -2028,17 +2256,19 @@ class JudgeAgent(BudgetMeter):
         # whole ``judge_max_tokens``, which a slow model cannot generate inside
         # a timeout chosen for a fast one (``llm.generation_rate``).
         timeout = self._verdict_timeout(
-            float(loop_limits("judge")[0]),
+            _seconds_or_none(loop_limits("judge")[0]),
             sum(len(str(getattr(message, "content", ""))) for message in messages),
         )
-        self.logger.info("JudgeAgent invoking verdict LLM (timeout=%ds)...", timeout)
+        self.logger.info(
+            "JudgeAgent invoking verdict LLM (timeout=%s)...", limit_text(timeout, "s")
+        )
         # A model list's turn deadline is a share of the clock it was last
         # started on — mediation's, by now. The verdict call is its own clock,
         # sized from the model's pace, so the list starts again on it; without
         # this the primary was declared stalled long before the sized wait.
         from maljan.llm.fallback import restart_models
 
-        restart_models(self.llm, loop_seconds=float(timeout), share=self._turn_share())
+        restart_models(self.llm, loop_seconds=timeout, share=self._turn_share())
 
         # Reset per call, not once: a first call that timed out and left the
         # flag set made every later parse return the fallback, and a fallback
@@ -2047,8 +2277,14 @@ class JudgeAgent(BudgetMeter):
         timed_out = False
 
         async def _ask(turns: list[Any]) -> Any:
+            # The verdict is always made; past the spend ceiling its output cap
+            # is what the remaining spend pays for.
+            from maljan.llm.context_window import output_bound_kwargs
+
+            bound = self._spend_admits("verdict", turns)
+            held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
             answer = await retry_on_connection_error(
-                lambda: self.llm.ainvoke(turns),
+                lambda: self.llm.ainvoke(turns, **held),
                 what="Judge verdict",
                 log=self.logger,
             )
@@ -2076,7 +2312,9 @@ class JudgeAgent(BudgetMeter):
                 # the mediator, and for why one loop owns every LLM call.
                 return await run_on_agent_loop(_ask(turns), timeout, label="judge:verdict")
             except TimeoutError:
-                self.logger.error("JudgeAgent verdict timed out after %ds.", timeout)
+                self.logger.error(
+                    "JudgeAgent verdict timed out after %s.", limit_text(timeout, "s")
+                )
                 timed_out = True
                 return "[TIMEOUT]"
 
@@ -2399,17 +2637,11 @@ class JudgeAgent(BudgetMeter):
             )
 
         carried = sorted(bundle_technique_ids(dumped))
-        head = (
-            f"{_standing_blocks(run_state, facts_block)}"
-            f"{_identity_prefix(sample)}"
-            + technique_question_head(
-                verdict_reports_text(
-                    reports or {}, isr_reports, evidence_summary, degradation_note
-                ),
-                str(decide_from_bundle(bundle)),
-                carried,
-            )
+        decided = str(decide_from_bundle(bundle))
+        report_parts = verdict_report_parts(
+            reports or {}, isr_reports, evidence_summary, degradation_note
         )
+        lead = f"{_standing_blocks(run_state, facts_block)}{_identity_prefix(sample)}"
         known = {str(k).lower(): _as_evidence(v) for k, v in (evidence_texts or {}).items()}
         cited = list(
             dict.fromkeys(i.lower() for q in questions for _a, _t, ids in q.mentions for i in ids)
@@ -2419,10 +2651,25 @@ class JudgeAgent(BudgetMeter):
         bare = technique_question_text(
             questions, {i: e._replace(text="") for i, e in entries.items()}
         )
+        empty_head = lead + technique_question_head("", decided, carried)
         room = self._question_room(
-            len(TECHNIQUE_QUESTION_SYSTEM) + len(head) + len(bare), int(cap or 0)
+            len(TECHNIQUE_QUESTION_SYSTEM) + len(empty_head) + len(bare) + _NOTICE_ROOM,
+            int(cap or 0),
         )
-        texts, notice = _fit_evidence({i: e.text for i, e in entries.items()}, room)
+        # The reports the verdict was drawn from and the evidence each question
+        # cites share the room: whole when they fit, the largest first when not.
+        report_room: int | None = None
+        if room is not None:
+            evidence_chars = sum(len(e.text) for e in entries.values())
+            report_room = max(0, room - min(evidence_chars, room // 2))
+        fitted_reports, reports_notice = fit_prompt_parts(report_parts, report_room)
+        head = lead + technique_question_head(join_prompt_parts(fitted_reports), decided, carried)
+        evidence_room = None if room is None else max(0, room - (len(head) - len(empty_head)))
+        texts, evidence_notice = _fit_evidence(
+            {i: e.text for i, e in entries.items()}, evidence_room
+        )
+        # One notice for both, said in the question and recorded on the answer.
+        notice = " ".join(n for n in (reports_notice, evidence_notice) if n)
         if notice:
             self.logger.warning("JudgeAgent technique question: %s", notice)
         fitted = {i: e._replace(text=texts[i]) for i, e in entries.items()}
@@ -2431,19 +2678,25 @@ class JudgeAgent(BudgetMeter):
             HumanMessage(content=head + technique_question_text(questions, fitted, notice=notice)),
         ]
         timeout = self._verdict_timeout(
-            float(loop_limits("judge")[0]),
+            _seconds_or_none(loop_limits("judge")[0]),
             sum(len(str(getattr(message, "content", ""))) for message in messages),
             call="judge:techniques",
         )
         self.logger.info(
-            "JudgeAgent asking about %d technique(s) its bundle does not carry (timeout=%ds): %s",
+            "JudgeAgent asking about %d technique(s) its bundle does not carry (timeout=%s): %s",
             len(asked),
-            timeout,
+            limit_text(timeout, "s"),
             ", ".join(asked),
         )
         from maljan.llm.fallback import restart_models
 
-        restart_models(self.llm, loop_seconds=float(timeout), share=self._turn_share())
+        restart_models(self.llm, loop_seconds=timeout, share=self._turn_share())
+        try:
+            self._spend_admits("technique question", messages)
+        except SpendCeilingStop as stop:
+            return TechniqueReview(
+                asked=asked, unanswered=f"not asked: {stop}", not_asked=not_asked
+            )
         structured = self._supports_structured_output()
 
         async def _ask() -> tuple[Any, Any]:
@@ -2500,8 +2753,10 @@ class JudgeAgent(BudgetMeter):
         try:
             answer, parsed = await run_on_agent_loop(_ask(), timeout, label="judge:techniques")
         except TimeoutError:
-            self.logger.error("JudgeAgent technique question timed out after %ds.", timeout)
-            return _unanswered(f"the question timed out after {timeout:.0f}s")
+            self.logger.error(
+                "JudgeAgent technique question timed out after %s.", limit_text(timeout, "s")
+            )
+            return _unanswered(f"the question timed out after {limit_text(timeout, 's')}")
         except Exception as exc:  # noqa: BLE001 — an unanswered question withholds nothing
             self.logger.error("JudgeAgent technique question failed (%s).", type(exc).__name__)
             return _unanswered(f"the question failed ({type(exc).__name__})")
@@ -2962,13 +3217,15 @@ class JudgeAgent(BudgetMeter):
         return float(value) if value is not None else CONSENSUS_THRESHOLD
 
     def _verdict_timeout(
-        self, configured: float, prompt_chars: int = 0, call: str = "judge:verdict"
-    ) -> float:
+        self, configured: float | None, prompt_chars: int = 0, call: str = "judge:verdict"
+    ) -> float | None:
         """The verdict call's timeout: configured, or what its budget needs at the model's pace.
 
         ``GenerationRates.call_timeout`` decides and records it; with no rates
         attached, no rate measured yet or no ``judge_max_tokens``, the
-        configured value stands.
+        configured value stands. ``None`` configured is the judge with no time
+        limit: the call waits what its answer takes at the model's measured
+        pace, or — with nothing measured — as long as its request timeout.
         """
         rates = getattr(self, "generation_rates", None)
         if rates is None:
@@ -2976,16 +3233,15 @@ class JudgeAgent(BudgetMeter):
         output = judge_output_cap()
         from maljan.llm.context_window import CHARS_PER_TOKEN
 
-        return float(
-            rates.call_timeout(
-                call,
-                model_name_of(self.llm),
-                configured,
-                output.tokens,
-                budget=output.sentence,
-                prompt_tokens=-(-int(prompt_chars) // CHARS_PER_TOKEN),
-            )
+        seconds = rates.call_timeout(
+            call,
+            model_name_of(self.llm),
+            configured,
+            output.tokens,
+            budget=output.sentence,
+            prompt_tokens=-(-int(prompt_chars) // CHARS_PER_TOKEN),
         )
+        return None if seconds is None else float(seconds)
 
     def _supports_structured_output(self) -> bool:
         """Delegates to the registry — see ``structured_output_supported``.
@@ -3138,11 +3394,9 @@ class JudgeAgent(BudgetMeter):
 
         for idx, case in enumerate(cases, 1):
             ttps = ", ".join(case.technique_ids) if case.technique_ids else "none"
-            summary = (
-                (case.summary_text[:200] + "...")
-                if len(case.summary_text) > 200
-                else case.summary_text
-            )
+            # Whole: the verdict prompt is fitted to the judge's window as a
+            # whole, and a case's summary is shortened there only when it must be.
+            summary = case.summary_text
             lines.append(
                 f"[{idx}/{total}] sample_id: {case.sample_id} (category: {case.malware_category})"
             )

@@ -3067,7 +3067,9 @@ def _processes_to_observables(roots: list[ProcessNode]) -> list[File | Process]:
         out.append(process)
         return process.id
 
-    for root in roots[:20]:  # cap to keep ObservedData reasonable
+    # Every root: the STIX bundle is the machine-readable form a reader of the
+    # page is pointed to for what the page leaves out.
+    for root in roots:
         _walk(root)
     return out
 

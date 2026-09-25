@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 from maljan.core.logger import logger
 from maljan.pipeline.sandbox_status import NOT_RUN, sandbox_status
+from maljan.utils.marked_cut import marked_cut
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -391,6 +392,8 @@ def sandbox_registry_ops(
 
 # How many of an API's calling processes one row names, in name order.
 _CALLERS_PER_API = 8
+# How much of one call's arguments a row quotes; a longer one ends in the cut mark.
+_FIRST_ARGS_CHARS = 400
 
 
 def _calls_by_process(report: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
@@ -494,8 +497,10 @@ def sandbox_api_calls(
                 "api": api,
                 "dll": str(module) if module else None,
                 "processes": sorted(callers.get(api, set()))[:_CALLERS_PER_API],
+                # How many processes called it, beside the few named.
+                "process_count": len(callers.get(api, set())),
                 "count": count,
-                "first_args": str(arguments)[:400] if arguments else "",
+                "first_args": marked_cut(str(arguments), _FIRST_ARGS_CHARS) if arguments else "",
                 "first_seen": str(seen) if seen not in (None, "") else None,
             }
         )

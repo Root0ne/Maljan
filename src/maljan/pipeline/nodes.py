@@ -41,6 +41,7 @@ from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, PROMPT_ROLES
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError
 from maljan.core.logger import logger
+from maljan.core.spend import SpendCeilingStop
 from maljan.memory.long_term_memory import build_stored_case
 from maljan.pipeline.conditions import (
     ConditionError,
@@ -1552,9 +1553,14 @@ def stage_runs(stage: Any, state: AnalysisState) -> tuple[bool, str]:
     return False, f"condition not met: {when}"
 
 
-def _stage_seconds_left(agent: Any, started: float) -> float:
-    """What is left of one analyst's stage time: its loop budget less what the node spent."""
+def _stage_seconds_left(agent: Any, started: float) -> float | None:
+    """What is left of one analyst's stage time: its loop budget less what the node spent.
+
+    ``None`` for an analyst with no time limit.
+    """
     timeout, _steps = agent._loop_limits()
+    if timeout is None:
+        return None
     return float(timeout) - (time.monotonic() - started)
 
 
@@ -1570,7 +1576,7 @@ def _second_loop_decision(agent: Any, started: float) -> str:
     left = _stage_seconds_left(agent, started)
     needs = agent.seconds_a_loop_needs()
     timeout, _steps = agent._loop_limits()
-    if left >= needs:
+    if left is None or timeout is None or left >= needs:
         return ""
     return (
         f"not run a second time: {max(0.0, left):.0f}s of its {float(timeout):.0f}s stage "
@@ -2408,7 +2414,31 @@ def make_stage_agent_node(
                 node_out["remote_sample_paths"] = staged
             node_out.update(_evidence_update())
             return _closing(node_out)
-        except (AnalystError, LLMError) as e:
+        except (AnalystError, LLMError, SpendCeilingStop) as e:
+            stopped = _spend_stop_of(e)
+            if stopped is not None:
+                # A call the operator's spend ceiling did not admit: not a failed
+                # analyst. The stage says so, and the run's degradation reason is
+                # the ceiling's own.
+                logger.warning("%s: not answered: %s.", agent_name, stopped)
+                _promoted = promoted_asks(agent)
+                return _closing(
+                    {
+                        "reports": {
+                            agent_name: "",
+                            **{key: answer.to_text_summary() for key, answer in _promoted.items()},
+                        },
+                        "isr_reports": {agent_name: _empty_isr(agent_name), **_promoted},
+                        **_evidence_update(),
+                        **stage_record(
+                            stage,
+                            ran=True,
+                            agents=(agent_name,),
+                            agent_reasons={agent_name: f"not answered: {stopped}"},
+                            duration_ms=_elapsed_ms(),
+                        ),
+                    }
+                )
             # Structured error event so Loki/Promtail
             # can aggregate ``event_type=analyst_error`` instead of regex-
             # scanning free-text. ``sample_hash`` is short-fingerprinted so
@@ -2764,6 +2794,23 @@ def make_negotiation_node(
                 }
             if announces and first_round:
                 announce_started(container, stage)
+        # Once the job's spend ceiling is reached no further round is held:
+        # the router goes on to the verdict with the analysts' answers as they
+        # stand, and the degradation reason says the ceiling ended the rounds.
+        _meter = _spend_meter(container)
+        if _meter is not None and _meter.exhausted():
+            logger.warning(
+                "negotiation: the job's spend ceiling is reached; no further round is held."
+            )
+            return {
+                "is_consensus": None,
+                "consensus_applicable": False,
+                **(
+                    stage_record(stage, ran=False, reason="the spend ceiling is reached")
+                    if stage is not None
+                    else {}
+                ),
+            }
         iteration = state.get("iteration_count", 0)
         agent_names = _debate_participants(container, stage, state)
 
@@ -2853,13 +2900,17 @@ def make_negotiation_node(
             # ``run_on_agent_loop`` for the full account; before this, no run in
             # the database had ever completed a negotiation round.
             #
-            # ``mediate`` budgets itself internally (``react_agent_timeout`` for
-            # the reasoning call, then the bounded structured-output retries),
-            # so the outer cap covers both phases plus the house +30s of decode
-            # headroom rather than truncating a mediation that is still working.
-            from maljan.core.config import get_settings
+            # ``mediate`` budgets itself internally (the judge's own loop
+            # budget for the reasoning call, then the bounded structured-output
+            # retries), so the outer cap covers both phases plus the house +30s
+            # of decode headroom rather than truncating a mediation that is
+            # still working. A judge with no time limit has no outer cap: each
+            # of its calls waits as long as its answer takes at the model's
+            # measured pace.
+            from maljan.agents.base_agent import loop_limits
 
-            mediation_timeout = float(get_settings().react_agent_timeout) * 2 + 30
+            judge_timeout, _judge_steps = loop_limits("judge")
+            mediation_timeout = None if judge_timeout is None else float(judge_timeout) * 2 + 30
             argument, is_consensus = await run_on_agent_loop(
                 judge.mediate(
                     reports=active_reports,
@@ -3263,6 +3314,49 @@ def _generation_snapshot(container: Any) -> dict[str, Any] | None:
     return snapshot if isinstance(snapshot, dict) else None
 
 
+def _spend_stop_of(exc: BaseException) -> SpendCeilingStop | None:
+    """The spend-ceiling refusal behind ``exc``, down its cause chain, or ``None``."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, SpendCeilingStop):
+            return current
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _spend_meter(container: Any) -> Any:
+    """The job's spend meter, or ``None`` (a stand-in container has none)."""
+    from maljan.core.spend import SpendMeter
+
+    try:
+        meter = getattr(container.get_token_ledger(), "spend", None)
+    except Exception:  # noqa: BLE001 — telemetry never breaks a verdict
+        return None
+    return meter if isinstance(meter, SpendMeter) else None
+
+
+def _spend_snapshot(container: Any) -> dict[str, Any] | None:
+    """The spend ceiling and what the run spent against it, or ``None`` with no ceiling."""
+    meter = _spend_meter(container)
+    try:
+        snapshot = meter.snapshot() if meter is not None else None
+    except Exception as exc:  # noqa: BLE001 — telemetry never breaks a verdict
+        logger.debug("the spend was not recorded on the run summary: %s", exc)
+        return None
+    return snapshot if isinstance(snapshot, dict) else None
+
+
+def _spend_ceiling_reason(container: Any) -> str:
+    """The degradation reason a reached spend ceiling gives, or ``""``."""
+    meter = _spend_meter(container)
+    try:
+        return str(meter.reason()) if meter is not None else ""
+    except Exception:  # noqa: BLE001 — telemetry never breaks a verdict
+        return ""
+
+
 def make_judge_node(
     container: ServiceContainer,
     *,
@@ -3577,6 +3671,19 @@ def make_judge_node(
                 for reason in container.server_degradation_reasons()
                 if reason_applies_to_format(reason, str(state.get("file_type") or ""))
             )
+            # The operator's spend ceiling, when it ended tool phases: the
+            # verdict and the report still run, from what was gathered.
+            _spend_reason = _spend_ceiling_reason(container)
+            if _spend_reason:
+                _degradation_reasons.append(_spend_reason)
+            # An analyst whose input was shortened to fit its prompt was told
+            # so; the reader is told here.
+            with suppress(Exception):
+                _degradation_reasons.extend(
+                    str(reason)
+                    for reason in container.get_truncation_ledger().input_shortened
+                    if str(reason) not in _degradation_reasons
+                )
             if _failed_analysts:
                 _degradation_reasons.append(f"analyst failures: {', '.join(_failed_analysts)}")
             # Two sentences, each saying what happened: an analyst skipped for
@@ -3713,6 +3820,12 @@ def make_judge_node(
                 _degraded_mode = True
             if VERDICT_TIMEOUT_CODE in _verdict_codes:
                 _degradation_reasons.append(VERDICT_TIMEOUT_REASON)
+                _degraded_mode = True
+            # A verdict prompt shortened to fit the judge's window says so in
+            # the prompt; the reader is told here.
+            _prompt_notice = getattr(judge, "verdict_prompt_notice", "")
+            if isinstance(_prompt_notice, str) and _prompt_notice:
+                _degradation_reasons.append(f"The verdict prompt was shortened: {_prompt_notice}")
                 _degraded_mode = True
 
             # The techniques the verdict's bundle does not carry — an analyst's
@@ -3873,6 +3986,7 @@ def make_judge_node(
                     .set_token_usage(container.get_token_ledger().snapshot())
                     .set_server_rests(container.server_rests())
                     .set_generation(_generation_snapshot(container))
+                    .set_spend(_spend_snapshot(container))
                     .set_truncation(_truncation_snapshot(container))
                     .set_triage(_triage_facts)
                     .set_sandbox(state.get("sandbox_report"))
@@ -4788,6 +4902,11 @@ def make_report_node(
 
             _ledger_of = getattr(container, "get_token_ledger", None)
             _spent = spend_blocks(_ledger_of().snapshot()) if callable(_ledger_of) else {}
+            # The spend against the ceiling, closed with the tokens: the report
+            # stage's calls count toward it too.
+            _ceiling = _spend_snapshot(container)
+            if _ceiling:
+                _spent = {**_spent, "spend": _ceiling}
             if _spent:
                 _state_summary.update(_spent)
                 _with_spend = dict(report.run_summary or {})

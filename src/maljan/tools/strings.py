@@ -16,7 +16,6 @@ same scan, plain dicts.
 from __future__ import annotations
 
 import re
-from collections import Counter
 from collections.abc import Callable, Iterator
 from functools import lru_cache
 from pathlib import Path
@@ -30,7 +29,6 @@ _MIN_STRING_LENGTH = 6
 # guard, not an output budget — see ``_iter_strings``. Real PEs routinely carry
 # tens of thousands of runs and the interesting ones are rarely at the front.
 _MAX_STRINGS_SCANNED = 200_000
-_MAX_IOC_STRINGS = 120
 
 # What every row this module produces was read out of. One value today, and a
 # field rather than an assumption: downstream a name seen on the wire and a
@@ -117,17 +115,10 @@ _ONION_RE = re.compile(r"\b[a-z2-7]{16,56}\.onion\b")
 # considered, and the C2 host — the thing an analyst actually wants — was
 # dropped in favour of `C:\Windows\System32\...`. Quotas make the failure mode
 # per-kind and survivable instead of global and silent.
-_IOC_QUOTAS: dict[str, int] = {
-    "url": 25,
-    "domain": 25,
-    "ip": 20,
-    "secret": 15,
-    "crypto_wallet": 10,
-    "registry": 20,
-    "mutex": 10,
-    "email": 10,
-    "path": 20,
-}
+# No count cap of any kind: every indicator the scan finds is returned, and a
+# tool answer larger than its caller's room is shortened there as a document,
+# with its notice and the paging the answer carries. A per-kind quota and a
+# 120-row cap used to drop the rest here without a word.
 
 
 def _iter_strings(blob: bytes) -> Iterator[str]:
@@ -172,7 +163,6 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
     """
     iocs: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
-    per_kind: Counter[str] = Counter()
 
     def _add(kind: str, decoded: str, notes: str | None = None) -> None:
         decoded = decoded.strip("\x00").strip()
@@ -181,19 +171,10 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
         key = (kind, decoded.lower())
         if key in seen:
             return
-        if per_kind[kind] >= _IOC_QUOTAS.get(kind, 10):
-            return
         seen.add(key)
-        per_kind[kind] += 1
         iocs.append({"kind": kind, "value": decoded, "notes": notes, "source": _IOC_SOURCE})
 
-    def _all_quotas_full() -> bool:
-        return all(per_kind[kind] >= quota for kind, quota in _IOC_QUOTAS.items())
-
     for text in _iter_strings(blob):
-        # Nothing left to learn — stop walking the binary.
-        if _all_quotas_full():
-            break
         for match in _URL_RE.findall(text.encode("ascii", errors="ignore")):
             _add("url", match.decode("ascii", errors="ignore"))
         encoded = text.encode("ascii", errors="ignore")
@@ -224,7 +205,7 @@ def iter_string_iocs(blob: bytes) -> list[dict[str, Any]]:
         for hit in _ONION_RE.findall(text):
             _add("domain", hit, notes="tor_hidden_service")
 
-    return iocs[:_MAX_IOC_STRINGS]
+    return iocs
 
 
 def _domains_in(text: str) -> list[str]:

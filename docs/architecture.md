@@ -1382,10 +1382,12 @@ ask itself is a ledger entry under the caller's key with `server="team"`,
 output and the callee's wall clock as its duration — so a report can cite the
 ask (`ev_0012`) or what the specialist looked at (`ev_0009`). The callee's turns
 carry a budget of their own (`core.agents.delegation_steps`,
-`core.agents.delegation_timeout_seconds`): the caller's step budget is not
-spent by its specialists' work, only its wall clock is, and an ask is cut to
+`core.agents.delegation_timeout_seconds`, both no limit unless an operator sets
+them): the caller's step budget is not spent by its specialists' work, only its
+wall clock is, and where the caller's loop has a time limit an ask is cut to
 the time the caller has left and refused when that is below what a first model
-turn needs. A callee that reaches its step cap writes up what it gathered, the
+turn needs. A caller with no time limit waits for a busy callee, unless that
+callee is itself waiting, directly or through others, on the caller. A callee that reaches its step cap writes up what it gathered, the
 way an analyst at its own cap does — and so, now, does a caller. A lead's
 report is the only channel its stage has, so a lead whose own loop ended
 without one used to take every answered ask down with it: one audited chunk
@@ -1866,13 +1868,24 @@ against its cap and seconds against its limit every five steps and at the end
 of each loop, with its prompt characters and `tool_definition_chars`, what the
 loop's tool definitions weigh with every request (the context budget counts
 them beside the conversation); `stage_ended_at_cap` says which cap ended the work when one did
-(`steps`, `time`, `repeats`, or the triage pack's `budget_seconds`); and
+(`steps`, `time`, `repeats`, `no_room`, `spend` — the operator's spend
+ceiling — or the triage pack's `budget_seconds`); and
 `run_summary.budget` sums the spend per agent, with the caps it hit and the
 largest `tool_definition_chars` of its loops, so a
 reader learns that an analyst ran out of steps from the summary and the
 pipeline panel rather than from a log line.
-The time cap ends a tool phase the way the step cap and a full window do: with
-the salvage writing the answer from what was gathered. It has to end early to
+No loop has a step or time cap unless an operator sets one: the defaults are
+`None` end to end (`loop_limits`, `LoopBudget`, langgraph's recursion limit,
+the hard cap, an ask's ceiling), and a loop with none ends by its model
+answering, by the repeat guard, by its conversation's room or by the job's
+spend ceiling (`core.spend.SpendMeter`, priced from each call's reported
+usage), with the arq job timeout as the last resort. Its run-state block says
+"no step limit" and "no time limit" in words. Where an operator did set a time
+limit, the time cap ends a tool phase the way the step cap and a full window
+do: with the salvage writing the answer from what was gathered. The spend
+ceiling ends it the same way, for every running loop at once; a loop that
+starts after it answers once without tools, and the verdict and the report
+still run. It has to end early to
 do that, because the thirty seconds of grace past the budget are a fraction of
 one turn of a slow model. So the loop times its own turns — from one model
 answer to the next, the tools it asked for included — per answering model, and

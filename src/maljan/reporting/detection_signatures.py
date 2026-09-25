@@ -38,6 +38,7 @@ from maljan.reporting.models import (
     RegistryMod,
     SandboxSignature,
 )
+from maljan.utils.marked_cut import marked_cut
 
 # yara-python is an optional dependency (C extension). When absent we still
 # build the rule body — only the compile-time validation is skipped.
@@ -50,8 +51,16 @@ except ImportError:
     _YARA_AVAILABLE = False
 
 
+# How many strings one drafted YARA rule matches on, and how many indicators of
+# each kind one Suricata draft writes rules for: the shape of a rule a reviewer
+# can read and deploy, not a cut of the evidence. A draft that leaves any
+# published indicator out says so in a comment of its own, and the IOC table
+# (and the JSON report) carries every one.
 _MAX_YARA_STRINGS = 25
 _MAX_SURICATA_RULES = 12
+LEFT_OUT_COMMENT = (
+    "{rest} more published {what} are not in this draft; the report's IOC table carries every one."
+)
 _SAFE_RULE_NAME_RE = re.compile(r"[^A-Za-z0-9_]+")
 
 
@@ -271,14 +280,11 @@ def _build_yara(report: MalwareReport) -> DetectionRule | None:
     strings: list[tuple[str, str]] = []  # (slot, value)
     sources: list[str] = [f"sha256:{sha256}"]
 
-    for row in _published_rows(report):
-        if len(strings) >= _MAX_YARA_STRINGS:
-            break
-        if not _yara_string_eligible(row):
-            continue
+    eligible = [row for row in _published_rows(report) if _yara_string_eligible(row)]
+    for row in eligible[:_MAX_YARA_STRINGS]:
         slot = f"$s{len(strings)}"
         strings.append((slot, row.value))
-        sources.append(f"string:{row.kind}:{row.value[:80]}")
+        sources.append(f"string:{row.kind}:{row.value}")
 
     # Gated above when the seed is a placeholder, so this normally uses the real
     # family; _rule_name_component keeps the name honest anyway should the gate
@@ -295,12 +301,16 @@ def _build_yara(report: MalwareReport) -> DetectionRule | None:
         generated_at_iso=report.generated_at.isoformat(),
     )
 
+    if len(eligible) > _MAX_YARA_STRINGS:
+        body += "\n// " + LEFT_OUT_COMMENT.format(
+            rest=len(eligible) - _MAX_YARA_STRINGS, what="strings"
+        )
     compile_error = _validate_yara(body)
     return DetectionRule(
         kind="yara",
         name=rule_name,
         body=body,
-        source_evidence=sources[:20],
+        source_evidence=sources,
         compile_error=compile_error,
     )
 
@@ -473,7 +483,7 @@ def _build_sigma(report: MalwareReport) -> DetectionRule | None:
         kind="sigma",
         name=f"Maljan_AutoGen_Sigma_{safe_name}",
         body=body,
-        source_evidence=sources[:20],
+        source_evidence=sources,
         compile_error=compile_error,
     )
 
@@ -628,7 +638,7 @@ def _collect_signature_names(report: MalwareReport) -> list[str]:
         if not text or text.lower() in seen:
             continue
         seen.add(text.lower())
-        out.append(text[:80])
+        out.append(marked_cut(text, 80))
     return out
 
 
@@ -721,19 +731,28 @@ def _build_suricata(report: MalwareReport) -> DetectionRule | None:
         rule = _suricata_http_rule(url, sid, sha256, family)
         if rule is not None:
             lines.append(rule)
-            sources.append(f"url:{url.url[:80]}")
+            sources.append(f"url:{url.url}")
             sid += 1
+
+    for what, rows in (("domains", domains), ("addresses", ips), ("URLs", urls)):
+        if len(rows) > _MAX_SURICATA_RULES:
+            lines.append(
+                "# " + LEFT_OUT_COMMENT.format(rest=len(rows) - _MAX_SURICATA_RULES, what=what)
+            )
 
     body = "\n".join(lines)
     if len(body.encode("utf-8")) > _SURICATA_MAX_BODY_BYTES:
-        body = body[:_SURICATA_MAX_BODY_BYTES] + "\n# (truncated)"
+        body = (
+            body[:_SURICATA_MAX_BODY_BYTES]
+            + "\n# (cut at the draft's size; the report's IOC table carries every indicator)"
+        )
 
     compile_error = _validate_suricata(body)
     return DetectionRule(
         kind="suricata",
         name=rule_name,
         body=body,
-        source_evidence=sources[:20],
+        source_evidence=sources,
         compile_error=compile_error,
     )
 
@@ -843,7 +862,7 @@ def _validate_suricata(body: str) -> str | None:
             and _SURICATA_MSG_RE.search(line)
             and _SURICATA_END_RE.search(line)
         ):
-            bad.append(line[:80])
+            bad.append(marked_cut(line, 80))
     if bad:
         return f"sanity check failed for {len(bad)} line(s); first: {bad[0]}"
     return None

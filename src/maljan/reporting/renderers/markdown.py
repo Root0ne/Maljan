@@ -411,9 +411,7 @@ class MarkdownRenderer:
             lines.append(_row("Signature chain", "valid" if signing.signature_valid else "invalid"))
         static = report.static
         if static is not None and (static.packer_matches or static.packer_hint):
-            names = ", ".join(
-                str(m.get("name") or "not recorded") for m in static.packer_matches[:4]
-            )
+            names = ", ".join(str(m.get("name") or "not recorded") for m in static.packer_matches)
             lines.append(_row("Packer signatures", names or static.packer_hint))
         lines.append(_row("Reputation", _reputation_line(report)))
         lines.append(_row("Report generated", report.generated_at.isoformat()))
@@ -575,13 +573,13 @@ class MarkdownRenderer:
             # A confidence column only where a match states one: a column of
             # "not recorded" under "Measured" reads as a measurement too.
             rated = any(
-                isinstance(pm.get("confidence"), int | float) for pm in static.packer_matches[:6]
+                isinstance(pm.get("confidence"), int | float) for pm in static.packer_matches
             )
             head = ["Name", "Kind", *(["Confidence"] if rated else []), "Method", "Evidence"]
             measured.append(_row(*head))
             measured.append(_divider(len(head)))
-            for pm in static.packer_matches[:6]:
-                evidence = ", ".join(f"`{e}`" for e in (pm.get("evidence") or [])[:4])
+            for pm in static.packer_matches:
+                evidence = ", ".join(f"`{e}`" for e in (pm.get("evidence") or []))
                 stated = pm.get("confidence")
                 cells = [pm.get("name") or "not recorded", pm.get("kind") or "-"]
                 if rated:
@@ -613,6 +611,7 @@ class MarkdownRenderer:
                 measured.append(
                     _row(sig.name, sig.severity, _truncate(sig.description, _CELL_LIMIT))
                 )
+            measured.extend(_left_out(len(evasive), 10, "evasion signatures"))
         blocks.append(
             _subsection(
                 "5.1",
@@ -641,7 +640,7 @@ class MarkdownRenderer:
         ]
         if resolving:
             names = ", ".join(
-                f"{_one_line(h.get('name'))} ({_one_line(h.get('source'))})" for h in resolving[:8]
+                f"{_one_line(h.get('name'))} ({_one_line(h.get('source'))})" for h in resolving
             )
             measured.append(f"_{MEASURED}:_ rule hits {names}.")
         measured.extend(_capa_table(capa, _is_resolution_rule))
@@ -702,6 +701,7 @@ class MarkdownRenderer:
                         mech.evidence_ref or "-",
                     )
                 )
+            measured.extend(_left_out(len(report.persistence), 40, "persistence mechanisms"))
         elif ctx.sandbox_watched_persistence:
             measured.append(f"_{OBSERVED}:_ no persistence observed." + ctx.partial_sentence())
         blocks.append(
@@ -726,6 +726,7 @@ class MarkdownRenderer:
             measured.append(_divider(2))
             for node in commands[:20]:
                 measured.append(_row(node.pid, f"`{_truncate(node.command_line, _CELL_LIMIT)}`"))
+            measured.extend(_left_out(len(commands), 20, "commands"))
         blocks.append(
             _subsection(
                 "5.5",
@@ -820,9 +821,10 @@ class MarkdownRenderer:
                         _truncate(u.user_agent or "-", _CELL_LIMIT),
                     )
                 )
+            measured.extend(_left_out(len(observed_urls), 20, "requests"))
         if net is not None and (net.ja3_fingerprints or net.ja3s_fingerprints):
-            prints = [f"JA3 `{_one_line(j)}`" for j in net.ja3_fingerprints[:6]]
-            prints += [f"JA3S `{_one_line(j)}`" for j in net.ja3s_fingerprints[:6]]
+            prints = [f"JA3 `{_one_line(j)}`" for j in net.ja3_fingerprints]
+            prints += [f"JA3S `{_one_line(j)}`" for j in net.ja3s_fingerprints]
             measured.extend(["", f"_{OBSERVED}:_ TLS fingerprints " + ", ".join(prints) + "."])
         prose = [ta.command_and_control, ta.message_packet_structure] if ta else []
         blocks.append(
@@ -870,6 +872,8 @@ class MarkdownRenderer:
                         "dropped (sandbox)",
                     )
                 )
+            measured.extend(_left_out(len(carved), 10, "carved payloads"))
+            measured.extend(_left_out(len(dropped), 20, "dropped files"))
         blocks.append(
             _subsection(
                 "5.8",
@@ -945,6 +949,7 @@ class MarkdownRenderer:
                         op.get("api", "-"),
                     )
                 )
+            lines.extend(_left_out(len(files), 40, "file operations"))
             lines.append("")
 
         if dyn.registry_mods:
@@ -957,6 +962,7 @@ class MarkdownRenderer:
                 ]
             )
             lines.extend(_registry_row(reg) for reg in dyn.registry_mods[:40])
+            lines.extend(_left_out(len(dyn.registry_mods), 40, "registry modifications"))
             lines.append("")
 
         mutexes = [
@@ -967,6 +973,7 @@ class MarkdownRenderer:
         if mutexes:
             lines.extend([_plain_heading("Mutexes"), ""])
             lines.extend(_item(f"`{name}`") for name in mutexes[:40])
+            lines.extend(_left_out(len(mutexes), 40, "mutexes"))
             lines.append("")
 
         services = next((s for s in report.sections if s.key == "sandbox_services_and_tasks"), None)
@@ -991,6 +998,7 @@ class MarkdownRenderer:
                             count if isinstance(count, int) else "not recorded",
                         )
                     )
+            lines.extend(_left_out(len(dyn.notable_apis), 20, "notable APIs"))
             lines.append("")
 
         if dyn.sandbox_signatures:
@@ -1003,6 +1011,7 @@ class MarkdownRenderer:
                 ]
             )
             lines.extend(_signature_row(sig) for sig in dyn.sandbox_signatures[:30])
+            lines.extend(_left_out(len(dyn.sandbox_signatures), 30, "sandbox signatures"))
             lines.append("")
 
         if len(lines) <= 4:
@@ -1060,6 +1069,7 @@ class MarkdownRenderer:
                     shown = ", ".join(f"`{f}`" for f in functions[:12])
                     more = f" and {len(functions) - 12} more" if len(functions) > 12 else ""
                     lines.append(_row(f"`{dll}`", shown + more))
+                lines.extend(_left_out(len(by_dll), 40, "libraries"))
                 lines.append("")
             if static.api_capabilities:
                 ordered = sorted(static.api_capabilities.items(), key=lambda kv: -kv[1])
@@ -1094,10 +1104,12 @@ class MarkdownRenderer:
             lines.append(_row("Name", "Ordinal", "RVA"))
             lines.append(_divider(3))
             if static.export_rows:
-                for exp in _distinct(static.export_rows, lambda e: (e.name, e.ordinal, e.rva))[:60]:
+                distinct = _distinct(static.export_rows, lambda e: (e.name, e.ordinal, e.rva))
+                for exp in distinct[:60]:
                     lines.append(
                         _row(f"`{exp.name or '(unnamed)'}`", exp.ordinal or "-", exp.rva or "-")
                     )
+                lines.extend(_left_out(len(distinct), 60, "exports"))
                 rvas = [
                     exp.rva
                     for exp in _distinct(static.export_rows, lambda e: (e.name, e.ordinal, e.rva))
@@ -1108,8 +1120,10 @@ class MarkdownRenderer:
                         ["", f"All {len(rvas)} exports share one address, {_one_line(rvas[0])}."]
                     )
             else:
-                for name in list(dict.fromkeys(static.exports))[:60]:
+                names = list(dict.fromkeys(static.exports))
+                for name in names[:60]:
                     lines.append(_row(f"`{name}`", "-", "-"))
+                lines.extend(_left_out(len(names), 60, "exports"))
             lines.append("")
 
         if static.embedded_resources:
@@ -1120,6 +1134,7 @@ class MarkdownRenderer:
                     kind = res.get("type") or res.get("kind") or "resource"
                     size = res.get("size")
                     lines.append(_item(f"{kind}" + (f" ({size} bytes)" if size else "")))
+                lines.extend(_left_out(len(plain), 20, "resources"))
                 lines.append("")
 
         rules = [s for s in report.sections if s.key in _RULE_SECTIONS]
@@ -1152,6 +1167,7 @@ class MarkdownRenderer:
                         published,
                     )
                 )
+            lines.extend(_left_out(len(static.interesting_strings), 60, "strings"))
             lines.append("")
 
         if static.pdb_path:
@@ -1233,9 +1249,7 @@ class MarkdownRenderer:
             seen.add(tid)
             folded = rules_by_tid.get(tid, [])
             procedure = (
-                ctx.cell(_truncate(mapping.evidence_quotes[0], 160))
-                if mapping.evidence_quotes
-                else "-"
+                ctx.cell(str(mapping.evidence_quotes[0])) if mapping.evidence_quotes else "-"
             )
             lines.append(
                 _row(
@@ -1360,11 +1374,14 @@ class MarkdownRenderer:
             body = [_subheading("10.1", "Rules that matched this sample", MEASURED), ""]
             for section in rules:
                 at = section.columns.index("Rule") if "Rule" in section.columns else 0
-                names = [_one_line(row[at]) for row in section.rows if len(row) > at][:20]
+                every = [_one_line(row[at]) for row in section.rows if len(row) > at]
+                names = every[:20]
                 ids = f" ({_ids(section.evidence_ids)})" if section.evidence_ids else ""
+                more = f" and {len(every) - 20} more (§7)" if len(every) > 20 else ""
                 body.append(
                     _item(
-                        f"{section.title}{ids}: " + (", ".join(f"`{n}`" for n in names) or "none")
+                        f"{section.title}{ids}: "
+                        + ((", ".join(f"`{n}`" for n in names) + more) or "none")
                     )
                 )
             body.extend(
@@ -1495,9 +1512,10 @@ class MarkdownRenderer:
                 ]
             )
             for match in attr.function_hash_matches[:10]:
-                examples = (
-                    ", ".join(f"`{f}`" for f in (match.get("example_functions") or [])[:3]) or "-"
-                )
+                example_functions = list(match.get("example_functions") or [])
+                examples = ", ".join(f"`{f}`" for f in example_functions[:3]) or "-"
+                if len(example_functions) > 3:
+                    examples += f" and {len(example_functions) - 3} more"
                 stated = match.get("confidence")
                 similarity.append(
                     _row(
@@ -1509,6 +1527,9 @@ class MarkdownRenderer:
                         examples,
                     )
                 )
+            similarity.extend(
+                _left_out(len(attr.function_hash_matches), 10, "function-hash matches")
+            )
             similarity.append("")
         if attr.family_rag_candidates:
             similarity.extend(
@@ -1529,6 +1550,7 @@ class MarkdownRenderer:
                         cand.get("sample_count") or "-",
                     )
                 )
+            similarity.extend(_left_out(len(attr.family_rag_candidates), 10, "candidates"))
             similarity.append("")
         # A similar sample is a measurement only with its distance; one the
         # memory returned without a score is counted, not listed as similar.
@@ -1558,6 +1580,7 @@ class MarkdownRenderer:
                         sample.get("source") or "-",
                     )
                 )
+            similarity.extend(_left_out(len(scored), 10, "similar samples"))
             similarity.append("")
         if unscored:
             similarity.append(
@@ -1857,7 +1880,7 @@ class MarkdownRenderer:
             "This report was produced by an automated team of language-model analysts "
             "working over tool servers. The analysts' claims were negotiated, a judge "
             "stated the verdict and the STIX bundle, and a report model wrote the "
-            "assessed prose. Every tool call is in Appendix A."
+            "assessed prose. Every tool call is in Appendix A. " + CUT_CELL_SENTENCE
         )
         lines.append("")
         profile = summary.get("profile") or {}
@@ -2775,7 +2798,7 @@ def _reputation_line(report: MalwareReport) -> str:
         said = f"{source}: {flagged} of {engines} engines flag it as malicious"
         return said + (f" (analysis {when}; {where})" if when else f" ({where})")
     facts = [f"{k} {v}" for k, v in rows.items() if k in _REPUTATION_KEYS]
-    return f"{where}: {'; '.join(facts[:6])}" if facts else f"{where}; see Appendix A"
+    return f"{where}: {'; '.join(facts)}" if facts else f"{where}; see Appendix A"
 
 
 def _first_match(pattern: str, text: str) -> str:
@@ -2794,7 +2817,7 @@ def _environment_line(report: MalwareReport) -> str:
             if len(row) >= 2 and str(row[0]).strip().lower() in keys:
                 facts.append(f"{row[0]} {row[1]}")
     if facts:
-        return "Environment: " + "; ".join(facts[:8]) + "."
+        return "Environment: " + "; ".join(facts) + "."
     return "Environment: the sandbox's own report recorded no environment details in this run."
 
 
@@ -2986,7 +3009,8 @@ def _attack_row(
     if notes:
         status += "; unresolved: " + ", ".join(dict.fromkeys(notes))
     tactic = f"{cell.tactic_name} ({cell.tactic})" if cell.tactic else cell.tactic_name
-    procedure = ctx.cell(_truncate(cell.evidence[0], 160)) if cell.evidence else "-"
+    # The statement whole: a table cell wraps, it is never cut.
+    procedure = ctx.cell(str(cell.evidence[0])) if cell.evidence else "-"
     evidence = list(dict.fromkeys(_ids_in(cell.evidence) + _rule_ids(rules, capa_ids)))
     return _row(
         tactic,
@@ -3315,7 +3339,7 @@ def _mbc_lines(report: MalwareReport) -> list[str]:
             _item(
                 f"{cell.technique_id}"
                 + (f" {name}" if name else "")
-                + (f": {_truncate(cell.evidence[0], 160)}" if cell.evidence else "")
+                + (f": {_one_line(cell.evidence[0])}" if cell.evidence else "")
                 + f" (claimed by {source}"
                 + (f"; {', '.join(said)}" if said else "")
                 + "; not an ATT&CK technique, not published)"
@@ -3413,6 +3437,26 @@ def _cell(value: Any) -> str:
 def _one_line(value: Any) -> str:
     """A value that has to stay on its line: its line breaks become spaces."""
     return " ".join(str(value or "").splitlines())
+
+
+# Said wherever a list is shown in part: how many were left out and where
+# every one is. The page is laid out for a reader; the JSON report (the same
+# report's structured form) and the evidence ledger hold every value whole.
+LEFT_OUT_LINE = "_{rest:,} more {what} not shown here; the JSON report carries every one._"
+# Said once, in the methodology appendix, of a table cell that ends in the cut
+# mark.
+CUT_CELL_SENTENCE = (
+    "A table value that ends in … is cut to fit the page; the JSON report and the "
+    "evidence ledger (Appendix A's ids) carry it whole."
+)
+
+
+def _left_out(total: int, shown: int, what: str) -> list[str]:
+    """The line a list shown in part ends with, or nothing when it is shown whole."""
+    rest = int(total) - int(shown)
+    if rest <= 0:
+        return []
+    return ["", LEFT_OUT_LINE.format(rest=rest, what=what)]
 
 
 def _truncate(value: Any, length: int) -> str:

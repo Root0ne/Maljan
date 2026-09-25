@@ -26,19 +26,14 @@ Design:
     - agent_id and domain from the first chunk ISR
     - A metadata annotation showing how many chunks were merged.
 
-MAX_CLAIMS cap: 20 claims per merged ISR is the default. The LLM judge
-prompt budget is finite; more than 20 claims per agent rarely adds value
-and inflates the system prompt significantly.
+Every claim is kept: no count cap. The judge's prompt is sized from the
+judge's own window, and it says so when it has to shorten what it shows.
 """
 
 from __future__ import annotations
 
 from maljan.core.logger import logger
 from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-
-# Maximum number of claims to retain in the merged ISR.
-# Claims beyond this cap are dropped (lowest confidence first).
-MAX_MERGED_CLAIMS: int = 20
 
 
 def _ranks_above(claim: ClaimEvidence, kept: ClaimEvidence) -> bool:
@@ -110,7 +105,7 @@ def merge_chunk_isrs(chunk_isrs: list[AgentISR]) -> AgentISR:
                     unkeyed_claims.append(claim)
 
     # ------------------------------------------------------------------
-    # Step 2: Consolidate and cap
+    # Step 2: Consolidate
     # ------------------------------------------------------------------
     # Keyed claims come first (they have explicit TTPs — higher value)
     keyed_sorted = sorted(
@@ -124,16 +119,11 @@ def merge_chunk_isrs(chunk_isrs: list[AgentISR]) -> AgentISR:
         reverse=True,
     )
 
+    # Every claim is kept. A count cap here dropped an analyst's claims past
+    # the twentieth, lowest confidence first and said so only at debug level;
+    # what reads the merged ISR next — the judge's prompt — is sized from its
+    # own window and says so when it must shorten.
     all_claims = keyed_sorted + unkeyed_sorted
-    if len(all_claims) > MAX_MERGED_CLAIMS:
-        dropped = len(all_claims) - MAX_MERGED_CLAIMS
-        logger.debug(
-            "Merged ISR for '%s': dropping %d low-confidence claims (cap=%d).",
-            agent_id,
-            dropped,
-            MAX_MERGED_CLAIMS,
-        )
-        all_claims = all_claims[:MAX_MERGED_CLAIMS]
 
     # ------------------------------------------------------------------
     # Step 3: Merge dissent items (deduped)

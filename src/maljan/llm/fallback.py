@@ -293,6 +293,21 @@ class FallbackChatModel(BaseChatModel):
             return model.bind_tools(tools, **tool_kwargs)
         return model
 
+    def leave_loop(self) -> None:
+        """No loop clock: no turn deadline but a model's own request timeout.
+
+        For a loop with no time limit. A share of nothing is no deadline, so a
+        model that stops answering is ended at its whole-call deadline — the
+        request's sized timeout, which Maljan enforces over the whole call
+        (``generation_rate.call_deadline``) — and that is a provider failure the
+        list moves on from. A deadline left over from an earlier loop with a
+        clock does not carry into this one.
+        """
+        with self._lock:
+            self._loop_ends = None
+            self._share = 0.0
+        self.turn_deadline = 0.0
+
     def enter_loop(self, loop_seconds: float, share: float) -> None:
         """Measure every turn's deadline against a loop of ``loop_seconds`` starting now."""
         with self._lock:
@@ -471,11 +486,18 @@ def restart_models(
     agent asked for help runs under the ask's clock, which can be far shorter
     than its own; a deadline fixed from its own budget let the ask cancel the
     stall before the list ever moved. A no-op for any other model.
+
+    ``None`` is a loop with no time limit: no turn deadline is set, and a
+    stalled model is ended at its whole-call deadline
+    (``generation_rate.call_deadline``), which the list reads as a provider
+    failure and moves on from.
     """
     if not isinstance(model, FallbackChatModel):
         return
     model.restart()
     if loop_seconds is None or loop_seconds <= 0:
+        # A loop with no time limit: no share of a clock to take.
+        model.leave_loop()
         return
     if share is None:
         share = _configured_share()
@@ -498,7 +520,8 @@ def turn_share_seconds(cfg: Any, agent: str) -> float:
 
     The budget is read the way the loop reads it — the agent's own
     definition, then the per-agent override map, then the deployment's
-    default. The reporter, which runs no loop, takes a share of
+    default — and none of them set is no deadline (``0.0``). The reporter,
+    which runs no loop, takes a share of
     ``reporting.composer_per_section_timeout``, the limit each of its calls
     runs under. Every loop start resets it to a share of the budget that loop
     actually has (:func:`restart_models`).
@@ -515,7 +538,9 @@ def turn_share_seconds(cfg: Any, agent: str) -> float:
         definition = definitions.get(agent) if isinstance(definitions, dict) else None
         own = getattr(definition, "timeout_seconds", None)
         overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
-        budget = own or overrides.get(agent) or getattr(cfg, "react_agent_timeout", 0)
+        budget = own or overrides.get(agent) or getattr(cfg, "react_agent_timeout", None)
+        # No time limit anywhere is no deadline: a stalled model is ended at
+        # its whole-call deadline (``generation_rate.call_deadline``).
         return max(1.0, float(budget) * share) if budget and share > 0 else 0.0
     except Exception as exc:  # noqa: BLE001 — no deadline is the lone-model behaviour
         logger.debug("fallback turn deadline not read (%s).", exc)

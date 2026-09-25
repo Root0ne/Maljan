@@ -303,7 +303,10 @@ class TestTheJudgeLoopToo:
 
         judge = JudgeAgent(llm=_AlwaysAsksForATool(calls=[]))
         judge.tools = [_strings_tool(MCPLangChainToolkit(), [])]
-        with patch("maljan.agents.judge_agent.get_settings") as settings:
+        with (
+            patch("maljan.agents.judge_agent.get_settings") as settings,
+            patch("maljan.agents.base_agent.get_settings", settings),
+        ):
             settings.return_value.react_agent_timeout = 60
             settings.return_value.react_agent_max_steps = 6
             reasoning = asyncio.run(judge.execute_tool_loop([("system", "s"), ("human", TASK)]))

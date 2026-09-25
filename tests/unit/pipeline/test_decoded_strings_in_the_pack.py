@@ -143,6 +143,21 @@ def _floss_entry(result: Any) -> Any:
     return entry
 
 
+def _bounded_line(tool: str, payload: Any, max_chars: int) -> str:
+    """The entry's line in a pack bounded at ``max_chars``."""
+    entry = build_entry(
+        entry_id=format_entry_id(12),
+        seq=12,
+        agent=PIPELINE,
+        tool=tool,
+        args={},
+        server=PIPELINE,
+        output=json.dumps(payload),
+        stage="triage_pack",
+    )
+    return render_pack([entry], max_chars)
+
+
 def _line(tool: str, payload: Any, *, ok: bool = True, error: str | None = None) -> str:
     entry = build_entry(
         entry_id=format_entry_id(12),
@@ -177,15 +192,24 @@ class TestTheStep:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         fake = _installed(monkeypatch, _answer(ROWS))
-        entry = _floss_entry(_pack(tmp_path))
+        entry = _floss_entry(_pack(tmp_path, budget_s=600.0))
         (call,) = fake.calls
         assert call["limit"] == triage_pack.DECODED_STRINGS_ROWS
-        assert call["timeout_s"] == emulated_strings.FLOSS_TIMEOUT_S
+        # What is left of the pack's own budget, never a fixed number.
+        assert 1 <= call["timeout_s"] <= 600
         assert entry.args == {
             "path": call["path"],
             "limit": triage_pack.DECODED_STRINGS_ROWS,
-            "timeout_s": emulated_strings.FLOSS_TIMEOUT_S,
+            "timeout_s": call["timeout_s"],
         }
+
+    def test_a_pack_with_no_budget_gives_floss_no_wall_clock(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake = _installed(monkeypatch, _answer(ROWS))
+        _floss_entry(_pack(tmp_path, budget_s=0.0))
+        (call,) = fake.calls
+        assert call["timeout_s"] is None
 
     def test_it_runs_in_the_job_s_staging_directory_with_the_server_s_environment(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -278,26 +302,30 @@ class TestTheLine:
         assert '"https://example.test/live/"@0x6a1f' in line
         assert 'routine 0x8c4c: "scub"' in line
 
-    def test_the_bound_is_stated_with_its_reason_and_where_the_rest_is(self) -> None:
+    def test_every_string_is_shown_whole_with_no_bound(self) -> None:
         many = [_row(f"s{i:03d}", "0xae78", hex(0x1000 + i)) for i in range(150)]
         line = _line("floss", _answer(many))
-        shown = triage_pack.DECODED_STRINGS_SHOWN
-        assert f"{shown} of 150 shown" in line
+        assert "all 150 shown" in line
+        assert '"s149"' in line
+
+    def test_the_room_bound_is_stated_with_its_reason_and_where_the_rest_is(self) -> None:
+        many = [_row(f"s{i:03d}", "0xae78", hex(0x1000 + i)) for i in range(150)]
+        whole = _line("floss", _answer(many))
+        line = _bounded_line("floss", _answer(many), len(whole) // 3)
+        assert len(line) <= len(whole) // 3
+        shown = int(line.split(" of 150 shown", 1)[0].rsplit(" ", 1)[1])
+        assert 0 < shown < 150
         assert "every agent reads the pack" in line
         assert f"offset {shown}" in line
-        assert len(line) <= triage_pack.DECODED_STRINGS_LINE_CHARS + 20
         assert f'"s{shown - 1:03d}"' in line
         assert f'"s{shown:03d}"' not in line
 
-    def test_the_character_bound_cuts_before_the_count_does(self) -> None:
-        long = [_row("x" * 110 + f"{i:03d}", "0xae78", hex(0x1000 + i)) for i in range(60)]
-        line = _line("floss", _answer(long))
-        assert "of 60 shown" in line
-        assert len(line) <= triage_pack.DECODED_STRINGS_LINE_CHARS + 20
-
-    def test_a_long_string_is_cut_and_says_it_was(self) -> None:
-        line = _line("floss", _answer([_row("A" * 300, "0xae78", "0x10")]))
-        assert '"' + "A" * (triage_pack.DECODED_STRING_CHARS - 1) + '…"' in line
+    def test_a_long_string_is_whole_with_no_bound_and_cut_said_within_one(self) -> None:
+        answer = _answer([_row("A" * 3000, "0xae78", "0x10")])
+        assert '"' + "A" * 3000 + '"' in _line("floss", answer)
+        line = _bounded_line("floss", answer, 1500)
+        assert len(line) <= 1500
+        assert 'A…"' in line
 
     def test_a_string_s_control_characters_are_written_out(self) -> None:
         line = _line("floss", _answer([_row('say "hi"\r\n', "0xae78", "0x10")]))
@@ -368,8 +396,9 @@ class TestTheNode:
 
 class TestTheLineSaysWhatItDidToAString:
     def test_a_string_cut_is_said_even_when_every_string_is_shown(self) -> None:
-        line = _line("floss", _answer([_row("A" * 300, "0xae78", "0x10")]))
-        assert "all 1 shown (1 cut to 120 characters" in line
+        line = _bounded_line("floss", _answer([_row("A" * 3000, "0xae78", "0x10")]), 1500)
+        assert "all 1 shown (1 cut to " in line
+        assert "fits its room; the whole string is in the entry" in line
 
     def test_a_line_with_nothing_cut_says_nothing_about_it(self) -> None:
         assert "cut to" not in _line("floss", _answer(ROWS))

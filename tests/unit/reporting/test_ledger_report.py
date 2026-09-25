@@ -200,8 +200,25 @@ class TestGenericFallbacks:
 
     def test_unknown_prose_becomes_a_capped_text_section(self) -> None:
         sections = _by_key(build_sections([_entry("notes", "x" * 9000)]))
+        text = sections["tool_notes"].text
         assert sections["tool_notes"].kind == "text"
-        assert len(sections["tool_notes"].text) == 4000
+        assert text.startswith("x" * 3000) and "…" in text
+        assert "Cut here at 4,000 of 9,000 characters; the evidence endpoint carries it" in text
+
+    def test_a_table_past_its_rows_says_how_many_it_left_out(self) -> None:
+        from maljan.reporting.ledger_report import _Sections
+
+        acc = _Sections()
+        section = acc.get("k", "Table", "table", columns=["a"])
+        section.evidence_ids.append("ev_0007")
+        for i in range(205):
+            acc.add_row(section, [str(i)])
+        (result,) = acc.result()
+        assert len(result.rows) == 200
+        assert "5 more rows not shown here; the evidence endpoint carries every one" in (
+            result.text
+        )
+        assert "ev_0007" in result.text
 
     def test_a_failed_call_builds_no_section(self) -> None:
         entry = build_entry(

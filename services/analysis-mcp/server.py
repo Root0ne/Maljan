@@ -32,7 +32,7 @@ from mcp.server.fastmcp import FastMCP
 
 from maljan.core.paths import resolve_data
 from maljan.tools import binary as binary_tools
-from maljan.tools import emulated_strings, staging
+from maljan.tools import children, emulated_strings, staging
 from maljan.tools import identify as identify_tools
 from maljan.tools import rules as rule_tools
 from maljan.tools import strings as string_tools
@@ -59,8 +59,15 @@ mcp = FastMCP("AnalysisMCP")
 # ``timeout_s: null`` for a scan that gives up after a minute has been told
 # something untrue by the structure whose premise is that it was computed.
 YARA_TIMEOUT_S = 60
-CAPA_TIMEOUT_S = 300
-FLOSS_TIMEOUT_S = emulated_strings.FLOSS_TIMEOUT_S
+# capa and FLOSS have no wall clock of the server's own: what bounds a call is
+# the ``timeout_s`` its caller passes — the triage pack passes the operator's
+# ``static.capa.timeout_seconds`` and what is left of ``triage.budget_seconds``
+# — and a call that passes none is bounded by the job's timeout. Their time
+# grows with the sample's code, not with anything the server can know in
+# advance, and a fixed ceiling stopped a large sample's emulation half-way
+# whatever the operator had allowed. The manifest declares ``timeout_s: null``.
+CAPA_TIMEOUT_S: int | None = None
+FLOSS_TIMEOUT_S: int | None = emulated_strings.FLOSS_TIMEOUT_S
 
 TOOL_NEEDS: list[ToolNeeds] = [
     ToolNeeds("identify_file"),
@@ -84,11 +91,12 @@ TOOL_NEEDS: list[ToolNeeds] = [
     ),
     ToolNeeds("sigma_match", (module("sigma"),)),
     ToolNeeds("sigma_match_sandbox", (module("sigma"),)),
-    ToolNeeds("capa", (module("capa"),), timeout_s=CAPA_TIMEOUT_S),
+    ToolNeeds("capa", (module("capa"),), timeout_s=CAPA_TIMEOUT_S, long_running=True),
     ToolNeeds(
         "floss",
         (binary("floss", emulated_strings.floss_unavailable),),
         timeout_s=FLOSS_TIMEOUT_S,
+        long_running=True,
         remediation=emulated_strings.FLOSS_REMEDIATION,
     ),
     ToolNeeds("put_sample"),
@@ -151,18 +159,22 @@ _ABSENT_WORDS = frozenset({"null", "None"})
 _ABSENT_CHARACTERS = " \t\r\n\"'"
 
 
-def _within(asked: Any, declared: int) -> int:
+def _within(asked: Any, declared: int | None) -> int | None:
     """One tool's wall clock, held to the value its own manifest declares.
 
     A model that asks for a day gets the minute the manifest promised: the
     declared value is what every reader of ``capabilities`` was told, and a
     tool that quietly took more would make that structure untrue. Asking for
-    less is allowed — a caller in a hurry is entitled to be.
+    less is allowed — a caller in a hurry is entitled to be. A tool that
+    declares none (``None``) runs as long as its caller asked, or with no
+    wall clock of its own when the caller asked for none.
     """
     try:
         wanted = int(asked)
     except (TypeError, ValueError):
         return declared
+    if declared is None:
+        return max(1, wanted)
     return max(1, min(wanted, declared))
 
 
@@ -364,8 +376,11 @@ def _carved_miss(tree: Path, asked: str) -> CarvedFileNotFound:
     The names only, never a path: a refusal travels into the ledger and onto
     the event feed, and the tails are what a caller needs to choose again.
     """
-    names = [entry.name for entry in _carved_files(tree)][:_LISTED_CARVED_FILES]
+    every = [entry.name for entry in _carved_files(tree)]
+    names = every[:_LISTED_CARVED_FILES]
     listed = ", ".join(names) if names else "this run carved nothing"
+    if len(every) > len(names):
+        listed += f" and {len(every) - len(names)} more (carve_payloads lists every one)"
     return CarvedFileNotFound(f"no carved file named {_echoed(asked)}; this run carved: {listed}")
 
 
@@ -917,24 +932,35 @@ def sigma_match_sandbox(report: dict[str, Any], ruleset: str = "default") -> dic
 
 @mcp.tool()
 @reads_a_carved_file
-def capa(
-    path: str, timeout_s: int = CAPA_TIMEOUT_S, backend: str = "auto", carved_path: str = ""
+async def capa(
+    path: str,
+    timeout_s: int | None = CAPA_TIMEOUT_S,
+    backend: str = "auto",
+    carved_path: str = "",
 ) -> dict[str, Any]:
     """Run capa and report the capabilities it finds, with ATT&CK and MBC metadata."""
-    return _guard(
-        "capa",
-        rule_tools.capa,
-        path=path,
-        carved_path=carved_path,
-        timeout_s=_within(timeout_s, CAPA_TIMEOUT_S),
-        backend=backend,
+    # One run per call shape at a time: a retry of the same call joins the run
+    # already going, and a run every caller has abandoned is killed with its
+    # child (``tools.children``).
+    return dict(
+        await children.joined(
+            ("capa", path, carved_path, backend, timeout_s),
+            lambda: _guard(
+                "capa",
+                rule_tools.capa,
+                path=path,
+                carved_path=carved_path,
+                timeout_s=_within(timeout_s, CAPA_TIMEOUT_S),
+                backend=backend,
+            ),
+        )
     )
 
 
 @mcp.tool()
 @says_unquoted("pattern")
 @reads_a_carved_file
-def floss(
+async def floss(
     path: str,
     carved_path: str = "",
     min_len: int = emulated_strings.DEFAULT_MIN_LENGTH,
@@ -942,7 +968,7 @@ def floss(
     limit: int = DEFAULT_STRINGS_LIMIT,
     offset: int = 0,
     pattern: str | None = None,
-    timeout_s: int = FLOSS_TIMEOUT_S,
+    timeout_s: int | None = FLOSS_TIMEOUT_S,
 ) -> dict[str, Any]:
     """Recover the strings a PE only builds at run time: decoded, stack and tight strings.
 
@@ -965,17 +991,33 @@ def floss(
     ``kinds`` keeps some of "decoded", "stack", "tight"; ``pattern`` keeps the
     rows containing a marker (case-insensitive substring, or ``re:<expression>``).
     """
-    return _guard(
+    run = (
         "floss",
-        emulated_strings.floss,
-        path=path,
-        carved_path=carved_path,
-        min_len=min_len,
-        kinds=kinds,
-        limit=limit,
-        offset=offset,
-        pattern=pattern,
-        timeout_s=_within(timeout_s, FLOSS_TIMEOUT_S),
+        path,
+        carved_path,
+        min_len,
+        tuple(kinds or ()),
+        limit,
+        offset,
+        pattern,
+        timeout_s,
+    )
+    return dict(
+        await children.joined(
+            run,
+            lambda: _guard(
+                "floss",
+                emulated_strings.floss,
+                path=path,
+                carved_path=carved_path,
+                min_len=min_len,
+                kinds=kinds,
+                limit=limit,
+                offset=offset,
+                pattern=pattern,
+                timeout_s=_within(timeout_s, FLOSS_TIMEOUT_S),
+            ),
+        )
     )
 
 

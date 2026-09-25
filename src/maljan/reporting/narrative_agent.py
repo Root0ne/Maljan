@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.config import REPORTER_AGENT_KEY
 from maljan.core.logger import logger
+from maljan.core.spend import spend_bound
 from maljan.core.token_ledger import structured_answer
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
@@ -530,6 +531,14 @@ class NarrativeAgent:
         if overflow is not None and overflow not in self.degradations:
             self.degradations.append(overflow)
         bound = call_output_bound(int(getattr(self, "output_cap", 0) or 0), window, chars)
+        held = spend_bound(
+            getattr(self, "token_ledger", None),
+            self.llm,
+            sum(len(str(getattr(m, "content", m) or "")) for m in turns),
+            int(getattr(self, "output_cap", 0) or 0),
+        )
+        if held is not None:
+            bound = held if bound is None else min(bound, held)
         if bound is None or not accepts_output_bound(self.llm):
             return None
         return bound

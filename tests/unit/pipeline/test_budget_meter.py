@@ -122,7 +122,8 @@ class TestTheLoopMetersItself:
         ticks = [p for k, p in events if k == BUDGET_TICK]
         assert ticks and ticks[-1]["final"] is True
         assert ticks[-1]["steps_used"] == 3 and ticks[-1]["ledger_entries"] == 1
-        assert ticks[-1]["max_steps"] == 40
+        # No operator limit anywhere: the tick says so as ``null``, not a number.
+        assert ticks[-1]["max_steps"] is None and ticks[-1]["timeout_s"] is None
         assert not [p for k, p in events if k == STAGE_ENDED_AT_CAP]
         (record,) = _budget_update(agent, "static")["budget_records"]["static"]
         assert record["cap"] is None and record["steps_used"] == 3
@@ -239,6 +240,24 @@ class TestTheRunSummarySumsTheMeter:
                 "caps": ["steps"],
             }
         }
+
+    def test_a_loop_with_no_limit_makes_the_agent_s_limit_none(self) -> None:
+        summary = (
+            RunSummaryBuilder(start_time=0.0)
+            .set_budget(
+                {
+                    "static": [
+                        {"steps_used": 12, "max_steps": 40, "elapsed_s": 3.0, "timeout_s": 90},
+                        {"steps_used": 60, "max_steps": None, "elapsed_s": 9.0, "timeout_s": None},
+                    ]
+                }
+            )
+            .build()
+            .to_dict()
+        )
+        row = summary["budget"]["static"]
+        assert row["max_steps"] is None and row["timeout_s"] is None
+        assert row["steps_used"] == 72
 
     def test_no_records_is_none(self) -> None:
         assert RunSummaryBuilder(start_time=0.0).set_budget({}).build().to_dict()["budget"] is None

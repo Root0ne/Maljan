@@ -323,8 +323,16 @@ class StaticAnalyst(BaseAnalyst):
                 SWITCH_PATH,
                 program_name_from_load,
             )
+            from maljan.providers.server_guard import deployment_call_budget
 
-            with httpx.Client(timeout=120.0, headers=headers) as http:
+            # Each request waits what one tool call of this deployment may
+            # take (``core.mcp.breaker.call_timeout_seconds``, else the longest
+            # tool budget configured), and with neither set, as long as Ghidra
+            # takes: a fixed 120 s cut a large program's load off half-way.
+            call_budget = deployment_call_budget(cfg)
+            with httpx.Client(
+                timeout=call_budget if call_budget > 0 else None, headers=headers
+            ) as http:
                 loaded = http.post(f"{base}/load_program", json={"file": file_path})
                 loaded.raise_for_status()
                 # Loading is not looking. `load_program` sets Ghidra's current

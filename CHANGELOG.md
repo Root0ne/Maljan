@@ -8,6 +8,19 @@ change landed on `main`.
 
 ### Added
 
+- **An operator's spend ceiling.** `llm.max_spend_usd_per_job` (no default:
+  none) and `llm.model_prices` (empty) price every recorded call from its
+  provider-reported cached input, input and output tokens at the answering
+  model's prices; the vendored model table carries DeepSeek's documented peak
+  prices for `deepseek-flash` and `deepseek-v4-pro`, with their page, as data.
+  At the ceiling every running tool loop ends its tool phase and its agent
+  writes its answer from what it gathered; a loop that starts afterwards
+  answers once without tools, an ask is refused, and the verdict and the
+  report still run. A degradation reason says so, `run_summary.spend` carries
+  the ceiling, the spend, whether it was reached and where each price came
+  from, and the budget meter's cap is `spend`. A model with no price is named
+  once in the log and in `run_summary.spend.unpriced_models`, and its calls
+  are not counted.
 - **The judge decides the techniques its bundle does not carry.** After the
   verdict the judge is asked once, in one tool-free question sized like the
   verdict call, about each technique an analyst claimed that its bundle
@@ -887,6 +900,70 @@ change landed on `main`.
 
 ### Changed
 
+- **No agent loop has a default step or time limit.** `react_agent_max_steps`
+  (was 10) and `react_agent_timeout` (was 180 s) are empty, the deprecated
+  `react_agent_*_overrides` maps ship empty (were static 40 steps / 1,500 s,
+  network 6 steps / 300 s, dynamic 600 s, judge 600 s), the seeded `lead`
+  carries no budget (was 40 / 1,800 s) and an ask's `agents.delegation_steps`
+  / `delegation_timeout_seconds` are empty (were 12 / 300 s). An operator's
+  value anywhere is still kept to. `None` is no limit end to end: the loop's
+  budget, langgraph's recursion limit, the hard cap, an ask's ceiling and its
+  tool description, the fallback turn deadline, the validation turn, the
+  salvage and the nudge. The run-state block says "no step limit" / "no time
+  limit" in words; the budget meter's `max_steps` / `timeout_s` are `null`. A
+  loop ends when its model answers, at the repeat guard, at its room, or at
+  the spend ceiling, with the job timeout last; each model call waits what
+  its answer takes at the measured pace.
+- **The judge's loop reads its own budget** through `loop_limits("judge")`,
+  so the override map's `judge` entry reaches it; it read the deployment-wide
+  numbers.
+- **The judge's prompts are sized from its window.** Each analyst report (was
+  cut at 500 characters), the evidence summary (2,000; it also named at most
+  25 techniques and 6 sources each), the negotiation history (800) and each
+  remembered case (200) are whole when the judge's window, less its output
+  cap, holds them; otherwise the largest parts are shortened first, the
+  prompt says which and to what width, and a degradation reason records it.
+  The technique question shares the same reports and rule.
+- **The triage pack shows everything its room holds.** Its fixed heads (six
+  names, 120 characters of text, 100 decoded strings in 3,000 characters at
+  120 each, 20 detection labels at 80 each) are gone: every line is whole when
+  the pack fits, and otherwise one detail level derived from the room applies,
+  each line saying what it left out and that the rest is a tool call away.
+- **capa and FLOSS on the analysis server have no wall clock of their own**
+  (were 300 s and 600 s): a call runs for the timeout its caller passes, the
+  triage pack passing `static.capa.timeout_seconds` for capa — which the
+  server's 300 s used to cut — and what is left of `triage.budget_seconds` for
+  FLOSS. The manifest declares `timeout_s: null` for both.
+- **Nothing a model wrote is dropped for a count.** A chunked analyst's merged
+  ISR keeps every claim (it kept 20), every schema complaint is fed back (six
+  were), the capability matrix and its table show each statement whole (six
+  statements, 200 characters, 160 in the table), a callee's claimless answer
+  reaches its caller whole (2,000 characters), and the dynamic analyst's
+  network table lists every DNS, HTTP, TCP, host and domain row (ten of each).
+- **The Ghidra sink pre-pass** waits one tool call's deployment budget, or as
+  long as Ghidra takes when none is set (was 120 s per request).
+- **An analyst's input is sized from its window.** `max_token_limit` (was
+  128,000 tokens, cut with a log line) is empty by default: the input may take
+  the window's room before the reply less the prompt around it; an operator's
+  number wins. Input over it is shortened as a document (JSON keeps its keys,
+  text its head ending in `…`), the model reads a note saying so, and the run
+  records a degradation reason. The function summariser's prompts (were 8,000
+  and 12,000 characters) are held to the same room and say when they are
+  shortened; the PE loader's markdown lists every import, export and string
+  (were 10, 10, 20 and 50); the generic MCP provider's prompt names every tool
+  (was 20); the capa and YARA evidence tables carry every hit (were cut at
+  6,000 characters mid-row).
+- **What the page leaves out, it says.** Every list the markdown report shows
+  in part ends "N more … not shown here; the JSON report carries every one", a
+  cut table value ends in `…` and the methodology appendix says where it is
+  whole, the JA3, packer, resolution and environment lists are whole, the
+  evidence sections say how many rows they left out and under which ids the
+  evidence endpoint carries them, a cut text section says where it is whole, a
+  figure's legend counts what it did not draw, a drafted YARA or Suricata rule
+  says in a comment how many published indicators it leaves to the IOC table,
+  the STIX export carries every process root (was 20), a job's failure message
+  is marked where it is cut, and a validation question naming a holder list
+  counts the rest.
 - **The report stage writes up to the model's own maximum.** A composer section
   and the narrative round take, in order, the operator's
   `reporting.composer_section_max_tokens` (sections) or `llm.judge_max_tokens`
@@ -2061,6 +2138,60 @@ change landed on `main`.
 
 ### Fixed
 
+- **A model call's whole-call deadline is that call failing, not the loop's
+  clock.** In a loop with no time limit a lone model that ran past it ended
+  the analyst with "exceeded hard cap of none" and its gathered evidence
+  unwritten; the tool phase ends there now, the salvage writes the answer, and
+  the budget record's detail says "model call deadline". A fallback list still
+  moves on to its next model.
+- **The spend is exhausted at the first call refused or held for it.** Every
+  gate (new tool loops, chunks, asks, negotiation rounds) and the degradation
+  reason read that latch, not only the ceiling being reached;
+  `run_summary.spend` records `exhausted`, `exhausted_at_usd` and
+  `exhausted_by` ("reached" or "a worst-case refusal"). A held call — the
+  verdict, a report section or a loop's closing answer — is given what the
+  remaining spend pays for and never less than 8,192 output tokens (or its own
+  cap when smaller); the overshoot is listed in `held_calls`. A call refused
+  for spend is reported as the ceiling's reason, not as an analyst failure.
+- The streamed-call deadline applies per chunk, so a consumer between chunks
+  sees `ModelCallDeadline` and no task is left cancelling; the judge's spend
+  admission counts tool calls, reasoning and tool definitions as the analysts'
+  does; a process-group kill never signals the server's own group and skips a
+  child already reaped; a capa worker that exits without an answer is logged
+  as such; the MCP request id is read in one helper with a test pinned to the
+  installed client.
+- **Every model request has a whole-call deadline.** Maljan enforces the
+  request's sized timeout (its output cap at the measured pace, or the
+  client's own 1,800 s where nothing is measured) over the whole call; the
+  client's timeout is only the longest silence httpx waits through, which a
+  server trickling keep-alive bytes never reaches. Ollama is held to it too.
+- **The judge's tool loop has the analysts' repeat guard**, and its running
+  turns are priced under its own model label, so they move the spend and trip
+  the ceiling (a lone model's unstamped turns were priced at nothing).
+- **capa and FLOSS on the analysis sidecar**: the client waits for them with
+  no deadline unless the operator set one, their timeouts and cancellations
+  are not breaker failures, a call the client gives up on or a job that ends
+  is cancelled at the server, which kills the child process with its process
+  group, and a retry of the same run joins the running one.
+- **String IOCs are all returned.** The 120-row cap and the per-kind quotas in
+  `iocs_from_text` / `iocs_from_file` and the static extractor are gone; the
+  tool-answer sizing and paging carry the rest. The report's IOC table grows
+  with them on a sample carrying many paths or URLs; that is intended. `apk_info` states the full
+  count of every list its `limit` cut, a YARA match states its length beside
+  its hex, a sandbox API row states how many processes called it and marks
+  the arguments it cuts, and a carved-file refusal counts the names it does
+  not list.
+- **The spend ceiling ends the run's rounds.** Once it is reached no further
+  negotiation round, chunk or tool loop starts; before any call, one whose
+  worst case would pass the ceiling is not made unless it is the verdict, a
+  report section or a loop's closing answer, which are held to the output the
+  remaining spend pays for and recorded in `run_summary.spend.held_calls`.
+  Price keys keep the model's tag; unreported usage is counted and the spend
+  said as "at least"; the summariser's shortened prompt is a degradation
+  reason; a no-clock delegation wait stops when its job is cancelled.
+- **A chunked analyst's validation turn runs under the agent's lock**, as the
+  single-chunk path's does, so a delegated ask of the same agent cannot land
+  between the findings buffer's mark and slice.
 - **A claim is kept whole.** Both claim parsers stored a claim cut to 300
   characters with no mark; in a paid run 26 of 40 claims were cut mid-word and
   every `attck.claim_does_not_describe` question was asked over a cut
@@ -4900,6 +5031,23 @@ change landed on `main`.
   benign PuTTY control after its verdict fell back.
 
 ### Upgrading
+
+**Loops have no default limit.** A deployment that relied on the old defaults
+— ten steps and 180 s per loop, the static analyst's 40 steps and 1,500 s, the
+network analyst's six steps, the dynamic analyst's 600 s, the judge's 600 s,
+the lead's 40 steps and 1,800 s, an ask's 12 steps and 300 s — now runs each
+loop until its model answers or a stop that is not a count ends it, bounded by
+the job timeout. To keep a bound, set it: on an agent's card (**Steps per
+loop**, **Seconds per loop**), in `react_agent_max_steps` /
+`react_agent_timeout`, in the deprecated maps (the only place for the built-in
+judge), or in `agents.delegation_steps` / `delegation_timeout_seconds`. On a
+paid provider, set `llm.max_spend_usd_per_job` (and `llm.model_prices` for a
+model the vendored table does not price). Stored values are untouched; no
+migration runs. Consumers of `budget_tick` events and `run_summary.budget`
+should read `max_steps` / `timeout_s` as nullable. The analysis server's
+manifest now declares `timeout_s: null` for capa and FLOSS, so the MCP call
+deadline for them is the deployment's (`mcp.breaker.call_timeout_seconds`, or
+the capa budget it derives from).
 
 **The judge's technique question adds a call.** Whenever the analysts named a
 technique the verdict's bundle does not carry, or one only on a finding, the

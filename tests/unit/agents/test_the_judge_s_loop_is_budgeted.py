@@ -157,7 +157,10 @@ def _judge(budget: Any, model: _Server) -> JudgeAgent:
 
 @contextlib.contextmanager
 def _settings(declared: int = 0) -> Iterator[None]:
-    with patch("maljan.agents.judge_agent.get_settings") as settings:
+    with (
+        patch("maljan.agents.judge_agent.get_settings") as settings,
+        patch("maljan.agents.base_agent.get_settings", settings),
+    ):
         cfg = settings.return_value
         cfg.react_agent_timeout = 600
         cfg.react_agent_max_steps = 40

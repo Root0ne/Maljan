@@ -383,6 +383,24 @@ class TruncationMetrics:
         )
 
 
+def _largest_limit(rows: Any, key: str) -> float | int | None:
+    """The largest of an agent's per-loop limits under ``key``, ``None`` when a loop had none.
+
+    A loop with no limit in a dimension records ``None`` under the key; one
+    such loop makes the agent's figure ``None`` too, because the largest limit
+    it ran under was no limit at all. A row without the key recorded nothing
+    and counts as zero, as it always did.
+    """
+    largest: float | int = 0
+    for row in rows:
+        if key in row and row[key] is None:
+            return None
+        value = row.get(key)
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            largest = max(largest, value)
+    return largest
+
+
 def _recorded_calls(latency: Any) -> int:
     """How many calls the per-agent latency table counts, across every agent."""
     total = 0
@@ -596,18 +614,25 @@ def generation_lines(generation: Any) -> list[str]:
             continue
         if row.get("budget"):
             lines.append(f"Output budget of `{call}`: {row['budget']}")
+        unlimited = row.get("configured_s") is None
         configured = float(row.get("configured_s") or 0.0)
         applied = float(row.get("applied_s") or 0.0)
         if row.get("derived_s") is None:
             lines.append(
-                f"Timeout of `{call}`: {applied:.0f}s, the configured value "
+                f"Timeout of `{call}`: none of its own — no time limit is configured and no "
+                "rate is measured for its model yet (or there is no output budget), so the "
+                "request's own timeout bounds it"
+                if unlimited
+                else f"Timeout of `{call}`: {applied:.0f}s, the configured value "
                 "(no rate measured for its model yet, or no output budget)"
             )
             continue
+        # With no configured limit the derived time is the whole of it.
+        larger_of = "" if unlimited else f"the larger of {configured:.0f}s configured and "
         if row.get("prompt_tokens_per_second") is not None:
             lines.append(
-                f"Timeout of `{call}`: {applied:.0f}s — the larger of {configured:.0f}s "
-                f"configured and ({int(row.get('prompt_tokens') or 0)} prompt tokens read at "
+                f"Timeout of `{call}`: {applied:.0f}s — {larger_of}"
+                f"({int(row.get('prompt_tokens') or 0)} prompt tokens read at "
                 f"{float(row['prompt_tokens_per_second']):.2f} tokens/s + "
                 f"{int(row.get('max_tokens') or 0)} tokens written at "
                 f"{float(row.get('tokens_per_second') or 0.0):.2f} tokens/s) × {margin} "
@@ -615,11 +640,52 @@ def generation_lines(generation: Any) -> list[str]:
             )
             continue
         lines.append(
-            f"Timeout of `{call}`: {applied:.0f}s — the larger of {configured:.0f}s configured "
-            f"and {int(row.get('max_tokens') or 0)} tokens at "
+            f"Timeout of `{call}`: {applied:.0f}s — {larger_of}"
+            f"{int(row.get('max_tokens') or 0)} tokens at "
             f"{float(row.get('tokens_per_second') or 0.0):.2f} tokens/s (prompt read included) "
             f"× {margin} = {float(row['derived_s']):.0f}s"
         )
+    return lines
+
+
+def spend_lines(spend: Any) -> list[str]:
+    """The spend ceiling, what the run spent against it, and every model it could not price."""
+    if not isinstance(spend, dict) or spend.get("ceiling_usd") is None:
+        return []
+    ceiling = float(spend.get("ceiling_usd") or 0.0)
+    spent = float(spend.get("spent_usd") or 0.0)
+    unreported = int(spend.get("unreported_calls") or 0)
+    lines = [
+        (
+            f"Spent at least {spent:.4f} USD of the {ceiling:.4f} USD ceiling; {unreported} "
+            "call(s) reported no usage and are not counted"
+            if unreported
+            else f"Spent {spent:.4f} USD of the {ceiling:.4f} USD ceiling"
+        )
+        + (
+            " — reached, and the tool phases still running ended there"
+            if spend.get("reached")
+            else (
+                f" — exhausted at {float(spend.get('exhausted_at_usd') or 0.0):.4f} USD by "
+                f"{spend.get('exhausted_by') or 'a refusal'}: no further loop, chunk, ask or "
+                "round was started"
+            )
+            if spend.get("exhausted")
+            else ""
+        )
+    ]
+    for model, source in sorted((spend.get("prices_from") or {}).items()):
+        if source == "llm.model_prices":
+            lines.append(f"Prices of `{model}`: the operator's (llm.model_prices)")
+        else:
+            lines.append(
+                f"`{model}` priced at the vendored rates ({source}); a vendor's off-peak "
+                "discount is not applied, so off-peak spend is overstated"
+            )
+    if spend.get("note"):
+        lines.append(f"Not counted: {spend['note']}")
+    for said in spend.get("held_calls") or []:
+        lines.append(f"Before the call: {said}")
     return lines
 
 
@@ -761,6 +827,9 @@ class RunSummary:
     # produced (``llm.generation_rate.GenerationRates.snapshot``). ``None`` on
     # a run that measured no answer and sized no call.
     generation: dict[str, Any] | None = None
+    # The operator's spend ceiling and what the run spent against it
+    # (``core.spend.SpendMeter.snapshot``). ``None`` with no ceiling set.
+    spend: dict[str, Any] | None = None
     # ``dedupe`` is deliberately not a field here. What the report folded is
     # counted while the report's sections are built, which happens after this
     # object exists, so the report builder writes ``dedupe`` onto the summary
@@ -981,6 +1050,10 @@ class RunSummary:
         if generation:
             lines += ["## Generation Rate", "", *(f"- {line}" for line in generation), ""]
 
+        spend = spend_lines(self.spend)
+        if spend:
+            lines += ["## Spend Ceiling", "", *(f"- {line}" for line in spend), ""]
+
         if self.truncation:
             trunc = self.truncation
             lines += [
@@ -1150,6 +1223,9 @@ class RunSummary:
         if self.generation:
             result["generation"] = dict(self.generation)
 
+        if self.spend:
+            result["spend"] = dict(self.spend)
+
         if self.truncation:
             t = self.truncation
             result["truncation"] = {
@@ -1235,6 +1311,7 @@ class RunSummaryBuilder:
         self._techniques_by_layer: dict[str, int] = {}
         self._tokens: TokenUsageMetrics | None = None
         self._generation: dict[str, Any] | None = None
+        self._spend: dict[str, Any] | None = None
         self._truncation: TruncationMetrics | None = None
         self._profile: dict[str, Any] | None = None
         self._stages: list[dict[str, Any]] = []
@@ -1274,9 +1351,10 @@ class RunSummaryBuilder:
             out[str(agent)] = {
                 "loops": len(loops),
                 "steps_used": sum(int(row.get("steps_used") or 0) for row in loops),
-                "max_steps": max(int(row.get("max_steps") or 0) for row in loops),
+                # ``None`` when any loop of the agent had no limit.
+                "max_steps": _largest_limit(loops, "max_steps"),
                 "elapsed_s": round(sum(float(row.get("elapsed_s") or 0.0) for row in loops), 1),
-                "timeout_s": max(float(row.get("timeout_s") or 0.0) for row in loops),
+                "timeout_s": _largest_limit(loops, "timeout_s"),
                 "delegated_steps": sum(int(row.get("delegated_steps") or 0) for row in loops),
                 # The largest of its loops: a figure sent with every request
                 # of a loop, not an amount spent, so it is not summed.
@@ -1437,6 +1515,12 @@ class RunSummaryBuilder:
         """
         if isinstance(snapshot, dict) and (snapshot.get("models") or snapshot.get("timeouts")):
             self._generation = dict(snapshot)
+        return self
+
+    def set_spend(self, snapshot: dict[str, Any] | None) -> RunSummaryBuilder:
+        """Record the spend ceiling and what the run spent against it; ``None`` leaves it unset."""
+        if isinstance(snapshot, dict) and snapshot:
+            self._spend = dict(snapshot)
         return self
 
     def set_truncation(self, snapshot: dict[str, Any] | None) -> RunSummaryBuilder:
@@ -1707,6 +1791,7 @@ class RunSummaryBuilder:
             tool_latency=self._tool_latency,
             sandbox=self._sandbox,
             generation=self._generation,
+            spend=self._spend,
         )
 
 

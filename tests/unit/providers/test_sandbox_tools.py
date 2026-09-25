@@ -208,7 +208,15 @@ class TestApiCalls:
 
         assert [r["api"] for r in rows] == ["CreateRemoteThread", "WriteProcessMemory"]
         for row in rows:
-            assert set(row) == {"api", "dll", "processes", "count", "first_args", "first_seen"}
+            assert set(row) == {
+                "api",
+                "dll",
+                "processes",
+                "process_count",
+                "count",
+                "first_args",
+                "first_seen",
+            }
             assert row["processes"] == ["invoice.exe"]
 
     def test_the_first_call_s_arguments_module_and_time_are_kept(self) -> None:

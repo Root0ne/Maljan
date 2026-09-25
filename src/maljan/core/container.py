@@ -437,7 +437,11 @@ class ServiceContainer:
 
         # Per-run LLM token/cost ledger (findings-log §4 Item 1). Agents and the
         # judge add each call's usage; the judge node snapshots it into RunSummary.
-        self._token_ledger = TokenLedger()
+        # With the job's spend meter, which prices each recorded call against
+        # the operator's ceiling (``llm.max_spend_usd_per_job``).
+        from maljan.core.spend import SpendMeter
+
+        self._token_ledger = TokenLedger(spend=SpendMeter.from_settings(config))
 
         # Per-run generation rate of each model, read off every call's answer
         # by a meter attached where the model is built. The judge and the
@@ -1521,6 +1525,18 @@ class ServiceContainer:
             return self._sandbox_slice(agent_name, slice_name, sandbox_report)
         return self.load_chunked(file_hash, agent_name)
 
+    def _prompt_room_chars(self) -> int | None:
+        """What one prompt may carry before the reply room, or ``None`` with no window learned."""
+        from maljan.llm.context_window import ContextBudget
+
+        try:
+            budget = self.get_context_budget()
+        except Exception:  # noqa: BLE001 — no budget is no bound
+            return None
+        if not isinstance(budget, ContextBudget) or not budget.derives:
+            return None
+        return int(budget.tool_budget_chars())
+
     def get_function_summarizer(self) -> FunctionSummarizer | None:
         if not self.config.preprocessing.use_function_summarizer:
             return None
@@ -1536,6 +1552,8 @@ class ServiceContainer:
                     max_summary_words=self.config.preprocessing.summarizer_max_words,
                     token_ledger=getattr(self, "_token_ledger", None),
                     model_label=self._summarizer_model_label(),
+                    room_chars=self._prompt_room_chars,
+                    truncation_ledger=getattr(self, "_truncation_ledger", None),
                 )
                 logger.info(
                     "FunctionSummarizer initialized (%s / %s, max_words=%d).",

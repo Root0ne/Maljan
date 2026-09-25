@@ -309,7 +309,7 @@ def info() -> None:
     typer.echo(f"  Expert Model: {config.llm.expert_model}")
     typer.echo(f"  Judge Model: {config.llm.judge_model}")
     typer.echo(f"  Max Iterations: {config.negotiation.max_iterations}")
-    typer.echo(f"  Max Token Limit: {config.max_token_limit}")
+    typer.echo(f"  Max Token Limit: {config.max_token_limit or 'derived from the window'}")
     typer.echo(f"\nActive profile: {container.config.agents.profile}")
     typer.echo(f"Analysts: {container.analyst_keys()}")
     typer.echo(f"Registered Parsers: {parser_reg.list_parsers()}")

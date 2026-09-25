@@ -9,6 +9,7 @@ tool that answers with its own error has answered, and never trips anything.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -447,3 +448,69 @@ class TestTheCallDeadline:
         settings = Settings()
         settings.mcp.breaker.call_timeout_seconds = 45
         assert guard_from_settings("x", settings).call_timeout("t") == 75.0
+
+
+class TestALongRunningToolIsNotAFailingServer:
+    """capa and FLOSS have no wall clock; a caller giving up on one is not a server failing."""
+
+    class _Session(_Session):
+        def __init__(self, script: list[Any]) -> None:
+            super().__init__(script)
+            self._request_id = 7
+            self.notified: list[Any] = []
+
+        async def send_notification(self, note: Any) -> None:
+            self.notified.append(note)
+
+    def _capa(self, toolkit: MCPLangChainToolkit) -> Any:
+        spec = SimpleNamespace(
+            name="capa",
+            description="Run capa.",
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        )
+        return toolkit._create_langchain_tool(spec)
+
+    def test_its_timeouts_do_not_rest_the_server_and_the_server_is_told_to_stop(self) -> None:
+        guard, _clock, opened = _guard(failures_to_open=1)
+        guard.declare({"capa": {"timeout_s": None, "long_running": True}})
+        timed_out = McpError(ErrorData(code=408, message="Timed out"))
+        session = self._Session([timed_out, timed_out])
+        toolkit = MCPLangChainToolkit(guard=guard)
+        toolkit.session = session  # type: ignore[assignment]
+        tool = self._capa(toolkit)
+
+        async def main() -> None:
+            await tool.ainvoke({})
+            await tool.ainvoke({})
+
+        asyncio.run(main())
+        assert opened == [], "a long-running tool's timeout is not a transport failure"
+        assert guard.refusal("capa") is None
+        (first, _second) = session.notified
+        assert first.root.params.requestId == 7
+
+
+class TestTheRequestIdIsTheCallsOwn:
+    """Pins the installed ``mcp`` client: the id read before ``call_tool`` is the id it sends."""
+
+    def test_next_request_id_is_the_id_call_tool_sends(self) -> None:
+        from mcp import ClientSession
+
+        from maljan.agents.mcp_client import next_request_id
+
+        async def main() -> tuple[Any, Any]:
+            to_server_send, to_server_receive = anyio.create_memory_object_stream(10)
+            from_server_send, from_server_receive = anyio.create_memory_object_stream(10)
+            async with ClientSession(from_server_receive, to_server_send) as session:
+                session._request_id = 41  # a session that has sent 41 requests
+                expected = next_request_id(session)
+                call = asyncio.ensure_future(session.call_tool("capa", {}))
+                message = await to_server_receive.receive()
+                call.cancel()
+                with contextlib.suppress(BaseException):
+                    await call
+                await from_server_send.aclose()
+                return expected, message.message.root.id
+
+        expected, sent = asyncio.run(main())
+        assert expected == sent == 41

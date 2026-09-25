@@ -55,7 +55,12 @@ class OllamaProvider:
         client_kwargs = dict(kwargs.pop("client_kwargs", None) or {})
         client_kwargs.setdefault("timeout", PROVIDER_REQUEST_TIMEOUT_SECONDS)
 
-        return ChatOllama(
+        # Every request held to a whole-call deadline sized for its answer
+        # (``generation_rate.with_sized_request_timeout``): the client's
+        # timeout above bounds only the silence between two pieces.
+        from maljan.llm.generation_rate import with_sized_request_timeout
+
+        return with_sized_request_timeout(ChatOllama)(  # type: ignore[no-any-return]
             model=model,
             client_kwargs=client_kwargs,
             base_url=base_url,

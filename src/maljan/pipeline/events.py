@@ -112,7 +112,8 @@ def emit(sink: EventSink | None, event_type: str, data: dict[str, Any]) -> None:
 # ``stage_ended_at_cap`` says which cap, when a cap is what ended the work:
 # ``steps`` (the loop's own recursion limit), ``time``
 # (the wall-clock hard cap), ``repeats`` (the repeat guard), ``no_room`` (the
-# conversation had no room left for a tool answer) or ``budget_seconds`` (the
+# conversation had no room left for a tool answer), ``spend`` (the operator's
+# spend ceiling for the job) or ``budget_seconds`` (the
 # triage pack's budget). Both are telemetry; neither changes what a model said.
 BUDGET_TICK = "budget_tick"
 STAGE_ENDED_AT_CAP = "stage_ended_at_cap"
@@ -123,7 +124,7 @@ TOOL_SERVER_RESTED = "tool_server_rested"
 # failed as a provider (``maljan.llm.fallback``). Once per switch.
 MODEL_FALLBACK = "model_fallback"
 BUDGET_TICK_EVERY = 5
-CAPS: tuple[str, ...] = ("steps", "time", "repeats", "no_room", "budget_seconds")
+CAPS: tuple[str, ...] = ("steps", "time", "repeats", "no_room", "spend", "budget_seconds")
 
 
 def emit_budget_tick(
@@ -132,15 +133,18 @@ def emit_budget_tick(
     agent: str,
     stage: str,
     steps_used: int,
-    max_steps: int,
+    max_steps: int | None,
     elapsed_s: float,
-    timeout_s: float,
+    timeout_s: float | None,
     prompt_chars: int,
     ledger_entries: int,
     final: bool = False,
     tool_definition_chars: int = 0,
 ) -> None:
     """One agent's spend as of now: steps against its cap, seconds against its limit.
+
+    ``max_steps`` and ``timeout_s`` are ``None`` for a loop with no limit in
+    that dimension, and are sent as ``null``.
 
     ``tool_definition_chars`` is what the loop's tool definitions weigh; they
     go with every request and the context budget counts them beside the
@@ -153,9 +157,9 @@ def emit_budget_tick(
             "agent": str(agent),
             "stage": str(stage),
             "steps_used": max(0, int(steps_used)),
-            "max_steps": max(0, int(max_steps)),
+            "max_steps": None if max_steps is None else max(0, int(max_steps)),
             "elapsed_s": round(max(0.0, float(elapsed_s)), 1),
-            "timeout_s": round(max(0.0, float(timeout_s)), 1),
+            "timeout_s": None if timeout_s is None else round(max(0.0, float(timeout_s)), 1),
             "prompt_chars": max(0, int(prompt_chars)),
             "ledger_entries": max(0, int(ledger_entries)),
             "tool_definition_chars": max(0, int(tool_definition_chars)),

@@ -184,15 +184,16 @@ def _analyst(model: _Scripted) -> _Analyst:
     return agent
 
 
-def _loop(answer: str = REPORT) -> list[list[Any]]:
+def _loop(answer: str = REPORT, max_steps: int | None = None) -> list[list[Any]]:
     model = _Scripted(seen=[], answer=answer)
-    _analyst(model).execute_tool_loop([("system", SYSTEM), ("human", "Analyse.")])
+    with patch("maljan.agents.base_agent.loop_limits", return_value=(None, max_steps)):
+        _analyst(model).execute_tool_loop([("system", SYSTEM), ("human", "Analyse.")])
     return model.seen
 
 
 class TestAnAnalystsToolLoop:
     def test_every_request_ends_on_the_current_block(self) -> None:
-        requests = _loop()
+        requests = _loop(max_steps=40)
         assert len(requests) == 4
         budgets = []
         for request in requests:
@@ -201,6 +202,13 @@ class TestAnAnalystsToolLoop:
             budgets.append(last.split("budget remaining: ")[1].split(",")[0])
         # The line the block exists for still counts down, turn by turn.
         assert len(set(budgets)) == len(budgets)
+
+    def test_a_loop_with_no_limit_says_so_on_every_turn(self) -> None:
+        requests = _loop()
+        assert len(requests) == 4
+        for request in requests:
+            last = str(request[-1].content)
+            assert "budget remaining: no step limit, no time limit" in last
 
     def test_the_first_request_carries_it_on_the_task(self) -> None:
         first = _loop()[0]
@@ -295,7 +303,10 @@ class TestTheShapeEveryTemplateTakes:
 
 @contextlib.contextmanager
 def _judge_settings() -> Iterator[None]:
-    with patch("maljan.agents.judge_agent.get_settings") as settings:
+    with (
+        patch("maljan.agents.judge_agent.get_settings") as settings,
+        patch("maljan.agents.base_agent.get_settings", settings),
+    ):
         cfg = settings.return_value
         cfg.react_agent_timeout = 600
         cfg.react_agent_max_steps = 40

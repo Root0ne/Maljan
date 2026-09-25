@@ -101,12 +101,11 @@ def test_yara_hits_land_in_the_technical_evidence(monkeypatch, tmp_path):
     assert "ransom_note" in bundle.technical_evidence["yara"]
 
 
-def test_the_evidence_text_is_capped():
+def test_the_evidence_text_carries_every_hit():
     from maljan.providers.static.capa_yara import _render_table
-    from maljan.schemas.tool_evidence import MAX_OUTPUT_CHARS
 
     text = _render_table([{"rule": f"rule_{i}", "namespace": "x"} for i in range(5000)])
-    assert len(text) <= MAX_OUTPUT_CHARS
+    assert "rule_4999" in text and "…" not in text
 
 
 # A real (un-mocked) ``_run_capa`` smoke test against ``data/samples`` was

@@ -54,17 +54,16 @@ class TestTheBudgetNoLongerStarvesDomains:
             "the domain lost its slot to file paths"
         )
 
-    def test_each_kind_has_its_own_ceiling(self) -> None:
+    def test_every_indicator_of_a_kind_is_kept(self) -> None:
         blob = b"".join(_pad(f"host{i:04d}.example.com".encode()) for i in range(500))
-        domains = _kinds(blob).get("domain", [])
-        assert domains, "domains extracted"
-        assert len(domains) <= 25, "a single kind must not consume the whole report"
+        assert len(_kinds(blob).get("domain", [])) == 500
 
-    def test_the_overall_cap_still_holds(self) -> None:
+    def test_no_count_cap_drops_one_kind_for_another(self) -> None:
         blob = b"".join(
             _pad(f"http://host{i:04d}.example.com/a".encode()) for i in range(200)
         ) + b"".join(_pad(f"C:\\dir\\file{i:04d}.dat".encode()) for i in range(200))
-        assert len(_extract_string_iocs(blob)) <= 80
+        kinds = _kinds(blob)
+        assert len(kinds.get("url", [])) == 200 and len(kinds.get("path", [])) == 200
 
 
 class TestWideStringsAreVisible:
