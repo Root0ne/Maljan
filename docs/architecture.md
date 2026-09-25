@@ -466,7 +466,11 @@ Two producers use it:
   count beside the first answer's, with which one was kept, goes on the loop's
   budget record (`validation_retry`). A retry's findings block travels on the
   retry's own ISR: findings and artifacts follow the answer that is kept, and a
-  discarded retry takes its findings with it.
+  discarded retry takes its findings with it. Tool-call markup is left out of
+  the replay. With the consistency gate on, the answer is replayed whole and
+  the question names the claims the gate set aside (`gate_removed_note`).
+  A claim is stored whole, however long: a claim stored at 300 characters was
+  checked, retried and published as the cut text.
 
 * **The judge** (`agents/judge_agent.py`) — `validate_verdict_bundle` reports an
   indicator whose pattern names a value no tool in the run saw, an
@@ -2261,9 +2265,20 @@ is assembled from what the run gathered rather than recomputed beside it:
   tool-free question with the verdict's framing and sizing, about the
   techniques an analyst claimed that its bundle carries on no attack-pattern
   and no edge, and the ones named only on a finding
-  (`capability_matrix.techniques_for_the_judge`), each with the claim or
-  finding text and its evidence ids: keep or drop, with a reason, one line per
-  technique. The answer is kept on the judge's bundle
+  (`capability_matrix.judge_questions`), each with the claim or finding text
+  and its evidence ids: keep or drop, with a reason. The question shows what
+  it asks the judge to decide from — the analysts' reports as the verdict call
+  sees them (`verdict_reports_text`), the verdict and the techniques the bundle
+  carries, and the text of every cited evidence entry — and when the entries
+  do not fit the judge's window less its output cap, each is shortened to an
+  equal share with the cut marked, a notice in the question, and the notice
+  recorded on the answer (`shortened`). The answer is asked for as a JSON
+  array, read from the schema where the provider has structured output and
+  otherwise by `read_technique_answer`: JSON arrays and objects first, then
+  each line on its own (table rows, a name after the id, arrows, a
+  "Decision:" label), a `<think>` block taken out and the last answer per id
+  kept. An id the catalogue rejects or the sample cannot host is not asked and
+  is recorded in `not_asked`. The answer is kept on the judge's bundle
   (`x_maljan_technique_review`, never exported) and the matrix publishes per
   it: a dropped technique is not published and reads "the judge dropped it
   (<reason>)", a kept one is published — a finding's technique included — with
