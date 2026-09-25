@@ -8,6 +8,7 @@ no per-agent branching exists.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import re
@@ -3713,6 +3714,48 @@ def make_judge_node(
             if VERDICT_TIMEOUT_CODE in _verdict_codes:
                 _degradation_reasons.append(VERDICT_TIMEOUT_REASON)
                 _degraded_mode = True
+
+            # The techniques the verdict's bundle does not carry — an analyst's
+            # claim it left out, a technique named only on a finding — are put
+            # to the judge once: keep or drop, with a reason. Its answer is
+            # kept on its bundle, where the capability matrix reads it; with
+            # no answer nothing is withheld. Set on every bundle, so a property
+            # a model wrote into its own answer is never read as this answer.
+            if isinstance(verdict.bundle, Bundle):
+                _review = None
+                if inspect.iscoroutinefunction(getattr(type(judge), "decide_techniques", None)):
+                    try:
+                        from maljan.agents.judge_agent import question_evidence
+
+                        try:
+                            _corpus = container.get_evidence_corpus()
+                        except Exception:  # noqa: BLE001 — the stored outputs stand alone
+                            _corpus = None
+                        _review = await judge.decide_techniques(
+                            verdict.bundle,
+                            isr_reports,
+                            # What the verdict was drawn from, and the text of
+                            # each entry a claim or finding in question cites.
+                            reports=reports,
+                            evidence_summary=evidence_summary,
+                            degradation_note=degradation_note,
+                            evidence_texts=question_evidence(_ledger, _corpus),
+                            sample=_sample_identity(state),
+                            # The routed minimum the matrix asks the platform
+                            # question with.
+                            routed={
+                                "platform": state.get("platform"),
+                                "file_type": state.get("file_type"),
+                            },
+                            facts_block=pack_text(state, container),
+                            run_state=render_run_state(state),
+                            verdict_timed_out=VERDICT_TIMEOUT_CODE in _verdict_codes,
+                        )
+                    except Exception as _exc:  # noqa: BLE001 — an unasked question withholds nothing
+                        logger.warning(
+                            "Judge technique question skipped (%s).", type(_exc).__name__
+                        )
+                verdict.bundle.x_maljan_technique_review = _review
 
             bundle = verdict.bundle
             stix_output: dict[str, Any] = bundle.model_dump() if isinstance(bundle, Bundle) else {}

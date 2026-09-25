@@ -27,7 +27,20 @@ from typing import Any
 import pytest
 
 from maljan.agents.base_agent import FINAL_ANSWER_NUDGE
-from maljan.agents.judge_agent import COMPACT_BUNDLE_RULES, verdict_cut_violation
+from maljan.agents.judge_agent import (
+    COMPACT_BUNDLE_RULES,
+    EVIDENCE_SHORTENED_NOTICE,
+    LOWERED_ENTRY_MARK,
+    NO_ENTRY_TEXT,
+    PARTIAL_ENTRY_MARK,
+    TECHNIQUE_ANSWER_FORM,
+    TECHNIQUE_ANSWER_UNREAD,
+    TECHNIQUE_QUESTION_NOT_ASKED,
+    TECHNIQUE_QUESTION_SYSTEM,
+    technique_question_head,
+    technique_question_text,
+    verdict_cut_violation,
+)
 from maljan.agents.network_analyst import NO_PACKET_TOOL_LINE, OTHER_TOOLS_THEN_ANALYZE
 from maljan.agents.prompt_fragments import (
     ENDPOINTS_ROW_SHAPE,
@@ -51,6 +64,7 @@ from maljan.agents.tool_pinning import (
     UNREADABLE_FILLED_CAPTURE_REMEDIATION,
 )
 from maljan.analysis.pcap_summary import CaptureRead
+from maljan.extractors.capability_matrix import NOT_ASKED_UNKNOWN_ID, TechniqueQuestion
 from maljan.pipeline import triage_pack
 from maljan.pipeline.nodes import (
     NO_SANDBOX_DATA_REASON,
@@ -58,11 +72,13 @@ from maljan.pipeline.nodes import (
     skipped_analysts_reason,
 )
 from maljan.pipeline.validation import (
+    ANALYST_FEEDBACK_CLOSING,
     CapabilityGrounding,
     EntryTexts,
     absence_claim_violation,
     analyst_cut_violation,
     claim_does_not_describe_violation,
+    gate_removed_note,
     misstated_entry_contents,
     repeated_item_violations,
     section_cut_violation,
@@ -95,7 +111,10 @@ from maljan.reporting.renderers.stix_renderer import (
 from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
+    JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
     ClaimEvidence,
+    judge_dropped_reason,
+    judge_kept_note,
 )
 from maljan.schemas.stix_models import Bundle
 from maljan.tools import knowledge
@@ -302,6 +321,36 @@ PROMPTS: dict[str, str] = {
     ),
     "rule-match-only note": RULE_ONLY_NOTE,
     "judge-only technique note": JUDGE_ONLY_TECHNIQUE_MARKER,
+    "analyst retry closing line": ANALYST_FEEDBACK_CLOSING,
+    "judge technique question": " ".join(
+        [
+            TECHNIQUE_QUESTION_SYSTEM,
+            technique_question_text(
+                [
+                    TechniqueQuestion("T1003", "claimed", [("a", "x", ["ev_0001"])]),
+                    TechniqueQuestion("T1112", "finding", [("b", "y", [])]),
+                ],
+                {"ev_0001": "entry text"},
+                notice=EVIDENCE_SHORTENED_NOTICE.format(cut=1, total=2, width=10),
+            ),
+        ]
+    ),
+    "judge technique answer form": TECHNIQUE_ANSWER_FORM,
+    "judge technique question head": technique_question_head("r", "Suspicious", ["T1112"]),
+    "judge technique question entry marks": " ".join(
+        [PARTIAL_ENTRY_MARK, LOWERED_ENTRY_MARK, NO_ENTRY_TEXT]
+    ),
+    "analyst question naming the claims the gate set aside": gate_removed_note(["x"]),
+    "judge technique notes": " ".join(
+        [
+            JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
+            judge_dropped_reason("r"),
+            judge_kept_note("r"),
+            TECHNIQUE_QUESTION_NOT_ASKED,
+            TECHNIQUE_ANSWER_UNREAD,
+            NOT_ASKED_UNKNOWN_ID,
+        ]
+    ),
     "analyst cut-at-cap question": analyst_cut_violation(
         4096, "CLAIM: The file opens a window.\nEVIDENCE: [ev_0001]\nCLAIM: The fi"
     ).message,

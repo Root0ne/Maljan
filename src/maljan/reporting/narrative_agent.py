@@ -630,6 +630,7 @@ class NarrativeAgent:
                     self.token_ledger,
                     agent=REPORTER_AGENT_KEY,
                     model=self.model_label,
+                    call="narrative",
                 )
                 if isinstance(result, NarrativeOutput):
                     return self._kept_with_ungrounded_recorded(
@@ -686,7 +687,11 @@ class NarrativeAgent:
                     from maljan.core.token_ledger import record_response_usage
 
                     record_response_usage(
-                        self.token_ledger, raw, agent=REPORTER_AGENT_KEY, model=self.model_label
+                        self.token_ledger,
+                        raw,
+                        agent=REPORTER_AGENT_KEY,
+                        model=self.model_label,
+                        call="narrative",
                     )
                     from maljan.pipeline.events import announce_model_fallback
 

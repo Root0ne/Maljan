@@ -9,7 +9,9 @@ made the call and the model that answered, and the judge node snapshots it into
 the ``RunSummary``.
 
 A call whose provider reported no usage is counted as a call and as **not
-reported** — never as an estimate. A figure printed as a count is a count the
+reported** — never as an estimate — and recorded by the agent that made it,
+the call it was and the model that answered, so a run summary that says "not
+reported for one call" can also say which one. A figure printed as a count is a count the
 provider gave; where it gave none, the report says so. The same rule holds for
 cost: there is no price table here, and a cost appears only where the provider
 reported one. Recording never raises — telemetry must not break analysis.
@@ -205,6 +207,7 @@ class TokenLedger:
         self._total = _Tally()
         self._agents: dict[str, _Tally] = {}
         self._fallbacks: list[dict[str, str]] = []
+        self._unreported: list[dict[str, str]] = []
 
     def add(
         self,
@@ -213,9 +216,16 @@ class TokenLedger:
         agent: str = "",
         model: str = "",
         fallback: str = "",
+        call: str = "",
     ) -> None:
-        """One call: its reported usage, or ``None`` when the provider reported none."""
+        """One call: its reported usage, or ``None`` when the provider reported none.
+
+        ``call`` names what the call was — a tool-loop turn, the verdict, a
+        report section — and is recorded for a call that reported no usage.
+        """
         with self._lock:
+            if usage is None:
+                self._unreported.append({"agent": agent, "call": call, "model": model})
             tallies = [self._total]
             if agent:
                 tallies.append(self._agents.setdefault(agent, _Tally()))
@@ -263,6 +273,10 @@ class TokenLedger:
             out.pop("models", None)
             out["agents"] = {name: tally.as_dict() for name, tally in sorted(self._agents.items())}
             out["fallbacks"] = [dict(row) for row in self._fallbacks]
+            # Which calls reported no usage, one row each, present only when
+            # one did: ``unreported_calls`` is their count.
+            if self._unreported:
+                out["unreported"] = [dict(row) for row in self._unreported]
             return out
 
 
@@ -272,11 +286,13 @@ def record_response_usage(
     *,
     agent: str = "",
     model: str = "",
+    call: str = "",
 ) -> None:
     """Add one model answer to ``ledger`` (no-op if ledger is None). Never raises.
 
     ``model`` is the label of the model the caller asked; an answer that says
     which model gave it — a fallback list stamps every answer — wins over it.
+    ``call`` names what the call was, for a call that reported no usage.
     """
     if ledger is None:
         return
@@ -284,13 +300,20 @@ def record_response_usage(
         from maljan.llm.fallback import turn_model
 
         answered_by, fallback = turn_model(response, model)
-        ledger.add(turn_usage(response), agent=agent, model=answered_by, fallback=fallback)
+        ledger.add(
+            turn_usage(response), agent=agent, model=answered_by, fallback=fallback, call=call
+        )
     except Exception:  # noqa: BLE001 — telemetry must never break analysis
         return
 
 
 def structured_answer(
-    answer: Any, ledger: TokenLedger | None, *, agent: str = "", model: str = ""
+    answer: Any,
+    ledger: TokenLedger | None,
+    *,
+    agent: str = "",
+    model: str = "",
+    call: str = "",
 ) -> Any:
     """The parsed value of a ``with_structured_output(..., include_raw=True)`` answer.
 
@@ -303,7 +326,7 @@ def structured_answer(
     """
     if not (isinstance(answer, dict) and "raw" in answer and "parsed" in answer):
         return answer
-    record_response_usage(ledger, answer.get("raw"), agent=agent, model=model)
+    record_response_usage(ledger, answer.get("raw"), agent=agent, model=model, call=call)
     error = answer.get("parsing_error")
     if answer.get("parsed") is None and error is not None:
         raise error if isinstance(error, BaseException) else ValueError(str(error))

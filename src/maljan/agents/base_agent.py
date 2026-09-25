@@ -85,6 +85,10 @@ RECURSION_STOP_TEXT = "Sorry, need more steps to process this request."
 # it is not a call on the token ledger.
 SYNTHETIC_TURN_KEY = "maljan_synthetic_turn"
 
+# What the token ledger calls one model turn of a tool loop, for a call that
+# reported no usage.
+TOOL_LOOP_TURN_CALL = "tool loop turn"
+
 
 def is_model_turn(message: Any) -> bool:
     """Whether ``message`` is an assistant turn a model answered, and so a call to count."""
@@ -1298,9 +1302,6 @@ def evidence_ref_width() -> int:
     )
 
 
-# How many dropped ids are written back after the evidence field's cut.
-_EVIDENCE_REF_IDS = 3
-
 # The start of an id the cut sliced through, at the end of the kept text: any
 # prefix of ``[ev_NNNN``, from the bare bracket up to a whole id whose closing
 # bracket was cut, and the space before it. The whole id is written back.
@@ -1314,9 +1315,9 @@ def evidence_ref_text(evidence_text: str) -> str:
     (``evidence_ref_width``), and the claim format asks for the id at
     the end of a line whose front is prose, so on a long line the cut lands on
     the one part the run can check. Any id the cut dropped is written back
-    after it, in the order the model wrote it, up to a few: the field is what
-    the report prints and what long-term memory embeds, and the width should
-    bound it. An id the cut sliced through is removed from
+    after it, in the order the model wrote it — every one: an id is the
+    citation, and a claim that loses one cites less than its analyst did. An
+    id the cut sliced through is removed from
     the kept text, since the whole id follows.
 
     The cut is marked (``utils.marked_cut.CUT_MARK``) where the kept text ends.
@@ -1332,7 +1333,7 @@ def evidence_ref_text(evidence_text: str) -> str:
         found
         for found in dict.fromkeys(f.lower() for f in ENTRY_ID_RE.findall(evidence_text))
         if found not in still_there
-    ][:_EVIDENCE_REF_IDS]
+    ]
     if not dropped:
         return kept
     return f"{kept} {' '.join(f'[{found}]' for found in dropped)}"
@@ -1412,7 +1413,9 @@ def parse_structured_claims_counted(text: str) -> tuple[list[ClaimEvidence], int
 
         claims.append(
             ClaimEvidence(
-                claim=claim_text[:300],
+                # Whole, as written: a claim stored at a fixed width was
+                # checked, retried and published as the cut text.
+                claim=claim_text,
                 evidence_ref=evidence_ref_text(evidence_text),
                 confidence=confidence,
                 technique_id=technique_id,
@@ -2394,9 +2397,12 @@ class _PriorAnswer:
 
     def __init__(self, isr: AgentISR) -> None:
         self.isr = isr
-        # An answer that parsed into nothing is shown back as the prose it was,
-        # so the question about its format is asked over what was written.
-        self.content = isr.unparsed_answer or isr.to_text_summary()
+        # The answer as the model wrote it, CLAIM blocks and findings block
+        # included: shown a summary of its parsed claims, a model answered
+        # again in the summary's shape, and nothing in that shape is a claim.
+        # The summary stands only for an ISR no single answer produced — a
+        # merge of chunks.
+        self.content = isr.answer_text or isr.unparsed_answer or isr.to_text_summary()
 
 
 def alignment_gate(knowledge: Any, cfg_validation: Any, log: Any, name: str) -> Any | None:
@@ -2470,18 +2476,21 @@ class BudgetMeter:
         share = getattr(llm, "fallback_turn_share", None)
         return float(share) if isinstance(share, int | float) else None
 
-    def _record_usage(self, response: Any, *, announce: bool = True) -> None:
+    def _record_usage(self, response: Any, *, announce: bool = True, call: str = "") -> None:
         """One model answer onto the run's ledger, under this agent and the model that gave it.
 
         ``announce`` publishes the switch when this answer is the one a
         fallback gave; the tool loop announces its turns as they happen and
-        records them afterwards, so it passes ``False`` here.
+        records them afterwards, so it passes ``False`` here. ``call`` names
+        what the call was, which the ledger keeps for a call that reported no
+        usage.
         """
         record_response_usage(
             getattr(self, "token_ledger", None),
             response,
             agent=str(getattr(self, "name", "") or ""),
             model=self._model_label(),
+            call=call,
         )
         # Whether this answer ended at the output cap, kept for the validation
         # turn: the last model answer recorded is the one the turn checks.
@@ -2501,7 +2510,7 @@ class BudgetMeter:
         """
         for message in list(latest.get("messages") or [])[sent:]:
             if is_model_turn(message):
-                self._record_usage(message, announce=False)
+                self._record_usage(message, announce=False, call=TOOL_LOOP_TURN_CALL)
 
     def _announce_fallback(self, message: Any) -> None:
         """Publish ``model_fallback`` when ``message`` is the turn its model list moved on.
@@ -3811,7 +3820,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # ``usage_metadata``) so the ledger reflects real LLM spend.
         for _m in msgs:
             if is_model_turn(_m):
-                self._record_usage(_m, announce=False)
+                self._record_usage(_m, announce=False, call=TOOL_LOOP_TURN_CALL)
         elapsed = _time.monotonic() - _t0
         # A loop that overran is a slow model or a slow tool, and the loop's
         # own elapsed time cannot tell them apart. Every ledger entry carries
@@ -4080,7 +4089,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return None
             modes.append("tool_choice_none")
         self._nudge_retry_mode = "+".join(modes) or None
-        self._record_usage(answer)
+        self._record_usage(answer, call="final-answer nudge")
         text = str(getattr(answer, "content", "") or "")
         return text or None
 
@@ -4167,6 +4176,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             block = parse_findings_block(content)
             if not block:
                 return content
+            # The prose goes on to the parser; the answer it came out of is
+            # what the validation turn shows back (``_text_to_isr``).
+            self._last_written_answer: tuple[str, str] | None = (block.prose, content)
             self._findings_buffer.extend(block.findings)
             self._artifacts_buffer.extend(block.artifacts)
             self.logger.info(
@@ -4345,6 +4357,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                     remaining,
                 ),
                 remaining,
+                what="step-cap salvage",
             )
         except Exception as exc:  # noqa: BLE001 - best-effort salvage
             self.logger.error(
@@ -4459,7 +4472,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 else asyncio.to_thread(llm.invoke, messages)
             )
             response = await asyncio.wait_for(call, timeout=float(timeout))
-            self._record_usage(response)
+            self._record_usage(response, call=what)
             return str(response.content)
 
         _t0 = _time.monotonic()
@@ -4782,7 +4795,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
         )
         try:
-            text = self._invoke_llm_with_timeout(messages, _SYNTHESIS_MIN_SECONDS)
+            text = self._invoke_llm_with_timeout(
+                messages, _SYNTHESIS_MIN_SECONDS, what="forced synthesis"
+            )
         except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves the failure
             self.logger.error(
                 "%s: synthesis from the answered asks failed: %s",
@@ -5167,6 +5182,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         if nudged:
             self.validation_findings.extend(parse_violations(isr))
 
+        # The findings and artifacts the answer being checked carried are its
+        # own from here on: a retry's are kept apart (``_parse``) and go with
+        # the retry only if the retry is the answer kept.
+        if isinstance(getattr(self, "_findings_buffer", None), list) and isinstance(
+            getattr(self, "_artifacts_buffer", None), list
+        ):
+            BaseAnalyst._drain_findings(self, isr)  # type: ignore[arg-type]
+
         try:
             initial = _validator(isr)
         except Exception as exc:  # noqa: BLE001
@@ -5239,9 +5262,16 @@ class BaseAnalyst(BudgetMeter, ABC):
         loop_cut = cuts.get(id(isr))
         # Measured with the turn that carries every question of this retry,
         # not the framed conversation alone: fourteen questions are not free.
-        from maljan.pipeline.validation import feedback_text
+        from maljan.pipeline.validation import (
+            ANALYST_FEEDBACK_CLOSING,
+            feedback_text,
+            gate_removed_note,
+        )
 
-        sent = with_question(messages, feedback_text(initial))
+        closing = ANALYST_FEEDBACK_CLOSING
+        if isr.gate_removed and isr.answer_text:
+            closing = f"{gate_removed_note(isr.gate_removed)}\n{closing}"
+        sent = with_question(messages, feedback_text(initial, closing=closing))
         if loop_cut is not None and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
             self, sent, loop_cut[0]
         ):
@@ -5268,18 +5298,74 @@ class BaseAnalyst(BudgetMeter, ABC):
             return self._invoke_llm_with_timeout(
                 frame_messages(turns, run_state=str(getattr(self, "run_state_block", "") or "")),
                 left,
+                what="validation retry",
             )
 
         def _parse(answer: Any) -> AgentISR:
             if isinstance(answer, _PriorAnswer):
                 return answer.isr
             text = str(getattr(answer, "content", answer))
-            parsed = self._text_to_isr(self._capture_findings(text), isr.revision_round)
+            self.logger.debug(
+                "%s: the validation retry answered %d character(s):\n%s",
+                self.name,
+                len(text),
+                text,
+            )
+            # The retry's findings block is read into the buffers like any
+            # answer's and taken straight back out onto the retry's own ISR, so
+            # an answer ``_keep`` discards takes its findings with it.
+            findings = getattr(self, "_findings_buffer", None)
+            artifacts = getattr(self, "_artifacts_buffer", None)
+            f_mark = len(findings) if isinstance(findings, list) else 0
+            a_mark = len(artifacts) if isinstance(artifacts, list) else 0
+            prose = self._capture_findings(text)
+            parsed = self._text_to_isr(prose, isr.revision_round)
+            if isinstance(findings, list):
+                parsed.findings = findings[f_mark:]
+                del findings[f_mark:]
+            if isinstance(artifacts, list):
+                parsed.artifacts = artifacts[a_mark:]
+                del artifacts[a_mark:]
             cuts[id(parsed)] = getattr(self, "_last_answer_cut", None)
             self._last_answer_cut = None
             return parsed
 
         def _keep(first_answer: AgentISR, retried: AgentISR) -> AgentISR:
+            kept = _choose(first_answer, retried)
+            self.logger.info(
+                "Validation: the retry for '%s' answered %d claim(s), the first answer %d; "
+                "the %s answer is kept.",
+                self.name,
+                len(retried.claims),
+                len(first_answer.claims),
+                "retry's" if kept is retried else "first",
+            )
+            # How many claims the retry answered with, beside the first
+            # answer's, on the loop's record: a retry that answered none
+            # is otherwise a warning in a log.
+            BaseAnalyst._note_on_last_loop(  # type: ignore[arg-type]
+                self,
+                "validation_retry",
+                {
+                    "first_claims": len(first_answer.claims),
+                    "retry_claims": len(retried.claims),
+                    "first_findings": len(first_answer.findings or []),
+                    "retry_findings": len(retried.findings or []),
+                    "kept": "retry" if kept is retried else "first",
+                },
+            )
+            if kept is retried and first_answer.findings and not retried.findings:
+                # Findings follow the answer that is kept, and this one wrote
+                # none: the first answer's go with it, and the record says so.
+                self.logger.warning(
+                    "Validation: the kept retry for '%s' carries no findings; the first "
+                    "answer's %d finding(s) are not published.",
+                    self.name,
+                    len(first_answer.findings),
+                )
+            return kept
+
+        def _choose(first_answer: AgentISR, retried: AgentISR) -> AgentISR:
             # A retry that came back with fewer claims than it started with
             # lost work. ``_text_to_isr`` over a garbled second answer parses
             # to an empty ISR just as happily as over a good one, and taking it
@@ -5332,6 +5418,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
                 keep=_keep,
                 drop_answer_for=frozenset({ANALYST_CUT_CODE}),
+                closing=closing,
             )
         except Exception as exc:  # noqa: BLE001 — a retry that fails keeps the first answer
             self.logger.warning("Validation retry failed (%s); keeping the first answer.", exc)
@@ -5426,7 +5513,13 @@ class BaseAnalyst(BudgetMeter, ABC):
                     len(isr.claims),
                     self.name,
                 )
-            return isr.model_copy(update={"claims": kept})
+            gated = isr.model_copy(update={"claims": kept})
+            if dropped:
+                # The written answer is still shown back whole — its shape is
+                # the one the parser reads — and the question names the claims
+                # of it the gate set aside.
+                gated.note_gate_removed([c.claim for c in isr.claims if c not in kept])
+            return gated
         except Exception as exc:  # noqa: BLE001 — gate must never break the run
             self.logger.warning("Consistency gate skipped (%s).", exc)
             return isr
@@ -5568,7 +5661,28 @@ class BaseAnalyst(BudgetMeter, ABC):
         return isr
 
     def _text_to_isr(self, text: str, revision_round: int) -> AgentISR:
-        """Convert a free-text report into a minimal AgentISR."""
+        """Convert a free-text report into a minimal AgentISR.
+
+        The ISR carries the answer it was parsed from as the model wrote it
+        (``AgentISR.answer_text``): the findings block ``_capture_findings``
+        took out of ``text`` is put back, because the validation turn shows the
+        analyst its own answer and the block is part of it.
+        """
+        written = text
+        last = getattr(self, "_last_written_answer", None)
+        if isinstance(last, tuple) and len(last) == 2 and last[0] == text:
+            written = str(last[1])
+        # Read once: the next answer's block is its own.
+        self._last_written_answer = None
+        isr = self._parse_answer_text(text, revision_round)
+        # Tool-call markup a model wrote into its answer is not part of it —
+        # the parser reads none of it — and replayed into a tool-free turn it
+        # would be shown back as something to write again.
+        isr.note_answer_text(strip_tool_call_scaffolding(written))
+        return isr
+
+    def _parse_answer_text(self, text: str, revision_round: int) -> AgentISR:
+        """The ISR the claim parser reads out of ``text``, for :meth:`_text_to_isr`."""
         domain = self._infer_domain()
 
         # A model that writes its tool calls into

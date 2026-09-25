@@ -191,7 +191,7 @@ class TestForcedSynthesisFollowsTheSameRule:
         agent = _Analyst(_StrictServer())
         sent: list[list[Any]] = []
 
-        def _capture(messages: list[Any], timeout: int) -> str:
+        def _capture(messages: list[Any], timeout: int, **_: Any) -> str:
             sent.append(list(messages))
             return _REPORT
 

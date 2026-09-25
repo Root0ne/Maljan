@@ -46,7 +46,7 @@ class _Analyst(BaseAnalyst):
     def revise(self, *args: Any, **kwargs: Any) -> str:  # pragma: no cover - unused
         return ""
 
-    def _invoke_llm_with_timeout(self, messages: list, timeout: int) -> str:
+    def _invoke_llm_with_timeout(self, messages: list, timeout: int, **_: Any) -> str:
         self.seen_messages = list(messages)
         self.seen_timeout = timeout
         return "FINAL ANSWER"

@@ -448,7 +448,7 @@ def test_the_validation_turn_is_told_it_carries_no_tools(monkeypatch: Any) -> No
     agent = _static_agent([_Tool("x", "knowledge")])
     sent: list[list[Any]] = []
 
-    def _capture(turns: list[Any], timeout: float) -> AIMessage:
+    def _capture(turns: list[Any], timeout: float, **_: Any) -> AIMessage:
         sent.append(list(turns))
         return AIMessage(content="CLAIM: c\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.5\nTECHNIQUE: T1055")
 
@@ -549,7 +549,7 @@ class TestAToolsFreeCallKeepsTheProvidersGuidance:
         agent = _static_agent([_Tool("x", "knowledge")], provider="ghidra")
         sent: list[list[Any]] = []
 
-        def _capture(turns: list[Any], timeout: float) -> AIMessage:
+        def _capture(turns: list[Any], timeout: float, **_: Any) -> AIMessage:
             sent.append(list(turns))
             return AIMessage(
                 content="CLAIM: c\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.5\nTECHNIQUE: T1055"

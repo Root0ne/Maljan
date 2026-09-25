@@ -34,6 +34,22 @@ JUDGE_ONLY_TECHNIQUE_MARKER = (
     "stated by the judge and claimed by no analyst; a technique the judge states is "
     "published as its own claim"
 )
+# The note on a technique the judge was asked about after its verdict and gave
+# no answer for: it is published, or not, as it would have been without the
+# question, and the row says the judge did not confirm it.
+JUDGE_UNCONFIRMED_TECHNIQUE_MARKER = "not confirmed by the judge"
+
+
+def judge_dropped_reason(reason: str) -> str:
+    """Why a technique the judge dropped when asked is not published, in its own words."""
+    said = str(reason or "").strip()
+    return f"the judge dropped it ({said})" if said else "the judge dropped it"
+
+
+def judge_kept_note(reason: str) -> str:
+    """The note on a technique the judge kept when asked, with the reason it gave."""
+    said = str(reason or "").strip()
+    return f"kept by the judge when asked ({said})" if said else "kept by the judge when asked"
 
 
 class ClaimEvidence(BaseModel):
@@ -209,11 +225,39 @@ class AgentISR(BaseModel):
     # nobody stated is not put on one.
     _unparsed_answer: str = PrivateAttr(default="")
     _blocks_without_confidence: int = PrivateAttr(default=0)
+    # The answer this ISR was parsed from, as the model wrote it: its CLAIM
+    # blocks and its findings block included. What the validation turn shows
+    # the analyst as its own previous answer; a rendering of the parsed claims
+    # in another shape is copied back in that shape, and the parser reads none
+    # of it.
+    _answer_text: str = PrivateAttr(default="")
+    # The claims of that answer the consistency gate set aside, as written:
+    # the answer is shown back whole, and the question says which of its
+    # claims no longer stand.
+    _gate_removed: list[str] = PrivateAttr(default_factory=list)
 
     @property
     def unparsed_answer(self) -> str:
         """The prose of an answer that parsed into no claim, or ``""``."""
         return self._unparsed_answer
+
+    @property
+    def answer_text(self) -> str:
+        """The answer this ISR was parsed from, as written, or ``""`` when it has none."""
+        return self._answer_text
+
+    def note_answer_text(self, text: str) -> None:
+        """Record the answer this ISR was parsed from, as the model wrote it."""
+        self._answer_text = str(text or "")
+
+    @property
+    def gate_removed(self) -> list[str]:
+        """The claims of the written answer the consistency gate set aside."""
+        return list(self._gate_removed)
+
+    def note_gate_removed(self, claims: list[str]) -> None:
+        """Record the claims of the written answer the consistency gate set aside."""
+        self._gate_removed = [str(c) for c in claims]
 
     @property
     def blocks_without_confidence(self) -> int:
