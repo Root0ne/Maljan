@@ -44,6 +44,7 @@ import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -1072,10 +1073,51 @@ def _left_out(n: int) -> str:
     return _LEFT_OUT.format(n=n, noun="entry" if n == 1 else "entries")
 
 
-# How many named items a line lists before it says how many more there are.
-_LIST_HEAD = 6
-# How many characters of a failure or a prose answer a line keeps.
-_TEXT_HEAD = 120
+@dataclass(frozen=True)
+class PackDetail:
+    """How much of each fact a pack line shows; ``None`` is all of it.
+
+    Not a set of caps. The pack is rendered whole first, and only when the
+    whole does not fit its room (the upstream bound, derived from the window
+    this job's models serve) is a detail level derived from that room: the
+    largest ``level`` at which the rendered pack fits. At ``level`` a line
+    lists ``level`` named items before saying how many more there are, and
+    keeps ``level × CHARS_PER_LEVEL`` characters of a text, a recovered
+    string or a label; the decoded-strings line shows as many strings as fit
+    the room left to it. What a line leaves out it says, and where the rest
+    is: one tool call away.
+    """
+
+    list_head: int | None = None
+    text_head: int | None = None
+    strings_shown: int | None = None
+    string_chars: int | None = None
+    labels_shown: int | None = None
+    label_chars: int | None = None
+
+    @classmethod
+    def at(cls, level: int) -> PackDetail:
+        chars = max(8, int(level) * CHARS_PER_LEVEL)
+        return cls(
+            list_head=int(level),
+            text_head=chars,
+            strings_shown=int(level),
+            string_chars=chars,
+            labels_shown=int(level),
+            label_chars=chars,
+        )
+
+
+# The characters of text one detail level is worth. A derivation constant,
+# not a limit: a level is chosen from the pack's room, and the text a line
+# keeps grows with it.
+CHARS_PER_LEVEL = 20
+WHOLE = PackDetail()
+_DETAIL: ContextVar[PackDetail] = ContextVar("pack_detail", default=WHOLE)
+
+
+def _detail() -> PackDetail:
+    return _DETAIL.get()
 
 
 RULE_TOOLS = ("capa", "yara_scan")
@@ -1114,15 +1156,80 @@ def pack_entries(rows: Any) -> list[LedgerEntry]:
 
 
 def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
-    """The pack as one line per entry, ``[ev_id] group: facts``, cut at ``max_chars``.
+    """The pack as one line per entry, ``[ev_id] group: facts``, within ``max_chars``.
 
-    Facts only: counts, names, the values the tools returned. A cut block
-    ends with a line saying how many entries it left out and that their full
-    output is a tool call away. ``max_chars`` at or below zero means no cut.
+    Facts only: counts, names, the values the tools returned, each whole when
+    the whole pack fits ``max_chars``. When it does not, the detail every line
+    shows is derived from the room (:class:`PackDetail`): the most that fits,
+    each line saying what it left out. Only when even the least detail does
+    not fit is an entry left out, and the block then ends with a line saying
+    how many and that their full output is a tool call away. ``max_chars`` at
+    or below zero means no bound.
     """
-    lines = [_pack_line(entry) for entry in entries]
-    if max_chars <= 0:
-        return "\n".join(lines)
+    whole = _render_lines(entries, WHOLE)
+    if max_chars <= 0 or _joined_len(whole) <= max_chars:
+        return "\n".join(whole)
+    detail = _detail_for(entries, max_chars)
+    token = _DETAIL.set(detail)
+    try:
+        return _fit_lines(entries, [_pack_line(entry) for entry in entries], max_chars)
+    finally:
+        _DETAIL.reset(token)
+
+
+def _render_lines(entries: list[LedgerEntry], detail: PackDetail) -> list[str]:
+    token = _DETAIL.set(detail)
+    try:
+        return [_pack_line(entry) for entry in entries]
+    finally:
+        _DETAIL.reset(token)
+
+
+def _joined_len(lines: list[str]) -> int:
+    return sum(len(line) for line in lines) + max(0, len(lines) - 1)
+
+
+def _detail_for(entries: list[LedgerEntry], max_chars: int) -> PackDetail:
+    """The most detail at which every line of the pack fits ``max_chars``, or the least.
+
+    A binary search over the level, from one item and one level of text to as
+    many as the largest list or text in the pack holds.
+    """
+    low, high = 1, max(1, _largest_detail_needed(entries))
+    best = PackDetail.at(1)
+    while low <= high:
+        middle = (low + high) // 2
+        detail = PackDetail.at(middle)
+        if _joined_len(_render_lines(entries, detail)) <= max_chars:
+            best, low = detail, middle + 1
+        else:
+            high = middle - 1
+    return best
+
+
+def _largest_detail_needed(entries: list[LedgerEntry]) -> int:
+    """A level past which no line of the pack shows anything more."""
+    largest = 1
+    for entry in entries:
+        text = str(entry.output or entry.error or "")
+        largest = max(largest, len(text) // CHARS_PER_LEVEL + 1)
+        data = entry.structured if isinstance(entry.structured, dict) else {}
+        largest = max(largest, _longest_list(data))
+    return largest
+
+
+def _longest_list(value: Any, depth: int = 4) -> int:
+    if depth <= 0:
+        return 0
+    if isinstance(value, list):
+        inner = max((_longest_list(v, depth - 1) for v in value[:50]), default=0)
+        return max(len(value), inner)
+    if isinstance(value, dict):
+        return max((_longest_list(v, depth - 1) for v in value.values()), default=len(value))
+    return 0
+
+
+def _fit_lines(entries: list[LedgerEntry], lines: list[str], max_chars: int) -> str:
     kept: list[str] = []
     used = 0
     for index, line in enumerate(lines):
@@ -1201,17 +1308,24 @@ def _was_not_made(entry: LedgerEntry) -> bool:
     return str(entry.error or entry.output or "").startswith(NOT_RUN_PREFIX)
 
 
-def _short(text: str | None, limit: int = _TEXT_HEAD) -> str:
+def _short(text: str | None, limit: int | None = None) -> str:
+    """``text`` on one line, whole, or cut to ``limit`` (the pack's detail by default)."""
     flat = " ".join(str(text or "").split())
-    return flat if len(flat) <= limit else flat[: limit - 1] + "…"
+    if limit is None:
+        limit = _detail().text_head
+    return flat if limit is None or len(flat) <= limit else flat[: max(1, limit - 1)] + "…"
 
 
-def _names(values: Any, head: int = _LIST_HEAD) -> str:
+def _names(values: Any, head: int | None = None) -> str:
+    """The names, all of them, or the first ``head`` (the pack's detail) and how many more."""
     items = [str(v) for v in (values or []) if str(v).strip()]
     if not items:
         return ""
-    shown = ", ".join(items[:head])
-    return shown if len(items) <= head else f"{shown} (+{len(items) - head} more)"
+    if head is None:
+        head = _detail().list_head
+    if head is None or len(items) <= head:
+        return ", ".join(items)
+    return f"{', '.join(items[:head])} (+{len(items) - head} more)"
 
 
 def _n(value: Any) -> str:
@@ -1367,9 +1481,7 @@ def _document(data: dict[str, Any]) -> str:
         if key in ("format", "tool", "size") or value in (None, "", [], {}, False, 0):
             continue
         if isinstance(value, dict):
-            parts.append(
-                f"{key} {', '.join(f'{k} {v}' for k, v in list(value.items())[:_LIST_HEAD])}"
-            )
+            parts.append(f"{key} {_names([f'{k} {v}' for k, v in value.items()])}")
         elif isinstance(value, list):
             parts.append(f"{len(value)} {key}")
         else:
@@ -1400,7 +1512,7 @@ def _iocs(data: dict[str, Any]) -> str:
         kind = str(row.get("kind") or "other")
         counts[kind] = counts.get(kind, 0) + 1
     summary = ", ".join(f"{n} {kind}" for kind, n in sorted(counts.items()))
-    first = _names([str(r.get("value") or "") for r in rows], head=3)
+    first = _names([str(r.get("value") or "") for r in rows])
     return f"{summary} ({first})"
 
 
@@ -1566,19 +1678,14 @@ def _pcap(data: dict[str, Any], max_chars: int | None = None) -> str:
     return line if len(line) <= max_chars else ""
 
 
-# The decoded-strings line. The pack is one block every agent reads, cut at
-# ``reporting.upstream_findings_max_chars`` as a whole (derived from the served
-# window by default, 6,000 characters when no window is known), and on a PE
-# the rest of the pack takes about 2,000 characters. The
-# ledger entry keeps up to ``DECODED_STRINGS_ROWS`` rows and the line shows up
-# to ``DECODED_STRINGS_SHOWN`` of them in ``DECODED_STRINGS_LINE_CHARS``, each
-# printed to ``DECODED_STRING_CHARS``: on the reference loader that is every one
-# of its 81 strings, and on a sample with thousands it is the first of them and
-# a sentence saying where the rest are.
+# The decoded-strings line. The pack is one block every agent reads, bounded
+# as a whole by ``reporting.upstream_findings_max_chars`` (derived from the
+# served window by default). The ledger entry keeps up to
+# ``DECODED_STRINGS_ROWS`` rows, and the line shows every one of them, each
+# whole, when the pack fits; when it does not, the pack's detail level
+# (:class:`PackDetail`) and the room left to the line decide how many, and the
+# line says how many it shows and where the rest are.
 DECODED_STRINGS_ROWS = 200
-DECODED_STRINGS_SHOWN = 100
-DECODED_STRINGS_LINE_CHARS = 3000
-DECODED_STRING_CHARS = 120
 
 # Said in the line itself, before the strings: they are the sample's words,
 # and a bracket, an id or an instruction inside one is the sample's too.
@@ -1589,14 +1696,15 @@ DECODED_STRINGS_PROVENANCE = (
 
 
 def _quoted(text: str) -> str:
-    """One recovered string, quoted, cut to ``DECODED_STRING_CHARS`` and on one line.
+    """One recovered string, quoted, whole or cut to the pack's detail, and on one line.
 
     Backslashes are left as FLOSS gave them, so a Windows path reads as a
     path; only the quote and the control characters are written out, and a
     backslash that would end the string, where it would read as escaping the
     closing quote.
     """
-    value = text if len(text) <= DECODED_STRING_CHARS else text[: DECODED_STRING_CHARS - 1] + "…"
+    width = _detail().string_chars
+    value = text if width is None or len(text) <= width else text[: max(1, width - 1)] + "…"
     # One escaping rule, read by the grounding search too
     # (``utils.written_forms``), so a value a model copied out of this line is
     # found again in the entry it came from.
@@ -1626,9 +1734,11 @@ def _decoded_groups(rows: list[dict[str, Any]]) -> str:
     return "; ".join(f"routine {routine}: {', '.join(items)}" for routine, items in groups.items())
 
 
-def _decoded_strings(data: dict[str, Any], max_chars: int = DECODED_STRINGS_LINE_CHARS) -> str:
-    """FLOSS's answer as counts, then the strings, bounded, the bound said when it cut.
+def _decoded_strings(data: dict[str, Any], max_chars: int | None = None) -> str:
+    """FLOSS's answer as counts, then the strings, the bound said when it cut.
 
+    Every string, whole, with no ``max_chars`` and the pack's whole detail;
+    otherwise as many as fit ``max_chars`` and the pack's detail level.
     ``""`` when not even the counts fit in ``max_chars``.
     """
     rows = [r for r in (data.get("strings") or []) if isinstance(r, dict)]
@@ -1653,34 +1763,43 @@ def _decoded_strings(data: dict[str, Any], max_chars: int = DECODED_STRINGS_LINE
         'each as "string"@offset from the image base (a decoded string\'s call site, '
         "a stack or tight string's routine), grouped by the routine that produced it"
     )
-    budget = min(int(max_chars), DECODED_STRINGS_LINE_CHARS)
+    detail = _detail()
+    width = detail.string_chars
 
     def _line(shown: int) -> str:
         if shown >= total:
             said = f"all {_n(total)} shown"
             lengths = [len(str(row.get("string") or "")) for row in rows[:shown]]
-            cut = sum(1 for length in lengths if length > DECODED_STRING_CHARS)
+            cut = sum(1 for length in lengths if width is not None and length > width)
             if cut:
                 said += (
-                    f" ({_n(cut)} cut to {DECODED_STRING_CHARS} characters and ending in …, "
-                    "so the line stays within the pack every agent reads; the whole string is "
-                    "in the entry)"
+                    f" ({_n(cut)} cut to {width} characters and ending in …, so the pack every "
+                    "agent reads fits its room; the whole string is in the entry)"
                 )
         else:
             said = (
-                f"{_n(shown)} of {_n(total)} shown (every agent reads the pack, so this line "
-                f"keeps to {_n(DECODED_STRINGS_SHOWN)} strings and "
-                f"{_n(DECODED_STRINGS_LINE_CHARS)} characters, each string to "
-                f"{DECODED_STRING_CHARS}); the rest are one floss call away at offset {shown}"
+                f"{_n(shown)} of {_n(total)} shown (every agent reads the pack, and this is "
+                f"what fits its room); the rest are one floss call away at offset {shown}"
             )
         if not shown:
             return f"{head}; {said}"
         return f"{head}; {said}, {offsets}: {_decoded_groups(rows[:shown])}"
 
-    shown = min(len(rows), DECODED_STRINGS_SHOWN)
+    shown = len(rows) if detail.strings_shown is None else min(len(rows), detail.strings_shown)
     line = _line(shown)
-    while shown > 0 and len(line) > budget:
-        shown -= 1
+    if max_chars is None:
+        return line
+    budget = int(max_chars)
+    if len(line) > budget:
+        # The most strings that fit, found by halving rather than one at a time.
+        low, high, best = 0, shown, 0
+        while low <= high:
+            middle = (low + high) // 2
+            if len(_line(middle)) <= budget:
+                best, low = middle, middle + 1
+            else:
+                high = middle - 1
+        shown = best
         line = _line(shown)
     return line if len(line) <= budget else ""
 
@@ -1734,25 +1853,15 @@ def _reputation_facts(entry: LedgerEntry) -> str:
     return f"{service} {count} malicious ({text})" if count is not None else f"{service}: {text}"
 
 
-# How many distinct detection labels the reputation line names. Enough that a
-# family named by several engines under several spellings is on the line,
-# short enough that the line stays one line in every model's prompt; the
-# count of the rest is stated beside them.
-_DETECTION_LABELS_SHOWN = 20
-# How much of one label the line prints. Engine labels run to a few dozen
-# characters; the answer is a service's, and a label as long as the answer is
-# not something a single line should carry whole.
-_DETECTION_LABEL_CHARS = 80
-
-
 def _detection_labels(data: dict[str, Any]) -> str:
     """The answer's detection labels, with how many engines gave each.
 
     VirusTotal's answer through its own MCP server carries ``detections``, one
     result label per engine that detected the file, and no popular threat
     classification. The labels are counted exactly as written, most engines
-    first and then in the order the answer lists them, and each is printed to
-    at most ``_DETECTION_LABEL_CHARS`` characters; nothing is merged,
+    first and then in the order the answer lists them, every one of them whole
+    when the pack fits its room and otherwise as many, and as much of each, as
+    the pack's detail level allows, the rest counted; nothing is merged,
     normalised or read for a family, which is the reader's to decide.
     """
     rows = _find_key(data, "detections")
@@ -1765,12 +1874,13 @@ def _detection_labels(data: dict[str, Any]) -> str:
     for label in labels:
         counts[label] = counts.get(label, 0) + 1
     ranked = sorted(counts, key=lambda label: -counts[label])
-    shown = ranked[:_DETECTION_LABELS_SHOWN]
+    detail = _detail()
+    shown = ranked if detail.labels_shown is None else ranked[: detail.labels_shown]
     bound = f", {len(shown)} shown" if len(ranked) > len(shown) else ""
     text = (
         f"{len(labels)} detection labels, {len(ranked)} distinct "
         f"(engines per label, most first{bound}): "
-        + ", ".join(f"{_short(label, _DETECTION_LABEL_CHARS)} ×{counts[label]}" for label in shown)
+        + ", ".join(f"{_short(label, detail.label_chars)} ×{counts[label]}" for label in shown)
     )
     if len(ranked) > len(shown):
         text += f" (+{len(ranked) - len(shown)} more distinct labels)"
