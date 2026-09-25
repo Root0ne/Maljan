@@ -73,7 +73,7 @@ from maljan.llm.context_window import (
     tool_definition_chars,
     window_full_error,
 )
-from maljan.llm.generation_rate import GenerationRates, model_name_of
+from maljan.llm.generation_rate import GenerationRates, ModelCallDeadline, model_name_of
 from maljan.memory.long_term_memory import a_past_case_technique
 from maljan.pipeline.events import emit_judge_question, safe_finding_value, scrub
 from maljan.pipeline.mediation_models import (
@@ -1637,7 +1637,10 @@ class JudgeAgent(BudgetMeter):
             "window_full": False,
             "spend": False,
             "repeats": False,
+            "call_deadline": False,
         }
+        # The sentence of a model call deadline that ended the tool phase.
+        deadline_said: dict[str, str] = {"why": ""}
         spend_key = object()
 
         async def _until_it_answers_or_runs_out() -> None:
@@ -1670,6 +1673,14 @@ class JudgeAgent(BudgetMeter):
                                 break
                 except SpendCeilingStop:
                     ended["spend"] = True
+                except ModelCallDeadline as exc:
+                    # One model call ran past its whole-call deadline: a failed
+                    # turn, not the loop's clock. With something gathered the
+                    # reasoning is written from it, as an analyst's is.
+                    deadline_said["why"] = f"model call deadline: {exc}"
+                    if not recorder.entries:
+                        raise
+                    ended["call_deadline"] = True
                 except Exception as exc:
                     # Only a provider's own full-window answer, and only once
                     # something was gathered; anything else fails the judge's
@@ -1707,11 +1718,27 @@ class JudgeAgent(BudgetMeter):
             # TokenLedger (the tools path previously recorded nothing — only
             # the no-tools fallback above did).
             _record_the_turns()
-            if ended["no_room"] or ended["window_full"] or ended["spend"] or ended["repeats"]:
-                cap = "spend" if ended["spend"] else "repeats" if ended["repeats"] else "no_room"
+            if (
+                ended["no_room"]
+                or ended["window_full"]
+                or ended["spend"]
+                or ended["repeats"]
+                or ended["call_deadline"]
+            ):
+                cap = (
+                    "spend"
+                    if ended["spend"]
+                    else "repeats"
+                    if ended["repeats"]
+                    else "time"
+                    if ended["call_deadline"]
+                    else "no_room"
+                )
                 why = (
                     "the job's spend ceiling was reached"
                     if ended["spend"]
+                    else deadline_said["why"]
+                    if ended["call_deadline"]
                     else f"{repeats.served_repeats} repeated tool call(s)"
                     if ended["repeats"]
                     else "the model server reported its context window full"
@@ -1734,6 +1761,13 @@ class JudgeAgent(BudgetMeter):
                 cap = "steps"
                 return ""
             return str(_msgs[-1].content) if _msgs else ""
+        except ModelCallDeadline:
+            # A model call's own deadline with nothing gathered: that call
+            # failed, recorded as the call deadline it was, not the loop's clock.
+            self.logger.error("JudgeAgent ReAct ended: %s.", deadline_said["why"])
+            cap = "time"
+            _record_the_turns()
+            raise
         except TimeoutError:
             self.logger.error("JudgeAgent ReAct timed out after %s.", limit_text(timeout, "s"))
             cap = "time"
@@ -1751,7 +1785,8 @@ class JudgeAgent(BudgetMeter):
             # mediation that timed out still made the calls it made.
             self._evidence_entries.extend(recorder.entries)
             details = {
-                "time": f"the loop did not answer within {limit_text(timeout, 's')}",
+                "time": deadline_said["why"]
+                or f"the loop did not answer within {limit_text(timeout, 's')}",
                 "no_room": (
                     "the model server reported its context window full"
                     if ended["window_full"]

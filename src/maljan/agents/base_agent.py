@@ -2165,6 +2165,10 @@ def _in_flight(
     )
 
 
+class HardCapExceeded(TimeoutError):
+    """The wait around an agent-loop coroutine ran out: its hard cap, not a call's own timeout."""
+
+
 def _run_coro_blocking(coro: Any, hard_timeout: float | None, label: str = "") -> Any:
     """Submit ``coro`` to the shared agent loop and block until done / timeout.
 
@@ -2214,7 +2218,9 @@ def _run_coro_blocking(coro: Any, hard_timeout: float | None, label: str = "") -
         # is ever *delivered* is a separate question, and one the watchdog
         # answers rather than assuming.
         _cancel_and_watch(loop, future, running, what)
-        raise TimeoutError(f"{what} exceeded hard cap of {limit_text(hard_timeout, 's')}") from None
+        raise HardCapExceeded(
+            f"{what} exceeded hard cap of {limit_text(hard_timeout, 's')}"
+        ) from None
     except _FuturesCancelled as exc:
         if job is not None and job.is_cancelled:
             job.check(f"while {what} was in flight")
@@ -2274,7 +2280,9 @@ async def run_on_agent_loop(coro: Any, hard_timeout: float | None, label: str = 
         if future.done() and not future.cancelled():
             raise
         _cancel_and_watch(loop, future, running, what)
-        raise TimeoutError(f"{what} exceeded hard cap of {limit_text(hard_timeout, 's')}") from None
+        raise HardCapExceeded(
+            f"{what} exceeded hard cap of {limit_text(hard_timeout, 's')}"
+        ) from None
     except (asyncio.CancelledError, _FuturesCancelled) as exc:
         # The caller itself being cancelled is not the call failing: the
         # cancellation goes on up, and the call on the agent loop is stopped
@@ -4797,12 +4805,22 @@ class BaseAnalyst(BudgetMeter, ABC):
         except ModelCallDeadline as exc:
             self.logger.error("LLM %s ended at its model call deadline: %s", what, exc)
             raise AnalystError(f"{self.name} {what} failed: model call deadline: {exc}") from exc
-        except TimeoutError:
+        except HardCapExceeded:
             self.logger.critical(
                 "%s %s exceeded the %s hard cap.",
                 self.name,
                 what,
                 limit_text(hard_timeout, "s"),
+            )
+            raise
+        except TimeoutError:
+            # The call's own per-call timeout, passed through by the runner:
+            # a call deadline, which is not the hard cap and is not said to be.
+            self.logger.error(
+                "%s %s ended at its call deadline of %s.",
+                self.name,
+                what,
+                limit_text(timeout, "s"),
             )
             raise
         except (AnalystError, SpendCeilingStop):

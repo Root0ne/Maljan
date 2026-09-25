@@ -120,3 +120,117 @@ class TestTheRunnerHandsTheCallsOwnTimeoutOn:
 
         with pytest.raises(ModelCallDeadline, match="its own"):
             _run_coro_blocking(raises(), None, label="test")
+
+
+class _Mediator(BaseChatModel):
+    """A judge that looks two things up, then runs past its deadline; asked to stop, it reasons."""
+
+    dies_on: int = 3
+    calls: int = 0
+
+    def _generate(
+        self, messages: Any, stop: Any = None, run_manager: Any = None, **_: Any
+    ) -> ChatResult:
+        self.calls += 1
+        last = messages[-1]
+        if isinstance(last, HumanMessage) and "Do NOT call" in str(last.content):
+            return ChatResult(
+                generations=[ChatGeneration(message=AIMessage(content="agreement 0.7"))]
+            )
+        if self.calls == self.dies_on:
+            raise ModelCallDeadline("the model request did not finish within its 1800 s deadline")
+        turn = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "lookup",
+                    "args": {"what": f"T{1000 + self.calls}"},
+                    "id": f"c{self.calls}",
+                }
+            ],
+        )
+        return ChatResult(generations=[ChatGeneration(message=turn)])
+
+    @property
+    def _llm_type(self) -> str:
+        return "mediator-stub"
+
+    def bind_tools(self, tools: Any, **_: Any) -> Any:
+        return self
+
+
+def _run_the_judge(model: _Mediator) -> tuple[Any, str]:
+    import asyncio
+
+    from maljan.agents.judge_agent import JudgeAgent
+    from maljan.core.config import Settings
+
+    def lookup(what: str = "") -> str:
+        return f"{what} is a technique"
+
+    judge = JudgeAgent(llm=model)
+    judge.tools = [
+        StructuredTool.from_function(func=lookup, name="lookup", description="L", args_schema=_What)
+    ]
+    cfg = Settings(_env_file=None)
+    with (
+        patch("maljan.agents.base_agent.get_settings", lambda: cfg),
+        patch("maljan.agents.judge_agent.get_settings", lambda: cfg),
+    ):
+        reasoning = asyncio.run(judge.execute_tool_loop([("system", "s"), ("human", "mediate")]))
+    return judge, reasoning
+
+
+class TestTheJudgesMediationLoop:
+    def test_a_call_deadline_is_recorded_as_one_and_the_reasoning_is_salvaged(self) -> None:
+        judge, reasoning = _run_the_judge(_Mediator(dies_on=3))
+
+        assert reasoning == "agreement 0.7", "written from what the loop gathered"
+        (record,) = judge.drain_budget_records()
+        assert record["cap"] == "time"
+        assert record["detail"].startswith("model call deadline: ")
+
+    def test_with_nothing_gathered_the_record_still_names_the_call_deadline(self) -> None:
+        import asyncio
+
+        from maljan.agents.judge_agent import JudgeAgent
+        from maljan.core.config import Settings
+
+        judge = JudgeAgent(llm=_Mediator(dies_on=1))
+
+        def lookup(what: str = "") -> str:
+            return what
+
+        judge.tools = [
+            StructuredTool.from_function(
+                func=lookup, name="lookup", description="L", args_schema=_What
+            )
+        ]
+        cfg = Settings(_env_file=None)
+        with (
+            patch("maljan.agents.base_agent.get_settings", lambda: cfg),
+            patch("maljan.agents.judge_agent.get_settings", lambda: cfg),
+            pytest.raises(ModelCallDeadline),
+        ):
+            asyncio.run(judge.execute_tool_loop([("system", "s"), ("human", "mediate")]))
+        (record,) = judge.drain_budget_records()
+        assert record["cap"] == "time"
+        assert record["detail"].startswith("model call deadline: ")
+
+
+class TestAPerCallTimeoutIsNotTheHardCap:
+    def test_it_is_logged_as_a_call_deadline(self, caplog: pytest.LogCaptureFixture) -> None:
+        import asyncio
+
+        class _Slow:
+            async def ainvoke(self, messages: Any, **_: Any) -> Any:
+                await asyncio.sleep(5)
+                return AIMessage(content="late")
+
+        agent = _analyst(_Model())
+        agent.llm = _Slow()  # type: ignore[assignment]
+        with caplog.at_level(logging.DEBUG), pytest.raises(TimeoutError):
+            agent._invoke_llm_with_timeout([HumanMessage(content="hi")], 0.2, what="turn")
+        said = " ".join(record.getMessage() for record in caplog.records)
+        assert "ended at its call deadline of 0s" in said
+        assert "hard cap" not in said
