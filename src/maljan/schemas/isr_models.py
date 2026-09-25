@@ -34,6 +34,22 @@ JUDGE_ONLY_TECHNIQUE_MARKER = (
     "stated by the judge and claimed by no analyst; a technique the judge states is "
     "published as its own claim"
 )
+# The note on a technique the judge was asked about after its verdict and gave
+# no answer for: it is published, or not, as it would have been without the
+# question, and the row says the judge did not confirm it.
+JUDGE_UNCONFIRMED_TECHNIQUE_MARKER = "not confirmed by the judge"
+
+
+def judge_dropped_reason(reason: str) -> str:
+    """Why a technique the judge dropped when asked is not published, in its own words."""
+    said = str(reason or "").strip()
+    return f"the judge dropped it ({said})" if said else "the judge dropped it"
+
+
+def judge_kept_note(reason: str) -> str:
+    """The note on a technique the judge kept when asked, with the reason it gave."""
+    said = str(reason or "").strip()
+    return f"kept by the judge when asked ({said})" if said else "kept by the judge when asked"
 
 
 class ClaimEvidence(BaseModel):

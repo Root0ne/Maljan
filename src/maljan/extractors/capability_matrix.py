@@ -40,13 +40,25 @@ read.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
 
 from maljan.analysis.technique_ids import attack_reference_id, says_no_technique
 from maljan.core.logger import logger
 from maljan.reporting.models import CapabilityCell, TTPMapping
-from maljan.schemas.isr_models import ABSENCE_TECHNIQUE_MARKER, JUDGE_ONLY_TECHNIQUE_MARKER
-from maljan.schemas.stix_models import stated_confidence
+from maljan.schemas.evidence import ENTRY_ID_RE
+from maljan.schemas.isr_models import (
+    ABSENCE_TECHNIQUE_MARKER,
+    JUDGE_ONLY_TECHNIQUE_MARKER,
+    JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,
+    judge_dropped_reason,
+    judge_kept_note,
+)
+from maljan.schemas.stix_models import (
+    TECHNIQUE_REVIEW_PROPERTY,
+    TechniqueReview,
+    stated_confidence,
+)
 from maljan.utils.marked_cut import marked_cut
 
 # Fallback MITRE ATT&CK Enterprise tactic catalogue (pre-v19 names). Used only
@@ -103,6 +115,7 @@ def build_capability_matrix(
         return [], []
 
     out_of_scope = _out_of_scope(list(techniques), sample)
+    review = technique_review(stix_output)
 
     cells: list[CapabilityCell] = []
     mappings: list[TTPMapping] = []
@@ -148,14 +161,37 @@ def build_capability_matrix(
         # report's ATT&CK section, its References, the STIX attack-patterns and
         # ``/reports/{id}/mitre`` are all built from it — and a technique a
         # check rejected is not one this run found.
+        # The judge's word on a technique it was asked about after its verdict
+        # (``techniques_for_the_judge``): one it dropped is not published and
+        # says so in the judge's words, one it kept is published — a finding's
+        # technique included, since the judge is the check that asked about
+        # it — and one it gave no answer for is what it would have been
+        # without the question, marked as not confirmed.
+        asked = review is not None and tid in review.asked
+        decided = review.decision_for(tid) if review is not None and asked else None
         if not valid:
             not_published = "the ATT&CK catalogue has no entry for this id in any domain"
         elif out_of_scope.get(tid):
             not_published = out_of_scope[tid]
-        elif not info.get("claimed"):
+        elif decided is not None and decided.decision == "drop":
+            not_published = judge_dropped_reason(decided.reason)
+        elif not info.get("claimed") and not (decided is not None and decided.decision == "keep"):
             not_published = FINDING_ONLY_REASON
         else:
             not_published = ""
+        notes: list[str] = []
+        if info.get("noted") and all(info["noted"]):
+            # Every analyst claim naming it reads as absence and was kept
+            # when asked. Published all the same: the analyst decided.
+            notes.append(ABSENCE_TECHNIQUE_MARKER)
+        elif info.get("judge_named") and not info.get("analyst_claimed") and not not_published:
+            # The judge named it and no analyst claimed it: published by the
+            # rule for a technique the judge states, and the row says so.
+            notes.append(JUDGE_ONLY_TECHNIQUE_MARKER)
+        if decided is not None and decided.decision == "keep":
+            notes.append(judge_kept_note(decided.reason))
+        elif asked and decided is None and not not_published:
+            notes.append(JUDGE_UNCONFIRMED_TECHNIQUE_MARKER)
         cells.append(
             CapabilityCell(
                 tactic=tactic_id or "TA0000",
@@ -170,19 +206,7 @@ def build_capability_matrix(
                 platforms=platforms,
                 domain=domain,
                 not_published=not_published,
-                # Every analyst claim naming it reads as absence and was kept
-                # when asked. Published all the same: the analyst decided. Or
-                # the judge named it and no analyst claimed it: published by the
-                # rule for a technique the judge states, and the row says so.
-                note=(
-                    ABSENCE_TECHNIQUE_MARKER
-                    if info.get("noted") and all(info["noted"])
-                    else JUDGE_ONLY_TECHNIQUE_MARKER
-                    if info.get("judge_named")
-                    and not info.get("analyst_claimed")
-                    and not not_published
-                    else ""
-                ),
+                note="; ".join(notes),
             )
         )
         if not_published:
@@ -600,3 +624,85 @@ def _resolve_tactic(tactic_slug: str, domain: str = "") -> tuple[str, str]:
     if tactic is not None and tactic.tactic_id:
         return tactic.tactic_id, _TACTIC_NAME_BY_ID.get(tactic.tactic_id, tactic.name)
     return _TACTIC_BY_SLUG.get(tactic_slug, ("", tactic_slug))
+
+
+@dataclass
+class TechniqueQuestion:
+    """One technique the judge is asked about after its verdict, with what names it.
+
+    ``kind`` is ``claimed`` for a technique an analyst claimed that the judge's
+    bundle does not carry, and ``finding`` for one named only on a finding.
+    Each mention is ``(agent, the claim's or the finding's text, its evidence
+    ids)``, the text as the analyst wrote it.
+    """
+
+    technique_id: str
+    kind: str
+    mentions: list[tuple[str, str, list[str]]] = field(default_factory=list)
+
+
+def technique_review(stix_output: dict[str, Any] | None) -> TechniqueReview | None:
+    """The judge's answer about the techniques it was asked, from its bundle, or ``None``."""
+    raw = (stix_output or {}).get(TECHNIQUE_REVIEW_PROPERTY)
+    if raw is None:
+        return None
+    try:
+        return raw if isinstance(raw, TechniqueReview) else TechniqueReview.model_validate(raw)
+    except Exception as exc:  # noqa: BLE001 — an unreadable answer decides nothing
+        logger.debug("capability_matrix: the judge's technique answer is unreadable (%s)", exc)
+        return None
+
+
+def _bundle_technique_ids(stix_output: dict[str, Any] | None) -> set[str]:
+    """Every technique id the judge's bundle carries, on an attack-pattern or an edge."""
+    return {tid.upper() for tid in _judge_technique_ids(stix_output)} | {
+        tid.upper() for tid, _c in _judge_relationship_rows(stix_output)
+    }
+
+
+def techniques_for_the_judge(
+    stix_output: dict[str, Any] | None, isr_reports: dict[str, Any] | None
+) -> list[TechniqueQuestion]:
+    """The techniques to put to the judge after its verdict, in the order they were named.
+
+    (a) Each technique an analyst claimed that the judge's bundle carries
+    neither as an attack-pattern nor on an edge, and (b) each technique named
+    only on a finding — on no claim and not in the bundle. A claim whose id the
+    catalogue rejected is not asked about: the report does not publish it
+    whatever the judge says.
+    """
+    in_bundle = _bundle_technique_ids(stix_output)
+    questions: dict[str, TechniqueQuestion] = {}
+    claimed: set[str] = set()
+    for agent_name, isr in (isr_reports or {}).items():
+        agent = str(getattr(isr, "agent_id", "") or agent_name)
+        for claim in getattr(isr, "claims", None) or []:
+            tid = str(getattr(claim, "technique_id", "") or "").strip().upper()
+            if not tid or says_no_technique(tid):
+                continue
+            claimed.add(tid)
+            if tid in in_bundle or not getattr(claim, "technique_id_valid", True):
+                continue
+            evidence = str(getattr(claim, "evidence_ref", "") or "")
+            questions.setdefault(tid, TechniqueQuestion(tid, "claimed")).mentions.append(
+                (
+                    agent,
+                    str(getattr(claim, "claim", "") or ""),
+                    list(dict.fromkeys(found.lower() for found in ENTRY_ID_RE.findall(evidence))),
+                )
+            )
+    for agent_name, isr in (isr_reports or {}).items():
+        agent = str(getattr(isr, "agent_id", "") or agent_name)
+        for finding in getattr(isr, "findings", None) or []:
+            title = str(getattr(finding, "title", "") or "")
+            detail = str(getattr(finding, "detail", "") or "")
+            text = f"{title} — {detail}" if title and detail else title or detail
+            ids = [str(i) for i in (getattr(finding, "evidence_ids", None) or []) if str(i)]
+            for raw in getattr(finding, "technique_ids", None) or []:
+                tid = str(raw or "").strip().upper()
+                if not tid or says_no_technique(tid) or tid in claimed or tid in in_bundle:
+                    continue
+                questions.setdefault(tid, TechniqueQuestion(tid, "finding")).mentions.append(
+                    (agent, text, ids)
+                )
+    return list(questions.values())

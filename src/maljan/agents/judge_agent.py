@@ -491,6 +491,80 @@ COMPACT_BUNDLE_RULES = (
 _NO_TOOLS_NEEDED = "No Threat Intelligence tools are needed for this run.\n"
 
 
+# The question asked once after the verdict about the techniques the verdict's
+# bundle does not carry: the ones an analyst claimed, and the ones named only on
+# a finding. The judge decides; with no answer nothing is withheld.
+TECHNIQUE_QUESTION_SYSTEM = (
+    "You are the Chief Malware Judge. Your verdict is given. The analysts named some "
+    "techniques that your bundle does not carry, and some that appear only on an "
+    "analyst's finding, which no check has asked about. You decide, for each one, "
+    "whether the report publishes it. This turn carries no tools: answer from the "
+    "reports, the pack and the evidence ids you are shown."
+)
+# The answer's form, which the reader of the answer parses line by line.
+TECHNIQUE_ANSWER_FORM = (
+    "For each technique above, answer one line in exactly this form:\n"
+    "<technique id>: keep: <reason>\n"
+    "<technique id>: drop: <reason>\n"
+    "Keep a technique the cited evidence shows the sample doing; drop one it does not, "
+    "and say why in the reason. A technique you leave unanswered is reported as it "
+    "would be without this question, marked as not confirmed by you."
+)
+# Why a technique question has no answer, for ``TechniqueReview.unanswered``.
+TECHNIQUE_QUESTION_NOT_ASKED = "not asked: the verdict call timed out"
+TECHNIQUE_ANSWER_UNREAD = "the answer named none of the techniques in the form asked"
+
+# One line of the answer: the id, keep or drop, and the reason after it.
+_TECHNIQUE_ANSWER_RE = re.compile(
+    r"^[\s*_`>#\-\d.)]*(T\d{4}(?:\.\d{3})?)\b[\s*_`]*[:\-\u2013\u2014=]+[\s*_`]*"
+    r"(keep|drop)\b[\s*_`]*[:\-\u2013\u2014,.;]*\s*(.*)$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def technique_question_text(questions: Sequence[Any]) -> str:
+    """The question's list of techniques and the answer's form, as the judge reads it.
+
+    ``questions`` are ``capability_matrix.TechniqueQuestion`` rows; each is
+    listed with every claim or finding that names it, in the analyst's words,
+    and the evidence ids it cites.
+    """
+    lines = ["TECHNIQUES TO DECIDE"]
+    for n, question in enumerate(questions, 1):
+        where = (
+            "claimed by an analyst and not in your bundle"
+            if question.kind == "claimed"
+            else "named only on an analyst's finding"
+        )
+        lines.append(f"{n}. {question.technique_id} — {where}")
+        for agent, text, ids in question.mentions:
+            cited = ", ".join(ids) if ids else "none cited"
+            lines.append(f"   - {agent}: {' '.join(str(text).split())} (evidence: {cited})")
+    return "\n".join(lines) + "\n\n" + TECHNIQUE_ANSWER_FORM
+
+
+def read_technique_answer(text: str, asked: Sequence[str]) -> list[Any]:
+    """The decisions ``text`` states for the ``asked`` techniques, the first line per id.
+
+    Each reason is kept whole, as written. A line about a technique that was
+    not asked is not read.
+    """
+    from maljan.schemas.stix_models import TechniqueDecision
+
+    wanted = {str(tid).upper() for tid in asked}
+    found: dict[str, TechniqueDecision] = {}
+    for match in _TECHNIQUE_ANSWER_RE.finditer(str(text or "")):
+        tid = match.group(1).upper()
+        if tid not in wanted or tid in found:
+            continue
+        found[tid] = TechniqueDecision(
+            technique_id=tid,
+            decision="keep" if match.group(2).lower() == "keep" else "drop",
+            reason=match.group(3).strip(),
+        )
+    return list(found.values())
+
+
 # The judge's system prompt. A module constant so that
 # ``composition.builtin_prompt("judge")`` and ``give_verdict`` cannot disagree
 # about what the judge is told.
@@ -1900,6 +1974,108 @@ class JudgeAgent(BudgetMeter):
             written=written,
         )
 
+    async def decide_techniques(
+        self,
+        bundle: Bundle,
+        isr_reports: dict[str, AgentISR] | None,
+        *,
+        sample: Any = None,
+        facts_block: str = "",
+        run_state: str = "",
+        verdict_timed_out: bool = False,
+    ) -> Any:
+        """Ask once, after the verdict, about the techniques the bundle does not carry.
+
+        The techniques an analyst claimed that the bundle carries on no
+        attack-pattern and no edge, and the ones named only on a finding, go to
+        the judge in one question — each with the claims or findings naming it
+        and their evidence ids — to keep or drop with a reason. Returns the
+        :class:`~maljan.schemas.stix_models.TechniqueReview`, or ``None`` when
+        there is nothing to ask. A question that times out or fails, or an
+        answer in no line of the form asked, is recorded as unanswered and
+        withholds nothing. Never raises.
+
+        One tool-free call with the verdict's framing — the run state and the
+        pack leading its one human turn — and the verdict's sizing: the judge's
+        own timeout held to the model's measured pace for the judge's output
+        cap and this prompt.
+        """
+        from maljan.extractors.capability_matrix import techniques_for_the_judge
+        from maljan.schemas.stix_models import TechniqueReview
+
+        try:
+            questions = techniques_for_the_judge(bundle.model_dump(), isr_reports)
+        except Exception as exc:  # noqa: BLE001 — a question not built is none asked
+            self.logger.warning("Judge technique question not built (%s).", type(exc).__name__)
+            return None
+        if not questions:
+            return None
+        asked = [q.technique_id for q in questions]
+        if verdict_timed_out:
+            return TechniqueReview(asked=asked, unanswered=TECHNIQUE_QUESTION_NOT_ASKED)
+
+        messages: list[Any] = [
+            SystemMessage(content=TECHNIQUE_QUESTION_SYSTEM),
+            HumanMessage(
+                content=(
+                    f"{_standing_blocks(run_state, facts_block)}"
+                    f"{_identity_prefix(sample)}"
+                    f"{technique_question_text(questions)}"
+                )
+            ),
+        ]
+        timeout = self._verdict_timeout(
+            float(loop_limits("judge")[0]),
+            sum(len(str(getattr(message, "content", ""))) for message in messages),
+            call="judge:techniques",
+        )
+        self.logger.info(
+            "JudgeAgent asking about %d technique(s) its bundle does not carry (timeout=%ds): %s",
+            len(asked),
+            timeout,
+            ", ".join(asked),
+        )
+        from maljan.llm.fallback import restart_models
+
+        restart_models(self.llm, loop_seconds=float(timeout), share=self._turn_share())
+        cap = judge_output_cap().tokens or None
+
+        async def _ask() -> Any:
+            answer = await retry_on_connection_error(
+                lambda: self.llm.ainvoke(messages),
+                what="Judge technique question",
+                log=self.logger,
+            )
+            self._record_usage(answer, call="technique question")
+            record_judge_response(getattr(self, "truncation_ledger", None), answer, cap=cap)
+            return answer
+
+        try:
+            answer = await run_on_agent_loop(_ask(), timeout, label="judge:techniques")
+        except TimeoutError:
+            self.logger.error("JudgeAgent technique question timed out after %ds.", timeout)
+            return TechniqueReview(
+                asked=asked, unanswered=f"the question timed out after {timeout:.0f}s"
+            )
+        except Exception as exc:  # noqa: BLE001 — an unanswered question withholds nothing
+            self.logger.error("JudgeAgent technique question failed (%s).", type(exc).__name__)
+            return TechniqueReview(
+                asked=asked, unanswered=f"the question failed ({type(exc).__name__})"
+            )
+        text = _answer_text(answer)
+        decisions = read_technique_answer(text, asked)
+        self.logger.info(
+            "JudgeAgent answered for %d of %d technique(s): %s",
+            len(decisions),
+            len(asked),
+            ", ".join(f"{d.technique_id} {d.decision}" for d in decisions) or "none",
+        )
+        return TechniqueReview(
+            asked=asked,
+            decisions=decisions,
+            unanswered=None if decisions else TECHNIQUE_ANSWER_UNREAD,
+        )
+
     def _bundle_from_response(
         self,
         answer: Any,
@@ -2323,7 +2499,9 @@ class JudgeAgent(BudgetMeter):
         value = getattr(negotiation, "consensus_threshold", None)
         return float(value) if value is not None else CONSENSUS_THRESHOLD
 
-    def _verdict_timeout(self, configured: float, prompt_chars: int = 0) -> float:
+    def _verdict_timeout(
+        self, configured: float, prompt_chars: int = 0, call: str = "judge:verdict"
+    ) -> float:
         """The verdict call's timeout: configured, or what its budget needs at the model's pace.
 
         ``GenerationRates.call_timeout`` decides and records it; with no rates
@@ -2338,7 +2516,7 @@ class JudgeAgent(BudgetMeter):
 
         return float(
             rates.call_timeout(
-                "judge:verdict",
+                call,
                 model_name_of(self.llm),
                 configured,
                 output.tokens,

@@ -8,6 +8,7 @@ no per-agent branching exists.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import re
@@ -3713,6 +3714,30 @@ def make_judge_node(
             if VERDICT_TIMEOUT_CODE in _verdict_codes:
                 _degradation_reasons.append(VERDICT_TIMEOUT_REASON)
                 _degraded_mode = True
+
+            # The techniques the verdict's bundle does not carry — an analyst's
+            # claim it left out, a technique named only on a finding — are put
+            # to the judge once: keep or drop, with a reason. Its answer is
+            # kept on its bundle, where the capability matrix reads it; with
+            # no answer nothing is withheld. Set on every bundle, so a property
+            # a model wrote into its own answer is never read as this answer.
+            if isinstance(verdict.bundle, Bundle):
+                _review = None
+                if inspect.iscoroutinefunction(getattr(type(judge), "decide_techniques", None)):
+                    try:
+                        _review = await judge.decide_techniques(
+                            verdict.bundle,
+                            isr_reports,
+                            sample=_sample_identity(state),
+                            facts_block=pack_text(state, container),
+                            run_state=render_run_state(state),
+                            verdict_timed_out=VERDICT_TIMEOUT_CODE in _verdict_codes,
+                        )
+                    except Exception as _exc:  # noqa: BLE001 — an unasked question withholds nothing
+                        logger.warning(
+                            "Judge technique question skipped (%s).", type(_exc).__name__
+                        )
+                verdict.bundle.x_maljan_technique_review = _review
 
             bundle = verdict.bundle
             stix_output: dict[str, Any] = bundle.model_dump() if isinstance(bundle, Bundle) else {}

@@ -596,6 +596,41 @@ class FallbackVerdict(_SpecConformantModel):
     reasoning: str | None = None
 
 
+class TechniqueDecision(_SpecConformantModel):
+    """The judge's word on one technique it was asked about: keep or drop, and why."""
+
+    technique_id: str
+    decision: Literal["keep", "drop"]
+    # The judge's reason as it wrote it, whole.
+    reason: str = ""
+
+
+class TechniqueReview(_SpecConformantModel):
+    """The judge's answer to the one question asked after its verdict.
+
+    The techniques an analyst claimed that the judge's bundle does not carry,
+    and the ones named only on a finding, are put to the judge once, together:
+    keep or drop, with a reason. ``asked`` is every technique in that question
+    and ``decisions`` what the answer said of each; a technique it said nothing
+    of is not decided. ``unanswered`` says why there is no answer at all — the
+    question timed out, failed, was not asked, or was answered in no line the
+    form names — and then nothing is withheld for it.
+    """
+
+    asked: list[str] = Field(default_factory=list)
+    decisions: list[TechniqueDecision] = Field(default_factory=list)
+    unanswered: str | None = None
+
+    def decision_for(self, technique_id: str) -> TechniqueDecision | None:
+        """What the answer said of ``technique_id``, or ``None`` when it said nothing."""
+        wanted = str(technique_id or "").strip().upper()
+        return next((d for d in self.decisions if d.technique_id.upper() == wanted), None)
+
+
+# The bundle property the judge's answer about those techniques is kept in.
+TECHNIQUE_REVIEW_PROPERTY = "x_maljan_technique_review"
+
+
 class Bundle(_SpecConformantModel):
     """STIX 2.1 Bundle container for transferring multiple objects.
 
@@ -618,6 +653,11 @@ class Bundle(_SpecConformantModel):
     # reader that wants the verdict asks ``pipeline.outcome.decide_from_bundle``
     # rather than counting objects.
     x_maljan_fallback_verdict: FallbackVerdict | None = None
+    # The judge's answer to the question asked after its verdict about the
+    # techniques its bundle does not carry (:class:`TechniqueReview`). ``None``
+    # when there was nothing to ask. Never exported: the export is built from
+    # the objects.
+    x_maljan_technique_review: TechniqueReview | None = None
 
     def confidence_annotated_relationships(self) -> list[ConfidenceAnnotatedRelationship]:
         """Return only the ConfidenceAnnotatedRelationship objects in this bundle."""
