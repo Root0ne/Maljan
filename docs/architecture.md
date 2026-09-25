@@ -2441,7 +2441,9 @@ is assembled from what the run gathered rather than recomputed beside it:
   `host`, `hostname`, `fqdn`, `url`, `uri`) in either column order, a row typed
   as a file, a path, a mutex, a registry key, a hash or anything else keeps
   nothing, and an untyped value is read only in an endpoints or C2 list, a
-  name there being a domain only when it has no file extension. The value is
+  name there being a domain only when it has no file extension. A name the
+  model typed as a domain, host or URL is kept as written, whatever its TLD
+  (`.zip`, `.mov` and `.app` are real ones). The value is
   read tolerantly: a port taken off, IPv6 brackets, any case, a URL's host. The judge's URL indicator keeps its
   host the same way. A well-known benign host is kept only as itself, never
   through a URL on it. `FINDINGS_BLOCK_FRAGMENT` states the shape it asks for

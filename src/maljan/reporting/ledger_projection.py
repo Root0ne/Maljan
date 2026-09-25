@@ -1067,11 +1067,13 @@ def _cell_values(cell: str, hint: str | None) -> list[tuple[str, str]]:
     name = text.lower().rstrip(".")
     if ":" in name:
         name = name.rsplit(":", 1)[0] if name.rsplit(":", 1)[1].isdigit() else name
-    if hint == "domain":
-        # Named a domain by the row itself: kept as written, a private-use
-        # name included, and the export's own rule answers whether it publishes.
-        is_file = name.rsplit(".", 1)[-1] in _FILE_LABELS
-        return [("domain", name)] if "." in name and not is_file else []
+    if hint in ("domain", "url"):
+        # Typed by the row itself: the model's own statement, kept as written —
+        # a private-use name, and a name under a TLD that is also a file extension
+        # (.zip, .mov, .app), included. The export's own rule answers the rest.
+        return [("domain", name)] if "." in name else []
+    # Untyped, in an endpoints or C2 list: a name is a host only when it could
+    # be one and does not end in a file's extension.
     if "." not in name or not host_is_public(name):
         return []
     if name.rsplit(".", 1)[-1] in _FILE_LABELS:

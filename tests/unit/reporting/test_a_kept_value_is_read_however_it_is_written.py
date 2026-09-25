@@ -178,10 +178,18 @@ def test_a_kind_that_only_spells_ip_inside_a_word_is_not_a_network_table() -> No
     assert kept_network_values(artifact) == []
 
 
-def test_a_file_name_beside_a_typed_domain_is_not_a_host() -> None:
-    artifact = Artifact(kind="network", rows=[["domain", "payload.dll", "relay-alpha-7f3c.top"]])
+def test_a_name_the_model_typed_as_a_domain_is_kept_whatever_its_tld() -> None:
+    """``.zip``, ``.mov`` and ``.app`` are TLDs; a typed row is the model's own statement."""
+    for kind, row in (
+        ("network", ["domain", "update.zip"]),
+        ("iocs", ["host", "cdn-sync.mov"]),
+        ("endpoints", ["url", "relay.app"]),
+    ):
+        assert kept_network_values(Artifact(kind=kind, rows=[row])) == [("domain", row[1])], row
 
-    assert kept_network_values(artifact) == [("domain", "relay-alpha-7f3c.top")]
+
+def test_the_same_name_untyped_in_an_endpoints_list_is_not_a_domain() -> None:
+    assert kept_network_values(Artifact(kind="endpoints", rows=[["update.zip"]])) == []
 
 
 def test_a_well_known_host_is_not_kept_through_a_url_on_it() -> None:

@@ -2072,7 +2072,8 @@ change landed on `main`.
   `endpoints`, `network`, `iocs` or `c2` artifact keeps; in it a row keeps a
   value typed as a network value (type aliases, either column order), a row
   typed as a file, path or hash keeps nothing, and an untyped value counts only
-  in an endpoints or C2 list, never as a file name. The value is read
+  in an endpoints or C2 list, never as a file name there; a name typed as a
+  domain, host or URL is the model's statement and is kept whatever its TLD. The value is read
   tolerantly (a port, IPv6 brackets, case, a URL's host), the judge's URL
   indicator keeps its host, and the analysts' findings block states the
   `endpoints` row shape. Otherwise
