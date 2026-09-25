@@ -2277,7 +2277,11 @@ is assembled from what the run gathered rather than recomputed beside it:
   otherwise by `read_technique_answer`: JSON arrays and objects first, then
   each line on its own (table rows, a name after the id, arrows, a
   "Decision:" label), a `<think>` block taken out and the last answer per id
-  kept. An id the catalogue rejects or the sample cannot host is not asked and
+  kept. The decision is read from its position — a JSON `decision` of one
+  whole word, or the word straight after the id's separator, else the last
+  standalone keep or drop — never from a word in the reason. Each cited entry
+  is shown as stored (`question_evidence`), with its tool, and marked when the
+  run holds only part of it or only its lower-cased search copy. An id the catalogue rejects or the sample cannot host is not asked and
   is recorded in `not_asked`. The answer is kept on the judge's bundle
   (`x_maljan_technique_review`, never exported) and the matrix publishes per
   it: a dropped technique is not published and reads "the judge dropped it

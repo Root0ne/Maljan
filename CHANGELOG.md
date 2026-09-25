@@ -19,9 +19,15 @@ change landed on `main`.
   or finding in question cites — shortened to the judge's window, when it does
   not fit, with a notice in the question and on the record. The answer is asked
   for as a JSON array (read from the schema where the provider has structured
-  output) and read tolerantly otherwise: table rows, a technique name after
-  the id, arrows and a "Decision:" label; a `<think>` block is taken out first
-  and the last answer per id wins. The answer is kept on the judge's bundle
+  output, from a function call's arguments, or asked once in text when a
+  provider refuses the schema) and read tolerantly otherwise: table rows, a
+  technique name after the id, arrows and a "Decision:" label; a `<think>`
+  block is taken out first and the last answer per id wins. The decision is
+  read from its position — a JSON `decision` of one whole word, or the word
+  straight after the id's separator, else the last standalone keep or drop —
+  never from a word inside the reason, and a slash-written sub-technique is
+  the same id. Each cited entry is shown as stored, with its tool, marked
+  when the run holds only part of it or only its lower-cased search copy. The answer is kept on the judge's bundle
   (`x_maljan_technique_review`) and the capability matrix publishes per it. A
   dropped technique reads "not published: the judge dropped it (<reason>)"; a
   kept one is published, a finding's technique included, with the judge's
@@ -2059,7 +2065,9 @@ change landed on `main`.
   characters with no mark; in a paid run 26 of 40 claims were cut mid-word and
   every `attck.claim_does_not_describe` question was asked over a cut
   sentence. The claim is stored as written. A model value quoted in a finding
-  row is still bounded where it is shown, and now ends in the cut mark.
+  row is still bounded where it is shown, and now ends in the cut mark. A
+  claim's evidence reference cut to its width writes back every id the cut
+  removed, not the first three.
 - **An analyst's validation retry answers in claims.** The retry was shown the
   first answer as a summary of its parsed claims and told to "answer again in
   the same format"; the model answered in the summary's shape, the parser read
