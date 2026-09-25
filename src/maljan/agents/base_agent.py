@@ -767,6 +767,40 @@ def _model_that_closes_off_truncated_calls(llm: Any, tools: list, repair: Any) -
     return bound | RunnableLambda(repair)
 
 
+def _loop_binding(loop_model: Any, llm: Any) -> Any | None:
+    """The model binding a loop's turns are sent through, where a turn's cap can be set on it.
+
+    ``None`` when the loop runs on a model it could not bind itself, or on
+    one that takes no per-call output cap: a turn of such a loop cannot be
+    held, and the spend ceiling admits it only at its whole cap.
+    """
+    from langchain_core.runnables import RunnableBinding, RunnableSequence
+
+    from maljan.llm.context_window import accepts_output_bound
+
+    if not accepts_output_bound(llm):
+        return None
+    first = loop_model.first if isinstance(loop_model, RunnableSequence) else loop_model
+    if not isinstance(first, RunnableBinding) or not isinstance(first.kwargs, dict):
+        return None
+    return first
+
+
+def _hold_the_turn(binding: Any, llm: Any, held: int | None) -> None:
+    """Set the next turn's output cap on the loop's binding: ``held``, or the model's own."""
+    if binding is None:
+        return
+    from maljan.llm.context_window import output_bound_kwargs
+
+    field = next(iter(output_bound_kwargs(llm, 1)), None)
+    if field is None:
+        return
+    if held is None:
+        binding.kwargs.pop(field, None)
+    else:
+        binding.kwargs[field] = int(held)
+
+
 def lock_for(agent: Any) -> Any:
     """The lock that serialises everything driving one agent, or nothing.
 
@@ -3437,6 +3471,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         started: float,
         budget: LoopBudget | None = None,
         recorder: Any = None,
+        spend_slot: Any = None,
+        held_binding: Any = None,
     ) -> Any:
         """The per-turn hook that regenerates the run-state block's budget line.
 
@@ -3451,6 +3487,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         numbers reads the same line. ``recorder`` is what the tick counts its
         ledger entries from — without it every tick but the last published a
         zero that meant "nobody asked" rather than "no calls yet".
+
+        ``spend_slot`` is the key the loop's turn in flight is reserved under
+        with the spend ceiling, and ``held_binding`` the loop's model binding
+        a turn's held output cap is set on (:func:`_hold_the_turn`); without
+        one a turn is admitted only at its whole cap.
         """
         ledger = budget if budget is not None else LoopBudget(max_steps, timeout, started)
         from maljan.pipeline.events import BUDGET_TICK_EVERY
@@ -3483,10 +3524,14 @@ class BaseAnalyst(BudgetMeter, ABC):
             # And what the request weighs, block included, which is what the
             # next tool answer's cap is measured against.
             self._note_conversation(sent)
-            # The spend ceiling's word on the turn about to be sent: a turn
-            # whose worst case would pass it is not sent, and the loop's
-            # salvage writes the answer from what was gathered.
-            self._spend_admits("loop turn", sent)
+            # The spend ceiling's word on the turn about to be sent: held to
+            # what the spend it may use pays for, or not sent, and then the
+            # loop's salvage writes the answer from what was gathered.
+            held = self._spend_admits(
+                "loop turn", sent, slot=spend_slot, holdable=held_binding is not None
+            )
+            if held_binding is not None:
+                _hold_the_turn(held_binding, self.llm, held)
             # The meter, every few steps: a tick per turn would be a stream
             # of near-identical events on a forty-step loop.
             used = steps_used(messages)
@@ -3695,8 +3740,14 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Sent with every request of this loop, so counted with its conversation.
         self._tool_definition_chars = tool_definition_chars(recorded)
         self.ended_out_of_room = False
+        # The key this loop's turns are counted and reserved under with the
+        # job's spend meter, until the ledger records them.
+        spend_key = object()
+        loop_model = _model_that_closes_off_truncated_calls(
+            self.llm, recorded, _close_off_truncated_calls
+        )
         agent_executor = create_react_agent(
-            _model_that_closes_off_truncated_calls(self.llm, recorded, _close_off_truncated_calls),
+            loop_model,
             recorded,
             prompt=self._run_state_refresher(
                 max_steps,
@@ -3704,6 +3755,8 @@ class BaseAnalyst(BudgetMeter, ABC):
                 budget.started,
                 budget=budget,
                 recorder=recorder,
+                spend_slot=spend_key,
+                held_binding=_loop_binding(loop_model, self.llm),
             ),
         )
 
@@ -3716,7 +3769,6 @@ class BaseAnalyst(BudgetMeter, ABC):
         # Whether one model call's whole-call deadline ended the tool phase.
         call_deadline_hit = False
         spend_meter = self._spend_meter()
-        spend_key = object()
         # Whether the time budget ended the tool phase, and the sentence saying
         # how: the loop's own turn times against what was left.
         time_capped = False
@@ -4268,11 +4320,19 @@ class BaseAnalyst(BudgetMeter, ABC):
         except Exception:  # noqa: BLE001 — a meter is never worth a lost loop
             return False
 
-    def _spend_admits(self, kind: str, messages: list[Any]) -> int | None:
+    def _spend_admits(
+        self,
+        kind: str,
+        messages: list[Any],
+        *,
+        slot: Any = None,
+        holdable: bool = True,
+    ) -> int | None:
         """The spend ceiling's word on one call before it is made (``SpendMeter.admit``).
 
         ``None`` to make it as it is, a number to make it with that output
-        cap; raises :class:`SpendCeilingStop` when it is not to be made.
+        cap; raises :class:`SpendCeilingStop` when it is not to be made. With
+        ``slot`` the call's worst case is reserved until it is released.
         """
         meter = self._spend_meter()
         if meter is None:
@@ -4284,8 +4344,34 @@ class BaseAnalyst(BudgetMeter, ABC):
                 model=self._model_label() or _model_label(self.llm),
                 prompt_chars=sum(_message_chars(m) for m in messages) + self._definitions_sent(),
                 cap_tokens=analyst_output_cap(str(getattr(self, "name", "") or "")),
+                slot=slot,
+                holdable=holdable,
             ),
         )
+
+    def _spend_release(self, slot: Any) -> None:
+        meter = self._spend_meter()
+        if meter is not None:
+            meter.release(slot)
+
+    def _spend_refuses(self, kind: str, messages: list[Any]) -> bool:
+        """Whether the spend ceiling would refuse this call now; nothing is reserved or logged."""
+        meter = self._spend_meter()
+        if meter is None:
+            return False
+        try:
+            return bool(
+                meter.preview(
+                    kind=kind,
+                    model=self._model_label() or _model_label(self.llm),
+                    prompt_chars=sum(_message_chars(m) for m in messages)
+                    + self._definitions_sent(),
+                    cap_tokens=analyst_output_cap(str(getattr(self, "name", "") or "")),
+                )
+                == 0
+            )
+        except Exception:  # noqa: BLE001 — a question about the meter is never a failure
+            return False
 
     def _spend_reason(self) -> str:
         meter = self._spend_meter()
@@ -4395,19 +4481,29 @@ class BaseAnalyst(BudgetMeter, ABC):
             with_question(sendable, FINAL_ANSWER_NUDGE), stated_steps, stated_time
         )
         budget = remaining_time
-        try:
-            self._spend_admits("final-answer nudge", list(turns))
-        except SpendCeilingStop:
+        if self._spend_refuses("final-answer nudge", list(turns)):
             self.logger.info("%s: the spend ceiling leaves no room for the nudge.", self.name)
             return None
 
         def _ask_with(model: Any, label: str, sent: list[Any] | None = None) -> Any:
             messages = turns if sent is None else sent
+            # Admitted per call, held to what the spend pays for, and its
+            # worst case reserved while it runs.
+            slot = object()
+            bound = self._spend_admits("final-answer nudge", list(messages), slot=slot)
+            from maljan.llm.context_window import output_bound_kwargs
+
+            held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
 
             async def _ask() -> Any:
-                return await asyncio.wait_for(model.ainvoke(messages), timeout=budget)
+                return await asyncio.wait_for(model.ainvoke(messages, **held), timeout=budget)
 
-            return _run_coro_blocking(_ask(), None if budget is None else budget + 5, label=label)
+            try:
+                return _run_coro_blocking(
+                    _ask(), None if budget is None else budget + 5, label=label
+                )
+            finally:
+                self._spend_release(slot)
 
         try:
             answer = _ask_with(self.llm, f"nudge:{self.name}")
@@ -4810,11 +4906,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         # rather than a throwaway per-call loop, so no openai async client is
         # ever orphaned on a closed loop.
         llm: Any = self.llm if model is None else model
-        # The spend ceiling's word before the call: a salvage is made with its
-        # cap lowered to what is left, anything else past the ceiling is not
-        # made (``SpendCeilingStop`` reaches the caller).
+        # The spend ceiling's word before the call: made with its cap held to
+        # what the spend it may use pays for, its worst case reserved while it
+        # runs, or not made (``SpendCeilingStop`` reaches the caller).
+        spend_slot = object()
         bound = self._spend_admits(
-            "salvage" if what == "step-cap salvage" else what, list(messages)
+            "salvage" if what == "step-cap salvage" else what, list(messages), slot=spend_slot
         )
         from maljan.llm.context_window import output_bound_kwargs
 
@@ -4846,7 +4943,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         _t0 = _time.monotonic()
         hard_timeout = hard_cap(timeout, getattr(self, "_budget_ceiling", None))
         try:
-            content = _run_coro_blocking(_invoke(), hard_timeout, label=f"llm:{self.name}")
+            try:
+                content = _run_coro_blocking(_invoke(), hard_timeout, label=f"llm:{self.name}")
+            finally:
+                # Returned or failed, the call is no longer in flight.
+                self._spend_release(spend_slot)
         except ModelCallDeadline as exc:
             self.logger.error("LLM %s ended at its model call deadline: %s", what, exc)
             raise AnalystError(f"{self.name} {what} failed: model call deadline: {exc}") from exc

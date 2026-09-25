@@ -1278,8 +1278,18 @@ class JudgeAgent(BudgetMeter):
         # request, for the budget record and the ticks; none before a loop.
         self._tool_definition_chars: int = 0
 
-    def _spend_admits(self, kind: str, messages: list[Any]) -> int | None:
-        """The spend ceiling's word on one judge call before it is made (``SpendMeter.admit``)."""
+    def _spend_admits(
+        self,
+        kind: str,
+        messages: list[Any],
+        *,
+        slot: Any = None,
+        holdable: bool = True,
+    ) -> int | None:
+        """The spend ceiling's word on one judge call before it is made (``SpendMeter.admit``).
+
+        With ``slot`` the call's worst case is reserved until it is released.
+        """
         from maljan.core.spend import SpendMeter
 
         meter = getattr(getattr(self, "token_ledger", None), "spend", None)
@@ -1295,8 +1305,17 @@ class JudgeAgent(BudgetMeter):
                 prompt_chars=sum(_message_chars(m) for m in messages)
                 + max(0, int(getattr(self, "_tool_definition_chars", 0) or 0)),
                 cap_tokens=int(judge_output_cap().tokens or 0),
+                slot=slot,
+                holdable=holdable,
             ),
         )
+
+    def _spend_release(self, slot: Any) -> None:
+        from maljan.core.spend import SpendMeter
+
+        meter = getattr(getattr(self, "token_ledger", None), "spend", None)
+        if isinstance(meter, SpendMeter):
+            meter.release(slot)
 
     def _model_label(self) -> str:
         """The label of the model this instance calls first, or ``""`` outside a job."""
@@ -1489,19 +1508,26 @@ class JudgeAgent(BudgetMeter):
             no_tools_timeout = loop_limits("judge")[0]
             # Sticky for this call only, with a deadline shorter than its clock.
             restart_models(self.llm, loop_seconds=no_tools_timeout, share=self._turn_share())
+            from maljan.llm.context_window import output_bound_kwargs
+
+            mediation_slot = object()
             try:
-                self._spend_admits("mediation", messages_pre)
+                bound = self._spend_admits("mediation", messages_pre, slot=mediation_slot)
             except SpendCeilingStop as stop:
                 self.logger.warning("JudgeAgent: %s.", stop)
                 return ""
-            response = await asyncio.wait_for(
-                retry_on_connection_error(
-                    lambda: self.llm.ainvoke(messages_pre),
-                    what="Judge no-tools path",
-                    log=self.logger,
-                ),
-                timeout=None if no_tools_timeout is None else float(no_tools_timeout),
-            )
+            held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
+            try:
+                response = await asyncio.wait_for(
+                    retry_on_connection_error(
+                        lambda: self.llm.ainvoke(messages_pre, **held),
+                        what="Judge no-tools path",
+                        log=self.logger,
+                    ),
+                    timeout=None if no_tools_timeout is None else float(no_tools_timeout),
+                )
+            finally:
+                self._spend_release(mediation_slot)
             self._record_usage(response, call="no-tools answer")
             record_judge_response(
                 getattr(self, "truncation_ledger", None),
@@ -1615,11 +1641,16 @@ class JudgeAgent(BudgetMeter):
             budget.note_turns(conversation)
             budget.own_steps += 1
             _note_the_conversation(conversation)
-            # The spend ceiling's word on the turn about to be sent.
-            self._spend_admits("mediation turn", conversation)
+            # The spend ceiling's word on the turn about to be sent, reserved
+            # under the loop's key until the step is counted. The executor
+            # binds the model itself, so a turn cannot be held: it is made at
+            # its whole cap or not at all.
+            self._spend_admits("mediation turn", conversation, slot=spend_key, holdable=False)
             self._publish_questions(conversation, asked)
             return conversation
 
+        # The key this loop's turns are counted and reserved under.
+        spend_key = object()
         agent_executor = create_react_agent(self.llm, recorded, prompt=_count_the_turns)
         self.logger.info(
             "JudgeAgent invoking ReAct (timeout=%s, steps=%s, tools=%d)...",
@@ -1641,7 +1672,6 @@ class JudgeAgent(BudgetMeter):
         }
         # The sentence of a model call deadline that ended the tool phase.
         deadline_said: dict[str, str] = {"why": ""}
-        spend_key = object()
 
         async def _until_it_answers_or_runs_out() -> None:
             stream: Any = agent_executor.astream(
@@ -2281,13 +2311,17 @@ class JudgeAgent(BudgetMeter):
             # is what the remaining spend pays for.
             from maljan.llm.context_window import output_bound_kwargs
 
-            bound = self._spend_admits("verdict", turns)
+            verdict_slot = object()
+            bound = self._spend_admits("verdict", turns, slot=verdict_slot)
             held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
-            answer = await retry_on_connection_error(
-                lambda: self.llm.ainvoke(turns, **held),
-                what="Judge verdict",
-                log=self.logger,
-            )
+            try:
+                answer = await retry_on_connection_error(
+                    lambda: self.llm.ainvoke(turns, **held),
+                    what="Judge verdict",
+                    log=self.logger,
+                )
+            finally:
+                self._spend_release(verdict_slot)
             self._record_usage(answer, call="verdict")
             # Whether the verdict reached its token cap, recorded like every
             # other judge call: a cut bundle reads as malformed JSON, and the
@@ -2691,8 +2725,11 @@ class JudgeAgent(BudgetMeter):
         from maljan.llm.fallback import restart_models
 
         restart_models(self.llm, loop_seconds=timeout, share=self._turn_share())
+        # Made at its whole cap or not at all: the structured path takes no
+        # per-call cap. Reserved while it runs.
+        question_slot = object()
         try:
-            self._spend_admits("technique question", messages)
+            self._spend_admits("technique question", messages, slot=question_slot, holdable=False)
         except SpendCeilingStop as stop:
             return TechniqueReview(
                 asked=asked, unanswered=f"not asked: {stop}", not_asked=not_asked
@@ -2751,7 +2788,10 @@ class JudgeAgent(BudgetMeter):
             )
 
         try:
-            answer, parsed = await run_on_agent_loop(_ask(), timeout, label="judge:techniques")
+            try:
+                answer, parsed = await run_on_agent_loop(_ask(), timeout, label="judge:techniques")
+            finally:
+                self._spend_release(question_slot)
         except TimeoutError:
             self.logger.error(
                 "JudgeAgent technique question timed out after %s.", limit_text(timeout, "s")

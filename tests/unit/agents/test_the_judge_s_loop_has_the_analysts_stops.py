@@ -121,8 +121,8 @@ class TestTheJudgesLoopWithNoLimit:
             {model_name_of(model): {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 10.0}},
             table={},
         )
-        # Worst cases always fit, so only the running turns can end it.
-        meter.worst_case = lambda *a, **k: 0.0  # type: ignore[method-assign]
+        # Every call is admitted as it is, so only the running turns can end it.
+        meter.admit = lambda **k: None  # type: ignore[method-assign]
 
         judge, _answer = _run(model, TokenLedger(spend=meter))
 

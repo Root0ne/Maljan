@@ -170,7 +170,8 @@ class TestBeforeEachCall:
 
     def test_the_verdict_is_made_with_its_cap_lowered_to_what_is_left(self) -> None:
         meter = self._meter()
-        meter.settle({"input_tokens": 0, "output_tokens": 150_000}, "deepseek-v4-pro")
+        # 0.56 USD of input and a measured answer of 10,000 tokens (0.04 USD).
+        meter.settle({"input_tokens": 560_000, "output_tokens": 10_000}, "deepseek-v4-pro")
         # 0.40 USD left at 4 USD a million output tokens is 100,000 tokens.
         held = meter.admit(
             kind="verdict", model="deepseek-v4-pro", prompt_chars=0, cap_tokens=384_000
@@ -179,21 +180,18 @@ class TestBeforeEachCall:
         (said,) = meter.snapshot()["held_calls"]
         assert "held to 100,000 output tokens" in said
 
-    def test_after_the_ceiling_only_the_verdict_and_the_report_are_made(self) -> None:
+    def test_after_the_ceiling_nothing_is_made_not_even_the_report(self) -> None:
         from maljan.core.spend import SpendCeilingStop
 
         meter = self._meter()
         meter.settle({"input_tokens": 0, "output_tokens": 300_000}, "deepseek-v4-pro")
         assert meter.reached()
-        with pytest.raises(SpendCeilingStop):
+        with pytest.raises(SpendCeilingStop, match="is exhausted"):
             meter.admit(
                 kind="validation retry", model="deepseek-v4-pro", prompt_chars=10, cap_tokens=10
             )
-        assert (
+        with pytest.raises(SpendCeilingStop, match="pays for 0 output tokens"):
             meter.admit(kind="report", model="deepseek-v4-pro", prompt_chars=10, cap_tokens=10)
-            is None
-        )
-        assert "made at its own 10-token cap" in (meter.snapshot()["held_calls"][-1])
 
     def test_a_model_with_no_price_is_made_until_the_ceiling_is_reached(self) -> None:
         meter = self._meter()

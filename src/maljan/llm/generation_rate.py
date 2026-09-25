@@ -643,6 +643,24 @@ def call_deadline(llm: Any, messages: Any, kwargs: dict[str, Any]) -> float:
         return UNMEASURED_REQUEST_TIMEOUT_SECONDS
 
 
+# Where an answer carries the time its request was sent (seconds since the
+# epoch): the spend ceiling prices a call at the rate in force then.
+SENT_AT_KEY = "sent_at"
+
+
+def _stamp_message(message: Any, sent: float) -> None:
+    metadata = getattr(message, "response_metadata", None)
+    if isinstance(metadata, dict):
+        metadata.setdefault(SENT_AT_KEY, float(sent))
+
+
+def stamp_sent_at(result: Any, sent: float) -> Any:
+    """``result`` with each answer's ``response_metadata`` carrying when its request was sent."""
+    for generation in getattr(result, "generations", None) or []:
+        _stamp_message(getattr(generation, "message", None), sent)
+    return result
+
+
 def _deadline_members(base: Any) -> dict[str, Any]:
     """``_agenerate``, ``_generate`` and ``_astream`` held to :func:`call_deadline`."""
     members: dict[str, Any] = {}
@@ -660,13 +678,15 @@ def _deadline_members(base: Any) -> dict[str, Any]:
             self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
         ) -> Any:
             seconds = call_deadline(self, messages, kwargs)
+            sent = time.time()
             try:
-                return await asyncio.wait_for(
+                result = await asyncio.wait_for(
                     base._agenerate(self, messages, stop=stop, run_manager=run_manager, **kwargs),
                     seconds,
                 )
             except TimeoutError as exc:
                 raise _expired(seconds) from exc
+            return stamp_sent_at(result, sent)
 
         members["_agenerate"] = _agenerate
 
@@ -677,6 +697,7 @@ def _deadline_members(base: Any) -> dict[str, Any]:
         ) -> Any:
             seconds = call_deadline(self, messages, kwargs)
             ends = time.monotonic() + seconds
+            sent: float | None = time.time()
             stream = base._astream(self, messages, stop=stop, run_manager=run_manager, **kwargs)
             try:
                 while True:
@@ -692,6 +713,11 @@ def _deadline_members(base: Any) -> dict[str, Any]:
                         return
                     except TimeoutError as exc:
                         raise _expired(seconds) from exc
+                    if sent is not None:
+                        # On the first chunk only: the chunks are added up
+                        # into one answer, and one stamp is what it carries.
+                        _stamp_message(getattr(chunk, "message", None), sent)
+                        sent = None
                     yield chunk
             finally:
                 await stream.aclose()
@@ -704,6 +730,7 @@ def _deadline_members(base: Any) -> dict[str, Any]:
             self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
         ) -> Any:
             seconds = call_deadline(self, messages, kwargs)
+            sent = time.time()
             outcome: dict[str, Any] = {}
             done = threading.Event()
 
@@ -722,7 +749,7 @@ def _deadline_members(base: Any) -> dict[str, Any]:
                 raise _expired(seconds)
             if "error" in outcome:
                 raise outcome["error"]
-            return outcome["answer"]
+            return stamp_sent_at(outcome["answer"], sent)
 
         members["_generate"] = _generate
     return members

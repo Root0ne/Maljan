@@ -449,6 +449,7 @@ class ServiceContainer:
         from maljan.core.spend import SpendMeter
 
         self._token_ledger = TokenLedger(spend=SpendMeter.from_settings(config))
+        self._plan_the_verdict_and_report(self._token_ledger.spend)
 
         # Per-run generation rate of each model, read off every call's answer
         # by a meter attached where the model is built. The judge and the
@@ -1342,6 +1343,33 @@ class ServiceContainer:
                 )
                 self._narrative_agent_cache.event_sink = self.event_sink
             return self._narrative_agent_cache
+
+    def _plan_the_verdict_and_report(self, meter: Any) -> None:
+        """Tell the spend meter the verdict and report calls this job will make.
+
+        The verdict is one call on the judge's model; the report is one call
+        for each section the composer writes (when it is on) and one for the
+        narrative round, on the reporter's model. The meter keeps what they
+        will cost aside from the tool phases. Never raises.
+        """
+        if meter is None or getattr(meter, "ceiling_usd", None) is None:
+            return
+        try:
+            from maljan.core.model_assignments import model_label_for
+
+            report_calls = 1
+            if bool(getattr(self.config.reporting, "composer_enabled", False)):
+                from maljan.reporting.composer import COMPOSED_SECTIONS
+
+                report_calls += len(COMPOSED_SECTIONS)
+            meter.plan_tail(
+                {
+                    "verdict": (model_label_for(self.config, "judge", role="judge"), 1),
+                    "report": (self._reporter_model_label(), report_calls),
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 — a plan never costs a job
+            logger.debug("the verdict and report were not planned for the spend meter: %s", exc)
 
     def _reporter_model_label(self) -> str:
         """The label of the model ``get_reporter_llm`` builds for the report's rounds."""

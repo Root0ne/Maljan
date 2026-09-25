@@ -111,8 +111,9 @@ def _reasoning_of(usage: dict[str, Any], raw: dict[str, Any]) -> int | None:
 def turn_usage(response: Any) -> dict[str, Any] | None:
     """One answer's reported usage, or ``None``.
 
-    ``{input_tokens, output_tokens[, cached_input_tokens][, reasoning_tokens][, cost]}``:
-    the optional keys are there only when the provider reported them. ``None``
+    ``{input_tokens, output_tokens[, cached_input_tokens][, reasoning_tokens][, cost]
+    [, sent_at]}``: the optional keys are there only when the provider reported
+    them (``sent_at`` when the client stamped the request's send time). ``None``
     is the provider having reported nothing, which the caller says in words
     rather than as a zero.
     """
@@ -133,6 +134,13 @@ def turn_usage(response: Any) -> dict[str, Any] | None:
     cost = _cost_of(response)
     if cost is not None:
         out["cost"] = cost
+    # When the request was sent, where the model's client stamped it: the
+    # spend ceiling prices a call at the rate in force then. Not a usage
+    # figure, and no tally reads it.
+    metadata = getattr(response, "response_metadata", None)
+    sent = metadata.get("sent_at") if isinstance(metadata, dict) else None
+    if isinstance(sent, int | float) and not isinstance(sent, bool) and sent > 0:
+        out["sent_at"] = float(sent)
     return out
 
 
