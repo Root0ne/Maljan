@@ -171,6 +171,34 @@ def reads_static_provider(definition: AgentDefinition | None) -> bool:
     return definition.role == "generic" and any(ref.kind == "provider" for ref in definition.tools)
 
 
+def pin_provider_sample(agent: Any) -> None:
+    """Hand the agent's static provider the path its tools must open the sample by.
+
+    For an agent whose tools include its provider's (a generic agent with a
+    ``provider`` reference): the provider was opened at resolution, before the
+    sample's path was known, so its own guard on the path argument — Ghidra's
+    ``load_program`` override — had nothing to hold a model to. Called once the
+    analyst node or a delegation has pinned ``_analysis_file_path``; never
+    re-attaches. A no-op for any other agent and any provider without a guard.
+    """
+    from maljan.agents.prompt_fragments import PROVIDER_FAMILY, tool_families
+
+    container = getattr(agent, "_container", None)
+    resolved = getattr(agent, "_resolved", None)
+    if container is None or resolved is None:
+        return
+    if PROVIDER_FAMILY not in tool_families(list(getattr(agent, "tools", None) or [])):
+        return
+    try:
+        provider = container.get_static_provider(resolved.static_provider_id)
+    except Exception as exc:  # noqa: BLE001 — a pin is never worth a failed stage
+        logger.debug("no provider to pin the sample on for %s (%s)", resolved.key, exc)
+        return
+    pin = getattr(provider, "pin_sample", None)
+    if callable(pin):
+        pin(getattr(agent, "_analysis_file_path", None))
+
+
 def reachable_agents(settings: Settings, named: Sequence[str]) -> list[str]:
     """The agents ``named``, every agent they can ask, and so on, in order.
 

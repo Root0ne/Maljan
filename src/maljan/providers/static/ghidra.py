@@ -241,6 +241,10 @@ class GhidraStaticProvider(StaticProvider):
         self._memory = memory
         self._container_samples_path = container_samples_path
         self._job = StaticJobContext()
+        # The container path an agent was pinned to (``pin_sample``), for an
+        # attach whose job context names none: a generic agent's provider is
+        # opened at resolution, before any sample path exists.
+        self._pinned_path: str | None = None
         self._toolkit: Any = None
         self._all_tools: list[Any] = []
         self.tools: list[Any] = []
@@ -391,6 +395,18 @@ class GhidraStaticProvider(StaticProvider):
     def get_tools(self) -> list[BaseTool]:
         return self._all_tools
 
+    def pin_sample(self, path: str | None) -> None:
+        """The container path ``load_program`` is held to, without re-attaching.
+
+        A generic agent given Ghidra's tools opens this provider when it is
+        resolved, with no sample path yet, so the ``load_program`` wrapper had
+        nothing to hold a model's ``file`` to. The analyst node pins the path
+        the agent's tools read before its loop starts, and from then on a host
+        path or an invented one a model sends is replaced with it. ``None``
+        clears it, for an agent cached into a run with no mirror.
+        """
+        self._pinned_path = path or None
+
     def _pin_load_program_path(self, tools: list[Any]) -> list[Any]:
         """Wrap ``load_program`` so a hallucinated ``file`` arg is overridden.
 
@@ -429,7 +445,9 @@ class GhidraStaticProvider(StaticProvider):
         provider = self
 
         async def pinned_load_program(**kwargs: Any) -> str:
-            pinned = getattr(provider._job, "mirror_sample_path", None)
+            pinned = getattr(provider, "_pinned_path", None) or getattr(
+                provider._job, "mirror_sample_path", None
+            )
             if isinstance(pinned, str) and pinned and kwargs.get("file") != pinned:
                 logger.warning(
                     "load_program: overriding model-supplied path %r with known container path %r.",

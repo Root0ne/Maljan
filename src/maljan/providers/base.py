@@ -157,6 +157,14 @@ class StaticProvider(ABC):
         """Where this provider is reached, safe to show any user: ``""`` when nowhere."""
         return ""
 
+    def pin_sample(self, path: str | None) -> None:
+        """The path this provider's tools open the sample by, set after an early attach.
+
+        A no-op by default; a provider whose tools take the sample path and
+        can hold a model to it overrides this.
+        """
+        return None
+
     def switched_off(self) -> bool:
         """Whether the operator turned this provider off, so it attaches nothing.
 

@@ -738,6 +738,12 @@ def _pin_sample_path(agent: Any, state: AnalysisState) -> None:
     # bytes instead of sharing this filesystem. Assigned unconditionally for
     # the same reason the path above is: an agent is cached across samples.
     agent._path_by_server = dict(getattr(agent._resolved, "path_by_server", {}) or {})
+    # And the agent's own provider, for a generic agent that reads one: its
+    # attach came before this path existed, and its guard on the path a model
+    # sends reads it from here.
+    from maljan.agents.composition import pin_provider_sample
+
+    pin_provider_sample(agent)
 
 
 def _augment_static_chunks_with_path(
@@ -745,6 +751,7 @@ def _augment_static_chunks_with_path(
     state: AnalysisState,
     *,
     provider_id: str | None = None,
+    host_path_reader: bool = True,
 ) -> list:
     """Inject the container-visible sample path into the static analyst's chunks.
 
@@ -819,8 +826,13 @@ def _augment_static_chunks_with_path(
     # Also carry the HOST-readable path (when present) so the static-feature
     # family classifier can read the raw bytes — ember reads the file on the
     # host, unlike Ghidra which reads the container-visible ``analysis_file_path``.
+    #
+    # Only for the reader that uses it (``host_path_reader``, the static role's
+    # family classifier). A generic agent has no such reader, and a second path
+    # in its head chunk is one a model can hand its tools instead of the one
+    # they read — the host path, which a containerised Ghidra cannot open.
     host_path = state.get("sample_path")
-    if isinstance(host_path, str) and host_path:
+    if host_path_reader and isinstance(host_path, str) and host_path:
         parsed["host_sample_path"] = host_path
     # The toolchain: knowing a sample is AutoIt or PyInstaller rather than
     # "a PE" changes which tools are worth spending steps on, and it costs one
@@ -2189,6 +2201,7 @@ def make_stage_agent_node(
                     chunks,
                     state,
                     provider_id=agent._resolved.static_provider_id,
+                    host_path_reader=role == "static",
                 )
 
             # The no-data guard runs on what the *loaders* produced. Injecting
