@@ -20,12 +20,12 @@ from maljan.core.spend import PROVIDER_REPORTED, SpendMeter, table_prices
 from maljan.core.token_ledger import TokenLedger, turn_usage
 
 FLASH = "deepseek-flash"
-# 2026-09-25 is a Friday, 2026-09-26 a Saturday.
 FRIDAY_17 = datetime(2026, 9, 25, 17, 0, tzinfo=UTC)
 FRIDAY_08 = datetime(2026, 9, 25, 8, 0, tzinfo=UTC)
 FRIDAY_0959 = datetime(2026, 9, 25, 9, 59, tzinfo=UTC)
 FRIDAY_10 = datetime(2026, 9, 25, 10, 0, tzinfo=UTC)
 SATURDAY_08 = datetime(2026, 9, 26, 8, 0, tzinfo=UTC)
+assert [FRIDAY_17.strftime("%a"), SATURDAY_08.strftime("%a")] == ["Fri", "Sat"]
 
 ONE_MILLION_OUT = {"input_tokens": 0, "output_tokens": 1_000_000}
 
@@ -44,6 +44,15 @@ class TestTheVendoredRow:
         assert len(row.windows) == 2
         assert all(window.price.output == pytest.approx(1.2) for window in row.windows)
         assert all("peak rate" in window.price.source for window in row.windows)
+
+    def test_prices_the_legacy_name_the_page_still_accepts(self) -> None:
+        legacy, current = table_prices()["deepseek-v4-flash"], table_prices()[FLASH]
+        assert (legacy.input, legacy.cached_input, legacy.output) == (
+            current.input,
+            current.cached_input,
+            current.output,
+        )
+        assert len(legacy.windows) == 2 and "legacy name" in legacy.source
 
 
 class TestACallIsSettledAtThePriceWhenItWasSent:
