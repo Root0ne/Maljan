@@ -1020,7 +1020,10 @@ then a `prices` row of the vendored model table
 (`data/model_context_windows_v1.json`), which carries DeepSeek's documented
 peak prices for `deepseek-flash` and `deepseek-v4-pro` with the page they are
 documented on — data, not a limit, and the peak rate so the figure is never
-below what a call cost. When the ceiling is reached every running tool loop
+below what a call cost. DeepSeek's off-peak rate is half the peak one, so a run
+priced at the vendored rates off-peak reads up to twice what it was billed; the
+run summary says "priced at the vendored rates" beside each such model, and an
+operator's `model_prices` row replaces the vendored one. When the ceiling is reached every running tool loop
 ends its tool phase and its agent writes its answer from what it gathered (the
 salvage a step limit uses); a loop that starts afterwards answers once without
 tools, an ask is refused, and the judge's verdict and the report still run, so
@@ -1043,6 +1046,30 @@ derived from the window by default); when it does not, the detail every line
 shows — names listed, characters of a text, decoded strings and detection
 labels — is derived from that room, the most at which the pack fits, and each
 line says what it left out and that the rest is a tool call away.
+
+**An analyst's input.** `core.max_token_limit` (was 128,000 tokens) is
+empty by default: an analyst's input text may take the room its window holds
+before the reply, less the system prompt, the pack and the run-state block
+around it. With no window learned the input goes whole; a number you set wins.
+Input over the room is shortened as a document — a JSON input keeps every key
+and loses elements off its largest lists, text keeps its head and ends in
+`…` — the text the model reads begins with a note saying so, and the run
+records a degradation reason ("The static analyst's input was shortened: …").
+The function summariser's prompts are held to the same window room and say
+when they were shortened; the PE loader's markdown lists every import, export
+and string, and the generic MCP provider's prompt names every tool.
+
+**What the report leaves out, it says.** The markdown report keeps its layout
+bounds — a long table value is cut to fit the page, a long list shows its
+first rows — and every one now says what it left out and where the whole is:
+a cut value ends in `…` and the methodology appendix says the JSON report and
+the evidence ledger carry it whole; a list shown in part ends with "N more …
+not shown here; the JSON report carries every one." The evidence sections do
+the same ("N more rows not shown here; the evidence endpoint carries every one
+under ev_…", a long text "Cut here at … characters"), a figure's legend counts
+what it did not draw, a drafted YARA or Suricata rule says in a comment how
+many published indicators it does not match on, and the STIX export carries
+every process root.
 
 ### The evidence budget
 

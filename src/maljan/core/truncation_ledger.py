@@ -247,6 +247,11 @@ class TruncationLedger:
         # number, because then no window was consulted.
         self.context_window: dict[str, object] = {}
 
+        # An analyst's input text shortened to fit its prompt
+        # (``BaseAnalyst._truncate_input``): one sentence per shortening, read by
+        # the judge node into the run's degradation reasons.
+        self.input_shortened: list[str] = []
+
         # ReAct loop step ceiling (agents/base_agent, LangGraph recursion_limit).
         self.react_invocations = 0
         self.react_step_cap_hits = 0
@@ -354,6 +359,12 @@ class TruncationLedger:
             self.context_window = dict(snapshot or {})
 
     # -- loop / generation ceilings ----------------------------------------
+
+    def record_input_shortened(self, sentence: str) -> None:
+        """One analyst input shortened to its prompt's room, in the sentence the run records."""
+        with self._lock:
+            if sentence not in self.input_shortened:
+                self.input_shortened.append(sentence)
 
     def record_react_loop(self, *, hit_step_cap: bool) -> None:
         with self._lock:

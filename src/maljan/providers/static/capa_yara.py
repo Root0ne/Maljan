@@ -46,7 +46,6 @@ from maljan.core.logger import logger
 from maljan.core.paths import resolve_data
 from maljan.providers.base import StaticCapabilities, StaticEvidenceBundle, StaticProvider
 from maljan.providers.registry import register_static_provider
-from maljan.schemas.tool_evidence import MAX_OUTPUT_CHARS, trim_output
 
 if TYPE_CHECKING:
     from maljan.core.config import Settings, StaticCapaConfig, StaticYaraConfig
@@ -443,21 +442,25 @@ class CapaYaraStaticProvider(StaticProvider):
 
 
 def _render_table(rows: list[dict[str, str]]) -> str:
-    """Render capa rule hits as a compact Markdown table, capped like every
-    other captured tool output (``schemas.tool_evidence.MAX_OUTPUT_CHARS``)."""
+    """Render capa rule hits as a compact Markdown table, every hit.
+
+    Whole: the table is a ledger entry the evidence budget stores and a model
+    reads through the context budget, which sizes it with a notice. A fixed
+    6,000 characters used to end it mid-row with no word of what was left out.
+    """
     lines = ["| rule | namespace |", "| --- | --- |"]
     for row in rows:
         lines.append(f"| {row.get('rule', '')} | {row.get('namespace', '')} |")
-    return trim_output("\n".join(lines), MAX_OUTPUT_CHARS)
+    return "\n".join(lines)
 
 
 def _render_yara(hits: list[dict[str, Any]]) -> str:
-    """Render YARA hits as a compact Markdown table, capped the same way."""
+    """Render YARA hits as a compact Markdown table, every hit, whole."""
     lines = ["| rule | strings |", "| --- | --- |"]
     for hit in hits:
         strings = ", ".join(str(s) for s in hit.get("strings") or [])
         lines.append(f"| {hit.get('rule', '')} | {strings} |")
-    return trim_output("\n".join(lines), MAX_OUTPUT_CHARS)
+    return "\n".join(lines)
 
 
 def ledger_entries(

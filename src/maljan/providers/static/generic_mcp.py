@@ -135,7 +135,8 @@ class GenericMCPStaticProvider(StaticProvider):
         if self._prompt_fragment_text:
             return self._prompt_fragment_text
         names = [t.name for t in self.get_tools()]
-        listed = ", ".join(f"`{n}`" for n in names[:20]) if names else "the tools you are given"
+        # Every tool name: the list is the model's map of what it can call.
+        listed = ", ".join(f"`{n}`" for n in names) if names else "the tools you are given"
         return (
             f"Analyze the binary using the {self._label} tools available to you. "
             "For EVERY claim you make, you MUST cite a concrete artifact: a function name, "

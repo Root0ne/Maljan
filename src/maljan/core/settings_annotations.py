@@ -670,11 +670,15 @@ ANNOTATIONS: dict[str, Annotation] = {
         "subgroup": "View decomposition",
     },
     "max_token_limit": {
-        "title": "Max token limit",
+        "title": "Analyst input limit (tokens)",
         "description": (
-            "Global token-count ceiling used to truncate prompts before they overflow "
-            "the LLM's context window. Conservative by default for smaller-context "
-            "models; raise it when running on a large-context model such as Gemini."
+            "How many tokens of an analyst's input text may reach its prompt. Empty, the "
+            "default, derives it from the window the analyst's model serves (the room "
+            "before the reply, less the prompt around the input); with no window learned "
+            "the input goes whole. A number set here wins. Input over the limit is "
+            "shortened as a document (a JSON input keeps its keys and loses list "
+            "elements; text keeps its head), the model is told what was left out, and "
+            "the run records a degradation reason."
         ),
         "subgroup": "Limits",
     },

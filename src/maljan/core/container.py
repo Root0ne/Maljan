@@ -1525,6 +1525,18 @@ class ServiceContainer:
             return self._sandbox_slice(agent_name, slice_name, sandbox_report)
         return self.load_chunked(file_hash, agent_name)
 
+    def _prompt_room_chars(self) -> int | None:
+        """What one prompt may carry before the reply room, or ``None`` with no window learned."""
+        from maljan.llm.context_window import ContextBudget
+
+        try:
+            budget = self.get_context_budget()
+        except Exception:  # noqa: BLE001 — no budget is no bound
+            return None
+        if not isinstance(budget, ContextBudget) or not budget.derives:
+            return None
+        return int(budget.tool_budget_chars())
+
     def get_function_summarizer(self) -> FunctionSummarizer | None:
         if not self.config.preprocessing.use_function_summarizer:
             return None
@@ -1540,6 +1552,7 @@ class ServiceContainer:
                     max_summary_words=self.config.preprocessing.summarizer_max_words,
                     token_ledger=getattr(self, "_token_ledger", None),
                     model_label=self._summarizer_model_label(),
+                    room_chars=self._prompt_room_chars,
                 )
                 logger.info(
                     "FunctionSummarizer initialized (%s / %s, max_words=%d).",

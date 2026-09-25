@@ -663,7 +663,13 @@ def spend_lines(spend: Any) -> list[str]:
         )
     ]
     for model, source in sorted((spend.get("prices_from") or {}).items()):
-        lines.append(f"Prices of `{model}`: {source}")
+        if source == "llm.model_prices":
+            lines.append(f"Prices of `{model}`: the operator's (llm.model_prices)")
+        else:
+            lines.append(
+                f"`{model}` priced at the vendored rates ({source}); a vendor's off-peak "
+                "discount is not applied, so off-peak spend is overstated"
+            )
     if spend.get("note"):
         lines.append(f"Not counted: {spend['note']}")
     return lines

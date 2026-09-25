@@ -942,6 +942,28 @@ change landed on `main`.
   network table lists every DNS, HTTP, TCP, host and domain row (ten of each).
 - **The Ghidra sink pre-pass** waits one tool call's deployment budget, or as
   long as Ghidra takes when none is set (was 120 s per request).
+- **An analyst's input is sized from its window.** `max_token_limit` (was
+  128,000 tokens, cut with a log line) is empty by default: the input may take
+  the window's room before the reply less the prompt around it; an operator's
+  number wins. Input over it is shortened as a document (JSON keeps its keys,
+  text its head ending in `…`), the model reads a note saying so, and the run
+  records a degradation reason. The function summariser's prompts (were 8,000
+  and 12,000 characters) are held to the same room and say when they are
+  shortened; the PE loader's markdown lists every import, export and string
+  (were 10, 10, 20 and 50); the generic MCP provider's prompt names every tool
+  (was 20); the capa and YARA evidence tables carry every hit (were cut at
+  6,000 characters mid-row).
+- **What the page leaves out, it says.** Every list the markdown report shows
+  in part ends "N more … not shown here; the JSON report carries every one", a
+  cut table value ends in `…` and the methodology appendix says where it is
+  whole, the JA3, packer, resolution and environment lists are whole, the
+  evidence sections say how many rows they left out and under which ids the
+  evidence endpoint carries them, a cut text section says where it is whole, a
+  figure's legend counts what it did not draw, a drafted YARA or Suricata rule
+  says in a comment how many published indicators it leaves to the IOC table,
+  the STIX export carries every process root (was 20), a job's failure message
+  is marked where it is cut, and a validation question naming a holder list
+  counts the rest.
 - **The report stage writes up to the model's own maximum.** A composer section
   and the narrative round take, in order, the operator's
   `reporting.composer_section_max_tokens` (sections) or `llm.judge_max_tokens`

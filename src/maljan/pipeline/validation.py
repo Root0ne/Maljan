@@ -29,8 +29,6 @@ from typing import Any, get_args, get_origin
 
 from pydantic import ValidationError
 
-# The row helpers live with the shape (``analysis.corroboration``) and are
-# re-exported here, where every reader of a run's validation looks for them.
 from maljan.agents.run_evidence_corpus import CorpusState, both_searched
 from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
@@ -47,6 +45,10 @@ from maljan.pipeline.events import (
 from maljan.schemas.evidence import entry_ids_in
 from maljan.schemas.judgement import BENIGN_VERDICT, SEVERITY_RATINGS, VERDICT_VALUES
 from maljan.schemas.stix_pattern import read_comparisons
+
+# The row helpers live with the shape (``analysis.corroboration``) and are
+# re-exported here, where every reader of a run's validation looks for them.
+from maljan.utils.marked_cut import marked_cut
 from maljan.utils.written_forms import written_forms
 
 # How many alternatives a suggestion list carries. Three is what fits in one
@@ -2121,10 +2123,17 @@ def _base_technique(technique_id: Any) -> str:
 
 
 # How many of a term's technique ids its question names, as examples of what
-# would ground it. Two: every term leads with the ids that describe it most
-# generally, and a longer list only puts more technique ids in front of a report
-# model that has not established any of them.
+# would ground it; the rest are counted. Two: every term leads with the ids
+# that describe it most generally, and naming more only puts more technique ids
+# in front of a report model that has not established any of them.
 _TERM_IDS_SHOWN = 2
+
+
+def _term_ids_said(techniques: Sequence[str]) -> str:
+    """The first ids of a term, and how many more it has."""
+    said = ", ".join(techniques[:_TERM_IDS_SHOWN])
+    rest = len(techniques) - _TERM_IDS_SHOWN
+    return f"{said} (or {rest} more)" if rest > 0 else said
 
 
 # A sentence whose assertion is that a rule matched: the matcher, a rule or a
@@ -2216,7 +2225,7 @@ def ungrounded_capabilities(
                 code=code,
                 message=(
                     f"the text claims {label}, which nothing in this run establishes — "
-                    f"no {', '.join(techniques[:_TERM_IDS_SHOWN])} technique, no matching evidence "
+                    f"no {_term_ids_said(techniques)} technique, no matching evidence "
                     f"section, and no analyst said it"
                     f" (in: {safe_finding_value(sentences[0])!r}).{rule_line} "
                     f"{grounding.summary()} Describe what was found, or drop the claim."
@@ -2614,7 +2623,8 @@ def analyst_cut_violation(cap: int, text: str = "") -> Violation:
     )
 
 
-# How much of a cut answer its question shows, as a sample of its shape.
+# How much of a cut answer its question shows, as a sample of its shape, marked
+# with … where it is cut.
 SECTION_CUT_HEAD_CHARS = 160
 
 
@@ -2642,7 +2652,7 @@ def section_cut_violation(
             else ""
         )
         + (
-            f", and opened with {safe_finding_value(head[:SECTION_CUT_HEAD_CHARS])!r}."
+            f", and opened with {safe_finding_value(marked_cut(head, SECTION_CUT_HEAD_CHARS))!r}."
             if head
             else "."
         )
@@ -3385,7 +3395,14 @@ def wrong_entry_citations(
         quoted = safe_finding_value(", ".join(repr(value) for value in values[:_MAX_NAMED_IDS]))
         more = len(values) - _MAX_NAMED_IDS
         named = safe_finding_value(", ".join(entries.named(i) for i in cited))
-        holding = safe_finding_value(", ".join(entries.named(i) for i in holders[:_MAX_NAMED_IDS]))
+        holding = safe_finding_value(
+            ", ".join(entries.named(i) for i in holders[:_MAX_NAMED_IDS])
+            + (
+                f" and {len(holders) - _MAX_NAMED_IDS} more"
+                if len(holders) > _MAX_NAMED_IDS
+                else ""
+            )
+        )
         message = (
             f"{quoted} is not in {named}, which the text cites for it; this run's evidence "
             f"holds it in {holding}. Cite the entry that holds the value the text states."

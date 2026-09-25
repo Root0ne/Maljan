@@ -881,6 +881,46 @@ def _definition_budget(cfg: Any, agent_name: str) -> tuple[int | None, int | Non
     )
 
 
+# Kept back from an analyst's input room for the notice a shortened input
+# begins with.
+INPUT_NOTICE_ROOM = 400
+INPUT_SHORTENED_NOTICE = (
+    "NOTE: this input did not fit the model's window whole and was shortened: "
+    "{detail}. What was left out is reachable by tool call where a tool reads it."
+)
+
+
+def shorten_input(text: str, room: int) -> tuple[str, str]:
+    """``text`` shortened to ``room`` characters as a document, and the sentence saying how.
+
+    A JSON document keeps every key and loses elements off its largest lists
+    (``output_shortening.shorten_json_document``), with its own bookkeeping of
+    what was left out; any other text keeps its head and ends in the cut mark.
+    Either way the result begins with :data:`INPUT_SHORTENED_NOTICE`. A JSON
+    document that fits once written without its whitespace comes back whole,
+    with an empty sentence.
+    """
+    from maljan.agents.output_shortening import shorten_json_document
+    from maljan.utils.marked_cut import marked_cut
+
+    budget = max(0, int(room))
+    shaped = shorten_json_document(text, budget)
+    if shaped.compacted:
+        # Whole, written without its whitespace: nothing was left out.
+        return shaped.text, ""
+    if shaped.shortened:
+        body = shaped.text
+        detail = (
+            f"{len(text):,} characters of JSON shortened to {len(body):,} by leaving list "
+            "elements out; the document says which lists and how many"
+        )
+    else:
+        body = marked_cut(text, budget)
+        detail = f"the first {len(body):,} of {len(text):,} characters are shown, ending in …"
+    notice = INPUT_SHORTENED_NOTICE.format(detail=detail)
+    return f"{notice}\n\n{body}", detail
+
+
 def slowest_call(entries: Any) -> str:
     """`, slowest <tool> 12.3s`, or `""` when nothing in the loop was timed.
 
@@ -5997,19 +6037,58 @@ class BaseAnalyst(BudgetMeter, ABC):
         return "static"
 
     def _truncate_input(self, text: str) -> str:
-        """Truncate input text to stay within the configured token limit."""
-        limit = get_settings().max_token_limit
+        """``text`` whole when it fits this analyst's input room, else shortened and said.
+
+        The room is ``max_token_limit`` where an operator set it, and otherwise
+        derived from the window the analyst's model serves
+        (:meth:`_input_room_chars`); with neither, the input goes whole. Input
+        over the room is shortened as a document (:func:`shorten_input`), the
+        text the model reads begins with a notice saying so, and the run's
+        truncation ledger records a sentence the judge node turns into a
+        degradation reason. Never a silent cut.
+        """
+        room = self._input_room_chars(text)
+        if room is None or len(text) <= room:
+            return text
+        shortened, sentence = shorten_input(text, room)
+        if not sentence:
+            return shortened
+        self.logger.warning("%s: %s", self.name, sentence)
+        ledger = getattr(self, "truncation_ledger", None)
+        record = getattr(ledger, "record_input_shortened", None)
+        if callable(record):
+            try:
+                record(f"The {self.name} analyst's input was shortened: {sentence}")
+            except Exception as exc:  # noqa: BLE001 — a record never costs an analysis
+                self.logger.debug("%s: the shortening was not recorded (%s).", self.name, exc)
+        return shortened
+
+    def _input_room_chars(self, text: str) -> int | None:
+        """Characters of input this analyst's prompt has room for, or ``None`` for no bound.
+
+        ``max_token_limit`` where the operator set it, counted in the tokens of
+        this text (its characters a token as ``tiktoken`` measures them).
+        Otherwise the window's room before the reply
+        (``ContextBudget.tool_budget_chars``) less the prompt around the input:
+        the system prompt, the pack and the run-state block.
+        """
+        configured = getattr(get_settings(), "max_token_limit", None)
+        if isinstance(configured, int) and not isinstance(configured, bool) and configured > 0:
+            try:
+                tokens = len(tiktoken.get_encoding("cl100k_base").encode(text)) or 1
+                per_token = max(1.0, len(text) / tokens)
+            except (KeyError, OSError, ValueError):
+                per_token = float(_CHARS_PER_TOKEN)
+            return int(configured * per_token)
+        from maljan.llm.context_window import ContextBudget
+
+        budget = self._context_budget()
+        if not isinstance(budget, ContextBudget) or not budget.derives:
+            return None
         try:
-            enc = tiktoken.get_encoding("cl100k_base")
-            tokens = enc.encode(text)
-            if len(tokens) > limit:
-                self.logger.warning("Input truncated from %d to %d tokens", len(tokens), limit)
-                return enc.decode(tokens[:limit])
-        except (KeyError, OSError, ValueError) as exc:
-            msg = "tiktoken truncation failed (%s); using char-based fallback."
-            self.logger.debug(msg, exc)  # nosemgrep
-            char_limit = limit * 4
-            if len(text) > char_limit:
-                self.logger.warning("Input truncated (fallback) to ~%d tokens", limit)
-                return text[:char_limit]
-        return text
+            framing = len(str(self._system_prompt("") or ""))
+        except Exception:  # noqa: BLE001 — a prompt that cannot be built weighs nothing here
+            framing = 0
+        framing += len(str(getattr(self, "facts_block", "") or ""))
+        framing += len(str(getattr(self, "run_state_block", "") or ""))
+        return max(0, int(budget.tool_budget_chars()) - framing - INPUT_NOTICE_ROOM)

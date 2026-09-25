@@ -80,15 +80,28 @@ class TestSummarizeChunk:
         assert isinstance(result, str)
         assert len(result) > 0
 
-    def test_chunk_truncated_at_8000_chars(self) -> None:
+    def test_a_chunk_the_window_holds_is_sent_whole(self) -> None:
         llm = _make_mock_llm("summary")
-        summarizer = FunctionSummarizer(llm=llm)
-        large_chunk = "A" * 20_000
-        summarizer.summarize_chunk(large_chunk)
-        # invoke edilen mesajin iceriginde 8000 karakter sınırı uygulanmali
+        summarizer = FunctionSummarizer(llm=llm, room_chars=lambda: 1_000_000)
+        summarizer.summarize_chunk("A" * 20_000)
+        call_args = llm.invoke.call_args[0][0]
+        full_prompt = " ".join(str(m.content) for m in call_args)
+        assert "A" * 20_000 in full_prompt
+
+    def test_a_chunk_past_the_window_is_shortened_and_says_so(self) -> None:
+        llm = _make_mock_llm("summary")
+        summarizer = FunctionSummarizer(llm=llm, room_chars=lambda: 8_000)
+        summarizer.summarize_chunk("A" * 20_000)
         call_args = llm.invoke.call_args[0][0]
         full_prompt = " ".join(str(m.content) for m in call_args)
         assert "A" * 20_000 not in full_prompt
+        assert "NOTE: only the first" in full_prompt and "…" in full_prompt
+
+    def test_with_no_window_the_chunk_is_whole(self) -> None:
+        llm = _make_mock_llm("summary")
+        FunctionSummarizer(llm=llm).summarize_chunk("A" * 20_000)
+        full_prompt = " ".join(str(m.content) for m in llm.invoke.call_args[0][0])
+        assert "A" * 20_000 in full_prompt
 
 
 class TestSummarizeChunks:

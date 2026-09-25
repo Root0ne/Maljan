@@ -3290,8 +3290,12 @@ class Settings(BaseSettings):
             return (init_settings,)
         return (init_settings, env_settings, dotenv_settings, file_secret_settings)
 
-    # Token overflow protection (128K is conservative for Gemini 1M+ context)
-    max_token_limit: Annotated[int, Field(ge=1)] = 128_000
+    # How many tokens of an analyst's input text may reach its prompt. ``None``,
+    # the default, derives it from the window the analyst's model serves: what
+    # the window holds before the reply room, less the prompt around the input.
+    # An operator's number wins. Input that does not fit is shortened as a
+    # document, the model is told, and the run records a degradation.
+    max_token_limit: Annotated[int, Field(ge=1)] | None = None
 
     # ReAct agent execution limits. ``None`` is no limit, and it is the
     # default: a loop ends when its model answers, when it only repeats itself

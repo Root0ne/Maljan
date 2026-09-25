@@ -81,6 +81,14 @@ _MERGE_HUMAN_TMPL = (
 # ---------------------------------------------------------------------------
 
 
+# Said at the head of a text the summariser's window could not hold whole.
+SHORTENED_NOTE = (
+    "NOTE: only the first {shown:,} of {total:,} characters fit this model's window; "
+    "the text below ends in … where it was cut."
+)
+SHORTENED_NOTE_ROOM = 200
+
+
 class FunctionSummarizer:
     """Two-stage LLM-based token-cost optimisation.
 
@@ -95,9 +103,14 @@ class FunctionSummarizer:
         max_summary_words: int = 150,
         token_ledger: Any | None = None,
         model_label: str = "",
+        room_chars: Any = None,
     ) -> None:
         self._llm = llm
         self._max_words = max_summary_words
+        # What one summariser prompt may carry, in characters, asked per call:
+        # a callable returning the window's room, or ``None`` for no bound. A
+        # fixed 8,000 and 12,000 used to stand here.
+        self._room_chars = room_chars
         # Each summary is a model call the run pays for, recorded under
         # ``summarizer`` and the model the summariser calls.
         self._token_ledger = token_ledger
@@ -128,7 +141,7 @@ class FunctionSummarizer:
 
         prompt = _SUMMARIZE_HUMAN_TMPL.format(
             max_words=self._max_words,
-            code_chunk=code_chunk[:8000],  # Hard limit — token budget.
+            code_chunk=self._fitted(code_chunk, _SUMMARIZE_SYSTEM + _SUMMARIZE_HUMAN_TMPL),
         )
 
         messages = [
@@ -151,8 +164,35 @@ class FunctionSummarizer:
             logger.warning(
                 "FunctionSummarizer.summarize_chunk failed: %s — returning raw chunk.", exc
             )
-            # Graceful degradation: on error return the raw chunk.
-            return code_chunk[: self._max_words * 6]  # Approximate char limit.
+            # Graceful degradation: on error return the raw chunk, whole; the
+            # analyst's input it becomes is sized from the analyst's window.
+            return code_chunk
+
+    def _fitted(self, text: str, framing: str) -> str:
+        """``text`` whole when the window's room holds it beside ``framing``, else shortened, said.
+
+        The room is asked of ``room_chars`` per call; with none, or no window
+        learned, the text goes whole. A shortened text ends in the cut mark
+        and begins with a line saying how much of it is shown.
+        """
+        from maljan.utils.marked_cut import marked_cut
+
+        try:
+            room = self._room_chars() if callable(self._room_chars) else None
+        except Exception:  # noqa: BLE001 — a room that cannot be read bounds nothing
+            room = None
+        if not isinstance(room, int) or room <= 0:
+            return text
+        width = room - len(framing) - SHORTENED_NOTE_ROOM
+        if len(text) <= width:
+            return text
+        shown = marked_cut(text, max(1, width))
+        logger.warning(
+            "FunctionSummarizer: %d of %d characters fit the window; the rest is left out.",
+            len(shown),
+            len(text),
+        )
+        return f"{SHORTENED_NOTE.format(shown=len(shown), total=len(text))}\n{shown}"
 
     def _ask(self, messages: list[Any]) -> Any:
         """One summariser call, on the agent loop so a cancelled job cancels it in flight.
@@ -246,7 +286,7 @@ class FunctionSummarizer:
         combined = "\n\n".join(summaries)
         prompt = _MERGE_HUMAN_TMPL.format(
             max_words=self._max_words * 2,
-            summaries=combined[:12000],  # Token budget guard.
+            summaries=self._fitted(combined, _MERGE_SYSTEM + _MERGE_HUMAN_TMPL),
         )
 
         messages = [
