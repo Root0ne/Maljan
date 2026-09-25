@@ -224,7 +224,11 @@ class TestWhatTheBundleCarries:
         assert not any("addr:value" in pattern for pattern in _patterns(bundle))
 
     def test_an_observed_address_is(self) -> None:
-        report = _report(NetworkIOCs(ips=[NetworkIP(address=C2_ADDRESSES[0], source="sandbox")]))
+        report = _report(
+            NetworkIOCs(
+                ips=[NetworkIP(address=C2_ADDRESSES[0], source="sandbox", sample_process_tree=True)]
+            )
+        )
 
         bundle = ExtendedSTIXRenderer().render(report)
 

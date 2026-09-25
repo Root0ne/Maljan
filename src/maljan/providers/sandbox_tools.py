@@ -160,10 +160,27 @@ def sandbox_network(report: dict[str, Any] | None) -> dict[str, Any]:
     for key in ("dns", "hosts", "http", "tcp", "udp", "domains", "icmp", "tls"):
         rows = network.get(key)
         if isinstance(rows, list):
-            out[key] = rows[:_ROW_LIMIT]
+            out[key] = [_with_resolver_fact(row) for row in rows[:_ROW_LIMIT]]
             if len(rows) > _ROW_LIMIT:
                 out[f"{key}_total"] = len(rows)
     return out
+
+
+def _with_resolver_fact(row: Any) -> Any:
+    """A flow or host row, marked ``public_resolver`` when it names a public DNS resolver.
+
+    A platform fact beside the sandbox's own: a sandbox's guest resolves
+    through a public resolver whatever the sample does, so an analyst reading
+    a row to one is told what the address is before it reads it as a contact.
+    """
+    if not isinstance(row, dict):
+        return row
+    from maljan.extractors.network_extractor import is_public_resolver
+
+    address = row.get("dst") or row.get("ip") or row.get("address")
+    if isinstance(address, str) and is_public_resolver(address):
+        return {**row, "public_resolver": True}
+    return row
 
 
 def sandbox_signatures(report: dict[str, Any] | None) -> dict[str, Any]:

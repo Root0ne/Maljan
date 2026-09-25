@@ -492,7 +492,9 @@ class TestTheCapHoldsAtTheRenderer:
 
         patterns = _patterns(ExtendedSTIXRenderer().render(report, base_bundle=base))
 
-        assert len(patterns) == 4
+        # The sample's hash, the URL, the URL's host (which follows the URL's
+        # decision) and the judge's two file names.
+        assert len(patterns) == 5
 
     def test_the_sample_own_hash_is_never_pushed_out_by_the_judge_hashes(self) -> None:
         judged = [

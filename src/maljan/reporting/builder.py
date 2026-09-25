@@ -728,7 +728,13 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 is_network=True,
             )
         for ip in net.ips:
-            where = [f"port {ip.port}" if ip.port else "", ip.transport or "", ip.asn or ""]
+            where = [
+                f"port {ip.port}" if ip.port else "",
+                ip.transport or "",
+                f"AS {ip.asn}" if ip.asn else "",
+                "public DNS resolver" if ip.public_resolver else "",
+                _process_tree_words(ip.sample_process_tree) if ip.source == "sandbox" else "",
+            ]
             _add(
                 "IPv6" if ":" in ip.address else "IPv4",
                 "ip",
@@ -786,7 +792,7 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
                 is_network=True,
             )
 
-    return _with_the_judge_s_values(rows, report)
+    return _with_the_hosts_of_published_urls(_with_the_judge_s_values(rows, report), report)
 
 
 # The table's type for each kind a judge indicator can name.
@@ -863,6 +869,48 @@ def _with_the_judge_s_values(
     return out
 
 
+def _with_the_hosts_of_published_urls(
+    rows: list[ConsolidatedIOC], report: MalwareReport
+) -> list[ConsolidatedIOC]:
+    """The table with a Domain row for the host of each URL it publishes.
+
+    A published URL's host follows the URL's decision
+    (``stix_renderer.published_url_hosts``): one live run published two C2
+    URLs and neither of their names, because the judge wrote URL indicators
+    only and nothing carried a URL's host to a row. A host the table already
+    has a row for keeps that row, asked the same rule.
+    """
+    from maljan.reporting.renderers.stix_renderer import (
+        emulation_kwargs,
+        publish_answer,
+        published_url_hosts,
+    )
+
+    hosts = published_url_hosts(report)
+    if not hosts:
+        return rows
+    out = list(rows)
+    listed = {row.value.strip().lower().rstrip(".") for row in out if row.kind == "domain"}
+    for host, (url, source) in hosts.items():
+        if host in listed:
+            continue
+        out.append(
+            ConsolidatedIOC(
+                type="Domain",
+                kind="domain",
+                value=host,
+                source=source,
+                context=f"the host of {url}",
+                description=f"the host of {url}",
+                published=publish_answer(
+                    "domain", host, source, **emulation_kwargs(report, "domain", host)
+                ),
+                is_network=True,
+            )
+        )
+    return out
+
+
 _PIPE_PREFIXES = ("\\\\.\\pipe\\", "//./pipe/")
 
 
@@ -879,6 +927,15 @@ def _spawned(roots: list[Any]) -> list[Any]:
             out.append(child)
             out.extend(_spawned([child]))
     return out
+
+
+def _process_tree_words(attributed: bool | None) -> str:
+    """What the sandbox report says about which process reached an address."""
+    if attributed is True:
+        return "reached by the sample's process tree"
+    if attributed is False:
+        return "reached by a process outside the sample's process tree"
+    return "the sandbox report does not say which process reached it"
 
 
 def _domain_context(d: Any) -> str:

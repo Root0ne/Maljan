@@ -45,7 +45,12 @@ NETWORK = {
         },
     ],
     "ips": [
-        {"address": "185.99.133.7", "source": "sandbox", "is_suspicious": True},
+        {
+            "address": "185.99.133.7",
+            "source": "sandbox",
+            "is_suspicious": True,
+            "sample_process_tree": True,
+        },
         {"address": "6.0.0.0", "source": "strings", "is_suspicious": False},
     ],
     "urls": [
@@ -237,3 +242,33 @@ class TestThePublishRuleFailsClosed:
         assert not [
             node for node in ast.walk(body) if isinstance(node, ast.Import | ast.ImportFrom)
         ], "the rule is imported once, at module scope, not per call"
+
+
+class TestAPublishedURLCarriesItsHost:
+    def test_the_host_of_a_published_url_is_a_published_domain_row(self) -> None:
+        """The table, the export and the feed read one decision for the host."""
+        from app.services import report_service
+        from maljan.reporting.models import MalwareReport
+
+        report = MalwareReport.model_validate(
+            {
+                **_malware_report(),
+                "network": {
+                    **NETWORK,
+                    "domains": [],
+                    "urls": [{"url": "http://relay-alpha-7f3c.top/gate", "source": "sandbox"}],
+                },
+            }
+        )
+        out: list[dict[str, Any]] = []
+
+        report_service._with_the_hosts_of_published_urls(out, report, None)
+
+        assert out == [
+            {
+                "kind": "domain",
+                "value": "relay-alpha-7f3c.top",
+                "source": "sandbox",
+                "published": True,
+            }
+        ]

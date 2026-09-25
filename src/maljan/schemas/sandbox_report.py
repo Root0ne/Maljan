@@ -390,6 +390,78 @@ def _split_host_port(value: str) -> tuple[str, int | None]:
     return value, None
 
 
+# The key a flow row states its attribution under: ``True`` when the process
+# that made the flow is the sample's or one it started, ``False`` when the
+# report names that process and it is neither, and absent when the report does
+# not say. A platform fact, so it is right or it is not there.
+SAMPLE_TREE_KEY = "sample_process_tree"
+
+
+def _is_the_sample(proc: dict[str, Any], sample: dict[str, Any]) -> bool:
+    """Whether a Triage process record is the submitted sample running.
+
+    Triage marks the process it started from the submission ``orig``; a report
+    without the mark names the sample in the process's image or command line,
+    by its digest or by the file name it was submitted under.
+    """
+    if proc.get("orig") is True:
+        return True
+    text = f"{proc.get('image') or ''} {proc.get('cmd') or ''}".lower()
+    names = [str(sample.get(key) or "").strip().lower() for key in ("sha256", "target")]
+    return any(name and name in text for name in names)
+
+
+def _sample_process_tree(
+    task: dict[str, Any], sample: dict[str, Any]
+) -> tuple[frozenset[Any], frozenset[Any]]:
+    """The ``procid``s of the sample's process tree in one task, and every ``procid`` listed.
+
+    The tree is the sample's own processes and every process whose parent
+    chain (``procid_parent``) reaches one. Empty when no process is the sample,
+    which leaves every flow of the task unattributed rather than attributed to
+    nothing.
+    """
+    processes = [p for p in task.get("processes") or [] if isinstance(p, dict)]
+    parent = {p.get("procid"): p.get("procid_parent") for p in processes if p.get("procid")}
+    roots = {p.get("procid") for p in processes if p.get("procid") and _is_the_sample(p, sample)}
+    tree: set[Any] = set()
+    for procid in parent:
+        seen: set[Any] = set()
+        current = procid
+        while current and current not in seen:
+            if current in roots:
+                tree.add(procid)
+                break
+            seen.add(current)
+            current = parent.get(current)
+    return frozenset(tree), frozenset(parent)
+
+
+def _flow_attribution(
+    flow: dict[str, Any], in_tree: frozenset[Any], listed: frozenset[Any]
+) -> dict[str, Any]:
+    """What one Triage flow says about the process that made it, and its network facts.
+
+    ``procid`` and ``pid`` as the flow gives them; ``sample_process_tree`` only
+    where the report settles it (see ``SAMPLE_TREE_KEY``); the destination's AS
+    number, AS organisation and country where Triage recorded them.
+    """
+    out: dict[str, Any] = {}
+    procid = flow.get("procid")
+    if procid not in (None, ""):
+        out["procid"] = procid
+        if in_tree and procid in in_tree:
+            out[SAMPLE_TREE_KEY] = True
+        elif in_tree and procid in listed:
+            out[SAMPLE_TREE_KEY] = False
+    if flow.get("pid") not in (None, ""):
+        out["pid"] = flow.get("pid")
+    for key in ("as_num", "as_org", "country"):
+        if flow.get(key) not in (None, ""):
+            out[key] = flow[key]
+    return out
+
+
 def triage_overview_to_sandbox_report(
     overview: dict[str, Any],
     *,
@@ -436,6 +508,7 @@ def triage_overview_to_sandbox_report(
     network = SandboxNetwork()
     hosts_by_ip: dict[str, dict[str, Any]] = {}
     for task in (task_reports or {}).values():
+        in_tree, listed = _sample_process_tree(task, sample)
         for proc in task.get("processes") or []:
             if not isinstance(proc, dict):
                 continue
@@ -460,7 +533,8 @@ def triage_overview_to_sandbox_report(
             dst_host, dst_port = _split_host_port(str(flow.get("dst") or ""))
             if not dst_host:
                 continue
-            row = {"dst": dst_host, "dport": dst_port}
+            row: dict[str, Any] = {"dst": dst_host, "dport": dst_port}
+            row.update(_flow_attribution(flow, in_tree, listed))
             if proto == "tcp":
                 network.tcp.append(row)
             elif proto == "udp":

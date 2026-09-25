@@ -12,6 +12,7 @@ from maljan.reporting.renderers.stix_renderer import (
     emulation_record,
     indicator_publish_reason,
     judge_indicator_rows,
+    published_url_hosts,
 )
 from maljan.reporting.run_diff import RunRecord, diff_runs
 from sqlalchemy import select
@@ -111,6 +112,64 @@ def _publishable(
             log_safe(exc),
         )
         return False
+
+
+def _typed_report(mr: dict) -> Any:
+    """The stored report as the model the export reads, or the dict when it will not validate.
+
+    A dict the model cannot read still answers the rule's own questions from
+    its fields; the attribution and URL-host answers need the model, and a
+    report that will not validate is said so in the log.
+    """
+    try:
+        from maljan.reporting.models import MalwareReport
+
+        return MalwareReport.model_validate(mr)
+    except Exception as exc:  # noqa: BLE001 — a feed answers, and says what broke
+        logger.error(
+            "the stored report could not be read as a report model; the feed asks the "
+            "publish rule of its fields alone (%s: %s)",
+            type(exc).__name__,
+            log_safe(exc),
+        )
+        return mr
+
+
+def _with_the_hosts_of_published_urls(out: list[dict], typed: Any, kind: str | None) -> None:
+    """Add a domain row for the host of each URL this report publishes, when it has none.
+
+    The host follows the URL's decision (``stix_renderer.published_url_hosts``),
+    as the report's table and the export read it.
+    """
+    if kind and kind != "domain":
+        return
+    try:
+        hosts = published_url_hosts(typed)
+    except Exception as exc:  # noqa: BLE001 — a feed answers, and says what broke
+        logger.error(
+            "the hosts of the published URLs could not be read (%s: %s)",
+            type(exc).__name__,
+            log_safe(exc),
+        )
+        return
+    listed = {
+        str(row.get("value") or "").strip().lower().rstrip(".")
+        for row in out
+        if row.get("kind") == "domain"
+    }
+    for host, (_url, source) in hosts.items():
+        if host in listed:
+            continue
+        out.append(
+            {
+                "kind": "domain",
+                "value": host,
+                "source": source,
+                "published": _publishable(
+                    "domain", host, source, None, emulation_kwargs(typed, "domain", host)
+                ),
+            }
+        )
 
 
 def _with_the_judge_s_values(out: list[dict], mr: dict, kind: str | None) -> None:
@@ -551,6 +610,10 @@ class ReportService:
         # What the run's FLOSS entry recovered by emulation, read from the
         # stored report the way the report's own table reads it.
         emulated = emulation_record(mr)
+        # The rule's report-dependent arguments are asked of the report as the
+        # export reads it: a sandbox row's attribution, the models that named a
+        # value and the published URLs whose hosts follow them.
+        typed = _typed_report(mr)
         identity = mr.get("identity") or {}
         hashes = identity.get("hashes") or {}
         for algo, value in hashes.items():
@@ -576,7 +639,7 @@ class ReportService:
                             dom.get("fqdn"),
                             dom.get("source"),
                             dom.get("reputation"),
-                            emulation_kwargs(mr, "domain", str(dom.get("fqdn") or ""), emulated),
+                            emulation_kwargs(typed, "domain", str(dom.get("fqdn") or ""), emulated),
                         ),
                     }
                 )
@@ -593,7 +656,7 @@ class ReportService:
                             ip.get("address"),
                             ip.get("source"),
                             ip.get("reputation"),
-                            emulation_kwargs(mr, "ip", str(ip.get("address") or ""), emulated),
+                            emulation_kwargs(typed, "ip", str(ip.get("address") or ""), emulated),
                         ),
                     }
                 )
@@ -614,7 +677,7 @@ class ReportService:
                             url.get("url"),
                             url.get("source") or "strings",
                             reputations.get(host),
-                            emulation_kwargs(mr, "url", str(url.get("url") or ""), emulated),
+                            emulation_kwargs(typed, "url", str(url.get("url") or ""), emulated),
                         ),
                     }
                 )
@@ -631,6 +694,7 @@ class ReportService:
             for value in network.get(field) or []:
                 out.append({"kind": row_kind, "value": value, "source": "sandbox"})
         _with_the_judge_s_values(out, mr, kind)
+        _with_the_hosts_of_published_urls(out, typed, kind)
         rows = [row for row in out if row.get("value")]
         wanted = str(include or "published").strip().lower()
         if wanted == "all":

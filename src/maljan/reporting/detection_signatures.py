@@ -493,10 +493,15 @@ def sigma_admits(report: MalwareReport) -> frozenset[str]:
         from maljan.reporting.builder import build_consolidated_iocs
 
         rows = build_consolidated_iocs(report)
+    # A network row the sandbox recorded is admitted on the table's own answer:
+    # a flow the report does not attribute to the sample's process tree is the
+    # guest's traffic, not the sample's, until a model names it — and one live
+    # run drafted rules over a public resolver the guest asked.
     return frozenset(
         row.value.strip().lower()
         for row in rows
-        if str(row.published or "") == "yes" or str(row.source or "") == "sandbox"
+        if str(row.published or "") == "yes"
+        or (str(row.source or "") == "sandbox" and row.kind not in _DRAFT_NETWORK_KINDS)
     )
 
 

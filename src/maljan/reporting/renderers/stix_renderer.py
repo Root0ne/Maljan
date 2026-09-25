@@ -1139,6 +1139,35 @@ class ExtendedSTIXRenderer:
                         )
                     )
 
+        # 5.5) The host of every URL this run publishes, where the network
+        #      block has no row for it: the host follows the URL's decision.
+        #      The judge's own URL indicators count, which is the case that
+        #      published two C2 URLs and neither of their names.
+        listed_domains = {
+            d.fqdn.strip().lower().rstrip(".")
+            for d in (report.network.domains if report.network is not None else [])
+        }
+        for host, (_url, source) in published_url_hosts(report).items():
+            if host in listed_domains:
+                continue
+            admitted = indicator_publish_reason(
+                "domain", host, source, **emulation_kwargs(report, "domain", host)
+            )
+            pattern = indicator_pattern("domain", host)
+            if admitted is None or pattern is None:
+                continue
+            _queue(
+                Indicator(
+                    name=f"Domain {host}",
+                    pattern=pattern,
+                    pattern_type="stix",
+                    indicator_types=[minted_indicator_type(report.verdict, suspicious=True)],
+                    description=admitted,
+                ),
+                _BAND_NETWORK,
+                source,
+            )
+
         # 6) StringIOC → Indicator.
         #
         # Which values this run may publish at all. One rule, read once, and
@@ -1805,8 +1834,23 @@ def indicator_publish_reason(
     recovered: str = "",
     verdict: Any = None,
     also_plain: str = "",
+    unattributed: str = "",
+    named_by: str = "",
+    in_published_url: str = "",
 ) -> str | None:
     """Why this run may publish one indicator of ``kind``, or ``None``.
+
+    ``in_published_url`` names a URL this run publishes whose host is this
+    domain (:func:`published_url_hosts`). The domain follows that URL's
+    decision: one live run published two C2 URLs and neither of their names,
+    because the judge wrote URL indicators only and nothing carried a
+    published URL's host to a row of its own.
+
+    ``unattributed`` is why a sandbox row is not the sample's own observation
+    — a flow the report does not attribute to the sample's process tree, a
+    well-known benign name the guest resolved — and ``named_by`` the models
+    that named the value (:func:`sandbox_row_kwargs`). Such a row is published
+    only when a model names it; the observation alone is the guest's traffic.
 
     One rule for every kind the platform mints, and every minting path asks it:
     the network block's own rows, the string rows that reach the bundle through
@@ -1839,10 +1883,16 @@ def indicator_publish_reason(
     if kind == "domain":
         if not host_is_public(value):
             return None
+        if in_published_url:
+            return f"the host of {in_published_url}, which this run publishes"
+        if unattributed:
+            return _named_by_a_model(named_by)
         return corroboration_reason(source, reputation, value) or _emulation_admits(
             value, recovered, verdict
         )
     if kind == "ip":
+        if unattributed and address_is_publishable(value, source):
+            return _named_by_a_model(named_by)
         admitted = ip_corroboration_reason(value, source, reputation)
         if admitted or not address_is_publishable(value, source):
             return admitted
@@ -1888,6 +1938,123 @@ def indicator_publish_reason(
     if str(source or "").strip().lower() not in ("", "strings"):
         return str(source)
     return corroborated_by or None
+
+
+def published_url_hosts(report: Any) -> dict[str, tuple[str, str]]:
+    """``{host: (url, source)}`` for every URL this report publishes whose host is a name.
+
+    The URLs of the network block the rule publishes, and the judge's URL
+    values the rule publishes (source ``judge``), in that order; the first URL
+    to carry a host is the one named. An address host is not a name and is
+    not carried: it is an ``ip`` row's to answer.
+    """
+    out: dict[str, tuple[str, str]] = {}
+
+    def _carry(url: str, source: str) -> None:
+        host = url_host(url)
+        if not host or not host_is_public(host):
+            return
+        try:
+            ipaddress.ip_address(host.strip("[]"))
+        except ValueError:
+            out.setdefault(host, (url, source))
+
+    network = _field(report, "network")
+    for row in (_field(network, "urls") or []) if network is not None else []:
+        url = str(_field(row, "url") or "").strip()
+        source = str(_field(row, "source") or "strings")
+        if url and (
+            indicator_publish_reason(
+                "url",
+                url,
+                source,
+                _host_reputation(report, url_host(url)),
+                **emulation_kwargs(report, "url", url),
+            )
+            is not None
+        ):
+            _carry(url, source)
+    judged = [
+        str(_field(item, "value") or "").strip()
+        for item in _field(report, "judge_indicators") or []
+        if str(_field(item, "kind") or "") == "url"
+    ]
+    if judged:
+        corroborating = _corroborating_values(report)
+        for url in judged:
+            if url and judge_value_answer(report, "url", url, corroborating) == "yes":
+                _carry(url, "judge")
+    return out
+
+
+def _named_by_a_model(named_by: str) -> str | None:
+    return f"named by {named_by}" if named_by else None
+
+
+# Why a sandbox row is not the sample's own observation, as the rule reports it.
+UNATTRIBUTED_FLOW = "the sandbox report does not say which process made the flows to it"
+FLOW_OUTSIDE_THE_TREE = (
+    "the sandbox report attributes its flows to a process outside the sample's process tree"
+)
+BENIGN_NAME_RESOLVED = "a well-known benign name the sandbox's guest resolved"
+
+
+def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
+    """``unattributed`` and ``named_by`` for one value's sandbox row, or nothing.
+
+    Asked of the report's network block. An address the sandbox saw is the
+    sample's own observation when a flow to it came from the sample's process
+    tree; one no flow of the tree reached — the report attributes its flows
+    elsewhere, or says nothing about which process made them — is the guest's
+    traffic, and so is a well-known benign name a DNS lookup asked for (Windows
+    resolves through its DNS service, never through the sample's tree, so a
+    name is judged by what it is). Either is published only when a model names
+    it: an analyst's artefact or claim, or the judge's indicator. The public
+    resolver and AS facts are stated in the reason.
+    """
+    network = _field(report, "network")
+    if network is None or kind not in ("ip", "domain"):
+        return {}
+    key = str(value or "").strip().lower().rstrip(".")
+    if kind == "ip":
+        row = next(
+            (r for r in _field(network, "ips") or [] if str(_field(r, "address")) == key), None
+        )
+        if row is None or _field(row, "source") != "sandbox":
+            return {}
+        if _field(row, "sample_process_tree") is True:
+            return {}
+        why = (
+            FLOW_OUTSIDE_THE_TREE
+            if _field(row, "sample_process_tree") is False
+            else UNATTRIBUTED_FLOW
+        )
+        if _field(row, "public_resolver"):
+            why += "; it is a public DNS resolver"
+        if _field(row, "asn"):
+            why += f"; AS {_field(row, 'asn')}"
+    else:
+        row = next(
+            (
+                r
+                for r in _field(network, "domains") or []
+                if str(_field(r, "fqdn") or "").strip().lower().rstrip(".") == key
+            ),
+            None,
+        )
+        if row is None or _field(row, "source") != "sandbox":
+            return {}
+        if not is_well_known_benign_host(key):
+            return {}
+        why = BENIGN_NAME_RESOLVED
+    named = [str(by) for by in _field(row, "named_by") or []]
+    for indicator in _field(report, "judge_indicators") or []:
+        if str(_field(indicator, "kind") or "") == kind and (
+            str(_field(indicator, "value") or "").strip().lower().rstrip(".") == key
+        ):
+            named.append("the judge's indicator")
+            break
+    return {"unattributed": why, "named_by": ", ".join(dict.fromkeys(named))}
 
 
 # What the rule writes for a value emulation recovered, before the entry id.
@@ -2084,16 +2251,26 @@ def emulation_kwargs(
     any) and ``verdict`` for a value only emulation recovered; ``also_plain``
     (the sweep's entry) for one the static sweep read too; nothing otherwise.
     The verdict is read as stated only when the judge gave it a confidence.
+    A sandbox row's ``unattributed`` and ``named_by`` (:func:`sandbox_row_kwargs`)
+    ride along, so every surface that asks the rule of a network value — the
+    IOC table, the export, ``/iocs``, the judge's values — reads one decision.
     """
     if kind not in ("domain", "ip", "url"):
         return {}
+    observed: dict[str, str] = (
+        dict(sandbox_row_kwargs(report, kind, value)) if report is not None else {}
+    )
+    if kind == "domain" and report is not None:
+        carried_by = published_url_hosts(report).get(str(value or "").strip().lower().rstrip("."))
+        if carried_by:
+            observed["in_published_url"] = carried_by[0]
     found = emulation_record(report) if record is None else record
     key = str(value or "").strip().lower().rstrip(".")
     if key in found.plain:
-        return {"also_plain": found.plain[key] or "the strings entry"}
+        return {"also_plain": found.plain[key] or "the strings entry", **observed}
     entry = found.values.get(key)
     if not entry:
-        return {}
+        return dict(observed)
     reason = f"{RECOVERED_BY_EMULATION}, {entry}"
     if found.partial:
         reason += f" (the record is partial: {found.partial})"
@@ -2101,6 +2278,7 @@ def emulation_kwargs(
     return {
         "recovered": reason,
         "verdict": _field(report, "verdict") if stated else UNSTATED_VERDICT,
+        **observed,
     }
 
 
@@ -2124,6 +2302,9 @@ def publish_answer(
     recovered: str = "",
     verdict: Any = None,
     also_plain: str = "",
+    unattributed: str = "",
+    named_by: str = "",
+    in_published_url: str = "",
 ) -> str:
     """The publish rule's answer for one row, as the report prints it.
 
@@ -2149,6 +2330,9 @@ def publish_answer(
         corroborated_by=corroborated,
         recovered=recovered,
         verdict=verdict,
+        unattributed=unattributed,
+        named_by=named_by,
+        in_published_url=in_published_url,
     ):
         return "yes"
     if kind == "domain" and not host_is_public(text):
@@ -2157,6 +2341,8 @@ def publish_answer(
         return "no: its host does not resolve outside the analysed network"
     if kind == "ip" and not address_is_publishable(text, source):
         return "no: not an address this run may publish"
+    if unattributed and kind in ("ip", "domain"):
+        return f"no: {unattributed}, and no model named it"
     if kind == "email" and not email_is_publishable(text):
         return "no: not a mailbox at a host that could exist"
     if (
@@ -2208,6 +2394,11 @@ def judge_value_answer(report: Any, kind: str, value: str, corroborating: str) -
     text = str(value or "").strip()
     network = getattr(report, "network", None)
     emulated = emulation_kwargs(report, kind, text)
+    if emulated.get("unattributed"):
+        # The value is the judge's own: a model named it, which is what a
+        # sandbox row the observation alone does not publish waits for.
+        named = [by for by in str(emulated.get("named_by") or "").split(", ") if by]
+        emulated["named_by"] = ", ".join(dict.fromkeys([*named, "the judge's indicator"]))
     if kind == "domain" and network is not None:
         for row in network.domains:
             if row.fqdn.strip().lower().rstrip(".") == text.lower().rstrip("."):

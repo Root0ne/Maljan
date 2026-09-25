@@ -50,6 +50,7 @@ from maljan.reporting.models import (
     StringIOC,
 )
 from maljan.schemas.evidence import build_entry, format_entry_id
+from maljan.schemas.sandbox_report import SAMPLE_TREE_KEY
 
 if TYPE_CHECKING:
     from maljan.schemas.evidence import LedgerEntry
@@ -773,6 +774,12 @@ def network_from_ledger(
             urls[value] = created
             network.urls.append(created)
 
+    # What the sandbox's own records say about each address it saw: whether a
+    # flow to it came from the sample's process tree, from another process, or
+    # from a process the report does not name.
+    attributed: dict[str, list[bool | None]] = {}
+    host_facts: dict[str, dict[str, Any]] = {}
+
     for _entry, data in _payloads(ledger, "sandbox_network"):
         for key in ("dns", "domains"):
             for row in data.get(key) or []:
@@ -782,10 +789,18 @@ def network_from_ledger(
         # though a string sweep had produced it, which is the weakest claim
         # there is and the one the publish rule holds back.
         for row in data.get("hosts") or []:
-            _add("ip", _first_str(row, "ip", "address", "host"), "sandbox")
+            address = _first_str(row, "ip", "address", "host")
+            _add("ip", address, "sandbox")
+            if isinstance(row, dict) and address:
+                host_facts.setdefault(address, {}).update(
+                    {k: row[k] for k in ("asn", "country_name") if row.get(k)}
+                )
         for key in ("tcp", "udp"):
             for row in data.get(key) or []:
-                _add("ip", _first_str(row, "dst", "ip", "address"), "sandbox")
+                address = _first_str(row, "dst", "ip", "address")
+                _add("ip", address, "sandbox")
+                if isinstance(row, dict) and address:
+                    attributed.setdefault(address, []).append(row.get(SAMPLE_TREE_KEY))
         for row in data.get("http") or []:
             host = _first_str(row, "host", "hostname")
             _add("domain", host, "sandbox")
@@ -799,12 +814,82 @@ def network_from_ledger(
             if isinstance(row, dict):
                 _add(str(row.get("kind") or ""), str(row.get("value") or ""), "strings")
 
+    named: dict[tuple[str, str], list[str]] = {}
     for artifact in _artifacts(isrs, "endpoints", "network", "iocs"):
+        source = str(getattr(artifact, "source", "") or "").strip()
+        by = f"an artifact of the {source} analyst" if source else "an analyst artifact"
         for row in _rows_of(artifact):
             if len(row) >= 2:
-                _add(row[0].strip().lower(), row[1], "analyst")
+                kind = row[0].strip().lower()
+                _add(kind, row[1], "analyst")
+                named_key = (kind, row[1].strip().lower().rstrip("."))
+                if by not in named.setdefault(named_key, []):
+                    named[named_key].append(by)
 
+    _state_sandbox_facts(network, attributed, host_facts)
+    _state_who_named(network, named, isrs)
     return network if (network.domains or network.ips or network.urls) else None
+
+
+def _state_sandbox_facts(
+    network: NetworkIOCs,
+    attributed: dict[str, list[bool | None]],
+    host_facts: dict[str, dict[str, Any]],
+) -> None:
+    """Each address's process attribution, resolver fact and AS, as the sandbox recorded them.
+
+    Attributed to the sample's tree when any flow to it came from the tree; to
+    another process when every flow the report attributes did; unattributed
+    when the report attributes none. A fact the report does not state stays
+    ``None``.
+    """
+    from maljan.extractors.network_extractor import is_public_resolver
+
+    for ip in network.ips:
+        answers = attributed.get(ip.address, [])
+        if any(answer is True for answer in answers):
+            ip.sample_process_tree = True
+        elif answers and all(answer is False for answer in answers):
+            ip.sample_process_tree = False
+        ip.public_resolver = is_public_resolver(ip.address)
+        facts = host_facts.get(ip.address, {})
+        if facts.get("asn") and not ip.asn:
+            ip.asn = str(facts["asn"])
+        if facts.get("country_name") and not ip.geo:
+            ip.geo = str(facts["country_name"])
+
+
+def _state_who_named(
+    network: NetworkIOCs,
+    named: dict[tuple[str, str], list[str]],
+    isrs: dict[str, AgentISR] | None,
+) -> None:
+    """Which model named each address and name: an analyst's artefact, or its claim.
+
+    A claim names a value when its text holds it as a whole value, the rule
+    every other "this text holds that value" question here answers.
+    """
+    from maljan.agents._indicator_denylists import whole_value_in
+
+    claims = [
+        (str(agent), f"{getattr(c, 'claim', '')} {getattr(c, 'evidence_ref', '')}".lower())
+        for agent, isr in (isrs or {}).items()
+        for c in getattr(isr, "claims", None) or []
+    ]
+
+    def _who(kind: str, value: str) -> list[str]:
+        key = value.strip().lower().rstrip(".")
+        out = list(named.get((kind, key), []))
+        for agent, text in claims:
+            by = f"a claim by the {agent} analyst"
+            if by not in out and whole_value_in(key, text):
+                out.append(by)
+        return out
+
+    for ip in network.ips:
+        ip.named_by = _who("ip", ip.address)
+    for domain in network.domains:
+        domain.named_by = _who("domain", domain.fqdn)
 
 
 def network_from_sandbox_report(report: dict[str, Any] | None) -> NetworkIOCs | None:

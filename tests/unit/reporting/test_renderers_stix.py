@@ -120,7 +120,7 @@ class TestNetworkIndicators:
             sandbox_report={
                 "network": {
                     "dns": [{"request": "evil-c2.duckdns.org", "answers": []}],
-                    "tcp": [{"dst": "8.8.8.8", "dport": 443}],
+                    "tcp": [{"dst": "8.8.8.8", "dport": 443, "sample_process_tree": True}],
                     "http": [
                         {
                             "host": "evil-c2.duckdns.org",

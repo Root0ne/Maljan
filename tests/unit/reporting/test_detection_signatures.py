@@ -128,7 +128,7 @@ def ransomware_report() -> MalwareReport:
         },
         "network": {
             "dns": [{"request": "evil-c2.duckdns.org", "answers": []}],
-            "tcp": [{"dst": "1.2.3.4", "dport": 443}],
+            "tcp": [{"dst": "1.2.3.4", "dport": 443, "sample_process_tree": True}],
             "http": [{"host": "evil-c2.duckdns.org", "uri": "/beacon", "method": "GET"}],
         },
         "signatures": [
