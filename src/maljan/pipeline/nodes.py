@@ -1876,18 +1876,24 @@ def label_of(container: ServiceContainer, key: str) -> str:
         return str(key)
 
 
-def spoken_name(container: ServiceContainer, key: str, stage_key: str) -> str:
+def spoken_name(container: ServiceContainer, key: str, stage: Any) -> str:
     """The name a published sentence gives an agent: its label, or its stage for a long key.
 
     The event scrubber reads a run of 24 or more key characters inside a
     sentence as a credential and publishes ``***``; an agent with no label and
-    such a key is named by the stage it answered in instead, ``the <stage>
-    analyst``. The line's identity fields keep the key either way.
+    such a key is named by the stage it answered in instead, ``<stage>
+    analyst``, with its place among the stage's agents where the stage has
+    more than one, so two such agents are never named alike. The line's
+    identity fields keep the key either way.
     """
     label = label_of(container, key)
+    stage_key = str(getattr(stage, "key", "") or "")
     if label != key or len(key) < 24 or not stage_key:
         return label
-    return f"the {stage_key} analyst"
+    agents = list(getattr(stage, "agents", None) or ())
+    if len(agents) > 1 and key in agents:
+        return f"{stage_key} analyst {agents.index(key) + 1} of {len(agents)}"
+    return f"{stage_key} analyst"
 
 
 def announce_started(container: ServiceContainer, stage: Any) -> None:
@@ -2405,7 +2411,7 @@ def make_stage_agent_node(
                 # published as ``***`` inside a sentence.
                 text=summarize_claims(
                     isr.claims,
-                    speaker=spoken_name(container, agent_name, stage_key_of(stage, "")),
+                    speaker=spoken_name(container, agent_name, stage),
                 ),
                 round_index=0,
                 status=isr_status(isr),
@@ -3144,15 +3150,15 @@ def make_negotiation_node(
 # ---------------------------------------------------------------------------
 
 
-def _home_stage(container: ServiceContainer, name: str) -> str:
-    """The key of the analysis stage ``name`` answers in, or ``""``. Never raises."""
+def _home_stage(container: ServiceContainer, name: str) -> Any:
+    """The analysis stage ``name`` answers in, or ``None``. Never raises."""
     try:
         for home in getattr(container.active_profile(), "stages", None) or []:
             if name in (getattr(home, "agents", None) or ()):
-                return str(getattr(home, "key", "") or "")
+                return home
     except Exception:  # noqa: BLE001 — a name is never worth a node
-        return ""
-    return ""
+        return None
+    return None
 
 
 def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any:

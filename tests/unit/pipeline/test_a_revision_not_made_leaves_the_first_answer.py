@@ -172,9 +172,25 @@ class TestAnUnlabelledLongKey:
         headline = texts[LONG_KEY].split(" Leading:")[0]
         assert LONG_KEY not in headline
         assert headline.startswith("23 evidence-backed claims from the ")
-        assert headline.endswith(" analyst layer.")
+        assert headline == "23 evidence-backed claims from the analysis analyst 2 of 3 layer."
         # A short key is still the name.
         assert texts["static"].startswith("9 evidence-backed claims from the static layer")
+
+
+class TestTwoUnlabelledLongKeysInOneStage:
+    def test_are_never_named_alike(self) -> None:
+        from types import SimpleNamespace
+
+        from maljan.pipeline.nodes import spoken_name
+
+        first, second = "all_tools_reverser_ghidra", "all_tools_reverser_binja_"
+        container = MagicMock()
+        container.config.agents.definitions = {}
+        stage = SimpleNamespace(key="reversing", agents=[first, second])
+        names = {spoken_name(container, key, stage) for key in (first, second)}
+        assert names == {"reversing analyst 1 of 2", "reversing analyst 2 of 2"}
+        alone = SimpleNamespace(key="reversing", agents=[first])
+        assert spoken_name(container, first, alone) == "reversing analyst"
 
 
 class TestARevisionThatWasMade:
