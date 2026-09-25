@@ -68,6 +68,38 @@ class TestPinning:
 
         assert seen == [{"pcap_path": capture}]
 
+    def test_a_filled_capture_the_server_cannot_read_is_said_to_be_the_platform_s(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import json
+
+        from maljan.tools.errors import PATH_OUTSIDE_ROOTS, tool_error
+
+        monkeypatch.setenv(staging.STAGING_DIR_ENV, str(tmp_path))
+        capture = str(staging.job_capture_dir("abc") / "run.pcap")
+
+        def _refuse(**_kwargs: Any) -> str:
+            return json.dumps(tool_error(PATH_OUTSIDE_ROOTS, "outside", tool="extract_dns"))
+
+        refusing = StructuredTool.from_function(
+            func=_refuse,
+            name="extract_dns",
+            description="extract_dns",
+            args_schema=_PcapArgs,
+            infer_schema=False,
+            metadata={"maljan_server": "network"},
+        )
+        [tool] = pin_paths([refusing], default_path=None, captures=(capture,))
+
+        error = json.loads(tool.invoke({}))["error"]
+
+        assert (
+            "the platform filled pcap_path with this run's capture, captures/run.pcap"
+            in (error["message"])
+        )
+        assert "not yours to give" in error["remediation"]
+        assert str(tmp_path) not in json.dumps(error)
+
     def test_several_captures_leave_the_argument_to_the_model(self) -> None:
         seen: list[dict[str, Any]] = []
         original = _tool(seen)

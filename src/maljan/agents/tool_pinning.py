@@ -213,6 +213,46 @@ def pin_paths(
 CAPTURE_ARG_NAMES = frozenset({"pcap_path"})
 
 
+# What a caller is told when the capture the platform filled in could not be
+# read. The argument is hidden, so the server's own advice — pass another
+# capture — names a call the model cannot make.
+UNREADABLE_FILLED_CAPTURE = (
+    "the platform filled {argument} with this run's capture, {capture}, and the server "
+    "could not read it: {message}"
+)
+UNREADABLE_FILLED_CAPTURE_REMEDIATION = (
+    "the capture argument is filled by the platform and is not yours to give; read the "
+    "sandbox's network view instead, and the failure stays on the run's record for the operator"
+)
+
+
+def _unreadable_filled_capture(tool: str, reply: Any, supplied: dict[str, str]) -> Any:
+    """``reply``, or, when it is a path failure, the failure of the capture the platform filled."""
+    import json
+
+    from maljan.tools.errors import (
+        NO_SUCH_FILE,
+        PATH_OUTSIDE_ROOTS,
+        error_parts,
+        tool_error,
+    )
+    from maljan.tools.staging import job_relative
+
+    parts = error_parts(reply)
+    if parts is None or parts[0] not in (PATH_OUTSIDE_ROOTS, NO_SUCH_FILE):
+        return reply
+    argument, capture = next(iter(supplied.items()))
+    failure = tool_error(
+        parts[0],
+        UNREADABLE_FILLED_CAPTURE.format(
+            argument=argument, capture=job_relative(capture), message=parts[1]
+        ),
+        tool=tool,
+        remediation=UNREADABLE_FILLED_CAPTURE_REMEDIATION,
+    )
+    return failure if isinstance(reply, dict) else json.dumps(failure)
+
+
 def _capture_arguments(tool: Any) -> tuple[str, ...]:
     """The arguments of ``tool`` that name a packet capture, in its declared order."""
     fields = getattr(getattr(tool, "args_schema", None), "model_fields", None)
@@ -340,17 +380,21 @@ def _pin_tool(
                 out[key] = pinned
         return out
 
+    def _told(reply: Any) -> Any:
+        """The reply, or the failure of a capture the platform filled in, said as one."""
+        return _unreadable_filled_capture(name, reply, supplied) if supplied else reply
+
     wrapped_func = None
     wrapped_coroutine = None
     if func is not None:
 
         def wrapped_func(**kwargs: Any) -> Any:  # noqa: F811
-            return func(**_correct(kwargs))
+            return _told(func(**_correct(kwargs)))
 
     if coroutine is not None:
 
         async def wrapped_coroutine(**kwargs: Any) -> Any:  # noqa: F811
-            return await coroutine(**_correct(kwargs))
+            return _told(await coroutine(**_correct(kwargs)))
 
     try:
         return StructuredTool.from_function(

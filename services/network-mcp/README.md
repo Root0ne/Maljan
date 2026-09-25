@@ -13,7 +13,9 @@ optional and has no default: a limit applies only when the caller passes one.
 Every answer states how many packets it read and how many the capture holds —
 the text tools on their first line (`14887 of 14887 packets in the capture
 read.`), `pcap_summary` as `packets_read`, `packets_in_capture` and
-`packet_limit`.
+`packet_limit`. `read_pcap_summary` with no `packet_limit` answers the whole
+capture's facts, as `pcap_summary` writes them; with one it lists that many
+packets from `offset`, one line each, and names the offset of the next page.
 
 Launched by `maljan.core.config._builtin_servers()` as the `network` server —
 `sys.executable services/network-mcp/server.py`, cwd `services/network-mcp`,

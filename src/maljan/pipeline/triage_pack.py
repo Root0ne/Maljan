@@ -1497,18 +1497,17 @@ def _sandbox_channels(data: dict[str, Any]) -> str:
     return _names(channels) or "none"
 
 
-# The capture line: the packet count, the protocol counts and the external
-# conversations, heaviest first, as many as ``CAPTURE_LINE_CHARS`` holds. It
-# used to be the summary's heading alone, and a report model then wrote that
-# the capture entry "holds only a header line" about an entry listing fifteen
-# conversations.
-CAPTURE_LINE_CHARS = 2000
+# The capture line: the packet count, the protocol counts and every external
+# conversation, heaviest first. It used to be the summary's heading alone, and
+# a report model then wrote that the capture entry "holds only a header line"
+# about an entry listing fifteen conversations. The line is cut only by the
+# pack's own room (``_within_room``), and then says how many it shows.
 
 
-def _pcap(data: dict[str, Any], max_chars: int = CAPTURE_LINE_CHARS) -> str:
-    """The capture's facts on one line, the conversations cut to the room, the cut said.
+def _pcap(data: dict[str, Any], max_chars: int | None = None) -> str:
+    """The capture's facts on one line, the conversations cut to ``max_chars``, the cut said.
 
-    ``""`` when not even the counts fit in ``max_chars``.
+    ``None`` is no cut. ``""`` when not even the counts fit.
     """
     if data.get("empty"):
         return "empty capture"
@@ -1516,7 +1515,8 @@ def _pcap(data: dict[str, Any], max_chars: int = CAPTURE_LINE_CHARS) -> str:
     if "packets_read" not in data:
         # An entry recorded before the summary carried its facts: its text,
         # flattened onto the line.
-        return _short(str(data.get("summary") or "recorded"), max_chars)
+        text = " ".join(str(data.get("summary") or "recorded").split())
+        return text if max_chars is None else _short(text, max_chars)
     protocols = data.get("protocols") or {}
     head = (
         f"{_n(data.get('packets_read'))} of {_n(data.get('packets_in_capture'))} packets in the "
@@ -1534,7 +1534,6 @@ def _pcap(data: dict[str, Any], max_chars: int = CAPTURE_LINE_CHARS) -> str:
         if periodic
         else "none detected"
     )
-    budget = min(int(max_chars), CAPTURE_LINE_CHARS)
 
     def _line(shown: int) -> str:
         if not conversations:
@@ -1551,12 +1550,20 @@ def _pcap(data: dict[str, Any], max_chars: int = CAPTURE_LINE_CHARS) -> str:
         rows = ", ".join(conversation_line(row) for row in conversations[:shown])
         return f"{head}; {said}" + (f": {rows}" if shown else "") + tail
 
-    shown = len(conversations)
-    line = _line(shown)
-    while shown > 0 and len(line) > budget:
-        shown -= 1
-        line = _line(shown)
-    return line if len(line) <= budget else ""
+    whole = _line(len(conversations))
+    if max_chars is None or len(whole) <= max_chars:
+        return whole
+    # The most conversations that fit, found by halving rather than by
+    # dropping one at a time: a capture can hold thousands of them.
+    low, high = 0, len(conversations)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if len(_line(middle)) <= max_chars:
+            low = middle
+        else:
+            high = middle - 1
+    line = _line(low)
+    return line if len(line) <= max_chars else ""
 
 
 # The decoded-strings line. The pack is one block every agent reads, cut at

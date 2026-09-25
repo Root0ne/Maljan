@@ -95,12 +95,33 @@ class TestTheWholeCaptureIsRead:
     def test_every_answer_states_what_it_read(self, network: Any, job: Path) -> None:
         capture = _capture(job / "captures" / "run.pcap", dns_at=0, total=3)
 
-        assert network.read_pcap_summary(str(capture)).startswith("3 of 3 packets")
+        assert "3 of 3 packets in the capture read" in network.read_pcap_summary(str(capture))
         assert network.extract_http(str(capture)).startswith("3 of 3 packets")
         summary = network.pcap_summary(str(capture))
         assert summary["packets_read"] == summary["packets_in_capture"] == 3
         assert summary["packet_limit"] is None
         assert "3 of 3 packets in the capture read" in summary["summary"]
+
+
+class TestThePacketListing:
+    def test_with_no_limit_the_answer_is_the_capture_s_facts(self, network: Any, job: Path) -> None:
+        capture = _capture(job / "captures" / "run.pcap", dns_at=0, total=40)
+
+        answer = network.read_pcap_summary(str(capture))
+
+        assert "40 of 40 packets in the capture read" in answer
+        assert "Packet 0:" not in answer
+
+    def test_a_listing_is_paged_and_names_the_next_page(self, network: Any, job: Path) -> None:
+        capture = _capture(job / "captures" / "run.pcap", dns_at=0, total=40)
+
+        answer = network.read_pcap_summary(str(capture), packet_limit=10, offset=5)
+
+        lines = answer.splitlines()
+        assert lines[0] == (
+            "Packets 5 to 14 of the 40 in the capture; the next page starts at offset 15."
+        )
+        assert lines[1].startswith("Packet 5:") and lines[-1].startswith("Packet 14:")
 
 
 class TestARefusalNamesTheRealCaptures:

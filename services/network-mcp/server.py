@@ -145,20 +145,37 @@ def capabilities() -> dict[str, Any]:
 
 
 @mcp.tool()
-def read_pcap_summary(pcap_path: str, packet_limit: int | None = None) -> str:
-    """List every IP packet of a PCAP file, one line each; ``packet_limit`` reads fewer."""
+def read_pcap_summary(pcap_path: str, packet_limit: int | None = None, offset: int = 0) -> str:
+    """Summarise a PCAP file, or list its IP packets one line each.
+
+    With no ``packet_limit`` the answer is the whole capture's facts: packet
+    count, protocols, every external conversation, TLS names and periodic
+    contacts. With one, it lists ``packet_limit`` packets from ``offset``, one
+    line each, and names the offset of the next page.
+    """
     if _SCAPY_MISSING:
         return _text_error(MISSING_DEPENDENCY, _SCAPY_MISSING, "read_pcap_summary")
     capture = _opened("read_pcap_summary", pcap_path)
     if isinstance(capture, str):
         return capture
     try:
+        from maljan.analysis.pcap_summary import asked_limit, capture_facts, summary_text
+
+        page = asked_limit(packet_limit)
+        if page is None:
+            facts = capture_facts(str(capture))
+            if not facts:
+                return _text_error(
+                    "tool_failed", "the capture could not be read", "read_pcap_summary"
+                )
+            return summary_text(facts)
+        start = max(0, int(offset or 0))
         output: list[str] = []
         index = 0
 
         def _visit(pkt: Any) -> None:
             nonlocal index
-            if IP in pkt:
+            if index >= start and IP in pkt:
                 proto = "Unknown"
                 if TCP in pkt:
                     proto = f"TCP {pkt[TCP].sport}->{pkt[TCP].dport}"
@@ -167,8 +184,15 @@ def read_pcap_summary(pcap_path: str, packet_limit: int | None = None) -> str:
                 output.append(f"Packet {index}: {pkt[IP].src} -> {pkt[IP].dst} ({proto})")
             index += 1
 
-        read = each_packet(str(capture), _visit, packet_limit)
-        head = f"{read.statement()}."
+        read = each_packet(str(capture), _visit, start + page)
+        end = read.packets_read
+        head = (
+            f"Packets {start} to {max(start, end - 1)} of the {read.packets_in_capture} "
+            "in the capture"
+        )
+        if end < read.packets_in_capture:
+            head += f"; the next page starts at offset {end}"
+        head += "."
         return "\n".join([head, *output]) if output else f"{head} No IP packets in them."
     except Exception as e:  # noqa: BLE001 - a tool server answers, it does not raise
         return _text_error(code_for_exception(e), f"{type(e).__name__}: {e}", "read_pcap_summary")
