@@ -1544,6 +1544,13 @@ def _yara(data: dict[str, Any]) -> str:
 
 
 def _capa(data: dict[str, Any]) -> str:
+    """capa's rules, each with where it matched, then the ATT&CK ids its rules assert.
+
+    A rule's addresses are what lets an agent that reads code go to the
+    routine the rule is about rather than find it again; they are offsets
+    from the image base, as the decoded strings' are, and a rule that matched
+    the file as a whole has none.
+    """
     rows = [r for r in (data.get("capabilities") or []) if isinstance(r, dict)]
     techniques: list[str] = []
     for row in rows:
@@ -1552,10 +1559,24 @@ def _capa(data: dict[str, Any]) -> str:
                 techniques.append(found)
     text = f"{len(rows)} capabilities"
     if rows:
-        text += f" ({_names([str(r.get('rule') or '') for r in rows])})"
+        text += f" ({_names([_capa_item(r) for r in rows])})"
+        if any(r.get("addresses") for r in rows):
+            text += "; each rule @ the offsets from the image base where it matched"
     if techniques:
         text += f", ATT&CK {_names(techniques)} (rule-asserted)"
     return text
+
+
+def _capa_item(row: dict[str, Any]) -> str:
+    """``rule @ 0x1a2b 0x3c4d``: a rule and where it matched, the pack's detail of them."""
+    rule = str(row.get("rule") or "")
+    addresses = [str(a) for a in (row.get("addresses") or []) if str(a).strip()]
+    if not addresses:
+        return rule
+    head = _detail().list_head
+    shown = addresses if head is None or len(addresses) <= head else addresses[:head]
+    more = f" (+{len(addresses) - len(shown)} more)" if len(shown) < len(addresses) else ""
+    return f"{rule} @ {' '.join(shown)}{more}"
 
 
 def _sigma(data: dict[str, Any]) -> str:

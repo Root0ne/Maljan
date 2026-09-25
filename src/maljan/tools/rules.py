@@ -394,13 +394,28 @@ def capa(
 
 
 def _capa_capabilities(document: dict[str, Any]) -> list[dict[str, Any]]:
-    """Flatten a capa ResultDocument's rule map into one row per rule."""
+    """Flatten a capa ResultDocument's rule map into one row per rule.
+
+    ``addresses`` is where each match is, in capa's order, so a reader can
+    take a rule to the function, basic block or instruction that matched it:
+    an address inside the image as its offset from the image base capa
+    analysed at, which is the number a disassembler that loaded the file
+    elsewhere agrees with (FLOSS's ``function_rva`` is the same kind of
+    number). A match with no address — a file-scope rule — has none listed.
+    """
+    base = _capa_base_address(document)
     rows: list[dict[str, Any]] = []
     for rule in (document.get("rules") or {}).values():
         if not isinstance(rule, dict):
             continue
         meta = rule.get("meta") or {}
         scopes = rule.get("matches") or []
+        addresses: list[str] = []
+        for match in scopes:
+            located = match[0] if isinstance(match, list | tuple) and match else None
+            where = _capa_address(located, base)
+            if where and where not in addresses:
+                addresses.append(where)
         rows.append(
             {
                 "namespace": str(meta.get("namespace") or ""),
@@ -408,10 +423,48 @@ def _capa_capabilities(document: dict[str, Any]) -> list[dict[str, Any]]:
                 "attck": [_capa_attck(entry) for entry in (meta.get("attack") or [])],
                 "mbc": [_capa_mbc(entry) for entry in (meta.get("mbc") or [])],
                 "match_count": len(scopes),
+                "addresses": addresses,
             }
         )
     rows.sort(key=lambda r: (r["namespace"], r["rule"]))
     return rows
+
+
+def _capa_base_address(document: dict[str, Any]) -> int | None:
+    """The image base capa analysed at, when its document names one."""
+    analysis = (document.get("meta") or {}).get("analysis") or {}
+    base = analysis.get("base_address")
+    if isinstance(base, dict) and base.get("type") == "absolute":
+        value = base.get("value")
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+    return None
+
+
+def _capa_address(address: Any, base: int | None) -> str | None:
+    """One match's address as a reader takes it to a disassembler, or ``None``.
+
+    capa writes an address as ``{"type": ..., "value": ...}``. An absolute
+    one is given as its offset from the image base when capa names the base
+    (the offset is what a disassembler agrees with) and marked ``va`` when it
+    does not; a file offset is marked ``file``; a relative one is already an
+    offset. Any other kind — no address, a .NET token, a process or a thread
+    of a dynamic analysis — is not a place in the image and is left out.
+    """
+    if not isinstance(address, dict):
+        return None
+    kind = address.get("type")
+    value = address.get("value")
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None
+    if kind == "absolute":
+        if base is not None and value >= base:
+            return hex(value - base)
+        return f"va {hex(value)}"
+    if kind == "relative":
+        return hex(value)
+    if kind == "file":
+        return f"file {hex(value)}"
+    return None
 
 
 def _capa_attck(entry: Any) -> str:
