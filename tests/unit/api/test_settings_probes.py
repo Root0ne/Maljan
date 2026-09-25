@@ -438,11 +438,21 @@ async def test_cape_probe_resolves_from_the_live_settings_object_with_nothing_st
     assert isinstance(seen["api_token"], str)
 
 
+def _r2mcp_is_found_where_configured(monkeypatch) -> None:
+    """The probe resolves the binary first; these tests are about what follows."""
+    from maljan.providers.static import r2
+
+    monkeypatch.setattr(
+        r2, "resolve_r2_binary", lambda configured, env=None: r2.R2Binary(configured, ())
+    )
+
+
 @pytest.mark.asyncio
 async def test_r2_probe_reports_a_missing_binary_by_name():
     r = await probes.probe_r2({"binary_path": "definitely-not-a-real-r2mcp-binary-xyz"})
     assert r.ok is False
     assert "definitely-not-a-real-r2mcp-binary-xyz" in r.detail
+    assert "looked in: PATH" in r.detail, "the test says where it looked, as a job does"
 
 
 @pytest.mark.asyncio
@@ -464,6 +474,7 @@ async def test_r2_probe_reports_a_timeout_and_kills_the_handshake(monkeypatch):
 
     monkeypatch.setattr(probes, "ServerHandle", _HangingHandle)
     monkeypatch.setattr(probes, "PROBE_BUDGET_SECONDS", 0.05)
+    _r2mcp_is_found_where_configured(monkeypatch)
     r = await probes.probe_r2({"binary_path": "r2mcp"})
     assert r.ok is False
     assert "no MCP handshake" in r.detail
@@ -487,6 +498,7 @@ async def test_r2_probe_reports_the_tool_count_on_success(monkeypatch):
             return ["open_file", "analyze"]
 
     monkeypatch.setattr(probes, "ServerHandle", _Handle)
+    _r2mcp_is_found_where_configured(monkeypatch)
     r = await probes.probe_r2({"binary_path": "r2mcp"})
     assert r.ok is True
     assert "2 tools offered by 'r2mcp'" in r.detail

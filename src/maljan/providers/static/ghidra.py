@@ -112,6 +112,108 @@ GHIDRA_PROMPT_FRAGMENT: str = (
 )
 
 
+def sink_priority_hint(cfg: Settings, provider_id: str, file_path: str, log: Any = None) -> str:
+    """The sink-reachability pre-pass for one agent: a priority-functions hint, or ``""``.
+
+    Loads and auto-analyses the binary on the headless Ghidra server, pulls
+    the whole call graph and renders the functions that reach sensitive sinks,
+    so the agent's loop decompiles the malicious core first. It runs for any
+    agent whose own static provider is Ghidra — the static analyst, a clone
+    of it, a generic agent given Ghidra's tools — and for no other: the calls
+    are Ghidra's REST API, which no other provider speaks. Ghidra configured
+    for stdio has no REST API either, so the transport must be ``http``.
+
+    Each request waits what one tool call of this deployment may take
+    (``core.mcp.breaker.call_timeout_seconds``, else the longest tool budget
+    configured), and with neither set, as long as Ghidra takes.
+
+    Deterministic and fail-safe: disabled, not Ghidra, a failed load or any
+    error returns ``""`` and the agent proceeds without a hint.
+    """
+    import logging
+
+    logger_ = log if log is not None else logging.getLogger(__name__)
+    if not getattr(cfg.preprocessing, "use_sink_reachability", False):
+        return ""
+    ghidra = cfg.static.ghidra
+    if provider_id != "ghidra" or ghidra.transport != "http":
+        return ""  # the pre-pass speaks the headless REST API directly
+    if not getattr(ghidra, "enabled", True):
+        return ""
+
+    try:
+        import httpx
+
+        from maljan.analysis.ghidra_program import (
+            SWITCH_PARAM,
+            SWITCH_PATH,
+            program_name_from_load,
+        )
+        from maljan.analysis.sink_reachability import build_priority_hint
+        from maljan.providers.server_guard import deployment_call_budget
+
+        base = ghidra.url.rstrip("/")
+        token = ghidra.auth_token.get_secret_value()
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        call_budget = deployment_call_budget(cfg)
+        with httpx.Client(
+            timeout=call_budget if call_budget > 0 else None, headers=headers
+        ) as http:
+            loaded = http.post(f"{base}/load_program", json={"file": file_path})
+            loaded.raise_for_status()
+            # Loading is not looking. `load_program` sets Ghidra's current
+            # program only when nothing is current yet, so from the second
+            # sample of a container's lifetime onwards a pre-pass without the
+            # switch described the *first* binary it ever loaded.
+            name = program_name_from_load(loaded.text)
+            if not name:
+                # A failed load answers **200** with
+                # {"error": "Failed to load program from: ..."}, so
+                # raise_for_status sees nothing wrong. Carrying on would
+                # analyse and describe whichever program is still current — a
+                # hint about a different binary. No hint is better than a
+                # wrong hint.
+                logger_.warning(
+                    "Sink-reachability pre-pass: load_program did not yield a program "
+                    "for '%s' (%s) — skipping the hint rather than describing whichever "
+                    "binary is still loaded.",
+                    file_path,
+                    " ".join(loaded.text.split())[:200],
+                )
+                return ""
+            http.post(f"{base}{SWITCH_PATH}", params={SWITCH_PARAM: name}, json={})
+            http.post(f"{base}/run_analysis", json={}).raise_for_status()
+            resp = http.get(
+                f"{base}/get_full_call_graph",
+                params={"format": "json", "limit": 20000},
+            )
+            resp.raise_for_status()
+            graph_text = resp.text
+
+        hint = build_priority_hint(
+            graph_text, max_funcs=cfg.preprocessing.sink_reachability_max_funcs
+        )
+        if hint:
+            logger_.info(
+                "Sink-reachability pre-pass: priority-functions hint built (%d chars) for '%s'.",
+                len(hint),
+                file_path,
+            )
+        else:
+            logger_.info(
+                "Sink-reachability pre-pass: no named sink APIs reachable "
+                "(stripped/static binary?) — no hint emitted."
+            )
+        return hint
+    except Exception as exc:  # fail-safe: never break analysis over a hint
+        logger_.warning(
+            "Sink-reachability pre-pass failed (%s: %s); continuing without hint.",
+            type(exc).__name__,
+            exc,
+        )
+        return ""
+
+
 @register_static_provider("ghidra")
 class GhidraStaticProvider(StaticProvider):
     """Ghidra MCP, as the static analyst has always driven it.
@@ -139,6 +241,10 @@ class GhidraStaticProvider(StaticProvider):
         self._memory = memory
         self._container_samples_path = container_samples_path
         self._job = StaticJobContext()
+        # The container path an agent was pinned to (``pin_sample``), for an
+        # attach whose job context names none: a generic agent's provider is
+        # opened at resolution, before any sample path exists.
+        self._pinned_path: str | None = None
         self._toolkit: Any = None
         self._all_tools: list[Any] = []
         self.tools: list[Any] = []
@@ -289,6 +395,18 @@ class GhidraStaticProvider(StaticProvider):
     def get_tools(self) -> list[BaseTool]:
         return self._all_tools
 
+    def pin_sample(self, path: str | None) -> None:
+        """The container path ``load_program`` is held to, without re-attaching.
+
+        A generic agent given Ghidra's tools opens this provider when it is
+        resolved, with no sample path yet, so the ``load_program`` wrapper had
+        nothing to hold a model's ``file`` to. The analyst node pins the path
+        the agent's tools read before its loop starts, and from then on a host
+        path or an invented one a model sends is replaced with it. ``None``
+        clears it, for an agent cached into a run with no mirror.
+        """
+        self._pinned_path = path or None
+
     def _pin_load_program_path(self, tools: list[Any]) -> list[Any]:
         """Wrap ``load_program`` so a hallucinated ``file`` arg is overridden.
 
@@ -327,7 +445,9 @@ class GhidraStaticProvider(StaticProvider):
         provider = self
 
         async def pinned_load_program(**kwargs: Any) -> str:
-            pinned = getattr(provider._job, "mirror_sample_path", None)
+            pinned = getattr(provider, "_pinned_path", None) or getattr(
+                provider._job, "mirror_sample_path", None
+            )
             if isinstance(pinned, str) and pinned and kwargs.get("file") != pinned:
                 logger.warning(
                     "load_program: overriding model-supplied path %r with known container path %r.",
@@ -390,6 +510,55 @@ class GhidraStaticProvider(StaticProvider):
             detail=f"HTTP {response.status_code}",
             latency_ms=int((time.perf_counter() - t0) * 1000),
         )
+
+    async def readiness(self) -> ProviderProbe:
+        """Whether a job on Ghidra can start: its schema answering, and no analysis.
+
+        Over http the schema endpoint with the configured token is the check —
+        the first call a job makes. Over stdio the job starts the server
+        itself, so what can be checked before then is that there is a command
+        and that it names an executable. The shipped transport is stdio with no
+        command, which an operator who switched Ghidra on and left the
+        transport alone meets as a run that fails when the agent starts; it is
+        said here instead. Switched off is ``switched_off``'s answer.
+        """
+        if self._cfg.transport == "http":
+            return await self.probe()
+        command = str(self._cfg.command or "").strip()
+        if not command:
+            return ProviderProbe(
+                ok=False,
+                detail=(
+                    f"transport is {self._cfg.transport!r} with no command; set "
+                    "core.static.ghidra.transport to 'http' and its url for the "
+                    "Ghidra container"
+                ),
+            )
+        import os
+        import shutil
+
+        # Named by its last segment only: the refusal reaches any user, and a
+        # command is a path on this host.
+        name = os.path.basename(command)
+        found = shutil.which(command)
+        if found is None:
+            return ProviderProbe(
+                ok=False,
+                detail=f"stdio command {name!r} is not an executable this host finds",
+            )
+        return ProviderProbe(ok=True, detail=f"stdio: {name!r} is started with the job")
+
+    def switched_off(self) -> bool:
+        """``core.static.ghidra.enabled`` is false: the provider attaches nothing."""
+        return not self._cfg.enabled
+
+    def address(self) -> str:
+        """The server's scheme and host over http; ``""`` over stdio, which is reached nowhere."""
+        if self._cfg.transport == "http":
+            from maljan.core.model_assignments import endpoint_label
+
+            return endpoint_label(str(self._cfg.url or ""))
+        return ""
 
     def _close_toolkit(self) -> None:
         """Release whatever client or subprocess is currently attached, if any.

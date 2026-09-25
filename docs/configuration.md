@@ -402,6 +402,43 @@ gate — neither a job nor a save can ask to skip it. It is there for an
 air-gapped batch run, where the endpoint is known good and nobody is at a
 console to press a button.
 
+### A team that needs Ghidra waits for it
+
+A static provider that degrades (r2, a generic MCP server, capa/YARA) costs a
+run some evidence when it is missing, and the run says so. Ghidra does not
+degrade: a static run with no decompiler is a confident report grounded in
+nothing, so the agent that needs it fails the run when it starts — minutes and
+a paid model call after the sample was accepted.
+
+So `POST /api/v1/jobs` asks first, in the same place as the model gate and
+with the same 422 (`apps/api/app/services/provider_readiness.py`). Every agent
+the chosen team can run — its stages' agents and every agent they can ask —
+that opens a static provider is resolved to the provider it would open, as the
+run resolves it: the team's forced provider, the definition's own
+`static_provider`, the job's `static_provider`, or `core.static.provider`.
+Each distinct provider that does not degrade is asked whether it is ready:
+Ghidra over http answers when `GET <url>/mcp/schema` with the configured token
+returns below 400, which loads and analyses nothing. Ghidra over stdio is
+started by the job itself, so what is checked is that `core.static.ghidra.command`
+is set and names an executable the API host finds (by its last path segment in
+the refusal). The check runs where the API runs, on its PATH and filesystem, so for a worker on another host or in another container it says only what the API can see. The shipped transport is `stdio` with no command, so an operator
+who switches Ghidra on without setting `transport` to `http` is told that here
+rather than when the agent starts. The refusal
+names each agent, the provider and its address as scheme and host:
+
+```
+A static provider this team needs is not ready, and a run without it fails when
+that agent starts. Start it, switch it on or correct its address, or choose a
+team that does not need it. agent 'all_tools_reverser_ghidra' needs static provider
+'ghidra' at http://ghidra-mcp:8089, which is not ready: ConnectError: ...
+```
+
+Ghidra switched off (`core.static.ghidra.enabled` false) attaches nothing and
+fails nothing, and it is the shipped default, so it is refused only for an
+agent that was given it by name — by its definition, by the team or by the
+job's `static_provider`. The loud failure inside the run stays; this is a check
+before it.
+
 ### Format routing and the sandbox
 
 No sample is refused for its format. Routing detects the file type from magic
@@ -1010,7 +1047,9 @@ tool's child process with its process group; and a second call of the same
 run (the same tool, sample and arguments) joins the one already going instead
 of starting another child;
 `ANSWER_SHARE`, the share of the window one tool answer is sized from, stays a
-documented derivation constant; the Ghidra sink pre-pass waits one tool call's
+documented derivation constant; the Ghidra sink pre-pass — run for every agent
+whose own static provider is Ghidra, the static analyst, a clone of it and a
+generic agent given Ghidra's tools alike — waits one tool call's
 deployment budget (`core.mcp.breaker.call_timeout_seconds`, derived as that
 row says), or as long as Ghidra takes with none.
 
@@ -1219,6 +1258,35 @@ in the analysts' own attach path, so they apply to a custom team too:
 `static_provider` overrides every member's provider at once. A single stage can
 withhold every built-in server from its own agents with
 `builtin_tools: false`, which stacks on top of whatever the team excludes.
+
+### Where r2mcp is looked for
+
+`core.static.r2.binary_path` defaults to the bare name `r2mcp`. `r2pm -ci
+r2mcp` installs it under radare2's own prefix and does not touch PATH, so the
+provider resolves the name when it starts: a value with a directory in it is
+used as it is; a bare name is looked up on the worker's PATH, then in
+`$R2PM_BINDIR`, `$R2PM_PREFIX/bin` and `radare2/prefix/bin` under the user's
+data directory (`$XDG_DATA_HOME`, else `~/.local/share`) — where r2pm puts it.
+Nothing past those is guessed. Not found, r2 degrades as it always has: the
+run goes on without it, the log names every place looked, and the run summary
+carries `static provider 'r2' unavailable: …` with the remedy (install it with
+`r2pm -ci r2mcp`, or set `binary_path` to the executable's absolute path). The
+connection test resolves the same way and names the same places.
+
+### Running Ghidra lighter
+
+The `ghidra-mcp` service reads three variables from `docker/.env`, each
+defaulting to the value it has always had: `GHIDRA_JAVA_OPTS` (the JVM's
+options, `-Xmx4g -XX:+UseG1GC`), `GHIDRA_MEM_LIMIT` (the container's memory
+and swap limit together, `6g`) and `GHIDRA_RESTART` (`unless-stopped`). Keep
+the memory limit about 2g above the heap: Ghidra's database is memory-mapped
+and its direct buffers live outside the heap. A host short of memory runs it
+with `GHIDRA_JAVA_OPTS="-Xmx2g -XX:+UseG1GC"` and `GHIDRA_MEM_LIMIT=4g`, and
+`GHIDRA_RESTART=no` keeps a stopped container stopped across a reboot, for a
+host that starts Ghidra only for the runs that need it
+(`docker compose -f docker/docker-compose.yml up -d ghidra-mcp`, then `stop`).
+A binary larger than the lighter heap can analyse fails its Ghidra calls
+rather than the host.
 
 ### VirusTotal's own MCP server
 
@@ -1442,6 +1510,81 @@ Like every built-in team, all five are editable only in their debate options,
 their `builtin_tools` switches and `exclude_servers`. Everything else means
 cloning the team, which the console does in one click.
 
+The reverser is handed addresses to start from. The triage pack every agent
+reads names each decoded string with the routine that produced it and its call
+site, and each capa rule with the places it matched, all as offsets from the
+image base; the seeded prompt tells it to go there first, to confirm or refute
+each upstream finding at function level, and then to look for what only
+reading the code shows: command dispatch, environment checks, persistence and
+cleanup, the logic that decides when and how it contacts a remote host, and
+the routines that decode its data. An agent on Ghidra — the reverser given
+`static_provider: "ghidra"` included — also gets the sink-reachability
+pre-pass's priority functions on its first turn, and the sample is mirrored for
+its provider even when that is not the deployment's global one.
+
+### An all-tools team
+
+`docs/examples/profiles/all-tools.json` is a team to import rather than one
+that ships: the triage pack and `triage`; one `static` stage of three analysts
+on three tools — `static` (the analysis, knowledge and VirusTotal servers, on
+the global provider), `all_tools_static_r2` (`static_provider: "r2"` with the analysis
+and knowledge servers) and `all_tools_qu1cksc0pe` (a generic agent on the
+`qu1cksc0pe` server); `reversing` with `all_tools_reverser_ghidra`, the seeded reverser
+prompt on `static_provider: "ghidra"`; `dynamic` when there is a sandbox
+report; `network` when there is a capture or a sandbox report; then `debate`,
+`verdict` and `report`. The later stages depend on every earlier analysis
+stage and read their findings (`inject_upstream: findings`).
+
+It is a settings import document (`maljan-settings/1`) holding
+`core.agents.definitions` and `core.agents.profiles`. Each of those is one
+setting holding a whole map, and an import replaces what it names, so merge the
+document into your own export first. The document's keys are all `all_tools_*`
+(the team is `all_tools`), so it adds entries and replaces none of yours:
+
+```bash
+curl -s http://localhost:8000/api/v1/settings/export \
+  -H "Authorization: Bearer $TOKEN" > current.json
+jq -s '{format: "maljan-settings/1", values: {
+  "core.agents.definitions": ((.[0].values["core.agents.definitions"] // {})
+                              + .[1].values["core.agents.definitions"]),
+  "core.agents.profiles":    ((.[0].values["core.agents.profiles"] // {})
+                              + .[1].values["core.agents.profiles"])}}' \
+  current.json docs/examples/profiles/all-tools.json > merged.json
+curl -s -X POST http://localhost:8000/api/v1/settings/import \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d @merged.json
+```
+
+What the team needs besides the document: an enabled `qu1cksc0pe` entry under
+`core.mcp.servers` (the import refuses a reference to a server that does not
+exist); Ghidra with `core.static.ghidra.enabled` true, `transport` set to
+`http` explicitly (its shipped value is `stdio`), `url` the address the worker
+reaches it at — `http://localhost:8089` for a worker on the host,
+`http://ghidra-mcp:8089` for one inside the compose network — and `auth_token`
+the container's `GHIDRA_MCP_AUTH_TOKEN` (see *A team that needs Ghidra waits
+for it* above); `core.static.r2.enabled` on and r2mcp findable by the worker —
+setting `core.static.r2.binary_path` to its absolute path is the sure way, since
+where r2pm put it depends on the environment r2pm ran in (see *Where r2mcp is
+looked for*; switched off or not found, r2 attaches nothing and the clone runs
+on its two servers alone); and, so that each static analyst reads a
+tool of its own, `core.static.provider` set to `none` — with the global
+provider on Ghidra the `static` analyst opens Ghidra as well. Run it by naming it on the job (`{"config": {"profile":
+"all_tools"}}`) or by making it `core.agents.profile`. A test
+(`tests/api/test_the_all_tools_team_document.py`) loads the document through
+the import's validation and resolves every agent against stub servers.
+
+### What a clone is given when it names no tools
+
+A definition that is not a built-in and has no `tools` key takes the tool list
+of its role's seed: a clone written as `{"role": "static", "static_provider":
+"r2"}` — by a script, an import or a hand-edited export — keeps the analysis,
+knowledge and VirusTotal servers the `static` seed reads, as a clone the
+console copies does. A `tools` key that is present is the operator's, and an
+empty list means no server at all. The roles with a seed of their own are
+`static`, `dynamic`, `network`, `report` and `lead`; a `generic` definition
+has none to inherit and keeps what it wrote. The settings API stores the list
+it resolved, so what the console shows is what the run reads.
+
 ### Delegation
 
 A definition's `tools` list takes four kinds of reference. `mcp` names a
@@ -1524,6 +1667,14 @@ entry under `llm.agents`, each server's `agents` binding and both
 `react_*_overrides` maps. The rename is logged once at warning level, and
 `alembic upgrade head` writes it into the stored document so the console shows
 the new name rather than renaming the same document on every read.
+
+A seeded definition whose prompt a later release rewrote is not such an entry.
+A save stores the whole definition map, seeds included, so a database holds
+each seeded row with the prompt it had on the day of its last save; a prompt
+the seed itself shipped with before (`FORMER_SEED_PROMPT_DIGESTS` in
+`maljan.core.config`, by SHA-256 of the exact text) is read as the seed's, and
+the row loads as the seed rather than being renamed. A release that rewrites a
+seeded prompt adds the one it replaced to that list.
 
 This applies only to names a release newly reserved. `static`, `dynamic`,
 `network`, `judge`, `reporter`, `default` and `measurement` have been reserved

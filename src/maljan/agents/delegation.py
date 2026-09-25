@@ -600,6 +600,9 @@ def _brief_callee(caller: Any, callee: Any, *, stage: str, round_index: int) -> 
         or None
     )
     callee._path_by_server = dict(getattr(resolved, "path_by_server", {}) or {})
+    from maljan.agents.composition import pin_provider_sample
+
+    pin_provider_sample(callee, choices.get("by_provider") or {})
     # The job's captures are the job's, whoever is asked: a callee's capture
     # tools read the same file its caller's would.
     callee._captures = tuple(getattr(caller, "_captures", ()) or ())

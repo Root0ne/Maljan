@@ -216,13 +216,24 @@ def profile_static_providers(container: Any) -> list[str]:
     reader still uses. The globally configured provider is
     always in the list even when no analyst names it, because that provider is
     the one that key means.
+
+    Every agent that opens a static provider counts, not only the ``static``
+    role: a generic reverser given ``static_provider="ghidra"`` and a
+    ``provider`` tool reference opens Ghidra too, and without a mirror for
+    Ghidra its ``load_program`` is handed a path the container cannot see.
+    The agents a lead can ask count as well, since they run under the same
+    job and open their own providers.
     """
-    from maljan.agents.composition import static_provider_id_for
+    from maljan.agents.composition import (
+        reachable_agents,
+        reads_static_provider,
+        static_provider_id_for,
+    )
 
     settings = container.config
     ids = [str(settings.static.provider)]
-    for key in container.analyst_keys():
-        if container.agent_role(key) != "static":
+    for key in reachable_agents(settings, container.analyst_keys()):
+        if not reads_static_provider(settings.agents.definitions.get(key)):
             continue
         provider_id = static_provider_id_for(settings, key)
         if provider_id not in ids:

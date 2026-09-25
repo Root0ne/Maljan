@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -265,8 +266,21 @@ class _StampedTool:
         self.metadata = {"maljan_server": server} if server else {}
 
 
+# The prompts the example team document ships for an operator to import.
+_TEAM_DOCUMENT = (
+    Path(__file__).resolve().parents[3] / "docs" / "examples" / "profiles" / "all-tools.json"
+)
+_TEAM_DOCUMENT_PROMPTS = " ".join(
+    str(entry.get("prompt") or "")
+    for entry in json.loads(_TEAM_DOCUMENT.read_text(encoding="utf-8"))["values"][
+        "core.agents.definitions"
+    ].values()
+)
+
+
 # Everything else a report model is shown on every run, as plain text.
 PROMPTS: dict[str, str] = {
+    "example team document prompts": _TEAM_DOCUMENT_PROMPTS,
     "narrative contract": EXPECTED_OBJECT,
     "narrative system prompt": _SYSTEM_PROMPT,
     "composer system prompt": _SYSTEM,

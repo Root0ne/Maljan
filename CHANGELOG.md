@@ -8,6 +8,29 @@ change landed on `main`.
 
 ### Added
 
+- **An all-tools team to import.** `docs/examples/profiles/all-tools.json` is a
+  settings import document: the triage pack and triage; one static stage of
+  three analysts on three tools (`static` on the sidecars, `all_tools_static_r2` on
+  radare2 with the analysis and knowledge servers, `all_tools_qu1cksc0pe` on the
+  `qu1cksc0pe` server); `all_tools_reverser_ghidra`, the seeded reverser prompt on
+  Ghidra; detonation, network, debate, verdict and report. A test validates it
+  as the import endpoint does and resolves every agent against stub servers
+  and a stub Ghidra. [configuration.md](docs/configuration.md) says how to
+  merge it into an export before importing.
+- **A team that needs Ghidra waits for it.** `POST /jobs` answers 422, before
+  the job exists, when a static provider that does not degrade (Ghidra) is not
+  ready for an agent of the chosen team: its schema endpoint with the
+  configured token did not answer below 400, or it is switched off for an
+  agent that names it. The refusal names the agent, the provider and its
+  address as scheme and host. The shipped default (Ghidra switched off as the
+  global provider) is not refused.
+- **capa says where a rule matched.** capa's rows carry `addresses`, offsets
+  from the image base capa analysed at, and the pack's capa line names them
+  beside each rule.
+- **The Ghidra container's JVM options, memory limit and restart policy are
+  variables:** `GHIDRA_JAVA_OPTS`, `GHIDRA_MEM_LIMIT` (memory and swap) and
+  `GHIDRA_RESTART`, defaulting to `-Xmx4g -XX:+UseG1GC`, `6g` and
+  `unless-stopped`.
 - **An operator's spend ceiling.** `llm.max_spend_usd_per_job` (no default:
   none) and `llm.model_prices` (empty) price every recorded call from its
   provider-reported cached input, input and output tokens at the answering
@@ -900,6 +923,20 @@ change landed on `main`.
 
 ### Changed
 
+- **The reverser reads the code where the static tools pointed.** The seeded
+  prompt starts it at the addresses the pack gives, asks it to confirm or
+  refute each upstream finding at function level, then to look for command
+  dispatch, environment checks, persistence and cleanup, the logic of contact
+  with a remote host and the decoding routines.
+- **The sink-reachability pre-pass follows the agent's own provider.** It runs
+  for every agent on Ghidra over http — a static clone on Ghidra under another
+  global provider, and a generic agent given Ghidra's tools, which now reads
+  the priority functions on its first turn — and for no agent on another
+  provider.
+- **A clone with no tool list takes its role seed's.** An operator's
+  definition with no `tools` key gets the list of its role's seed (`static`,
+  `dynamic`, `network`, `report`, `lead`); a list that is present, empty
+  included, is kept as written.
 - **No agent loop has a default step or time limit.** `react_agent_max_steps`
   (was 10) and `react_agent_timeout` (was 180 s) are empty, the deprecated
   `react_agent_*_overrides` maps ship empty (were static 40 steps / 1,500 s,
@@ -2138,6 +2175,22 @@ change landed on `main`.
 
 ### Fixed
 
+- **A reverser on Ghidra under another global provider had no sample to
+  load.** The worker mirrored the sample only for the global provider and the
+  `static` role's; a generic agent with a provider reference, and an agent a
+  lead can ask, now count, so the mirror exists for every provider the team
+  opens.
+- **r2mcp installed by r2pm was not found.** `static.r2.binary_path` is
+  resolved when the provider starts: a path as it is, a bare name on PATH and
+  then under `R2PM_BINDIR`, `R2PM_PREFIX/bin` and `radare2/prefix/bin` in the
+  user's data directory. Not found, the run summary says so with the remedy and
+  the log names every place looked; the connection test resolves the same way.
+- **A seeded definition saved before its prompt changed was renamed.** A stored
+  seeded row whose prompt is one the seed shipped with earlier
+  (`FORMER_SEED_PROMPT_DIGESTS`) loads as the seed instead of becoming
+  `reverser_custom` with every reference rewritten.
+- **A degrading static provider that did not attach was a log line only.** It
+  is now a degradation reason on the run summary, with its remedy.
 - **A model call's whole-call deadline is that call failing, not the loop's
   clock.** In a loop with no time limit a lone model that ran past it ended
   the analyst with "exceeded hard cap of none" and its gathered evidence
@@ -5031,6 +5084,14 @@ change landed on `main`.
   benign PuTTY control after its verdict fell back.
 
 ### Upgrading
+
+**Importing the all-tools team.** The document holds two whole-map settings,
+and an import replaces what it names, so merge it into an export first (the
+`jq` line is in [configuration.md](docs/configuration.md), *An all-tools
+team*). Its agents are all keyed `all_tools_*` and its team `all_tools`, so
+none of your own definitions or teams is replaced. A job
+naming a team with an agent on Ghidra is now refused while Ghidra is not
+answering — start it before submitting.
 
 **Loops have no default limit.** A deployment that relied on the old defaults
 — ten steps and 180 s per loop, the static analyst's 40 steps and 1,500 s, the

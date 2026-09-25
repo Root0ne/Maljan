@@ -35,7 +35,7 @@ stage agent.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -130,20 +130,122 @@ def current_analyst_keys() -> list[str]:
     return analyst_keys(get_settings())
 
 
-def static_provider_id_for(settings: Settings, key: str) -> str:
+def static_provider_id_for(
+    settings: Settings,
+    key: str,
+    *,
+    profile: ProfileDefinition | None = None,
+    global_provider: str | None = None,
+) -> str:
     """The static provider id agent ``key`` reads, falling back to the global one.
 
     The active profile wins over both. ``measurement`` forces ``none`` across
     every member, which is what makes it a baseline rather than a profile that
     merely happens to have no tool servers today.
+
+    ``profile`` and ``global_provider`` answer the question for a job that
+    has not been built yet: the team and the provider a submitted job names,
+    which the stored settings do not hold until the worker folds them in.
     """
-    forced = active_profile(settings).static_provider
-    if forced:
-        return str(forced)
+    team = profile if profile is not None else active_profile(settings)
+    if team.static_provider:
+        return str(team.static_provider)
     definition = settings.agents.definitions.get(key)
     if definition is not None and definition.static_provider:
         return str(definition.static_provider)
-    return str(settings.static.provider)
+    return str(global_provider or settings.static.provider)
+
+
+def reads_static_provider(definition: AgentDefinition | None) -> bool:
+    """Whether a run opens a static provider for this definition.
+
+    Two ways, and only two. The ``static`` role opens its provider itself,
+    inside its own class; a ``generic`` agent opens one when its tool list
+    holds a ``provider`` reference, at resolution (``_provider_tools``). Every
+    other role reads no static provider, whatever its tool list says.
+    """
+    if definition is None:
+        return False
+    if definition.role == "static":
+        return True
+    return definition.role == "generic" and any(ref.kind == "provider" for ref in definition.tools)
+
+
+NOT_MIRRORED_REASON = "sample not mirrored for {provider}"
+
+
+def pin_provider_sample(agent: Any, mirrored: Mapping[str, str] | None) -> None:
+    """Hand the agent's static provider its own mirror of the sample, or clear the pin.
+
+    For an agent whose tools include its provider's (a generic agent with a
+    ``provider`` reference): the provider was opened at resolution, before the
+    sample's path was known, so its own guard on the path argument — Ghidra's
+    ``load_program`` override — had nothing to hold a model to. ``mirrored``
+    is the job's mirror per provider id (``state["static_sample_paths"]``);
+    only this provider's own entry is pinned, never a fallback path the
+    provider cannot read. A provider that needs a mirror and has none gets its
+    pin cleared and the run a degradation reason saying so. Never re-attaches;
+    a no-op for any other agent and any provider without a guard.
+    """
+    from maljan.agents.prompt_fragments import PROVIDER_FAMILY, tool_families
+
+    container = getattr(agent, "_container", None)
+    resolved = getattr(agent, "_resolved", None)
+    if container is None or resolved is None:
+        return
+    if PROVIDER_FAMILY not in tool_families(list(getattr(agent, "tools", None) or [])):
+        return
+    provider_id = str(resolved.static_provider_id)
+    try:
+        provider = container.get_static_provider(provider_id)
+    except Exception as exc:  # noqa: BLE001 — a pin is never worth a failed stage
+        logger.debug("no provider to pin the sample on for %s (%s)", resolved.key, exc)
+        return
+    pin = getattr(provider, "pin_sample", None)
+    if not callable(pin):
+        return
+    path = (mirrored or {}).get(provider_id) or None
+    pin(path)
+    needs_mirror = bool(
+        getattr(getattr(provider, "capabilities", None), "needs_sample_mirror", False)
+    )
+    if path is None and needs_mirror:
+        reason = NOT_MIRRORED_REASON.format(provider=provider_id)
+        logger.warning("%s: %s; its tools are not held to a path.", resolved.key, reason)
+        own = list(getattr(agent, "degradation_reasons", None) or [])
+        if reason not in own:
+            agent.degradation_reasons = [*own, reason]
+        try:
+            registry = container.get_server_registry()
+        except Exception:  # noqa: BLE001 — the reason is still on the agent
+            return
+        reasons = getattr(registry, "degradation_reasons", None)
+        if isinstance(reasons, list) and reason not in reasons:
+            reasons.append(reason)
+
+
+def reachable_agents(settings: Settings, named: Sequence[str]) -> list[str]:
+    """The agents ``named``, every agent they can ask, and so on, in order.
+
+    A team's stages name the agents it runs, and a lead names the specialists
+    it asks as ``agent`` tool references, which sit in no stage. Anything
+    asked of "the agents this run can call" — a model to have probed, a
+    provider to have mirrored the sample for — has to follow those
+    references. The reference graph is acyclic (the settings model refuses a
+    self-reference and the run refuses a cycle), so the closure terminates.
+    """
+    definitions = settings.agents.definitions
+    reached = list(dict.fromkeys(str(key) for key in named))
+    pending = list(reached)
+    while pending:
+        definition = definitions.get(pending.pop())
+        for ref in getattr(definition, "tools", None) or []:
+            callee = str(getattr(ref, "agent", "") or "")
+            if getattr(ref, "kind", "") != "agent" or not callee or callee in reached:
+                continue
+            reached.append(callee)
+            pending.append(callee)
+    return reached
 
 
 def sample_format(container: Any) -> tuple[str, str]:

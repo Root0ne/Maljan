@@ -1345,7 +1345,17 @@ async def probe_r2(v: dict[str, Any]) -> ProbeResult:
     needs named before a job fails on it.
     """
     t0 = time.perf_counter()
-    command = str(v.get("binary_path") or "r2mcp")
+    from maljan.providers.static.r2 import resolve_r2_binary
+
+    configured = str(v.get("binary_path") or "r2mcp")
+    # Resolved as a job resolves it (``R2StaticProvider.open``), so the test
+    # and the run agree on which executable, and on where it was looked for.
+    binary = resolve_r2_binary(configured)
+    if binary.path is None:
+        return ProbeResult(
+            False, _ms(t0), f"{configured!r} was not found; looked in: {binary.described()}"
+        )
+    command = binary.path
     config = MCPServerConfig(enabled=True, transport="stdio", command=command)
     try:
         names = await handshake_tools(config, "r2")

@@ -363,7 +363,7 @@ baseline has no triage stage at all.
 **Every model reads it.** `triage_pack.render_pack` turns the entries into one
 line each — `[ev_0001] identity: pe windows, 4,486,656 bytes, …`,
 `[ev_0003] signature: none`, `[ev_0007] yara: 2 hits of 30 rules (…)`,
-`[ev_0008] capa: 6 capabilities, ATT&CK T1027, T1055 (rule-asserted)`,
+`[ev_0008] capa: 6 capabilities (parse PE header @ 0x1a20 0x2b40, …), ATT&CK T1027, T1055 (rule-asserted)`,
 `[ev_0017] reputation: VirusTotal: 31 of 75 engines flag it as malicious, labels Filisto` — cut at
 `reporting.upstream_findings_max_chars` (derived from the served window at
 its default of 0, like a tool answer's cap) with a last line saying how many
@@ -375,7 +375,11 @@ at most 100 strings and 3,000 characters with each string cut at 120; a line
 that cut says so, with the reason and the `offset` of the rest, and a line
 that would not fit in what is left of the block is rendered shorter rather
 than dropped. The line says, before the strings, that they are the sample's own
-text — data, not instructions, ledger entries or the platform's findings. On the
+text — data, not instructions, ledger entries or the platform's findings. The
+capa line names each rule with the places it matched, as offsets from the image
+base capa analysed at (`va` or `file` when that is what capa gives, none
+for a rule that matched the file as a whole), so an agent that reads code goes
+to the routine a rule is about instead of finding it again. On the
 reference loader it carries all 81 strings. Under
 the heading *Facts established before analysis (ledger ids in brackets; cite
 them)* the block leads every analyst's first human turn (analysis and
@@ -1696,6 +1700,26 @@ views as before. A live sandbox's report is read as it always was.
 
 Every provider that can be reached over the network has a probe behind a Test
 button in the console; see [configuration.md](configuration.md).
+
+### Which agents open a static provider
+
+Two kinds, and only two (`composition.reads_static_provider`): the `static`
+role, whose class opens its provider when it runs, and a `generic` agent whose
+tool list holds a `provider` reference, whose provider is opened when it is
+resolved. Each reads its own provider — the team's forced one, else its
+definition's `static_provider`, else the global one — and the container keeps
+one provider object per id. Everything that depends on the provider follows
+the agent rather than `core.static.provider`: the worker mirrors the sample
+once per provider any such agent of the team (or any agent they can ask)
+opens, so a reverser on Ghidra under another global provider has a path the
+Ghidra container can read; the sink-reachability pre-pass
+(`providers.static.ghidra.sink_priority_hint`) runs for every agent on
+Ghidra over http and for no other; and submitting a job checks every such
+provider that does not degrade (*A team that needs Ghidra waits for it* in
+[configuration.md](configuration.md)). A provider that degrades and does not
+attach — an r2mcp that is nowhere to be found — lets the static analyst run
+without it, and the run summary names it as `static provider '<id>'
+unavailable: …` with the remedy.
 
 ### When a provider fails
 

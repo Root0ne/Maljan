@@ -1,0 +1,162 @@
+{
+  "format": "maljan-settings/1",
+  "values": {
+    "core.agents.definitions": {
+      "all_tools_static_r2": {
+        "role": "static",
+        "label": "Static analyst (radare2)",
+        "static_provider": "r2",
+        "tools": [
+          {
+            "kind": "mcp",
+            "server": "analysis"
+          },
+          {
+            "kind": "mcp",
+            "server": "knowledge"
+          }
+        ]
+      },
+      "all_tools_qu1cksc0pe": {
+        "role": "generic",
+        "label": "Static analyst (Qu1cksc0pe)",
+        "prompt": "You are a static-analysis step of a malware-analysis team, working through the\nanalysis tool server in your tool list.\n\nRun the server's analysis of the sample once, with the sample path you are\ngiven, and read what it returns: the file's structure, its imports and the\ngroups the server sorts them into, the strings and indicators it extracts, and\nany rule or signature it reports as matching. Then take the answers that bear\non what the sample does and ask the server for the detail behind each, where it\noffers a narrower tool.\n\nReport every finding with the evidence id of the tool call it came from, and\nsay what the finding lets someone conclude. A category the server attaches to\nan import is a lead, not a behaviour: name the import and say what the code\nwould have to do with it. Where the server's answer and the facts established\nbefore you disagree, say so and say which you trust.\n\nDo not guess at a family, a verdict or a technique the output does not\nsupport: nothing downstream can unlearn a guess you state as a finding.",
+        "tools": [
+          {
+            "kind": "mcp",
+            "server": "qu1cksc0pe"
+          }
+        ]
+      },
+      "all_tools_reverser_ghidra": {
+        "role": "generic",
+        "label": "Reverser (Ghidra)",
+        "prompt": "You are the reversing step of a malware-analysis team.\n\nThe stages before you have run, and what they established is in front of you:\nthe triage pack's facts and the findings of the static stage. Your job is to\ntake what they could only see from the outside into the code, through a\ndecompiler when your tool list has one, and come back with answers at function\nlevel. When no tool in your list decompiles or reads cross-references, say so\nonce and mark each finding unresolved for that reason rather than describing\ncode you did not read.\n\nStart from the addresses you are given. The pack names the routine that\nproduced each recovered string and the places each capability rule matched,\nas offsets from the image base; add the image base your decompiler shows to\nreach them. They are where the code the static stage described actually is.\n\nFirst, each upstream finding. For each one:\n\n1. Find the code it is about. Start from the import, string, rule match,\n   section or address the finding names, and follow the cross-references to\n   the function that uses it.\n2. Read the function. Say what it does, what calls it, and what it does with\n   the value the finding was about.\n3. State the outcome. \"Confirmed\" means you can name the function and describe\n   the behaviour. \"Refuted\" means the code does not do what the finding said,\n   and you can say what it does instead. \"Unresolved\" means the code is\n   obfuscated, unreachable or absent, and you say which.\n\nThen the control flow the static stage could not see, because only reading the\ncode shows it. Look for each of these, and report what you find or that you\nlooked and found none:\n\n- Command dispatch: a routine that takes an instruction from outside and\n  branches on it, the table or the branches it uses, and what each branch does.\n- Environment checks: what the code inspects about the machine it runs on\n  before it goes on, and what it does when a check fails.\n- Persistence and cleanup: how it arranges to run again, and what it removes,\n  renames or hides of what it leaves behind.\n- Contact with a remote host: the logic that decides when, where and with what\n  it makes contact, and what it does with the reply.\n- Decoding: the routines that turn stored bytes into the text or the\n  configuration the rest of the code uses.\n\nFor each, name the function and its address, what calls it, and what it does\nwith its inputs.\n\nCite the evidence id behind every claim. A function address with no evidence\nbehind it is a claim about a binary you did not read.\n\nWhen a reputation tool is among your tools, look the sample's hash up once and\ncite what comes back: a reputation label is one source and not the verdict, and\nan unknown hash is not a clean sample.",
+        "static_provider": "ghidra",
+        "tools": [
+          {
+            "kind": "provider"
+          },
+          {
+            "kind": "mcp",
+            "server": "knowledge"
+          },
+          {
+            "kind": "mcp",
+            "server": "virustotal"
+          }
+        ]
+      }
+    },
+    "core.agents.profiles": {
+      "all_tools": {
+        "label": "All tools",
+        "stages": [
+          {
+            "key": "triage_pack",
+            "label": "Triage pack",
+            "kind": "triage",
+            "inject_upstream": "none"
+          },
+          {
+            "key": "triage",
+            "label": "Triage",
+            "kind": "analysis",
+            "agents": [
+              "triage"
+            ],
+            "inject_upstream": "none"
+          },
+          {
+            "key": "static",
+            "label": "Static",
+            "kind": "analysis",
+            "agents": [
+              "static",
+              "all_tools_static_r2",
+              "all_tools_qu1cksc0pe"
+            ],
+            "depends_on": [
+              "triage"
+            ],
+            "inject_upstream": "findings"
+          },
+          {
+            "key": "reversing",
+            "label": "Reversing",
+            "kind": "analysis",
+            "agents": [
+              "all_tools_reverser_ghidra"
+            ],
+            "depends_on": [
+              "static"
+            ],
+            "inject_upstream": "findings"
+          },
+          {
+            "key": "dynamic",
+            "label": "Detonation",
+            "kind": "analysis",
+            "agents": [
+              "dynamic"
+            ],
+            "depends_on": [
+              "static",
+              "reversing"
+            ],
+            "when": "has_sandbox_report",
+            "inject_upstream": "findings"
+          },
+          {
+            "key": "network",
+            "label": "Network",
+            "kind": "analysis",
+            "agents": [
+              "network"
+            ],
+            "depends_on": [
+              "static",
+              "reversing",
+              "dynamic"
+            ],
+            "when": "has_pcap or has_sandbox_report",
+            "inject_upstream": "findings"
+          },
+          {
+            "key": "debate",
+            "label": "Debate",
+            "kind": "debate",
+            "depends_on": [
+              "network"
+            ],
+            "inject_upstream": "none"
+          },
+          {
+            "key": "verdict",
+            "label": "Verdict",
+            "kind": "verdict",
+            "agents": [
+              "judge"
+            ],
+            "depends_on": [
+              "debate"
+            ],
+            "inject_upstream": "none"
+          },
+          {
+            "key": "report",
+            "label": "Report",
+            "kind": "report",
+            "agents": [
+              "reporter"
+            ],
+            "depends_on": [
+              "verdict"
+            ],
+            "inject_upstream": "none"
+          }
+        ]
+      }
+    }
+  }
+}

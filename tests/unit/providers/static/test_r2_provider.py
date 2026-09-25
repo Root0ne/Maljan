@@ -77,6 +77,11 @@ def test_opening_never_writes_the_resolved_command_back_into_the_config(monkeypa
             return []
 
     monkeypatch.setattr(mcp_client, "MCPLangChainToolkit", _FakeToolkit)
+    from maljan.providers.static import r2
+
+    monkeypatch.setattr(
+        r2, "resolve_r2_binary", lambda configured, env=None: r2.R2Binary(configured, ())
+    )
 
     cfg = _cfg()
     original_command = cfg.static.r2.command

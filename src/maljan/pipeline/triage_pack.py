@@ -1134,6 +1134,10 @@ class PackDetail:
 CHARS_PER_LEVEL = 20
 WHOLE = PackDetail()
 _DETAIL: ContextVar[PackDetail] = ContextVar("pack_detail", default=WHOLE)
+# How many addresses each capa rule shows: ``None`` all of them (the whole
+# pack), a number that many. Apart from the shared detail on purpose — see
+# ``render_pack``.
+_RULE_ADDRESSES: ContextVar[int | None] = ContextVar("pack_rule_addresses", default=None)
 
 
 def _detail() -> PackDetail:
@@ -1189,12 +1193,55 @@ def render_pack(entries: list[LedgerEntry], max_chars: int) -> str:
     whole = _render_lines(entries, WHOLE)
     if max_chars <= 0 or _joined_len(whole) <= max_chars:
         return "\n".join(whole)
-    detail = _detail_for(entries, max_chars)
+    # The shared level is fitted with no rule addresses at all: a capa result
+    # with hundreds of matches would otherwise lower what every other line may
+    # show. The addresses then take what room the fitted lines leave.
+    addresses_token = _RULE_ADDRESSES.set(0)
+    try:
+        detail = _detail_for(entries, max_chars)
+    finally:
+        _RULE_ADDRESSES.reset(addresses_token)
     token = _DETAIL.set(detail)
     try:
-        return _fit_lines(entries, [_pack_line(entry) for entry in entries], max_chars)
+        return _fit_lines(entries, _with_rule_addresses(entries, max_chars), max_chars)
     finally:
         _DETAIL.reset(token)
+
+
+def _rule_line(entry: LedgerEntry, addresses: int) -> str:
+    token = _RULE_ADDRESSES.set(addresses)
+    try:
+        return _pack_line(entry)
+    finally:
+        _RULE_ADDRESSES.reset(token)
+
+
+def _with_rule_addresses(entries: list[LedgerEntry], max_chars: int) -> list[str]:
+    """The pack's lines at the fitted level, the capa line given the room that is left.
+
+    Each rule shows as many of its addresses as fit (the same count for every
+    rule), found by halving; with no room left it shows none and says how many
+    places it matched.
+    """
+    lines = [_rule_line(entry, 0) for entry in entries]
+    room = max_chars - _joined_len(lines)
+    for index, entry in enumerate(entries):
+        if entry.tool != "capa" or room <= 0:
+            continue
+        data = entry.structured if isinstance(entry.structured, dict) else {}
+        rows = [r for r in data.get("capabilities") or [] if isinstance(r, dict)]
+        most = max((len(r.get("addresses") or []) for r in rows), default=0)
+        low, high, best = 1, most, lines[index]
+        while low <= high:
+            middle = (low + high) // 2
+            candidate = _rule_line(entry, middle)
+            if len(candidate) - len(lines[index]) <= room:
+                best, low = candidate, middle + 1
+            else:
+                high = middle - 1
+        room -= len(best) - len(lines[index])
+        lines[index] = best
+    return lines
 
 
 def _render_lines(entries: list[LedgerEntry], detail: PackDetail) -> list[str]:
@@ -1544,6 +1591,13 @@ def _yara(data: dict[str, Any]) -> str:
 
 
 def _capa(data: dict[str, Any]) -> str:
+    """capa's rules, each with where it matched, then the ATT&CK ids its rules assert.
+
+    A rule's addresses are what lets an agent that reads code go to the
+    routine the rule is about rather than find it again; they are offsets
+    from the image base, as the decoded strings' are, and a rule that matched
+    the file as a whole has none.
+    """
     rows = [r for r in (data.get("capabilities") or []) if isinstance(r, dict)]
     techniques: list[str] = []
     for row in rows:
@@ -1552,10 +1606,26 @@ def _capa(data: dict[str, Any]) -> str:
                 techniques.append(found)
     text = f"{len(rows)} capabilities"
     if rows:
-        text += f" ({_names([str(r.get('rule') or '') for r in rows])})"
+        text += f" ({_names([_capa_item(r) for r in rows])})"
+        if any(r.get("addresses") for r in rows):
+            text += "; each rule @ the offsets from the image base where it matched"
     if techniques:
         text += f", ATT&CK {_names(techniques)} (rule-asserted)"
     return text
+
+
+def _capa_item(row: dict[str, Any]) -> str:
+    """``rule @ 0x1a2b 0x3c4d``: a rule and where it matched, as many as the room gives."""
+    rule = str(row.get("rule") or "")
+    addresses = [str(a) for a in (row.get("addresses") or []) if str(a).strip()]
+    if not addresses:
+        return rule
+    head = _RULE_ADDRESSES.get()
+    shown = addresses if head is None or len(addresses) <= head else addresses[:head]
+    if not shown:
+        return f"{rule} @ {len(addresses)} places"
+    more = f" (+{len(addresses) - len(shown)} more)" if len(shown) < len(addresses) else ""
+    return f"{rule} @ {' '.join(shown)}{more}"
 
 
 def _sigma(data: dict[str, Any]) -> str:

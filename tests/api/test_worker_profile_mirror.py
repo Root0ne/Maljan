@@ -146,3 +146,56 @@ def test_the_frozen_key_is_the_global_providers_mirror_not_the_first_one_made():
     )
     assert global_mirror_path({"r2": "/host/abc.exe"}, settings) is None
     assert global_mirror_path({}, settings) is None
+
+
+def _reverser_on_ghidra() -> dict:
+    return {
+        "role": "generic",
+        "prompt": "p",
+        "static_provider": "ghidra",
+        "tools": [{"kind": "provider"}],
+    }
+
+
+def test_a_generic_agent_on_its_own_provider_is_mirrored_for_too():
+    """A reverser given Ghidra's tools opens Ghidra; without a mirror for it,
+    ``load_program`` is handed a path the Ghidra container cannot see."""
+    container = _container(
+        definitions={
+            "reverser_ghidra": _reverser_on_ghidra(),
+            "static_r2": {"role": "static", "static_provider": "r2"},
+        },
+        profiles={"team": {"analysts": ["static_r2", "reverser_ghidra"]}},
+        profile="team",
+    )
+    container.config.static.provider = "r2"
+    assert profile_static_providers(container) == ["r2", "ghidra"]
+
+
+def test_a_generic_agent_with_no_provider_reference_is_not():
+    container = _container(
+        definitions={
+            "plain": {"role": "generic", "prompt": "p", "static_provider": "ghidra", "tools": []},
+        },
+        profiles={"team": {"analysts": ["plain"]}},
+        profile="team",
+    )
+    container.config.static.provider = "r2"
+    assert profile_static_providers(container) == ["r2"]
+
+
+def test_an_agent_a_lead_asks_is_mirrored_for():
+    container = _container(
+        definitions={
+            "reverser_ghidra": _reverser_on_ghidra(),
+            "boss": {
+                "role": "lead",
+                "prompt": "p",
+                "tools": [{"kind": "agent", "agent": "reverser_ghidra"}],
+            },
+        },
+        profiles={"team": {"analysts": ["boss"]}},
+        profile="team",
+    )
+    container.config.static.provider = "none"
+    assert profile_static_providers(container) == ["none", "ghidra"]
