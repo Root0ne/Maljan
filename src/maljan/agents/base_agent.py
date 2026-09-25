@@ -1416,7 +1416,9 @@ def parse_structured_claims_counted(text: str) -> tuple[list[ClaimEvidence], int
 
         claims.append(
             ClaimEvidence(
-                claim=claim_text[:300],
+                # Whole, as written: a claim stored at a fixed width was
+                # checked, retried and published as the cut text.
+                claim=claim_text,
                 evidence_ref=evidence_ref_text(evidence_text),
                 confidence=confidence,
                 technique_id=technique_id,

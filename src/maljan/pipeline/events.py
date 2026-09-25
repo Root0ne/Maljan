@@ -788,7 +788,11 @@ def safe_finding_value(value: Any) -> str:
     analysis page, and none of them is an event, so none of them was covered by
     the scrubbing the publisher does.
     """
-    return scrub(value)[:FINDING_VALUE_LIMIT]
+    from maljan.utils.marked_cut import marked_cut
+
+    # Bounded where it is shown, and marked: a claim quoted back to its analyst
+    # cut mid-word read as the analyst's own ending.
+    return marked_cut(scrub(value), FINDING_VALUE_LIMIT)
 
 
 def scrub_keeping_layout(text: Any) -> str:
