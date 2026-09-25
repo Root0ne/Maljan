@@ -682,15 +682,59 @@ def sandbox_tools(container: Any) -> list[BaseTool]:
         """
         return sandbox_services_and_tasks(report, offset, limit)
 
+    sizer = _answer_sizer(container)
     return [
-        StructuredTool.from_function(func=_report_section, name="sandbox_report_section"),
-        StructuredTool.from_function(func=_processes, name="sandbox_processes"),
-        StructuredTool.from_function(func=_network, name="sandbox_network"),
-        StructuredTool.from_function(func=_signatures, name="sandbox_signatures"),
-        StructuredTool.from_function(func=_dropped_files, name="sandbox_dropped_files"),
-        StructuredTool.from_function(func=_registry_ops, name="sandbox_registry_ops"),
-        StructuredTool.from_function(func=_api_calls, name="sandbox_api_calls"),
-        StructuredTool.from_function(func=_mutexes, name="sandbox_mutexes"),
-        StructuredTool.from_function(func=_services_and_tasks, name="sandbox_services_and_tasks"),
-        StructuredTool.from_function(func=_channels, name="sandbox_channels"),
+        StructuredTool.from_function(func=_sized(func, sizer), name=name)
+        for func, name in (
+            (_report_section, "sandbox_report_section"),
+            (_processes, "sandbox_processes"),
+            (_network, "sandbox_network"),
+            (_signatures, "sandbox_signatures"),
+            (_dropped_files, "sandbox_dropped_files"),
+            (_registry_ops, "sandbox_registry_ops"),
+            (_api_calls, "sandbox_api_calls"),
+            (_mutexes, "sandbox_mutexes"),
+            (_services_and_tasks, "sandbox_services_and_tasks"),
+            (_channels, "sandbox_channels"),
+        )
     ]
+
+
+def _answer_sizer(container: Any) -> Any:
+    """The job's answer guardrail (``ServerRegistry.answer_sizer``), or ``None`` without one."""
+    get_registry = getattr(container, "get_server_registry", None)
+    if not callable(get_registry):
+        return None
+    try:
+        return get_registry().answer_sizer()
+    except Exception as exc:  # noqa: BLE001 — a view answered unsized is still an answer
+        logger.warning("sandbox tools: no answer guardrail for this job (%s).", exc)
+        return None
+
+
+# The arguments every view pages by, named in the notice a shortened answer
+# carries so the rows it left out are one call away.
+_PAGING = ("offset", "limit")
+
+
+def _sized(func: Any, sizer: Any) -> Any:
+    """``func``, its answer sent through the MCP toolkit's guardrail when there is one.
+
+    The same sizing an MCP tool's answer gets: measured against the room the
+    conversation has, shortened as a JSON document whose bookkeeping says what
+    was left out, the budget charged. The recorder's notice then names
+    ``offset`` and ``limit``, so every row stays reachable a page at a time.
+    """
+    import functools
+    import json
+
+    if sizer is None:
+        return func
+
+    @functools.wraps(func)
+    def _answer(*args: Any, **kwargs: Any) -> Any:
+        value = func(*args, **kwargs)
+        text = json.dumps(value, default=str)
+        return sizer._apply_output_guardrail(text, _PAGING)
+
+    return _answer
