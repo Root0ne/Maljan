@@ -784,8 +784,8 @@ and the cap is derived from then on.
 ### A call waits as long as its answer takes at the model's pace
 
 Two calls have an output budget of their own: the judge's verdict
-(`core.llm.judge_max_tokens`, derived from the window by default, under the judge definition's
-timeout — 600 s in the shipped team) and each composer section
+(`core.llm.judge_max_tokens`, derived from the window by default, under the judge's
+own time limit where an operator set one — none by default) and each composer section
 (`core.reporting.composer_section_max_tokens`, under
 `core.reporting.composer_per_section_timeout`, 120 s). A timeout chosen for a
 fast model cuts a slow one off: at 3.8 tokens a second only about 2,280 of the
@@ -965,6 +965,84 @@ where the server reports one (`prompt_tokens_per_second`, `prompt_tokens`,
 `prompt_seconds`, `prompt_sources`), and for each sized call
 the configured value, the budget, the rate, the derived and the applied
 seconds; the report's Run Summary prints the same numbers.
+
+### Loops have no default limit
+
+No agent loop has a step or time limit unless you set one.
+`core.react_agent_max_steps` and `core.react_agent_timeout` are empty by
+default, the two deprecated `core.react_agent_*_overrides` maps ship empty, no
+built-in agent definition carries `max_steps` or `timeout_seconds`, and an
+ask's `core.agents.delegation_steps` / `delegation_timeout_seconds` are empty
+too. A number you set — on an agent's card, in a map, or deployment-wide — is
+kept to exactly as before. The judge's tool loop reads its budget the same way
+every agent's loop does (`loop_limits("judge")`): the `judge` entries of the
+maps, then the deployment's values.
+
+A loop with no limit ends when its model answers, or at one of the stops that
+are not a count: the repeat guard (a model re-asking for answers it already
+has), the conversation's room (a tool answer that no longer fits the window),
+and the job's spend ceiling below. The arq job timeout is the last resort. A
+loop with no time limit has no clock of its own: each model call waits as long
+as its answer takes at the model's measured pace (the request timeout sized in
+the section above), and a model list gives no turn deadline — a stalled model
+is ended by its own request timeout, which the list reads as a provider
+failure and moves on from. The run-state block says `budget remaining: no step
+limit, no time limit` rather than a number, and the run summary's `budget` rows
+carry `max_steps` / `timeout_s` as `null`.
+
+The other fixed limits were decided one by one: `core.negotiation.max_iterations`
+stays an explicit setting (5), the runaway stop on a negotiation that never
+converges; `core.react_agent_tool_call_budget` only ever logs a warning;
+capa and FLOSS on the analysis server have no wall clock of their own and run
+for as long as their caller asks (the triage pack passes
+`core.static.capa.timeout_seconds` and what is left of
+`core.triage.budget_seconds`), and their manifest declares none;
+`ANSWER_SHARE`, the share of the window one tool answer is sized from, stays a
+documented derivation constant; the Ghidra sink pre-pass waits one tool call's
+deployment budget (`core.mcp.breaker.call_timeout_seconds`, derived as that
+row says), or as long as Ghidra takes with none.
+
+**The spend ceiling.** `core.llm.max_spend_usd_per_job` is the most one job may
+spend on its models, in US dollars; empty, the default, is none. Spend is each
+call's provider-reported usage — the input tokens read from the prompt cache,
+the other input tokens and the output tokens — at the prices of the model that
+answered: `core.llm.model_prices` first, keyed by the model name the provider
+serves:
+
+```json
+{"deepseek-v4-pro": {"input_usd_per_mtok": 1.32,
+                     "cached_input_usd_per_mtok": 0.044,
+                     "output_usd_per_mtok": 3.96,
+                     "source": "our contract"}}
+```
+
+then a `prices` row of the vendored model table
+(`data/model_context_windows_v1.json`), which carries DeepSeek's documented
+peak prices for `deepseek-flash` and `deepseek-v4-pro` with the page they are
+documented on — data, not a limit, and the peak rate so the figure is never
+below what a call cost. When the ceiling is reached every running tool loop
+ends its tool phase and its agent writes its answer from what it gathered (the
+salvage a step limit uses); a loop that starts afterwards answers once without
+tools, an ask is refused, and the judge's verdict and the report still run, so
+the report is never lost. The run summary's degradation reasons say the
+ceiling ended the tool phases, and `run_summary.spend` carries the ceiling, the
+spend, whether it was reached and where each model's prices came from. A model
+with no price is named once in the log and in `run_summary.spend`
+(`unpriced_models`), and its calls are not counted: the figure compared is what
+the job spent at least. Nothing is guessed.
+
+**What the judge and the pack are shown.** The judge's verdict prompt and its
+technique question show every analyst's report, the evidence summary (every
+technique and every source), the negotiation history and each remembered
+case's summary whole when the judge's window, less its output cap, holds them.
+When it does not, the largest parts are shortened first to one shared width,
+each ending in `…`, the prompt says which parts and to what width, and the run
+records it as a degradation reason. The triage pack is rendered whole when it
+fits its room (the upstream bound, `core.reporting.upstream_findings_max_chars`,
+derived from the window by default); when it does not, the detail every line
+shows — names listed, characters of a text, decoded strings and detection
+labels — is derived from that room, the most at which the pack fits, and each
+line says what it left out and that the rest is a tool call away.
 
 ### The evidence budget
 
@@ -1346,33 +1424,32 @@ specialist asking another is depth 2, and an ask that would go deeper is
 refused with a message the model reads. It bounds the nesting, never the
 number of asks.
 
-`agents.delegation_steps` (12) and `agents.delegation_timeout_seconds` (300)
-are what one ask gets. They are the delegation's own budget, not a share of
-the caller's: an ask carries them whole, whatever the caller has spent, and
-the caller's own step budget is not reduced by what its specialists do. The
-one thing the two really share is the wall clock — the caller waits inside its
-own timeout — so an ask is cut to what the caller has left, and an ask is
-refused only when that is below the floor a first model turn needs. A callee
-that reaches its step cap writes up what it gathered, the way an analyst at
-its own cap does.
+`agents.delegation_steps` and `agents.delegation_timeout_seconds` are what
+one ask gets, and both are empty — no limit — unless you set them. They are
+the delegation's own budget, not a share of the caller's: an ask carries them
+whole, whatever the caller has spent, and the caller's own step budget is not
+reduced by what its specialists do. The one thing the two really share is the
+wall clock: where the caller's loop has a time limit, the caller waits inside
+it, so an ask is cut to what the caller has left and refused only when that is
+below the floor a first model turn needs. A caller with no time limit waits
+for a busy callee until it frees up, unless that callee is itself waiting on
+the caller, which is refused in words the model reads. A callee that reaches a
+step limit writes up what it gathered, the way an analyst at its own does.
 
-That makes the caller's stage timeout the thing that decides how many asks fit
-in one loop: the seeded `lead` carries `timeout_seconds: 1800` and
-`max_steps: 40` on its own definition, which is room for six asks and
-the turns to weigh them — 1800 s over the default 300 s per ask, and two steps
-per ask. A budget is part of the definition, so a clone of a team carries the
-budget its agents need; the console draws the two as **Steps per loop** and
-**Seconds per loop** on the agent's card, and a blank box inherits the
-deployment's `react_agent_max_steps` / `react_agent_timeout`. The two
-`react_agent_*_overrides` maps are deprecated and are deleted in the release
-after the next promotion to main: until then they are still read for an
-agent whose definition sets neither, so a deployment that configured a budget
-there keeps it, and a definition's own value wins over them. A map entry that
-is not a whole number of at least one is dropped with a warning when the
-settings are built, the same bound the definition's own fields carry.
-The `ask_<key>` tool's description gives the model the same number,
-computed by `delegation._asks_that_fit` from the caller's own timeout rather
-than written down twice. See *Delegation* in [architecture.md](architecture.md) for
+A budget is part of the definition, so a clone of a team carries the budget
+its agents need; the console draws the two as **Steps per loop** and **Seconds
+per loop** on the agent's card, and a blank box inherits the deployment's
+`react_agent_max_steps` / `react_agent_timeout` — both empty, no limit, by
+default. No built-in definition carries a budget: the seeded `lead` has none
+either. The `ask_<key>` tool's description says what an ask gets ("no step
+limit and no time limit of its own", or the numbers you set) and, where both
+the caller and the ask have a time limit, how many asks fit
+(`delegation._asks_that_fit`). The two `react_agent_*_overrides` maps are
+deprecated and operator-only: they ship empty, and an entry you write is still
+read for an agent whose definition sets neither, before the deployment's
+value; a definition's own value wins over them. A map entry that is not a
+whole number of at least one is dropped with a warning when the settings are
+built, the same bound the definition's own fields carry. See *Delegation* in [architecture.md](architecture.md) for
 what the ledger and the transcript record.
 
 ### A name a later release takes
