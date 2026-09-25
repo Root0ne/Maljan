@@ -90,7 +90,7 @@ def _names_its_failure(name: str, fn: Any) -> Any:
     def _mark(exc: Exception) -> None:
         if getattr(exc, FAILED_NODE_ATTR, None) is None:
             try:
-                setattr(exc, FAILED_NODE_ATTR, name)
+                exc.maljan_graph_node = name  # type: ignore[attr-defined]
             except (AttributeError, TypeError):
                 pass
 
