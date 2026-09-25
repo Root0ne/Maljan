@@ -383,7 +383,13 @@ def capa(
         timeout_seconds=None if timeout_s is None else max(1, int(timeout_s)),
     )
     if document is None:
-        return {"error": "capa produced no result within its budget", "tool": "capa"}
+        return {
+            "error": (
+                "capa produced no result within its budget, or its worker exited without an "
+                "answer (the server log says which)"
+            ),
+            "tool": "capa",
+        }
     return {"capabilities": _capa_capabilities(document), "meta": _capa_meta(document)}
 
 

@@ -9,6 +9,7 @@ tool that answers with its own error has answered, and never trips anything.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -487,3 +488,29 @@ class TestALongRunningToolIsNotAFailingServer:
         assert guard.refusal("capa") is None
         (first, _second) = session.notified
         assert first.root.params.requestId == 7
+
+
+class TestTheRequestIdIsTheCallsOwn:
+    """Pins the installed ``mcp`` client: the id read before ``call_tool`` is the id it sends."""
+
+    def test_next_request_id_is_the_id_call_tool_sends(self) -> None:
+        from mcp import ClientSession
+
+        from maljan.agents.mcp_client import next_request_id
+
+        async def main() -> tuple[Any, Any]:
+            to_server_send, to_server_receive = anyio.create_memory_object_stream(10)
+            from_server_send, from_server_receive = anyio.create_memory_object_stream(10)
+            async with ClientSession(from_server_receive, to_server_send) as session:
+                session._request_id = 41  # a session that has sent 41 requests
+                expected = next_request_id(session)
+                call = asyncio.ensure_future(session.call_tool("capa", {}))
+                message = await to_server_receive.receive()
+                call.cancel()
+                with contextlib.suppress(BaseException):
+                    await call
+                await from_server_send.aclose()
+                return expected, message.message.root.id
+
+        expected, sent = asyncio.run(main())
+        assert expected == sent == 41

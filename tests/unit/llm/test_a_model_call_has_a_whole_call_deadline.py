@@ -93,3 +93,20 @@ class TestTheWholeCallIsBounded:
 
     def test_with_nothing_measured_the_deadline_is_the_client_s_own(self) -> None:
         assert call_deadline(_Trickling(request_timeout=42.0), [], {}) == 42.0
+
+
+class TestAStreamBetweenChunks:
+    def test_a_consumer_between_chunks_sees_the_deadline_and_no_task_is_left_cancelling(
+        self,
+    ) -> None:
+        async def main() -> int:
+            model = _model(request_timeout=0.3)
+            stream = model.astream([HumanMessage(content="hi")])
+            with pytest.raises(ModelCallDeadline):
+                async for _chunk in stream:
+                    await asyncio.sleep(0.05)  # the consumer's own work between chunks
+            task = asyncio.current_task()
+            assert task is not None
+            return task.cancelling()
+
+        assert asyncio.run(main()) == 0

@@ -238,7 +238,10 @@ def run_capa_document(
     # waiting on a queue nothing will write to.
     from maljan.tools import children
 
-    children.register(lambda: children.kill_process_group(int(process.pid or 0)))
+    # Only while it is alive: a reaped child's pid can be another process's.
+    children.register(
+        lambda: children.kill_process_group(int(process.pid or 0)) if process.is_alive() else None
+    )
     try:
         # Read before joining: the child's result is routinely well over the OS
         # pipe buffer (a full capa ResultDocument), and a child that has put a
@@ -255,12 +258,20 @@ def run_capa_document(
         while kind == "peak":
             note_capa_peak(payload)
             kind, payload = _next_message(queue, process, timeout_seconds, started)
-    except Exception:  # noqa: BLE001 - stdlib queue.Empty, or a crashed child
-        logger.warning(
-            "capa on %s exceeded its %ss budget; terminating the worker process.",
-            sample_path,
-            timeout_seconds,
-        )
+    except Exception as exc:  # noqa: BLE001 - stdlib queue.Empty, or a crashed child
+        if isinstance(exc, RuntimeError):
+            # It died on its own, or was killed with its run: not a budget.
+            logger.warning(
+                "capa on %s: the worker process exited without an answer (exit code %s).",
+                sample_path,
+                process.exitcode,
+            )
+        else:
+            logger.warning(
+                "capa on %s exceeded its %ss budget; terminating the worker process.",
+                sample_path,
+                timeout_seconds,
+            )
         process.terminate()
         process.join(5.0)
         if process.is_alive():

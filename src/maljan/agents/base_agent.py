@@ -44,6 +44,7 @@ from maljan.llm.context_window import (
     tool_definition_chars,
     window_full_error,
 )
+from maljan.llm.generation_rate import ModelCallDeadline
 from maljan.pipeline.run_state import NO_LIMIT, NoLimit, budget_line
 from maljan.pipeline.turns import with_question
 from maljan.pipeline.validation import (
@@ -931,7 +932,7 @@ def spend_reached(agent: Any) -> bool:
 
     meter = getattr(getattr(agent, "token_ledger", None), "spend", None)
     try:
-        return isinstance(meter, SpendMeter) and meter.reached() is True
+        return isinstance(meter, SpendMeter) and meter.exhausted() is True
     except Exception:  # noqa: BLE001 — a meter is never worth a lost analysis
         return False
 
@@ -2204,6 +2205,11 @@ def _run_coro_blocking(coro: Any, hard_timeout: float | None, label: str = "") -
     try:
         return future.result(timeout=hard_timeout)
     except _FuturesTimeout:
+        # A ``TimeoutError`` the coroutine itself raised — a model call's own
+        # whole-call deadline — reaches here too, since the two are one class:
+        # it is the call's answer, handed on untouched, not this wait running out.
+        if future.done() and not future.cancelled():
+            raise
         # We cancelled it: it ran out of wall clock. Whether that cancellation
         # is ever *delivered* is a separate question, and one the watchdog
         # answers rather than assuming.
@@ -2264,6 +2270,9 @@ async def run_on_agent_loop(coro: Any, hard_timeout: float | None, label: str = 
     try:
         return await asyncio.wait_for(asyncio.wrap_future(future), hard_timeout)
     except TimeoutError:
+        # The coroutine's own timeout (a model call's deadline) is its answer.
+        if future.done() and not future.cancelled():
+            raise
         _cancel_and_watch(loop, future, running, what)
         raise TimeoutError(f"{what} exceeded hard cap of {limit_text(hard_timeout, 's')}") from None
     except (asyncio.CancelledError, _FuturesCancelled) as exc:
@@ -2756,6 +2765,9 @@ class BudgetMeter:
             "tool_definition_chars": self._definitions_sent(),
             "cap": cap,
         }
+        # Why the cap ended it, in the words the stage event carries.
+        if cap and detail:
+            record["detail"] = detail
         self._note_budget(record)
         if cap:
             emit_stage_ended_at_cap(
@@ -3652,6 +3664,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         # counts this loop's turns while it runs, under a key of its own,
         # until the ledger records them.
         spend_capped = False
+        # Whether one model call's whole-call deadline ended the tool phase.
+        call_deadline_hit = False
         spend_meter = self._spend_meter()
         spend_key = object()
         # Whether the time budget ended the tool phase, and the sentence saying
@@ -3719,6 +3733,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 one llama-server slot a run that is still alive is not free.
                 """
                 nonlocal time_capped, time_detail, final_reserve, spend_capped
+                nonlocal call_deadline_hit
                 stream: Any = agent_executor.astream(
                     {"messages": messages},
                     {"recursion_limit": recursion_limit(max_steps)},
@@ -3768,7 +3783,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                                     list(latest.get("messages") or [])[len(messages) :],
                                     self._model_label() or _model_label(self.llm),
                                 )
-                                if spend_meter.reached():
+                                if spend_meter.exhausted():
                                     spend_capped = True
                                     self.logger.warning(
                                         "%s ReAct loop ended: the job's spend ceiling is "
@@ -3800,6 +3815,21 @@ class BaseAnalyst(BudgetMeter, ABC):
                                     time_detail,
                                 )
                                 break
+                    except ModelCallDeadline as exc:
+                        # One model call ran past its whole-call deadline: a
+                        # failed turn, not the loop's clock. The tool phase
+                        # ends here and the salvage writes the answer from
+                        # what was gathered; with nothing gathered the agent
+                        # fails as a provider failure does.
+                        if not recorder.entries:
+                            raise
+                        call_deadline_hit = True
+                        time_detail = f"model call deadline: {exc}"
+                        self.logger.warning(
+                            "%s ReAct loop ended: %s; synthesising from what it gathered.",
+                            self.name,
+                            time_detail,
+                        )
                     except SpendCeilingStop:
                         spend_capped = True
                         self.logger.warning(
@@ -3874,6 +3904,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                         msg_count,
                     )
                     return result
+                except ModelCallDeadline:
+                    # A model call's own deadline with nothing gathered: the
+                    # call failed, which is not this loop's clock.
+                    raise
                 except TimeoutError:
                     # The time budget itself, reached inside one turn or one
                     # tool call longer than any the loop had seen. What was
@@ -3939,6 +3973,12 @@ class BaseAnalyst(BudgetMeter, ABC):
                 thread_result: dict | None = _run_coro_blocking(
                     _invoke(), hard_timeout, label=f"react:{self.name}"
                 )
+            except ModelCallDeadline as exc:
+                detail = f"model call deadline: {exc}"
+                self.logger.error("%s ReAct agent failed: %s.", self.name, detail)
+                self._record_budget(budget, [], "time", detail=detail)
+                self._record_turns_taken(latest, len(messages))
+                raise AnalystError(f"{self.name} ReAct agent failed: {detail}") from exc
             except TimeoutError:
                 # Two different walls. The soft budget with nothing gathered
                 # is not the hard cap, and is not said to be.
@@ -4074,7 +4114,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # steps: it has evidence and no answer, and the salvage is what turns
         # the first into the second.
         ended_early = repeats.ending_the_loop() or no_room or window_full or time_capped
-        ended_early = ended_early or spend_capped
+        ended_early = ended_early or spend_capped or call_deadline_hit
         self._record_react_loop(hit_step_cap=hit_step_cap)
         if repeats.ending_the_loop():
             cap, why = "repeats", f"{repeats.served_repeats} repeated tool call(s)"
@@ -4086,6 +4126,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             cap, why = "time", time_detail
         elif spend_capped:
             cap, why = SPEND_CAP, self._spend_reason()
+        elif call_deadline_hit:
+            cap, why = "time", time_detail
         elif hit_step_cap:
             cap, why = "steps", ""
         else:
@@ -4169,7 +4211,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         """Whether the job's spend ceiling is reached. Never raises."""
         meter = self._spend_meter()
         try:
-            return bool(meter is not None and meter.reached() is True)
+            return bool(meter is not None and meter.exhausted() is True)
         except Exception:  # noqa: BLE001 — a meter is never worth a lost loop
             return False
 
@@ -4752,6 +4794,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         hard_timeout = hard_cap(timeout, getattr(self, "_budget_ceiling", None))
         try:
             content = _run_coro_blocking(_invoke(), hard_timeout, label=f"llm:{self.name}")
+        except ModelCallDeadline as exc:
+            self.logger.error("LLM %s ended at its model call deadline: %s", what, exc)
+            raise AnalystError(f"{self.name} {what} failed: model call deadline: {exc}") from exc
         except TimeoutError:
             self.logger.critical(
                 "%s %s exceeded the %s hard cap.",

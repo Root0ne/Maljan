@@ -2138,6 +2138,28 @@ change landed on `main`.
 
 ### Fixed
 
+- **A model call's whole-call deadline is that call failing, not the loop's
+  clock.** In a loop with no time limit a lone model that ran past it ended
+  the analyst with "exceeded hard cap of none" and its gathered evidence
+  unwritten; the tool phase ends there now, the salvage writes the answer, and
+  the budget record's detail says "model call deadline". A fallback list still
+  moves on to its next model.
+- **The spend is exhausted at the first call refused or held for it.** Every
+  gate (new tool loops, chunks, asks, negotiation rounds) and the degradation
+  reason read that latch, not only the ceiling being reached;
+  `run_summary.spend` records `exhausted`, `exhausted_at_usd` and
+  `exhausted_by` ("reached" or "a worst-case refusal"). A held call — the
+  verdict, a report section or a loop's closing answer — is given what the
+  remaining spend pays for and never less than 8,192 output tokens (or its own
+  cap when smaller); the overshoot is listed in `held_calls`. A call refused
+  for spend is reported as the ceiling's reason, not as an analyst failure.
+- The streamed-call deadline applies per chunk, so a consumer between chunks
+  sees `ModelCallDeadline` and no task is left cancelling; the judge's spend
+  admission counts tool calls, reasoning and tool definitions as the analysts'
+  does; a process-group kill never signals the server's own group and skips a
+  child already reaped; a capa worker that exits without an answer is logged
+  as such; the MCP request id is read in one helper with a test pinned to the
+  installed client.
 - **Every model request has a whole-call deadline.** Maljan enforces the
   request's sized timeout (its output cap at the measured pace, or the
   client's own 1,800 s where nothing is measured) over the whole call; the
@@ -2153,7 +2175,8 @@ change landed on `main`.
   group, and a retry of the same run joins the running one.
 - **String IOCs are all returned.** The 120-row cap and the per-kind quotas in
   `iocs_from_text` / `iocs_from_file` and the static extractor are gone; the
-  tool-answer sizing and paging carry the rest. `apk_info` states the full
+  tool-answer sizing and paging carry the rest. The report's IOC table grows
+  with them on a sample carrying many paths or URLs; that is intended. `apk_info` states the full
   count of every list its `limit` cut, a YARA match states its length beside
   its hex, a sandbox API row states how many processes called it and marks
   the arguments it cuts, and a carved-file refusal counts the names it does

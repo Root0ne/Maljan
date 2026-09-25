@@ -238,7 +238,7 @@ def refusal(container: Any, caller: Any, callee_key: str) -> str | None:
             f"{limit} ({path}); answer from what you have or ask through your caller"
         )
     meter = getattr(getattr(caller, "token_ledger", None), "spend", None)
-    if meter is not None and meter.reached() is True:
+    if meter is not None and meter.exhausted() is True:
         return SPEND_CEILING_REFUSAL.format(callee=repr(callee_key))
     budget = getattr(caller, "loop_budget", None)
     if budget is not None:

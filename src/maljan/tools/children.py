@@ -72,7 +72,16 @@ def kill(run: Hashable) -> int:
 
 
 def kill_process_group(pid: int) -> None:
-    """Kill the process group ``pid`` leads, or the process alone where it leads none."""
+    """Kill the process group ``pid`` leads, or the process alone where it leads none.
+
+    Never this process or its own group, and never a pid that names no child
+    (0 and 1 are the caller's group and init): a mistaken pid here would
+    signal the server itself.
+    """
+    pid = int(pid or 0)
+    if pid <= 1 or pid == os.getpid() or pid == os.getpgrp():
+        logger.debug("refused to kill pid %d: it is not a child of this run.", pid)
+        return
     try:
         os.killpg(pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):

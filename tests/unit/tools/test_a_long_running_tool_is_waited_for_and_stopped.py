@@ -110,3 +110,36 @@ class TestOneRunAtATime:
             return str(await second)
 
         assert asyncio.run(one_leaves_one_stays()) == "done"
+
+
+class TestAKillNeverReachesTheServer:
+    def test_no_pid_that_names_this_process_or_its_group_is_signalled(self) -> None:
+        from unittest.mock import patch
+
+        with (
+            patch("maljan.tools.children.os.killpg") as killpg,
+            patch("maljan.tools.children.os.kill") as kill,
+        ):
+            for pid in (0, 1, -5, os.getpid(), os.getpgrp()):
+                children.kill_process_group(pid)
+        killpg.assert_not_called()
+        kill.assert_not_called()
+
+    def test_a_reaped_child_is_not_killed(self) -> None:
+        pids: list[int] = []
+
+        def work() -> int:
+            process = subprocess.Popen(["true"], start_new_session=True)  # noqa: S607
+            children.register(
+                lambda: children.kill_process_group(process.pid) if process.poll() is None else None
+            )
+            pids.append(process.pid)
+            return process.wait()
+
+        from unittest.mock import patch
+
+        with patch("maljan.tools.children.kill_process_group") as killer:
+            with children.running_as(("floss", "done.dll")):
+                work()
+                children.kill(("floss", "done.dll"))
+        killer.assert_not_called()

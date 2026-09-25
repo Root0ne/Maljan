@@ -57,6 +57,21 @@ def truncation_target(limit: int) -> int:
     return max(0, int(limit) - len(TRUNCATION_MARKER))
 
 
+def next_request_id(session: Any) -> Any:
+    """The id the session will give its next request, or ``None`` where it cannot say.
+
+    The ``mcp`` client has no public way to learn a request's id, so this is
+    the one place its private counter is read: ``BaseSession._request_id``,
+    which ``send_request`` takes as the request's id before its first await,
+    and ``ClientSession.call_tool`` reaches ``send_request`` with no await in
+    between. Read immediately before the call, it is that call's id, which is
+    how a call this client gives up on is cancelled at the server by name. A
+    test pins that behaviour to the installed version.
+    """
+    value = getattr(session, "_request_id", None)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 async def _cancel_at_the_server(session: Any, request_id: Any, reason: str) -> None:
     """Tell the server to stop the request this client gave up on. Never raises.
 
@@ -359,10 +374,7 @@ class MCPLangChainToolkit:
                 {"read_timeout_seconds": timedelta(seconds=deadline)} if deadline else {}
             )
             long_running = guard is not None and guard.long_running(tool_name)
-            # The id the session gives this request: read before the call,
-            # which takes it with no await in between, so a call this client
-            # gives up on can be cancelled at the server by name.
-            request_id = getattr(session, "_request_id", None)
+            request_id = next_request_id(session)
             try:
                 result = await session.call_tool(tool_name, arguments=args, **timing)
             except asyncio.CancelledError:

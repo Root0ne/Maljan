@@ -42,6 +42,7 @@ from maljan.agents.base_agent import (
     TOOL_LOOP_TURN_CALL,
     BudgetMeter,
     LoopBudget,
+    _message_chars,
     _trim_for_synthesis,
     _turn_key,
     counted_window_tokens,
@@ -1289,7 +1290,10 @@ class JudgeAgent(BudgetMeter):
             meter.admit(
                 kind=kind,
                 model=self._model_label() or model_name_of(self.llm),
-                prompt_chars=sum(len(str(getattr(m, "content", m) or "")) for m in messages),
+                # As an analyst's call is measured: tool calls and reasoning
+                # counted with the text, and the tool definitions sent with it.
+                prompt_chars=sum(_message_chars(m) for m in messages)
+                + max(0, int(getattr(self, "_tool_definition_chars", 0) or 0)),
                 cap_tokens=int(judge_output_cap().tokens or 0),
             ),
         )
@@ -1465,7 +1469,7 @@ class JudgeAgent(BudgetMeter):
         spend_meter = getattr(getattr(self, "token_ledger", None), "spend", None)
         if not isinstance(spend_meter, SpendMeter):
             spend_meter = None
-        spent_out = bool(spend_meter is not None and spend_meter.reached() is True)
+        spent_out = bool(spend_meter is not None and spend_meter.exhausted() is True)
         if spent_out:
             self.logger.warning(
                 "JudgeAgent: the job's spend ceiling is reached; answering without tools."
@@ -1661,7 +1665,7 @@ class JudgeAgent(BudgetMeter):
                                 list(latest.get("messages") or [])[len(messages) :],
                                 self._model_label() or model_name_of(self.llm),
                             )
-                            if spend_meter.reached():
+                            if spend_meter.exhausted():
                                 ended["spend"] = True
                                 break
                 except SpendCeilingStop:

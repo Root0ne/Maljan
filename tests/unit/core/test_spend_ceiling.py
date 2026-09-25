@@ -193,10 +193,7 @@ class TestBeforeEachCall:
             meter.admit(kind="report", model="deepseek-v4-pro", prompt_chars=10, cap_tokens=10)
             is None
         )
-        assert (
-            "made at its own output cap past the spend ceiling"
-            in (meter.snapshot()["held_calls"][-1])
-        )
+        assert "made at its own 10-token cap" in (meter.snapshot()["held_calls"][-1])
 
     def test_a_model_with_no_price_is_made_until_the_ceiling_is_reached(self) -> None:
         meter = self._meter()

@@ -676,14 +676,25 @@ def _deadline_members(base: Any) -> dict[str, Any]:
             self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
         ) -> Any:
             seconds = call_deadline(self, messages, kwargs)
+            ends = time.monotonic() + seconds
+            stream = base._astream(self, messages, stop=stop, run_manager=run_manager, **kwargs)
             try:
-                async with asyncio.timeout(seconds):
-                    async for chunk in base._astream(
-                        self, messages, stop=stop, run_manager=run_manager, **kwargs
-                    ):
-                        yield chunk
-            except TimeoutError as exc:
-                raise _expired(seconds) from exc
+                while True:
+                    # Each step against the time left, so the deadline never
+                    # spans a ``yield``: a consumer between two chunks sees
+                    # ``ModelCallDeadline`` and no task is left cancelling.
+                    left = ends - time.monotonic()
+                    if left <= 0:
+                        raise _expired(seconds)
+                    try:
+                        chunk = await asyncio.wait_for(stream.__anext__(), left)
+                    except StopAsyncIteration:
+                        return
+                    except TimeoutError as exc:
+                        raise _expired(seconds) from exc
+                    yield chunk
+            finally:
+                await stream.aclose()
 
         members["_astream"] = _astream
 

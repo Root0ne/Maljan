@@ -665,6 +665,12 @@ def spend_lines(spend: Any) -> list[str]:
         + (
             " — reached, and the tool phases still running ended there"
             if spend.get("reached")
+            else (
+                f" — exhausted at {float(spend.get('exhausted_at_usd') or 0.0):.4f} USD by "
+                f"{spend.get('exhausted_by') or 'a refusal'}: no further loop, chunk, ask or "
+                "round was started"
+            )
+            if spend.get("exhausted")
             else ""
         )
     ]

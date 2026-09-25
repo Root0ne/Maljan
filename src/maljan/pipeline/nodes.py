@@ -41,6 +41,7 @@ from maljan.core.config import BUILTIN_AGENTS, JUDGE_AGENT_KEY, PROMPT_ROLES
 from maljan.core.container import ServiceContainer
 from maljan.core.exceptions import AnalystError, LLMError
 from maljan.core.logger import logger
+from maljan.core.spend import SpendCeilingStop
 from maljan.memory.long_term_memory import build_stored_case
 from maljan.pipeline.conditions import (
     ConditionError,
@@ -2413,7 +2414,31 @@ def make_stage_agent_node(
                 node_out["remote_sample_paths"] = staged
             node_out.update(_evidence_update())
             return _closing(node_out)
-        except (AnalystError, LLMError) as e:
+        except (AnalystError, LLMError, SpendCeilingStop) as e:
+            stopped = _spend_stop_of(e)
+            if stopped is not None:
+                # A call the operator's spend ceiling did not admit: not a failed
+                # analyst. The stage says so, and the run's degradation reason is
+                # the ceiling's own.
+                logger.warning("%s: not answered: %s.", agent_name, stopped)
+                _promoted = promoted_asks(agent)
+                return _closing(
+                    {
+                        "reports": {
+                            agent_name: "",
+                            **{key: answer.to_text_summary() for key, answer in _promoted.items()},
+                        },
+                        "isr_reports": {agent_name: _empty_isr(agent_name), **_promoted},
+                        **_evidence_update(),
+                        **stage_record(
+                            stage,
+                            ran=True,
+                            agents=(agent_name,),
+                            agent_reasons={agent_name: f"not answered: {stopped}"},
+                            duration_ms=_elapsed_ms(),
+                        ),
+                    }
+                )
             # Structured error event so Loki/Promtail
             # can aggregate ``event_type=analyst_error`` instead of regex-
             # scanning free-text. ``sample_hash`` is short-fingerprinted so
@@ -2773,7 +2798,7 @@ def make_negotiation_node(
         # the router goes on to the verdict with the analysts' answers as they
         # stand, and the degradation reason says the ceiling ended the rounds.
         _meter = _spend_meter(container)
-        if _meter is not None and _meter.reached():
+        if _meter is not None and _meter.exhausted():
             logger.warning(
                 "negotiation: the job's spend ceiling is reached; no further round is held."
             )
@@ -3287,6 +3312,18 @@ def _generation_snapshot(container: Any) -> dict[str, Any] | None:
         logger.debug("the generation rate was not recorded on the run summary: %s", exc)
         return None
     return snapshot if isinstance(snapshot, dict) else None
+
+
+def _spend_stop_of(exc: BaseException) -> SpendCeilingStop | None:
+    """The spend-ceiling refusal behind ``exc``, down its cause chain, or ``None``."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, SpendCeilingStop):
+            return current
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return None
 
 
 def _spend_meter(container: Any) -> Any:

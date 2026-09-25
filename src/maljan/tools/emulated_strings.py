@@ -339,7 +339,10 @@ def _spawn(
     # of this run has gone (``tools.children``).
     from maljan.tools import children
 
-    children.register(lambda: children.kill_process_group(process.pid))
+    # Only while it runs: a reaped child's pid can be another session's.
+    children.register(
+        lambda: children.kill_process_group(process.pid) if process.poll() is None else None
+    )
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:

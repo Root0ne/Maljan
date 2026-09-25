@@ -1044,8 +1044,12 @@ worst case — its whole prompt as uncached input and its whole output cap as
 output — is priced; a call whose worst case would pass what is left is not
 made, unless it is the verdict, a report section or the answer a tool loop the
 ceiling ended writes from what it gathered, which are made with their output
-cap lowered to what the remaining spend pays for (and, once nothing is left,
-at their own cap, so the verdict and the report are never lost). Each such
+cap lowered to what the remaining spend pays for, so the verdict and the
+report are never lost. The first
+call refused or held this way exhausts the spend: from then on every gate
+reads it as the ceiling reached, `run_summary.spend` says `exhausted` with
+when and why, and a held call is given what is left or 8,192 output tokens,
+whichever is more (its own cap when that is smaller), the overshoot recorded. Each such
 decision is logged and listed in `run_summary.spend.held_calls`. After each
 model turn the spend so far — this loop's running turns included — is
 compared with the ceiling. When it is reached every running tool loop ends its
