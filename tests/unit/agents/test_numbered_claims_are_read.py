@@ -59,3 +59,17 @@ def test_the_plain_form_reads_as_it_did() -> None:
 def test_a_word_that_begins_with_claim_is_not_a_heading() -> None:
     text = "CLAIMS: listed below\nCLAIM: one\nEVIDENCE: ev_0001\nCONFIDENCE: 0.5"
     assert [c.claim for c in _parse_claim_blocks(text)] == ["one"]
+
+
+def test_a_claim_heading_inside_evidence_does_not_split_the_block() -> None:
+    text = "CLAIM 1: one\nEVIDENCE: first line\nCLAIM 2 - see also ev_0002\nCONFIDENCE: 0.8"
+    (claim,) = _parse_claim_blocks(text)
+    assert claim.claim == "one" and claim.confidence == 0.8
+
+
+def test_a_peer_claim_quoted_under_disputes_is_not_this_analyst_s() -> None:
+    text = (
+        "CLAIM 1: own finding\nEVIDENCE: ev_0001\nCONFIDENCE: 0.9\n\n"
+        "DISPUTES:\n* CLAIM 3: the peer's claim\n  EVIDENCE: ev_0009\n  CONFIDENCE: 0.7\n"
+    )
+    assert [c.claim for c in _parse_claim_blocks(text)] == ["own finding"]
