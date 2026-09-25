@@ -261,7 +261,7 @@ class TokenLedger:
             if fallback:
                 self._fallbacks.append({"agent": agent, "model": model, "reason": fallback})
         if self.spend is not None:
-            self.spend.settle(usage, model)
+            self.spend.settle(usage, model, call)
 
     @property
     def input_tokens(self) -> int:

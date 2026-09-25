@@ -1349,13 +1349,16 @@ class ServiceContainer:
 
         The verdict is one call on the judge's model; the report is one call
         for each section the composer writes (when it is on) and one for the
-        narrative round, on the reporter's model. The meter keeps what they
-        will cost aside from the tool phases. Never raises.
+        narrative round, on the reporter's model. Each is planned with the
+        prompt the window accounting allows it: its model's window less its
+        output budget, from what is already known of the window (nothing is
+        asked of a server here), and ``0`` where no window is known. The meter
+        keeps what they will cost aside from the tool phases. Never raises.
         """
         if meter is None or getattr(meter, "ceiling_usd", None) is None:
             return
         try:
-            from maljan.core.model_assignments import model_label_for
+            from maljan.core.model_assignments import assignment_chain_for, model_label_for
 
             report_calls = 1
             if bool(getattr(self.config.reporting, "composer_enabled", False)):
@@ -1364,12 +1367,40 @@ class ServiceContainer:
                 report_calls += len(COMPOSED_SECTIONS)
             meter.plan_tail(
                 {
-                    "verdict": (model_label_for(self.config, "judge", role="judge"), 1),
-                    "report": (self._reporter_model_label(), report_calls),
+                    "verdict": (
+                        model_label_for(self.config, "judge", role="judge"),
+                        1,
+                        self._prompt_allowance(
+                            assignment_chain_for(self.config, "judge", role="judge")
+                        ),
+                    ),
+                    "report": (
+                        self._reporter_model_label(),
+                        report_calls,
+                        self._prompt_allowance(
+                            assignment_chain_for(self.config, REPORTER_AGENT_KEY, role="judge")
+                        ),
+                    ),
                 }
             )
         except Exception as exc:  # noqa: BLE001 — a plan never costs a job
             logger.debug("the verdict and report were not planned for the spend meter: %s", exc)
+
+    def _prompt_allowance(self, chain: list[Any]) -> int:
+        """The prompt tokens the first model of ``chain`` leaves room for, or ``0`` unknown.
+
+        Its window less its report-stage output budget, from the window this
+        process already knows (the table, the operator's declaration, a window
+        learned earlier); a window nothing answered for is not a fact to plan by.
+        """
+        if not chain:
+            return 0
+        from maljan.llm.context_window import FALLBACK
+
+        budget = report_stage_budget(self.config, chain[0], probe=False)
+        if budget.window.source == FALLBACK or budget.window.tokens <= 0:
+            return 0
+        return max(0, int(budget.window.tokens) - int(budget.tokens))
 
     def _reporter_model_label(self) -> str:
         """The label of the model ``get_reporter_llm`` builds for the report's rounds."""

@@ -67,7 +67,7 @@ class TestTheReviewsCase:
         with pytest.raises(SpendCeilingStop, match="smallest answer it can give") as refused:
             meter.admit(kind="loop turn", model=FLASH, prompt_chars=1_000, cap_tokens=FLASH_CAP)
 
-        assert "the largest answer this job has measured of deepseek-flash" in str(refused.value)
+        assert "this job has measured of deepseek-flash" in str(refused.value)
         assert meter.reached() is False and meter.exhausted() is True
         snapshot = meter.snapshot()
         assert snapshot["exhausted_by"] == "a refusal"

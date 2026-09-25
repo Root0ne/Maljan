@@ -36,7 +36,7 @@ from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
 from maljan.core.logger import logger
-from maljan.core.spend import SPEND_CAP, SpendCeilingStop
+from maljan.core.spend import LOOP_TURN_CALL, SPEND_CAP, SpendCeilingStop
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.llm.context_window import (
     CHARS_PER_TOKEN,
@@ -90,7 +90,7 @@ SYNTHETIC_TURN_KEY = "maljan_synthetic_turn"
 
 # What the token ledger calls one model turn of a tool loop, for a call that
 # reported no usage.
-TOOL_LOOP_TURN_CALL = "tool loop turn"
+TOOL_LOOP_TURN_CALL = LOOP_TURN_CALL
 
 
 def is_model_turn(message: Any) -> bool:
@@ -4122,9 +4122,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             # because the last one timed out is the opposite of a ledger.
             self._finish_evidence(recorder)
             self.loop_budget = None
-            # The ledger records this loop's turns next, so the meter stops
-            # counting them as running.
-            if spend_meter is not None:
+            # A loop that failed has recorded its turns on the ledger by now,
+            # so the meter stops counting them as running. A finished loop's
+            # turns are recorded below, and the meter lets go of them there,
+            # after they are on the ledger: never a moment counted nowhere.
+            if spend_meter is not None and sys.exc_info()[1] is not None:
                 spend_meter.forget_loop(spend_key)
             # Read before the conversation is forgotten: forgetting it clears
             # the mark, so a question asked afterwards is always answered no
@@ -4138,6 +4140,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             self._forget_conversation()
 
         if thread_result is None:
+            if spend_meter is not None:
+                spend_meter.forget_loop(spend_key)
             raise AnalystError(f"{self.name} ReAct agent returned no result")
 
         msgs = thread_result.get("messages", []) or []
@@ -4158,6 +4162,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         for _m in msgs:
             if is_model_turn(_m):
                 self._record_usage(_m, announce=False, call=TOOL_LOOP_TURN_CALL)
+        if spend_meter is not None:
+            spend_meter.forget_loop(spend_key)
         elapsed = _time.monotonic() - _t0
         # A loop that overran is a slow model or a slow tool, and the loop's
         # own elapsed time cannot tell them apart. Every ledger entry carries
@@ -4326,17 +4332,25 @@ class BaseAnalyst(BudgetMeter, ABC):
         messages: list[Any],
         *,
         slot: Any = None,
-        holdable: bool = True,
+        holdable: bool | None = None,
+        model: Any = None,
+        deadline_s: float | None = None,
     ) -> int | None:
         """The spend ceiling's word on one call before it is made (``SpendMeter.admit``).
 
         ``None`` to make it as it is, a number to make it with that output
         cap; raises :class:`SpendCeilingStop` when it is not to be made. With
         ``slot`` the call's worst case is reserved until it is released.
+        ``holdable`` defaults to whether the model the call goes to (``model``,
+        else this agent's) takes a cap of its own per call: one that does not
+        is admitted only at its whole cap.
         """
         meter = self._spend_meter()
         if meter is None:
             return None
+        from maljan.llm.context_window import accepts_output_bound
+
+        target = self.llm if model is None else model
         return cast(
             "int | None",
             meter.admit(
@@ -4345,7 +4359,8 @@ class BaseAnalyst(BudgetMeter, ABC):
                 prompt_chars=sum(_message_chars(m) for m in messages) + self._definitions_sent(),
                 cap_tokens=analyst_output_cap(str(getattr(self, "name", "") or "")),
                 slot=slot,
-                holdable=holdable,
+                holdable=accepts_output_bound(target) if holdable is None else holdable,
+                deadline_s=deadline_s,
             ),
         )
 
@@ -4490,13 +4505,21 @@ class BaseAnalyst(BudgetMeter, ABC):
             # Admitted per call, held to what the spend pays for, and its
             # worst case reserved while it runs.
             slot = object()
-            bound = self._spend_admits("final-answer nudge", list(messages), slot=slot)
+            bound = self._spend_admits(
+                "final-answer nudge",
+                list(messages),
+                slot=slot,
+                deadline_s=None if budget is None else float(budget),
+            )
             from maljan.llm.context_window import output_bound_kwargs
 
             held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
 
             async def _ask() -> Any:
-                return await asyncio.wait_for(model.ainvoke(messages, **held), timeout=budget)
+                answer = await asyncio.wait_for(model.ainvoke(messages, **held), timeout=budget)
+                # On the ledger before the reservation goes.
+                self._record_usage(answer, call="final-answer nudge")
+                return answer
 
             try:
                 return _run_coro_blocking(
@@ -4532,7 +4555,6 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return None
             modes.append("tool_choice_none")
         self._nudge_retry_mode = "+".join(modes) or None
-        self._record_usage(answer, call="final-answer nudge")
         text = str(getattr(answer, "content", "") or "")
         return text or None
 
@@ -4911,7 +4933,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         # runs, or not made (``SpendCeilingStop`` reaches the caller).
         spend_slot = object()
         bound = self._spend_admits(
-            "salvage" if what == "step-cap salvage" else what, list(messages), slot=spend_slot
+            "salvage" if what == "step-cap salvage" else what,
+            list(messages),
+            slot=spend_slot,
+            model=llm,
+            deadline_s=None if timeout is None else float(timeout),
         )
         from maljan.llm.context_window import output_bound_kwargs
 

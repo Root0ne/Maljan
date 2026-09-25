@@ -154,7 +154,6 @@ class FunctionSummarizer:
 
         try:
             response = self._ask(messages)
-            self._record(response)
             summary: str = response.content  # type: ignore[assignment,union-attr]
             word_count = len(summary.split())
             logger.debug(
@@ -215,15 +214,21 @@ class FunctionSummarizer:
         (``generation_rate.sized_request_timeout``), so the wait never ends
         before the request would. A model that has only a synchronous
         ``invoke`` is called as before.
+
+        Admitted by the job's spend ceiling first, like every model call: sent
+        with its cap held to what the spend pays for, reserved while it runs,
+        and recorded on the token ledger before the reservation goes. A call
+        the ceiling refuses raises :class:`SpendCeilingStop`, and the caller
+        keeps the raw text.
         """
         import inspect
 
         from maljan.agents.base_agent import run_coro_blocking
+        from maljan.core.spend import admitted
+        from maljan.llm.context_window import output_bound_kwargs
         from maljan.llm.generation_rate import sized_request_timeout
         from maljan.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
 
-        if not inspect.iscoroutinefunction(getattr(type(self._llm), "ainvoke", None)):
-            return self._llm.invoke(messages)
         cap = 0
         for attr in ("max_tokens", "num_predict", "max_output_tokens"):
             value = getattr(self._llm, attr, None)
@@ -232,11 +237,25 @@ class FunctionSummarizer:
                 break
         chars = sum(len(str(getattr(message, "content", message))) for message in messages)
         seconds = sized_request_timeout(self._llm, cap, chars)
-        return run_coro_blocking(
-            self._llm.ainvoke(messages),
-            float(seconds if seconds is not None else PROVIDER_REQUEST_TIMEOUT_SECONDS),
-            label="function-summarizer",
-        )
+        with admitted(
+            self._token_ledger,
+            kind="summary",
+            llm=self._llm,
+            model=self._model_label,
+            prompt_chars=chars,
+            cap_tokens=cap,
+        ) as bound:
+            held = output_bound_kwargs(self._llm, bound) if bound is not None else {}
+            if not inspect.iscoroutinefunction(getattr(type(self._llm), "ainvoke", None)):
+                response = self._llm.invoke(messages, **held)
+            else:
+                response = run_coro_blocking(
+                    self._llm.ainvoke(messages, **held),
+                    float(seconds if seconds is not None else PROVIDER_REQUEST_TIMEOUT_SECONDS),
+                    label="function-summarizer",
+                )
+            self._record(response)
+            return response
 
     def summarize_chunks(self, chunks: list[str]) -> str:
         """Summarise multiple chunks and merge the results.
@@ -308,7 +327,6 @@ class FunctionSummarizer:
 
         try:
             response = self._ask(messages)
-            self._record(response)
             result: str = response.content  # type: ignore[assignment,union-attr]
             return result.strip()
         except Exception as exc:

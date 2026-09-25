@@ -1197,6 +1197,26 @@ class ReportComposer:
                     else (lambda: self.llm.ainvoke(turns)),
                     what="ReportComposer raw",
                 )
+                # On the ledger before the reservation goes.
+                if self.token_ledger is not None:
+                    try:
+                        from maljan.core.token_ledger import record_response_usage
+
+                        record_response_usage(
+                            self.token_ledger,
+                            raw,
+                            agent=REPORTER_AGENT_KEY,
+                            model=self.model_label,
+                            call="report section",
+                        )
+                        from maljan.pipeline.events import announce_model_fallback
+
+                        announce_model_fallback(
+                            getattr(self, "event_sink", None), raw, agent="reporter", stage="report"
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
+                        logger.debug("ReportComposer: token usage not recorded (%s).", exc)
             finally:
                 spend_release(getattr(self, "token_ledger", None), slot)
             # Per answer: a retry that closes inside the cap is not a cut one.
@@ -1215,25 +1235,6 @@ class ReportComposer:
                     cut_why,
                     shape,
                 )
-            if self.token_ledger is not None:
-                try:
-                    from maljan.core.token_ledger import record_response_usage
-
-                    record_response_usage(
-                        self.token_ledger,
-                        raw,
-                        agent=REPORTER_AGENT_KEY,
-                        model=self.model_label,
-                        call="report section",
-                    )
-                    from maljan.pipeline.events import announce_model_fallback
-
-                    announce_model_fallback(
-                        getattr(self, "event_sink", None), raw, agent="reporter", stage="report"
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
-                    logger.debug("ReportComposer: token usage not recorded (%s).", exc)
             return raw
 
         def _parse(answer: Any) -> Any:

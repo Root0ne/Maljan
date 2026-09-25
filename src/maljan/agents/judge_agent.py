@@ -1284,17 +1284,23 @@ class JudgeAgent(BudgetMeter):
         messages: list[Any],
         *,
         slot: Any = None,
-        holdable: bool = True,
+        holdable: bool | None = None,
+        deadline_s: float | None = None,
     ) -> int | None:
         """The spend ceiling's word on one judge call before it is made (``SpendMeter.admit``).
 
         With ``slot`` the call's worst case is reserved until it is released.
+        ``holdable`` defaults to whether the judge's model takes a cap of its
+        own per call; one that does not is admitted only at its whole cap.
         """
         from maljan.core.spend import SpendMeter
+        from maljan.llm.context_window import accepts_output_bound
 
         meter = getattr(getattr(self, "token_ledger", None), "spend", None)
         if not isinstance(meter, SpendMeter):
             return None
+        if holdable is None:
+            holdable = accepts_output_bound(self.llm)
         return cast(
             "int | None",
             meter.admit(
@@ -1307,6 +1313,7 @@ class JudgeAgent(BudgetMeter):
                 cap_tokens=int(judge_output_cap().tokens or 0),
                 slot=slot,
                 holdable=holdable,
+                deadline_s=deadline_s,
             ),
         )
 
@@ -1526,9 +1533,9 @@ class JudgeAgent(BudgetMeter):
                     ),
                     timeout=None if no_tools_timeout is None else float(no_tools_timeout),
                 )
+                self._record_usage(response, call="no-tools answer")
             finally:
                 self._spend_release(mediation_slot)
-            self._record_usage(response, call="no-tools answer")
             record_judge_response(
                 getattr(self, "truncation_ledger", None),
                 response,
@@ -1728,11 +1735,11 @@ class JudgeAgent(BudgetMeter):
             if turns_recorded:
                 return
             turns_recorded = True
-            if spend_meter is not None:
-                spend_meter.forget_loop(spend_key)
             for _m in list(latest.get("messages") or [])[len(messages) :]:
                 if is_model_turn(_m):
                     self._record_usage(_m, call=TOOL_LOOP_TURN_CALL)
+            if spend_meter is not None:
+                spend_meter.forget_loop(spend_key)
 
         try:
             await asyncio.wait_for(
@@ -1857,16 +1864,26 @@ class JudgeAgent(BudgetMeter):
                 "found and a single agreement_confidence score."
             )
         )
+        from maljan.llm.context_window import output_bound_kwargs
+
+        asked = with_question(trimmed, str(directive.content))
+        salvage_slot = object()
+        try:
+            bound = self._spend_admits("salvage", asked, slot=salvage_slot, deadline_s=timeout)
+        except SpendCeilingStop as stop:
+            self.logger.warning("JudgeAgent reasoning salvage not made: %s.", stop)
+            return ""
+        held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
         try:
             # Asked at the end of the last user turn when the trim left one
             # last, rather than as a second user turn after it.
-            response = await asyncio.wait_for(
-                self.llm.ainvoke(with_question(trimmed, str(directive.content))), timeout
-            )
+            response = await asyncio.wait_for(self.llm.ainvoke(asked, **held), timeout)
+            self._record_usage(response, call="reasoning salvage")
         except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves no reasoning
             self.logger.warning("JudgeAgent reasoning salvage failed (%s).", type(exc).__name__)
             return ""
-        self._record_usage(response, call="reasoning salvage")
+        finally:
+            self._spend_release(salvage_slot)
         return str(getattr(response, "content", "") or "")
 
     def drain_evidence_entries(self) -> list[LedgerEntry]:
@@ -2084,16 +2101,35 @@ class JudgeAgent(BudgetMeter):
                     direct_messages.append(SystemMessage(content=content))
                 elif role == "human":
                     direct_messages.append(HumanMessage(content=content))
+            from maljan.llm.context_window import output_bound_kwargs
+
+            fast_timeout = _seconds_or_none(loop_limits("judge")[0])
+            fast_slot = object()
             try:
-                response = await asyncio.wait_for(
-                    retry_on_connection_error(
-                        lambda: self.llm.ainvoke(direct_messages),
-                        what="Mediator fast path",
-                        log=self.logger,
-                    ),
-                    timeout=_seconds_or_none(loop_limits("judge")[0]),
+                fast_bound = self._spend_admits(
+                    "mediation", direct_messages, slot=fast_slot, deadline_s=fast_timeout
                 )
+            except SpendCeilingStop as stop:
+                # Not made: mediation reads no reasoning as no agreement.
+                self.logger.warning("Mediator fast path not made: %s.", stop)
+                fast_bound, direct_messages = None, []
+            fast_held = output_bound_kwargs(self.llm, fast_bound) if fast_bound is not None else {}
+            try:
+                if not direct_messages:
+                    response = None
+                else:
+                    response = await asyncio.wait_for(
+                        retry_on_connection_error(
+                            lambda: self.llm.ainvoke(direct_messages, **fast_held),
+                            what="Mediator fast path",
+                            log=self.logger,
+                        ),
+                        timeout=fast_timeout,
+                    )
+                    self._record_usage(response, call="mediation")
             except TimeoutError:
+                # The timed-out call is no longer in flight; the loop admits its own turns.
+                self._spend_release(fast_slot)
                 self.logger.error("Mediator fast-path timed out. Falling back to tool loop.")
                 await self._initialize_mcp_client()
                 # The fast path's prompt was written for a call with no tools;
@@ -2105,8 +2141,9 @@ class JudgeAgent(BudgetMeter):
                 ]
                 reasoning_text = await self.execute_tool_loop(prompt_messages)
             else:
-                self._record_usage(response, call="mediation")
-                reasoning_text = str(response.content)
+                reasoning_text = "" if response is None else str(response.content)
+            finally:
+                self._spend_release(fast_slot)
 
         # Agreement among fewer than two analysts that said something measures
         # nothing, whatever number the reasoning ended on: the mediator's words
@@ -2320,9 +2357,9 @@ class JudgeAgent(BudgetMeter):
                     what="Judge verdict",
                     log=self.logger,
                 )
+                self._record_usage(answer, call="verdict")
             finally:
                 self._spend_release(verdict_slot)
-            self._record_usage(answer, call="verdict")
             # Whether the verdict reached its token cap, recorded like every
             # other judge call: a cut bundle reads as malformed JSON, and the
             # count is what says the cap, not the model, ended it.
@@ -2939,18 +2976,35 @@ class JudgeAgent(BudgetMeter):
             return self._fallback_mediate(reasoning_text)
 
         last_exc: Exception | None = None
+        try:
+            extraction_turns = list(extract_prompt.format_messages(reasoning_log=reasoning_text))
+        except Exception:  # noqa: BLE001 — sized from the reasoning alone when it will not format
+            extraction_turns = [HumanMessage(content=reasoning_text)]
         for attempt in range(1, max_attempts + 1):
+            extraction_slot = object()
+            try:
+                # The structured path takes no per-call cap: made at its whole
+                # cap or not at all, and reserved while it runs.
+                self._spend_admits(
+                    "mediation extraction", extraction_turns, slot=extraction_slot, holdable=False
+                )
+            except SpendCeilingStop as stop:
+                self.logger.warning("Structured mediator output not asked: %s.", stop)
+                return self._fallback_mediate(reasoning_text)
             try:
                 llm_structured = self.llm.with_structured_output(MediatorVerdict, include_raw=True)
-                result = structured_answer(
-                    await (extract_prompt | llm_structured).ainvoke(
-                        {"reasoning_log": reasoning_text}
-                    ),
-                    self.token_ledger,
-                    agent=str(self.name),
-                    model=self._model_label(),
-                    call="mediation extraction",
-                )
+                try:
+                    result = structured_answer(
+                        await (extract_prompt | llm_structured).ainvoke(
+                            {"reasoning_log": reasoning_text}
+                        ),
+                        self.token_ledger,
+                        agent=str(self.name),
+                        model=self._model_label(),
+                        call="mediation extraction",
+                    )
+                finally:
+                    self._spend_release(extraction_slot)
                 if isinstance(result, MediatorVerdict):
                     return result
                 raise ValueError(
