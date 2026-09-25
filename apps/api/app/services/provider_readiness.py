@@ -32,6 +32,8 @@ from typing import Any
 
 from maljan.core.logger import logger
 
+from app.logsafe import log_safe
+
 
 def refusal_sentence(refusals: list[str]) -> str:
     """The whole 422 body: what is wrong, then one sentence per agent."""
@@ -98,7 +100,9 @@ async def unready_static_providers(
         try:
             provider = _provider_for(settings, provider_id)
         except Exception as exc:  # noqa: BLE001 — an unknown id is refused elsewhere
-            logger.debug("readiness: provider %r not built (%s)", provider_id, exc)
+            logger.debug(
+                "readiness: provider %s not built (%s)", log_safe(provider_id), log_safe(exc)
+            )
             continue
         if provider.capabilities.degrade_on_failure:
             continue
