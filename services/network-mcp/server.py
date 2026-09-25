@@ -9,7 +9,9 @@ from maljan.analysis.pcap_summary import each_packet
 from maljan.tools import staging
 from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest, module
 from maljan.tools.errors import (
+    CAPTURES_REMEDIATION,
     MISSING_DEPENDENCY,
+    NO_CAPTURE_REMEDIATION,
     NO_SUCH_FILE,
     PATH_OUTSIDE_ROOTS,
     code_for_exception,
@@ -91,13 +93,8 @@ def capture_remediation() -> str:
     """
     names = staging.job_captures(_staging_root())
     if not names:
-        return (
-            f"this run holds no packet capture, so there is nothing for {CAPTURE_ARGUMENT} "
-            "to name; read the sandbox's network view instead"
-        )
-    return f"pass {CAPTURE_ARGUMENT} as one of this run's captures, exactly as written: " + (
-        ", ".join(names)
-    )
+        return NO_CAPTURE_REMEDIATION.format(argument=CAPTURE_ARGUMENT)
+    return CAPTURES_REMEDIATION.format(argument=CAPTURE_ARGUMENT, names=", ".join(names))
 
 
 def _capture(pcap_path: str) -> Path:

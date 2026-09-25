@@ -1524,15 +1524,15 @@ def _pcap(data: dict[str, Any], max_chars: int = CAPTURE_LINE_CHARS) -> str:
         f"{float(data.get('duration_s') or 0.0):.1f}s; protocols: "
         + (", ".join(f"{k} {_n(v)}" for k, v in protocols.items()) or "no IP packets")
     )
-    beacons = data.get("beacons") or []
-    tail = "; beaconing: " + (
+    periodic = data.get("beacons") or []
+    tail = "; contacts at a regular interval: " + (
         ", ".join(
             f"{b.get('dst')}:{b.get('dport')}/{b.get('proto')} every ~{b.get('interval_s')}s"
-            for b in beacons
+            for b in periodic
             if isinstance(b, dict)
         )
-        if beacons
-        else "no regular interval detected"
+        if periodic
+        else "none detected"
     )
     budget = min(int(max_chars), CAPTURE_LINE_CHARS)
 

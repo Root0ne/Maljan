@@ -81,6 +81,18 @@ REMEDIATIONS: dict[str, str] = {
     ),
 }
 
+# What a capture tool says when the capture it was asked for is not one it may
+# read. Its own sentences, because ``pcap_path`` is required on every tool that
+# takes one and the general advice to leave a path argument out sent a live
+# analyst after a call that cannot be made; the captures are listed by the
+# names a caller can pass back, never by host path.
+NO_CAPTURE_REMEDIATION = (
+    "this run holds no packet capture, so there is nothing for {argument} to name; read "
+    "the sandbox's network view instead"
+)
+CAPTURES_REMEDIATION = "pass {argument} as one of this run's captures, exactly as written: {names}"
+
+
 # What a flat error text says about its own cause. Ordered: the first
 # pattern that matches names the code, and the last is the catch-all.
 _CODE_BY_TEXT: tuple[tuple[str, re.Pattern[str]], ...] = (

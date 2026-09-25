@@ -213,8 +213,9 @@ _INSTRUCTIONS: dict[str, str] = {
         "value is: a registry key or value only when it is written under a registry hive "
         "or from one of its top keys (Software\\, System\\) or the entry records it as a "
         "registry access, and 'String' when the entry does "
-        "not show what the value is. Give its purpose where the evidence "
-        "says, and leave the purpose empty where it does not."
+        "not show what the value is. Give its purpose where the evidence or an analyst "
+        "claim above says what the sample uses the value for, in that claim's sense, and "
+        "leave the purpose empty where neither says."
     ),
     "commands": "Extract the commands the sample accepts from its operator.",
     "encryption_scheme": "Extract the encryption scheme.",

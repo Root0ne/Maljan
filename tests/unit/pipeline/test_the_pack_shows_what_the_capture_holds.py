@@ -68,7 +68,7 @@ class TestThePackLine:
         assert "tcp 1,100" in line and "udp 98" in line
         assert "all 3 external conversations by volume" in line
         assert "198.51.100.0:443/tcp — 100 pkts, 9000 bytes" in line
-        assert "no regular interval detected" in line
+        assert "contacts at a regular interval: none detected" in line
 
     def test_a_short_room_keeps_the_heaviest_conversations_and_says_so(self) -> None:
         entry = _entry("pcap_summary", _facts(conversations=40))

@@ -130,7 +130,7 @@ export default function TechnicalAnalysisPanel({ report }: { report: MalwareRepo
                     <td className="py-1 pr-3 font-mono break-all text-text-secondary">
                       {item.value}
                     </td>
-                    <td className="py-1 pr-3 text-text-muted">{item.purpose || "-"}</td>
+                    <td className="py-1 pr-3 text-text-muted">{item.purpose?.trim() || "not stated"}</td>
                     <td className="py-1">
                       <Cited ids={item.evidence_refs} />
                       <Unresolved
