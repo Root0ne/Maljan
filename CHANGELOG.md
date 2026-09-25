@@ -2175,6 +2175,12 @@ change landed on `main`.
 
 ### Fixed
 
+- **The console's context window read the fallback for a model whose server
+  lists its own.** `GET /api/v1/settings/context-window` probes on the API's
+  loop, and its answers stream asynchronously; the body was read with the
+  synchronous reader, the error was swallowed and the probe learned nothing,
+  so DeepSeek showed 8,192 (fallback) where the worker learned 1,048,576. The
+  async probe reads its answers with an async reader under the same bound.
 - **A reverser on Ghidra under another global provider had no sample to
   load.** The worker mirrored the sample only for the global provider and the
   `static` role's; a generic agent with a provider reference, and an agent a
