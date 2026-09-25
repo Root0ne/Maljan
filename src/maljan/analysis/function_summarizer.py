@@ -107,7 +107,11 @@ class FunctionSummarizer:
         from maljan.core.token_ledger import record_response_usage
 
         record_response_usage(
-            self._token_ledger, response, agent="summarizer", model=self._model_label
+            self._token_ledger,
+            response,
+            agent="summarizer",
+            model=self._model_label,
+            call="function summary",
         )
 
     def summarize_chunk(self, code_chunk: str) -> str:

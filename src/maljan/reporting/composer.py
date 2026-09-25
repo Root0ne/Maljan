@@ -1068,6 +1068,7 @@ class ReportComposer:
                 self.token_ledger,
                 agent=REPORTER_AGENT_KEY,
                 model=self.model_label,
+                call="report section",
             )
             if isinstance(result, dict):
                 result = schema.model_validate(result)
@@ -1142,7 +1143,11 @@ class ReportComposer:
                     from maljan.core.token_ledger import record_response_usage
 
                     record_response_usage(
-                        self.token_ledger, raw, agent=REPORTER_AGENT_KEY, model=self.model_label
+                        self.token_ledger,
+                        raw,
+                        agent=REPORTER_AGENT_KEY,
+                        model=self.model_label,
+                        call="report section",
                     )
                     from maljan.pipeline.events import announce_model_fallback
 

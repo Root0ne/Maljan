@@ -38,6 +38,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 
 from maljan.agents.base_agent import (
+    TOOL_LOOP_TURN_CALL,
     BudgetMeter,
     LoopBudget,
     _trim_for_synthesis,
@@ -907,7 +908,7 @@ class JudgeAgent(BudgetMeter):
                 ),
                 timeout=float(no_tools_timeout),
             )
-            self._record_usage(response)
+            self._record_usage(response, call="no-tools answer")
             record_judge_response(
                 getattr(self, "truncation_ledger", None),
                 response,
@@ -1060,7 +1061,7 @@ class JudgeAgent(BudgetMeter):
             turns_recorded = True
             for _m in list(latest.get("messages") or [])[len(messages) :]:
                 if is_model_turn(_m):
-                    self._record_usage(_m)
+                    self._record_usage(_m, call=TOOL_LOOP_TURN_CALL)
 
         try:
             await asyncio.wait_for(_until_it_answers_or_runs_out(), timeout=timeout)
@@ -1161,7 +1162,7 @@ class JudgeAgent(BudgetMeter):
         except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves no reasoning
             self.logger.warning("JudgeAgent reasoning salvage failed (%s).", type(exc).__name__)
             return ""
-        self._record_usage(response)
+        self._record_usage(response, call="reasoning salvage")
         return str(getattr(response, "content", "") or "")
 
     def drain_evidence_entries(self) -> list[LedgerEntry]:
@@ -1400,7 +1401,7 @@ class JudgeAgent(BudgetMeter):
                 ]
                 reasoning_text = await self.execute_tool_loop(prompt_messages)
             else:
-                self._record_usage(response)
+                self._record_usage(response, call="mediation")
                 reasoning_text = str(response.content)
 
         # Agreement among fewer than two analysts that said something measures
@@ -1612,7 +1613,7 @@ class JudgeAgent(BudgetMeter):
                 what="Judge verdict",
                 log=self.logger,
             )
-            self._record_usage(answer)
+            self._record_usage(answer, call="verdict")
             # Whether the verdict reached its token cap, recorded like every
             # other judge call: a cut bundle reads as malformed JSON, and the
             # count is what says the cap, not the model, ended it.
@@ -2015,6 +2016,7 @@ class JudgeAgent(BudgetMeter):
                     self.token_ledger,
                     agent=str(self.name),
                     model=self._model_label(),
+                    call="mediation extraction",
                 )
                 if isinstance(result, MediatorVerdict):
                     return result

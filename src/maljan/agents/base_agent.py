@@ -85,6 +85,10 @@ RECURSION_STOP_TEXT = "Sorry, need more steps to process this request."
 # it is not a call on the token ledger.
 SYNTHETIC_TURN_KEY = "maljan_synthetic_turn"
 
+# What the token ledger calls one model turn of a tool loop, for a call that
+# reported no usage.
+TOOL_LOOP_TURN_CALL = "tool loop turn"
+
 
 def is_model_turn(message: Any) -> bool:
     """Whether ``message`` is an assistant turn a model answered, and so a call to count."""
@@ -2473,18 +2477,21 @@ class BudgetMeter:
         share = getattr(llm, "fallback_turn_share", None)
         return float(share) if isinstance(share, int | float) else None
 
-    def _record_usage(self, response: Any, *, announce: bool = True) -> None:
+    def _record_usage(self, response: Any, *, announce: bool = True, call: str = "") -> None:
         """One model answer onto the run's ledger, under this agent and the model that gave it.
 
         ``announce`` publishes the switch when this answer is the one a
         fallback gave; the tool loop announces its turns as they happen and
-        records them afterwards, so it passes ``False`` here.
+        records them afterwards, so it passes ``False`` here. ``call`` names
+        what the call was, which the ledger keeps for a call that reported no
+        usage.
         """
         record_response_usage(
             getattr(self, "token_ledger", None),
             response,
             agent=str(getattr(self, "name", "") or ""),
             model=self._model_label(),
+            call=call,
         )
         # Whether this answer ended at the output cap, kept for the validation
         # turn: the last model answer recorded is the one the turn checks.
@@ -2504,7 +2511,7 @@ class BudgetMeter:
         """
         for message in list(latest.get("messages") or [])[sent:]:
             if is_model_turn(message):
-                self._record_usage(message, announce=False)
+                self._record_usage(message, announce=False, call=TOOL_LOOP_TURN_CALL)
 
     def _announce_fallback(self, message: Any) -> None:
         """Publish ``model_fallback`` when ``message`` is the turn its model list moved on.
@@ -3814,7 +3821,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # ``usage_metadata``) so the ledger reflects real LLM spend.
         for _m in msgs:
             if is_model_turn(_m):
-                self._record_usage(_m, announce=False)
+                self._record_usage(_m, announce=False, call=TOOL_LOOP_TURN_CALL)
         elapsed = _time.monotonic() - _t0
         # A loop that overran is a slow model or a slow tool, and the loop's
         # own elapsed time cannot tell them apart. Every ledger entry carries
@@ -4083,7 +4090,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return None
             modes.append("tool_choice_none")
         self._nudge_retry_mode = "+".join(modes) or None
-        self._record_usage(answer)
+        self._record_usage(answer, call="final-answer nudge")
         text = str(getattr(answer, "content", "") or "")
         return text or None
 
@@ -4465,7 +4472,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 else asyncio.to_thread(llm.invoke, messages)
             )
             response = await asyncio.wait_for(call, timeout=float(timeout))
-            self._record_usage(response)
+            self._record_usage(response, call=what)
             return str(response.content)
 
         _t0 = _time.monotonic()

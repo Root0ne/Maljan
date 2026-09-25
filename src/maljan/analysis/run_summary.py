@@ -149,7 +149,8 @@ class TokenUsageMetrics:
     ``reasoning_tokens`` (the part of the output spent reasoning) are present
     only where a provider reported them, over ``cached_calls`` and
     ``reasoning_calls`` calls. ``per_agent`` holds the same figures for each
-    agent, and the models that answered it.
+    agent, and the models that answered it. ``unreported`` names each call that
+    reported no usage — the agent, the call and the model — one row per call.
     """
 
     input_tokens: int
@@ -164,6 +165,29 @@ class TokenUsageMetrics:
     cost: float | None = None
     cost_calls: int = 0
     per_agent: dict[str, dict[str, Any]] = field(default_factory=dict)
+    unreported: list[dict[str, str]] = field(default_factory=list)
+
+
+def _unreported_clause(rows: Any) -> str:
+    """`` (<agent>: <call> on <model>, …)`` for the calls that reported no usage, or ``""``.
+
+    Identical rows are said once with their count. A summary stored before the
+    rows were recorded has none, and the count stands alone.
+    """
+    if not isinstance(rows, list):
+        return ""
+    counted: dict[str, int] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        agent = str(row.get("agent") or "an unnamed agent")
+        call = str(row.get("call") or "a call")
+        model = str(row.get("model") or "")
+        said = f"{agent}: {call}" + (f" on {model}" if model else "")
+        counted[said] = counted.get(said, 0) + 1
+    if not counted:
+        return ""
+    return " (" + ", ".join(said if n == 1 else f"{said} ×{n}" for said, n in counted.items()) + ")"
 
 
 def tokens_sentence(tokens: dict[str, Any] | None) -> str | None:
@@ -190,13 +214,18 @@ def tokens_sentence(tokens: dict[str, Any] | None) -> str | None:
     unreported = int(tokens.get("unreported_calls") or 0)
     reported = calls - unreported
     if reported <= 0:
-        return f"Tokens: not reported by the provider for any of {calls} model {noun}."
+        return (
+            f"Tokens: not reported by the provider for any of {calls} model {noun}"
+            f"{_unreported_clause(tokens.get('unreported'))}."
+        )
     text = (
         f"Tokens: {int(tokens.get('input_tokens') or 0):,} in and "
         f"{int(tokens.get('output_tokens') or 0):,} out over {calls} model {noun}"
     )
     if unreported:
-        text += f"; not reported for {unreported} of them"
+        text += (
+            f"; not reported for {unreported} of them{_unreported_clause(tokens.get('unreported'))}"
+        )
     text += _part_clause(
         tokens, "cached_input_tokens", "cached_calls", "of the input read from the prompt cache"
     )
@@ -1042,6 +1071,8 @@ class RunSummary:
         if tok.cost is not None and tok.cost_calls:
             out["cost"] = round(tok.cost, 6)
             out["cost_calls"] = tok.cost_calls
+        if tok.unreported:
+            out["unreported"] = [dict(row) for row in tok.unreported]
         out["sentence"] = tokens_sentence(out) or ""
         return out
 
@@ -1374,6 +1405,11 @@ class RunSummaryBuilder:
             cost=float(cost) if isinstance(cost, int | float) else None,
             cost_calls=int(snapshot.get("cost_calls", 0) or 0),
             per_agent={str(name): dict(row) for name, row in agents.items()},
+            unreported=[
+                {str(k): str(v) for k, v in row.items()}
+                for row in (snapshot.get("unreported") or [])
+                if isinstance(row, dict)
+            ],
         )
         models: dict[str, Any] = {}
         for name, row in agents.items():
