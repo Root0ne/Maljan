@@ -36,6 +36,7 @@ from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError
 from maljan.core.logger import logger
+from maljan.core.spend import SPEND_CAP
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.llm.context_window import (
     CHARS_PER_TOKEN,
@@ -43,6 +44,7 @@ from maljan.llm.context_window import (
     tool_definition_chars,
     window_full_error,
 )
+from maljan.pipeline.run_state import NO_LIMIT, NoLimit, budget_line
 from maljan.pipeline.turns import with_question
 from maljan.pipeline.validation import (
     ABSENCE_CLAIM_CODE,
@@ -419,7 +421,7 @@ def steps_used(messages: list) -> int:
     return len(ai_turns) + tool_rounds
 
 
-def model_turns_left(max_steps: int, messages: list) -> int:
+def model_turns_left(max_steps: int | None, messages: list) -> int | None:
     """How many model turns the loop still has, counted the way langgraph counts.
 
     ``max_steps`` is handed to langgraph as ``recursion_limit``, and langgraph
@@ -427,9 +429,31 @@ def model_turns_left(max_steps: int, messages: list) -> int:
     tools costs a second for the tool node. So the budget in model turns is
     half the steps, rounded up, less what the transcript already spent — one
     per assistant turn plus one per tool round. What the model is told is a
-    number it can act on; the graph's own step count is not.
+    number it can act on; the graph's own step count is not. ``None`` for a
+    loop with no step limit: there is no count to give.
     """
+    if max_steps is None:
+        return None
     return max(0, (int(max_steps) - steps_used(messages) + 1) // 2)
+
+
+def recursion_limit(max_steps: int | None) -> int:
+    """The ``recursion_limit`` langgraph is handed for a loop of ``max_steps``.
+
+    langgraph has no "unlimited" and ends a graph at twenty-five steps when it
+    is given none, so a loop with no step limit is handed the largest number
+    Python's platform offers: the graph never stops for steps, and the loop
+    ends by its model answering or by one of the stops that remain (the
+    repeat guard, the room, the spend ceiling, the job timeout).
+    """
+    return sys.maxsize if max_steps is None else int(max_steps)
+
+
+def limit_text(value: float | None, unit: str = "") -> str:
+    """A limit for a log line: ``180s``, ``40``, or ``none`` where there is none."""
+    if value is None:
+        return "none"
+    return f"{int(value)}{unit}"
 
 
 class LoopBudget:
@@ -445,9 +469,12 @@ class LoopBudget:
     needs no charging: a delegated call runs inside the caller's own timeout.
     """
 
-    def __init__(self, max_steps: int, timeout: float, started: float | None = None) -> None:
-        self.max_steps = int(max_steps)
-        self.timeout = float(timeout)
+    def __init__(
+        self, max_steps: int | None, timeout: float | None, started: float | None = None
+    ) -> None:
+        # ``None`` in either is no limit in that dimension.
+        self.max_steps = None if max_steps is None else int(max_steps)
+        self.timeout = None if timeout is None else float(timeout)
         self.started = time.monotonic() if started is None else float(started)
         self.own_steps = 0
         self.delegated_steps = 0
@@ -465,15 +492,35 @@ class LoopBudget:
         """
         self.delegated_steps += max(0, int(steps))
 
-    def steps_left(self) -> int:
+    def steps_left(self) -> int | None:
+        """Steps this loop has left, or ``None`` with no step limit."""
+        if self.max_steps is None:
+            return None
         return max(0, self.max_steps - self.own_steps)
 
-    def turns_left(self, messages: list) -> int:
-        """The budget line's number: model turns this loop has left."""
+    def turns_left(self, messages: list) -> int | None:
+        """The budget line's number: model turns this loop has left, ``None`` with no limit."""
         return model_turns_left(self.max_steps, messages)
 
-    def seconds_left(self) -> float:
+    def seconds_left(self) -> float | None:
+        """Seconds this loop has left, or ``None`` with no time limit."""
+        if self.timeout is None:
+            return None
         return max(0.0, self.timeout - (time.monotonic() - self.started))
+
+    def deadline(self) -> float | None:
+        """When this loop's time runs out on the monotonic clock, or ``None`` with no limit."""
+        return None if self.timeout is None else self.started + self.timeout
+
+    def stated_turns(self, messages: list) -> int | NoLimit:
+        """What the run-state block says of the turns: a count, or no limit."""
+        left = self.turns_left(messages)
+        return NO_LIMIT if left is None else left
+
+    def stated_seconds(self) -> float | NoLimit:
+        """What the run-state block says of the time: seconds, or no limit."""
+        left = self.seconds_left()
+        return NO_LIMIT if left is None else left
 
 
 class BudgetCeiling:
@@ -492,10 +539,13 @@ class BudgetCeiling:
     without one.
     """
 
-    def __init__(self, steps: int, seconds: float, wall: float | None = None) -> None:
-        self.steps = int(steps)
-        self.seconds = float(seconds)
-        self.wall = float(seconds if wall is None else wall)
+    def __init__(self, steps: int | None, seconds: float | None, wall: float | None = None) -> None:
+        # ``None`` steps or seconds is no limit in that dimension: an ask with
+        # no budget of its own, answered for a caller with no clock.
+        self.steps = None if steps is None else int(steps)
+        self.seconds = None if seconds is None else float(seconds)
+        wall = seconds if wall is None else wall
+        self.wall = None if wall is None else float(wall)
 
 
 # The class-level stand-ins for two pieces of per-agent state, for an analyst
@@ -773,7 +823,7 @@ def _steps_this_loop_spent(ledger: LoopBudget, messages: list) -> int:
     return int(steps_used(messages) if messages else ledger.own_steps)
 
 
-def hard_cap(timeout: float, ceiling: BudgetCeiling | None = None) -> float:
+def hard_cap(timeout: float | None, ceiling: BudgetCeiling | None = None) -> float | None:
     """The wall a loop is aborted at, never later than a caller is waiting for.
 
     A delegated loop runs on a tool thread that cannot be cancelled, so the
@@ -784,11 +834,19 @@ def hard_cap(timeout: float, ceiling: BudgetCeiling | None = None) -> float:
     than being clipped away against the ask's own timeout — a callee whose
     abort fires at the same second as its soft timeout never gets to write up
     what it gathered.
+
+    ``None`` for a loop with no time limit and no caller's clock above it: the
+    loop is not aborted on a clock of its own, and each model call inside it
+    waits as long as its answer takes at the model's measured pace.
     """
-    wall = float(timeout) + HARD_CAP_GRACE
-    if ceiling is not None:
-        wall = min(wall, float(ceiling.wall))
-    return max(1.0, wall)
+    walls: list[float] = []
+    if timeout is not None:
+        walls.append(float(timeout) + HARD_CAP_GRACE)
+    if ceiling is not None and ceiling.wall is not None:
+        walls.append(float(ceiling.wall))
+    if not walls:
+        return None
+    return max(1.0, min(walls))
 
 
 def a_budget(value: Any) -> int | None:
@@ -844,11 +902,16 @@ def slowest_call(entries: Any) -> str:
     return f", slowest {slowest[1]} {slowest[0] / 1000.0:.1f}s"
 
 
-def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[int, int]:
-    """``(timeout, max_steps)`` for one loop of ``agent_name``.
+def loop_limits(
+    agent_name: str, ceiling: BudgetCeiling | None = None
+) -> tuple[int | None, int | None]:
+    """``(timeout, max_steps)`` for one loop of ``agent_name``; ``None`` is no limit.
 
     The agent's own definition first, then the deprecated per-agent override
-    maps — each held to what a budget can be — then the deployment's defaults.
+    maps — each held to what a budget can be — then the deployment's own
+    ``react_agent_timeout`` / ``react_agent_max_steps``. All of them are
+    ``None`` unless an operator set one, and a dimension nobody set has no
+    limit.
     A budget is a property of the agent
     — an operator cloning a team gets the definition, and used to get none of
     its budget — so the definition wins over a map keyed by agent name
@@ -861,13 +924,19 @@ def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[
     own_timeout, own_steps = _definition_budget(cfg, agent_name)
     overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
     step_overrides = getattr(cfg, "react_agent_max_steps_overrides", {}) or {}
-    timeout = own_timeout or a_budget(overrides.get(agent_name)) or int(cfg.react_agent_timeout)
+    timeout = (
+        own_timeout
+        or a_budget(overrides.get(agent_name))
+        or a_budget(getattr(cfg, "react_agent_timeout", None))
+    )
     max_steps = (
-        own_steps or a_budget(step_overrides.get(agent_name)) or int(cfg.react_agent_max_steps)
+        own_steps
+        or a_budget(step_overrides.get(agent_name))
+        or a_budget(getattr(cfg, "react_agent_max_steps", None))
     )
     if ceiling is not None:
-        max_steps = max(2, int(ceiling.steps))
-        timeout = max(1, int(ceiling.seconds))
+        max_steps = None if ceiling.steps is None else max(2, int(ceiling.steps))
+        timeout = None if ceiling.seconds is None else max(1, int(ceiling.seconds))
     return timeout, max_steps
 
 
@@ -880,6 +949,13 @@ def loop_limits(agent_name: str, ceiling: BudgetCeiling | None = None) -> tuple[
 # message and the run's one extra step bought nothing. The turn says so: the
 # system prompt above it described the loop's tools, and this request carries
 # none (or carries them forbidden, on the second way of asking).
+# The question a loop is asked when it starts after the job's spend ceiling
+# was reached: it has no tool phase, and says so to the model.
+SPEND_CEILING_QUESTION = (
+    "The job's spend ceiling is reached, so no tool can be called. Write your final "
+    "answer now from what you were given above."
+)
+
 FINAL_ANSWER_NUDGE = (
     "Your last message was not a final report. No tool can be called in this turn. "
     "Return your final ISR now."
@@ -2033,7 +2109,7 @@ def _in_flight(
     )
 
 
-def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
+def _run_coro_blocking(coro: Any, hard_timeout: float | None, label: str = "") -> Any:
     """Submit ``coro`` to the shared agent loop and block until done / timeout.
 
     Mirrors the old daemon-thread + ``t.join(timeout)`` contract: on the hard
@@ -2077,7 +2153,7 @@ def _run_coro_blocking(coro: Any, hard_timeout: float, label: str = "") -> Any:
         # is ever *delivered* is a separate question, and one the watchdog
         # answers rather than assuming.
         _cancel_and_watch(loop, future, running, what)
-        raise TimeoutError(f"{what} exceeded hard cap of {int(hard_timeout)}s") from None
+        raise TimeoutError(f"{what} exceeded hard cap of {limit_text(hard_timeout, 's')}") from None
     except _FuturesCancelled as exc:
         if job is not None and job.is_cancelled:
             job.check(f"while {what} was in flight")
@@ -2105,7 +2181,7 @@ run_coro_blocking = _run_coro_blocking
 CLOSE_TOOLS_TIMEOUT = 15.0
 
 
-async def run_on_agent_loop(coro: Any, hard_timeout: float, label: str = "") -> Any:
+async def run_on_agent_loop(coro: Any, hard_timeout: float | None, label: str = "") -> Any:
     """Await ``coro`` on the shared agent loop from a *different* running loop.
 
     The async sibling of ``_run_coro_blocking``, and the other half of the
@@ -2134,7 +2210,7 @@ async def run_on_agent_loop(coro: Any, hard_timeout: float, label: str = "") -> 
         return await asyncio.wait_for(asyncio.wrap_future(future), hard_timeout)
     except TimeoutError:
         _cancel_and_watch(loop, future, running, what)
-        raise TimeoutError(f"{what} exceeded hard cap of {int(hard_timeout)}s") from None
+        raise TimeoutError(f"{what} exceeded hard cap of {limit_text(hard_timeout, 's')}") from None
     except (asyncio.CancelledError, _FuturesCancelled) as exc:
         # The caller itself being cancelled is not the call failing: the
         # cancellation goes on up, and the call on the agent loop is stopped
@@ -2619,7 +2695,8 @@ class BudgetMeter:
             "steps_used": _steps_this_loop_spent(ledger, messages),
             "max_steps": ledger.max_steps,
             "elapsed_s": round(time.monotonic() - ledger.started, 1),
-            "timeout_s": round(ledger.timeout, 1),
+            # ``None`` in either is a loop with no limit in that dimension.
+            "timeout_s": None if ledger.timeout is None else round(ledger.timeout, 1),
             "delegated_steps": ledger.delegated_steps,
             "tool_definition_chars": self._definitions_sent(),
             "cap": cap,
@@ -3151,7 +3228,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             captures=tuple(getattr(self, "_captures", ()) or ()),
         )
 
-    def _run_state_body(self, steps_left: int | None, seconds_left: float | None) -> str:
+    def _run_state_body(
+        self, steps_left: int | NoLimit | None, seconds_left: float | NoLimit | None
+    ) -> str:
         """The node's run-state lines plus this loop's remaining budget.
 
         Once the conversation has no room left for a tool answer the block
@@ -3162,13 +3241,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         body = str(getattr(self, "run_state_block", "") or "").rstrip()
         if not body:
             return ""
-        budget = []
-        if steps_left is not None:
-            budget.append(f"{max(0, int(steps_left))} model turns")
-        if seconds_left is not None:
-            budget.append(f"{max(0, int(seconds_left))} s")
-        if budget:
-            body = f"{body}\nbudget remaining: {', '.join(budget)}"
+        line = budget_line(steps_left, seconds_left)
+        if line:
+            body = f"{body}\n{line}"
         return f"{body}\n{NO_ROOM_RUN_STATE}" if self._says_no_room() else body
 
     def _says_no_room(self) -> bool:
@@ -3206,8 +3281,8 @@ class BaseAnalyst(BudgetMeter, ABC):
         self,
         messages: list[BaseMessage],
         *,
-        steps_left: int | None = None,
-        seconds_left: float | None = None,
+        steps_left: int | NoLimit | None = None,
+        seconds_left: float | NoLimit | None = None,
     ) -> list[BaseMessage]:
         """``messages`` with this agent's facts block and run-state block in place."""
         return frame_messages(
@@ -3217,7 +3292,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
 
     def _with_current_run_state(
-        self, messages: list[Any], steps_left: int | None, seconds_left: float | None
+        self,
+        messages: list[Any],
+        steps_left: int | NoLimit | None,
+        seconds_left: float | NoLimit | None,
     ) -> list[Any]:
         """``messages`` with this agent's run-state block as of now on the last; never raises.
 
@@ -3234,14 +3312,14 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.logger.debug("%s: run-state block left out (%s).", self.name, exc)
             return list(messages)
 
-    def _loop_limits(self) -> tuple[int, int]:
-        """This agent's ``(timeout, max_steps)`` for one loop; see ``loop_limits``."""
+    def _loop_limits(self) -> tuple[int | None, int | None]:
+        """This agent's ``(timeout, max_steps)`` for one loop, ``None`` for no limit; see ``loop_limits``."""
         return loop_limits(self.name, getattr(self, "_budget_ceiling", None))
 
     def _run_state_refresher(
         self,
-        max_steps: int,
-        timeout: float,
+        max_steps: int | None,
+        timeout: float | None,
         started: float,
         budget: LoopBudget | None = None,
         recorder: Any = None,
@@ -3282,8 +3360,8 @@ class BaseAnalyst(BudgetMeter, ABC):
                 try:
                     sent = self.frame_messages(
                         messages,
-                        steps_left=ledger.turns_left(messages),
-                        seconds_left=ledger.seconds_left(),
+                        steps_left=ledger.stated_turns(messages),
+                        seconds_left=ledger.stated_seconds(),
                     )
                 except Exception as exc:  # noqa: BLE001 — the block never costs a turn
                     self.logger.debug("%s: run-state refresh skipped (%s).", self.name, exc)
@@ -3365,24 +3443,34 @@ class BaseAnalyst(BudgetMeter, ABC):
         # inside an ask is the ask's, not the agent's own.
         from maljan.llm.fallback import restart_models
 
-        restart_models(self.llm, loop_seconds=float(timeout), share=self._turn_share())
+        restart_models(self.llm, loop_seconds=timeout, share=self._turn_share())
 
         # The two standing blocks: the pack at the head of the task, the run
         # state last with this loop's whole budget still ahead.
+        whole = LoopBudget(max_steps, timeout)
         prebuilt = self.frame_messages(
-            prebuilt, steps_left=model_turns_left(max_steps, []), seconds_left=float(timeout)
+            prebuilt, steps_left=whole.stated_turns([]), seconds_left=whole.stated_seconds()
         )
 
-        if not self.tools:
-            plain = LoopBudget(int(max_steps), float(timeout))
-            self._last_loop_deadline = plain.started + float(timeout)
+        # A loop that starts after the job's spend ceiling was reached has no
+        # tool phase: its agent answers once, tool-free, from what it was given.
+        spent_out = self._spend_reached()
+        if not self.tools or spent_out:
+            plain = LoopBudget(max_steps, timeout)
+            self._last_loop_deadline = plain.deadline()
+            sent = with_question(prebuilt, SPEND_CEILING_QUESTION) if spent_out else prebuilt
             try:
-                answer = self._invoke_llm_with_timeout(prebuilt, timeout)
+                answer = self._invoke_llm_with_timeout(sent, timeout)
             except TimeoutError:
                 self._record_budget(plain, [], "time", detail="the model did not answer in time")
                 raise
             self.steps_spent += 1
-            self._record_budget(plain, [], None)
+            self._record_budget(
+                plain,
+                [],
+                SPEND_CAP if spent_out else None,
+                detail=self._spend_reason() if spent_out else "",
+            )
             return self._capture_findings(answer)
 
         from langgraph.errors import GraphRecursionError
@@ -3435,10 +3523,11 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         # The loop's budget, readable by an ask made from inside it and
         # charged by the delegation when the callee returns.
-        budget = LoopBudget(int(max_steps), float(timeout))
+        budget = LoopBudget(max_steps, timeout)
         # When this loop's time runs out: the validation turn that follows it
-        # is held to what is left, not given a fresh budget.
-        self._last_loop_deadline = budget.started + float(timeout)
+        # is held to what is left, not given a fresh budget. ``None`` with no
+        # time limit.
+        self._last_loop_deadline = budget.deadline()
         self.loop_budget = budget
 
         # The run-state block is regenerated on every model turn with the
@@ -3485,8 +3574,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             _model_that_closes_off_truncated_calls(self.llm, recorded, _close_off_truncated_calls),
             recorded,
             prompt=self._run_state_refresher(
-                int(max_steps),
-                float(timeout),
+                max_steps,
+                timeout,
                 budget.started,
                 budget=budget,
                 recorder=recorder,
@@ -3495,6 +3584,12 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         # Whether the server, rather than the budget, said the window was full.
         window_full = False
+        # Whether the job's spend ceiling ended the tool phase. The meter
+        # counts this loop's turns while it runs, under a key of its own,
+        # until the ledger records them.
+        spend_capped = False
+        spend_meter = self._spend_meter()
+        spend_key = object()
         # Whether the time budget ended the tool phase, and the sentence saying
         # how: the loop's own turn times against what was left.
         time_capped = False
@@ -3525,8 +3620,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         # loop (see ``_get_agent_loop``) instead of a throwaway per-call loop.
         async def _invoke() -> dict:
             self.logger.info(
-                "Invoking ReAct agent (timeout=%ds, tools=%d)...",
-                timeout,
+                "Invoking ReAct agent (timeout=%s, steps=%s, tools=%d)...",
+                limit_text(timeout, "s"),
+                limit_text(max_steps),
                 len(self.tools),
             )
             # The provider sets
@@ -3558,10 +3654,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 alive until the loop's finalizer gets to it, and on a box with
                 one llama-server slot a run that is still alive is not free.
                 """
-                nonlocal time_capped, time_detail, final_reserve
+                nonlocal time_capped, time_detail, final_reserve, spend_capped
                 stream: Any = agent_executor.astream(
                     {"messages": messages},
-                    {"recursion_limit": max_steps},
+                    {"recursion_limit": recursion_limit(max_steps)},
                     stream_mode="values",
                 )
                 spoken: set[str] = set()
@@ -3598,6 +3694,24 @@ class BaseAnalyst(BudgetMeter, ABC):
                                     self.name,
                                 )
                                 break
+                            # And for the operator's spend ceiling: what the
+                            # job has spent, this loop's turns included, has
+                            # reached it, so the tool phase ends and the
+                            # salvage writes up what was gathered.
+                            if spend_meter is not None:
+                                spend_meter.note_loop(
+                                    spend_key,
+                                    list(latest.get("messages") or [])[len(messages) :],
+                                    self._model_label() or _model_label(self.llm),
+                                )
+                                if spend_meter.reached():
+                                    spend_capped = True
+                                    self.logger.warning(
+                                        "%s ReAct loop ended: the job's spend ceiling is "
+                                        "reached; synthesising from what it gathered.",
+                                        self.name,
+                                    )
+                                    break
                             # And the same end for the clock, early enough for
                             # the answer: once what is left cannot hold another
                             # turn at this model's own pace and the final-answer
@@ -3606,11 +3720,11 @@ class BaseAnalyst(BudgetMeter, ABC):
                             # time budget itself there is no turn left to write.
                             pace.note(snapshot, _model_label(self.llm))
                             left = budget.seconds_left()
-                            if pace.leaves_no_room_for(left):
+                            if left is not None and pace.leaves_no_room_for(left):
                                 time_capped = True
                                 final_reserve = pace.reserve()
                                 time_detail = (
-                                    f"{left:.0f}s of {float(timeout):.0f}s left; the longest "
+                                    f"{left:.0f}s of {float(timeout or 0):.0f}s left; the longest "
                                     f"turn of {pace.current} (its tools and its next "
                                     f"answer) took {pace.longest():.0f}s, and "
                                     f"{final_reserve:.0f}s are kept for the final answer"
@@ -3632,10 +3746,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                         # agent at its cap writes up what it has, and a
                         # recursion error is not something a model can read.
                         self.logger.warning(
-                            "%s ReAct loop reached its %d-step cap; "
+                            "%s ReAct loop reached its %s-step cap; "
                             "synthesising from what it gathered.",
                             self.name,
-                            max_steps,
+                            limit_text(max_steps),
                         )
                         latest["messages"] = [
                             *list(latest.get("messages") or []),
@@ -3676,9 +3790,12 @@ class BaseAnalyst(BudgetMeter, ABC):
                 # analyst for a blip the retry exists to absorb.
                 repeats.reset()
                 try:
+                    # No clock of the loop's own with no time limit: each
+                    # model call inside it waits as long as its answer takes
+                    # at the model's measured pace.
                     result = await asyncio.wait_for(
                         _until_it_answers_or_repeats(),
-                        timeout=float(timeout),
+                        timeout=None if timeout is None else float(timeout),
                     )
                     msg_count = len(result.get("messages", []))
                     self.logger.info(
@@ -3693,21 +3810,22 @@ class BaseAnalyst(BudgetMeter, ABC):
                     # the analyst; the salvage gets whatever time is left,
                     # which may be none. Any other timeout is not this one.
                     nonlocal time_capped, time_detail, budget_ran_out_empty
-                    if budget.seconds_left() > 1.0:
+                    left_now = budget.seconds_left()
+                    if left_now is None or left_now > 1.0:
                         raise
                     if not recorder.entries:
                         budget_ran_out_empty = True
                         raise
                     time_capped = True
                     time_detail = (
-                        f"the loop reached its {float(timeout):.0f}s budget inside a "
+                        f"the loop reached its {float(timeout or 0):.0f}s budget inside a "
                         "turn longer than any it had measured"
                     )
                     self.logger.warning(
-                        "%s ReAct loop reached its %ds time budget mid-turn; keeping "
+                        "%s ReAct loop reached its %s time budget mid-turn; keeping "
                         "what it gathered.",
                         self.name,
-                        timeout,
+                        limit_text(timeout, "s"),
                     )
                     return dict(latest)
                 except APIConnectionError as conn_exc:
@@ -3755,19 +3873,22 @@ class BaseAnalyst(BudgetMeter, ABC):
                 # is not the hard cap, and is not said to be.
                 if budget_ran_out_empty:
                     self.logger.critical(
-                        "%s ReAct agent reached its %ds budget with nothing gathered; "
+                        "%s ReAct agent reached its %s budget with nothing gathered; "
                         "aborting this analyst.",
                         self.name,
-                        timeout,
+                        limit_text(timeout, "s"),
                     )
-                    detail = f"the loop reached its {int(timeout)}s budget with nothing gathered"
+                    detail = (
+                        f"the loop reached its {limit_text(timeout, 's')} budget "
+                        "with nothing gathered"
+                    )
                 else:
                     self.logger.critical(
-                        "%s ReAct agent exceeded the %ds hard cap; aborting this analyst.",
+                        "%s ReAct agent exceeded the %s hard cap; aborting this analyst.",
                         self.name,
-                        hard_timeout,
+                        limit_text(hard_timeout, "s"),
                     )
-                    detail = f"the loop exceeded its {int(hard_timeout)}s hard cap"
+                    detail = f"the loop exceeded its {limit_text(hard_timeout, 's')} hard cap"
                 self._record_budget(budget, [], "time", detail=detail)
                 self._record_turns_taken(latest, len(messages))
                 raise
@@ -3789,6 +3910,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             # because the last one timed out is the opposite of a ledger.
             self._finish_evidence(recorder)
             self.loop_budget = None
+            # The ledger records this loop's turns next, so the meter stops
+            # counting them as running.
+            if spend_meter is not None:
+                spend_meter.forget_loop(spend_key)
             # Read before the conversation is forgotten: forgetting it clears
             # the mark, so a question asked afterwards is always answered no
             # and a loop that ran out of room recorded the step cap instead.
@@ -3840,7 +3965,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 elapsed,
                 slowest,
             )
-        elif elapsed > 0.9 * float(timeout):
+        elif timeout is not None and elapsed > 0.9 * float(timeout):
             self.logger.warning(
                 "%s ReAct loop close to timeout: elapsed=%.1fs, "
                 "timeout=%ds, tool_calls=%d, messages=%d%s.",
@@ -3878,6 +4003,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         # steps: it has evidence and no answer, and the salvage is what turns
         # the first into the second.
         ended_early = repeats.ending_the_loop() or no_room or window_full or time_capped
+        ended_early = ended_early or spend_capped
         self._record_react_loop(hit_step_cap=hit_step_cap)
         if repeats.ending_the_loop():
             cap, why = "repeats", f"{repeats.served_repeats} repeated tool call(s)"
@@ -3887,6 +4013,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             cap, why = "no_room", "the model server reported its context window full"
         elif time_capped:
             cap, why = "time", time_detail
+        elif spend_capped:
+            cap, why = SPEND_CAP, self._spend_reason()
         elif hit_step_cap:
             cap, why = "steps", ""
         else:
@@ -3919,7 +4047,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             # the hard cap the loop was already inside. Measured 2026-08-11:
             # 109.5 s loop + a fresh 1,500 s synthesis = 1,677 s against a
             # 1,530 s cap, and zero techniques out the other side.
-            if time_capped:
+            if time_capped and timeout is not None:
                 self._give_the_final_turn(final_reserve, float(timeout) - elapsed)
             synthesized = self._force_final_synthesis(msgs, timeout, elapsed)
             if synthesized.strip() and not _RECURSION_STOP_RE.search(synthesized):
@@ -3959,6 +4087,25 @@ class BaseAnalyst(BudgetMeter, ABC):
             self._settle_final_answer(content, msgs, timeout, elapsed, max_steps)
         )
 
+    def _spend_meter(self) -> Any:
+        """The job's spend meter (``core.spend.SpendMeter``), or ``None``."""
+        return getattr(getattr(self, "token_ledger", None), "spend", None)
+
+    def _spend_reached(self) -> bool:
+        """Whether the job's spend ceiling is reached. Never raises."""
+        meter = self._spend_meter()
+        try:
+            return bool(meter is not None and meter.reached() is True)
+        except Exception:  # noqa: BLE001 — a meter is never worth a lost loop
+            return False
+
+    def _spend_reason(self) -> str:
+        meter = self._spend_meter()
+        try:
+            return str(meter.reason()) if meter is not None else ""
+        except Exception:  # noqa: BLE001 — a meter is never worth a lost loop
+            return ""
+
     def _count_question(self, code: str) -> None:
         """Count one question a tool call was answered with, where the run summary reads it."""
         with self._the_meter_s_lock():
@@ -3983,7 +4130,12 @@ class BaseAnalyst(BudgetMeter, ABC):
             self.logger.debug("final-turn deadline not set (%s).", exc)
 
     def _settle_final_answer(
-        self, content: str, msgs: list, timeout: int, elapsed: float, max_steps: int
+        self,
+        content: str,
+        msgs: list,
+        timeout: float | None,
+        elapsed: float,
+        max_steps: int | None,
     ) -> str:
         """The loop's answer, nudged once if it was not a report, and judged.
 
@@ -4009,7 +4161,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         return content
 
     def _nudge_for_final_answer(
-        self, msgs: list, timeout: int, elapsed: float, max_steps: int
+        self, msgs: list, timeout: float | None, elapsed: float, max_steps: int | None
     ) -> str | None:
         """Ask once for the report the loop did not produce; ``None`` on failure.
 
@@ -4021,16 +4173,18 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
 
         remaining_steps = model_turns_left(max_steps, list(msgs))
-        if remaining_steps < 1:
+        if remaining_steps is not None and remaining_steps < 1:
             self.logger.info(
                 "%s: no step budget left for the final-answer nudge.",
                 self.name,
             )
             return None
-        remaining_time = float(timeout) - elapsed
-        if remaining_time <= 1.0:
+        remaining_time = None if timeout is None else float(timeout) - elapsed
+        if remaining_time is not None and remaining_time <= 1.0:
             self.logger.info("%s: no time budget left for the final-answer nudge.", self.name)
             return None
+        stated_steps = NO_LIMIT if remaining_steps is None else remaining_steps
+        stated_time = NO_LIMIT if remaining_time is None else remaining_time
 
         self.logger.warning(
             "%s: the loop's last message was not a final report; asking once for one.",
@@ -4046,13 +4200,13 @@ class BaseAnalyst(BudgetMeter, ABC):
         # place the loop's turns carried it.
         turns = self._with_current_run_state(
             with_question(tool_free_turns(sendable), FINAL_ANSWER_NUDGE),
-            remaining_steps,
-            remaining_time,
+            stated_steps,
+            stated_time,
         )
         loop_turns = self._with_current_run_state(
-            with_question(sendable, FINAL_ANSWER_NUDGE), remaining_steps, remaining_time
+            with_question(sendable, FINAL_ANSWER_NUDGE), stated_steps, stated_time
         )
-        budget = min(remaining_time, float(timeout))
+        budget = remaining_time
 
         def _ask_with(model: Any, label: str, sent: list[Any] | None = None) -> Any:
             messages = turns if sent is None else sent
@@ -4060,7 +4214,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             async def _ask() -> Any:
                 return await asyncio.wait_for(model.ainvoke(messages), timeout=budget)
 
-            return _run_coro_blocking(_ask(), budget + 5, label=label)
+            return _run_coro_blocking(_ask(), None if budget is None else budget + 5, label=label)
 
         try:
             answer = _ask_with(self.llm, f"nudge:{self.name}")
@@ -4224,7 +4378,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         """
         return [entry.to_captured() for entry in self._evidence_entries]
 
-    def _force_final_synthesis(self, msgs: list, timeout: int, elapsed: float = 0.0) -> str:
+    def _force_final_synthesis(
+        self, msgs: list, timeout: float | None, elapsed: float = 0.0
+    ) -> str:
         """Salvage a ReAct loop that hit its step budget without answering.
 
         LangGraph returns a "...need more steps..." stop message when the agent
@@ -4260,11 +4416,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         from langchain_core.messages import HumanMessage
 
         # Not truncated to whole seconds: at the time cap a second is a large
-        # share of what the final answer was kept.
-        remaining = max(0.0, float(timeout) - elapsed)
+        # share of what the final answer was kept. ``None`` with no time
+        # limit: the salvage is then sized by the window alone.
+        remaining = None if timeout is None else max(0.0, float(timeout) - elapsed)
         generation_rate, prompt_rate = self._measured_rates()
         paced_unknown = generation_rate is None or prompt_rate is None
-        if paced_unknown and remaining < _SYNTHESIS_MIN_SECONDS:
+        if paced_unknown and remaining is not None and remaining < _SYNTHESIS_MIN_SECONDS:
             self.logger.warning(
                 "%s skipping forced synthesis: only %ds of the %ds budget left "
                 "(minimum %ds) — starting it is how the hard cap fires.",
@@ -4288,11 +4445,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         )
         # What the time left can hold at this model's measured pace, when both
         # of its rates are known; the window's bound applies either way.
-        paced = salvage_chars_at_pace(
-            remaining,
-            generation_rate=generation_rate,
-            prompt_rate=prompt_rate,
-            chars_per_token=self._chars_per_token(),
+        paced = (
+            None
+            if remaining is None
+            else salvage_chars_at_pace(
+                remaining,
+                generation_rate=generation_rate,
+                prompt_rate=prompt_rate,
+                chars_per_token=self._chars_per_token(),
+            )
         )
         budget = window_budget if paced is None else min(window_budget, paced)
         # The same transcript rule the nudge follows: a tool call whose
@@ -4306,8 +4467,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             # time left at this pace. Starting anyway is a call that runs into
             # its hard cap and keeps the model busy past it.
             detail = (
-                f"{remaining:.0f}s were left; at {rates} they hold {max(0, paced)} characters "
-                f"of request, and the task alone is {framing}"
+                f"{remaining or 0:.0f}s were left; at {rates} they hold {max(0, paced)} "
+                f"characters of request, and the task alone is {framing}"
             )
             self.logger.warning("%s skipping forced synthesis: %s.", self.name, detail)
             self._note_salvage(
@@ -4354,7 +4515,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 self._with_current_run_state(
                     with_question(tool_free_turns(trimmed), str(directive.content)),
                     None,
-                    remaining,
+                    NO_LIMIT if remaining is None else remaining,
                 ),
                 remaining,
                 what="step-cap salvage",
@@ -4427,12 +4588,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         loop budget.
         """
         timeout, _steps = loop_limits(self.name, getattr(self, "_budget_ceiling", None))
-        return self._invoke_llm_with_timeout(messages, float(timeout), model=model, what=what)
+        return self._invoke_llm_with_timeout(messages, timeout, model=model, what=what)
 
     def _invoke_llm_with_timeout(
         self,
         messages: list,
-        timeout: float,
+        timeout: float | None,
         *,
         model: Any = None,
         what: str = "no-tools fallback",
@@ -4443,7 +4604,10 @@ class BaseAnalyst(BudgetMeter, ABC):
         the agent has no tools registered, by the salvage, by the validation
         turn and by ``ask_the_model``. Runs on the shared agent loop so a
         stalled / queued llama-server cannot freeze the worker, and a timeout
-        or a cancelled job cancels the request itself.
+        or a cancelled job cancels the request itself. ``timeout`` ``None`` is
+        no wall clock of the caller's: the request waits as long as its answer
+        takes at the model's measured pace (the request timeout it is sent
+        with), and a cancelled job still cancels it.
         """
         import time as _time
 
@@ -4457,7 +4621,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         async def _invoke() -> str:
             # ``what`` goes into the format itself so the timeout stays the
             # line's first argument, as log readers of this line expect.
-            self.logger.info(f"Invoking LLM ({what}, timeout=%ds)...", timeout)  # noqa: G004
+            self.logger.info(f"Invoking LLM ({what}, timeout=%s)...", limit_text(timeout, "s"))  # noqa: G004
             # The model's own async call where it has one, so the timeout and
             # a cancelled job cancel the request itself: the connection closes
             # and the server stops generating. A synchronous ``invoke`` in a
@@ -4471,7 +4635,9 @@ class BaseAnalyst(BudgetMeter, ABC):
                 if inspect.iscoroutinefunction(ask)
                 else asyncio.to_thread(llm.invoke, messages)
             )
-            response = await asyncio.wait_for(call, timeout=float(timeout))
+            response = await asyncio.wait_for(
+                call, timeout=None if timeout is None else float(timeout)
+            )
             self._record_usage(response, call=what)
             return str(response.content)
 
@@ -4481,10 +4647,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             content = _run_coro_blocking(_invoke(), hard_timeout, label=f"llm:{self.name}")
         except TimeoutError:
             self.logger.critical(
-                "%s %s exceeded the %ds hard cap.",
+                "%s %s exceeded the %s hard cap.",
                 self.name,
                 what,
-                hard_timeout,
+                limit_text(hard_timeout, "s"),
             )
             raise
         except AnalystError:
@@ -4495,11 +4661,11 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         elapsed = _time.monotonic() - _t0
         self.logger.info(
-            "%s %s: elapsed=%.1fs, timeout=%ds.",
+            "%s %s: elapsed=%.1fs, timeout=%s.",
             self.name,
             what,
             elapsed,
-            timeout,
+            limit_text(timeout, "s"),
         )
         return str(content)
 
@@ -4607,7 +4773,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         with lock_for(self):
             return self._analyze_isr_guarded(data)
 
-    def safe_analyze_isr_within(self, data: str, seconds: float) -> AgentISR:
+    def safe_analyze_isr_within(self, data: str, seconds: float | None) -> AgentISR:
         """``safe_analyze_isr`` with the loop held to ``seconds``, what the stage has left.
 
         The ceiling a delegated ask uses, with this agent's own step budget:
@@ -4618,7 +4784,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         _timeout, max_steps = loop_limits(self.name)
         with lock_for(self):
             before = getattr(self, "_budget_ceiling", None)
-            self._budget_ceiling = BudgetCeiling(max_steps, max(1.0, float(seconds)))
+            self._budget_ceiling = BudgetCeiling(
+                max_steps, None if seconds is None else max(1.0, float(seconds))
+            )
             try:
                 return self._analyze_isr_guarded(data)
             finally:
@@ -4636,11 +4804,15 @@ class BaseAnalyst(BudgetMeter, ABC):
             return float(_SYNTHESIS_MIN_SECONDS)
         return pace.reserve()
 
-    def _seconds_the_last_loop_left(self, fallback: float) -> float:
-        """What is left of the last loop's time, or ``fallback`` when no loop has run."""
+    def _seconds_the_last_loop_left(self, fallback: float | None) -> float | None:
+        """What is left of the last loop's time, ``fallback`` when no timed loop has run.
+
+        ``None`` is no time limit: the last loop had none, and neither does
+        the fallback.
+        """
         deadline = getattr(self, "_last_loop_deadline", None)
         if not isinstance(deadline, int | float):
-            return float(fallback)
+            return None if fallback is None else float(fallback)
         return float(deadline) - time.monotonic()
 
     def _note_on_last_loop(self, key: str, value: Any) -> None:
@@ -5205,9 +5377,9 @@ class BaseAnalyst(BudgetMeter, ABC):
         timeout, _steps = loop_limits(self.name, getattr(self, "_budget_ceiling", None))
         # Through the class's functions, so a duck-typed analyst that borrows
         # this method alone is held to the same rule.
-        left = BaseAnalyst._seconds_the_last_loop_left(self, float(timeout))  # type: ignore[arg-type]
+        left = BaseAnalyst._seconds_the_last_loop_left(self, timeout)  # type: ignore[arg-type]
         needs = BaseAnalyst.seconds_an_answer_needs(self)  # type: ignore[arg-type]
-        if left < needs:
+        if left is not None and left < needs:
             detail = (
                 f"not asked: {max(0.0, left):.0f}s of the loop's time were left, and an answer "
                 f"needs {needs:.0f}s at the pace this agent's loop measured"

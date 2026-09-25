@@ -323,6 +323,21 @@ class FrontierConfig(FrontierArm):
     arms: dict[str, FrontierArm] = Field(default_factory=dict)
 
 
+class ModelPrice(BaseModel):
+    """What one model's tokens cost, in US dollars per million, as its vendor prices them.
+
+    ``cached_input_usd_per_mtok`` is the price of an input token the provider
+    read from its prompt cache; ``None`` prices a cached token as an ordinary
+    input token. ``source`` is where the figures were read, kept with them so
+    a reader can check them.
+    """
+
+    input_usd_per_mtok: Annotated[float, Field(ge=0.0)]
+    output_usd_per_mtok: Annotated[float, Field(ge=0.0)]
+    cached_input_usd_per_mtok: Annotated[float, Field(ge=0.0)] | None = None
+    source: str = ""
+
+
 class LLMConfig(BaseModel):
     """Top-level LLM configuration grouping provider selection and per-provider settings.
 
@@ -346,6 +361,21 @@ class LLMConfig(BaseModel):
     # cancel the stall first: at a half, a first model that stops answering
     # leaves the other half of the loop to the model that stays for it.
     fallback_turn_share: Annotated[float, Field(gt=0.0, lt=1.0)] = 0.5
+
+    # The operator's spend ceiling for one job, in US dollars; ``None`` (the
+    # default) is none. Spend is the provider-reported usage of every call —
+    # cached input, input and output tokens — at the prices of the model that
+    # answered: ``model_prices`` first, then a price the vendored model table
+    # carries for it. When it is reached, every running tool loop ends its
+    # tool phase and its agent writes its answer from what it gathered; the
+    # judge's verdict and the report still run, tool-free, so the report is
+    # never lost, and a degradation reason says the ceiling ended the tool
+    # phases. A model with no price makes the ceiling impossible to compute:
+    # the log and the run summary say so once, and nothing is guessed.
+    max_spend_usd_per_job: Annotated[float, Field(gt=0.0)] | None = None
+    # Per-model prices, keyed by the model name as the provider reports it
+    # (``deepseek-v4-pro``). Empty by default: no price is assumed.
+    model_prices: dict[str, ModelPrice] = Field(default_factory=dict)
 
     # Whether a job is refused when an agent names a model no probe has
     # reached. A model name is the one part of a definition nothing validates
@@ -1257,10 +1287,9 @@ class AgentDefinition(BaseModel):
     # How long one loop of this agent may run and how many steps it may take.
     # ``None`` means the deployment-wide ``react_agent_timeout`` /
     # ``react_agent_max_steps``, by way of the deprecated per-agent override
-    # maps. A budget is a property of the agent, not of the deployment: an
-    # operator who clones the lead gets a definition that asks six specialists
-    # and, without this, the default ten steps to do it in — the clone starves
-    # and nothing in the card they edited said why.
+    # maps, and those are no limit unless an operator set one. A budget is a
+    # property of the agent, not of the deployment, so an operator who wants
+    # one for a single agent sets it here.
     max_steps: Annotated[int, Field(ge=1)] | None = None
     timeout_seconds: Annotated[int, Field(ge=1)] | None = None
 
@@ -2021,17 +2050,6 @@ def _builtin_definitions() -> dict[str, AgentDefinition]:
             role="lead",
             label="Lead analyst",
             prompt=LEAD_PROMPT,
-            # A lead spends its steps on asks and on reading what comes back,
-            # and each ask is two of them — the turn that calls the tool and
-            # the node that runs it. Six asks and the turns to weigh them is
-            # forty, and at the default 300 s per ask 1800 s fits those six
-            # with the lead's own turns around them; that is the number
-            # ``delegation._asks_that_fit`` computes and the number the
-            # ``ask_<key>`` tool's description gives the model. The
-            # specialists' own budgets are their own and do not come out of
-            # these.
-            max_steps=40,
-            timeout_seconds=1800,
             tools=[
                 ToolRef(kind="agent", agent="static"),
                 ToolRef(kind="agent", agent="dynamic"),
@@ -2386,22 +2404,22 @@ class AgentsConfig(BaseModel):
     a callee derived from what its caller had left ran out of steps before it
     had made a tool call — the live proof watched a static specialist die at a
     recursion limit of five, and every later ask refused with "0 s and 3 steps
-    remain". An ask is bounded by the caller's remaining wall clock and by
-    nothing else, because the wall clock is the one thing the two really
-    share: the ask runs inside the caller's own timeout.
+    remain". Both are ``None`` unless an operator sets them, which is no
+    limit of the delegation's own. An ask is also bounded by the caller's
+    remaining wall clock where the caller's loop has one, because the wall
+    clock is the one thing the two really share: the ask runs inside the
+    caller's own timeout.
     """
 
     profile: str = "default"
     profiles: dict[str, ProfileDefinition] = Field(default_factory=_builtin_profiles)
     definitions: dict[str, AgentDefinition] = Field(default_factory=_builtin_definitions)
     delegation_depth: Annotated[int, Field(ge=1)] = 2
-    # Twelve steps is about five tool rounds and an answer — what a specialist
-    # needs to open the sample, look at two or three things and write a claim.
-    delegation_steps: Annotated[int, Field(ge=2)] = 12
-    # Five minutes per ask on a local model: a specialist with tools spends
-    # most of it waiting for its own tool calls, and a lead with a long stage
-    # timeout can still make several asks inside one loop.
-    delegation_timeout_seconds: Annotated[int, Field(ge=1)] = 300
+    # What one ask gets, when an operator sets it; ``None`` is no limit of the
+    # delegation's own. An ask is still held to the time its caller has left
+    # when the caller's loop has a clock.
+    delegation_steps: Annotated[int, Field(ge=2)] | None = None
+    delegation_timeout_seconds: Annotated[int, Field(ge=1)] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -3275,121 +3293,29 @@ class Settings(BaseSettings):
     # Token overflow protection (128K is conservative for Gemini 1M+ context)
     max_token_limit: Annotated[int, Field(ge=1)] = 128_000
 
-    # ReAct agent execution limits
-    react_agent_timeout: Annotated[int, Field(ge=1)] = 180  # seconds before agent loop times out
-    react_agent_max_steps: Annotated[int, Field(ge=1)] = 10  # max LangGraph recursion steps
-    # Tool-call budget.
-    # When an analyst's ReAct loop exceeds this many cumulative tool calls
-    # we log a WARNING. Not a hard limit (LangGraph's recursion_limit is
-    # the structural cap); this is the early signal that an analyst is
-    # spinning unproductively on tool calls. Set via env
-    # ``REACT_AGENT_TOOL_CALL_BUDGET``.
+    # ReAct agent execution limits. ``None`` is no limit, and it is the
+    # default: a loop ends when its model answers, when it only repeats itself
+    # (``RepeatGuard``), when its conversation has no room left for a tool
+    # answer, or when the operator's spend ceiling
+    # (``llm.max_spend_usd_per_job``) is reached — and the arq job timeout is
+    # the last resort. Each model call still waits only as long as its answer
+    # takes at the model's measured pace (``llm.generation_rate``). An
+    # operator's number, here or on an agent's definition, is a limit the loop
+    # keeps to.
+    react_agent_timeout: Annotated[int, Field(ge=1)] | None = None
+    react_agent_max_steps: Annotated[int, Field(ge=1)] | None = None
+    # How many cumulative tool calls of one loop are logged as a warning. A
+    # signal for an operator reading the log, never a limit: nothing about the
+    # loop changes when it is passed.
     react_agent_tool_call_budget: Annotated[int, Field(ge=1)] = 20
 
-    # Deprecated: a budget belongs to the agent that spends it, so
-    # ``agents.definitions.<key>.timeout_seconds`` is where one is set now and
-    # a definition's own value wins. This map is still read until the release
-    # after the next promotion to main, so a deployment that set a budget here
-    # keeps it.
-    # Per-agent timeout overrides. The default ``react_agent_timeout`` is
-    # tuned for the network/dynamic analysts (~1-3 tool calls). The
-    # static analyst attaches the Ghidra MCP server with many tools, so
-    # we give it more headroom by default. The judge agent also needs a
-    # larger budget on local models (Qwen3.6-35B on llama.cpp took 180+s
-    # to formulate the final verdict in the 2026-05-23 E2E run, hitting
-    # the previous ``max(timeout, 120)`` ceiling and triggering the
-    # fallback path). Override via env, e.g.
-    # ``REACT_AGENT_TIMEOUT_OVERRIDES__static=600``.
-    react_agent_timeout_overrides: dict[str, int] = Field(
-        default_factory=lambda: {
-            # The static analyst runs a
-            # full ReAct loop against Ghidra MCP (load_program → auto-
-            # analyze → behaviour scan → decompile). On the local 35B Qwen
-            # at ~4.6 tok/s output the previous 600s ceiling fired
-            # *during* Ghidra auto-analysis (live trace job 3450f9cd
-            # 2026-05-28 — Ghidra logged ``Loaded program`` for the target
-            # before the budget expired). 1200s covers a cold-cache cycle
-            # end-to-end while still leaving headroom under the arq
-            # 3600s job timeout once we add dynamic (600s) + network
-            # (300s) + negotiation + judge. Reduce to 600s for hosted
-            # multi-slot APIs.
-            #
-            # 2026-07-13 — restored 300 -> 1500 (per *chunk*). The 2026-07-11 cut
-            # to 300 blamed "SWA re-prefill" (a MISDIAGNOSIS — see
-            # max_tool_output_chars / parallel_analysts): the 1200s blow-ups were
-            # parallel analysts clobbering the single slot's recurrent state, now
-            # fixed by the sequential topology. This per-chunk wall-clock is the
-            # BINDING constraint on depth — the restored static max_steps=40 is
-            # inert unless the timeout moves with it (at ~15-20s/step, 300s fits
-            # only ~15-20 steps). 40 steps ~= 600-800s when a rich chunk uses them
-            # all; 1500 (hard cap timeout+30 = 1530s) is generous headroom so the
-            # net never fires on a *progressing* chunk ("a timeout is a bug").
-            # safe_analyze_isr_chunked still tolerates a genuinely wedged chunk.
-            # Override via ``REACT_AGENT_TIMEOUT_OVERRIDES__static=1500``.
-            "static": 1500,
-            # Judge budget bumped 300 → 600 for the same reason — the
-            # final-verdict LLM call on Qwen 35B repeatedly bottlenecked
-            # at 180-300s in the 2026-05-28 sequential live runs.
-            "judge": 600,
-            # A single-slot llama-server serialises
-            # all three analyst LLM calls — when the static analyst holds the
-            # slot for ~600s the dynamic / network analysts spend most of
-            # their budget queueing. Bump them so they don't time out before
-            # the LLM ever sees their request.
-            "dynamic": 600,
-            "network": 300,
-        }
-    )
-
-    # Deprecated, as ``react_agent_timeout_overrides`` is: set a step budget on
-    # the agent's own definition (``agents.definitions.<key>.max_steps``),
-    # which wins over this map. Read until the release after the next promotion
-    # to main, so a deployment that set one here keeps it.
-    # Per-agent ReAct recursion-step overrides. The default
-    # ``react_agent_max_steps`` (10) suits the network/dynamic analysts (0-3
-    # tool calls), but the static analyst runs a full Ghidra MCP ReAct loop
-    # (load_program -> list functions -> decompile -> imports/strings) that
-    # needs far more than ~4 tool calls. With only 10 recursion steps it was
-    # cut off mid-analysis and LangGraph returned the "Sorry, need more steps
-    # to process this request." stop message instead of real claims (live job
-    # 3be3ba0e, 2026-06-23: ReAct "completed" in 17.3s after just 4 tool calls,
-    # hitting the step cap while its 1200s *time* budget was barely touched —
-    # the per-agent timeout override added earlier missed the parallel step
-    # cap). Override via env, e.g. ``REACT_AGENT_MAX_STEPS_OVERRIDES__static=40``.
-    # ``network`` is capped LOW: with a real CAPE PCAP the analyst can enter a
-    # read_pcap_summary/extract_* tool loop whose large per-packet output is slow
-    # to prefill+decode on a constrained local model, over-running the 330s
-    # analyst budget (live task 8, 2026-07-11). The structured flows are handed
-    # to it up front (see network_analyst.analyze_isr), so a tight cap keeps the
-    # optional PCAP peek from starving synthesis. ~6 steps ≈ 2-3 tool calls.
-    # 2026-07-13 — static RESTORED 8 -> 40 (its original designed depth). The
-    # 2026-07-11 cuts (40 -> 12 -> 8) blamed "SWA re-prefill": every step
-    # re-prefilling ~58k tokens of growing Ghidra context, so late steps cost
-    # 50-90s and chunks blew their cap. That was a MISDIAGNOSIS — the model is a
-    # hybrid Gated-DeltaNet (recurrent) MoE, and the re-prefill was actually
-    # parallel analysts clobbering the single slot's recurrent state, now fixed
-    # by parallel_analysts=False (+ the revision node serialised; see LLMConfig).
-    # With sequential analysts each step reuses the prior context (only new
-    # tokens processed), so a deep loop is cheap again. 40 (~20 tool calls) is
-    # the full Ghidra pass (load_program -> auto-analyze -> enumerate -> decompile
-    # the sink-reachability priority functions -> xrefs -> strings -> imports ->
-    # malware-specific tools). MEASURED (E2E 2026-07-13, sample 11e77149): static
-    # did 19 tool calls -> 7 claims (vs 3 calls at cap=8), zero re-prefill, 120.9s
-    # < 1500s. The small local model tends to keep tool-calling to the cap rather
-    # than self-terminating, so the forced-synthesis salvage still fires — but now
-    # it synthesises DEEP (19-call) evidence, not shallow (3-call). Depth is the
-    # win; the salvage is the conclusion mechanism, not a bug. Raising the cap
-    # further mostly adds tool calls + salvage time (diminishing returns).
-    # MUST move with the static timeout (1500) — the per-chunk wall-clock is the
-    # binding constraint. Context-safe: 40 steps * ~1500 tok (max_tool_output_
-    # chars=6000) ~= 90-95k peak, ~36k under n_ctx=131072. Override via
-    # ``REACT_AGENT_MAX_STEPS_OVERRIDES__static=40``.
-    react_agent_max_steps_overrides: dict[str, int] = Field(
-        default_factory=lambda: {
-            "static": 40,
-            "network": 6,
-        }
-    )
+    # Deprecated, and operator-only: a budget belongs to the agent that spends
+    # it, so ``agents.definitions.<key>.timeout_seconds`` and ``.max_steps``
+    # are where one is set now, and a definition's own value wins. These maps
+    # ship empty; an entry an operator writes is still read, after the
+    # definition and before the deployment-wide value above.
+    react_agent_timeout_overrides: dict[str, int] = Field(default_factory=dict)
+    react_agent_max_steps_overrides: dict[str, int] = Field(default_factory=dict)
 
     @field_validator(
         "react_agent_timeout_overrides", "react_agent_max_steps_overrides", mode="before"

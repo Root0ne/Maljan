@@ -202,8 +202,11 @@ class _Tally:
 class TokenLedger:
     """Thread-safe tally of what one run's model calls spent, per agent and per model."""
 
-    def __init__(self) -> None:
+    def __init__(self, spend: Any = None) -> None:
         self._lock = threading.Lock()
+        # The job's spend meter (``core.spend.SpendMeter``), handed every
+        # recorded call; ``None`` where nothing prices the run.
+        self.spend = spend
         self._total = _Tally()
         self._agents: dict[str, _Tally] = {}
         self._fallbacks: list[dict[str, str]] = []
@@ -249,6 +252,8 @@ class TokenLedger:
                     tally.cost_calls += 1
             if fallback:
                 self._fallbacks.append({"agent": agent, "model": model, "reason": fallback})
+        if self.spend is not None:
+            self.spend.settle(usage, model)
 
     @property
     def input_tokens(self) -> int:

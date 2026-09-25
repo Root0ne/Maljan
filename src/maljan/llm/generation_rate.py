@@ -39,7 +39,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, overload
 from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
@@ -228,6 +228,7 @@ class GenerationRates:
             row = self._models.get(str(model))
             return row.prompt_rate() if row is not None else None
 
+    @overload
     def call_timeout(
         self,
         call: str,
@@ -237,7 +238,30 @@ class GenerationRates:
         *,
         budget: str = "",
         prompt_tokens: int = 0,
-    ) -> float:
+    ) -> float: ...
+
+    @overload
+    def call_timeout(
+        self,
+        call: str,
+        model: str,
+        configured: float | None,
+        max_tokens: int,
+        *,
+        budget: str = "",
+        prompt_tokens: int = 0,
+    ) -> float | None: ...
+
+    def call_timeout(
+        self,
+        call: str,
+        model: str,
+        configured: float | None,
+        max_tokens: int,
+        *,
+        budget: str = "",
+        prompt_tokens: int = 0,
+    ) -> float | None:
         """The seconds one call of ``call`` waits, and a record of how it was reached.
 
         With both of the model's server rates measured and the call's prompt
@@ -248,12 +272,20 @@ class GenerationRates:
         or no output budget the configured value stands. ``budget`` is how the
         caller reached ``max_tokens``, kept with the row so the record says
         where both numbers came from.
+
+        ``configured`` ``None`` is a caller with no time limit: the wait is
+        the derived time alone, and ``None`` — no wait of the caller's own,
+        the request's own timeout bounding it — while nothing is measured.
         """
-        configured = float(configured)
         tokens = int(max_tokens or 0)
         prompt = int(prompt_tokens or 0)
         derived, used_rate, read_rate = self._derived(model, tokens, prompt)
-        applied = configured if derived is None else max(configured, derived)
+        applied: float | None
+        if configured is None:
+            applied = derived
+        else:
+            configured = float(configured)
+            applied = configured if derived is None else max(configured, derived)
         with self._lock:
             record: dict[str, Any] = {
                 "model": str(model),
@@ -261,7 +293,7 @@ class GenerationRates:
                 "max_tokens": tokens,
                 "tokens_per_second": None if used_rate is None else round(used_rate, 3),
                 "derived_s": None if derived is None else round(derived, 1),
-                "applied_s": round(applied, 1),
+                "applied_s": None if applied is None else round(applied, 1),
             }
             if read_rate is not None:
                 record["prompt_tokens"] = prompt

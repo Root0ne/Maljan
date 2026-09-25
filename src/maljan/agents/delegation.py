@@ -41,14 +41,16 @@ still read an answer in, and a callee that does not free up in that time is a
 refusal like the others.
 
 An ask has a budget of its own: ``core.agents.delegation_steps`` and
-``core.agents.delegation_timeout_seconds``, cut to the time the caller has
-left and to nothing else. A callee derived from its caller's remaining steps
+``core.agents.delegation_timeout_seconds``, both no limit unless an operator
+sets them, cut to the time the caller has left where the caller's loop has a
+clock, and to nothing else. A callee derived from its caller's remaining steps
 ran out before it had made a tool call, and the caller's own budget is not
 spent by its specialists' work — only by the wall clock it waits through.
 """
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
@@ -136,11 +138,9 @@ def ask_tool(container: Any, caller_key: str, callee_key: str) -> BaseTool:
     description = (
         f"Ask {label} ({callee_key}, role {role}) to work on one focused task with its "
         "own tools over this sample. Its answer comes back as its own claims, each with "
-        "the ledger ids it cited, exactly as it gave them. It gets "
-        f"{steps} steps and up to {seconds} s of its own, and they do not come out of "
-        f"your step budget — your wall clock is what they cost, so about "
-        f"{_asks_that_fit(caller_key, seconds)} of these fit in your time. Ask one at a "
-        "time and read each answer before the next."
+        "the ledger ids it cited, exactly as it gave them. "
+        f"{_what_an_ask_gets_sentence(caller_key, steps, seconds)} "
+        "Ask one at a time and read each answer before the next."
     )
 
     def _ask(task: str, context: str = "") -> str:
@@ -158,20 +158,41 @@ def ask_tool(container: Any, caller_key: str, callee_key: str) -> BaseTool:
     )
 
 
-def _asks_that_fit(caller_key: str, seconds: int) -> int:
-    """Roughly how many asks the caller's own stage timeout has room for.
+def _asks_that_fit(caller_key: str, seconds: int | None) -> int | None:
+    """Roughly how many asks the caller's own stage timeout has room for, or ``None``.
 
     A number the model can plan against. Rough on purpose: an ask that
     finishes early gives its remainder back, so this is a floor rather than a
-    quota, and the refusal is what actually stops the last one.
+    quota, and the refusal is what actually stops the last one. ``None`` when
+    either side has no time limit: there is no count to give, and the tool's
+    description says so rather than inventing one.
     """
     from maljan.agents.base_agent import loop_limits
 
+    if seconds is None:
+        return None
     try:
         timeout, _steps = loop_limits(caller_key)
     except Exception:  # noqa: BLE001 — a sentence is never worth a failed resolution
-        return 1
+        return None
+    if timeout is None:
+        return None
     return max(1, int(timeout // max(1, seconds)))
+
+
+def _what_an_ask_gets_sentence(caller_key: str, steps: int | None, seconds: int | None) -> str:
+    """The ask tool's sentence on the callee's budget, in the words the model plans with."""
+    own = []
+    own.append("no step limit" if steps is None else f"{steps} steps")
+    own.append("no time limit" if seconds is None else f"up to {seconds} s")
+    sentence = (
+        f"It gets {' and '.join(own)} of its own, and they do not come out of your step "
+        "budget — your wall clock is what they cost"
+    )
+    fit = _asks_that_fit(caller_key, seconds)
+    if fit is not None:
+        sentence += f", so about {fit} of these fit in your time"
+    return sentence + "."
 
 
 def refusal(container: Any, caller: Any, callee_key: str) -> str | None:
@@ -208,13 +229,21 @@ def refusal(container: Any, caller: Any, callee_key: str) -> str | None:
             f"asking {callee_key!r} would nest deeper than the delegation depth of "
             f"{limit} ({path}); answer from what you have or ask through your caller"
         )
+    meter = getattr(getattr(caller, "token_ledger", None), "spend", None)
+    if meter is not None and meter.reached() is True:
+        return (
+            f"the job's spend ceiling is reached, so {callee_key!r} cannot be asked; "
+            "write your answer from what you have"
+        )
     budget = getattr(caller, "loop_budget", None)
     if budget is not None:
         # Time, and only time. An ask has a step budget of its own, so the
         # caller having spent its steps says nothing about whether a
         # specialist can still do a piece of work — but the caller waits
         # inside its own wall clock, so its remaining seconds are real.
-        seconds = budget.seconds_left() - SECONDS_KEPT_FOR_THE_CALLER
+        left = budget.seconds_left()
+        # A caller with no time limit has all the time an ask needs.
+        seconds = float("inf") if left is None else left - SECONDS_KEPT_FOR_THE_CALLER
         if seconds < MIN_SECONDS_TO_ASK:
             return (
                 f"not enough time left to ask {callee_key!r}: {max(0, int(seconds))} s "
@@ -292,7 +321,7 @@ def ask(container: Any, *, caller_key: str, callee_key: str, task: str, context:
     # an ask still nests.
     if not _held(caller.asks_lock, wait):
         raise DelegationRefused(
-            f"another of your asks is still running and did not finish within {int(wait)} s; "
+            f"another of your asks is still running and did not finish within {int(wait or 0)} s; "
             "ask one agent at a time, or answer from what you have"
         )
     try:
@@ -306,7 +335,15 @@ def ask(container: Any, *, caller_key: str, callee_key: str, task: str, context:
         # stage that reference each other would otherwise each hold what the
         # other wants. What the wait buys is an answer; what it costs is
         # refused in words the model can act on.
-        if not _held(callee.delegation_lock, _seconds_to_wait_for(caller)):
+        freed = _held_unless_waiting_on_each_other(
+            callee.delegation_lock, _seconds_to_wait_for(caller), caller, callee
+        )
+        if freed is None:
+            raise DelegationRefused(
+                f"agent {callee_key!r} is itself waiting on an answer from you, so neither "
+                "could go on; answer from what you have or ask someone else"
+            )
+        if not freed:
             raise DelegationRefused(
                 f"agent {callee_key!r} is busy with its own work and did not free up in time; "
                 "answer from what you have or ask someone else"
@@ -329,17 +366,78 @@ def ask(container: Any, *, caller_key: str, callee_key: str, task: str, context:
         caller.asks_lock.release()
 
 
-def _held(lock: Any, wait: float) -> bool:
-    """Take ``lock`` within ``wait`` seconds, or say it could not be taken."""
+def _held(lock: Any, wait: float | None) -> bool:
+    """Take ``lock`` within ``wait`` seconds, or say it could not be taken; ``None`` waits."""
+    if wait is None:
+        return bool(lock.acquire())
     return bool(lock.acquire(timeout=max(0.0, float(wait))))
 
 
-def _seconds_to_wait_for(caller: Any) -> float:
-    """How long a caller may wait for a busy callee: what it can spare, at most."""
+# Which agent each waiting agent is waiting for, by object identity: the
+# agents of one job are one set of objects, and two jobs in one process never
+# share one. Read to refuse a wait that would never end — two agents of one
+# parallel stage asking each other, each holding what the other wants.
+_WAITING_FOR: dict[int, Any] = {}
+_WAITING_LOCK = threading.Lock()
+# How often a caller with no time limit looks again at whom a busy callee is
+# waiting for. A polling interval, not a limit: the wait itself has none.
+_WAIT_POLL_SECONDS = 1.0
+
+
+def _waits_on(start: Any, target: Any) -> bool:
+    """Whether ``start`` is waiting, directly or down a chain of waits, on ``target``."""
+    seen: set[int] = set()
+    current = start
+    with _WAITING_LOCK:
+        while current is not None and id(current) not in seen:
+            if current is target:
+                return True
+            seen.add(id(current))
+            current = _WAITING_FOR.get(id(current))
+    return False
+
+
+def _held_unless_waiting_on_each_other(
+    lock: Any, wait: float | None, caller: Any, callee: Any
+) -> bool | None:
+    """Take ``lock`` as ``_held`` does; ``None`` when the callee is waiting on the caller.
+
+    A caller with a clock waits what it can spare, as before. A caller with no
+    time limit waits until the callee frees up — unless the callee is itself
+    waiting, directly or through others, on this caller, which no wait ends.
+    """
+    if wait is not None:
+        return _held(lock, wait)
+    with _WAITING_LOCK:
+        _WAITING_FOR[id(caller)] = callee
+    try:
+        while not lock.acquire(timeout=_WAIT_POLL_SECONDS):
+            if _waits_on(_waiting_for(callee), caller):
+                return None
+        return True
+    finally:
+        with _WAITING_LOCK:
+            _WAITING_FOR.pop(id(caller), None)
+
+
+def _waiting_for(agent: Any) -> Any:
+    with _WAITING_LOCK:
+        return _WAITING_FOR.get(id(agent))
+
+
+def _seconds_to_wait_for(caller: Any) -> float | None:
+    """How long a caller may wait for a busy callee: what it can spare, at most.
+
+    ``None`` for a caller whose loop has no time limit: it waits for the
+    callee to free up, as it would wait for any tool.
+    """
     budget = getattr(caller, "loop_budget", None)
     if budget is None:
         return SECONDS_WAITING_OUTSIDE_A_LOOP
-    return max(1.0, float(budget.seconds_left()) - SECONDS_KEPT_FOR_THE_CALLER)
+    left = budget.seconds_left()
+    if left is None:
+        return None
+    return max(1.0, float(left) - SECONDS_KEPT_FOR_THE_CALLER)
 
 
 def _ask(container: Any, caller: Any, callee: Any, task: str, context: str) -> str:
@@ -433,12 +531,14 @@ def _note_what_the_callee_cannot_have(container: Any, callee: Any) -> None:
         logger.debug("delegation: the callee's manifest check was skipped (%s).", exc)
 
 
-def ask_budget(container: Any) -> tuple[int, int]:
-    """``(steps, seconds)`` one ask gets, from the job's settings."""
+def ask_budget(container: Any) -> tuple[int | None, int | None]:
+    """``(steps, seconds)`` one ask gets, from the job's settings; ``None`` is no limit."""
+    from maljan.agents.base_agent import a_budget
+
     agents = container.config.agents
-    steps = int(getattr(agents, "delegation_steps", 12) or 12)
-    seconds = int(getattr(agents, "delegation_timeout_seconds", 300) or 300)
-    return max(2, steps), max(1, seconds)
+    steps = a_budget(getattr(agents, "delegation_steps", None))
+    seconds = a_budget(getattr(agents, "delegation_timeout_seconds", None))
+    return (None if steps is None else max(2, steps)), seconds
 
 
 def _what_this_ask_gets(container: Any, budget: Any) -> Any:
@@ -452,11 +552,15 @@ def _what_this_ask_gets(container: Any, budget: Any) -> Any:
     from maljan.agents.base_agent import BudgetCeiling
 
     steps, seconds = ask_budget(container)
-    wall = float(seconds)
-    if budget is not None:
-        wall = max(1.0, budget.seconds_left() - SECONDS_KEPT_FOR_THE_CALLER)
-        seconds = int(min(seconds, wall))
-    return BudgetCeiling(steps=steps, seconds=float(seconds), wall=wall)
+    wall: float | None = None if seconds is None else float(seconds)
+    left = None if budget is None else budget.seconds_left()
+    if left is not None:
+        # The caller has a clock: the ask is held to what it has left.
+        wall = max(1.0, left - SECONDS_KEPT_FOR_THE_CALLER)
+        seconds = int(wall if seconds is None else min(seconds, wall))
+    return BudgetCeiling(
+        steps=steps, seconds=None if seconds is None else float(seconds), wall=wall
+    )
 
 
 def _brief_callee(caller: Any, callee: Any, *, stage: str, round_index: int) -> None:

@@ -437,7 +437,11 @@ class ServiceContainer:
 
         # Per-run LLM token/cost ledger (findings-log §4 Item 1). Agents and the
         # judge add each call's usage; the judge node snapshots it into RunSummary.
-        self._token_ledger = TokenLedger()
+        # With the job's spend meter, which prices each recorded call against
+        # the operator's ceiling (``llm.max_spend_usd_per_job``).
+        from maljan.core.spend import SpendMeter
+
+        self._token_ledger = TokenLedger(spend=SpendMeter.from_settings(config))
 
         # Per-run generation rate of each model, read off every call's answer
         # by a meter attached where the model is built. The judge and the

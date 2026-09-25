@@ -30,8 +30,11 @@ from typing import Any
 from maljan.pipeline.triage_pack import NOT_RUN_PREFIX, PIPELINE, pack_entries, render_pack
 
 __all__ = [
+    "NO_LIMIT",
     "RUN_STATE_BEGIN",
     "RUN_STATE_END",
+    "NoLimit",
+    "budget_line",
     "is_run_state_block",
     "render_run_state",
     "run_state_block",
@@ -42,6 +45,52 @@ __all__ = [
 
 RUN_STATE_BEGIN = "=== RUN STATE (derived from the ledger; regenerated each turn) ==="
 RUN_STATE_END = "=== END RUN STATE ==="
+
+
+class NoLimit:
+    """A budget dimension with no limit, as the run-state block is handed it.
+
+    A value of its own rather than ``None``: a caller outside a tool loop
+    passes ``None`` and the budget line is left out, while a loop with no step
+    or time limit says so in words — never as a number standing in for
+    infinity, which a model would read as a count to plan against.
+    """
+
+    _instance: NoLimit | None = None
+
+    def __new__(cls) -> NoLimit:
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __repr__(self) -> str:
+        return "NO_LIMIT"
+
+
+NO_LIMIT = NoLimit()
+
+NO_STEP_LIMIT = "no step limit"
+NO_TIME_LIMIT = "no time limit"
+
+
+def budget_line(steps_left: int | NoLimit | None, seconds_left: float | NoLimit | None) -> str:
+    """``budget remaining: …`` for a loop's remaining budget, or ``""`` with none given.
+
+    A count where the loop has a limit, the words ``no step limit`` / ``no
+    time limit`` where it has none, and nothing for a dimension the caller did
+    not pass.
+    """
+    parts: list[str] = []
+    if isinstance(steps_left, NoLimit):
+        parts.append(NO_STEP_LIMIT)
+    elif steps_left is not None:
+        parts.append(f"{max(0, int(steps_left))} model turns")
+    if isinstance(seconds_left, NoLimit):
+        parts.append(NO_TIME_LIMIT)
+    elif seconds_left is not None:
+        parts.append(f"{max(0, int(seconds_left))} s")
+    return f"budget remaining: {', '.join(parts)}" if parts else ""
+
 
 _BLOCK_RE = re.compile(re.escape(RUN_STATE_BEGIN) + r".*?" + re.escape(RUN_STATE_END), re.DOTALL)
 
@@ -54,8 +103,8 @@ _LINE_CHARS = 240
 def render_run_state(
     state: Mapping[str, Any],
     *,
-    steps_left: int | None = None,
-    seconds_left: float | None = None,
+    steps_left: int | NoLimit | None = None,
+    seconds_left: float | NoLimit | None = None,
 ) -> str:
     """The block for ``state``, without its markers. Never raises.
 
@@ -143,7 +192,9 @@ def is_run_state_block(text: object) -> bool:
 
 
 def _lines(
-    state: Mapping[str, Any], steps_left: int | None, seconds_left: float | None
+    state: Mapping[str, Any],
+    steps_left: int | NoLimit | None,
+    seconds_left: float | NoLimit | None,
 ) -> list[str]:
     lines: list[str] = []
     sha256 = str(state.get("file_hash") or "")
@@ -205,13 +256,9 @@ def _lines(
     if failed:
         lines.append("tools failed: " + ", ".join(failed))
 
-    budget = []
-    if steps_left is not None:
-        budget.append(f"{max(0, int(steps_left))} model turns")
-    if seconds_left is not None:
-        budget.append(f"{max(0, int(seconds_left))} s")
-    if budget:
-        lines.append("budget remaining: " + ", ".join(budget))
+    line = budget_line(steps_left, seconds_left)
+    if line:
+        lines.append(line)
     return lines
 
 

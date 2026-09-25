@@ -374,6 +374,8 @@ class TestAnAskThroughTheRealLoop:
             ],
             helper_script=[AIMessage(content=HELPER_REPORT)],
         )
+        container.config.agents.delegation_steps = 12
+        container.config.agents.delegation_timeout_seconds = 300
         steps, seconds = ask_budget(container)
         helper = container.get_agent("helper")
         original = helper._loop_limits
@@ -386,22 +388,61 @@ class TestAnAskThroughTheRealLoop:
         helper._loop_limits = _limits  # type: ignore[method-assign]
         _run_boss(container)
         timeout, allowed = seen[0]
-        # The boss had ten steps and 180 s. The callee gets the delegation's
-        # twelve whatever the caller has left, and a clock that is the per-ask
-        # timeout or what the caller has left, whichever is shorter.
+        # The boss has no clock of its own. The callee gets the delegation's
+        # twelve steps and its per-ask timeout, as the operator set them.
         assert allowed == steps == 12
-        assert timeout <= 180 - 15 and timeout <= seconds
+        assert timeout == seconds == 300
+
+    def test_with_no_limit_anywhere_the_callee_has_none(self) -> None:
+        seen: list[tuple[Any, Any]] = []
+        container = _team(
+            boss_script=[
+                _call(tool_name("helper"), {"task": "t"}, "ask_1"),
+                AIMessage(content=BOSS_REPORT),
+            ],
+            helper_script=[AIMessage(content=HELPER_REPORT)],
+        )
+        helper = container.get_agent("helper")
+        original = helper._loop_limits
+
+        def _limits() -> Any:
+            limits = original()
+            seen.append(limits)
+            return limits
+
+        helper._loop_limits = _limits  # type: ignore[method-assign]
+        _run_boss(container)
+        assert seen[0] == (None, None)
 
     def test_a_short_caller_clock_still_cuts_the_ask(self) -> None:
         from maljan.agents.delegation import _what_this_ask_gets
 
         container = _team([], [])
+        container.config.agents.delegation_steps = 12
+        container.config.agents.delegation_timeout_seconds = 300
         budget = LoopBudget(max_steps=10, timeout=60.0)
 
         ceiling = _what_this_ask_gets(container, budget)
 
         assert ceiling.steps == 12, "the steps are the delegation's, whole"
-        assert 1 <= ceiling.seconds <= 60 - 15 + 1
+        assert ceiling.seconds is not None and 1 <= ceiling.seconds <= 60 - 15 + 1
+
+    def test_a_caller_clock_cuts_an_ask_with_no_budget_of_its_own(self) -> None:
+        from maljan.agents.delegation import _what_this_ask_gets
+
+        container = _team([], [])
+        ceiling = _what_this_ask_gets(container, LoopBudget(max_steps=None, timeout=60.0))
+
+        assert ceiling.steps is None, "no step limit of the delegation's own"
+        assert ceiling.seconds is not None and 1 <= ceiling.seconds <= 60 - 15 + 1
+
+    def test_no_caller_clock_and_no_ask_budget_is_no_ceiling_at_all(self) -> None:
+        from maljan.agents.delegation import _what_this_ask_gets
+
+        container = _team([], [])
+        ceiling = _what_this_ask_gets(container, LoopBudget(max_steps=None, timeout=None))
+
+        assert (ceiling.steps, ceiling.seconds, ceiling.wall) == (None, None, None)
 
 
 class TestTheGuards:
@@ -727,11 +768,11 @@ class TestTheCeiling:
         seeded = Settings(_env_file=None)
         lead = seeded.agents.definitions["lead"]
 
-        assert lead.max_steps == 40
-        assert seeded.agents.delegation_steps == 12
-        assert seeded.agents.delegation_timeout_seconds == 300
-        fits = lead.timeout_seconds // seeded.agents.delegation_timeout_seconds
-        assert fits >= 5, "a lead's stage holds several asks end to end"
+        # No limit of its own and none on an ask: the lead's asks are never
+        # refused for time, and each ask runs until its callee answers.
+        assert lead.max_steps is None and lead.timeout_seconds is None
+        assert seeded.agents.delegation_steps is None
+        assert seeded.agents.delegation_timeout_seconds is None
 
     def test_the_lead_carries_its_budget_where_a_clone_of_it_would(self) -> None:
         """The budget travels with the definition, not with the agent's name.
@@ -771,8 +812,17 @@ class TestTheCeiling:
             t for t in team.get_agent("boss").tools if t.name == tool_name("helper")
         ).description
 
-        assert "12 steps" in described and "300 s" in described
+        assert "no step limit and no time limit of its own" in described
         assert "do not come out of your step budget" in described
+        assert "fit in your time" not in described, "no count is invented without a clock"
+
+    def test_an_operator_s_ask_budget_is_what_the_tool_says(self) -> None:
+        container = _team([], [])
+        container.config.agents.delegation_steps = 12
+        container.config.agents.delegation_timeout_seconds = 300
+        described = ask_tool(container, "boss", "helper").description
+
+        assert "12 steps and up to 300 s of its own" in described
 
 
 class TestACalleeAtItsCapWritesUpWhatItHas:
@@ -1176,3 +1226,52 @@ class TestAHandedOverRowStaysWithinTheBound:
         assert message.startswith(ELIDED_CHAIN)
         assert len(route) < 3
         assert message.endswith(sentence)
+
+
+class TestAWaitWithNoClock:
+    """A caller with no time limit waits for a busy callee — unless it waits on the caller."""
+
+    def test_two_agents_asking_each_other_are_both_refused_rather_than_stuck(self) -> None:
+        from types import SimpleNamespace
+
+        from maljan.agents.delegation import _held_unless_waiting_on_each_other
+
+        first = SimpleNamespace(name="first", delegation_lock=threading.Lock())
+        second = SimpleNamespace(name="second", delegation_lock=threading.Lock())
+        outcomes: dict[str, Any] = {}
+        both_hold = threading.Barrier(2)
+
+        def _ask(caller: Any, callee: Any) -> None:
+            # Each runs its own stage (its own lock held) and asks the other.
+            with caller.delegation_lock:
+                both_hold.wait()
+                got = _held_unless_waiting_on_each_other(
+                    callee.delegation_lock, None, caller, callee
+                )
+                outcomes[caller.name] = got
+            if got:
+                callee.delegation_lock.release()
+
+        threads = [
+            threading.Thread(target=_ask, args=(first, second), daemon=True),
+            threading.Thread(target=_ask, args=(second, first), daemon=True),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+        assert not any(thread.is_alive() for thread in threads)
+        assert None in outcomes.values(), "at least one side saw the cycle and was refused"
+        assert len(outcomes) == 2, "the refused side let go, and the other side went on"
+
+    def test_a_busy_callee_that_frees_up_is_waited_for(self) -> None:
+        from types import SimpleNamespace
+
+        from maljan.agents.delegation import _held_unless_waiting_on_each_other
+
+        caller = SimpleNamespace(name="caller")
+        callee = SimpleNamespace(name="callee", delegation_lock=threading.Lock())
+        callee.delegation_lock.acquire()
+        threading.Timer(1.5, callee.delegation_lock.release).start()
+
+        assert _held_unless_waiting_on_each_other(callee.delegation_lock, None, caller, callee)

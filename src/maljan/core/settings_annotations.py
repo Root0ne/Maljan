@@ -212,6 +212,34 @@ ANNOTATIONS: dict[str, Annotation] = {
         "probe": "llm",
         "advanced": True,
     },
+    "llm.max_spend_usd_per_job": {
+        "title": "Spend ceiling per job (USD)",
+        "description": (
+            "The most one job may spend on its models, in US dollars. Empty, the default, "
+            "is no ceiling. Spend is the provider-reported usage of every call (cached "
+            "input, input and output tokens) at the prices of the model that answered: "
+            "llm.model_prices first, then a price the vendored model table documents. "
+            "When it is reached every running tool loop ends its tool phase and its agent "
+            "writes its answer from what it gathered; the verdict and the report still "
+            "run, tool-free, and a degradation reason says so. A model with no price is "
+            "named once in the log and the run summary and its calls are not counted, so "
+            "the figure compared is what the job spent at least."
+        ),
+        "subgroup": "Spend",
+    },
+    "llm.model_prices": {
+        "title": "Model prices (USD per million tokens)",
+        "description": (
+            "Per-model prices for the spend ceiling, keyed by the model name the provider "
+            "serves (for example deepseek-v4-pro): input_usd_per_mtok, "
+            "output_usd_per_mtok, and optionally cached_input_usd_per_mtok (a cached "
+            "input token costs an input token without it) and source. Empty by default; "
+            "the vendored model table's documented prices answer for a model not named "
+            "here, and a model neither names has no price."
+        ),
+        "subgroup": "Spend",
+        "advanced": True,
+    },
     "llm.fallback_turn_share": {
         "title": "Turn deadline for a model on a fallback list (share of the loop)",
         "description": (
@@ -225,7 +253,10 @@ ANNOTATIONS: dict[str, Annotation] = {
             "loop, because the loop budget is what would otherwise cancel a stalled model "
             "before any timeout inside it: the default of a half leaves the other half of "
             "the loop to the model that took over. The last model on a list has no "
-            "deadline of its own and is bounded by the loop, as a lone model is."
+            "deadline of its own and is bounded by the loop, as a lone model is. A loop "
+            "with no time limit gives no turn deadline: a stalled model is ended by its own "
+            "request timeout, sized for its answer at its measured pace, and the list "
+            "moves on from that as from any provider failure."
         ),
         "advanced": True,
     },
@@ -1071,52 +1102,55 @@ ANNOTATIONS: dict[str, Annotation] = {
         "subgroup": "Technique check",
     },
     "react_agent_max_steps": {
-        "title": "ReAct agent default max steps",
+        "title": "Steps per agent loop",
         "description": (
-            "Default maximum LangGraph recursion steps for a ReAct agent loop, tuned "
-            "for the network/dynamic analysts' small tool-call count. Per-agent "
-            "overrides live in react_agent_max_steps_overrides."
+            "The deployment's step limit for an agent's tool loop (LangGraph graph steps: "
+            "a model turn is one, a tool round one more). Empty, the default, is no step "
+            "limit: a loop ends when its model answers, when it only repeats itself, when "
+            "its conversation has no room left for a tool answer, or at the job's spend "
+            "ceiling, with the job timeout as the last resort. An agent definition's own "
+            "max_steps wins over this; a number set here is kept to."
         ),
         "subgroup": "Limits",
     },
     "react_agent_max_steps_overrides": {
-        "title": "ReAct agent max-steps overrides",
+        "title": "Steps per loop, by agent name (deprecated)",
         "description": (
-            "Per-agent LangGraph recursion-step overrides, keyed by agent name, "
-            "overriding react_agent_max_steps for agents whose tool-call depth differs "
-            "from the default — the static analyst needs many more steps for its Ghidra "
-            "pass, while network is capped low to keep an optional PCAP tool loop from "
-            "starving synthesis."
+            "Operator-only and deprecated: a step limit per agent name, read after the "
+            "agent definition's own max_steps and before the deployment's value. Ships "
+            "empty. Set a budget on the agent's definition instead."
         ),
         "subgroup": "Limits",
         "advanced": True,
     },
     "react_agent_timeout": {
-        "title": "ReAct agent default timeout (s)",
+        "title": "Seconds per agent loop",
         "description": (
-            "Default wall-clock timeout in seconds for a ReAct agent loop (analyst or "
-            "judge) before it is forced to stop, tuned for the network/dynamic "
-            "analysts. Per-agent overrides live in react_agent_timeout_overrides."
+            "The deployment's time limit, in seconds, for an agent's tool loop (analyst or "
+            "judge). Empty, the default, is no time limit: the loop has no clock of its own "
+            "and each model call waits as long as its answer takes at the model's measured "
+            "pace, with the job timeout as the last resort. An agent definition's own "
+            "timeout_seconds wins over this; a number set here is kept to."
         ),
         "subgroup": "Limits",
     },
     "react_agent_timeout_overrides": {
-        "title": "ReAct agent timeout overrides",
+        "title": "Seconds per loop, by agent name (deprecated)",
         "description": (
-            "Per-agent timeout overrides (in seconds), keyed by agent name (e.g. "
-            "static, dynamic, network, judge), overriding react_agent_timeout for "
-            "agents whose workload needs a different budget — the static analyst's "
-            "Ghidra ReAct loop in particular needs far more time than the default."
+            "Operator-only and deprecated: a time limit in seconds per agent name, read "
+            "after the agent definition's own timeout_seconds and before the deployment's "
+            "value. Ships empty. Set a budget on the agent's definition instead; the judge, "
+            "which is built in, takes its budget from here or from the deployment's value."
         ),
         "subgroup": "Limits",
         "advanced": True,
     },
     "react_agent_tool_call_budget": {
-        "title": "ReAct agent tool-call budget",
+        "title": "Tool calls before a warning",
         "description": (
-            "Soft ceiling on cumulative tool calls in a ReAct loop; exceeding it logs a "
-            "warning rather than stopping the agent, as an early signal that it is "
-            "spinning unproductively."
+            "How many cumulative tool calls of one loop are logged as a warning. A signal "
+            "for an operator reading the log and never a limit: the loop goes on exactly "
+            "as it would have."
         ),
         "subgroup": "Limits",
     },
@@ -1808,20 +1842,22 @@ ANNOTATIONS.update(
             "title": "Steps one ask gets",
             "description": (
                 "How many graph steps a delegated agent may spend answering one "
-                "ask — about five tool rounds and an answer at the default. It is "
+                "ask. Empty, the default, is no step limit of the ask's own. It is "
                 "the ask's own budget, not a share of the caller's: a callee that "
                 "inherited what its caller had left ran out before it had made a "
                 "tool call. The caller's own step budget is not reduced by what "
-                "its specialists spend; its wall clock is."
+                "its specialists spend; its wall clock, where it has one, is."
             ),
             "group": "agents",
         },
         "agents.delegation_timeout_seconds": {
             "title": "Seconds one ask gets",
             "description": (
-                "How long a delegated agent may take over one ask. An ask is also "
-                "bounded by the time its caller has left, so the caller's own "
-                "stage timeout is what decides how many asks fit in one loop."
+                "How long a delegated agent may take over one ask. Empty, the "
+                "default, is no time limit of the ask's own. An ask is also "
+                "bounded by the time its caller has left where the caller's loop "
+                "has a time limit, and a caller with none waits for a busy callee "
+                "unless that callee is itself waiting on the caller."
             ),
             "group": "agents",
         },

@@ -34,7 +34,7 @@ class _EmptyFirst(_Analyst):
         super().__init__("static", EvidenceCounter())
         self.second = second
         self.needs = needs
-        self.second_loops: list[float] = []
+        self.second_loops: list[float | None] = []
 
     def safe_analyze_isr(self, data: str) -> AgentISR:
         self._run_one_loop()
@@ -43,10 +43,16 @@ class _EmptyFirst(_Analyst):
     def seconds_a_loop_needs(self) -> float:
         return self.needs
 
-    def safe_analyze_isr_within(self, data: str, seconds: float) -> AgentISR:
+    def safe_analyze_isr_within(self, data: str, seconds: float | None) -> AgentISR:
         self.second_loops.append(seconds)
         self._run_one_loop()
         return self.second
+
+
+def _timed(agent: _EmptyFirst, seconds: int = 1500) -> _EmptyFirst:
+    """``agent`` with an operator's time limit on its loop."""
+    agent._loop_limits = lambda: (seconds, None)  # type: ignore[method-assign]
+    return agent
 
 
 def _claims() -> AgentISR:
@@ -94,13 +100,21 @@ class TestTheSecondLoopsAnswerIsTheAnalysts:
         assert update["isr_reports"]["static"].status_reason == UNPARSED_ANSWER_REASON
 
     def test_it_is_given_what_is_left_not_a_fresh_budget(self) -> None:
-        agent = _EmptyFirst(_claims(), needs=1.0)
+        agent = _timed(_EmptyFirst(_claims(), needs=1.0))
         timeout, _steps = agent._loop_limits()
 
         _run(agent)
 
         (given,) = agent.second_loops
+        assert timeout is not None
         assert 0 < given <= timeout
+
+    def test_with_no_time_limit_it_runs_with_none(self) -> None:
+        agent = _EmptyFirst(_claims(), needs=10_000_000.0)
+
+        _run(agent)
+
+        assert agent.second_loops == [None], "no clock to hold it to, and no pace can refuse it"
 
     def test_one_that_also_ends_empty_says_so(self) -> None:
         agent = _EmptyFirst(AgentISR(agent_id="static", domain="static"), needs=1.0)
@@ -115,7 +129,7 @@ class TestTheSecondLoopsAnswerIsTheAnalysts:
 
 class TestAStageThatCannotHoldIt:
     def test_the_loop_is_not_run_and_the_record_says_why(self) -> None:
-        agent = _EmptyFirst(_claims(), needs=10_000_000.0)
+        agent = _timed(_EmptyFirst(_claims(), needs=10_000_000.0))
 
         update = _run(agent)
 

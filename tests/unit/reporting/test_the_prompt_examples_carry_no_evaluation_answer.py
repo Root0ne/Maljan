@@ -26,13 +26,15 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.base_agent import FINAL_ANSWER_NUDGE
+from maljan.agents.base_agent import FINAL_ANSWER_NUDGE, SPEND_CEILING_QUESTION
+from maljan.agents.delegation import _what_an_ask_gets_sentence
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
     EVIDENCE_SHORTENED_NOTICE,
     LOWERED_ENTRY_MARK,
     NO_ENTRY_TEXT,
     PARTIAL_ENTRY_MARK,
+    PROMPT_SHORTENED_NOTICE,
     TECHNIQUE_ANSWER_FORM,
     TECHNIQUE_ANSWER_UNREAD,
     TECHNIQUE_QUESTION_NOT_ASKED,
@@ -71,6 +73,7 @@ from maljan.pipeline.nodes import (
     NO_STATIC_FIXTURE_NOTE,
     skipped_analysts_reason,
 )
+from maljan.pipeline.run_state import NO_LIMIT, budget_line
 from maljan.pipeline.validation import (
     ANALYST_FEEDBACK_CLOSING,
     CapabilityGrounding,
@@ -336,6 +339,12 @@ PROMPTS: dict[str, str] = {
         ]
     ),
     "judge technique answer form": TECHNIQUE_ANSWER_FORM,
+    "judge prompt shortened to its window": PROMPT_SHORTENED_NOTICE.format(
+        cut=2, total=5, names="static report, evidence summary", width=900
+    ),
+    "a loop started past the spend ceiling": SPEND_CEILING_QUESTION,
+    "run-state budget line of a loop with no limit": budget_line(NO_LIMIT, NO_LIMIT),
+    "ask tool budget sentence with no limit": _what_an_ask_gets_sentence("lead", None, None),
     "judge technique question head": technique_question_head("r", "Suspicious", ["T1112"]),
     "judge technique question entry marks": " ".join(
         [PARTIAL_ENTRY_MARK, LOWERED_ENTRY_MARK, NO_ENTRY_TEXT]
