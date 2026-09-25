@@ -130,20 +130,69 @@ def current_analyst_keys() -> list[str]:
     return analyst_keys(get_settings())
 
 
-def static_provider_id_for(settings: Settings, key: str) -> str:
+def static_provider_id_for(
+    settings: Settings,
+    key: str,
+    *,
+    profile: ProfileDefinition | None = None,
+    global_provider: str | None = None,
+) -> str:
     """The static provider id agent ``key`` reads, falling back to the global one.
 
     The active profile wins over both. ``measurement`` forces ``none`` across
     every member, which is what makes it a baseline rather than a profile that
     merely happens to have no tool servers today.
+
+    ``profile`` and ``global_provider`` answer the question for a job that
+    has not been built yet: the team and the provider a submitted job names,
+    which the stored settings do not hold until the worker folds them in.
     """
-    forced = active_profile(settings).static_provider
-    if forced:
-        return str(forced)
+    team = profile if profile is not None else active_profile(settings)
+    if team.static_provider:
+        return str(team.static_provider)
     definition = settings.agents.definitions.get(key)
     if definition is not None and definition.static_provider:
         return str(definition.static_provider)
-    return str(settings.static.provider)
+    return str(global_provider or settings.static.provider)
+
+
+def reads_static_provider(definition: AgentDefinition | None) -> bool:
+    """Whether a run opens a static provider for this definition.
+
+    Two ways, and only two. The ``static`` role opens its provider itself,
+    inside its own class; a ``generic`` agent opens one when its tool list
+    holds a ``provider`` reference, at resolution (``_provider_tools``). Every
+    other role reads no static provider, whatever its tool list says.
+    """
+    if definition is None:
+        return False
+    if definition.role == "static":
+        return True
+    return definition.role == "generic" and any(ref.kind == "provider" for ref in definition.tools)
+
+
+def reachable_agents(settings: Settings, named: Sequence[str]) -> list[str]:
+    """The agents ``named``, every agent they can ask, and so on, in order.
+
+    A team's stages name the agents it runs, and a lead names the specialists
+    it asks as ``agent`` tool references, which sit in no stage. Anything
+    asked of "the agents this run can call" — a model to have probed, a
+    provider to have mirrored the sample for — has to follow those
+    references. The reference graph is acyclic (the settings model refuses a
+    self-reference and the run refuses a cycle), so the closure terminates.
+    """
+    definitions = settings.agents.definitions
+    reached = list(dict.fromkeys(str(key) for key in named))
+    pending = list(reached)
+    while pending:
+        definition = definitions.get(pending.pop())
+        for ref in getattr(definition, "tools", None) or []:
+            callee = str(getattr(ref, "agent", "") or "")
+            if getattr(ref, "kind", "") != "agent" or not callee or callee in reached:
+                continue
+            reached.append(callee)
+            pending.append(callee)
+    return reached
 
 
 def sample_format(container: Any) -> tuple[str, str]:

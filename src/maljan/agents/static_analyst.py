@@ -229,7 +229,12 @@ class StaticAnalyst(BaseAnalyst):
             self.logger.info("Static provider '%s' exposes no tools.", provider.id)
             self.tools = self._attach_registry_tools("static")
             return
-        provider.open(self._job_context())
+        try:
+            provider.open(self._job_context())
+        except Exception as exc:
+            if provider.capabilities.degrade_on_failure:
+                self._record_provider_degradation(provider, exc)
+            raise
         # Marked as the provider's, so the prompt names them as such rather
         # than inferring it from the absence of a server key.
         pool = stamp_source(provider.get_tools(), PROVIDER_FAMILY)
@@ -244,6 +249,25 @@ class StaticAnalyst(BaseAnalyst):
             ),
         ]
         self.logger.info("Static provider '%s': %d tools attached.", provider.id, len(self.tools))
+
+    def _record_provider_degradation(self, provider: Any, exc: BaseException) -> None:
+        """Say in the run summary that a degrading provider did not attach, and why.
+
+        A degrading provider's failed attach used to reach the log alone: the
+        run went on without the provider's tools and the summary did not say
+        so. The reason is the published form of the failure — its kind and its
+        remedy, never its message, which may name host paths — and goes on the
+        job's registry list, which the run summary reads, once.
+        """
+        from maljan.pipeline.events import describe_exception
+
+        reason = f"static provider '{provider.id}' unavailable: {describe_exception(exc)}"
+        if reason not in self.degradation_reasons:
+            self.degradation_reasons = [*self.degradation_reasons, reason]
+        registry = self._server_registry()
+        reasons = getattr(registry, "degradation_reasons", None)
+        if isinstance(reasons, list) and reason not in reasons:
+            reasons.append(reason)
 
     def _fallback_prompt(self, tools: Sequence[Any]) -> str:
         """The prompt of an analyst built outside a container, for ``tools``."""
@@ -281,120 +305,33 @@ class StaticAnalyst(BaseAnalyst):
     def _compute_sink_priority_hint(self, file_path: str) -> str:
         """Maltracker-style pre-pass: rank functions reachable to sensitive sinks.
 
-        Loads + auto-analyses the binary on the Ghidra MCP server, pulls the
-        full call graph, and renders a "priority functions" hint pointing the
-        ReAct loop at the malicious core first. Deterministic and fail-safe:
-        any error (or a stripped binary with no named sink APIs) returns an
-        empty string and the analyst proceeds with its normal behaviour.
+        Runs when *this agent's* static provider is Ghidra, whatever the
+        globally configured one is: a clone of the static analyst on Ghidra in
+        a team whose global provider is r2 is as much a Ghidra run as the
+        default one. The pre-pass itself is the Ghidra provider module's
+        (``providers.static.ghidra.sink_priority_hint``), shared with a generic
+        agent that reads Ghidra. Deterministic and fail-safe: any error, or a
+        stripped binary with no named sink APIs, returns an empty string and
+        the analyst proceeds with its normal behaviour.
         """
         from maljan.core.config import get_settings
+        from maljan.providers.static.ghidra import sink_priority_hint
 
-        cfg = get_settings()
-        if not cfg.preprocessing.use_sink_reachability:
-            return ""
-        # Ghidra-specific by construction: this pre-pass drives the headless
-        # Ghidra REST API directly (load_program / call graph), not a
-        # capability any other static provider could satisfy. Generalising it
-        # behind a capability flag is future work.
-        #
-        # L3 (live-run finding): ``cfg.static.ghidra`` is Ghidra's own
-        # sub-config and keeps its "http" default regardless of which static
-        # provider is actually selected, so gating on its transport alone let
-        # this run its Ghidra-only REST calls against an r2/generic_mcp
-        # profile too — no ``load_program`` tool exists there, so every call
-        # logged "load_program did not yield a program" at WARNING for a
-        # provider this pre-pass was never meant to touch. The provider
-        # selector is the real gate; the transport check stays underneath it
-        # for the one case that still matters — Ghidra itself configured for
-        # stdio, which this REST-only pre-pass cannot speak either.
-        if cfg.static.provider != "ghidra" or cfg.static.ghidra.transport != "http":
-            return ""  # the pre-pass speaks the headless REST API directly
+        return sink_priority_hint(get_settings(), self._provider_id(), file_path, self.logger)
 
-        try:
-            import httpx
+    def _provider_id(self) -> str:
+        """This agent's own static provider id: its resolution's, else the global one.
 
-            from maljan.analysis.sink_reachability import build_priority_hint
+        Read without building the provider, so a bare analyst in a test or a
+        script answers from the settings alone.
+        """
+        resolved = getattr(self, "_resolved", None)
+        provider_id = getattr(resolved, "static_provider_id", None) if resolved else None
+        if provider_id:
+            return str(provider_id)
+        from maljan.core.config import get_settings
 
-            base = cfg.static.ghidra.url.rstrip("/")
-            token = cfg.static.ghidra.auth_token.get_secret_value()
-            headers = {"Authorization": f"Bearer {token}"} if token else {}
-            from maljan.analysis.ghidra_program import (
-                SWITCH_PARAM,
-                SWITCH_PATH,
-                program_name_from_load,
-            )
-            from maljan.providers.server_guard import deployment_call_budget
-
-            # Each request waits what one tool call of this deployment may
-            # take (``core.mcp.breaker.call_timeout_seconds``, else the longest
-            # tool budget configured), and with neither set, as long as Ghidra
-            # takes: a fixed 120 s cut a large program's load off half-way.
-            call_budget = deployment_call_budget(cfg)
-            with httpx.Client(
-                timeout=call_budget if call_budget > 0 else None, headers=headers
-            ) as http:
-                loaded = http.post(f"{base}/load_program", json={"file": file_path})
-                loaded.raise_for_status()
-                # Loading is not looking. `load_program` sets Ghidra's current
-                # program only when nothing is current yet, so from the second
-                # sample of a container's lifetime onwards this pre-pass was
-                # building its hint from the *first* binary — measured
-                # 2026-08-10 as byte-identical call graphs across samples that
-                # shared nothing. The switch is what makes the next two calls
-                # describe the file we were asked about.
-                name = program_name_from_load(loaded.text)
-                if not name:
-                    # A failed load answers **200** with
-                    # {"error": "Failed to load program from: ..."}, so
-                    # raise_for_status sees nothing wrong. Carrying on would
-                    # analyse and describe whichever program is still current —
-                    # a hint about a different binary, handed to the analyst as
-                    # guidance for this one. Measured 2026-08-10: once the
-                    # server began refusing loads, 66 consecutive samples
-                    # produced a call graph of identical length.
-                    #
-                    # No hint is better than a wrong hint; the analyst's
-                    # documented fallback is to proceed without one.
-                    self.logger.warning(
-                        "Sink-reachability pre-pass: load_program did not yield a program "
-                        "for '%s' (%s) — skipping the hint rather than describing whichever "
-                        "binary is still loaded.",
-                        file_path,
-                        " ".join(loaded.text.split())[:200],
-                    )
-                    return ""
-                http.post(f"{base}{SWITCH_PATH}", params={SWITCH_PARAM: name}, json={})
-                http.post(f"{base}/run_analysis", json={}).raise_for_status()
-                resp = http.get(
-                    f"{base}/get_full_call_graph",
-                    params={"format": "json", "limit": 20000},
-                )
-                resp.raise_for_status()
-                graph_text = resp.text
-
-            hint = build_priority_hint(
-                graph_text, max_funcs=cfg.preprocessing.sink_reachability_max_funcs
-            )
-            if hint:
-                self.logger.info(
-                    "Sink-reachability pre-pass: priority-functions hint built "
-                    "(%d chars) for '%s'.",
-                    len(hint),
-                    file_path,
-                )
-            else:
-                self.logger.info(
-                    "Sink-reachability pre-pass: no named sink APIs reachable "
-                    "(stripped/static binary?) — no hint emitted."
-                )
-            return hint
-        except Exception as exc:  # fail-safe: never break analysis over a hint
-            self.logger.warning(
-                "Sink-reachability pre-pass failed (%s: %s); continuing without hint.",
-                type(exc).__name__,
-                exc,
-            )
-            return ""
+        return str(get_settings().static.provider)
 
     def _compute_function_hash_hint(self, file_path: str, sample_hash: str) -> str:
         """Pre-pass: surface known-family code reuse via exact opcode-hash match.

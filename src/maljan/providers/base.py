@@ -142,6 +142,29 @@ class StaticProvider(ABC):
     async def probe(self) -> ProviderProbe:
         return ProviderProbe(ok=True, detail="no connection test for this provider")
 
+    async def readiness(self) -> ProviderProbe:
+        """Whether a job that needs this provider can start, without analysing anything.
+
+        Asked before a job is accepted, for a provider that does not degrade
+        (``capabilities.degrade_on_failure`` false): a run that cannot open it
+        fails mid-way, so the submit is refused instead. The connection test by
+        default; a provider overrides it where its connection test is not the
+        whole answer (a transport with nothing to reach before the job).
+        """
+        return await self.probe()
+
+    def address(self) -> str:
+        """Where this provider is reached, safe to show any user: ``""`` when nowhere."""
+        return ""
+
+    def switched_off(self) -> bool:
+        """Whether the operator turned this provider off, so it attaches nothing.
+
+        A provider switched off does not fail a run; the analyst runs without
+        its tools and its prompt says the provider is not attached.
+        """
+        return False
+
     def open(self, job: StaticJobContext) -> None:
         """Attach to the tool for one sample. Idempotent."""
         return None
