@@ -472,3 +472,46 @@ class TestTheLoopStopsMidStream:
                 answer = agent.execute_tool_loop([("system", "s"), ("human", "h")])
 
         assert answer == "done"
+
+    def test_a_loop_past_the_warning_threshold_is_not_said_to_overrun_a_budget(self) -> None:
+        """``react_agent_tool_call_budget`` warns; nothing stops the loop at it."""
+        from unittest.mock import MagicMock, patch
+
+        from langchain_core.messages import AIMessage
+
+        calls = [{"name": "pe_info", "args": {}, "id": f"c{i}"} for i in range(3)]
+
+        class _Executor:
+            async def astream(self, inputs: Any, config: Any, stream_mode: str = "values") -> Any:
+                yield {"messages": [AIMessage(content="", tool_calls=calls)]}
+                yield {
+                    "messages": [
+                        AIMessage(content="", tool_calls=calls),
+                        AIMessage(content="done"),
+                    ]
+                }
+
+        agent = self._agent(MagicMock())
+        agent.tools = [MagicMock()]
+        agent.logger = MagicMock()
+        with patch("maljan.agents.base_agent.get_settings") as settings:
+            cfg = settings.return_value
+            cfg.react_agent_timeout = 180
+            cfg.react_agent_timeout_overrides = {}
+            cfg.react_agent_max_steps = 40
+            cfg.react_agent_max_steps_overrides = {}
+            cfg.react_agent_tool_call_budget = 2
+            with patch("langgraph.prebuilt.create_react_agent", return_value=_Executor()):
+                agent.execute_tool_loop([("system", "s"), ("human", "h")])
+
+        said = [
+            call.args[0] % call.args[1:]
+            for call in agent.logger.warning.call_args_list
+            if "tool calls" in str(call.args[0])
+        ]
+        assert len(said) == 1
+        assert said[0].startswith(
+            "static ReAct loop made 3 tool calls, past the tool-call warning threshold "
+            "of 2 (not a limit; elapsed="
+        )
+        assert "budget" not in said[0]

@@ -2215,6 +2215,10 @@ change landed on `main`.
   `decompile_function`. A reply that is only such an envelope, of radare2 log
   lines with an `[ERROR]` among them, is now a failed call whose message is
   radare2's lines.
+- **The tool-call threshold is worded as the warning it is.** The log line read
+  "spent 83 tool calls (budget=20 …)", an overrun of a limit that does not
+  exist; it now reads "made 83 tool calls, past the tool-call warning threshold
+  of 20 (not a limit; …)".
 - **A Ghidra that cannot open the job's sample stops its agent.** With
   `GHIDRA_CONTAINER_SAMPLES_PATH` set to a host path the container cannot see,
   `load_program` answered HTTP 200 with `{"error": "File not found: ..."}`,
