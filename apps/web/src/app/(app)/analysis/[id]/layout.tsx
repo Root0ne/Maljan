@@ -408,6 +408,13 @@ export default function AnalysisLayout({
                 <p className="mb-1 text-xs text-status-orange">{readingNote}</p>
               )}
 
+              {/* A report kept from a run that failed after it was built. The
+                  failure note below says why the job failed; this says that
+                  the report in front of the reader is incomplete. */}
+              {report?.incomplete_reason && (
+                <p className="mb-1 text-xs text-status-orange">{report.incomplete_reason}</p>
+              )}
+
               {failure && <FailureNote failure={failure} className="mb-1.5" />}
 
               {/* The sample is the `h1` above. A "Sample:" line under it was

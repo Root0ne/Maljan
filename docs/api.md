@@ -112,6 +112,12 @@ copy to fall behind it. `POST /reports/{report_id}/enrich` queues
 threat-intelligence enrichment and answers 202 — the lookups run as their own
 job so they never delay a verdict.
 
+A job that failed after its report was built has that report, served by the
+same routes. Its `incomplete_reason` is one sentence saying where the run
+failed, the exception's class and the error id, and the same sentence is among
+its degradation reasons; the job itself stays `failed`. A report of a run that
+completed has `incomplete_reason: null`.
+
 `stix` serves the exported bundle. `stix?source=judge` serves the judge's own
 bundle beside it, as `{"bundle": …, "labels": {…}}`: the bundle as the pipeline
 read it and the map from each id the judge wrote to the id it was published

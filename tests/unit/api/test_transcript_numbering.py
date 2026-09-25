@@ -196,7 +196,7 @@ class TestTheStoredNumber:
 
         from app.worker import analysis_worker
 
-        source = inspect.getsource(analysis_worker.run_analysis)
+        source = inspect.getsource(analysis_worker._store_the_report)
         assert '_numbered = any(int(m.get("seq") or 0) > 0 for m in transcript)' in source
         assert "seq=_stamped or (0 if _numbered else index)," in source
 

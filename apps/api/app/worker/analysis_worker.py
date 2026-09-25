@@ -1371,6 +1371,96 @@ async def mark_job_cancelled(db_session: async_sessionmaker, job_uuid: uuid.UUID
         return False
 
 
+def kept_report_note(failed_step: str, exc: BaseException, error_id: str) -> str:
+    """What a report kept from a failed run says about itself.
+
+    Where the run failed and the id the log entries are filed under, and the
+    class of the exception, never its message: the same rule
+    ``failure_reason`` follows for the job row.
+    """
+    return (
+        f"This report was built and the run failed after it: {failed_step} raised "
+        f"{type(exc).__name__} (error id {error_id}). The job is failed and this "
+        "report is incomplete: nothing the run would have done after it is in it."
+    )
+
+
+async def keep_the_built_report(
+    db_session: async_sessionmaker,
+    *,
+    job_uuid: uuid.UUID,
+    job_id: str,
+    built: dict[str, Any],
+    note: str,
+    transcript: list[dict[str, Any]],
+    core_settings: Any,
+    override_keys: Any,
+    hash_mismatch_reason: str | None,
+) -> bool:
+    """Store a report a failed run built, marked incomplete. Never raises.
+
+    ``built`` is the state the report node built its report from, with what
+    it wrote merged in (``MaljanApp.built_report``). The report is stored the
+    way a completed run stores one — findings, evidence ledger, transcript —
+    with ``incomplete_reason`` set to ``note``, and the note is added to the
+    degradation reasons the report and the run summary already carry, so every
+    surface that shows a degraded run shows this one. The job row is not
+    touched: it stays ``failed``.
+    """
+    try:
+        state = dict(built)
+        malware_report = state.get("malware_report")
+        if isinstance(malware_report, dict):
+            malware_report = dict(malware_report)
+            malware_report["degraded_mode"] = True
+            malware_report["degradation_reasons"] = [
+                *(malware_report.get("degradation_reasons") or []),
+                note,
+            ]
+            state["malware_report"] = malware_report
+        stix_bundle, run_summary = _report_inputs(
+            state,
+            core_settings=core_settings,
+            override_keys=override_keys,
+            hash_mismatch_reason=hash_mismatch_reason,
+        )
+        run_summary["degraded_mode"] = True
+        run_summary["degradation_reasons"] = [
+            *(run_summary.get("degradation_reasons") or []),
+            note,
+        ]
+        async with db_session() as db:
+            report = await _store_the_report(
+                db,
+                job_uuid=job_uuid,
+                job_id=job_id,
+                pipeline_result=state,
+                stix_bundle=stix_bundle,
+                run_summary=run_summary,
+                transcript=transcript,
+                incomplete_reason=note,
+            )
+            await db.commit()
+            report_id = report.id
+        logger.warning(
+            "Kept the report the failed run built: report=%s job=%s. %s",
+            report_id,
+            job_id,
+            note,
+            extra={"job_id": job_id, "component": "report"},
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001 — the run has already failed
+        logger.error(
+            "Could not keep the report the failed run built (%s); job=%s.",
+            type(exc).__name__,
+            job_id,
+            exc_info=True,
+            extra={"job_id": job_id, "component": "report"},
+        )
+        return False
+
+
 async def mark_job_failed(
     db_session: async_sessionmaker,
     job_uuid: uuid.UUID,
@@ -2208,48 +2298,12 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         await _publish_event(redis_conn, job_id, "phase_change", {"phase": "reporting"})
 
         # ── 4. Build the report ──────────────────────────────
-        from app.models.report import AgentFinding, AnalysisReport
-
-        # Prefer the rich extended bundle produced by ``report_node``
-        # (54+ objects with Identity/Indicator/ObservedData/Note/Report
-        # SDOs) over the minimal judge bundle. The legacy field is the
-        # fallback for callers that pre-date the MalwareReport refactor.
-        stix_bundle_for_persist = pipeline_result.get(
-            "stix_bundle_extended"
-        ) or pipeline_result.get("stix_output")
-        # Ensure STIX 2.1 ``spec_version`` is present on every bundle —
-        # the OASIS spec requires it on top-level bundle objects, and
-        # downstream tooling (OpenCTI / MISP / TAXII clients) silently
-        # rejects bundles that omit the field. Defensive: covers the
-        # case where the producer dropped it during serialization.
-        if isinstance(stix_bundle_for_persist, dict):
-            stix_bundle_for_persist.setdefault("spec_version", "2.1")
-
-        # A masked, non-secret record of the Settings this job actually
-        # ran with, plus which core keys came from a stored UI override
-        # rather than the environment/default -- lets a report reader
-        # tell what was in effect without re-deriving it.
-        _run_summary = pipeline_result.get("run_summary")
-        _run_summary = dict(_run_summary) if isinstance(_run_summary, dict) else {}
-        _run_summary["settings_snapshot"] = settings_snapshot(core_settings, overrides.keys())
-        if _report_hash_mismatch_reason:
-            # Threaded in here rather than through the pipeline state:
-            # the mismatch is known before the graph runs (it is on the
-            # stored row, checked at upload time), and both the run
-            # summary and the report banner read a plain list of
-            # strings, so appending to each is the whole fix.
-            _existing_reasons = _run_summary.get("degradation_reasons")
-            _run_summary["degradation_reasons"] = [
-                *(_existing_reasons if isinstance(_existing_reasons, list) else []),
-                _report_hash_mismatch_reason,
-            ]
-            _malware_report = pipeline_result.get("malware_report")
-            if isinstance(_malware_report, dict):
-                _report_reasons = _malware_report.get("degradation_reasons")
-                _malware_report["degradation_reasons"] = [
-                    *(_report_reasons if isinstance(_report_reasons, list) else []),
-                    _report_hash_mismatch_reason,
-                ]
+        stix_bundle_for_persist, _run_summary = _report_inputs(
+            pipeline_result,
+            core_settings=core_settings,
+            override_keys=overrides.keys(),
+            hash_mismatch_reason=_report_hash_mismatch_reason,
+        )
 
         # A pipeline that produced no report is a failed run, not a
         # completed one with nothing in it (L15, security hardening):
@@ -2288,224 +2342,14 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
         # a "completed" row with no report under it, is worse than one more
         # run of the analysis.
         async with db_session() as db:
-            report = AnalysisReport(
-                job_id=job_uuid,
-                verdict=pipeline_result.get("final_decision", "Unknown"),
-                overall_confidence=_extract_confidence(pipeline_result),
-                malware_category=_extract_category(pipeline_result),
+            report = await _store_the_report(
+                db,
+                job_uuid=job_uuid,
+                job_id=job_id,
+                pipeline_result=pipeline_result,
                 stix_bundle=stix_bundle_for_persist,
-                judge_stix_bundle=judge_bundle_record(pipeline_result),
-                mitre_techniques=_extract_mitre(pipeline_result),
-                # The agents' *final* prose. This used to persist only
-                # ``reports`` — the first-pass text — so the report an analyst
-                # rewrote after the negotiation was thrown away, and the stored
-                # prose silently contradicted the stored claims (which do come
-                # from the revised ISR). ``revised_reports`` is keyed by the
-                # same agent names, so the merge is per-agent and an agent that
-                # never revised keeps its original.
-                agent_reports={
-                    **(pipeline_result.get("reports") or {}),
-                    **(pipeline_result.get("revised_reports") or {}),
-                },
-                negotiation_log={
-                    "discussion_history": [
-                        {
-                            "round": i + 1,
-                            "agent": (
-                                arg.agent_name
-                                if hasattr(arg, "agent_name")
-                                else arg.get("agent_name", "")
-                            ),
-                            "position": "",  # derived by confidence on frontend
-                            # ``None`` on a round where consensus did not
-                            # apply: no agreement was measured, so none is
-                            # stored, neither 100 nor 0.
-                            "confidence": _argument_confidence(arg),
-                            "argument": (
-                                arg.finding if hasattr(arg, "finding") else arg.get("finding", "")
-                            ),
-                            # The platform's sentence about the round, apart
-                            # from the mediator's own words.
-                            "note": (
-                                getattr(arg, "note", "")
-                                if hasattr(arg, "finding")
-                                else arg.get("note", "")
-                            ),
-                            # ``complete`` | ``failed`` | ``timeout``. Without
-                            # it a mediation that never ran is indistinguishable
-                            # from one where the agents calmly disagreed: both
-                            # store ``is_consensus=False`` at 0.0 confidence.
-                            # Every run in this database is the former, and the
-                            # UI drew all of them as the latter.
-                            "status": (
-                                getattr(arg, "status", "complete")
-                                if hasattr(arg, "status")
-                                else arg.get("status", "complete")
-                            ),
-                        }
-                        for i, arg in enumerate(pipeline_result.get("discussion_history") or [])
-                    ],
-                    "confidence_history": pipeline_result.get("confidence_history", []),
-                    "iteration_count": pipeline_result.get("iteration_count", 0),
-                    # ``None`` beside ``consensus_applicable: false`` when
-                    # fewer than two analysts produced claims.
-                    "is_consensus": pipeline_result.get("is_consensus", False),
-                    "consensus_applicable": pipeline_result.get("consensus_applicable", True)
-                    is not False,
-                    # True when at least one round failed outright, so consumers
-                    # can say "the negotiation did not run" rather than "the
-                    # agents did not agree".
-                    "mediation_failed": any(
-                        getattr(a, "status", "complete") in ("failed", "timeout")
-                        for a in (pipeline_result.get("discussion_history") or [])
-                        if getattr(a, "agent_name", "") == "Mediator"
-                    ),
-                    # Whether the last round's agreement was flagged as
-                    # sycophantic — agents converging without new evidence. It
-                    # reached the database only buried inside ``run_summary``
-                    # before, so nothing rendering the negotiation could tell
-                    # a genuine consensus from a manufactured one.
-                    "sycophancy_detected": bool(pipeline_result.get("sycophancy_detected", False)),
-                },
                 run_summary=_run_summary,
-                malware_report=pipeline_result.get("malware_report"),
-            )
-            # A re-run supersedes its predecessor. ``analysis_reports.job_id``
-            # is unique and this path only ever inserted, so an arq retry --
-            # which arq schedules on its own -- reached the end of a full
-            # analysis and threw the result away on a UniqueViolationError.
-            await _supersede_previous_report(db, job_uuid)
-            db.add(report)
-            await db.flush()
-
-            logger.info(
-                "Report saved: id=%s verdict=%s confidence=%s",
-                report.id,
-                report.verdict,
-                report.overall_confidence,
-                extra={"job_id": job_id, "component": "report"},
-            )
-
-            # Save per-agent findings
-            isr_reports = pipeline_result.get("isr_reports", {})
-            pipeline_reports = pipeline_result.get("reports") or {}
-            for agent_name, isr in isr_reports.items():
-                if hasattr(isr, "model_dump"):
-                    isr_data = isr.model_dump()
-                elif isinstance(isr, dict):
-                    isr_data = isr
-                else:
-                    continue
-
-                # Derive agent confidence from claims (ISR has no overall_confidence field)
-                claims = isr_data.get("claims", [])
-                agent_confidence = 0.0
-                if claims:
-                    agent_confidence = sum(c.get("confidence", 0) for c in claims) / len(claims)
-
-                # D15+D16: derive lifecycle status from the analyst's text
-                # report + claim shape so the UI can render "FAILED" /
-                # "NO DATA" badges instead of synthesising a misleading
-                # verdict from an empty payload.
-                _text_report = pipeline_reports.get(agent_name, "")
-                _stripped = _text_report.strip() if isinstance(_text_report, str) else ""
-                status: str
-                status_reason: str | None
-                if _stripped.startswith("[ERROR]"):
-                    _reason = _stripped[len("[ERROR]") :].strip()[:500] or None
-                    _low = (_reason or "").lower()
-                    if "timeout" in _low or "timed out" in _low:
-                        status = "timeout"
-                    else:
-                        status = "failed"
-                    status_reason = _reason
-                elif isr_data.get("status") in _AGENT_FINDING_STATUSES:
-                    # The analyst said something about its own answer that the
-                    # claim list cannot: it ended without a structured report,
-                    # so this is not "no data" but "no report". Only a value
-                    # from the known vocabulary is persisted — the column feeds
-                    # a TypeScript union and a badge, and an unknown string
-                    # would reach both.
-                    status = str(isr_data["status"])
-                    status_reason = str(isr_data.get("status_reason") or "") or None
-                elif not claims:
-                    if isr_data.get("status"):
-                        logger.warning(
-                            "Agent %s reported the unknown status %r; recording no_data.",
-                            agent_name,
-                            isr_data["status"],
-                        )
-                    status = "no_data"
-                    status_reason = "Agent produced no claims"
-                else:
-                    status = "complete"
-                    status_reason = None
-
-                finding = AgentFinding(
-                    report_id=report.id,
-                    agent_name=agent_name,
-                    domain=isr_data.get("domain", agent_name),
-                    claims=claims,
-                    dissent_items=isr_data.get("dissent_items", []),
-                    revision_rounds=isr_data.get("revision_round", 0),
-                    final_confidence=agent_confidence,
-                    status=status,
-                    status_reason=status_reason,
-                )
-                db.add(finding)
-
-            logger.info(
-                f"Saved {len(isr_reports)} agent findings for report={report.id}",
-                extra={"job_id": job_id},
-            )
-
-            # ── 4a. Save the evidence ledger ─────────────────────
-            # Every tool call the run made, in the order the ids were issued.
-            # The report's sections cite these ids, so the two are written in
-            # one transaction: a report whose citations resolve to nothing is
-            # worse than one that was never saved.
-            _ledger = pipeline_result.get("evidence_ledger") or []
-            for _entry in _ledger:
-                if not isinstance(_entry, dict):
-                    continue
-                db.add(_evidence_row(_entry, job_id=job_uuid))
-
-            logger.info(
-                f"Saved {len(_ledger)} evidence entries for job={job_id}",
-                extra={"job_id": job_id},
-            )
-
-            # ── 4b. Save the transcript ──────────────────────────
-            # The conversation itself, written down exactly as it was
-            # broadcast. ``agent_findings`` above records where each agent
-            # *ended up*; this records what was said and in what order, which
-            # is the only place the per-round positions, the sycophancy
-            # intervention and the revised prose survive past the 24 h Redis
-            # stream. See ``AgentMessage`` for the full rationale.
-            # Whether the publisher numbered this run at all. A run it never
-            # reached — one whose loop was already closing, or whose recorder
-            # raised — falls back to the position in the recording, which is
-            # the order the lines were said in and all this column ever meant.
-            # A run it numbered *partly* may not: the position and the
-            # publisher's count share the low integers, so a line that missed
-            # its stamp would borrow a number another line already owns and
-            # the console would draw the two as one. Those get ``0``, which is
-            # outside the publisher's range — it counts from 1 — and which
-            # every reader already treats as "no number".
-            _numbered = any(int(m.get("seq") or 0) > 0 for m in transcript)
-            for index, message in enumerate(transcript):
-                _stamped = int(message.get("seq") or 0)
-                db.add(
-                    _transcript_row(
-                        message,
-                        report_id=report.id,
-                        seq=_stamped or (0 if _numbered else index),
-                    )
-                )
-
-            logger.info(
-                f"Saved {len(transcript)} transcript messages for report={report.id}",
-                extra={"job_id": job_id},
+                transcript=transcript,
             )
 
             # ── 5. Mark job complete ─────────────────────────────
@@ -2622,6 +2466,25 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # row saying ``running``, with no error and no ``completed_at``,
             # for as long as the worker stayed up.
             await mark_job_failed(db_session, job_uuid, reason=reason, error_id=error_id)
+            # A report the report node finished is not lost because a later
+            # step failed: it is stored against this failed job, marked
+            # incomplete with where the run failed. Only when the graph itself
+            # raised — a report a finished run produced and the worker then
+            # refused (an absent analysis) is not a report to keep.
+            built = getattr(app, "built_report", None) if app is not None else None
+            failed_step = getattr(app, "failed_step", None) if app is not None else None
+            if built and failed_step:
+                await keep_the_built_report(
+                    db_session,
+                    job_uuid=job_uuid,
+                    job_id=job_id,
+                    built=built,
+                    note=kept_report_note(failed_step, exc, error_id),
+                    transcript=transcript,
+                    core_settings=core_settings,
+                    override_keys=overrides.keys(),
+                    hash_mismatch_reason=_report_hash_mismatch_reason,
+                )
         else:
             logger.warning(
                 "Cannot update job status: the job id did not parse (job_id=%s).",
@@ -3355,3 +3218,296 @@ async def _supersede_previous_report(db: Any, job_id: Any) -> None:
         await db.flush()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not check for a previous report on job %s (%s).", job_id, exc)
+
+
+def _report_inputs(
+    pipeline_result: dict[str, Any],
+    *,
+    core_settings: Any,
+    override_keys: Any,
+    hash_mismatch_reason: str | None,
+) -> tuple[dict | None, dict[str, Any]]:
+    """The STIX bundle and the run summary a stored report carries.
+
+    Read off the pipeline's state, whether the run completed or failed after
+    its report was built: both store the report the same way.
+    """
+    # Prefer the rich extended bundle produced by ``report_node``
+    # (54+ objects with Identity/Indicator/ObservedData/Note/Report
+    # SDOs) over the minimal judge bundle. The legacy field is the
+    # fallback for callers that pre-date the MalwareReport refactor.
+    stix_bundle_for_persist = pipeline_result.get("stix_bundle_extended") or pipeline_result.get(
+        "stix_output"
+    )
+    # Ensure STIX 2.1 ``spec_version`` is present on every bundle —
+    # the OASIS spec requires it on top-level bundle objects, and
+    # downstream tooling (OpenCTI / MISP / TAXII clients) silently
+    # rejects bundles that omit the field. Defensive: covers the
+    # case where the producer dropped it during serialization.
+    if isinstance(stix_bundle_for_persist, dict):
+        stix_bundle_for_persist.setdefault("spec_version", "2.1")
+
+    # A masked, non-secret record of the Settings this job actually
+    # ran with, plus which core keys came from a stored UI override
+    # rather than the environment/default -- lets a report reader
+    # tell what was in effect without re-deriving it.
+    _run_summary = pipeline_result.get("run_summary")
+    _run_summary = dict(_run_summary) if isinstance(_run_summary, dict) else {}
+    _run_summary["settings_snapshot"] = settings_snapshot(core_settings, override_keys)
+    if hash_mismatch_reason:
+        # Threaded in here rather than through the pipeline state:
+        # the mismatch is known before the graph runs (it is on the
+        # stored row, checked at upload time), and both the run
+        # summary and the report banner read a plain list of
+        # strings, so appending to each is the whole fix.
+        _existing_reasons = _run_summary.get("degradation_reasons")
+        _run_summary["degradation_reasons"] = [
+            *(_existing_reasons if isinstance(_existing_reasons, list) else []),
+            hash_mismatch_reason,
+        ]
+        _malware_report = pipeline_result.get("malware_report")
+        if isinstance(_malware_report, dict):
+            _report_reasons = _malware_report.get("degradation_reasons")
+            _malware_report["degradation_reasons"] = [
+                *(_report_reasons if isinstance(_report_reasons, list) else []),
+                hash_mismatch_reason,
+            ]
+    return stix_bundle_for_persist, _run_summary
+
+
+async def _store_the_report(
+    db: Any,
+    *,
+    job_uuid: uuid.UUID,
+    job_id: str,
+    pipeline_result: dict[str, Any],
+    stix_bundle: dict | None,
+    run_summary: dict[str, Any],
+    transcript: list[dict[str, Any]],
+    incomplete_reason: str | None = None,
+) -> Any:
+    """Add the report and everything that cites it to ``db``, uncommitted.
+
+    The report, the per-agent findings, the evidence ledger and the
+    transcript go together because the report's sections cite the ledger's
+    ids. ``incomplete_reason`` is set on a report kept from a run that
+    failed after the report was built, and says so.
+    """
+    from app.models.report import AgentFinding, AnalysisReport
+
+    report = AnalysisReport(
+        job_id=job_uuid,
+        verdict=pipeline_result.get("final_decision", "Unknown"),
+        overall_confidence=_extract_confidence(pipeline_result),
+        malware_category=_extract_category(pipeline_result),
+        stix_bundle=stix_bundle,
+        judge_stix_bundle=judge_bundle_record(pipeline_result),
+        mitre_techniques=_extract_mitre(pipeline_result),
+        # The agents' *final* prose. This used to persist only
+        # ``reports`` — the first-pass text — so the report an analyst
+        # rewrote after the negotiation was thrown away, and the stored
+        # prose silently contradicted the stored claims (which do come
+        # from the revised ISR). ``revised_reports`` is keyed by the
+        # same agent names, so the merge is per-agent and an agent that
+        # never revised keeps its original.
+        agent_reports={
+            **(pipeline_result.get("reports") or {}),
+            **(pipeline_result.get("revised_reports") or {}),
+        },
+        negotiation_log={
+            "discussion_history": [
+                {
+                    "round": i + 1,
+                    "agent": (
+                        arg.agent_name if hasattr(arg, "agent_name") else arg.get("agent_name", "")
+                    ),
+                    "position": "",  # derived by confidence on frontend
+                    # ``None`` on a round where consensus did not
+                    # apply: no agreement was measured, so none is
+                    # stored, neither 100 nor 0.
+                    "confidence": _argument_confidence(arg),
+                    "argument": (
+                        arg.finding if hasattr(arg, "finding") else arg.get("finding", "")
+                    ),
+                    # The platform's sentence about the round, apart
+                    # from the mediator's own words.
+                    "note": (
+                        getattr(arg, "note", "") if hasattr(arg, "finding") else arg.get("note", "")
+                    ),
+                    # ``complete`` | ``failed`` | ``timeout``. Without
+                    # it a mediation that never ran is indistinguishable
+                    # from one where the agents calmly disagreed: both
+                    # store ``is_consensus=False`` at 0.0 confidence.
+                    # Every run in this database is the former, and the
+                    # UI drew all of them as the latter.
+                    "status": (
+                        getattr(arg, "status", "complete")
+                        if hasattr(arg, "status")
+                        else arg.get("status", "complete")
+                    ),
+                }
+                for i, arg in enumerate(pipeline_result.get("discussion_history") or [])
+            ],
+            "confidence_history": pipeline_result.get("confidence_history", []),
+            "iteration_count": pipeline_result.get("iteration_count", 0),
+            # ``None`` beside ``consensus_applicable: false`` when
+            # fewer than two analysts produced claims.
+            "is_consensus": pipeline_result.get("is_consensus", False),
+            "consensus_applicable": pipeline_result.get("consensus_applicable", True) is not False,
+            # True when at least one round failed outright, so consumers
+            # can say "the negotiation did not run" rather than "the
+            # agents did not agree".
+            "mediation_failed": any(
+                getattr(a, "status", "complete") in ("failed", "timeout")
+                for a in (pipeline_result.get("discussion_history") or [])
+                if getattr(a, "agent_name", "") == "Mediator"
+            ),
+            # Whether the last round's agreement was flagged as
+            # sycophantic — agents converging without new evidence. It
+            # reached the database only buried inside ``run_summary``
+            # before, so nothing rendering the negotiation could tell
+            # a genuine consensus from a manufactured one.
+            "sycophancy_detected": bool(pipeline_result.get("sycophancy_detected", False)),
+        },
+        run_summary=run_summary,
+        malware_report=pipeline_result.get("malware_report"),
+        incomplete_reason=incomplete_reason,
+    )
+    # A re-run supersedes its predecessor. ``analysis_reports.job_id``
+    # is unique and this path only ever inserted, so an arq retry --
+    # which arq schedules on its own -- reached the end of a full
+    # analysis and threw the result away on a UniqueViolationError.
+    await _supersede_previous_report(db, job_uuid)
+    db.add(report)
+    await db.flush()
+
+    logger.info(
+        "Report saved: id=%s verdict=%s confidence=%s",
+        report.id,
+        report.verdict,
+        report.overall_confidence,
+        extra={"job_id": job_id, "component": "report"},
+    )
+
+    # Save per-agent findings
+    isr_reports = pipeline_result.get("isr_reports", {})
+    pipeline_reports = pipeline_result.get("reports") or {}
+    for agent_name, isr in isr_reports.items():
+        if hasattr(isr, "model_dump"):
+            isr_data = isr.model_dump()
+        elif isinstance(isr, dict):
+            isr_data = isr
+        else:
+            continue
+
+        # Derive agent confidence from claims (ISR has no overall_confidence field)
+        claims = isr_data.get("claims", [])
+        agent_confidence = 0.0
+        if claims:
+            agent_confidence = sum(c.get("confidence", 0) for c in claims) / len(claims)
+
+        # D15+D16: derive lifecycle status from the analyst's text
+        # report + claim shape so the UI can render "FAILED" /
+        # "NO DATA" badges instead of synthesising a misleading
+        # verdict from an empty payload.
+        _text_report = pipeline_reports.get(agent_name, "")
+        _stripped = _text_report.strip() if isinstance(_text_report, str) else ""
+        status: str
+        status_reason: str | None
+        if _stripped.startswith("[ERROR]"):
+            _reason = _stripped[len("[ERROR]") :].strip()[:500] or None
+            _low = (_reason or "").lower()
+            if "timeout" in _low or "timed out" in _low:
+                status = "timeout"
+            else:
+                status = "failed"
+            status_reason = _reason
+        elif isr_data.get("status") in _AGENT_FINDING_STATUSES:
+            # The analyst said something about its own answer that the
+            # claim list cannot: it ended without a structured report,
+            # so this is not "no data" but "no report". Only a value
+            # from the known vocabulary is persisted — the column feeds
+            # a TypeScript union and a badge, and an unknown string
+            # would reach both.
+            status = str(isr_data["status"])
+            status_reason = str(isr_data.get("status_reason") or "") or None
+        elif not claims:
+            if isr_data.get("status"):
+                logger.warning(
+                    "Agent %s reported the unknown status %r; recording no_data.",
+                    agent_name,
+                    isr_data["status"],
+                )
+            status = "no_data"
+            status_reason = "Agent produced no claims"
+        else:
+            status = "complete"
+            status_reason = None
+
+        finding = AgentFinding(
+            report_id=report.id,
+            agent_name=agent_name,
+            domain=isr_data.get("domain", agent_name),
+            claims=claims,
+            dissent_items=isr_data.get("dissent_items", []),
+            revision_rounds=isr_data.get("revision_round", 0),
+            final_confidence=agent_confidence,
+            status=status,
+            status_reason=status_reason,
+        )
+        db.add(finding)
+
+    logger.info(
+        f"Saved {len(isr_reports)} agent findings for report={report.id}",
+        extra={"job_id": job_id},
+    )
+
+    # ── 4a. Save the evidence ledger ─────────────────────
+    # Every tool call the run made, in the order the ids were issued.
+    # The report's sections cite these ids, so the two are written in
+    # one transaction: a report whose citations resolve to nothing is
+    # worse than one that was never saved.
+    _ledger = pipeline_result.get("evidence_ledger") or []
+    for _entry in _ledger:
+        if not isinstance(_entry, dict):
+            continue
+        db.add(_evidence_row(_entry, job_id=job_uuid))
+
+    logger.info(
+        f"Saved {len(_ledger)} evidence entries for job={job_id}",
+        extra={"job_id": job_id},
+    )
+
+    # ── 4b. Save the transcript ──────────────────────────
+    # The conversation itself, written down exactly as it was
+    # broadcast. ``agent_findings`` above records where each agent
+    # *ended up*; this records what was said and in what order, which
+    # is the only place the per-round positions, the sycophancy
+    # intervention and the revised prose survive past the 24 h Redis
+    # stream. See ``AgentMessage`` for the full rationale.
+    # Whether the publisher numbered this run at all. A run it never
+    # reached — one whose loop was already closing, or whose recorder
+    # raised — falls back to the position in the recording, which is
+    # the order the lines were said in and all this column ever meant.
+    # A run it numbered *partly* may not: the position and the
+    # publisher's count share the low integers, so a line that missed
+    # its stamp would borrow a number another line already owns and
+    # the console would draw the two as one. Those get ``0``, which is
+    # outside the publisher's range — it counts from 1 — and which
+    # every reader already treats as "no number".
+    _numbered = any(int(m.get("seq") or 0) > 0 for m in transcript)
+    for index, message in enumerate(transcript):
+        _stamped = int(message.get("seq") or 0)
+        db.add(
+            _transcript_row(
+                message,
+                report_id=report.id,
+                seq=_stamped or (0 if _numbered else index),
+            )
+        )
+
+    logger.info(
+        f"Saved {len(transcript)} transcript messages for report={report.id}",
+        extra={"job_id": job_id},
+    )
+    return report

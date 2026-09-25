@@ -140,6 +140,10 @@ export interface ReportDetailDTO {
    * back to rebuilding what it can from ``agent_findings`` for those. */
   transcript?: TranscriptRow[];
   malware_report: MalwareReport | null;
+  /** Set on a report kept from a run that failed after the report was built:
+   *  where the run failed and the error id. Absent or `null` on a report of a
+   *  completed run. */
+  incomplete_reason?: string | null;
   created_at: string;
 }
 

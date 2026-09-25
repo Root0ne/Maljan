@@ -35,6 +35,8 @@ llama-server slot to itself for its whole timeout budget. The global
 a plain analyst list and has never been opened as stages.
 """
 
+import asyncio
+import functools
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
@@ -67,10 +69,52 @@ from maljan.pipeline.topology import (
     plan,
 )
 
+# The attribute a node's exception carries its node's name under, so a run
+# that failed can say which step it failed in. LangGraph raises a node's own
+# exception out of the graph without naming the node.
+FAILED_NODE_ATTR = "maljan_graph_node"
+
 
 def _node(name: str, fn: Any) -> Any:
     """One graph node: memory reported on each side, and not started once its job is cancelled."""
-    return instrument_node(name, stops_when_cancelled(name, fn))
+    return instrument_node(name, stops_when_cancelled(name, _names_its_failure(name, fn)))
+
+
+def _names_its_failure(name: str, fn: Any) -> Any:
+    """``fn``, with any exception it raises marked with the node it came from.
+
+    The innermost node that raised is the one named: an exception already
+    marked keeps its mark.
+    """
+
+    def _mark(exc: Exception) -> None:
+        if getattr(exc, FAILED_NODE_ATTR, None) is None:
+            try:
+                setattr(exc, FAILED_NODE_ATTR, name)
+            except (AttributeError, TypeError):
+                pass
+
+    if asyncio.iscoroutinefunction(fn):
+
+        @functools.wraps(fn)
+        async def async_node(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return await fn(*args, **kwargs)
+            except Exception as exc:
+                _mark(exc)
+                raise
+
+        return async_node
+
+    @functools.wraps(fn)
+    def sync_node(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            _mark(exc)
+            raise
+
+    return sync_node
 
 
 def build_graph(container: ServiceContainer) -> CompiledStateGraph:

@@ -55,6 +55,13 @@ class MaljanApp:
             job_id=job_id,
         )
         self.graph = build_graph(self.container)
+        # What the report node built, with the state it built it from, as soon
+        # as the node returned: kept so that a run which fails after the report
+        # was built still has it (``_stream_the_graph``). ``None`` until then.
+        self.built_report: dict[str, Any] | None = None
+        # Where the graph failed, when it did: ``node <name>``, or the step
+        # whose writes could not be applied. ``None`` on a run that returned.
+        self.failed_step: str | None = None
 
     async def aclose(self) -> None:
         """Release the container's agents, toolkits and per-job caches.
@@ -452,4 +459,63 @@ class MaljanApp:
             "budget_records": {},
         }
 
-        return cast("dict[str, Any]", await self.graph.ainvoke(initial_state))
+        return await self._stream_the_graph(initial_state)
+
+    async def _stream_the_graph(self, initial_state: AnalysisState) -> dict[str, Any]:
+        """Run the graph, watching each node's output as it lands.
+
+        The final state is the one ``ainvoke`` returns: ``ainvoke`` is this
+        same stream in the same two modes with the same output keys, keeping
+        the last ``values`` chunk. What streaming adds is the ``updates``
+        chunks, one per node as it returns. When the report node returns a
+        report it is kept on ``built_report``, merged into the state it was
+        built from through the graph's own reducers, so a later step that
+        raises — including LangGraph refusing the writes of the report's own
+        step — no longer takes a finished report down with it. The graph has
+        no checkpointer, and an ``ainvoke`` that raises returns nothing.
+        """
+        from langgraph.channels.binop import BinaryOperatorAggregate
+
+        from maljan.pipeline.builder import FAILED_NODE_ATTR
+        from maljan.pipeline.topology import REPORT_NODE
+
+        self.built_report = None
+        self.failed_step = None
+        latest: dict[str, Any] = {}
+        # The nodes whose output arrived since the last complete step.
+        step: list[str] = []
+        try:
+            async for mode, payload in self.graph.astream(
+                initial_state,
+                stream_mode=["updates", "values"],
+                output_keys=self.graph.output_channels,
+            ):
+                if mode == "values":
+                    latest = cast("dict[str, Any]", payload)
+                    step = []
+                    continue
+                updates = payload if isinstance(payload, dict) else {}
+                for node, update in updates.items():
+                    step.append(str(node))
+                    if node != REPORT_NODE or not isinstance(update, dict):
+                        continue
+                    if not update.get("malware_report"):
+                        continue
+                    built = dict(latest)
+                    for key, value in update.items():
+                        channel = self.graph.channels.get(key)
+                        if isinstance(channel, BinaryOperatorAggregate) and key in built:
+                            built[key] = channel.operator(built[key], value)
+                        else:
+                            built[key] = value
+                    self.built_report = built
+        except Exception as exc:
+            node = getattr(exc, FAILED_NODE_ATTR, None)
+            if node:
+                self.failed_step = f"node {node}"
+            elif step:
+                self.failed_step = f"the graph step of nodes {', '.join(step)}"
+            else:
+                self.failed_step = "the graph"
+            raise
+        return latest

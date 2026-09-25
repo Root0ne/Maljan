@@ -54,6 +54,23 @@ operator can reconfigure.
    record.
 5. The report is written to Postgres and becomes available under
    `/api/v1/reports/...` in every rendering the report service supports.
+   A run that fails after its report was built keeps the report. The graph
+   runs as a stream (`astream` in the modes `ainvoke` itself uses, so a run
+   that completes ends in the same state), and `MaljanApp.built_report` holds
+   what the report node returned, merged into the state it was built from,
+   from the moment it returns. When the graph then raises — a later node, or
+   LangGraph refusing the writes of the report's own step — the worker marks
+   the job `failed` as for any failure and stores that report against it,
+   with its findings, ledger and transcript, and with
+   `analysis_reports.incomplete_reason` set to one sentence: where the run
+   failed (`node <name>`, or the graph step whose nodes' writes were refused),
+   the exception's class and the error id, never its message. The same
+   sentence is added to the report's and the run summary's degradation
+   reasons, so the console's degraded banner, the header notice beside the
+   failure note and the markdown and HTML renderings all say the report is
+   incomplete. The job stays `failed`. A graph that returned and a result the
+   worker then refused — an absent analysis, a report node that answered with
+   an error — keeps nothing.
 6. Threat-intelligence enrichment runs afterwards as its own job, on the
    enrichment worker's queue, so it delays neither the verdict nor the next
    analysis.

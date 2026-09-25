@@ -2194,6 +2194,16 @@ change landed on `main`.
   next stage also depends on another stage leaves through its own
   `<stage>__join`. The seeded teams' graphs are unchanged. `run_summary` keeps
   no reducer: two verdicts must never be merged into one.
+- **A report that was built survives a later step failing.** The graph ran
+  with `ainvoke` and no checkpointer, and the worker stored a report only on
+  success, so a run that failed after its report node finished lost the report
+  (in the all-tools run, 234,362 characters and 55 STIX objects). The graph now
+  runs as a stream in the modes `ainvoke` uses, the app keeps what the report
+  node returned the moment it returns, and a job whose graph then raises stores
+  that report against the failed job with `analysis_reports.incomplete_reason`
+  (migration `20261001000000`): where the run failed, the exception's class and
+  the error id. The sentence is also among the report's degradation reasons,
+  and the console shows it in the analysis header. The job stays `failed`.
 - **A Ghidra that cannot open the job's sample stops its agent.** With
   `GHIDRA_CONTAINER_SAMPLES_PATH` set to a host path the container cannot see,
   `load_program` answered HTTP 200 with `{"error": "File not found: ..."}`,
