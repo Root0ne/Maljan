@@ -1871,14 +1871,23 @@ def label_of(container: ServiceContainer, key: str) -> str:
     try:
         from maljan.agents.composition import display_name
 
-        definition = container.config.agents.definitions.get(key)
-        # A label is words; anything else a stand-in configuration hands back
-        # is not one, and the key stands (``display_name``'s rule otherwise).
-        if not isinstance(getattr(definition, "label", ""), str):
-            return str(key)
         return display_name(container.config, key)
     except Exception:  # noqa: BLE001 — a name is never worth a node
         return str(key)
+
+
+def spoken_name(container: ServiceContainer, key: str, stage_key: str) -> str:
+    """The name a published sentence gives an agent: its label, or its stage for a long key.
+
+    The event scrubber reads a run of 24 or more key characters inside a
+    sentence as a credential and publishes ``***``; an agent with no label and
+    such a key is named by the stage it answered in instead, ``the <stage>
+    analyst``. The line's identity fields keep the key either way.
+    """
+    label = label_of(container, key)
+    if label != key or len(key) < 24 or not stage_key:
+        return label
+    return f"the {stage_key} analyst"
 
 
 def announce_started(container: ServiceContainer, stage: Any) -> None:
@@ -2394,7 +2403,10 @@ def make_stage_agent_node(
                 # The operator's label, not the key: a key of 24 characters or
                 # more reads as a credential to the event scrubber and is
                 # published as ``***`` inside a sentence.
-                text=summarize_claims(isr.claims, speaker=label_of(container, agent_name)),
+                text=summarize_claims(
+                    isr.claims,
+                    speaker=spoken_name(container, agent_name, stage_key_of(stage, "")),
+                ),
                 round_index=0,
                 status=isr_status(isr),
                 claims=claims_to_payload(isr.claims),
@@ -3132,6 +3144,17 @@ def make_negotiation_node(
 # ---------------------------------------------------------------------------
 
 
+def _home_stage(container: ServiceContainer, name: str) -> str:
+    """The key of the analysis stage ``name`` answers in, or ``""``. Never raises."""
+    try:
+        for home in getattr(container.active_profile(), "stages", None) or []:
+            if name in (getattr(home, "agents", None) or ()):
+                return str(getattr(home, "key", "") or "")
+    except Exception:  # noqa: BLE001 — a name is never worth a node
+        return ""
+    return ""
+
+
 def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any:
     """Factory: creates the revision node where all agents revise concurrently."""
 
@@ -3268,6 +3291,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
             revised[name] = kept_texts.get(name) or original_reports.get(name, "")
             revised_isrs[name] = kept
             label = label_of(container, name)
+            spoken = spoken_name(container, name, _home_stage(container, name))
             logger.warning(
                 "%s: the round-%d revision was not made (%s); its answer in force stands with "
                 "%d claim(s).",
@@ -3281,7 +3305,7 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                 speaker=name,
                 role="reviser",
                 text=(
-                    f"{summarize_claims(kept.claims, speaker=label)} The revision was not made "
+                    f"{summarize_claims(kept.claims, speaker=spoken)} The revision was not made "
                     f"({why}); this answer stands."
                 ),
                 round_index=iteration,
@@ -3352,7 +3376,10 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     container.event_sink,
                     speaker=name,
                     role="reviser",
-                    text=summarize_claims(isr.claims, speaker=label_of(container, name)),
+                    text=summarize_claims(
+                        isr.claims,
+                        speaker=spoken_name(container, name, _home_stage(container, name)),
+                    ),
                     round_index=iteration,
                     status=isr_status(isr),
                     claims=claims_to_payload(isr.claims),

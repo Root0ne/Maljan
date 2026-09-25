@@ -97,9 +97,13 @@ def _state() -> dict[str, Any]:
     }
 
 
-def _run(outcomes: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], _Recorder]:
+def _run(
+    outcomes: dict[str, Any], *, unlabelled: bool = False
+) -> tuple[dict[str, Any], dict[str, Any], _Recorder]:
     recorder = _Recorder()
     container, labels = _container(recorder, outcomes)
+    if unlabelled:
+        labels = {}
     state = _state()
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr("maljan.pipeline.nodes._revision_input_is_absent", lambda *a: False)
@@ -155,6 +159,22 @@ class TestARevisionTheCeilingRefused:
         assert "The revision was not made (it failed: " in texts["static"]
         assert texts["static"].startswith("9 evidence-backed claims")
         assert "this answer stands" in texts["triage"]
+
+
+class TestAnUnlabelledLongKey:
+    def test_is_named_by_its_stage_not_published_as_a_masked_key(self) -> None:
+        empty_composed = ("", AgentISR(agent_id=LONG_KEY, domain="static", claims=[]))
+        _update, _merged, recorder = _run(
+            {"static": _refused("static"), LONG_KEY: empty_composed, "triage": _refused("triage")},
+            unlabelled=True,
+        )
+        texts = {message["speaker"]: message["text"] for message in recorder.said()}
+        headline = texts[LONG_KEY].split(" Leading:")[0]
+        assert LONG_KEY not in headline
+        assert headline.startswith("23 evidence-backed claims from the ")
+        assert headline.endswith(" analyst layer.")
+        # A short key is still the name.
+        assert texts["static"].startswith("9 evidence-backed claims from the static layer")
 
 
 class TestARevisionThatWasMade:
