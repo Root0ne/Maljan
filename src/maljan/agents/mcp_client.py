@@ -57,6 +57,30 @@ def truncation_target(limit: int) -> int:
     return max(0, int(limit) - len(TRUNCATION_MARKER))
 
 
+async def _cancel_at_the_server(session: Any, request_id: Any, reason: str) -> None:
+    """Tell the server to stop the request this client gave up on. Never raises.
+
+    The client library abandons a request it times out or is cancelled on and
+    says nothing to the server, which then works on with no one waiting — a
+    capa or FLOSS child of a large sample for as long as it takes. The server
+    cancels the request's work when told, and a long-running tool kills its
+    child process with it (``tools.children``).
+    """
+    if request_id is None:
+        return
+    try:
+        from mcp import types
+
+        note = types.ClientNotification(
+            types.CancelledNotification(
+                params=types.CancelledNotificationParams(requestId=request_id, reason=reason)
+            )
+        )
+        await asyncio.shield(asyncio.wait_for(session.send_notification(note), 5.0))
+    except BaseException as exc:  # noqa: BLE001 — a notice that cannot be sent changes nothing
+        logger.debug("the cancellation of request %s was not sent (%s).", request_id, exc)
+
+
 class MCPLangChainToolkit:
     """Toolkit that connects to an MCP server and exposes its tools to LangChain."""
 
@@ -334,17 +358,33 @@ class MCPLangChainToolkit:
             timing: dict[str, Any] = (
                 {"read_timeout_seconds": timedelta(seconds=deadline)} if deadline else {}
             )
+            long_running = guard is not None and guard.long_running(tool_name)
+            # The id the session gives this request: read before the call,
+            # which takes it with no await in between, so a call this client
+            # gives up on can be cancelled at the server by name.
+            request_id = getattr(session, "_request_id", None)
             try:
                 result = await session.call_tool(tool_name, arguments=args, **timing)
             except asyncio.CancelledError:
-                # The caller's own budget ran out while this call was with the
-                # server: a call the server did not answer in the time there
-                # was, counted as one rather than let go as abandoned.
-                if guard is not None and not settled:
+                await _cancel_at_the_server(session, request_id, "the caller stopped waiting")
+                # A long-running tool still at work when its caller stopped
+                # waiting is not a server that failed to answer.
+                if guard is not None and not settled and not long_running:
+                    # The caller's own budget ran out while this call was with
+                    # the server: a call the server did not answer in the time
+                    # there was, counted as one rather than let go as abandoned.
                     guard.failed(
                         "the call did not finish within its caller's budget",
                         trial=trial,
                     )
+                    settled = True
+                raise
+            except Exception as exc:
+                if transport_failure(exc) is not None:
+                    await _cancel_at_the_server(session, request_id, "the client gave up")
+                if long_running and guard is not None and not settled:
+                    # Its own deadline passed: the server was still working.
+                    guard.abandoned(trial=trial)
                     settled = True
                 raise
             if guard is not None:

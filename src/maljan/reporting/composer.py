@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.config import REPORTER_AGENT_KEY
 from maljan.core.logger import logger
+from maljan.core.spend import spend_bound
 from maljan.core.token_ledger import structured_answer
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
@@ -975,6 +976,11 @@ class ReportComposer:
         if overflow is not None:
             self._note_degradation(overflow)
         bound = call_output_bound(cap, window, chars)
+        # A section is always written; past the spend ceiling its output cap is
+        # what the remaining spend pays for.
+        held = spend_bound(getattr(self, "token_ledger", None), self.llm, chars, cap)
+        if held is not None:
+            bound = held if bound is None else min(bound, held)
         if bound is None or not accepts_output_bound(self.llm):
             return None
         return bound

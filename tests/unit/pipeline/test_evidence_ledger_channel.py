@@ -450,3 +450,30 @@ class TestOneSequenceAcrossTheRun:
         assert persisted == ["ev_0001", "ev_0002", "ev_0003"]
         assert len(persisted) == len(set(persisted))
         assert counter.issued == len(persisted)
+
+
+class TestNoRoundPastTheSpendCeiling:
+    def test_the_negotiation_goes_straight_on_to_the_verdict(self) -> None:
+        from maljan.core.spend import SpendMeter
+        from maljan.core.token_ledger import TokenLedger
+
+        counter = EvidenceCounter()
+        container = _JudgeContainer(counter)
+        mediator = container.get_judge_agent(role="expert")
+        _mediates_with_a_tool_call(mediator)
+        meter = SpendMeter(
+            0.01, {"m": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}}, table={}
+        )
+        meter.settle({"input_tokens": 100_000, "output_tokens": 0}, "m")
+        ledger = TokenLedger(spend=meter)
+        container.get_token_ledger = lambda: ledger  # type: ignore[method-assign]
+
+        update = asyncio.run(
+            make_negotiation_node(container)(
+                {"iteration_count": 0, "reports": {"static": "f"}, "isr_reports": {}}
+            )
+        )
+
+        assert update["consensus_applicable"] is False
+        assert _ids(update) == [], "no mediation call was made"
+        assert "further negotiation round" in meter.reason()

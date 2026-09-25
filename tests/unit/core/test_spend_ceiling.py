@@ -141,3 +141,91 @@ class TestTheRunSummary:
     def test_no_ceiling_is_no_block(self) -> None:
         summary = RunSummaryBuilder(start_time=0.0).set_spend(None).build()
         assert "spend" not in summary.to_dict()
+
+
+class TestBeforeEachCall:
+    """A call whose worst case would pass the ceiling: made held, or not made."""
+
+    def _meter(self, ceiling: float = 1.0) -> SpendMeter:
+        return SpendMeter(ceiling, PRICES, table={})
+
+    def test_a_call_that_fits_is_made_as_it_is(self) -> None:
+        meter = self._meter()
+        assert (
+            meter.admit(
+                kind="loop turn", model="deepseek-v4-pro", prompt_chars=3000, cap_tokens=1000
+            )
+            is None
+        )
+
+    def test_an_ordinary_call_past_the_worst_case_is_not_made(self) -> None:
+        from maljan.core.spend import SpendCeilingStop
+
+        meter = self._meter()
+        with pytest.raises(SpendCeilingStop, match="loop turn call"):
+            meter.admit(
+                kind="loop turn", model="deepseek-v4-pro", prompt_chars=3000, cap_tokens=500_000
+            )
+        assert meter.snapshot()["held_calls"]
+
+    def test_the_verdict_is_made_with_its_cap_lowered_to_what_is_left(self) -> None:
+        meter = self._meter()
+        meter.settle({"input_tokens": 0, "output_tokens": 150_000}, "deepseek-v4-pro")
+        # 0.40 USD left at 4 USD a million output tokens is 100,000 tokens.
+        held = meter.admit(
+            kind="verdict", model="deepseek-v4-pro", prompt_chars=0, cap_tokens=384_000
+        )
+        assert held == 100_000
+        (said,) = meter.snapshot()["held_calls"]
+        assert "held to 100,000 output tokens" in said
+
+    def test_after_the_ceiling_only_the_verdict_and_the_report_are_made(self) -> None:
+        from maljan.core.spend import SpendCeilingStop
+
+        meter = self._meter()
+        meter.settle({"input_tokens": 0, "output_tokens": 300_000}, "deepseek-v4-pro")
+        assert meter.reached()
+        with pytest.raises(SpendCeilingStop):
+            meter.admit(
+                kind="validation retry", model="deepseek-v4-pro", prompt_chars=10, cap_tokens=10
+            )
+        assert (
+            meter.admit(kind="report", model="deepseek-v4-pro", prompt_chars=10, cap_tokens=10)
+            is None
+        )
+        assert (
+            "made at its own output cap past the spend ceiling"
+            in (meter.snapshot()["held_calls"][-1])
+        )
+
+    def test_a_model_with_no_price_is_made_until_the_ceiling_is_reached(self) -> None:
+        meter = self._meter()
+        assert (
+            meter.admit(kind="loop turn", model="mystery", prompt_chars=10, cap_tokens=10) is None
+        )
+
+
+class TestTheTagIsKept:
+    def test_two_tags_are_two_prices_and_the_base_name_is_the_fallback(self) -> None:
+        meter = SpendMeter(
+            1.0,
+            {
+                "qwen3:8b": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0},
+                "qwen3": {"input_usd_per_mtok": 9.0, "output_usd_per_mtok": 9.0},
+            },
+            table={},
+        )
+        assert meter.price_of("ollama/qwen3:8b").input == 1.0
+        assert meter.price_of("qwen3:32b").input == 9.0
+
+
+class TestUnreportedUsage:
+    def test_is_counted_and_the_spend_is_at_least(self, caplog: pytest.LogCaptureFixture) -> None:
+        meter = SpendMeter(1.0, PRICES, table={})
+        with caplog.at_level(logging.WARNING, logger="maljan"):
+            meter.settle(None, "deepseek-v4-pro")
+            meter.settle(None, "deepseek-v4-pro")
+        snapshot = meter.snapshot()
+        assert snapshot["unreported_calls"] == 2
+        assert sum("reported no usage" in r.getMessage() for r in caplog.records) == 1
+        assert spend_lines(snapshot)[0].startswith("Spent at least 0.0000 USD")

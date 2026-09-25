@@ -9,6 +9,7 @@ description says the argument is the raw text, unquoted.
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import sys
 from pathlib import Path
@@ -120,7 +121,7 @@ class TestTheAnalysisServer:
 
         monkeypatch.setattr(analysis.emulated_strings, "floss", _fake)
 
-        answer = analysis.floss(path=_sample(tmp_path), pattern='"runnung"')
+        answer = asyncio.run(analysis.floss(path=_sample(tmp_path), pattern='"runnung"'))
 
         assert asked == ["runnung"]
         assert answer["read_as"] == {"pattern": "runnung"}

@@ -534,7 +534,7 @@ def unmapped_behaviours(stix_output: dict[str, Any] | None) -> list[str]:
             # reads; it is a mapped technique and belongs to the matrix.
             continue
         if name and name not in names:
-            names.append(name[:200])
+            names.append(name)
     return names
 
 

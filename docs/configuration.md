@@ -982,10 +982,15 @@ A loop with no limit ends when its model answers, or at one of the stops that
 are not a count: the repeat guard (a model re-asking for answers it already
 has), the conversation's room (a tool answer that no longer fits the window),
 and the job's spend ceiling below. The arq job timeout is the last resort. A
-loop with no time limit has no clock of its own: each model call waits as long
-as its answer takes at the model's measured pace (the request timeout sized in
-the section above), and a model list gives no turn deadline — a stalled model
-is ended by its own request timeout, which the list reads as a provider
+loop with no time limit has no clock of its own. Every model request still has
+a whole-call deadline Maljan enforces itself: the request timeout sized in the
+section above (its output cap at the model's measured pace, prompt read
+included), or the client's own timeout — `PROVIDER_REQUEST_TIMEOUT_SECONDS`,
+1,800 s — where nothing is measured. The client's timeout stays as a second
+guard, on silence: httpx reads it as the longest gap it waits through, so a
+server that trickles keep-alive bytes or answers slowly but steadily was held
+by nothing else. A model list gives no turn deadline in such a loop; a stalled
+model is ended at its whole-call deadline, which the list reads as a provider
 failure and moves on from. The run-state block says `budget remaining: no step
 limit, no time limit` rather than a number, and the run summary's `budget` rows
 carry `max_steps` / `timeout_s` as `null`.
@@ -996,7 +1001,14 @@ converges; `core.react_agent_tool_call_budget` only ever logs a warning;
 capa and FLOSS on the analysis server have no wall clock of their own and run
 for as long as their caller asks (the triage pack passes
 `core.static.capa.timeout_seconds` and what is left of
-`core.triage.budget_seconds`), and their manifest declares none;
+`core.triage.budget_seconds`), and their manifest declares none and marks them
+`long_running`. A model's call of either is waited for with no client deadline
+unless you set `core.mcp.breaker.call_timeout_seconds`; a timeout or a
+cancellation of such a call is not counted by the breaker; a call the client
+gives up on, or a job that ends, is cancelled at the server, which kills the
+tool's child process with its process group; and a second call of the same
+run (the same tool, sample and arguments) joins the one already going instead
+of starting another child;
 `ANSWER_SHARE`, the share of the window one tool answer is sized from, stays a
 documented derivation constant; the Ghidra sink pre-pass waits one tool call's
 deployment budget (`core.mcp.breaker.call_timeout_seconds`, derived as that
@@ -1020,14 +1032,28 @@ then a `prices` row of the vendored model table
 (`data/model_context_windows_v1.json`), which carries DeepSeek's documented
 peak prices for `deepseek-flash` and `deepseek-v4-pro` with the page they are
 documented on — data, not a limit, and the peak rate so the figure is never
-below what a call cost. DeepSeek's off-peak rate is half the peak one, so a run
+below what a call cost. A price key keeps a model's tag (`qwen3:8b` and
+`qwen3:32b` are two models); the base name answers only where no row names
+the tag. A call whose provider reported no usage is counted, and the spend is
+then said as "at least X; N calls reported no usage"; a model that never
+reports usage cannot trip the ceiling, and the log says so once. DeepSeek's off-peak rate is half the peak one, so a run
 priced at the vendored rates off-peak reads up to twice what it was billed; the
 run summary says "priced at the vendored rates" beside each such model, and an
-operator's `model_prices` row replaces the vendored one. When the ceiling is reached every running tool loop
-ends its tool phase and its agent writes its answer from what it gathered (the
-salvage a step limit uses); a loop that starts afterwards answers once without
-tools, an ask is refused, and the judge's verdict and the report still run, so
-the report is never lost. The run summary's degradation reasons say the
+operator's `model_prices` row replaces the vendored one. The ceiling is checked twice. Before each model call, the call's
+worst case — its whole prompt as uncached input and its whole output cap as
+output — is priced; a call whose worst case would pass what is left is not
+made, unless it is the verdict, a report section or the answer a tool loop the
+ceiling ended writes from what it gathered, which are made with their output
+cap lowered to what the remaining spend pays for (and, once nothing is left,
+at their own cap, so the verdict and the report are never lost). Each such
+decision is logged and listed in `run_summary.spend.held_calls`. After each
+model turn the spend so far — this loop's running turns included — is
+compared with the ceiling. When it is reached every running tool loop ends its
+tool phase and its agent writes its answer from what it gathered; no further
+negotiation round, chunk or tool loop is started, an ask is refused, and only
+the verdict and the report run, tool-free. The ceiling is a trip: a turn
+already in flight when it is reached is not recalled, so set it below the true
+limit by the cost of the verdict and the report. The run summary's degradation reasons say the
 ceiling ended the tool phases, and `run_summary.spend` carries the ceiling, the
 spend, whether it was reached and where each model's prices came from. A model
 with no price is named once in the log and in `run_summary.spend`

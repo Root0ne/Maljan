@@ -2138,6 +2138,34 @@ change landed on `main`.
 
 ### Fixed
 
+- **Every model request has a whole-call deadline.** Maljan enforces the
+  request's sized timeout (its output cap at the measured pace, or the
+  client's own 1,800 s where nothing is measured) over the whole call; the
+  client's timeout is only the longest silence httpx waits through, which a
+  server trickling keep-alive bytes never reaches. Ollama is held to it too.
+- **The judge's tool loop has the analysts' repeat guard**, and its running
+  turns are priced under its own model label, so they move the spend and trip
+  the ceiling (a lone model's unstamped turns were priced at nothing).
+- **capa and FLOSS on the analysis sidecar**: the client waits for them with
+  no deadline unless the operator set one, their timeouts and cancellations
+  are not breaker failures, a call the client gives up on or a job that ends
+  is cancelled at the server, which kills the child process with its process
+  group, and a retry of the same run joins the running one.
+- **String IOCs are all returned.** The 120-row cap and the per-kind quotas in
+  `iocs_from_text` / `iocs_from_file` and the static extractor are gone; the
+  tool-answer sizing and paging carry the rest. `apk_info` states the full
+  count of every list its `limit` cut, a YARA match states its length beside
+  its hex, a sandbox API row states how many processes called it and marks
+  the arguments it cuts, and a carved-file refusal counts the names it does
+  not list.
+- **The spend ceiling ends the run's rounds.** Once it is reached no further
+  negotiation round, chunk or tool loop starts; before any call, one whose
+  worst case would pass the ceiling is not made unless it is the verdict, a
+  report section or a loop's closing answer, which are held to the output the
+  remaining spend pays for and recorded in `run_summary.spend.held_calls`.
+  Price keys keep the model's tag; unreported usage is counted and the spend
+  said as "at least"; the summariser's shortened prompt is a degradation
+  reason; a no-clock delegation wait stops when its job is cancelled.
 - **A chunked analyst's validation turn runs under the agent's lock**, as the
   single-chunk path's does, so a delegated ask of the same agent cannot land
   between the findings buffer's mark and slice.

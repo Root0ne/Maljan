@@ -335,6 +335,11 @@ def _spawn(
         start_new_session=True,
         preexec_fn=_limit_address_space,  # noqa: PLW1509 - one setrlimit call
     )
+    # Its own session, so its group is what the server kills when every caller
+    # of this run has gone (``tools.children``).
+    from maljan.tools import children
+
+    children.register(lambda: children.kill_process_group(process.pid))
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:

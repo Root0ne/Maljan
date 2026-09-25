@@ -26,8 +26,16 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.base_agent import FINAL_ANSWER_NUDGE, SPEND_CEILING_QUESTION
-from maljan.agents.delegation import _what_an_ask_gets_sentence
+from maljan.agents.base_agent import (
+    FINAL_ANSWER_NUDGE,
+    INPUT_SHORTENED_NOTICE,
+    SPEND_CEILING_QUESTION,
+)
+from maljan.agents.delegation import (
+    SPEND_CEILING_REFUSAL,
+    WAITING_ON_EACH_OTHER_REFUSAL,
+    _what_an_ask_gets_sentence,
+)
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
     EVIDENCE_SHORTENED_NOTICE,
@@ -65,6 +73,7 @@ from maljan.agents.tool_pinning import (
     UNREADABLE_FILLED_CAPTURE,
     UNREADABLE_FILLED_CAPTURE_REMEDIATION,
 )
+from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
 from maljan.analysis.pcap_summary import CaptureRead
 from maljan.extractors.capability_matrix import NOT_ASKED_UNKNOWN_ID, TechniqueQuestion
 from maljan.pipeline import triage_pack
@@ -78,6 +87,7 @@ from maljan.pipeline.validation import (
     ANALYST_FEEDBACK_CLOSING,
     CapabilityGrounding,
     EntryTexts,
+    _term_ids_said,
     absence_claim_violation,
     analyst_cut_violation,
     claim_does_not_describe_violation,
@@ -343,6 +353,18 @@ PROMPTS: dict[str, str] = {
         cut=2, total=5, names="static report, evidence summary", width=900
     ),
     "a loop started past the spend ceiling": SPEND_CEILING_QUESTION,
+    "an analyst input shortened to its window": INPUT_SHORTENED_NOTICE.format(
+        detail="the first 1,000 of 9,000 characters are shown, ending in …"
+    ),
+    "a summariser prompt shortened to its window": SUMMARISER_SHORTENED_NOTE.format(
+        shown=1000, total=9000
+    ),
+    "an ask refused at the spend ceiling": SPEND_CEILING_REFUSAL.format(callee="'helper'"),
+    "an ask refused for a mutual wait": WAITING_ON_EACH_OTHER_REFUSAL.format(callee="'helper'"),
+    "the pack's decoded strings in part": triage_pack.DECODED_STRINGS_ROOM_SENTENCE.format(
+        shown=10, total=90, offset=10
+    ),
+    "a term's example ids and how many more": _term_ids_said(["T1000", "T1001", "T1002"]),
     "run-state budget line of a loop with no limit": budget_line(NO_LIMIT, NO_LIMIT),
     "ask tool budget sentence with no limit": _what_an_ask_gets_sentence("lead", None, None),
     "judge technique question head": technique_question_head("r", "Suspicious", ["T1112"]),

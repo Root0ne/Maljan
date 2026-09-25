@@ -651,25 +651,41 @@ def apk_info(
         out["min_sdk"] = apk.get_min_sdk_version()
         out["target_sdk"] = apk.get_target_sdk_version()
     if permissions:
-        out["permissions"] = sorted(apk.get_permissions())[:limit]
+        out["permissions"] = _within_limit(out, "permissions", apk.get_permissions(), limit)
     if components:
-        out["activities"] = sorted(apk.get_activities())[:limit]
-        out["services"] = sorted(apk.get_services())[:limit]
-        out["receivers"] = sorted(apk.get_receivers())[:limit]
-        out["providers"] = sorted(apk.get_providers())[:limit]
+        out["activities"] = _within_limit(out, "activities", apk.get_activities(), limit)
+        out["services"] = _within_limit(out, "services", apk.get_services(), limit)
+        out["receivers"] = _within_limit(out, "receivers", apk.get_receivers(), limit)
+        out["providers"] = _within_limit(out, "providers", apk.get_providers(), limit)
     if certs:
         out["signing_schemes"] = {
             "v1": bool(apk.is_signed_v1()),
             "v2": bool(apk.is_signed_v2()),
             "v3": bool(apk.is_signed_v3()),
         }
-        out["certificates"] = [
+        every_cert = [
             {"subject": str(cert.subject), "issuer": str(cert.issuer), "sha256": cert.sha256.hex()}
             for cert in apk.get_certificates()
-        ][:limit]
+        ]
+        out["certificates"] = every_cert[:limit]
+        if len(every_cert) > limit:
+            out.setdefault("totals", {})["certificates"] = len(every_cert)
     if dex_strings:
         out["dex_strings"] = _apk_dex_strings(apk, limit)
     return out
+
+
+def _within_limit(out: dict[str, Any], name: str, values: Any, limit: int) -> list[Any]:
+    """The first ``limit`` of ``values``, sorted; the full count under ``totals`` when cut.
+
+    ``limit`` is the caller's own argument, and a list it cut says so: the
+    answer's ``totals`` holds how many there were, so a model reads a page as
+    a page and can ask again with a larger ``limit``.
+    """
+    ordered = sorted(values or [])
+    if len(ordered) > limit:
+        out.setdefault("totals", {})[name] = len(ordered)
+    return ordered[:limit]
 
 
 def _apk_zip_facts(target: Path, limit: int, *, native_libs: bool, certs: bool) -> dict[str, Any]:
@@ -697,8 +713,8 @@ def _apk_zip_facts(target: Path, limit: int, *, native_libs: bool, certs: bool) 
     out["dex_count"] = len(out["dex_files"])
     out["abis"] = sorted(abis)
     out["entry_count"] = len(names)
-    out["dex_files"] = sorted(out["dex_files"])[:limit]
-    out["native_libs"] = sorted(out["native_libs"])[:limit]
+    out["dex_files"] = _within_limit(out, "dex_files", out["dex_files"], limit)
+    out["native_libs"] = _within_limit(out, "native_libs", out["native_libs"], limit)
     out["cert_files"] = sorted(out["cert_files"])
     return out
 

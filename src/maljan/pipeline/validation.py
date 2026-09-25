@@ -30,6 +30,9 @@ from typing import Any, get_args, get_origin
 from pydantic import ValidationError
 
 from maljan.agents.run_evidence_corpus import CorpusState, both_searched
+
+# The row helpers live with the shape (``analysis.corroboration``) and are
+# re-exported here, where every reader of a run's validation looks for them.
 from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
 from maljan.analysis.technique_ids import MITRE_ATTACK_SOURCES, TECHNIQUE_ID_EXACT_RE
@@ -45,9 +48,6 @@ from maljan.pipeline.events import (
 from maljan.schemas.evidence import entry_ids_in
 from maljan.schemas.judgement import BENIGN_VERDICT, SEVERITY_RATINGS, VERDICT_VALUES
 from maljan.schemas.stix_pattern import read_comparisons
-
-# The row helpers live with the shape (``analysis.corroboration``) and are
-# re-exported here, where every reader of a run's validation looks for them.
 from maljan.utils.marked_cut import marked_cut
 from maljan.utils.written_forms import written_forms
 
@@ -2130,10 +2130,10 @@ _TERM_IDS_SHOWN = 2
 
 
 def _term_ids_said(techniques: Sequence[str]) -> str:
-    """The first ids of a term, and how many more it has."""
+    """The first ids of a term, and how many more it has ("T1027, T1140 and 3 more")."""
     said = ", ".join(techniques[:_TERM_IDS_SHOWN])
     rest = len(techniques) - _TERM_IDS_SHOWN
-    return f"{said} (or {rest} more)" if rest > 0 else said
+    return f"{said} and {rest} more" if rest > 0 else said
 
 
 # A sentence whose assertion is that a rule matched: the matcher, a rule or a
@@ -3571,7 +3571,7 @@ def misstated_entry_contents(
                 code=ENTRY_CONTENTS_MISSTATED_CODE,
                 message=(
                     f"The text says {named} {safe_finding_value(said)} "
-                    f"({safe_finding_value(sentence[:200])!r}); {named} holds "
+                    f"({safe_finding_value(marked_cut(sentence, 200))!r}); {named} holds "
                     f"{safe_finding_value(held)} values in "
                     "this run. State what the entry holds, or cite the entry the statement is "
                     "about."

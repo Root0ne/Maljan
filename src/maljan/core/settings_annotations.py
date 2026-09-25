@@ -219,9 +219,14 @@ ANNOTATIONS: dict[str, Annotation] = {
             "is no ceiling. Spend is the provider-reported usage of every call (cached "
             "input, input and output tokens) at the prices of the model that answered: "
             "llm.model_prices first, then a price the vendored model table documents. "
-            "When it is reached every running tool loop ends its tool phase and its agent "
-            "writes its answer from what it gathered; the verdict and the report still "
-            "run, tool-free, and a degradation reason says so. A model with no price is "
+            "Before each call, one whose worst case (whole prompt as input, whole output "
+            "cap as output) would pass what is left is not made, unless it is the verdict, "
+            "a report section or a loop's closing answer, which are held to the output "
+            "the remaining spend pays for. When it is reached every running tool loop "
+            "writes its answer from what it gathered, no further negotiation round, chunk "
+            "or tool loop starts, and only the verdict and the report run, tool-free; a "
+            "degradation reason says so. It is a trip, not a cap: set it below the true "
+            "limit by the verdict's and the report's cost. A model with no price is "
             "named once in the log and the run summary and its calls are not counted, so "
             "the figure compared is what the job spent at least."
         ),
@@ -254,9 +259,9 @@ ANNOTATIONS: dict[str, Annotation] = {
             "before any timeout inside it: the default of a half leaves the other half of "
             "the loop to the model that took over. The last model on a list has no "
             "deadline of its own and is bounded by the loop, as a lone model is. A loop "
-            "with no time limit gives no turn deadline: a stalled model is ended by its own "
-            "request timeout, sized for its answer at its measured pace, and the list "
-            "moves on from that as from any provider failure."
+            "with no time limit gives no turn deadline: a stalled model is ended at its "
+            "whole-call deadline (the request's sized timeout, enforced over the whole "
+            "call), and the list moves on from that as from any provider failure."
         ),
         "advanced": True,
     },
@@ -742,8 +747,8 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Hard ceiling on negotiation rounds between agents, kept as an explicit "
             "setting. Not the expected round count — the primary exit is adaptive "
             "termination on the rolling standard deviation of confidence history; this "
-            "ceiling only stops a runaway loop when that convergence fails, which nothing "
-            "else stops when no spend ceiling is set."
+            "ceiling stops a runaway loop when that convergence fails. A reached spend "
+            "ceiling also ends the rounds: none is held after it."
         ),
     },
     "openai_api_key": {

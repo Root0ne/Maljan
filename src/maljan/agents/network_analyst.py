@@ -291,7 +291,8 @@ class NetworkAnalyst(BaseAnalyst):
                 # OPTIONAL deep-dive: on a constrained local model an unbounded
                 # read_pcap_summary loop over-ran the 330s analyst budget and
                 # aborted, so we hand the analyst the structured evidence up front
-                # and cap the PCAP peek (react_agent_max_steps_overrides.network).
+                # and ask for a short PCAP peek in the prompt below; the loop
+                # itself has no step limit unless an operator sets one.
                 packet_tools = _pcap_tools_in(self.tools)
                 peek = (
                     "You MAY make at most one or two PCAP tool calls "

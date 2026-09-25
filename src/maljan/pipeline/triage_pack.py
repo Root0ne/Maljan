@@ -1706,6 +1706,11 @@ def _pcap(data: dict[str, Any], max_chars: int | None = None) -> str:
 # (:class:`PackDetail`) and the room left to the line decide how many, and the
 # line says how many it shows and where the rest are.
 DECODED_STRINGS_ROWS = 200
+# What the line says when the pack's room holds only some of the strings.
+DECODED_STRINGS_ROOM_SENTENCE = (
+    "{shown} of {total} shown (every agent reads the pack, and this is what fits its "
+    "room); the rest are one floss call away at offset {offset}"
+)
 
 # Said in the line itself, before the strings: they are the sample's words,
 # and a bracket, an id or an instruction inside one is the sample's too.
@@ -1797,9 +1802,8 @@ def _decoded_strings(data: dict[str, Any], max_chars: int | None = None) -> str:
                     "agent reads fits its room; the whole string is in the entry)"
                 )
         else:
-            said = (
-                f"{_n(shown)} of {_n(total)} shown (every agent reads the pack, and this is "
-                f"what fits its room); the rest are one floss call away at offset {shown}"
+            said = DECODED_STRINGS_ROOM_SENTENCE.format(
+                shown=_n(shown), total=_n(total), offset=shown
             )
         if not shown:
             return f"{head}; {said}"

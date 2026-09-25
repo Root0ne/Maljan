@@ -36,7 +36,7 @@ from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError
 from maljan.core.logger import logger
-from maljan.core.spend import SPEND_CAP
+from maljan.core.spend import SPEND_CAP, SpendCeilingStop
 from maljan.core.token_ledger import TokenLedger, record_response_usage
 from maljan.llm.context_window import (
     CHARS_PER_TOKEN,
@@ -919,6 +919,21 @@ def shorten_input(text: str, room: int) -> tuple[str, str]:
         detail = f"the first {len(body):,} of {len(text):,} characters are shown, ending in …"
     notice = INPUT_SHORTENED_NOTICE.format(detail=detail)
     return f"{notice}\n\n{body}", detail
+
+
+def spend_reached(agent: Any) -> bool:
+    """Whether the job ``agent`` serves has reached its spend ceiling. Never raises.
+
+    A module function, so a duck-typed analyst that borrows one method is held
+    to the same rule.
+    """
+    from maljan.core.spend import SpendMeter
+
+    meter = getattr(getattr(agent, "token_ledger", None), "spend", None)
+    try:
+        return isinstance(meter, SpendMeter) and meter.reached() is True
+    except Exception:  # noqa: BLE001 — a meter is never worth a lost analysis
+        return False
 
 
 def slowest_call(entries: Any) -> str:
@@ -3409,6 +3424,10 @@ class BaseAnalyst(BudgetMeter, ABC):
             # And what the request weighs, block included, which is what the
             # next tool answer's cap is measured against.
             self._note_conversation(sent)
+            # The spend ceiling's word on the turn about to be sent: a turn
+            # whose worst case would pass it is not sent, and the loop's
+            # salvage writes the answer from what was gathered.
+            self._spend_admits("loop turn", sent)
             # The meter, every few steps: a tick per turn would be a stream
             # of near-identical events on a forty-step loop.
             used = steps_used(messages)
@@ -3494,23 +3513,28 @@ class BaseAnalyst(BudgetMeter, ABC):
 
         # A loop that starts after the job's spend ceiling was reached has no
         # tool phase: its agent answers once, tool-free, from what it was given.
-        spent_out = self._spend_reached()
-        if not self.tools or spent_out:
+        # A loop that would start after the job's spend ceiling was reached is
+        # not started: once it is reached only the verdict and the report run.
+        if self._spend_reached():
+            plain = LoopBudget(max_steps, timeout)
+            self._record_budget(plain, [], SPEND_CAP, detail=self._spend_reason())
+            self.logger.warning(
+                "%s: the job's spend ceiling is reached; this loop is not started.", self.name
+            )
+            return ""
+        if not self.tools:
             plain = LoopBudget(max_steps, timeout)
             self._last_loop_deadline = plain.deadline()
-            sent = with_question(prebuilt, SPEND_CEILING_QUESTION) if spent_out else prebuilt
             try:
-                answer = self._invoke_llm_with_timeout(sent, timeout)
+                answer = self._invoke_llm_with_timeout(prebuilt, timeout)
             except TimeoutError:
                 self._record_budget(plain, [], "time", detail="the model did not answer in time")
                 raise
+            except SpendCeilingStop as stop:
+                self._record_budget(plain, [], SPEND_CAP, detail=str(stop))
+                return ""
             self.steps_spent += 1
-            self._record_budget(
-                plain,
-                [],
-                SPEND_CAP if spent_out else None,
-                detail=self._spend_reason() if spent_out else "",
-            )
+            self._record_budget(plain, [], None)
             return self._capture_findings(answer)
 
         from langgraph.errors import GraphRecursionError
@@ -3776,6 +3800,13 @@ class BaseAnalyst(BudgetMeter, ABC):
                                     time_detail,
                                 )
                                 break
+                    except SpendCeilingStop:
+                        spend_capped = True
+                        self.logger.warning(
+                            "%s ReAct loop ended: the next turn does not fit the job's spend "
+                            "ceiling; synthesising from what it gathered.",
+                            self.name,
+                        )
                     except GraphRecursionError:
                         # The step cap, reached without langgraph's own
                         # "need more steps" turn — which it only takes when
@@ -4129,7 +4160,10 @@ class BaseAnalyst(BudgetMeter, ABC):
 
     def _spend_meter(self) -> Any:
         """The job's spend meter (``core.spend.SpendMeter``), or ``None``."""
-        return getattr(getattr(self, "token_ledger", None), "spend", None)
+        from maljan.core.spend import SpendMeter
+
+        meter = getattr(getattr(self, "token_ledger", None), "spend", None)
+        return meter if isinstance(meter, SpendMeter) else None
 
     def _spend_reached(self) -> bool:
         """Whether the job's spend ceiling is reached. Never raises."""
@@ -4138,6 +4172,25 @@ class BaseAnalyst(BudgetMeter, ABC):
             return bool(meter is not None and meter.reached() is True)
         except Exception:  # noqa: BLE001 — a meter is never worth a lost loop
             return False
+
+    def _spend_admits(self, kind: str, messages: list[Any]) -> int | None:
+        """The spend ceiling's word on one call before it is made (``SpendMeter.admit``).
+
+        ``None`` to make it as it is, a number to make it with that output
+        cap; raises :class:`SpendCeilingStop` when it is not to be made.
+        """
+        meter = self._spend_meter()
+        if meter is None:
+            return None
+        return cast(
+            "int | None",
+            meter.admit(
+                kind=kind,
+                model=self._model_label() or _model_label(self.llm),
+                prompt_chars=sum(_message_chars(m) for m in messages) + self._definitions_sent(),
+                cap_tokens=analyst_output_cap(str(getattr(self, "name", "") or "")),
+            ),
+        )
 
     def _spend_reason(self) -> str:
         meter = self._spend_meter()
@@ -4247,6 +4300,11 @@ class BaseAnalyst(BudgetMeter, ABC):
             with_question(sendable, FINAL_ANSWER_NUDGE), stated_steps, stated_time
         )
         budget = remaining_time
+        try:
+            self._spend_admits("final-answer nudge", list(turns))
+        except SpendCeilingStop:
+            self.logger.info("%s: the spend ceiling leaves no room for the nudge.", self.name)
+            return None
 
         def _ask_with(model: Any, label: str, sent: list[Any] | None = None) -> Any:
             messages = turns if sent is None else sent
@@ -4657,6 +4715,15 @@ class BaseAnalyst(BudgetMeter, ABC):
         # rather than a throwaway per-call loop, so no openai async client is
         # ever orphaned on a closed loop.
         llm: Any = self.llm if model is None else model
+        # The spend ceiling's word before the call: a salvage is made with its
+        # cap lowered to what is left, anything else past the ceiling is not
+        # made (``SpendCeilingStop`` reaches the caller).
+        bound = self._spend_admits(
+            "salvage" if what == "step-cap salvage" else what, list(messages)
+        )
+        from maljan.llm.context_window import output_bound_kwargs
+
+        bound_kwargs = output_bound_kwargs(llm, bound) if bound is not None else {}
 
         async def _invoke() -> str:
             # ``what`` goes into the format itself so the timeout stays the
@@ -4671,9 +4738,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             # that stubs only ``invoke`` is still run in a thread.
             ask = getattr(type(llm), "ainvoke", None)
             call = (
-                llm.ainvoke(messages)
+                llm.ainvoke(messages, **bound_kwargs)
                 if inspect.iscoroutinefunction(ask)
-                else asyncio.to_thread(llm.invoke, messages)
+                else asyncio.to_thread(llm.invoke, messages, **bound_kwargs)
             )
             response = await asyncio.wait_for(
                 call, timeout=None if timeout is None else float(timeout)
@@ -4693,7 +4760,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 limit_text(hard_timeout, "s"),
             )
             raise
-        except AnalystError:
+        except (AnalystError, SpendCeilingStop):
             raise
         except Exception as exc:
             self.logger.error("LLM %s failed: %s (%s)", what, type(exc).__name__, exc)
@@ -5047,6 +5114,11 @@ class BaseAnalyst(BudgetMeter, ABC):
         errors: list[str] = []
 
         for chunk in chunks:
+            # No new chunk once the job's spend ceiling is reached: what the
+            # chunks so far gathered is merged, and the degradation says why.
+            if spend_reached(self):
+                errors.append(f"chunk {chunk.index + 1}: not started, the spend ceiling is reached")
+                continue
             prompt_text = f"{chunk.to_prompt_header()}\n\n{chunk.content}"
             try:
                 # Each chunk's loop under this agent's lock, so an ask of it
@@ -6069,8 +6141,12 @@ class BaseAnalyst(BudgetMeter, ABC):
         ``max_token_limit`` where the operator set it, counted in the tokens of
         this text (its characters a token as ``tiktoken`` measures them).
         Otherwise the window's room before the reply
-        (``ContextBudget.tool_budget_chars``) less the prompt around the input:
-        the system prompt, the pack and the run-state block.
+        (``ContextBudget.tool_budget_chars``) less the prompt around the input
+        — the system prompt, the pack, the run-state block and the tool
+        definitions every request carries — and less the share one tool answer
+        is sized from (``ANSWER_SHARE``), so a loop over an input sized to the
+        room still has room for its first answer. The notice a shortened input
+        begins with is kept out of the room in both cases.
         """
         configured = getattr(get_settings(), "max_token_limit", None)
         if isinstance(configured, int) and not isinstance(configured, bool) and configured > 0:
@@ -6079,8 +6155,8 @@ class BaseAnalyst(BudgetMeter, ABC):
                 per_token = max(1.0, len(text) / tokens)
             except (KeyError, OSError, ValueError):
                 per_token = float(_CHARS_PER_TOKEN)
-            return int(configured * per_token)
-        from maljan.llm.context_window import ContextBudget
+            return max(0, int(configured * per_token) - INPUT_NOTICE_ROOM)
+        from maljan.llm.context_window import ANSWER_SHARE, ContextBudget
 
         budget = self._context_budget()
         if not isinstance(budget, ContextBudget) or not budget.derives:
@@ -6091,4 +6167,7 @@ class BaseAnalyst(BudgetMeter, ABC):
             framing = 0
         framing += len(str(getattr(self, "facts_block", "") or ""))
         framing += len(str(getattr(self, "run_state_block", "") or ""))
-        return max(0, int(budget.tool_budget_chars()) - framing - INPUT_NOTICE_ROOM)
+        framing += self._definitions_sent() or tool_definition_chars(list(self.tools or []))
+        room = int(budget.tool_budget_chars())
+        answers = int(room * ANSWER_SHARE)
+        return max(0, room - framing - answers - INPUT_NOTICE_ROOM)

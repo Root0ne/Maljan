@@ -85,6 +85,17 @@ SECONDS_KEPT_FOR_THE_CALLER = 15.0
 SECONDS_WAITING_OUTSIDE_A_LOOP = 300.0
 
 
+# The two refusals the no-limit budget brought, in the words the model reads.
+SPEND_CEILING_REFUSAL = (
+    "the job's spend ceiling is reached, so {callee} cannot be asked; "
+    "write your answer from what you have"
+)
+WAITING_ON_EACH_OTHER_REFUSAL = (
+    "agent {callee} is itself waiting on an answer from you, so neither could go on; "
+    "answer from what you have or ask someone else"
+)
+
+
 class DelegationRefused(Exception):
     """An ask that is not made, with the reason in the words the model reads."""
 
@@ -228,10 +239,7 @@ def refusal(container: Any, caller: Any, callee_key: str) -> str | None:
         )
     meter = getattr(getattr(caller, "token_ledger", None), "spend", None)
     if meter is not None and meter.reached() is True:
-        return (
-            f"the job's spend ceiling is reached, so {callee_key!r} cannot be asked; "
-            "write your answer from what you have"
-        )
+        return SPEND_CEILING_REFUSAL.format(callee=repr(callee_key))
     budget = getattr(caller, "loop_budget", None)
     if budget is not None:
         # Time, and only time. An ask has a step budget of its own, so the
@@ -336,10 +344,7 @@ def ask(container: Any, *, caller_key: str, callee_key: str, task: str, context:
             callee.delegation_lock, _seconds_to_wait_for(caller), caller, callee
         )
         if freed is None:
-            raise DelegationRefused(
-                f"agent {callee_key!r} is itself waiting on an answer from you, so neither "
-                "could go on; answer from what you have or ask someone else"
-            )
+            raise DelegationRefused(WAITING_ON_EACH_OTHER_REFUSAL.format(callee=repr(callee_key)))
         if not freed:
             raise DelegationRefused(
                 f"agent {callee_key!r} is busy with its own work and did not free up in time; "
@@ -407,8 +412,15 @@ def _held_unless_waiting_on_each_other(
         return _held(lock, wait)
     with _WAITING_LOCK:
         _WAITING_FOR[id(caller)] = callee
+    from maljan.core import cancellation
+
+    job = cancellation.current()
     try:
         while not lock.acquire(timeout=_WAIT_POLL_SECONDS):
+            # A cancelled job's waiter stops here rather than when the callee
+            # frees up.
+            if job is not None:
+                job.check("while an ask waited for a busy agent")
             if _waits_on(_waiting_for(callee), caller):
                 return None
         return True

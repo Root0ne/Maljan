@@ -447,3 +447,43 @@ class TestTheCallDeadline:
         settings = Settings()
         settings.mcp.breaker.call_timeout_seconds = 45
         assert guard_from_settings("x", settings).call_timeout("t") == 75.0
+
+
+class TestALongRunningToolIsNotAFailingServer:
+    """capa and FLOSS have no wall clock; a caller giving up on one is not a server failing."""
+
+    class _Session(_Session):
+        def __init__(self, script: list[Any]) -> None:
+            super().__init__(script)
+            self._request_id = 7
+            self.notified: list[Any] = []
+
+        async def send_notification(self, note: Any) -> None:
+            self.notified.append(note)
+
+    def _capa(self, toolkit: MCPLangChainToolkit) -> Any:
+        spec = SimpleNamespace(
+            name="capa",
+            description="Run capa.",
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        )
+        return toolkit._create_langchain_tool(spec)
+
+    def test_its_timeouts_do_not_rest_the_server_and_the_server_is_told_to_stop(self) -> None:
+        guard, _clock, opened = _guard(failures_to_open=1)
+        guard.declare({"capa": {"timeout_s": None, "long_running": True}})
+        timed_out = McpError(ErrorData(code=408, message="Timed out"))
+        session = self._Session([timed_out, timed_out])
+        toolkit = MCPLangChainToolkit(guard=guard)
+        toolkit.session = session  # type: ignore[assignment]
+        tool = self._capa(toolkit)
+
+        async def main() -> None:
+            await tool.ainvoke({})
+            await tool.ainvoke({})
+
+        asyncio.run(main())
+        assert opened == [], "a long-running tool's timeout is not a transport failure"
+        assert guard.refusal("capa") is None
+        (first, _second) = session.notified
+        assert first.root.params.requestId == 7

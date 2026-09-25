@@ -41,6 +41,35 @@ MILLION = 1_000_000
 # ``repeats`` and ``no_room``.
 SPEND_CAP = "spend"
 
+# The calls that are still made when their worst case would pass the ceiling:
+# the verdict and a report section (the report is never lost), and the answer
+# a tool loop the ceiling ended writes from what it gathered. Each is made with
+# its output cap lowered to what the remaining spend pays for.
+HELD_KINDS = frozenset({"verdict", "report", "salvage"})
+
+
+class SpendCeilingStop(Exception):
+    """A model call the operator's spend ceiling does not admit, in the words the run records."""
+
+
+def spend_bound(ledger: Any, llm: Any, prompt_chars: int, cap_tokens: int) -> int | None:
+    """A report section's output cap under the spend ceiling, or ``None`` for its own."""
+    meter = getattr(ledger, "spend", None)
+    if not isinstance(meter, SpendMeter):
+        return None
+    try:
+        from maljan.llm.generation_rate import model_name_of
+
+        held: int | None = meter.admit(
+            kind="report",
+            model=model_name_of(llm),
+            prompt_chars=int(prompt_chars),
+            cap_tokens=int(cap_tokens),
+        )
+        return held
+    except Exception:  # noqa: BLE001 — a report section is never lost over the meter
+        return None
+
 
 def _number(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
@@ -118,13 +147,17 @@ def table_prices() -> dict[str, Price]:
 
 
 def _clean(model: str) -> str:
-    """A model name as the tables key it: lower-cased, without its endpoint, vendor path or tag.
+    """A model name as the tables key it: lower-cased, without its endpoint or vendor path.
 
     A model list labels a model ``openai/deepseek-flash @ https://api.deepseek.com``;
-    the price is the model's, whichever endpoint served it.
+    the price is the model's, whichever endpoint served it. The tag after a
+    colon is kept: ``qwen3:8b`` and ``qwen3:32b`` are two models.
     """
     name = str(model or "").strip().lower().split(" @ ", 1)[0].strip()
-    name = name.rsplit("/", 1)[-1]
+    return name.rsplit("/", 1)[-1]
+
+
+def _untagged(name: str) -> str:
     return name.split(":", 1)[0]
 
 
@@ -154,6 +187,9 @@ class SpendMeter:
         self._priced_from: dict[str, str] = {}
         self._reached_at: float | None = None
         self._said_unpriced = False
+        self._unreported = 0
+        # What the ceiling did to calls before they were made, one sentence each.
+        self._held: list[str] = []
 
     @classmethod
     def from_settings(cls, cfg: Any) -> SpendMeter:
@@ -168,14 +204,18 @@ class SpendMeter:
         name = _clean(model)
         if not name:
             return None
-        found = self._operator.get(name)
-        if found is not None:
-            return found
         table = self._table if self._table is not None else table_prices()
-        return table.get(name)
+        # The tagged name first, in the operator's prices and then the table's;
+        # the base name only where no row names the tag.
+        for key in dict.fromkeys((name, _untagged(name))):
+            found = self._operator.get(key) or table.get(key)
+            if found is not None:
+                return found
+        return None
 
     def _cost(self, usage: Mapping[str, Any] | None, model: str) -> float | None:
         if usage is None:
+            self._note_unreported()
             return None
         price = self.price_of(model)
         name = _clean(model) or "(unnamed model)"
@@ -185,6 +225,18 @@ class SpendMeter:
         with self._lock:
             self._priced_from.setdefault(name, price.source)
         return price.cost(usage)
+
+    def _note_unreported(self) -> None:
+        """One call whose provider reported no usage: counted, and said once with a ceiling."""
+        with self._lock:
+            self._unreported += 1
+            first = self._unreported == 1 and self.ceiling_usd is not None
+        if first:
+            logger.warning(
+                "spend ceiling: a call reported no usage, so it cannot be priced; the spend "
+                "compared with the ceiling leaves it out. A model that never reports usage "
+                "(a local or mock one) cannot trip the ceiling."
+            )
 
     def _note_unpriced(self, name: str) -> None:
         with self._lock:
@@ -221,6 +273,9 @@ class SpendMeter:
                 if getattr(turn, "type", "") != "ai":
                     continue
                 answered_by, _fallback = turn_model(turn, model)
+                if not answered_by:
+                    metadata = getattr(turn, "response_metadata", None) or {}
+                    answered_by = str(metadata.get("model_name") or "")
                 usage = turn_usage(turn)
                 if usage is None:
                     continue
@@ -237,6 +292,86 @@ class SpendMeter:
         """A loop whose turns the ledger now holds (or never will)."""
         with self._lock:
             self._in_flight.pop(key, None)
+
+    def remaining(self) -> float | None:
+        """US dollars left under the ceiling, or ``None`` with no ceiling."""
+        if self.ceiling_usd is None:
+            return None
+        return max(0.0, self.ceiling_usd - self.spent())
+
+    def worst_case(self, model: str, prompt_tokens: int, output_tokens: int) -> float | None:
+        """What one call could cost at most: its whole prompt uncached and its whole output cap."""
+        price = self.price_of(model)
+        if price is None:
+            return None
+        return price.cost({"input_tokens": int(prompt_tokens), "output_tokens": int(output_tokens)})
+
+    def output_room(self, model: str, prompt_tokens: int) -> int | None:
+        """Output tokens the remaining spend pays for after this prompt, or ``None`` unknown."""
+        price = self.price_of(model)
+        left = self.remaining()
+        if price is None or left is None or price.output <= 0:
+            return None
+        after_prompt = left - price.cost({"input_tokens": int(prompt_tokens), "output_tokens": 0})
+        return max(0, int(after_prompt * MILLION / price.output))
+
+    def admit(self, *, kind: str, model: str, prompt_chars: int, cap_tokens: int) -> int | None:
+        """Whether a call may be made, before it is: ``None`` as it is, a number as a lowered cap.
+
+        With no ceiling every call is made as it is. With one, a call whose
+        worst case — its whole prompt as uncached input and its whole output
+        cap as output, at its model's prices — fits what is left is made as it
+        is. Otherwise only a :data:`HELD_KINDS` call is made, with its output
+        cap lowered to what the remaining spend pays for after its prompt; any
+        other raises :class:`SpendCeilingStop`. Once the ceiling is reached the
+        same holds for every call. A call of a model with no price cannot be
+        measured and is made as it is until the ceiling is reached. Every
+        lowered or refused call is logged and recorded.
+        """
+        if self.ceiling_usd is None:
+            return None
+        from maljan.llm.context_window import CHARS_PER_TOKEN
+
+        prompt_tokens = -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
+        cap = max(0, int(cap_tokens or 0))
+        reached = self.reached()
+        worst = self.worst_case(model, prompt_tokens, cap) if cap else None
+        left = self.remaining() or 0.0
+        if not reached and (worst is None or worst <= left):
+            return None
+        name = _clean(model) or "the model"
+        if kind not in HELD_KINDS:
+            said = (
+                f"a {kind} call of {name} was not made: the spend ceiling of "
+                f"{self.ceiling_usd:.4f} USD "
+                + ("is reached" if reached else f"leaves {left:.4f} USD, under its worst case")
+            )
+            self._note_held(said)
+            raise SpendCeilingStop(said)
+        room = self.output_room(model, prompt_tokens)
+        if room is None or room < 1:
+            said = (
+                f"the {kind} call of {name} was made at its own output cap past the spend "
+                f"ceiling of {self.ceiling_usd:.4f} USD: the remaining spend pays for no output "
+                "token, and the verdict and the report are never lost"
+            )
+            self._note_held(said)
+            return None
+        if cap and room >= cap:
+            return None
+        said = (
+            f"the {kind} call of {name} was held to {room:,} output tokens (its cap was "
+            f"{cap:,}): what the {left:.4f} USD left under the spend ceiling pays for"
+        )
+        self._note_held(said)
+        return room
+
+    def _note_held(self, said: str) -> None:
+        with self._lock:
+            if said in self._held:
+                return
+            self._held.append(said)
+        logger.warning("spend ceiling: %s.", said)
 
     def spent(self) -> float:
         with self._lock:
@@ -265,12 +400,17 @@ class SpendMeter:
         """The degradation reason a reached ceiling gives, or ``""``."""
         with self._lock:
             at = self._reached_at
+            unreported = self._unreported
         if at is None or self.ceiling_usd is None:
             return ""
+        spent = f"at least {at:.4f} USD spent" + (
+            f"; {unreported} call(s) reported no usage and are not counted" if unreported else ""
+        )
         return (
-            f"The spend ceiling of {self.ceiling_usd:.4f} USD was reached ({at:.4f} USD spent); "
-            "the tool phases still running ended there and their agents wrote their answers "
-            "from what they had gathered."
+            f"The spend ceiling of {self.ceiling_usd:.4f} USD was reached ({spent}). The tool "
+            "phases still running ended there and their agents wrote their answers from what "
+            "they had gathered; no further negotiation round, chunk or tool loop was started, "
+            "and only the verdict and the report ran, tool-free."
         )
 
     def snapshot(self) -> dict[str, Any] | None:
@@ -284,6 +424,11 @@ class SpendMeter:
                 "reached": self._reached_at is not None,
                 "prices_from": dict(sorted(self._priced_from.items())),
             }
+            if self._held:
+                out["held_calls"] = list(self._held)
+            if self._unreported:
+                out["unreported_calls"] = self._unreported
+                out["spent_is_at_least"] = True
             if self._unpriced:
                 out["unpriced_models"] = dict(sorted(self._unpriced.items()))
                 out["note"] = (

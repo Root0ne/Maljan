@@ -104,6 +104,7 @@ class FunctionSummarizer:
         token_ledger: Any | None = None,
         model_label: str = "",
         room_chars: Any = None,
+        truncation_ledger: Any = None,
     ) -> None:
         self._llm = llm
         self._max_words = max_summary_words
@@ -111,6 +112,8 @@ class FunctionSummarizer:
         # a callable returning the window's room, or ``None`` for no bound. A
         # fixed 8,000 and 12,000 used to stand here.
         self._room_chars = room_chars
+        # Where a shortened prompt is recorded, for the run's degradation reasons.
+        self._truncation_ledger = truncation_ledger
         # Each summary is a model call the run pays for, recorded under
         # ``summarizer`` and the model the summariser calls.
         self._token_ledger = token_ledger
@@ -192,6 +195,15 @@ class FunctionSummarizer:
             len(shown),
             len(text),
         )
+        record = getattr(self._truncation_ledger, "record_input_shortened", None)
+        if callable(record):
+            try:
+                record(
+                    "The function summariser's prompt was shortened: the first "
+                    f"{len(shown):,} of {len(text):,} characters fit its model's window."
+                )
+            except Exception as exc:  # noqa: BLE001 — a record never costs a summary
+                logger.debug("FunctionSummarizer: the shortening was not recorded (%s).", exc)
         return f"{SHORTENED_NOTE.format(shown=len(shown), total=len(text))}\n{shown}"
 
     def _ask(self, messages: list[Any]) -> Any:

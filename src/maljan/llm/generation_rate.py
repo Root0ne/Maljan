@@ -35,6 +35,7 @@ reading rate is known and nothing is sized from one.
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from dataclasses import dataclass, field
@@ -603,6 +604,119 @@ def request_timeout_for(llm: Any, payload: dict[str, Any]) -> float | None:
         return None
 
 
+class ModelCallDeadline(TimeoutError):
+    """A model request that did not finish within its whole-call deadline.
+
+    A ``TimeoutError``, so a model list reads it as a provider failure and
+    moves on, as it reads any other timeout.
+    """
+
+
+# The keywords and attributes a call's output cap is read from.
+_CAP_NAMES = ("max_tokens", "max_completion_tokens", "max_output_tokens", "num_predict")
+
+
+def call_deadline(llm: Any, messages: Any, kwargs: dict[str, Any]) -> float:
+    """The whole-call deadline of one request of ``llm``, in seconds.
+
+    The request timeout the call is sized for (:func:`sized_request_timeout`:
+    its output cap at the model's measured pace, prompt read included) where
+    that is longer than the client's own, and otherwise the client's own —
+    ``PROVIDER_REQUEST_TIMEOUT_SECONDS`` unless the client was built with
+    another. httpx reads a request timeout as the longest silence it waits
+    through, so a server that keeps a request alive with keep-alive bytes, or
+    answers slowly but steadily, was held by nothing but this. Never raises.
+    """
+    try:
+        cap = 0
+        for name in _CAP_NAMES:
+            value = kwargs.get(name)
+            if value is None:
+                value = getattr(llm, name, None)
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                cap = value
+                break
+        chars = _content_chars(messages)
+        sized = sized_request_timeout(llm, cap, chars)
+        return float(sized if sized is not None else _client_timeout(llm))
+    except Exception:  # noqa: BLE001 — a deadline that cannot be sized is the documented one
+        return UNMEASURED_REQUEST_TIMEOUT_SECONDS
+
+
+def _deadline_members(base: Any) -> dict[str, Any]:
+    """``_agenerate``, ``_generate`` and ``_astream`` held to :func:`call_deadline`."""
+    members: dict[str, Any] = {}
+
+    def _expired(seconds: float) -> ModelCallDeadline:
+        return ModelCallDeadline(
+            f"the model request did not finish within its {seconds:.0f} s deadline "
+            "(its output cap at the model's measured pace, or the provider's request "
+            "timeout where nothing is measured)"
+        )
+
+    if hasattr(base, "_agenerate"):
+
+        async def _agenerate(
+            self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+        ) -> Any:
+            seconds = call_deadline(self, messages, kwargs)
+            try:
+                return await asyncio.wait_for(
+                    base._agenerate(self, messages, stop=stop, run_manager=run_manager, **kwargs),
+                    seconds,
+                )
+            except TimeoutError as exc:
+                raise _expired(seconds) from exc
+
+        members["_agenerate"] = _agenerate
+
+    if hasattr(base, "_astream"):
+
+        async def _astream(
+            self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+        ) -> Any:
+            seconds = call_deadline(self, messages, kwargs)
+            try:
+                async with asyncio.timeout(seconds):
+                    async for chunk in base._astream(
+                        self, messages, stop=stop, run_manager=run_manager, **kwargs
+                    ):
+                        yield chunk
+            except TimeoutError as exc:
+                raise _expired(seconds) from exc
+
+        members["_astream"] = _astream
+
+    if hasattr(base, "_generate"):
+
+        def _generate(
+            self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+        ) -> Any:
+            seconds = call_deadline(self, messages, kwargs)
+            outcome: dict[str, Any] = {}
+            done = threading.Event()
+
+            def _run() -> None:
+                try:
+                    outcome["answer"] = base._generate(
+                        self, messages, stop=stop, run_manager=run_manager, **kwargs
+                    )
+                except BaseException as exc:  # noqa: BLE001 — handed back to the caller
+                    outcome["error"] = exc
+                finally:
+                    done.set()
+
+            threading.Thread(target=_run, name="model-call", daemon=True).start()
+            if not done.wait(timeout=seconds):
+                raise _expired(seconds)
+            if "error" in outcome:
+                raise outcome["error"]
+            return outcome["answer"]
+
+        members["_generate"] = _generate
+    return members
+
+
 # One subclass per chat class seen, so pydantic builds each schema once.
 _SIZED_CLASSES: dict[type, type] = {}
 
@@ -623,6 +737,11 @@ def with_sized_request_timeout(chat_class: Any) -> Any:
     Chat classes that build an OpenAI-style payload (``_get_request_payload``)
     get the timeout in the payload; Gemini's (``_prepare_request``) gets it as
     the ``timeout`` argument that method reads.
+
+    Every class, those two and any other (Ollama's), is also held to a
+    whole-call deadline Maljan enforces itself (:func:`call_deadline`): the same
+    sized value, or the client's own timeout where nothing is measured. The
+    client's timeout stays as a second guard on silence.
     """
     if not isinstance(chat_class, type):
         return chat_class
@@ -654,8 +773,7 @@ def with_sized_request_timeout(chat_class: Any) -> Any:
             return base._prepare_request(self, messages, **kwargs)
 
         members["_prepare_request"] = _prepare_request
-    else:
-        return chat_class
+    members.update(_deadline_members(base))
 
     sized = type(chat_class.__name__, (chat_class,), members)
     # Named where it is made, so a log line or a repr says whose class it is.

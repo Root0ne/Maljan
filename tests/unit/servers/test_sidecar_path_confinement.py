@@ -14,6 +14,7 @@ names no host path, because the refusal itself travels to the model.
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import sys
@@ -123,6 +124,9 @@ class TestAPathOutsideEveryRootIsRefused:
         self, analysis: Any, staging: Path, tool: str, argument: str
     ) -> None:
         answer = getattr(analysis, tool)(**{argument: "/etc/passwd"})
+        if asyncio.iscoroutine(answer):
+            # capa and FLOSS are async on the server: a run is joined and killed.
+            answer = asyncio.run(answer)
 
         error = _refusal(answer)
         assert error["code"] == "path_outside_roots", (tool, answer)
@@ -471,8 +475,8 @@ class TestAnArgumentIsBoundedBeforeItIsRead:
 
         monkeypatch.setattr(analysis.rule_tools, "capa", _fake_capa)
 
-        analysis.capa(_pe(staging / "s.bin"), timeout_s=86_400)
-        analysis.capa(_pe(staging / "t.bin"))
+        asyncio.run(analysis.capa(_pe(staging / "s.bin"), timeout_s=86_400))
+        asyncio.run(analysis.capa(_pe(staging / "t.bin")))
 
         assert asked == [86_400, None]
 
@@ -493,8 +497,8 @@ class TestAnArgumentIsBoundedBeforeItIsRead:
 
         monkeypatch.setattr(analysis.emulated_strings, "floss", _fake_floss)
 
-        analysis.floss(_pe(staging / "s.bin"), timeout_s=86_400)
-        analysis.floss(_pe(staging / "t.bin"))
+        asyncio.run(analysis.floss(_pe(staging / "s.bin"), timeout_s=86_400))
+        asyncio.run(analysis.floss(_pe(staging / "t.bin")))
 
         assert asked == [86_400, None]
 

@@ -2769,6 +2769,23 @@ def make_negotiation_node(
                 }
             if announces and first_round:
                 announce_started(container, stage)
+        # Once the job's spend ceiling is reached no further round is held:
+        # the router goes on to the verdict with the analysts' answers as they
+        # stand, and the degradation reason says the ceiling ended the rounds.
+        _meter = _spend_meter(container)
+        if _meter is not None and _meter.reached():
+            logger.warning(
+                "negotiation: the job's spend ceiling is reached; no further round is held."
+            )
+            return {
+                "is_consensus": None,
+                "consensus_applicable": False,
+                **(
+                    stage_record(stage, ran=False, reason="the spend ceiling is reached")
+                    if stage is not None
+                    else {}
+                ),
+            }
         iteration = state.get("iteration_count", 0)
         agent_names = _debate_participants(container, stage, state)
 
@@ -3273,11 +3290,14 @@ def _generation_snapshot(container: Any) -> dict[str, Any] | None:
 
 
 def _spend_meter(container: Any) -> Any:
-    """The job's spend meter, or ``None``."""
+    """The job's spend meter, or ``None`` (a stand-in container has none)."""
+    from maljan.core.spend import SpendMeter
+
     try:
-        return getattr(container.get_token_ledger(), "spend", None)
+        meter = getattr(container.get_token_ledger(), "spend", None)
     except Exception:  # noqa: BLE001 — telemetry never breaks a verdict
         return None
+    return meter if isinstance(meter, SpendMeter) else None
 
 
 def _spend_snapshot(container: Any) -> dict[str, Any] | None:

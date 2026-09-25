@@ -297,9 +297,9 @@ class FallbackChatModel(BaseChatModel):
         """No loop clock: no turn deadline but a model's own request timeout.
 
         For a loop with no time limit. A share of nothing is no deadline, so a
-        model that stops answering is ended by the request timeout it was sent
-        with — sized for its answer at the model's measured pace
-        (``llm.generation_rate``) — and that timeout is a provider failure the
+        model that stops answering is ended at its whole-call deadline — the
+        request's sized timeout, which Maljan enforces over the whole call
+        (``generation_rate.call_deadline``) — and that is a provider failure the
         list moves on from. A deadline left over from an earlier loop with a
         clock does not carry into this one.
         """
@@ -488,8 +488,9 @@ def restart_models(
     stall before the list ever moved. A no-op for any other model.
 
     ``None`` is a loop with no time limit: no turn deadline is set, and a
-    stalled model is ended by its own request timeout, which the list reads
-    as a provider failure and moves on from.
+    stalled model is ended at its whole-call deadline
+    (``generation_rate.call_deadline``), which the list reads as a provider
+    failure and moves on from.
     """
     if not isinstance(model, FallbackChatModel):
         return
@@ -538,8 +539,8 @@ def turn_share_seconds(cfg: Any, agent: str) -> float:
         own = getattr(definition, "timeout_seconds", None)
         overrides = getattr(cfg, "react_agent_timeout_overrides", {}) or {}
         budget = own or overrides.get(agent) or getattr(cfg, "react_agent_timeout", None)
-        # No time limit anywhere is no deadline: a stalled model is ended by
-        # its own request timeout, sized for its answer at its measured pace.
+        # No time limit anywhere is no deadline: a stalled model is ended at
+        # its whole-call deadline (``generation_rate.call_deadline``).
         return max(1.0, float(budget) * share) if budget and share > 0 else 0.0
     except Exception as exc:  # noqa: BLE001 — no deadline is the lone-model behaviour
         logger.debug("fallback turn deadline not read (%s).", exc)

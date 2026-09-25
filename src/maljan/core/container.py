@@ -1553,6 +1553,7 @@ class ServiceContainer:
                     token_ledger=getattr(self, "_token_ledger", None),
                     model_label=self._summarizer_model_label(),
                     room_chars=self._prompt_room_chars,
+                    truncation_ledger=getattr(self, "_truncation_ledger", None),
                 )
                 logger.info(
                     "FunctionSummarizer initialized (%s / %s, max_words=%d).",

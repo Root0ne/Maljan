@@ -31,7 +31,7 @@ import re
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -64,6 +64,7 @@ from maljan.agents.judge_postprocess import (
 from maljan.agents.prompt_fragments import tools_statement
 from maljan.core.config import get_settings
 from maljan.core.logger import logger
+from maljan.core.spend import SpendCeilingStop
 from maljan.core.token_ledger import TokenLedger, structured_answer
 from maljan.core.truncation_ledger import TruncationLedger, record_judge_response
 from maljan.llm.context_window import (
@@ -1276,6 +1277,23 @@ class JudgeAgent(BudgetMeter):
         # request, for the budget record and the ticks; none before a loop.
         self._tool_definition_chars: int = 0
 
+    def _spend_admits(self, kind: str, messages: list[Any]) -> int | None:
+        """The spend ceiling's word on one judge call before it is made (``SpendMeter.admit``)."""
+        from maljan.core.spend import SpendMeter
+
+        meter = getattr(getattr(self, "token_ledger", None), "spend", None)
+        if not isinstance(meter, SpendMeter):
+            return None
+        return cast(
+            "int | None",
+            meter.admit(
+                kind=kind,
+                model=self._model_label() or model_name_of(self.llm),
+                prompt_chars=sum(len(str(getattr(m, "content", m) or "")) for m in messages),
+                cap_tokens=int(judge_output_cap().tokens or 0),
+            ),
+        )
+
     def _model_label(self) -> str:
         """The label of the model this instance calls first, or ``""`` outside a job."""
         if getattr(self, "_runs_on", "judge") != "expert":
@@ -1442,7 +1460,11 @@ class JudgeAgent(BudgetMeter):
 
         # The job's spend meter: a loop that starts after its ceiling was
         # reached runs no tool phase, and one running ends its tool phase there.
+        from maljan.core.spend import SpendMeter
+
         spend_meter = getattr(getattr(self, "token_ledger", None), "spend", None)
+        if not isinstance(spend_meter, SpendMeter):
+            spend_meter = None
         spent_out = bool(spend_meter is not None and spend_meter.reached() is True)
         if spent_out:
             self.logger.warning(
@@ -1451,12 +1473,23 @@ class JudgeAgent(BudgetMeter):
         if not getattr(self, "tools", None) or spent_out:
             if not spent_out:
                 self.logger.warning("No tools initialized. Falling back to standard LLM invoke.")
+            else:
+                from maljan.agents.base_agent import SPEND_CEILING_QUESTION
+
+                # Said, as the analysts' tool-free turn says it: the prompt
+                # described tools, and this call carries none.
+                messages_pre = with_question(messages_pre, SPEND_CEILING_QUESTION)
             # Wrap the no-tools ainvoke in the
             # same hard timeout used by the tools path so a stalled / queued
             # llama-server cannot freeze the judge node.
             no_tools_timeout = loop_limits("judge")[0]
             # Sticky for this call only, with a deadline shorter than its clock.
             restart_models(self.llm, loop_seconds=no_tools_timeout, share=self._turn_share())
+            try:
+                self._spend_admits("mediation", messages_pre)
+            except SpendCeilingStop as stop:
+                self.logger.warning("JudgeAgent: %s.", stop)
+                return ""
             response = await asyncio.wait_for(
                 retry_on_connection_error(
                     lambda: self.llm.ainvoke(messages_pre),
@@ -1524,7 +1557,13 @@ class JudgeAgent(BudgetMeter):
         # after the analysts had finished was none, so each reputation answer
         # got the widest cap and nothing could say the room was gone.
         room = self._context_budget()
-        recorded = record_tools(self.tools, recorder, context_budget=room)
+        # The analysts' repeat guard, on the judge's tools too: a judge that
+        # re-asks the same lookup is ended there, as an analyst is, rather than
+        # left to fill its window.
+        from maljan.agents.evidence_recorder import RepeatGuard
+
+        repeats = RepeatGuard()
+        recorded = record_tools(self.tools, recorder, repeats, context_budget=room)
         definitions = tool_definition_chars(recorded)
         # On the budget record and the ticks, as the analysts' loop puts it.
         self._tool_definition_chars = definitions
@@ -1572,6 +1611,8 @@ class JudgeAgent(BudgetMeter):
             budget.note_turns(conversation)
             budget.own_steps += 1
             _note_the_conversation(conversation)
+            # The spend ceiling's word on the turn about to be sent.
+            self._spend_admits("mediation turn", conversation)
             self._publish_questions(conversation, asked)
             return conversation
 
@@ -1587,7 +1628,12 @@ class JudgeAgent(BudgetMeter):
         # conversation as it stands, and a server that says the window is full
         # leaves behind what was gathered rather than nothing.
         latest: dict[str, Any] = {"messages": list(messages)}
-        ended: dict[str, bool] = {"no_room": False, "window_full": False, "spend": False}
+        ended: dict[str, bool] = {
+            "no_room": False,
+            "window_full": False,
+            "spend": False,
+            "repeats": False,
+        }
         spend_key = object()
 
         async def _until_it_answers_or_runs_out() -> None:
@@ -1600,16 +1646,26 @@ class JudgeAgent(BudgetMeter):
                 try:
                     async for snapshot in snapshots:
                         latest.update(snapshot)
+                        if repeats.ending_the_loop():
+                            ended["repeats"] = True
+                            break
                         if _out_of_room():
                             ended["no_room"] = True
                             break
                         if spend_meter is not None:
+                            # Priced under the judge's own model label, as an
+                            # analyst's turns are: a lone model stamps nothing
+                            # on its answers, and a turn priced as "" costs 0.
                             spend_meter.note_loop(
-                                spend_key, list(latest.get("messages") or [])[len(messages) :]
+                                spend_key,
+                                list(latest.get("messages") or [])[len(messages) :],
+                                self._model_label() or model_name_of(self.llm),
                             )
                             if spend_meter.reached():
                                 ended["spend"] = True
                                 break
+                except SpendCeilingStop:
+                    ended["spend"] = True
                 except Exception as exc:
                     # Only a provider's own full-window answer, and only once
                     # something was gathered; anything else fails the judge's
@@ -1647,11 +1703,13 @@ class JudgeAgent(BudgetMeter):
             # TokenLedger (the tools path previously recorded nothing — only
             # the no-tools fallback above did).
             _record_the_turns()
-            if ended["no_room"] or ended["window_full"] or ended["spend"]:
-                cap = "spend" if ended["spend"] else "no_room"
+            if ended["no_room"] or ended["window_full"] or ended["spend"] or ended["repeats"]:
+                cap = "spend" if ended["spend"] else "repeats" if ended["repeats"] else "no_room"
                 why = (
                     "the job's spend ceiling was reached"
                     if ended["spend"]
+                    else f"{repeats.served_repeats} repeated tool call(s)"
+                    if ended["repeats"]
                     else "the model server reported its context window full"
                     if ended["window_full"]
                     else "the conversation had no room left for a tool answer"
@@ -1696,6 +1754,7 @@ class JudgeAgent(BudgetMeter):
                     else "the conversation had no room left for a tool answer"
                 ),
                 "spend": str(spend_meter.reason()) if spend_meter is not None else "",
+                "repeats": f"{repeats.served_repeats} repeated tool call(s)",
             }
             self._record_budget(budget, turns, cap, detail=details.get(cap or "", ""))
             self._budget_tick(budget, turns, final=True, ledger_entries=len(recorder.entries))
@@ -2179,8 +2238,14 @@ class JudgeAgent(BudgetMeter):
         timed_out = False
 
         async def _ask(turns: list[Any]) -> Any:
+            # The verdict is always made; past the spend ceiling its output cap
+            # is what the remaining spend pays for.
+            from maljan.llm.context_window import output_bound_kwargs
+
+            bound = self._spend_admits("verdict", turns)
+            held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
             answer = await retry_on_connection_error(
-                lambda: self.llm.ainvoke(turns),
+                lambda: self.llm.ainvoke(turns, **held),
                 what="Judge verdict",
                 log=self.logger,
             )
@@ -2587,6 +2652,12 @@ class JudgeAgent(BudgetMeter):
         from maljan.llm.fallback import restart_models
 
         restart_models(self.llm, loop_seconds=timeout, share=self._turn_share())
+        try:
+            self._spend_admits("technique question", messages)
+        except SpendCeilingStop as stop:
+            return TechniqueReview(
+                asked=asked, unanswered=f"not asked: {stop}", not_asked=not_asked
+            )
         structured = self._supports_structured_output()
 
         async def _ask() -> tuple[Any, Any]:

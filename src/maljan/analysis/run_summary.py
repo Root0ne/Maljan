@@ -654,8 +654,14 @@ def spend_lines(spend: Any) -> list[str]:
         return []
     ceiling = float(spend.get("ceiling_usd") or 0.0)
     spent = float(spend.get("spent_usd") or 0.0)
+    unreported = int(spend.get("unreported_calls") or 0)
     lines = [
-        f"Spent {spent:.4f} USD of the {ceiling:.4f} USD ceiling"
+        (
+            f"Spent at least {spent:.4f} USD of the {ceiling:.4f} USD ceiling; {unreported} "
+            "call(s) reported no usage and are not counted"
+            if unreported
+            else f"Spent {spent:.4f} USD of the {ceiling:.4f} USD ceiling"
+        )
         + (
             " — reached, and the tool phases still running ended there"
             if spend.get("reached")
@@ -672,6 +678,8 @@ def spend_lines(spend: Any) -> list[str]:
             )
     if spend.get("note"):
         lines.append(f"Not counted: {spend['note']}")
+    for said in spend.get("held_calls") or []:
+        lines.append(f"Before the call: {said}")
     return lines
 
 

@@ -169,6 +169,9 @@ def _yara_native_matches(
                         "offset": int(getattr(instance, "offset", 0) or 0),
                         "identifier": str(string_match.identifier),
                         "data_hex": blob[:_MAX_MATCH_BYTES].hex(),
+                        # The match's own length, so a hex cut at the bound
+                        # reads as the first bytes of a longer match.
+                        "length": len(blob),
                     }
                 )
         rows.append(
@@ -218,6 +221,7 @@ def _yara_regex_matches(layer: Any, data: bytes) -> list[dict[str, Any]]:
                         "data_hex": match.group()
                         .encode("utf-8", errors="replace")[:_MAX_MATCH_BYTES]
                         .hex(),
+                        "length": len(match.group().encode("utf-8", errors="replace")),
                     }
                 )
         if not strings:

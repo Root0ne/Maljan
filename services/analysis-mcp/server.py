@@ -32,7 +32,7 @@ from mcp.server.fastmcp import FastMCP
 
 from maljan.core.paths import resolve_data
 from maljan.tools import binary as binary_tools
-from maljan.tools import emulated_strings, staging
+from maljan.tools import children, emulated_strings, staging
 from maljan.tools import identify as identify_tools
 from maljan.tools import rules as rule_tools
 from maljan.tools import strings as string_tools
@@ -91,11 +91,12 @@ TOOL_NEEDS: list[ToolNeeds] = [
     ),
     ToolNeeds("sigma_match", (module("sigma"),)),
     ToolNeeds("sigma_match_sandbox", (module("sigma"),)),
-    ToolNeeds("capa", (module("capa"),), timeout_s=CAPA_TIMEOUT_S),
+    ToolNeeds("capa", (module("capa"),), timeout_s=CAPA_TIMEOUT_S, long_running=True),
     ToolNeeds(
         "floss",
         (binary("floss", emulated_strings.floss_unavailable),),
         timeout_s=FLOSS_TIMEOUT_S,
+        long_running=True,
         remediation=emulated_strings.FLOSS_REMEDIATION,
     ),
     ToolNeeds("put_sample"),
@@ -375,8 +376,11 @@ def _carved_miss(tree: Path, asked: str) -> CarvedFileNotFound:
     The names only, never a path: a refusal travels into the ledger and onto
     the event feed, and the tails are what a caller needs to choose again.
     """
-    names = [entry.name for entry in _carved_files(tree)][:_LISTED_CARVED_FILES]
+    every = [entry.name for entry in _carved_files(tree)]
+    names = every[:_LISTED_CARVED_FILES]
     listed = ", ".join(names) if names else "this run carved nothing"
+    if len(every) > len(names):
+        listed += f" and {len(every) - len(names)} more (carve_payloads lists every one)"
     return CarvedFileNotFound(f"no carved file named {_echoed(asked)}; this run carved: {listed}")
 
 
@@ -928,27 +932,35 @@ def sigma_match_sandbox(report: dict[str, Any], ruleset: str = "default") -> dic
 
 @mcp.tool()
 @reads_a_carved_file
-def capa(
+async def capa(
     path: str,
     timeout_s: int | None = CAPA_TIMEOUT_S,
     backend: str = "auto",
     carved_path: str = "",
 ) -> dict[str, Any]:
     """Run capa and report the capabilities it finds, with ATT&CK and MBC metadata."""
-    return _guard(
-        "capa",
-        rule_tools.capa,
-        path=path,
-        carved_path=carved_path,
-        timeout_s=_within(timeout_s, CAPA_TIMEOUT_S),
-        backend=backend,
+    # One run per call shape at a time: a retry of the same call joins the run
+    # already going, and a run every caller has abandoned is killed with its
+    # child (``tools.children``).
+    return dict(
+        await children.joined(
+            ("capa", path, carved_path, backend, timeout_s),
+            lambda: _guard(
+                "capa",
+                rule_tools.capa,
+                path=path,
+                carved_path=carved_path,
+                timeout_s=_within(timeout_s, CAPA_TIMEOUT_S),
+                backend=backend,
+            ),
+        )
     )
 
 
 @mcp.tool()
 @says_unquoted("pattern")
 @reads_a_carved_file
-def floss(
+async def floss(
     path: str,
     carved_path: str = "",
     min_len: int = emulated_strings.DEFAULT_MIN_LENGTH,
@@ -979,17 +991,33 @@ def floss(
     ``kinds`` keeps some of "decoded", "stack", "tight"; ``pattern`` keeps the
     rows containing a marker (case-insensitive substring, or ``re:<expression>``).
     """
-    return _guard(
+    run = (
         "floss",
-        emulated_strings.floss,
-        path=path,
-        carved_path=carved_path,
-        min_len=min_len,
-        kinds=kinds,
-        limit=limit,
-        offset=offset,
-        pattern=pattern,
-        timeout_s=_within(timeout_s, FLOSS_TIMEOUT_S),
+        path,
+        carved_path,
+        min_len,
+        tuple(kinds or ()),
+        limit,
+        offset,
+        pattern,
+        timeout_s,
+    )
+    return dict(
+        await children.joined(
+            run,
+            lambda: _guard(
+                "floss",
+                emulated_strings.floss,
+                path=path,
+                carved_path=carved_path,
+                min_len=min_len,
+                kinds=kinds,
+                limit=limit,
+                offset=offset,
+                pattern=pattern,
+                timeout_s=_within(timeout_s, FLOSS_TIMEOUT_S),
+            ),
+        )
     )
 
 

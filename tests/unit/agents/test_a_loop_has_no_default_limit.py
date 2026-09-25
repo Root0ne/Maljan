@@ -223,6 +223,8 @@ class TestALoopWithNoLimit:
             {name: {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 10.0}},
             table={},
         )
+        # Every turn's worst case fits, so the running turns are what trip it.
+        meter.worst_case = lambda *a, **k: 0.0  # type: ignore[method-assign]
         agent = _analyst(model, TokenLedger(spend=meter))
 
         answer = _run(agent)
@@ -235,7 +237,7 @@ class TestALoopWithNoLimit:
         assert meter.snapshot()["reached"] is True
         assert "spend ceiling of 0.0500 USD was reached" in meter.reason()
 
-    def test_a_loop_that_starts_past_the_ceiling_answers_once_without_tools(self) -> None:
+    def test_a_loop_that_would_start_past_the_ceiling_is_not_started(self) -> None:
         model = _Model(calls=10_000, seen=[])
         meter = SpendMeter(
             0.01,
@@ -247,8 +249,57 @@ class TestALoopWithNoLimit:
 
         answer = _run(agent)
 
-        assert len(model.seen) == 1, "one tool-free answer, no tool phase"
-        assert "spend ceiling is reached" in str(model.seen[0][-1].content)
-        assert "it reads its own strings" in answer
+        assert model.seen == [], "no call: past the ceiling only the verdict and report run"
+        assert answer == ""
         (record,) = _records(agent)
         assert record["cap"] == "spend"
+
+    def test_a_chunk_is_not_started_past_the_ceiling(self) -> None:
+        from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
+
+        model = _Model(calls=10_000, seen=[])
+        meter = SpendMeter(
+            0.01,
+            {model_name_of(model): {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 10.0}},
+            table={},
+        )
+        meter.settle(USAGE, model_name_of(model))
+        agent = _analyst(model, TokenLedger(spend=meter))
+        chunks = [
+            TextChunk(
+                index=i,
+                total=2,
+                strategy=ChunkStrategy.SLIDING_WINDOW,
+                content="data",
+                char_count=4,
+                token_estimate=1,
+                domain="static",
+            )
+            for i in range(2)
+        ]
+        import pytest
+
+        from maljan.core.exceptions import AnalystError
+
+        with pytest.raises(AnalystError, match="not started, the spend ceiling is reached"):
+            agent.safe_analyze_isr_chunked(chunks)
+        assert model.seen == []
+
+
+class TestATurnPastTheWorstCase:
+    def test_is_not_sent_and_the_loop_says_why(self) -> None:
+        model = _Model(calls=10_000, seen=[])
+        meter = SpendMeter(
+            0.05,
+            {model_name_of(model): {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 10.0}},
+            table={},
+        )
+        meter.worst_case = lambda *a, **k: 1.0  # type: ignore[method-assign]
+        agent = _analyst(model, TokenLedger(spend=meter))
+
+        _run(agent)
+
+        assert model.seen == [], "the first turn's worst case passes the ceiling"
+        (record,) = _records(agent)
+        assert record["cap"] == "spend"
+        assert "loop turn call" in meter.snapshot()["held_calls"][0]
