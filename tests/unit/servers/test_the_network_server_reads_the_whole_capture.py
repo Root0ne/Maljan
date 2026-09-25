@@ -131,3 +131,19 @@ class TestARefusalNamesTheRealCaptures:
         answer = json.loads(network.extract_dns("capture.pcap"))
 
         assert "holds no packet capture" in answer["error"]["remediation"]
+
+    def test_a_relative_name_never_reaches_another_job_s_capture(
+        self, network: Any, job: Path
+    ) -> None:
+        other = job.parent / "job-9999ffff" / "captures"
+        other.mkdir(parents=True)
+        _capture(other / "theirs.pcap", dns_at=0, total=1)
+        _capture(job / "captures" / "mine.pcap", dns_at=0, total=1)
+
+        for spelling in (
+            "../job-9999ffff/captures/theirs.pcap",
+            "../../job-9999ffff/captures/theirs.pcap",
+            "captures/../../job-9999ffff/captures/theirs.pcap",
+        ):
+            answer = json.loads(network.extract_dns(spelling))
+            assert answer["error"]["code"] == "path_outside_roots", spelling
