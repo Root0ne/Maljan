@@ -86,7 +86,8 @@ def test_a_miss_names_every_place_looked_and_guesses_nothing(tmp_path: Path) -> 
     found = resolve_r2_binary("r2mcp", {"PATH": "/nonexistent-bin", "HOME": str(home)})
     assert found.path is None
     described = found.described()
-    assert "PATH (/nonexistent-bin)" in described
+    assert "PATH (1 directory)" in described
+    assert "/nonexistent-bin" not in described, "PATH is counted, not listed"
     assert os.path.join(str(home), ".local", "share", "radare2", "prefix", "bin", "r2mcp") in (
         described
     )

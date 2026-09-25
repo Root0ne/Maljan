@@ -1557,10 +1557,16 @@ curl -s -X POST http://localhost:8000/api/v1/settings/import \
 
 What the team needs besides the document: an enabled `qu1cksc0pe` entry under
 `core.mcp.servers` (the import refuses a reference to a server that does not
-exist), Ghidra enabled over http with its URL and token (see *A team that needs
-Ghidra waits for it* above), `core.static.r2.enabled` on and r2mcp findable
-(see *Where r2mcp is looked for*; switched off, r2 attaches nothing and the
-clone runs on its two servers alone), and, so that each static analyst reads a
+exist); Ghidra with `core.static.ghidra.enabled` true, `transport` set to
+`http` explicitly (its shipped value is `stdio`), `url` the address the worker
+reaches it at — `http://localhost:8089` for a worker on the host,
+`http://ghidra-mcp:8089` for one inside the compose network — and `auth_token`
+the container's `GHIDRA_MCP_AUTH_TOKEN` (see *A team that needs Ghidra waits
+for it* above); `core.static.r2.enabled` on and r2mcp findable by the worker —
+setting `core.static.r2.binary_path` to its absolute path is the sure way, since
+where r2pm put it depends on the environment r2pm ran in (see *Where r2mcp is
+looked for*; switched off or not found, r2 attaches nothing and the clone runs
+on its two servers alone); and, so that each static analyst reads a
 tool of its own, `core.static.provider` set to `none` — with the global
 provider on Ghidra the `static` analyst opens Ghidra as well. Run it by naming it on the job (`{"config": {"profile":
 "all_tools"}}`) or by making it `core.agents.profile`. A test

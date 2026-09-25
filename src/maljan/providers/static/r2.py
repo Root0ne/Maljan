@@ -188,7 +188,12 @@ def resolve_r2_binary(configured: str, env: Mapping[str, str] | None = None) -> 
     if os.sep in name or (os.altsep and os.altsep in name):
         return R2Binary(name if _executable(name) else None, (name,))
     path_value = environ.get("PATH", "")
-    looked: list[str] = [f"PATH ({path_value})" if path_value else "PATH (empty)"]
+    # PATH is counted, not listed: the whole of it is long, says nothing about
+    # r2mcp, and the directories r2 installs into are named below one by one.
+    entries = [d for d in path_value.split(os.pathsep) if d]
+    looked: list[str] = [
+        f"PATH ({len(entries)} {'directory' if len(entries) == 1 else 'directories'})"
+    ]
     on_path = shutil.which(name, path=path_value) if path_value else None
     if on_path:
         return R2Binary(on_path, tuple(looked))
