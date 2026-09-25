@@ -2030,6 +2030,55 @@ change landed on `main`.
 
 ### Fixed
 
+- **The network analyst gets the capture.** With exactly one capture in the
+  job, `pcap_path` is hidden from the schema the built-in network tools are
+  bound with and filled in, like the sample's own path; with several it stays
+  the model's, a relative name is read inside the job's directory, and a
+  refusal lists the job's captures (`captures/<file>`) or says there is none,
+  instead of telling the model to leave out an argument the tool requires. A
+  live network analyst lost 8 of its 20 calls inventing capture names. The
+  pack's capture entry and the sandbox report's network section name the
+  capture relative to the job, never by host path.
+- **Every capture tool reads the whole capture.** The network server read the
+  first 5,000 packets by default and the in-process summary the first 200,000.
+  All of them stream the capture (`analysis.pcap_summary.each_packet`),
+  `packet_limit` has no default, and every answer states the packets read and
+  the packets in the capture (`pcap_summary` as `packets_read`,
+  `packets_in_capture`, `packet_limit`, beside its protocols, every external
+  conversation, SNI names and periodic contacts).
+- **The pack shows what the capture holds.** Its capture line carries the
+  packet count, the protocol counts and the external conversations heaviest
+  first, cut to the pack's room with the cut said, where it printed the
+  summary's heading alone and a report then said the entry held only a header
+  line. A key-finding or section sentence saying a cited entry holds nothing
+  or one line is checked against that entry and asked once when it holds more
+  (`report.entry_contents_misstated`); the sentence is never rewritten.
+- **Sandbox background traffic is not published as the sample's C2.** Triage
+  flows carry `procid`, `pid` and AS facts, and each tcp/udp row states
+  `sample_process_tree` (true, false, or absent when the report does not say).
+  The sandbox view marks public resolvers, and the network block carries the
+  attribution, the resolver fact and `named_by`. A sandbox address the
+  sample's tree did not make, and a well-known benign name the guest resolved,
+  is published only when a model names it (an analyst's artefact or claim, or
+  the judge's indicator); otherwise the IOC table carries it as
+  `no: <reason>, and no model named it`, and the STIX bundle, `/iocs` and the
+  YARA, Sigma and Suricata drafts read that answer. A live run published a
+  public resolver and a connectivity check as C2.
+- **A published URL carries its name.** The host of every URL the publish rule
+  publishes follows the URL's decision; the IOC table, the export and `/iocs`
+  add it as a domain row and indicator where nothing else did. A live run
+  published two C2 URLs from the judge's bundle and neither host.
+- **A Sigma rule title is never a registry key.** A Sigma match is a
+  persistence row only when it names a T1547 technique and its event names the
+  key (kind by the key, then by the sub-technique); one naming no technique had
+  its title filed as a `registry_run` key and printed in section 9.
+- **An identifier's purpose.** The host-identifier section is asked for a
+  purpose where the evidence or an analyst claim says what the value is for,
+  and an empty purpose prints as `not stated` rather than `-`.
+- **An r2mcp error reply is a failed ledger entry.** r2mcp answers a refused
+  call (an invalid regex, no open file) with an ordinary text result, which
+  the ledger filed as ok; the provider now hands such a reply on in the
+  structured failure shape with r2mcp's own message.
 - **An analyst is told the truth about its tools.** With `static.provider =
   none` the static analyst's system prompt said "You have no analysis tools in
   this configuration" while the same request carried 36 tools from the

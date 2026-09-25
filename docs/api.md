@@ -143,7 +143,13 @@ judge not counting as a second source; the exported bundle carries it only
 when the rule publishes it, and this feed says the same. A name only the sample's own byte image knows is not an
 observation of infrastructure, so it is withheld from the default feed and
 labelled in the wider ones rather than shipped looking like one the sandbox
-watched.
+watched. A `sandbox` address is the sample's observation only when the
+sandbox report attributes a flow to it to the sample's process tree; one it
+attributes elsewhere, or does not attribute, and a well-known benign name the
+guest resolved, is published only when a model names it (an analyst's
+artefact or claim, or the judge's indicator). The host of a URL the feed
+publishes is a `domain` row with the URL's decision, added when the report has
+no row for it.
 
 #### What changed between two runs
 
