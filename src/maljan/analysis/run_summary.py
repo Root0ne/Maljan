@@ -677,16 +677,27 @@ def spend_lines(spend: Any) -> list[str]:
     for model, source in sorted((spend.get("prices_from") or {}).items()):
         if source == "llm.model_prices":
             lines.append(f"Prices of `{model}`: the operator's (llm.model_prices)")
+        elif source == "provider-reported":
+            lines.append(f"Cost of `{model}`'s calls: as its provider reported it with each answer")
         else:
             lines.append(
-                f"`{model}` priced at the vendored rates ({source}); a vendor's off-peak "
-                "discount is not applied, so off-peak spend is overstated"
+                f"`{model}` priced at the rates in force when each call was sent ({source})"
             )
+    if spend.get("reserve_usd") is not None:
+        lines.append(
+            "Still kept for the verdict and the report when this was written: "
+            f"{float(spend['reserve_usd']):.4f} USD"
+        )
     if spend.get("note"):
         lines.append(f"Not counted: {spend['note']}")
     for said in spend.get("held_calls") or []:
         lines.append(f"Before the call: {said}")
     return lines
+
+
+def _sandbox_name(provider: str) -> str:
+    """A sandbox provider's name as a reader knows it."""
+    return {"triage": "Triage", "cape2": "CAPE", "cuckoo": "Cuckoo"}.get(provider, provider)
 
 
 def tool_latency_lines(latency: Any) -> list[str]:
@@ -823,6 +834,9 @@ class RunSummary:
     # ran, or the report is a recorded fixture. ``None`` when a sandbox
     # observed the run, which needs no sentence.
     sandbox: dict[str, str] | None = None
+    # The run-time limit the sandbox set for the task, and which sandbox set
+    # it (``run_limit`` in the report); ``None`` where its report says nothing.
+    sandbox_run_limit: dict[str, Any] | None = None
     # Each model's measured generation rate and each per-call timeout it
     # produced (``llm.generation_rate.GenerationRates.snapshot``). ``None`` on
     # a run that measured no answer and sized no call.
@@ -861,6 +875,14 @@ class RunSummary:
             f"**STIX objects**: {self.stix_object_count}  ",
             f"**Elapsed**: {self.elapsed_seconds:.1f}s  ",
             *([f"**Sandbox**: {self.sandbox['statement']}  "] if self.sandbox else []),
+            *(
+                [
+                    f"**Sandbox run-time limit**: {self.sandbox_run_limit['seconds']} s, "
+                    f"the run-time limit {self.sandbox_run_limit['set_by']} set for the task  "
+                ]
+                if self.sandbox_run_limit
+                else []
+            ),
             *stage_duration_lines(self.stages),
             *tool_latency_lines(self.tool_latency),
             "",
@@ -1206,6 +1228,8 @@ class RunSummary:
             "tool_latency": dict(self.tool_latency) if self.tool_latency else None,
             "sandbox": dict(self.sandbox) if self.sandbox else None,
         }
+        if self.sandbox_run_limit:
+            result["sandbox_run_limit"] = dict(self.sandbox_run_limit)
 
         if self.validation:
             result["validation"] = {
@@ -1317,6 +1341,7 @@ class RunSummaryBuilder:
         self._stages: list[dict[str, Any]] = []
         self._triage: dict[str, Any] | None = None
         self._sandbox: dict[str, str] | None = None
+        self._sandbox_run_limit: dict[str, Any] | None = None
         self._nudge: dict[str, Any] | None = None
         self._budget: dict[str, Any] | None = None
         self._tool_latency: dict[str, Any] | None = None
@@ -1446,6 +1471,20 @@ class RunSummaryBuilder:
             None
             if found.status == OBSERVED
             else {"status": found.status, "statement": found.statement}
+        )
+        limit = report.get("run_limit") if isinstance(report, dict) else None
+        seconds = limit.get("seconds") if isinstance(limit, dict) else None
+        self._sandbox_run_limit = (
+            {
+                "seconds": int(seconds),
+                "set_by": _sandbox_name(str(limit.get("set_by") or "the sandbox")),
+            }
+            if found.status == OBSERVED
+            and isinstance(limit, dict)
+            and isinstance(seconds, int)
+            and not isinstance(seconds, bool)
+            and seconds > 0
+            else None
         )
         return self
 
@@ -1790,6 +1829,7 @@ class RunSummaryBuilder:
             budget=self._budget,
             tool_latency=self._tool_latency,
             sandbox=self._sandbox,
+            sandbox_run_limit=self._sandbox_run_limit,
             generation=self._generation,
             spend=self._spend,
         )

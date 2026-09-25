@@ -20,6 +20,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from maljan.agents.base_agent import NO_STRUCTURED_REPORT_STATUS
 from maljan.agents.delegation import REFUSAL_PREFIX
 from maljan.agents.evidence_recorder import EvidenceRecorder
 from maljan.agents.judge_agent import (
@@ -1875,6 +1876,26 @@ def label_of(container: ServiceContainer, key: str) -> str:
         return str(key)
 
 
+def spoken_name(container: ServiceContainer, key: str, stage: Any) -> str:
+    """The name a published sentence gives an agent: its label, or its stage for a long key.
+
+    The event scrubber reads a run of 24 or more key characters inside a
+    sentence as a credential and publishes ``***``; an agent with no label and
+    such a key is named by the stage it answered in instead, ``<stage>
+    analyst``, with its place among the stage's agents where the stage has
+    more than one, so two such agents are never named alike. The line's
+    identity fields keep the key either way.
+    """
+    label = label_of(container, key)
+    stage_key = str(getattr(stage, "key", "") or "")
+    if label != key or len(key) < 24 or not stage_key:
+        return label
+    agents = list(getattr(stage, "agents", None) or ())
+    if len(agents) > 1 and key in agents:
+        return f"{stage_key} analyst {agents.index(key) + 1} of {len(agents)}"
+    return f"{stage_key} analyst"
+
+
 def announce_started(container: ServiceContainer, stage: Any) -> None:
     """``stage_started``, from the one node of the stage that announces it."""
     emit(
@@ -2385,7 +2406,13 @@ def make_stage_agent_node(
                 container.event_sink,
                 speaker=agent_name,
                 role="analyst",
-                text=summarize_claims(isr.claims, speaker=agent_name),
+                # The operator's label, not the key: a key of 24 characters or
+                # more reads as a credential to the event scrubber and is
+                # published as ``***`` inside a sentence.
+                text=summarize_claims(
+                    isr.claims,
+                    speaker=spoken_name(container, agent_name, stage),
+                ),
                 round_index=0,
                 status=isr_status(isr),
                 claims=claims_to_payload(isr.claims),
@@ -3123,6 +3150,17 @@ def make_negotiation_node(
 # ---------------------------------------------------------------------------
 
 
+def _home_stage(container: ServiceContainer, name: str) -> Any:
+    """The analysis stage ``name`` answers in, or ``None``. Never raises."""
+    try:
+        for home in getattr(container.active_profile(), "stages", None) or []:
+            if name in (getattr(home, "agents", None) or ()):
+                return home
+    except Exception:  # noqa: BLE001 — a name is never worth a node
+        return None
+    return None
+
+
 def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any:
     """Factory: creates the revision node where all agents revise concurrently."""
 
@@ -3244,34 +3282,65 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
         revision_nudge_modes: dict[str, str] = {}
         revision_budget: dict[str, list[dict[str, Any]]] = {}
 
+        # The answer each analyst has in force before this round: its last
+        # revision that stood, or its first answer.
+        kept_isrs = state.get("isr_reports") or {}
+        kept_texts = state.get("revised_reports") or {}
+
+        def _keep_the_answer_in_force(
+            name: str, why: str, status: str = "", report: str = ""
+        ) -> None:
+            """A revision that was not made leaves the answer in force standing, whole."""
+            kept = kept_isrs.get(name)
+            if kept is None:
+                kept = _empty_isr(name, revision_round=iteration)
+            revised[name] = kept_texts.get(name) or original_reports.get(name, "")
+            revised_isrs[name] = kept
+            label = label_of(container, name)
+            spoken = spoken_name(container, name, _home_stage(container, name))
+            logger.warning(
+                "%s: the round-%d revision was not made (%s); its answer in force stands with "
+                "%d claim(s).",
+                name,
+                iteration,
+                why,
+                len(kept.claims or []),
+            )
+            emit_agent_message(
+                container.event_sink,
+                speaker=name,
+                role="reviser",
+                text=(
+                    f"{summarize_claims(kept.claims, speaker=spoken)} The revision was not made "
+                    f"({why}); this answer stands."
+                ),
+                round_index=iteration,
+                status=status or isr_status(kept),
+                claims=claims_to_payload(kept.claims),
+                # What the revision wrote, where it wrote something: kept on the
+                # record though its claims do not replace the ones in force.
+                report=report,
+                stage=stage_key_of(stage, "debate"),
+                display_name=label,
+            )
+
         # strict=True: agent_names and results MUST be equal length; mismatch
         # is a programming error and must surface, not be silently truncated.
         for name, result in zip(agent_names, results, strict=True):
             if isinstance(result, BaseException):
                 logger.error("%s revision failed: %s", name, result)
-                revised[name] = original_reports.get(name, "")
-                revised_isrs[name] = _empty_isr(name, revision_round=iteration)
-                emit_agent_message(
-                    container.event_sink,
-                    speaker=name,
-                    role="reviser",
-                    # The class of the failure and nothing else, as the judge
-                    # and the mediator already say it. The log above keeps the
-                    # exception's own words for an operator; this line goes to
-                    # every reader of the run, and an exception's text can
-                    # carry a path, a host or a credential. One helper decides
-                    # what that class is called, so a group names what is
-                    # inside it and a refusal keeps its remedy.
-                    text=f"[ERROR] {name} revision failed: {describe_exception(result)}",
-                    round_index=iteration,
-                    status="failed",
-                    stage=stage_key_of(stage, "debate"),
-                    display_name=label_of(container, name),
+                # The class of the failure and nothing else, as the judge and
+                # the mediator already say it. The log above keeps the
+                # exception's own words for an operator; the published line
+                # goes to every reader of the run, and an exception's text can
+                # carry a path, a host or a credential. One helper decides what
+                # that class is called, so a group names what is inside it and
+                # a refusal keeps its remedy.
+                _keep_the_answer_in_force(
+                    name, f"it failed: {describe_exception(result)}", status="failed"
                 )
             else:
                 revised_text, isr = result
-                revised[name] = revised_text
-                revised_isrs[name] = isr
                 try:
                     revision_ledger.extend(
                         entry.model_dump(mode="json")
@@ -3291,11 +3360,32 @@ def make_revision_node(container: ServiceContainer, *, stage: Any = None) -> Any
                     _budget_update(container.get_agent(name), name).get("budget_records") or {}
                 ).items():
                     revision_budget.setdefault(agent_key, []).extend(rows)
+                if not str(revised_text or "").strip():
+                    # No answer at all: the loop was not started (the spend
+                    # ceiling), or the call was refused before it was made.
+                    _keep_the_answer_in_force(name, "no answer was written")
+                    continue
+                if (
+                    not list(isr.claims or [])
+                    and str(getattr(isr, "status", "") or "") == NO_STRUCTURED_REPORT_STATUS
+                    and list(getattr(kept_isrs.get(name), "claims", None) or [])
+                ):
+                    # The revision ended without a structured report: it made
+                    # no decision about the claims in force, so they stand.
+                    _keep_the_answer_in_force(
+                        name, "its answer carried no structured report", report=revised_text
+                    )
+                    continue
+                revised[name] = revised_text
+                revised_isrs[name] = isr
                 emit_agent_message(
                     container.event_sink,
                     speaker=name,
                     role="reviser",
-                    text=summarize_claims(isr.claims, speaker=name),
+                    text=summarize_claims(
+                        isr.claims,
+                        speaker=spoken_name(container, name, _home_stage(container, name)),
+                    ),
                     round_index=iteration,
                     status=isr_status(isr),
                     claims=claims_to_payload(isr.claims),

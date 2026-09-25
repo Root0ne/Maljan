@@ -323,19 +323,61 @@ class FrontierConfig(FrontierArm):
     arms: dict[str, FrontierArm] = Field(default_factory=dict)
 
 
+_PRICE_WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+_UTC_CLOCK = r"^([01]\d|2[0-3]):[0-5]\d$"
+
+
+class ModelPriceWindow(BaseModel):
+    """A span of the day (UTC) when a model is priced otherwise, as its vendor documents it.
+
+    ``utc_from`` is in the window and ``utc_to`` is not; a window whose end is
+    before its start runs past midnight, and ``days`` (``mon`` … ``sun``, empty
+    for every day) names the day it opens on. ``source`` is where the figures
+    were read.
+    """
+
+    utc_from: Annotated[str, Field(pattern=_UTC_CLOCK)]
+    utc_to: Annotated[str, Field(pattern=_UTC_CLOCK)]
+    days: list[str] = Field(default_factory=list)
+    input_usd_per_mtok: Annotated[float, Field(ge=0.0)]
+    output_usd_per_mtok: Annotated[float, Field(ge=0.0)]
+    cached_input_usd_per_mtok: Annotated[float, Field(ge=0.0)] | None = None
+    source: str = ""
+
+    @field_validator("days")
+    @classmethod
+    def _known_days(cls, days: list[str]) -> list[str]:
+        named = [str(day).strip().lower() for day in days]
+        unknown = [day for day in named if day not in _PRICE_WEEKDAYS]
+        if unknown:
+            raise ValueError(
+                f"unknown weekday(s) {', '.join(unknown)}: use {', '.join(_PRICE_WEEKDAYS)}"
+            )
+        return named
+
+    @model_validator(mode="after")
+    def _not_empty(self) -> "ModelPriceWindow":
+        if self.utc_from == self.utc_to:
+            raise ValueError("a price window's utc_from and utc_to must differ")
+        return self
+
+
 class ModelPrice(BaseModel):
     """What one model's tokens cost, in US dollars per million, as its vendor prices them.
 
     ``cached_input_usd_per_mtok`` is the price of an input token the provider
     read from its prompt cache; ``None`` prices a cached token as an ordinary
     input token. ``source`` is where the figures were read, kept with them so
-    a reader can check them.
+    a reader can check them. ``windows`` are the spans of the day the vendor
+    prices otherwise (a peak or an off-peak rate); a call is priced at the
+    window its request was sent in, and at these figures outside every window.
     """
 
     input_usd_per_mtok: Annotated[float, Field(ge=0.0)]
     output_usd_per_mtok: Annotated[float, Field(ge=0.0)]
     cached_input_usd_per_mtok: Annotated[float, Field(ge=0.0)] | None = None
     source: str = ""
+    windows: list[ModelPriceWindow] = Field(default_factory=list)
 
 
 class LLMConfig(BaseModel):
@@ -2963,6 +3005,11 @@ class SandboxTriageConfig(BaseModel):
     file type, so an APK reaches an Android profile rather than the Windows
     one every other sample uses. ``timeout_seconds`` is generous because a
     Triage run queues behind other tenants' work.
+
+    ``analysis_seconds`` is how long the Triage VM runs the sample, sent as
+    the submission's ``defaults.timeout``; unset, nothing is sent and Triage's
+    own default applies. ``timeout_seconds`` is how long this platform polls
+    for the finished report, so it must be longer than the run it waits for.
     """
 
     base_url: str = "https://tria.ge/api/v0"
@@ -2972,6 +3019,17 @@ class SandboxTriageConfig(BaseModel):
     timeout_seconds: Annotated[int, Field(ge=1)] = 900
     poll_interval_seconds: Annotated[int, Field(ge=1)] = 15
     fetch_pcap: bool = True
+    analysis_seconds: Annotated[int, Field(ge=1)] | None = None
+
+    @model_validator(mode="after")
+    def _the_poll_outlasts_the_run(self) -> "SandboxTriageConfig":
+        if self.analysis_seconds is not None and self.timeout_seconds <= self.analysis_seconds:
+            raise ValueError(
+                f"sandbox.triage.timeout_seconds ({self.timeout_seconds}) must be longer than "
+                f"sandbox.triage.analysis_seconds ({self.analysis_seconds}): the poll waits "
+                "for the sample's run and for Triage to process it into a report"
+            )
+        return self
 
 
 class SandboxUploadConfig(BaseModel):

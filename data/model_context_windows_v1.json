@@ -73,18 +73,120 @@
     }
   },
   "prices": {
-    "_comment": "What a model's tokens cost, in US dollars per million, as its vendor's own page documents them, with that page. Data for the operator's spend ceiling (core.llm.max_spend_usd_per_job), never a limit of its own: a row is read only where core.llm.model_prices names no price for the model, and a model not listed has no price. DeepSeek documents a peak and an off-peak rate (off-peak is half); the peak rate is written here, so the spend the ceiling is compared with is never below what a call cost.",
+    "_comment": "What a model's tokens cost, in US dollars per million, as its vendor's own page documents them, with that page. Data for the operator's spend ceiling (core.llm.max_spend_usd_per_job), never a limit of its own: a row is read only where core.llm.model_prices names no price for the model, and a model not listed has no price. A row's own figures are its price outside every window; each window is a span of the day, UTC, on the weekdays it names, with the figures the vendor charges then, and a call is priced at the window its request was sent in. DeepSeek documents peak hours of 01:00-04:00 and 06:00-10:00 UTC, Monday to Friday, at twice the off-peak rate, and every other hour as off-peak; it does not say whether a request is timed at its start or its end. It also takes Chinese public holidays out of the peak hours, which no window here names: a call made in a peak window on such a day is priced at the peak rate, above what it cost.",
     "deepseek-flash": {
-      "input_usd_per_mtok": 0.3,
-      "cached_input_usd_per_mtok": 0.006,
-      "output_usd_per_mtok": 1.2,
-      "source": "https://api-docs.deepseek.com/quick_start/pricing (peak rate)"
+      "input_usd_per_mtok": 0.15,
+      "cached_input_usd_per_mtok": 0.003,
+      "output_usd_per_mtok": 0.6,
+      "source": "https://api-docs.deepseek.com/quick_start/pricing (off-peak rate: every hour outside the peak windows)",
+      "windows": [
+        {
+          "utc_from": "01:00",
+          "utc_to": "04:00",
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "input_usd_per_mtok": 0.3,
+          "cached_input_usd_per_mtok": 0.006,
+          "output_usd_per_mtok": 1.2,
+          "source": "https://api-docs.deepseek.com/quick_start/pricing (peak rate, 01:00-04:00 UTC Monday to Friday)"
+        },
+        {
+          "utc_from": "06:00",
+          "utc_to": "10:00",
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "input_usd_per_mtok": 0.3,
+          "cached_input_usd_per_mtok": 0.006,
+          "output_usd_per_mtok": 1.2,
+          "source": "https://api-docs.deepseek.com/quick_start/pricing (peak rate, 06:00-10:00 UTC Monday to Friday)"
+        }
+      ]
+    },
+    "deepseek-v4-flash": {
+      "input_usd_per_mtok": 0.15,
+      "cached_input_usd_per_mtok": 0.003,
+      "output_usd_per_mtok": 0.6,
+      "source": "https://api-docs.deepseek.com/quick_start/pricing (off-peak rate: every hour outside the peak windows); deepseek-v4-flash is the legacy name the page lists as accepted for deepseek-flash",
+      "windows": [
+        {
+          "utc_from": "01:00",
+          "utc_to": "04:00",
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "input_usd_per_mtok": 0.3,
+          "cached_input_usd_per_mtok": 0.006,
+          "output_usd_per_mtok": 1.2,
+          "source": "https://api-docs.deepseek.com/quick_start/pricing (peak rate, 01:00-04:00 UTC Monday to Friday); deepseek-v4-flash is the legacy name the page lists as accepted for deepseek-flash"
+        },
+        {
+          "utc_from": "06:00",
+          "utc_to": "10:00",
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "input_usd_per_mtok": 0.3,
+          "cached_input_usd_per_mtok": 0.006,
+          "output_usd_per_mtok": 1.2,
+          "source": "https://api-docs.deepseek.com/quick_start/pricing (peak rate, 06:00-10:00 UTC Monday to Friday); deepseek-v4-flash is the legacy name the page lists as accepted for deepseek-flash"
+        }
+      ]
     },
     "deepseek-v4-pro": {
-      "input_usd_per_mtok": 1.32,
-      "cached_input_usd_per_mtok": 0.044,
-      "output_usd_per_mtok": 3.96,
-      "source": "https://api-docs.deepseek.com/quick_start/pricing (peak rate)"
+      "input_usd_per_mtok": 0.66,
+      "cached_input_usd_per_mtok": 0.022,
+      "output_usd_per_mtok": 1.98,
+      "source": "https://api-docs.deepseek.com/quick_start/pricing (off-peak rate: every hour outside the peak windows)",
+      "windows": [
+        {
+          "utc_from": "01:00",
+          "utc_to": "04:00",
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "input_usd_per_mtok": 1.32,
+          "cached_input_usd_per_mtok": 0.044,
+          "output_usd_per_mtok": 3.96,
+          "source": "https://api-docs.deepseek.com/quick_start/pricing (peak rate, 01:00-04:00 UTC Monday to Friday)"
+        },
+        {
+          "utc_from": "06:00",
+          "utc_to": "10:00",
+          "days": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "input_usd_per_mtok": 1.32,
+          "cached_input_usd_per_mtok": 0.044,
+          "output_usd_per_mtok": 3.96,
+          "source": "https://api-docs.deepseek.com/quick_start/pricing (peak rate, 06:00-10:00 UTC Monday to Friday)"
+        }
+      ]
     }
   }
 }

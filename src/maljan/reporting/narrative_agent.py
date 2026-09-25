@@ -33,7 +33,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.config import REPORTER_AGENT_KEY
 from maljan.core.logger import logger
-from maljan.core.spend import spend_bound
+from maljan.core.spend import (
+    SpendCeilingStop,
+    admitted,
+    spend_bound,
+    spend_ceiling_set,
+    spend_left_said,
+    spend_preview,
+    spend_release,
+)
 from maljan.core.token_ledger import structured_answer
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
@@ -517,7 +525,19 @@ class NarrativeAgent:
 
         The composer's rule (``context_window.call_output_bound``): where the
         window is known and the budget would not fit beside the prompt, the
-        call may write what the window leaves after it.
+        call may write what the window leaves after it. The spend ceiling is
+        asked without anything being reserved (:meth:`_call_limit` reserves).
+        """
+        return self._call_limit(turns, preview=True)[0]
+
+    def _call_limit(
+        self, turns: Sequence[BaseMessage], *, slot: Any = None, preview: bool = False
+    ) -> tuple[int | None, str]:
+        """The ``max_tokens`` one call of this round is held to, and the limit that set it.
+
+        As the composer's section (``ReportComposer._call_limit``): the
+        round's output budget, what the window leaves after the prompt, or the
+        spend ceiling's hold, whichever is smallest, named as it applied.
         """
         from maljan.llm.context_window import (
             accepts_output_bound,
@@ -525,23 +545,27 @@ class NarrativeAgent:
             prompt_overflow_sentence,
         )
 
+        cap = int(getattr(self, "output_cap", 0) or 0)
         chars = sum(len(str(getattr(message, "content", "") or "")) for message in turns)
         window = int(getattr(self, "window_tokens", 0) or 0)
         overflow = prompt_overflow_sentence("narrative round's", chars, window)
         if overflow is not None and overflow not in self.degradations:
             self.degradations.append(overflow)
-        bound = call_output_bound(int(getattr(self, "output_cap", 0) or 0), window, chars)
-        held = spend_bound(
-            getattr(self, "token_ledger", None),
-            self.llm,
-            sum(len(str(getattr(m, "content", m) or "")) for m in turns),
-            int(getattr(self, "output_cap", 0) or 0),
-        )
-        if held is not None:
-            bound = held if bound is None else min(bound, held)
+        why = f"its output budget of {cap} tokens"
+        bound = call_output_bound(cap, window, chars)
+        if bound is not None:
+            why = f"what its {window}-token window leaves after the prompt"
+        ledger = getattr(self, "token_ledger", None)
+        if preview:
+            held = spend_preview(ledger, self.llm, chars, cap)
+        else:
+            held = spend_bound(ledger, self.llm, chars, cap, slot=slot)
+        if held is not None and (bound is None or held < bound):
+            bound = held
+            why = f"the spend ceiling's hold: what {spend_left_said(ledger)} pays for"
         if bound is None or not accepts_output_bound(self.llm):
-            return None
-        return bound
+            return None, why
+        return bound, why
 
     def _note_room(self, prompt_chars: int) -> None:
         """Record, once, a prompt larger than what the window leaves after the budget.
@@ -629,18 +653,34 @@ class NarrativeAgent:
         # in seconds instead of an hour and a half.
         # A call that has to be held under its budget goes by the manual path,
         # where the hold can be passed with the call.
-        if structured_output_supported_for_llm(self.llm) and self._call_bound(messages) is None:
+        if (
+            structured_output_supported_for_llm(self.llm)
+            and not spend_ceiling_set(getattr(self, "token_ledger", None))
+            and self._call_bound(messages) is None
+        ):
             try:
                 structured = self.llm.with_structured_output(NarrativeOutput, include_raw=True)
-                result = structured_answer(
-                    await retry_on_connection_error(
-                        lambda: structured.ainvoke(messages), what="NarrativeAgent structured"
-                    ),
+                # Taken only with no spend ceiling set, and admitted like every
+                # model call: at its whole cap, the structured path taking none.
+                with admitted(
                     self.token_ledger,
-                    agent=REPORTER_AGENT_KEY,
+                    kind="report",
+                    llm=self.llm,
                     model=self.model_label,
-                    call="narrative",
-                )
+                    prompt_chars=sum(len(str(message.content)) for message in messages),
+                    cap_tokens=int(getattr(self, "output_cap", 0) or 0),
+                    holdable=False,
+                ):
+                    result = structured_answer(
+                        await retry_on_connection_error(
+                            lambda: structured.ainvoke(messages),
+                            what="NarrativeAgent structured",
+                        ),
+                        self.token_ledger,
+                        agent=REPORTER_AGENT_KEY,
+                        model=self.model_label,
+                        call="narrative",
+                    )
                 if isinstance(result, NarrativeOutput):
                     return self._kept_with_ungrounded_recorded(
                         result, grounding, known_ids, citable, evidence
@@ -676,40 +716,39 @@ class NarrativeAgent:
         from maljan.llm.context_window import output_bound_kwargs
 
         async def _run(turns: list[BaseMessage]) -> Any:
-            bound = self._call_bound(turns)
+            slot = object()
+            bound, why = self._call_limit(turns, slot=slot)
             if bound is not None:
-                logger.info(
-                    "NarrativeAgent: this call may write %d tokens — what its %d-token "
-                    "window leaves after the prompt, under its budget of %d.",
-                    bound,
-                    self.window_tokens,
-                    self.output_cap,
+                logger.info("NarrativeAgent: output limit on this call: %d — %s.", bound, why)
+            try:
+                raw = await retry_on_connection_error(
+                    (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))
+                    if bound is not None
+                    else (lambda: self.llm.ainvoke(turns)),
+                    what="NarrativeAgent raw",
                 )
-            raw = await retry_on_connection_error(
-                (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))
-                if bound is not None
-                else (lambda: self.llm.ainvoke(turns)),
-                what="NarrativeAgent raw",
-            )
-            if self.token_ledger is not None:
-                try:
-                    from maljan.core.token_ledger import record_response_usage
+                # On the ledger before the reservation goes.
+                if self.token_ledger is not None:
+                    try:
+                        from maljan.core.token_ledger import record_response_usage
 
-                    record_response_usage(
-                        self.token_ledger,
-                        raw,
-                        agent=REPORTER_AGENT_KEY,
-                        model=self.model_label,
-                        call="narrative",
-                    )
-                    from maljan.pipeline.events import announce_model_fallback
+                        record_response_usage(
+                            self.token_ledger,
+                            raw,
+                            agent=REPORTER_AGENT_KEY,
+                            model=self.model_label,
+                            call="narrative",
+                        )
+                        from maljan.pipeline.events import announce_model_fallback
 
-                    announce_model_fallback(
-                        getattr(self, "event_sink", None), raw, agent="reporter", stage="report"
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
-                    logger.debug("NarrativeAgent: token usage not recorded (%s).", exc)
+                        announce_model_fallback(
+                            getattr(self, "event_sink", None), raw, agent="reporter", stage="report"
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
+                        logger.debug("NarrativeAgent: token usage not recorded (%s).", exc)
+            finally:
+                spend_release(getattr(self, "token_ledger", None), slot)
             return raw
 
         try:
@@ -728,6 +767,12 @@ class NarrativeAgent:
                 parse=_narrative_payload,
                 on_feedback=self.validation_tally.count,
             )
+        except SpendCeilingStop as stop:
+            said = f"The narrative round was not written: {stop}."
+            if said not in self.degradations:
+                self.degradations.append(said)
+            logger.warning("NarrativeAgent: %s", said)
+            return None
         except Exception as exc:  # noqa: BLE001
             logger.error("NarrativeAgent: manual-parse fallback failed (%s); NO NARRATIVE.", exc)
             return None

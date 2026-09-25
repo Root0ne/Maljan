@@ -208,6 +208,9 @@ class TestTheUsageParts:
     def test_nothing_is_invented_where_nothing_was_reported(self) -> None:
         answer = _ask(_settings(HOSTED), _Wire({"prompt_tokens": 9, "completion_tokens": 2}))
         usage = turn_usage(answer)
+        assert usage is not None
+        # The send time is the client's own stamp, not a usage figure.
+        assert usage.pop("sent_at") > 0
         assert usage == {"input_tokens": 9, "output_tokens": 2}
 
     def test_the_ledger_and_the_report_sentence_carry_them(self) -> None:

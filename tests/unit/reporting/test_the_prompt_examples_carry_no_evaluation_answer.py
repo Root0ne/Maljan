@@ -272,6 +272,21 @@ class _StampedTool:
 
 
 # The prompts the example team document ships for an operator to import.
+def _spend_sentences() -> str:
+    """The spend ceiling's degradation reason and one refusal, as the run states them."""
+    from maljan.core.spend import SpendCeilingStop, SpendMeter
+
+    meter = SpendMeter(
+        0.01, {"m": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}}, table={}
+    )
+    meter.settle({"input_tokens": 0, "output_tokens": 5_000}, "m")
+    try:
+        meter.admit(kind="loop turn", model="m", prompt_chars=3_000, cap_tokens=10_000)
+    except SpendCeilingStop as stop:
+        refused = str(stop)
+    return f"{meter.reason()} {refused}"
+
+
 _TEAM_DOCUMENT = (
     Path(__file__).resolve().parents[3] / "docs" / "examples" / "profiles" / "all-tools.json"
 )
@@ -379,6 +394,7 @@ PROMPTS: dict[str, str] = {
         shown=1000, total=9000
     ),
     "an ask refused at the spend ceiling": SPEND_CEILING_REFUSAL.format(callee="'helper'"),
+    "the spend ceiling's reason and a call it refused": _spend_sentences(),
     "an ask refused for a mutual wait": WAITING_ON_EACH_OTHER_REFUSAL.format(callee="'helper'"),
     "the pack's decoded strings in part": triage_pack.DECODED_STRINGS_ROOM_SENTENCE.format(
         shown=10, total=90, offset=10

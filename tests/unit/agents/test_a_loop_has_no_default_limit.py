@@ -223,8 +223,8 @@ class TestALoopWithNoLimit:
             {name: {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 10.0}},
             table={},
         )
-        # Every turn's worst case fits, so the running turns are what trip it.
-        meter.worst_case = lambda *a, **k: 0.0  # type: ignore[method-assign]
+        # Every call is admitted as it is, so the running turns are what trip it.
+        meter.admit = lambda **k: None  # type: ignore[method-assign]
         agent = _analyst(model, TokenLedger(spend=meter))
 
         answer = _run(agent)

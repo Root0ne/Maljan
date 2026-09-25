@@ -449,6 +449,7 @@ class ServiceContainer:
         from maljan.core.spend import SpendMeter
 
         self._token_ledger = TokenLedger(spend=SpendMeter.from_settings(config))
+        self._plan_the_verdict_and_report(self._token_ledger.spend)
 
         # Per-run generation rate of each model, read off every call's answer
         # by a meter attached where the model is built. The judge and the
@@ -1342,6 +1343,74 @@ class ServiceContainer:
                 )
                 self._narrative_agent_cache.event_sink = self.event_sink
             return self._narrative_agent_cache
+
+    def _plan_the_verdict_and_report(self, meter: Any) -> None:
+        """Tell the spend meter the verdict and report calls this job will make.
+
+        The verdict is one call on the judge's model; the report is one call
+        for each section the composer writes (when it is on) and one for the
+        narrative round, on the reporter's model. Each is planned with the
+        prompt the window accounting allows it: its model's window less its
+        output budget, from what is already known of the window (nothing is
+        asked of a server here), and ``0`` where no window is known. The meter
+        keeps what they will cost aside from the tool phases. Never raises.
+        """
+        if meter is None or getattr(meter, "ceiling_usd", None) is None:
+            return
+        try:
+            from maljan.core.model_assignments import assignment_chain_for, model_label_for
+
+            report_calls = 1
+            if bool(getattr(self.config.reporting, "composer_enabled", False)):
+                from maljan.reporting.composer import COMPOSED_SECTIONS
+
+                report_calls += len(COMPOSED_SECTIONS)
+            judge_chain = assignment_chain_for(self.config, "judge", role="judge")
+            reporter_chain = assignment_chain_for(self.config, REPORTER_AGENT_KEY, role="judge")
+            meter.plan_tail(
+                {
+                    "verdict": (
+                        model_label_for(self.config, "judge", role="judge"),
+                        1,
+                        self._prompt_allowance(judge_chain),
+                        self._output_cap_of(judge_chain),
+                    ),
+                    "report": (
+                        self._reporter_model_label(),
+                        report_calls,
+                        self._prompt_allowance(reporter_chain),
+                        self._output_cap_of(reporter_chain),
+                    ),
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 — a plan never costs a job
+            logger.debug("the verdict and report were not planned for the spend meter: %s", exc)
+
+    def _output_cap_of(self, chain: list[Any]) -> int:
+        """The report-stage output cap of the first model of ``chain``, or ``0`` unknown.
+
+        What a verdict or report call is admitted with (``llm.judge_max_tokens``,
+        or its derivation), so the reserve plans the answer its admission demands.
+        """
+        if not chain:
+            return 0
+        return max(0, int(report_stage_budget(self.config, chain[0], probe=False).tokens))
+
+    def _prompt_allowance(self, chain: list[Any]) -> int:
+        """The prompt tokens the first model of ``chain`` leaves room for, or ``0`` unknown.
+
+        Its window less its report-stage output budget, from the window this
+        process already knows (the table, the operator's declaration, a window
+        learned earlier); a window nothing answered for is not a fact to plan by.
+        """
+        if not chain:
+            return 0
+        from maljan.llm.context_window import FALLBACK
+
+        budget = report_stage_budget(self.config, chain[0], probe=False)
+        if budget.window.source == FALLBACK or budget.window.tokens <= 0:
+            return 0
+        return max(0, int(budget.window.tokens) - int(budget.tokens))
 
     def _reporter_model_label(self) -> str:
         """The label of the model ``get_reporter_llm`` builds for the report's rounds."""

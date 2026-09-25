@@ -215,20 +215,23 @@ ANNOTATIONS: dict[str, Annotation] = {
     "llm.max_spend_usd_per_job": {
         "title": "Spend ceiling per job (USD)",
         "description": (
-            "The most one job may spend on its models, in US dollars. Empty, the default, "
-            "is no ceiling. Spend is the provider-reported usage of every call (cached "
-            "input, input and output tokens) at the prices of the model that answered: "
-            "llm.model_prices first, then a price the vendored model table documents. "
-            "Before each call, one whose worst case (whole prompt as input, whole output "
-            "cap as output) would pass what is left is not made, unless it is the verdict, "
-            "a report section or a loop's closing answer, which are held to the output "
-            "the remaining spend pays for. When it is reached every running tool loop "
-            "writes its answer from what it gathered, no further negotiation round, chunk "
-            "or tool loop starts, and only the verdict and the report run, tool-free; a "
-            "degradation reason says so. It is a trip, not a cap: set it below the true "
-            "limit by the verdict's and the report's cost. A model with no price is "
-            "named once in the log and the run summary and its calls are not counted, so "
-            "the figure compared is what the job spent at least."
+            "The most one job may spend on its models, in US dollars: a hard bound against "
+            "the platform's prompt estimate (characters over three), nothing is sent that "
+            "could pass it by that measure. Empty, the default, is no ceiling. A call counts "
+            "what it was charged: the cost its provider reported with the answer, else its "
+            "reported usage (cached input, input and output tokens) at the rates in force "
+            "when it was sent, from llm.model_prices first, then the vendored model table, "
+            "time windows such as peak hours included. Before each call its output cap is "
+            "held to what the spend it may use pays for; it is refused only when that is "
+            "below the smallest answer it can give (the largest this job has measured of "
+            "its model, else its own cap). Calls in flight reserve their worst case, and "
+            "the verdict and the report keep a reserve sized from this job's measured "
+            "prompts and answers that the other calls cannot spend. After the first "
+            "refusal every running tool loop writes its answer from what it gathered, no "
+            "further negotiation round, chunk or tool loop starts, and the verdict and the "
+            "report run on the reserve; a degradation reason says so. A model with no "
+            "price is named once in the log and the run summary and its calls are not "
+            "counted, so the figure compared is what the job spent at least."
         ),
         "subgroup": "Spend",
     },
@@ -238,7 +241,10 @@ ANNOTATIONS: dict[str, Annotation] = {
             "Per-model prices for the spend ceiling, keyed by the model name the provider "
             "serves (for example deepseek-v4-pro): input_usd_per_mtok, "
             "output_usd_per_mtok, and optionally cached_input_usd_per_mtok (a cached "
-            "input token costs an input token without it) and source. Empty by default; "
+            "input token costs an input token without it), source, and windows: spans of "
+            "the day in UTC (utc_from, utc_to, optional days mon to sun) with their own "
+            "prices and source, for a vendor's peak or off-peak rate; a call is priced at "
+            "the window it was sent in. Empty by default; "
             "the vendored model table's documented prices answer for a model not named "
             "here, and a model neither names has no price."
         ),
@@ -1667,7 +1673,21 @@ ANNOTATIONS.update(
             "title": "Triage timeout (s)",
             "description": (
                 "Maximum seconds to wait for a Triage analysis to reach the reported "
-                "state, queueing behind other tenants included."
+                "state, queueing behind other tenants included. With a run time set "
+                "below, it must be longer than that run time and also cover Triage's "
+                "processing of the run into a report; no margin for the processing is "
+                "guessed, so leave room for it."
+            ),
+            "applies_when": _SANDBOX_TRIAGE,
+        },
+        "sandbox.triage.analysis_seconds": {
+            "title": "Triage run time (s)",
+            "description": (
+                "How long the Triage VM runs the sample, sent with the submission as "
+                "defaults.timeout. Empty, the default, sends nothing and Triage's own "
+                "default applies. A value the account does not allow is refused by Triage, "
+                "and the submission error quotes its words. The run summary states the "
+                "run-time limit Triage set for the task."
             ),
             "applies_when": _SANDBOX_TRIAGE,
         },

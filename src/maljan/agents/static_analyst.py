@@ -937,13 +937,56 @@ _DISPUTES_RE = re.compile(
 )
 
 
+# A claim's heading at the start of a line, as models number and mark it:
+# ``CLAIM:``, ``CLAIM 3:``, ``CLAIM 3 —``, ``**CLAIM 4 (REVISED):**``. Each one
+# opens a block of its own, so claims written one after another with no
+# ``---`` between them are read as the claims they are, not as the first one.
+_CLAIM_HEAD_RE = re.compile(
+    r"^[ \t>*_#]*CLAIM(?:[ \t]*#?\d+)?(?:[ \t]*\([^)\n]*\))?[ \t]*(?:\*\*)?[ \t]*"
+    r"(?::|—|–|-(?=\s))[ \t]*(?:\*\*)?[ \t]*"
+)
+_CONFIDENCE_LINE_RE = re.compile(r"^[ \t>*_#]*CONFIDENCE:")
+_DISPUTES_LINE_RE = re.compile(r"^[ \t>*_#]*DISPUTES\b", flags=re.IGNORECASE)
+
+
+def _claims_headed(text: str) -> str:
+    """``text`` with each claim heading turned into a ``---``-separated ``CLAIM:`` block.
+
+    A heading opens a new block only where one can begin: the first one, or
+    one after the open block has its CONFIDENCE line. A line inside a block's
+    EVIDENCE that happens to start with "CLAIM 2 -" is part of that block, and
+    nothing under the DISPUTES section — a peer's claim quoted there — is
+    read as this analyst's claim.
+    """
+    out: list[str] = []
+    open_block = False
+    confident = False
+    disputes = False
+    for line in text.splitlines():
+        if _DISPUTES_LINE_RE.match(line):
+            disputes = True
+        heading = None if disputes else _CLAIM_HEAD_RE.match(line)
+        if heading is not None and (not open_block or confident):
+            out.extend(["---", "CLAIM: " + line[heading.end() :]])
+            open_block, confident = True, False
+            continue
+        if _CONFIDENCE_LINE_RE.match(line):
+            confident = True
+        elif line.strip() and not line.strip().strip("-"):
+            # The model's own separator line closes the block.
+            open_block = False
+        out.append(line)
+    return "\n".join(out)
+
+
 def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
     """Parse structured CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE blocks from LLM output.
 
-    Tolerates CRLF line endings and varying amounts of whitespace.
+    Tolerates CRLF line endings and varying amounts of whitespace, a numbered
+    or marked claim heading, and claims with no separator line between them.
     """
     claims: list[ClaimEvidence] = []
-    blocks = _BLOCK_SPLIT_RE.split(text)
+    blocks = _BLOCK_SPLIT_RE.split(_claims_headed(text))
     for block in blocks:
         block = block.strip()
         if not block or "CLAIM:" not in block:

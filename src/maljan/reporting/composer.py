@@ -32,7 +32,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from maljan.agents.base_agent import retry_on_connection_error
 from maljan.core.config import REPORTER_AGENT_KEY
 from maljan.core.logger import logger
-from maljan.core.spend import spend_bound
+from maljan.core.spend import (
+    SpendCeilingStop,
+    admitted,
+    spend_bound,
+    spend_ceiling_set,
+    spend_left_said,
+    spend_preview,
+    spend_release,
+)
 from maljan.core.token_ledger import structured_answer
 from maljan.llm.registry import structured_output_supported_for_llm
 from maljan.pipeline.validation import (
@@ -236,6 +244,22 @@ _PROSE_SECTIONS: dict[str, str] = {
     "command_and_control": "Command and Control",
     "payloads": "Payloads and Dropped Files",
 }
+
+# Every section ``ReportComposer.compose`` writes, in its order: one call each
+# unless its answer is asked again. The spend ceiling keeps what these calls
+# will cost aside from the start of the job (``SpendMeter.plan_tail``).
+COMPOSED_SECTIONS: tuple[str, ...] = (
+    "introduction",
+    "execution_flow",
+    *_PROSE_SECTIONS,
+    "configuration",
+    "host_identifiers",
+    "commands",
+    "encryption_scheme",
+    "cli_flags",
+    "ransom_note",
+    "communications",
+)
 
 # One example answer per section shape, shown under the object the answer has
 # to be. The object alone names the keys; the example shows what goes in them
@@ -908,6 +932,10 @@ class ReportComposer:
                 self._invoke(messages, schema, section=section, validators=validators or []),
                 timeout=timeout,
             )
+        except SpendCeilingStop as stop:
+            logger.warning("ReportComposer: section '%s' is not written: %s.", section, stop)
+            self._note_degradation(f"report section '{section}' is not written: {stop}")
+            return None
         except TimeoutError:
             logger.warning("ReportComposer: section '%s' timed out; skipping.", section)
             self._note_degradation(
@@ -961,7 +989,23 @@ class ReportComposer:
         Where the window is known and the section's budget would not fit
         beside the prompt, the call may write what the window leaves after it
         (``context_window.call_output_bound``): a longer answer would be refused
-        by a hosted API, and cut by a runtime we run.
+        by a hosted API, and cut by a runtime we run. The spend ceiling is
+        asked without anything being reserved (:meth:`_call_limit` reserves).
+        """
+        return self._call_limit(turns, preview=True)[0]
+
+    def _call_limit(
+        self, turns: Sequence[BaseMessage], *, slot: Any = None, preview: bool = False
+    ) -> tuple[int | None, str]:
+        """The ``max_tokens`` one call of this section is held to, and the limit that set it.
+
+        ``(None, why)`` for the section's own output budget. The limit is the
+        smallest of three, named as it applied: the section's output budget
+        (the operator's cap and how it was derived), what the model's window
+        leaves after the prompt, and the spend ceiling's hold. With ``slot``
+        the spend ceiling reserves the call's worst case under it; with
+        ``preview`` it is only asked. Raises :class:`SpendCeilingStop` when
+        the spend ceiling does not admit the call.
         """
         from maljan.llm.context_window import (
             accepts_output_bound,
@@ -975,15 +1019,22 @@ class ReportComposer:
         overflow = prompt_overflow_sentence("report section's", chars, window)
         if overflow is not None:
             self._note_degradation(overflow)
+        budget_note = str(getattr(self, "budget_note", "") or "")
+        why = f"its output budget of {cap} tokens" + (f" ({budget_note})" if budget_note else "")
         bound = call_output_bound(cap, window, chars)
-        # A section is always written; past the spend ceiling its output cap is
-        # what the remaining spend pays for.
-        held = spend_bound(getattr(self, "token_ledger", None), self.llm, chars, cap)
-        if held is not None:
-            bound = held if bound is None else min(bound, held)
+        if bound is not None:
+            why = f"what its {window}-token window leaves after the prompt"
+        ledger = getattr(self, "token_ledger", None)
+        if preview:
+            held = spend_preview(ledger, self.llm, chars, cap)
+        else:
+            held = spend_bound(ledger, self.llm, chars, cap, slot=slot)
+        if held is not None and (bound is None or held < bound):
+            bound = held
+            why = f"the spend ceiling's hold: what {spend_left_said(ledger)} pays for"
         if bound is None or not accepts_output_bound(self.llm):
-            return None
-        return bound
+            return None, why
+        return bound, why
 
     def _start_the_section_clock(self, seconds: float) -> None:
         """Measure the model list's turn deadline against this section's clock.
@@ -1003,6 +1054,13 @@ class ReportComposer:
             share = _configured_share()
         if share > 0:
             enter(float(seconds), float(share))
+
+    def _cap_said(self, answer: Any) -> str:
+        """The limit a call sent with no held cap ran to, in words."""
+        note = str(getattr(self, "budget_note", "") or "")
+        return f"its output budget of {self._cap_of(answer)} tokens" + (
+            f" ({note})" if note else ""
+        )
 
     def _cap_of(self, answer: Any) -> int:
         """The output cap of the model that gave ``answer``."""
@@ -1064,18 +1122,35 @@ class ReportComposer:
         try:
             # A call that has to be held under its budget goes by the manual
             # path, where the hold can be passed with the call.
-            if not structured_output_supported_for_llm(self.llm) or self._call_bound(messages):
+            # Under a spend ceiling every call goes by the manual path, where
+            # its held cap is sent with it.
+            if (
+                not structured_output_supported_for_llm(self.llm)
+                or spend_ceiling_set(getattr(self, "token_ledger", None))
+                or self._call_bound(messages)
+            ):
                 raise _StructuredOutputUnavailable
             structured = self.llm.with_structured_output(schema, include_raw=True)
-            result = structured_answer(
-                await retry_on_connection_error(
-                    lambda: structured.ainvoke(messages), what="ReportComposer structured"
-                ),
+            # Taken only with no spend ceiling set, and admitted like every
+            # model call: at its whole cap, the structured path taking none.
+            with admitted(
                 self.token_ledger,
-                agent=REPORTER_AGENT_KEY,
+                kind="report",
+                llm=self.llm,
                 model=self.model_label,
-                call="report section",
-            )
+                prompt_chars=sum(len(_message_text(message)) for message in messages),
+                cap_tokens=int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0),
+                holdable=False,
+            ):
+                result = structured_answer(
+                    await retry_on_connection_error(
+                        lambda: structured.ainvoke(messages), what="ReportComposer structured"
+                    ),
+                    self.token_ledger,
+                    agent=REPORTER_AGENT_KEY,
+                    model=self.model_label,
+                    call="report section",
+                )
             if isinstance(result, dict):
                 result = schema.model_validate(result)
             if isinstance(result, schema):
@@ -1108,61 +1183,70 @@ class ReportComposer:
         cut_at = 0
         cut_shapes: list[str] = []
         cut_text = ""
+        cut_why = ""
         retry_unfit = False
+        # Why a cut section is not asked again, when it is not: the limit that
+        # held its first call leaves no more room for a second.
+        no_more_room = ""
 
         from maljan.llm.context_window import output_bound_kwargs
 
         async def _run(turns: list[BaseMessage]) -> Any:
-            nonlocal cut, cut_at, cut_text
-            bound = self._call_bound(turns)
+            nonlocal cut, cut_at, cut_text, cut_why
+            slot = object()
+            bound, why = self._call_limit(turns, slot=slot)
             if bound is not None:
                 logger.info(
-                    "ReportComposer: section '%s' may write %d tokens on this call — what "
-                    "its %d-token window leaves after the prompt, under its budget of %d.",
+                    "ReportComposer: section '%s' output limit on this call: %d — %s.",
                     section or schema.__name__,
                     bound,
-                    int(self.window_tokens),
-                    int(self.output_cap),
+                    why,
                 )
-            raw = await retry_on_connection_error(
-                (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))
-                if bound is not None
-                else (lambda: self.llm.ainvoke(turns)),
-                what="ReportComposer raw",
-            )
+            try:
+                raw = await retry_on_connection_error(
+                    (lambda: self.llm.ainvoke(turns, **output_bound_kwargs(self.llm, bound)))
+                    if bound is not None
+                    else (lambda: self.llm.ainvoke(turns)),
+                    what="ReportComposer raw",
+                )
+                # On the ledger before the reservation goes.
+                if self.token_ledger is not None:
+                    try:
+                        from maljan.core.token_ledger import record_response_usage
+
+                        record_response_usage(
+                            self.token_ledger,
+                            raw,
+                            agent=REPORTER_AGENT_KEY,
+                            model=self.model_label,
+                            call="report section",
+                        )
+                        from maljan.pipeline.events import announce_model_fallback
+
+                        announce_model_fallback(
+                            getattr(self, "event_sink", None), raw, agent="reporter", stage="report"
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
+                        logger.debug("ReportComposer: token usage not recorded (%s).", exc)
+            finally:
+                spend_release(getattr(self, "token_ledger", None), slot)
             # Per answer: a retry that closes inside the cap is not a cut one.
             held = self._cap_of(raw) if bound is None else min(self._cap_of(raw), bound)
             cut = _reached_the_cap(raw, held)
             if cut:
                 cut_at = held
                 cut_text = _message_text(raw)
+                cut_why = why if bound is not None and held == bound else self._cap_said(raw)
                 shape = cut_answer_shape(cut_text)
                 cut_shapes.append(shape)
                 logger.warning(
-                    "ReportComposer: section '%s' was cut at its output cap (%d) — %s.",
+                    "ReportComposer: section '%s' was cut at its output cap (%d, %s) — %s.",
                     section or schema.__name__,
                     cut_at,
+                    cut_why,
                     shape,
                 )
-            if self.token_ledger is not None:
-                try:
-                    from maljan.core.token_ledger import record_response_usage
-
-                    record_response_usage(
-                        self.token_ledger,
-                        raw,
-                        agent=REPORTER_AGENT_KEY,
-                        model=self.model_label,
-                        call="report section",
-                    )
-                    from maljan.pipeline.events import announce_model_fallback
-
-                    announce_model_fallback(
-                        getattr(self, "event_sink", None), raw, agent="reporter", stage="report"
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure — record_response_usage() swallows its own exceptions, so exc here is only an import/attribute error  # noqa: E501
-                    logger.debug("ReportComposer: token usage not recorded (%s).", exc)
             return raw
 
         def _parse(answer: Any) -> Any:
@@ -1229,9 +1313,28 @@ class ReportComposer:
             # short turn leave the section's output budget free in the window.
             # Every other question keeps the answer and asks for a fix to it,
             # and is sent as it always was.
-            nonlocal retry_unfit
+            nonlocal retry_unfit, no_more_room
             if not cut:
                 return True
+            if not cut_text.strip():
+                # A cut with no text is the model's reasoning taking the whole
+                # allowance: asked again it needs more room, not a question.
+                # Asked only when the second call would have more.
+                next_bound, _next_why = self._call_limit(turns, preview=True)
+                cap = int(getattr(self, "output_cap", 0) or self.section_max_tokens or 0)
+                next_room = cap if next_bound is None else next_bound
+                if next_room <= cut_at:
+                    no_more_room = (
+                        f"its answer was cut at {cut_at} tokens with no text written (the "
+                        "model's reasoning took the whole allowance), and a second call "
+                        f"would have {next_room} tokens, no more room; the limit was {cut_why}"
+                    )
+                    logger.warning(
+                        "ReportComposer: section '%s' is not asked again: %s.",
+                        section or schema.__name__,
+                        no_more_room,
+                    )
+                    return False
             room = self._room_chars()
             if room is None:
                 return True
@@ -1284,6 +1387,11 @@ class ReportComposer:
                 "y" if retries == 1 else "ies",
                 "; ".join(f"{v.path}: {v.message}" for v in broken),
             )
+            if cut and no_more_room:
+                self._note_degradation(
+                    f"report section '{section or schema.__name__}' is not written: {no_more_room}"
+                )
+                return None
             if cut:
                 # The cap ended the answer, not the model: the schema only
                 # failed because the JSON was cut off. Said as what it was.
