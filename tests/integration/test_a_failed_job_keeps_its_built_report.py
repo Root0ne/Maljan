@@ -71,6 +71,33 @@ async def test_a_node_after_the_report_fails_and_the_report_is_kept(
 ) -> None:
     job = _make_job()
     recorded = _answer_reads(mock_db_session, _reads(job, _make_sample()))
+    # The order the session saw things in: the kept report is committed before
+    # the row turns ``failed``, so a console that reads the terminal status
+    # finds the report already there.
+    order: list[str] = []
+    execute = mock_db_session.execute
+
+    async def _execute(*args: Any, **kwargs: Any) -> Any:
+        if args and "UPDATE analysis_jobs" in str(args[0]):
+            params = args[0].compile().params
+            if params.get("status") == "failed":
+                order.append("failed")
+        return await execute(*args, **kwargs)
+
+    mock_db_session.execute = _execute
+
+    async def _commit() -> None:
+        order.append("commit")
+
+    mock_db_session.commit = AsyncMock(side_effect=_commit)
+
+    def _add(obj: Any) -> None:
+        from app.models.report import AnalysisReport
+
+        if isinstance(obj, AnalysisReport):
+            order.append("report")
+
+    mock_db_session.add = MagicMock(side_effect=_add)
 
     async def _fails_after_the_report(self: Any, **_: Any) -> dict[str, Any]:
         self.built_report = {
@@ -95,6 +122,8 @@ async def test_a_node_after_the_report_fails_and_the_report_is_kept(
     error_id = re.search(r"error id ([0-9a-f]{32})", result["error"]).group(1)  # type: ignore[union-attr]
     statuses = [u["status"] for u in updates_in(recorded, "analysis_jobs")]
     assert statuses == ["running", "failed"]
+    kept = order.index("report")
+    assert "commit" in order[kept : order.index("failed")]
 
     stored = _stored_reports(mock_db_session)
     assert len(stored) == 1

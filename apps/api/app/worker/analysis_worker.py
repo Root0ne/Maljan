@@ -2471,12 +2471,14 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             # failed came to publish its ``error`` event and still leave the
             # row saying ``running``, with no error and no ``completed_at``,
             # for as long as the worker stayed up.
-            await mark_job_failed(db_session, job_uuid, reason=reason, error_id=error_id)
             # A report the report node finished is not lost because a later
             # step failed: it is stored against this failed job, marked
             # incomplete with where the run failed. Only when the graph itself
             # raised — a report a finished run produced and the worker then
-            # refused (an absent analysis) is not a report to keep.
+            # refused (an absent analysis) is not a report to keep. Stored
+            # before the row turns ``failed``: a console that sees the terminal
+            # status fetches the report once, and must find it there. The keep
+            # never raises, so the row below is always marked.
             built = getattr(app, "built_report", None) if app is not None else None
             failed_step = getattr(app, "failed_step", None) if app is not None else None
             if built and failed_step:
@@ -2491,6 +2493,7 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
                     override_keys=overrides.keys(),
                     hash_mismatch_reason=_report_hash_mismatch_reason,
                 )
+            await mark_job_failed(db_session, job_uuid, reason=reason, error_id=error_id)
         else:
             logger.warning(
                 "Cannot update job status: the job id did not parse (job_id=%s).",
