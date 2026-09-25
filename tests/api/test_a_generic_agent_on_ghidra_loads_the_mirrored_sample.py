@@ -98,9 +98,18 @@ def _load(provider: GhidraStaticProvider, file: str) -> None:
     run_coro_blocking(tool.coroutine(file=file), hard_timeout=20.0, label="test-load")
 
 
+class _Registry:
+    def __init__(self) -> None:
+        self.degradation_reasons: list[str] = []
+
+
 class _Container:
     def __init__(self, provider: Any) -> None:
         self.provider = provider
+        self.registry = _Registry()
+
+    def get_server_registry(self) -> Any:
+        return self.registry
 
     def get_static_provider(self, provider_id: str | None = None) -> Any:
         return self.provider
@@ -130,7 +139,7 @@ def test_the_container_path_is_what_ghidra_is_asked_to_load(ghidra, sent: str) -
     url, handler = ghidra
     provider = _provider(url)
     try:
-        pin_provider_sample(_reverser(provider))
+        pin_provider_sample(_reverser(provider), {"ghidra": MIRROR})
         _load(provider, sent)
     finally:
         provider.close()
@@ -154,7 +163,7 @@ def test_an_agent_without_the_provider_s_tools_pins_nothing(ghidra) -> None:
     try:
         agent = _reverser(provider)
         agent.tools = []
-        pin_provider_sample(agent)
+        pin_provider_sample(agent, {"ghidra": MIRROR})
         _load(provider, HOST)
     finally:
         provider.close()
@@ -213,3 +222,50 @@ def test_a_generic_agent_s_head_chunk_names_only_the_path_its_tools_read() -> No
     assert "host_sample_path" not in generic
     assert HOST not in json.dumps(generic)
     assert static["host_sample_path"] == HOST, "the static role's family classifier keeps it"
+
+
+def test_only_the_provider_s_own_mirror_is_pinned(ghidra) -> None:
+    """With no Ghidra mirror, a fallback path is one Ghidra cannot read: nothing
+    is pinned, a pin from before is cleared, and the run says why."""
+    url, handler = ghidra
+    provider = _provider(url)
+    try:
+        agent = _reverser(provider)
+        agent.degradation_reasons = []
+        pin_provider_sample(agent, {"ghidra": MIRROR})
+        pin_provider_sample(agent, {"none": HOST})
+        _load(provider, "/tmp/invented/sample.exe")
+        registry = agent._container.registry
+    finally:
+        provider.close()
+    assert handler.loaded == ["/tmp/invented/sample.exe"]
+    assert agent.degradation_reasons == ["sample not mirrored for ghidra"]
+    assert registry.degradation_reasons == ["sample not mirrored for ghidra"]
+
+
+def test_a_delegation_pins_the_callee_s_own_mirror(ghidra) -> None:
+    """A lead asking the reverser on Ghidra hands it Ghidra's mirror, not the
+    caller's own path."""
+    from maljan.agents.delegation import _brief_callee
+
+    url, handler = ghidra
+    provider = _provider(url)
+    try:
+        callee = _reverser(provider)
+        callee._analysis_file_path = None
+
+        class _Caller:
+            name = "lead"
+            _analysis_file_path = HOST
+            sample_path_choices = {
+                "by_provider": {"ghidra": MIRROR, "none": HOST},
+                "static": None,
+                "host": HOST,
+            }
+
+        _brief_callee(_Caller(), callee, stage="lead", round_index=0)
+        assert callee._analysis_file_path == MIRROR
+        _load(provider, HOST)
+    finally:
+        provider.close()
+    assert handler.loaded == [MIRROR]

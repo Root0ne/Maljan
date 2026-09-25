@@ -35,7 +35,7 @@ stage agent.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -171,15 +171,21 @@ def reads_static_provider(definition: AgentDefinition | None) -> bool:
     return definition.role == "generic" and any(ref.kind == "provider" for ref in definition.tools)
 
 
-def pin_provider_sample(agent: Any) -> None:
-    """Hand the agent's static provider the path its tools must open the sample by.
+NOT_MIRRORED_REASON = "sample not mirrored for {provider}"
+
+
+def pin_provider_sample(agent: Any, mirrored: Mapping[str, str] | None) -> None:
+    """Hand the agent's static provider its own mirror of the sample, or clear the pin.
 
     For an agent whose tools include its provider's (a generic agent with a
     ``provider`` reference): the provider was opened at resolution, before the
     sample's path was known, so its own guard on the path argument — Ghidra's
-    ``load_program`` override — had nothing to hold a model to. Called once the
-    analyst node or a delegation has pinned ``_analysis_file_path``; never
-    re-attaches. A no-op for any other agent and any provider without a guard.
+    ``load_program`` override — had nothing to hold a model to. ``mirrored``
+    is the job's mirror per provider id (``state["static_sample_paths"]``);
+    only this provider's own entry is pinned, never a fallback path the
+    provider cannot read. A provider that needs a mirror and has none gets its
+    pin cleared and the run a degradation reason saying so. Never re-attaches;
+    a no-op for any other agent and any provider without a guard.
     """
     from maljan.agents.prompt_fragments import PROVIDER_FAMILY, tool_families
 
@@ -189,14 +195,33 @@ def pin_provider_sample(agent: Any) -> None:
         return
     if PROVIDER_FAMILY not in tool_families(list(getattr(agent, "tools", None) or [])):
         return
+    provider_id = str(resolved.static_provider_id)
     try:
-        provider = container.get_static_provider(resolved.static_provider_id)
+        provider = container.get_static_provider(provider_id)
     except Exception as exc:  # noqa: BLE001 — a pin is never worth a failed stage
         logger.debug("no provider to pin the sample on for %s (%s)", resolved.key, exc)
         return
     pin = getattr(provider, "pin_sample", None)
-    if callable(pin):
-        pin(getattr(agent, "_analysis_file_path", None))
+    if not callable(pin):
+        return
+    path = (mirrored or {}).get(provider_id) or None
+    pin(path)
+    needs_mirror = bool(
+        getattr(getattr(provider, "capabilities", None), "needs_sample_mirror", False)
+    )
+    if path is None and needs_mirror:
+        reason = NOT_MIRRORED_REASON.format(provider=provider_id)
+        logger.warning("%s: %s; its tools are not held to a path.", resolved.key, reason)
+        own = list(getattr(agent, "degradation_reasons", None) or [])
+        if reason not in own:
+            agent.degradation_reasons = [*own, reason]
+        try:
+            registry = container.get_server_registry()
+        except Exception:  # noqa: BLE001 — the reason is still on the agent
+            return
+        reasons = getattr(registry, "degradation_reasons", None)
+        if isinstance(reasons, list) and reason not in reasons:
+            reasons.append(reason)
 
 
 def reachable_agents(settings: Settings, named: Sequence[str]) -> list[str]:

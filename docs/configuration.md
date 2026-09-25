@@ -421,7 +421,7 @@ Ghidra over http answers when `GET <url>/mcp/schema` with the configured token
 returns below 400, which loads and analyses nothing. Ghidra over stdio is
 started by the job itself, so what is checked is that `core.static.ghidra.command`
 is set and names an executable the API host finds (by its last path segment in
-the refusal). The shipped transport is `stdio` with no command, so an operator
+the refusal). The check runs where the API runs, on its PATH and filesystem, so for a worker on another host or in another container it says only what the API can see. The shipped transport is `stdio` with no command, so an operator
 who switches Ghidra on without setting `transport` to `http` is told that here
 rather than when the agent starts. The refusal
 names each agent, the provider and its address as scheme and host:

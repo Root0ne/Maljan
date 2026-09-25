@@ -743,7 +743,7 @@ def _pin_sample_path(agent: Any, state: AnalysisState) -> None:
     # sends reads it from here.
     from maljan.agents.composition import pin_provider_sample
 
-    pin_provider_sample(agent)
+    pin_provider_sample(agent, state.get("static_sample_paths") or {})
 
 
 def _augment_static_chunks_with_path(
