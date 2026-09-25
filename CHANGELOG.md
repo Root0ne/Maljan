@@ -2038,36 +2038,57 @@ change landed on `main`.
   instead of telling the model to leave out an argument the tool requires. A
   live network analyst lost 8 of its 20 calls inventing capture names. The
   pack's capture entry and the sandbox report's network section name the
-  capture relative to the job, never by host path.
+  capture relative to the job, never by host path, and a filled-in capture the
+  server cannot read is said to be the platform's, by its job-relative name.
 - **Every capture tool reads the whole capture.** The network server read the
   first 5,000 packets by default and the in-process summary the first 200,000.
   All of them stream the capture (`analysis.pcap_summary.each_packet`),
   `packet_limit` has no default, and every answer states the packets read and
   the packets in the capture (`pcap_summary` as `packets_read`,
   `packets_in_capture`, `packet_limit`, beside its protocols, every external
-  conversation, SNI names and periodic contacts).
+  conversation, SNI names and periodic contacts). `read_pcap_summary` with no
+  limit answers those facts; with one it lists packets from `offset`, paged.
 - **The pack shows what the capture holds.** Its capture line carries the
   packet count, the protocol counts and the external conversations heaviest
-  first, cut to the pack's room with the cut said, where it printed the
+  first, cut only by the pack's own room with the cut said, where it printed the
   summary's heading alone and a report then said the entry held only a header
-  line. A key-finding or section sentence saying a cited entry holds nothing
-  or one line is checked against that entry and asked once when it holds more
-  (`report.entry_contents_misstated`); the sentence is never rewritten.
+  line. A key-finding or section sentence whose subject names a cited entry
+  (its id, or a word for a recorded answer beside the entry's tool) and says it
+  holds nothing or one line is checked against that entry and asked once when
+  it holds more (`report.entry_contents_misstated`); a sentence about the
+  sample is never judged, and no sentence is rewritten.
 - **Sandbox background traffic is not published as the sample's C2.** Triage
   flows carry `procid`, `pid` and AS facts, and each tcp/udp row states
-  `sample_process_tree` (true, false, or absent when the report does not say).
-  The sandbox view marks public resolvers, and the network block carries the
-  attribution, the resolver fact and `named_by`. A sandbox address the
-  sample's tree did not make, and a well-known benign name the guest resolved,
-  is published only when a model names it (an analyst's artefact or claim, or
-  the judge's indicator); otherwise the IOC table carries it as
-  `no: <reason>, and no model named it`, and the STIX bundle, `/iocs` and the
-  YARA, Sigma and Suricata drafts read that answer. A live run published a
-  public resolver and a connectivity check as C2.
+  `sample_process_tree`: true for the process Triage marks `orig` (only it,
+  when it marks one; otherwise a process running a file named exactly as the
+  submission or the sample's digest) and its descendants, false for another
+  named process, absent when the report does not say. The sandbox view marks
+  public resolvers, and the network block, projected from the job's whole
+  report, carries the attribution, the resolver fact, `kept_by` and
+  `mentioned_by`. A sandbox address the sample's tree did not make, and a
+  well-known benign name the guest resolved, is published only when a model
+  keeps it as an indicator (an analyst's artifact, or the judge's indicator);
+  a claim that mentions it keeps nothing and is named in the reason. Otherwise
+  the IOC table carries it as `no: <reason>, and no model kept it as an
+  indicator`, and the STIX bundle, `/iocs` and the YARA, Sigma and Suricata
+  drafts read that answer. **Upgrading:** CAPE, REST and mock reports carry no
+  process on a flow, so every address they record now waits for a model to
+  keep it; expect fewer sandbox addresses in `/iocs` on those deployments. A
+  live run published a public resolver and a connectivity check as C2.
 - **A published URL carries its name.** The host of every URL the publish rule
-  publishes follows the URL's decision; the IOC table, the export and `/iocs`
-  add it as a domain row and indicator where nothing else did. A live run
-  published two C2 URLs from the judge's bundle and neither host.
+  publishes follows the URL's decision, unless it is a well-known benign host
+  no model kept; the IOC table, the export and `/iocs` add it as a domain row
+  and indicator where nothing else did. A live run published two C2 URLs from
+  the judge's bundle and neither host.
+- **Nothing cuts the sandbox views or the export's network rows.** The sandbox
+  tools answer every row unless a caller pages them (`offset`, `limit`, with
+  the total and the next offset stated), where they cut every view at 200 rows;
+  the STIX export no longer slices the network block at 40 rows per kind; and
+  an address a sandbox watched is kept whatever its class, answered `no:`.
+- **Any MCP error reply is a failed ledger entry.** The client's failure
+  markers are JSON (`mcp_client.tool_error_marker`); an `isError` reply was
+  written as a Python repr and an exception message with a quote broke the
+  marker, and both were filed as ok.
 - **A Sigma rule title is never a registry key.** A Sigma match is a
   persistence row only when it names a T1547 technique and its event names the
   key (kind by the key, then by the sub-technique); one naming no technique had

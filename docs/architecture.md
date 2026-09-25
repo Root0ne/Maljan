@@ -574,7 +574,7 @@ Two producers use it:
   (`report.entry_contents_misstated`): a sentence saying a cited entry holds
   nothing, is empty, or holds only a header, a line or a row is checked against
   that entry — the one its subject names (`the capture entry` names the
-  capture summary's), or the only one it cites. The statement is false when
+  capture summary's, and so does the entry's id), never merely the one it cites. The statement is false when
   the entry's text holds a value (or more than one), counted through its JSON
   with a zero, an empty string and an empty list holding nothing; the model is
   asked once, a partial entry is never judged, and the sentence is never
@@ -2416,24 +2416,39 @@ is assembled from what the run gathered rather than recomputed beside it:
 * **A sandbox row is the sample's when the sample's process tree made it.**
   The Triage mapping carries each flow's `procid`, `pid` and AS facts into its
   tcp/udp row and states `sample_process_tree`: true when the flow's process
-  is the sample (Triage's `orig` process, or one whose image or command line
-  names the sample's digest or submitted name) or a descendant of it through
-  `procid_parent`, false when the report names another process, absent when it
-  does not say. The sandbox view marks public DNS resolvers, and the network
-  block carries the attribution, the resolver fact and `named_by` (an
-  analyst's artefact or claim naming the value). The publish rule
+  is the sample or a descendant of it through `procid_parent`, false when the
+  report names another process, absent when it does not say. The sample is the
+  process Triage marks `orig` and only that one; a report that marks none
+  names it by a file the process runs whose name equals the submitted name, or
+  is the sample's digest with an extension — equal, never contained, so a
+  guest's `MicrosoftEdgeUpdate.exe` is not a sample submitted as `update.exe`.
+  **CAPE, REST and mock reports carry no process on a flow**, so every address
+  they record is unattributed and is published only when a model keeps it. The
+  network block is projected from the job's whole report, never from a paged
+  view, and an address somebody watched is kept whatever its class and answered
+  with `no:` when it cannot be published. The sandbox view marks public DNS
+  resolvers, and the network block carries the attribution, the resolver fact,
+  `kept_by` (an analyst's artifact of endpoints, network values or IOCs) and
+  `mentioned_by` (an analyst's claim holding the value). The publish rule
   (`stix_renderer.sandbox_row_kwargs`, asked through `emulation_kwargs` by the
   table, the export, `/iocs` and the judge's values alike) holds back a
   sandbox address the tree did not make, and a well-known benign name the
   guest resolved — Windows resolves through its DNS service, so a name is
-  judged by what it is — until a model names it; otherwise the row reads
-  `no: <reason>, and no model named it`, with the resolver and AS facts in the
-  reason and the table's context. The drafts read the table's answer, the
-  Sigma selection included. **A published URL carries its name.** The host of
-  every URL the rule publishes — the network block's and the judge's —
-  follows the URL's decision (`published_url_hosts`, `in_published_url`): the
-  table, the export and `/iocs` add it as a domain row and indicator when
-  nothing else did.
+  judged by what it is — until a model keeps it as an indicator: an analyst's
+  artifact or the judge's indicator. A claim that mentions the value keeps
+  nothing (one run's analysts named two background addresses in claims calling
+  them noise). Otherwise the row reads `no: <reason>, and no model kept it as
+  an indicator`, naming any claim that only mentioned it, with the resolver and
+  AS facts in the reason and the table's context. The drafts read the table's
+  answer, the Sigma selection included. **A published URL carries its name.**
+  The host of every URL the rule publishes — the network block's and the
+  judge's — follows the URL's decision (`published_url_hosts`,
+  `in_published_url`), except a well-known benign host, which is published
+  only when a model keeps the host itself; the table, the export and `/iocs`
+  add it as a domain row and indicator when nothing else did. The export
+  carries every network row the table publishes, bounded only by the one
+  indicator cap, which records what it drops. The rule's report-wide lookups
+  are built once per table, export or feed (`one_reading`).
 * **The IOC table is the one publish rule's answer, row by row.**
   `build_consolidated_iocs` stores every indicator live with its kind, who
   recorded it and `published`: `yes`, or `no:` and the half of

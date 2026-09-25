@@ -45,6 +45,10 @@ from maljan.agents.static_analyst import (
     _reframe_static_raw_data,
     _tool_use_line,
 )
+from maljan.agents.tool_pinning import (
+    UNREADABLE_FILLED_CAPTURE,
+    UNREADABLE_FILLED_CAPTURE_REMEDIATION,
+)
 from maljan.analysis.pcap_summary import CaptureRead
 from maljan.pipeline import triage_pack
 from maljan.pipeline.nodes import (
@@ -81,9 +85,11 @@ from maljan.reporting.composer import (
 )
 from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXAMPLE_OBJECT, EXPECTED_OBJECT
 from maljan.reporting.renderers.stix_renderer import (
+    BENIGN_NAME_IN_A_URL,
     BENIGN_NAME_RESOLVED,
     FLOW_OUTSIDE_THE_TREE,
     UNATTRIBUTED_FLOW,
+    not_kept_reason,
 )
 from maljan.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
@@ -365,7 +371,16 @@ PROMPTS: dict[str, str] = {
         )
     ),
     "publish rule reasons for a sandbox row": " ".join(
-        [UNATTRIBUTED_FLOW, FLOW_OUTSIDE_THE_TREE, BENIGN_NAME_RESOLVED]
+        [
+            UNATTRIBUTED_FLOW,
+            FLOW_OUTSIDE_THE_TREE,
+            BENIGN_NAME_RESOLVED,
+            BENIGN_NAME_IN_A_URL,
+            not_kept_reason("x", "a claim by the network analyst"),
+        ]
+    ),
+    "failure of a capture the platform filled in": " ".join(
+        [UNREADABLE_FILLED_CAPTURE, UNREADABLE_FILLED_CAPTURE_REMEDIATION]
     ),
     "capture line in the pack": triage_pack._pcap(
         {
