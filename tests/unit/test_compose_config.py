@@ -140,3 +140,47 @@ def test_migrations_run_once_before_the_api_and_the_worker(tmp_path):
     # and stored per service (re-review M2).
     images = {config["services"][s]["image"] for s in ("migrate", "backend-api", "backend-worker")}
     assert images == {"maljan-backend"}
+
+
+def _render_ghidra(tmp_path: Path, **extra: str) -> dict:
+    compose_dir = tmp_path / "docker"
+    compose_dir.mkdir(exist_ok=True)
+    copy = compose_dir / "docker-compose.yml"
+    shutil.copy(ROOT / "docker" / "docker-compose.yml", copy)
+    empty_env = tmp_path / ".env"
+    empty_env.write_text("")
+    out = subprocess.run(
+        ["docker", "compose", "--env-file", str(empty_env), "-f", str(copy), "config"],
+        env={**REQUIRED_ENV, **extra, "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return yaml.safe_load(out)["services"]["ghidra-mcp"]
+
+
+GIB = 1024**3
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
+def test_the_ghidra_knobs_default_to_the_values_they_replaced(tmp_path):
+    ghidra = _render_ghidra(tmp_path)
+    assert ghidra["restart"] == "unless-stopped"
+    assert int(ghidra["mem_limit"]) == 6 * GIB
+    assert int(ghidra["memswap_limit"]) == 6 * GIB
+    # The image's own default, now written where an operator can change it.
+    assert ghidra["environment"]["JAVA_OPTS"] == "-Xmx4g -XX:+UseG1GC"
+
+
+@pytest.mark.skipif(shutil.which("docker") is None, reason="docker not installed")
+def test_a_lighter_ghidra_is_three_variables(tmp_path):
+    ghidra = _render_ghidra(
+        tmp_path,
+        GHIDRA_JAVA_OPTS="-Xmx2g -XX:+UseG1GC",
+        GHIDRA_MEM_LIMIT="4g",
+        GHIDRA_RESTART="no",
+    )
+    assert ghidra["restart"] == "no"
+    # One variable sets both, so swap cannot outgrow the memory limit.
+    assert int(ghidra["mem_limit"]) == int(ghidra["memswap_limit"]) == 4 * GIB
+    assert ghidra["environment"]["JAVA_OPTS"] == "-Xmx2g -XX:+UseG1GC"
