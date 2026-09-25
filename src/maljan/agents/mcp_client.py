@@ -25,6 +25,21 @@ from pydantic import create_model
 
 from maljan.core.logger import logger
 
+
+def tool_error_marker(kind: str, tool: str, **fields: str) -> str:
+    """The marker an MCP call's failure is handed on in, as JSON the ledger reads.
+
+    ``{"tool_error": <kind>, "tool": <name>, ...}``, written with ``json.dumps``
+    so any text in it survives: the markers used to be f-strings, and an
+    ``isError`` reply's content written as a Python repr, or an exception
+    message with a quote in it, was not JSON. ``tools.errors.error_parts``
+    then read no failure and the ledger filed the call as ok.
+    """
+    import json
+
+    return json.dumps({"tool_error": kind, "tool": tool, **fields})
+
+
 # What a character cut leaves behind, and the room kept back for it.
 #
 # The marker goes *inside* the limit rather than after it, which is the same
@@ -248,7 +263,7 @@ class MCPLangChainToolkit:
             if not self.session:
                 # Structured marker so the agent prompt can detect "no session"
                 # without parsing free-form text.
-                return f'{{"tool_error": "mcp_session_inactive", "tool": "{tool_name}"}}'
+                return tool_error_marker("mcp_session_inactive", tool_name)
             # LangChain fills every declared field before invoking, so an
             # argument the agent never mentioned still arrives here — as the
             # schema default when there is one, and as ``None`` when there is
@@ -311,7 +326,7 @@ class MCPLangChainToolkit:
         try:
             session = self.session
             if session is None:
-                return f'{{"tool_error": "mcp_session_inactive", "tool": "{tool_name}"}}'
+                return tool_error_marker("mcp_session_inactive", tool_name)
             deadline = guard.call_timeout(tool_name) if guard is not None else None
             # The client library answers a call past its deadline with its own
             # request-timeout error, which is a transport failure. Only named
@@ -336,9 +351,12 @@ class MCPLangChainToolkit:
                 guard.answered()
                 settled = True
             if result.isError:
-                return (
-                    f'{{"tool_error": "tool_returned_error", "tool": "{tool_name}", '
-                    f'"detail": {result.content!r}}}'
+                return tool_error_marker(
+                    "tool_returned_error",
+                    tool_name,
+                    detail="\n".join(
+                        str(getattr(c, "text", "") or "") for c in result.content or []
+                    ).strip(),
                 )
             output = "\n".join(c.text for c in result.content if hasattr(c, "text"))
             # On a thread: shortening a five-megabyte answer is CPU-bound
@@ -355,9 +373,8 @@ class MCPLangChainToolkit:
                     guard.failed(reason, trial=trial)
                 settled = True
             logger.warning("MCP tool '%s' raised %s: %s", tool_name, type(exc).__name__, exc)
-            return (
-                f'{{"tool_error": "exception", "tool": "{tool_name}", '
-                f'"type": "{type(exc).__name__}", "detail": "{exc}"}}'
+            return tool_error_marker(
+                "exception", tool_name, type=type(exc).__name__, detail=str(exc)
             )
         finally:
             if guard is not None and not settled:
