@@ -509,6 +509,12 @@ class MaljanApp:
                         continue
                     if not update.get("malware_report"):
                         continue
+                    # The state the report was built from is the last complete
+                    # step, and only the report's own update is merged into it.
+                    # With every stage joined on all its upstream stages
+                    # (``pipeline.builder``), the report runs after the verdict
+                    # stage and nothing a team declares runs beside it; a node
+                    # of the same step would not be what the report read.
                     built = dict(latest)
                     for key, value in update.items():
                         channel = self.graph.channels.get(key)

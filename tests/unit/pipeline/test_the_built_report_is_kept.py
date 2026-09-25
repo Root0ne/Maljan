@@ -111,6 +111,37 @@ def test_the_writes_of_the_reports_own_step_are_refused_and_the_report_is_kept()
     }
 
 
+def test_only_the_reports_own_update_joins_the_state_it_was_built_from() -> None:
+    """A node finishing beside the report did not feed it, and is not merged.
+
+    Staged teams cannot put a node beside the report: the report stage waits
+    for every stage it depends on. A hand-built graph can, and what the kept
+    report carries is still the state it read plus what it wrote.
+    """
+
+    async def _beside(state: Any) -> dict[str, Any]:
+        return {"judge_report": "written beside the report", "evidence_ledger": [{"id": "E9"}]}
+
+    builder = StateGraph(AnalysisState)
+    builder.add_node("judge", _node("judge", _judge))
+    builder.add_node("report", _node("report", _report))
+    builder.add_node("beside", _node("beside", _beside))
+    builder.add_node("after", _node("after", _fails))
+    builder.add_edge(START, "judge")
+    builder.add_edge("judge", "report")
+    builder.add_edge("judge", "beside")
+    builder.add_edge(["report", "beside"], "after")
+    builder.add_edge("after", END)
+    app = _app(builder.compile())
+    with pytest.raises(RuntimeError):
+        asyncio.run(app._stream_the_graph(dict(INITIAL)))  # type: ignore[arg-type]
+    kept = app.built_report
+    assert kept is not None
+    assert "judge_report" not in kept
+    assert kept["evidence_ledger"] == [{"id": "E1"}, {"id": "E2"}]
+    assert app.failed_step == "node after"
+
+
 def test_a_graph_that_fails_before_the_report_keeps_nothing() -> None:
     builder = StateGraph(AnalysisState)
     builder.add_node("judge", _node("judge", _fails))

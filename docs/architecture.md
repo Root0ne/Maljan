@@ -70,7 +70,16 @@ operator can reconfigure.
    failure note and the markdown and HTML renderings all say the report is
    incomplete. The job stays `failed`. A graph that returned and a result the
    worker then refused — an absent analysis, a report node that answered with
-   an error — keeps nothing.
+   an error — keeps nothing. Neither does a run that was cancelled, by the
+   operator or by arq's job timeout, after its report was built: both reach
+   the pipeline as a cancellation (`CancelledError`, `JobCancelled`), not as a
+   failure, and the job ends `cancelled` or is swept, not `failed`. A report
+   stored against it would be a result for a run somebody stopped, and the
+   worker leaving on a timeout is a process going down with no session to
+   store it in. Only the report node's own update is merged into the state it
+   was built from: the report stage waits for every stage it depends on, so
+   no node of a team finishes in the report's step (the stage-graph test pins
+   that the report runs in a step of its own).
 6. Threat-intelligence enrichment runs afterwards as its own job, on the
    enrichment worker's queue, so it delays neither the verdict nor the next
    analysis.

@@ -87,7 +87,21 @@ def _run(settings: Settings, monkeypatch: pytest.MonkeyPatch, *, loops: int = 0)
     monkeypatch.setattr(graph_builder, "ConsensusRouter", router)
 
     compiled = graph_builder.build_graph(_Container(settings))  # type: ignore[arg-type]
-    asyncio.run(compiled.ainvoke({"job_id": "job-under-test"}))
+    # Streamed in the modes ``MaljanApp`` runs the graph in, so the nodes of
+    # each step are known: the updates that arrive between two ``values``.
+    steps: list[list[str]] = [[]]
+
+    async def _stream() -> None:
+        async for mode, payload in compiled.astream(
+            {"job_id": "job-under-test"}, stream_mode=["updates", "values"]
+        ):
+            if mode == "values":
+                steps.append([])
+            else:
+                steps[-1].extend(payload or {})
+
+    asyncio.run(_stream())
+    runs.steps = [step for step in steps if step]  # type: ignore[attr-defined]
     return runs
 
 
@@ -129,6 +143,12 @@ def _assert_once_each(runs: Counter, settings: Settings) -> None:
     revisions = {name for name in compiled_nodes if name.endswith(REVISION_NODE)}
     assert set(runs) == compiled_nodes - revisions
     assert {name: count for name, count in runs.items() if count != 1} == {}
+    # The report runs in a step of its own: the kept report of a failed run
+    # merges only the report's own update into the state it was built from
+    # (``MaljanApp._stream_the_graph``), which is right only while nothing
+    # finishes beside it.
+    if REPORT_NODE in runs:
+        assert [step for step in runs.steps if REPORT_NODE in step] == [[REPORT_NODE]]
 
 
 GENERIC = {"role": "generic", "prompt": "look"}
