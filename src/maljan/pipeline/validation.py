@@ -67,6 +67,20 @@ ALIGNMENT_MARGIN = 0.20
 MAX_SCHEMA_VIOLATIONS = 6
 
 
+# What the question says of the claims the consistency gate set aside from an
+# answer that is shown back whole.
+GATE_REMOVED_LEAD = (
+    "These claims of the answer above were set aside before it was checked, because "
+    "the evidence text holds nothing they cite; they are in your answer again only if "
+    "you write them with evidence it holds:"
+)
+
+
+def gate_removed_note(claims: Sequence[str]) -> str:
+    """The lines naming the claims the consistency gate set aside, as written."""
+    return "\n".join([GATE_REMOVED_LEAD, *(f"- {' '.join(str(c).split())}" for c in claims)])
+
+
 # The sentence the retry turn opens with. A constant because two call sites
 # send it and a test reads it.
 FEEDBACK_PREAMBLE = "Your previous answer had these problems:"

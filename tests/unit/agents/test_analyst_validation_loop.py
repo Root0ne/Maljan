@@ -50,7 +50,7 @@ class _Analyst(BaseAnalyst):
     def analyze_isr(self, data: str) -> AgentISR:
         return self._first
 
-    def _invoke_llm_with_timeout(self, messages: list, timeout: int) -> str:
+    def _invoke_llm_with_timeout(self, messages: list, timeout: int, **_: Any) -> str:
         self.seen_turns.append(list(messages))
         return self._replies.pop(0)
 
@@ -179,7 +179,7 @@ class TestTheAnalystGetsOneTurnToFixIt:
 
     def test_a_retry_that_raises_keeps_the_first_answer(self) -> None:
         class _Broken(_Analyst):
-            def _invoke_llm_with_timeout(self, messages: list, timeout: int) -> str:
+            def _invoke_llm_with_timeout(self, messages: list, timeout: int, **_: Any) -> str:
                 raise RuntimeError("the model is unreachable")
 
         analyst = _Broken(_isr(_claim("T9999")), [])
@@ -280,6 +280,8 @@ class TestTheRetryIsShownTheAnswerAsWritten:
         assert analyst._budget_records[-1]["validation_retry"] == {
             "first_claims": 2,
             "retry_claims": 0,
+            "first_findings": 0,
+            "retry_findings": 0,
             "kept": "first",
         }
 
@@ -328,3 +330,106 @@ class TestFindingsFollowTheKeptAnswer:
         result = analyst._drain_findings(analyst.safe_analyze_isr("raw data"))
 
         assert [f.title for f in result.findings] == ["first finding"]
+
+    def test_a_kept_retry_without_findings_is_recorded(self, caplog) -> None:
+        written = f"{_BLOCK_ANSWER}\n{_fenced('first finding')}"
+        analyst = _WrittenAnalyst(written, [_BLOCK_ANSWER.replace("T9999", "T1055")])
+        analyst._budget_records = [{"agent": "static"}]
+
+        result = analyst.safe_analyze_isr("raw data")
+
+        assert result.findings == []
+        record = analyst._budget_records[-1]["validation_retry"]
+        assert (record["first_findings"], record["retry_findings"], record["kept"]) == (
+            1,
+            0,
+            "retry",
+        )
+        assert "carries no findings" in caplog.text
+
+
+class TestTheReplayIsTheAnswerWithoutScaffolding:
+    def test_tool_call_markup_is_not_replayed(self) -> None:
+        call = '<tool_call>{"name": "strings", "arguments": {}}</tool_call>'
+        analyst = _WrittenAnalyst(f"{call}\n{_BLOCK_ANSWER}", [_BLOCK_ANSWER])
+
+        analyst.safe_analyze_isr("raw data")
+
+        [replayed] = _replayed(analyst)
+        assert "<tool_call>" not in replayed
+        assert "CLAIM: allocates memory in another process" in replayed
+
+    def test_the_stored_block_is_read_once(self) -> None:
+        analyst = _WrittenAnalyst(_BLOCK_ANSWER, [])
+        analyst._text_to_isr(analyst._capture_findings(f"{_BLOCK_ANSWER}\n{_fenced('x')}"), 0)
+
+        again = analyst._text_to_isr(_BLOCK_ANSWER.strip(), 0)
+
+        assert "maljan-findings" not in again.answer_text
+
+
+class TestTheGatedAnswerIsShownWhole:
+    def test_the_gate_keeps_the_written_answer_and_names_what_it_set_aside(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from types import SimpleNamespace
+
+        from maljan.agents import base_agent
+
+        monkeypatch.setattr(
+            base_agent,
+            "get_settings",
+            lambda: SimpleNamespace(preprocessing=SimpleNamespace(use_claim_consistency_gate=True)),
+        )
+        analyst = _WrittenAnalyst(_BLOCK_ANSWER, [])
+        isr = analyst._text_to_isr(_BLOCK_ANSWER, 0)
+
+        gated = analyst._apply_consistency_gate(isr, "VirtualAllocEx 0x401234 T9999")
+
+        assert [c.claim for c in gated.claims] == ["allocates memory in another process"]
+        assert gated.answer_text == _BLOCK_ANSWER
+        assert gated.gate_removed == ["writes into the memory it allocated"]
+
+    def test_the_question_names_the_claims_the_gate_set_aside(self) -> None:
+        from maljan.pipeline.validation import GATE_REMOVED_LEAD
+
+        analyst = _WrittenAnalyst(_BLOCK_ANSWER, [_BLOCK_ANSWER])
+        first = analyst._text_to_isr(_BLOCK_ANSWER, 0)
+        first.note_gate_removed(["writes into the memory it allocated"])
+        analyst.analyze_isr = lambda data: first  # type: ignore[method-assign]
+
+        analyst.safe_analyze_isr("raw data")
+
+        assert _replayed(analyst) == [_BLOCK_ANSWER]
+        question = str(analyst.seen_turns[0][-1].content)
+        assert GATE_REMOVED_LEAD in question
+        assert "- writes into the memory it allocated" in question
+
+
+class TestTheRetryIsLabelledOnTheLedger:
+    def test_a_retry_that_reports_no_usage_is_named_as_the_validation_retry(self) -> None:
+        from langchain_core.messages import AIMessage
+
+        from maljan.core.token_ledger import TokenLedger
+
+        class _Model:
+            async def ainvoke(self, messages: list) -> AIMessage:
+                return AIMessage(content=_BLOCK_ANSWER.replace("T9999", "T1055"))
+
+        class _Plain(BaseAnalyst):
+            def analyze(self, data: str) -> str:  # pragma: no cover - unused
+                return ""
+
+            def revise(self, *args: Any, **kwargs: Any) -> str:  # pragma: no cover - unused
+                return ""
+
+            def analyze_isr(self, data: str) -> AgentISR:
+                return self._text_to_isr(_BLOCK_ANSWER, 0)
+
+        analyst = _Plain(llm=_Model(), name="static")
+        analyst.token_ledger = TokenLedger()
+
+        analyst.safe_analyze_isr("raw data")
+
+        calls = [row["call"] for row in analyst.token_ledger.snapshot().get("unreported", [])]
+        assert calls == ["validation retry"]

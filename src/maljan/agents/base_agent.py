@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
@@ -88,6 +88,25 @@ SYNTHETIC_TURN_KEY = "maljan_synthetic_turn"
 # What the token ledger calls one model turn of a tool loop, for a call that
 # reported no usage.
 TOOL_LOOP_TURN_CALL = "tool loop turn"
+
+
+@contextlib.contextmanager
+def labelled_call(agent: Any, label: str) -> Iterator[None]:
+    """Name the model calls made inside the block, for the token ledger.
+
+    An attribute rather than an argument, so an agent stand-in whose
+    ``_invoke_llm_with_timeout`` takes no label still answers the call.
+    """
+    before = getattr(agent, "_call_label", None)
+    try:
+        agent._call_label = label
+    except Exception:  # noqa: BLE001 — an agent that cannot be named is not
+        yield
+        return
+    try:
+        yield
+    finally:
+        agent._call_label = before
 
 
 def is_model_turn(message: Any) -> bool:
@@ -4181,7 +4200,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return content
             # The prose goes on to the parser; the answer it came out of is
             # what the validation turn shows back (``_text_to_isr``).
-            self._last_written_answer = (block.prose, content)
+            self._last_written_answer: tuple[str, str] | None = (block.prose, content)
             self._findings_buffer.extend(block.findings)
             self._artifacts_buffer.extend(block.artifacts)
             self.logger.info(
@@ -4353,14 +4372,15 @@ class BaseAnalyst(BudgetMeter, ABC):
             "sized_by": "window" if paced is None or window_budget <= paced else "pace",
         }
         try:
-            answer = self._invoke_llm_with_timeout(
-                self._with_current_run_state(
-                    with_question(tool_free_turns(trimmed), str(directive.content)),
-                    None,
+            with labelled_call(self, "step-cap salvage"):
+                answer = self._invoke_llm_with_timeout(
+                    self._with_current_run_state(
+                        with_question(tool_free_turns(trimmed), str(directive.content)),
+                        None,
+                        remaining,
+                    ),
                     remaining,
-                ),
-                remaining,
-            )
+                )
         except Exception as exc:  # noqa: BLE001 - best-effort salvage
             self.logger.error(
                 "%s forced synthesis failed: %s (%s)",
@@ -4474,7 +4494,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 else asyncio.to_thread(llm.invoke, messages)
             )
             response = await asyncio.wait_for(call, timeout=float(timeout))
-            self._record_usage(response, call=what)
+            self._record_usage(response, call=str(getattr(self, "_call_label", "") or what))
             return str(response.content)
 
         _t0 = _time.monotonic()
@@ -4797,7 +4817,8 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
         )
         try:
-            text = self._invoke_llm_with_timeout(messages, _SYNTHESIS_MIN_SECONDS)
+            with labelled_call(self, "forced synthesis"):
+                text = self._invoke_llm_with_timeout(messages, _SYNTHESIS_MIN_SECONDS)
         except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves the failure
             self.logger.error(
                 "%s: synthesis from the answered asks failed: %s",
@@ -5262,9 +5283,16 @@ class BaseAnalyst(BudgetMeter, ABC):
         loop_cut = cuts.get(id(isr))
         # Measured with the turn that carries every question of this retry,
         # not the framed conversation alone: fourteen questions are not free.
-        from maljan.pipeline.validation import ANALYST_FEEDBACK_CLOSING, feedback_text
+        from maljan.pipeline.validation import (
+            ANALYST_FEEDBACK_CLOSING,
+            feedback_text,
+            gate_removed_note,
+        )
 
-        sent = with_question(messages, feedback_text(initial, closing=ANALYST_FEEDBACK_CLOSING))
+        closing = ANALYST_FEEDBACK_CLOSING
+        if isr.gate_removed and isr.answer_text:
+            closing = f"{gate_removed_note(isr.gate_removed)}\n{closing}"
+        sent = with_question(messages, feedback_text(initial, closing=closing))
         if loop_cut is not None and not BaseAnalyst._fits_the_window(  # type: ignore[arg-type]
             self, sent, loop_cut[0]
         ):
@@ -5288,10 +5316,13 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return first.pop()
             # The block moves to the retry's own question, the last message,
             # and the turn that carried it before is sent as it was written.
-            return self._invoke_llm_with_timeout(
-                frame_messages(turns, run_state=str(getattr(self, "run_state_block", "") or "")),
-                left,
-            )
+            with labelled_call(self, "validation retry"):
+                return self._invoke_llm_with_timeout(
+                    frame_messages(
+                        turns, run_state=str(getattr(self, "run_state_block", "") or "")
+                    ),
+                    left,
+                )
 
         def _parse(answer: Any) -> AgentISR:
             if isinstance(answer, _PriorAnswer):
@@ -5341,9 +5372,20 @@ class BaseAnalyst(BudgetMeter, ABC):
                 {
                     "first_claims": len(first_answer.claims),
                     "retry_claims": len(retried.claims),
+                    "first_findings": len(first_answer.findings or []),
+                    "retry_findings": len(retried.findings or []),
                     "kept": "retry" if kept is retried else "first",
                 },
             )
+            if kept is retried and first_answer.findings and not retried.findings:
+                # Findings follow the answer that is kept, and this one wrote
+                # none: the first answer's go with it, and the record says so.
+                self.logger.warning(
+                    "Validation: the kept retry for '%s' carries no findings; the first "
+                    "answer's %d finding(s) are not published.",
+                    self.name,
+                    len(first_answer.findings),
+                )
             return kept
 
         def _choose(first_answer: AgentISR, retried: AgentISR) -> AgentISR:
@@ -5399,7 +5441,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 stage=str(getattr(self, "pipeline_stage", "") or "analysis"),
                 keep=_keep,
                 drop_answer_for=frozenset({ANALYST_CUT_CODE}),
-                closing=ANALYST_FEEDBACK_CLOSING,
+                closing=closing,
             )
         except Exception as exc:  # noqa: BLE001 — a retry that fails keeps the first answer
             self.logger.warning("Validation retry failed (%s); keeping the first answer.", exc)
@@ -5496,10 +5538,10 @@ class BaseAnalyst(BudgetMeter, ABC):
                 )
             gated = isr.model_copy(update={"claims": kept})
             if dropped:
-                # The written answer still holds the claims the gate removed,
-                # and shown back it would ask the analyst to fix them: what
-                # stands is shown instead.
-                gated.note_answer_text("")
+                # The written answer is still shown back whole — its shape is
+                # the one the parser reads — and the question names the claims
+                # of it the gate set aside.
+                gated.note_gate_removed([c.claim for c in isr.claims if c not in kept])
             return gated
         except Exception as exc:  # noqa: BLE001 — gate must never break the run
             self.logger.warning("Consistency gate skipped (%s).", exc)
@@ -5653,8 +5695,13 @@ class BaseAnalyst(BudgetMeter, ABC):
         last = getattr(self, "_last_written_answer", None)
         if isinstance(last, tuple) and len(last) == 2 and last[0] == text:
             written = str(last[1])
+        # Read once: the next answer's block is its own.
+        self._last_written_answer = None
         isr = self._parse_answer_text(text, revision_round)
-        isr.note_answer_text(written)
+        # Tool-call markup a model wrote into its answer is not part of it —
+        # the parser reads none of it — and replayed into a tool-free turn it
+        # would be shown back as something to write again.
+        isr.note_answer_text(strip_tool_call_scaffolding(written))
         return isr
 
     def _parse_answer_text(self, text: str, revision_round: int) -> AgentISR:

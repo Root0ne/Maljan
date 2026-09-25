@@ -245,7 +245,7 @@ class _Analyst(BaseAnalyst):
     def analyze_isr(self, data: str) -> AgentISR:
         return self._first
 
-    def _invoke_llm_with_timeout(self, messages: list, timeout: int) -> str:
+    def _invoke_llm_with_timeout(self, messages: list, timeout: int, **_: Any) -> str:
         self.seen_turns.append(list(messages))
         return self._replies.pop(0)
 

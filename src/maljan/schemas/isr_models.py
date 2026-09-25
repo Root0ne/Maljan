@@ -231,6 +231,10 @@ class AgentISR(BaseModel):
     # in another shape is copied back in that shape, and the parser reads none
     # of it.
     _answer_text: str = PrivateAttr(default="")
+    # The claims of that answer the consistency gate set aside, as written:
+    # the answer is shown back whole, and the question says which of its
+    # claims no longer stand.
+    _gate_removed: list[str] = PrivateAttr(default_factory=list)
 
     @property
     def unparsed_answer(self) -> str:
@@ -245,6 +249,15 @@ class AgentISR(BaseModel):
     def note_answer_text(self, text: str) -> None:
         """Record the answer this ISR was parsed from, as the model wrote it."""
         self._answer_text = str(text or "")
+
+    @property
+    def gate_removed(self) -> list[str]:
+        """The claims of the written answer the consistency gate set aside."""
+        return list(self._gate_removed)
+
+    def note_gate_removed(self, claims: list[str]) -> None:
+        """Record the claims of the written answer the consistency gate set aside."""
+        self._gate_removed = [str(c) for c in claims]
 
     @property
     def blocks_without_confidence(self) -> int:
