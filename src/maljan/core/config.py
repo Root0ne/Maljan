@@ -1234,6 +1234,102 @@ def _without_the_empty_builtin_tool_list(entry: dict[str, Any]) -> dict[str, Any
     return entry
 
 
+# The prompts a seeded definition shipped with before its current one, by
+# SHA-256 of the exact text. A save stores the whole definition map, seeds
+# included, so a database holds each seeded row as it was on the day of its
+# last save; when a release rewrites a seed's prompt, that stored row stops
+# matching its seed, and the key migration takes it for an operator's own agent
+# on a name the product later reserved and renames it (`reverser` ->
+# `reverser_custom`, every reference rewritten). A stored prompt that is one
+# the seed itself shipped is the seed's, and is read as not set. An operator's
+# own text is never one of these, so it is still renamed out of the way.
+FORMER_SEED_PROMPT_DIGESTS: dict[str, frozenset[str]] = {
+    "reverser": frozenset(
+        {
+            "c596c81df2fc88cf47e23dd2431cbdd4e8fa1258d3abe4eb948b8929bccbb953",
+            "3f843ad560c68f70869031d79e600cad9ef9a3f77468efb41cbeb67d23f6be60",
+            "3e0c00643b9359a348bfcdd9f9947d80b49395218351befdf292c4a962919afc",
+            "6a73348166297c3296f6f829727799b5929c4ec55049e281edb44b7f6b810267",
+        }
+    ),
+    "triage": frozenset(
+        {
+            "548dbd4f8a38495320ccfc5076a6b81df32581e2748d794003cb27702c948583",
+            "8222ed6448b01cae52ff39debdbef1abe0283fa9450120db24829f46c57c9409",
+        }
+    ),
+    "android_static": frozenset(
+        {
+            "22e4389d96dd022526f33c0bb95c5edd75b51f3a4ce53cfbe3806397efa83609",
+            "19a98551834f425c1af85400754d7c22c26f88b6160cab4567d0ca7ba308873e",
+        }
+    ),
+    "lead": frozenset(
+        {
+            "31d93bd9c5a3b5f5d679deb2803b7d10f3bfe4f05613ac00c0b99972428c1f26",
+            "8fdf07ee5a05a50c45e365a751ffc37b7197b71e11cbe05b922f6cd6860d814e",
+        }
+    ),
+}
+
+
+def as_stored_builtin(key: str, entry: dict[str, Any]) -> dict[str, Any]:
+    """A stored built-in row with what only means "the seed" taken out.
+
+    Two things read as not set, so the seed's own value applies: an empty tool
+    list (``_without_the_empty_builtin_tool_list``) and a prompt the seed
+    itself shipped with in an earlier release (``FORMER_SEED_PROMPT_DIGESTS``).
+    Every place that compares a stored built-in with its seed reads it
+    through here, so the settings model, the settings API and the key
+    migration agree on what an edit is.
+    """
+    out = _without_the_empty_builtin_tool_list(entry)
+    prompt = out.get("prompt")
+    if isinstance(prompt, str):
+        import hashlib
+
+        digest = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        if digest in FORMER_SEED_PROMPT_DIGESTS.get(key, frozenset()):
+            out = {k: v for k, v in out.items() if k != "prompt"}
+    return out
+
+
+def with_the_role_seed_tools(entry: dict[str, Any]) -> dict[str, Any]:
+    """An operator's definition with no ``tools`` key, given its role's seeded tools.
+
+    The rule for a definition that is not a built-in: a tool list that is
+    **absent** means "what the role's own seed has", and a list that is
+    **present** is the operator's, an empty one included, which means none. A
+    clone of ``static`` written as ``{"role": "static", "static_provider":
+    "r2"}`` — by a script, an import or a hand-edited export — keeps the
+    analysis, knowledge and VirusTotal servers the static seed reads, the same
+    as a clone the console copies with its list; one written with ``"tools":
+    []`` asked for no server and gets none. Only a role with exactly one seed
+    of its own (``static``, ``dynamic``, ``network``, ``report``, ``lead``)
+    has a seed to inherit from; ``generic`` has three and none of them is the
+    role's, so a generic definition's missing list stays empty.
+
+    Unlike ``_without_the_empty_builtin_tool_list``, an empty list here is not
+    read as missing. A built-in's stored ``[]`` predates the tool sidecars and
+    cannot be an edit (a built-in's tools cannot be edited); an operator's
+    ``[]`` can only be what they wrote.
+    """
+    if "tools" in entry:
+        return entry
+    seed = _role_seeds().get(str(entry.get("role") or ""))
+    if seed is None:
+        return entry
+    return {**entry, "tools": [ref.model_dump() for ref in seed.tools]}
+
+
+def _role_seeds() -> dict[str, "AgentDefinition"]:
+    """Each role that exactly one seeded definition plays, with that definition."""
+    by_role: dict[str, list[AgentDefinition]] = {}
+    for definition in _builtin_definitions().values():
+        by_role.setdefault(str(definition.role), []).append(definition)
+    return {role: seeds[0] for role, seeds in by_role.items() if len(seeds) == 1}
+
+
 def _a_whole_number(value: Any) -> Any:
     """``value`` as the integer it names, or ``value`` itself.
 
@@ -2485,8 +2581,10 @@ class AgentsConfig(BaseModel):
         for key, entry in definitions.items():
             seed = seeds.get(key)
             if seed is not None and isinstance(entry, dict):
-                entry = _without_the_empty_builtin_tool_list(entry)
+                entry = as_stored_builtin(str(key), entry)
                 merged[key] = {**seed.model_dump(), **entry}
+            elif isinstance(entry, dict):
+                merged[key] = with_the_role_seed_tools(entry)
             else:
                 merged[key] = entry
         return {**data, "definitions": merged}

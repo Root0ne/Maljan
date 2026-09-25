@@ -20,9 +20,10 @@ from maljan.core.config import (
     ProfileDefinition,
     _builtin_definitions,
     _builtin_profiles,
-    _without_the_empty_builtin_tool_list,
     agent_reference_problems,
+    as_stored_builtin,
     convert_builtin_profile_document,
+    with_the_role_seed_tools,
 )
 from maljan.core.settings_overrides import build_settings
 from maljan.core.team_layout import layout_team
@@ -135,16 +136,23 @@ def validate_definitions(
         # check below would see a bare-default label and refuse an edit the
         # operator never made.
         #
-        # ``_without_the_empty_builtin_tool_list`` is part of that same merge
-        # and was missing here, which is the whole of the console defect the
-        # audit found: a database written before the tool sidecars holds
-        # ``tools: []`` on every built-in, the Settings layer reads that as
-        # "not set" and the seed's tools apply, and this layer read it as an
-        # edit. Every save touching the agent map was then refused with
+        # ``as_stored_builtin`` is part of that same merge, and its empty-tool
+        # half was once missing here, which is the whole of the console
+        # defect the audit found: a database written before the tool sidecars
+        # holds ``tools: []`` on every built-in, the Settings layer reads that
+        # as "not set" and the seed's tools apply, and this layer read it as
+        # an edit. Every save touching the agent map was then refused with
         # "'judge' is built in; clone it to change it" on the four built-ins
-        # whose seed has tools -- reporter's is empty, so it alone passed.
+        # whose seed has tools -- reporter's is empty, so it alone passed. Its
+        # other half reads a prompt the seed itself once shipped as not set.
+        #
+        # An operator's own definition goes through ``with_the_role_seed_tools``
+        # instead: a missing tool list is its role seed's, a present one is
+        # theirs.
         candidate = (
-            {**seed, **_without_the_empty_builtin_tool_list(entry)} if seed is not None else entry
+            {**seed, **as_stored_builtin(name, entry)}
+            if seed is not None
+            else with_the_role_seed_tools(entry)
         )
         try:
             model = AgentDefinition.model_validate(candidate)
@@ -421,7 +429,7 @@ def staged_definitions(value: Any) -> dict[str, Any]:
         for key, entry in value.items():
             name = str(key)
             if isinstance(entry, dict) and name in seeds:
-                out[name] = {**seeds[name], **_without_the_empty_builtin_tool_list(entry)}
+                out[name] = {**seeds[name], **as_stored_builtin(name, entry)}
             else:
                 out[name] = entry
     return out
