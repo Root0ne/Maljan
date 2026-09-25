@@ -1943,9 +1943,11 @@ def announce_finished(
 def make_join_node(stage: Any, container: ServiceContainer, finishes: tuple[str, ...] = ()) -> Any:
     """The barrier at the end of a parallel analysis stage.
 
-    Does nothing but exist. LangGraph waits for every predecessor of a node, so
-    one node behind the stage's agents is a fan-in; the stage's own result is
-    already in the state, written by each agent through the merging reducer.
+    Does nothing but exist. The builder enters it through one list edge from
+    all of the stage's agents, which waits for every one of them, so one node
+    behind the agents is a fan-in; the stage's own result is already in the
+    state, written by each agent through the merging reducer. A debate that
+    leaves through one is entered from the router's ``judge`` branch.
     """
 
     async def node_fn(state: AnalysisState) -> dict[str, Any]:

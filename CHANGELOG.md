@@ -2182,6 +2182,18 @@ change landed on `main`.
 
 ### Fixed
 
+- **A stage runs once, after every stage it depends on.** The builder wired one
+  edge per upstream tail, and in LangGraph separate edges into one node are
+  separate triggers. In the all-tools team, detonation (after static and
+  reversing) ran twice and network (after static, reversing and detonation)
+  three times, the first passes without the reverser's findings; negotiation
+  ran three times, the judge twice, and the report shared a superstep with the
+  second judge, so the run ended in `InvalidUpdateError` on `run_summary`
+  after the report was built. A node with more than one upstream tail is now
+  entered through one list edge that waits for all of them, and a debate whose
+  next stage also depends on another stage leaves through its own
+  `<stage>__join`. The seeded teams' graphs are unchanged. `run_summary` keeps
+  no reducer: two verdicts must never be merged into one.
 - **A Ghidra that cannot open the job's sample stops its agent.** With
   `GHIDRA_CONTAINER_SAMPLES_PATH` set to a host path the container cannot see,
   `load_program` answered HTTP 200 with `{"error": "File not found: ..."}`,

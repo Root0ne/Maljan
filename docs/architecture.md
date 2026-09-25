@@ -1462,6 +1462,23 @@ is where the graph starts, and every other stage without a dependency follows
 it instead of `START`, so a team gains the pack by having the stage inserted
 and nothing else rewritten.
 
+**A node runs once, after every stage it depends on.** In LangGraph, separate
+single-source edges into one node are separate triggers: the node runs in the
+superstep after *any* of them finishes. A stage that depends on two stages of
+unequal depth — detonation after static and reversing, network after all three
+— would run once per upstream stage, and everything after it again, up to two
+judges and a report sharing a superstep with the second one. So the builder
+enters a node with more than one upstream tail through one list edge,
+`add_edge([tails], head)`, which is a barrier that waits for all of them. The
+debate's `revision → negotiation` loop edge and its router stay single-source,
+so a loop pass never waits for a tail that already ran. The router's edge is
+conditional and a barrier cannot wait on it: a debate whose next stage also
+depends on another stage leaves through its own `<stage>__join`, and that node
+is the tail the next stage joins. A stage whose condition declines still runs
+its node, so every barrier fills. `tests/unit/pipeline/test_every_node_runs_once.py`
+runs the compiled graph of every seeded team and the all-tools example with
+stub nodes and counts.
+
 The default team therefore builds exactly the graph the project has always
 built, node for node and edge for edge — `tests/fixtures/golden/graph_default.json`
 pins it in both analyst modes.

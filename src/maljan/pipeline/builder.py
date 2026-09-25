@@ -28,7 +28,7 @@ Building a different graph per sample would mean a run's shape could not be
 predicted, compared or drawn before the sample arrived.
 
 Analyst mode is per analysis stage now. ``parallel`` fans the stage's agents
-out and lets LangGraph wait for all of them, which is right for a hosted
+out and joins them in one barrier edge, which is right for a hosted
 multi-slot API; ``sequential`` chains them so each gets the single local
 llama-server slot to itself for its whole timeout budget. The global
 ``llm.parallel_analysts`` still decides the mode of a profile that is stored as
@@ -126,6 +126,16 @@ def build_graph(container: ServiceContainer) -> CompiledStateGraph:
     #    is why its ``exit`` is empty. A triage stage with no dependency stands
     #    in for START for every other root: the facts it writes come before
     #    anything that reads them.
+    #
+    #    A node with more than one upstream tail is entered through one edge
+    #    from all of them. Separate single-source edges into one node are
+    #    separate triggers in LangGraph: the node runs in the superstep after
+    #    *any* of them finishes, so a stage that depends on two stages of
+    #    unequal depth would run once per upstream stage and everything after
+    #    it again. A list edge is a barrier that waits for every tail. The
+    #    debate's ``revision -> negotiation`` loop edge and its router are not
+    #    dependency edges and stay single-source, so a loop pass never waits
+    #    for a tail that already ran.
     first_key, adopted_keys = adopted_roots([entry.stage for entry in staged])
     first = by_key[first_key] if first_key is not None else None
     adopted = [by_key[key] for key in adopted_keys]
@@ -137,10 +147,9 @@ def build_graph(container: ServiceContainer) -> CompiledStateGraph:
         if not upstream:
             for node in entry.entry:
                 builder.add_edge(START, node)
-        for source in upstream:
-            for tail in source.exit:
-                for head in entry.entry:
-                    builder.add_edge(tail, head)
+        tails = list(dict.fromkeys(tail for source in upstream for tail in source.exit))
+        for head in entry.entry:
+            _add_dependency_edge(builder, tails, head)
         live_dependents = [d for d in dependents(profile, stage.key) if d.key in by_key]
         if entry is first and adopted:
             continue
@@ -149,6 +158,14 @@ def build_graph(container: ServiceContainer) -> CompiledStateGraph:
                 builder.add_edge(tail, END)
 
     return builder.compile()
+
+
+def _add_dependency_edge(builder: StateGraph, tails: list[str], head: str) -> None:
+    """``head`` runs once, after every one of ``tails`` has finished."""
+    if len(tails) == 1:
+        builder.add_edge(tails[0], head)
+    elif tails:
+        builder.add_edge(tails, head)
 
 
 def _add_stage(
@@ -239,8 +256,7 @@ def _add_analysis_stage(
             barrier,
             _node(barrier, make_join_node(stage, container, closes.get(barrier, ()))),
         )
-        for agent in stage.agents:
-            builder.add_edge(analyst_node(agent), barrier)
+        _add_dependency_edge(builder, [analyst_node(agent) for agent in stage.agents], barrier)
 
 
 def _add_debate_stage(
