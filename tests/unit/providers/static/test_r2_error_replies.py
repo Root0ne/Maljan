@@ -92,8 +92,11 @@ def test_the_open_file_refusals_name_the_call_that_would_succeed() -> None:
 
 
 def test_the_tool_keeps_its_name_schema_and_metadata() -> None:
-    wrapped = r2._reading_error_replies(_tool("x"))
+    original = _tool("x")
+    wrapped = r2._reading_error_replies(original)
 
     assert wrapped.name == "list_strings"
     assert wrapped.args_schema is _Args
     assert wrapped.metadata == {"maljan_server": "r2"}
+    # A copy: stamping the wrapped tool's source must not stamp the original.
+    assert wrapped.metadata is not original.metadata

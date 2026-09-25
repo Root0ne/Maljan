@@ -104,7 +104,7 @@ def _reading_error_replies(tool: Any) -> Any:
             description=getattr(tool, "description", ""),
             args_schema=args_schema,
             infer_schema=False,
-            metadata=getattr(tool, "metadata", None),
+            metadata=dict(getattr(tool, "metadata", None) or {}),
         )
     except Exception as exc:  # noqa: BLE001 — reading a reply never costs a tool
         logger.warning("r2: tool '%s' kept as it is (%s).", name, exc)
