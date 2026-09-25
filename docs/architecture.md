@@ -2437,11 +2437,12 @@ is assembled from what the run gathered rather than recomputed beside it:
   of a keeping kind only — `endpoints`, `network`, `iocs`, `c2` and their plain
   spellings (`network_iocs`, `c2_endpoints`, `indicators`); a table of
   contacted hosts is an observation and keeps nothing. A row has one type
-  cell: the column a heading names `type`, or else the first cell naming a
-  type, read by its last word with a `:port` taken off ("C2 domain" is
-  `domain`, "ip:port" is `ip`). The type applies to one value cell — the
-  heading's value column, or the cell after the type cell (before it when the
-  type comes last) — and a network type (`ip`, `ipv4`, `ipv6`, `address`,
+  cell: the column a heading names `type`, or else the first short cell (at
+  most three words; a longer one is a note) naming a type, read by its last
+  word with a `:port` taken off ("C2 domain" is `domain`, "ip:port" is `ip`).
+  The type applies to one value cell — the heading's value column, or the cell
+  after the type cell, or the one before it when the type comes last or the
+  cell after it is no value of that type — and a network type (`ip`, `ipv4`, `ipv6`, `address`,
   `domain`, `host`, `hostname`, `fqdn`, `url`, `uri`) keeps that value. A row
   whose type cell is a file, a path, a mutex, a registry key, a hash or
   anything else keeps nothing; a note cell never drops a typed row. Every

@@ -1008,6 +1008,17 @@ _VALUE_HEADINGS = frozenset(
     {"value", "indicator", "ioc", "observable", "address", "host", "domain", "url", "endpoint"}
 )
 _PORT_SUFFIX_RE = re.compile(r"[:/]\s*port$")
+# The most words a type cell holds; a longer cell is a note.
+_TYPE_CELL_WORDS = 3
+
+
+def _of_kind(found: list[tuple[str, str]], hint: str) -> list[tuple[str, str]]:
+    """``found`` when it holds a value of the row's type, else nothing.
+
+    A URL row's value may be a bare name, which the model typed as the host.
+    """
+    wanted = ("url", "domain") if hint == "url" else (hint,)
+    return found if any(kind in wanted for kind, _value in found) else []
 
 
 def _type_word(cell: str) -> str | None:
@@ -1022,7 +1033,12 @@ def _type_word(cell: str) -> str | None:
         return None
     if text in _TYPE_ALIASES or text in _OTHER_TYPES:
         return text
-    last = text.split()[-1]
+    words = text.split()
+    if len(words) > _TYPE_CELL_WORDS:
+        # A sentence that happens to end in a type word is a note, not a type:
+        # "C2 of the dropped file" types nothing.
+        return None
+    last = words[-1]
     return last if last in _TYPE_ALIASES or last in _OTHER_TYPES else None
 
 
@@ -1086,7 +1102,14 @@ def kept_network_values(artifact: Any) -> list[tuple[str, str]]:
             continue
         hint = _TYPE_ALIASES.get(word) if word else None
         if hint is not None and value_at is not None:
-            _keep(_cell_values(row[value_at], hint))
+            typed = _of_kind(_cell_values(row[value_at], hint), hint)
+            if not typed and headed is None and type_at and value_at == type_at + 1:
+                # Value first, a note after the type ("relay.top", "domain",
+                # "C2"): the cell after the type is no value of it, so the
+                # value is the one before.
+                value_at = type_at - 1
+                typed = _of_kind(_cell_values(row[value_at], hint), hint)
+            _keep(typed)
         if not bare:
             continue
         for index, cell in enumerate(row):

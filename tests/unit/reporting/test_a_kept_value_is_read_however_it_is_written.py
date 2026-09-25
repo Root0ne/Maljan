@@ -246,6 +246,27 @@ class TestATypeAppliesToItsValueCellOnly:
             ("ip", CONTACT),
         ]
 
+    def test_a_value_first_row_with_a_note_after_the_type_keeps_its_value(self) -> None:
+        for kind in ("iocs", "endpoints"):
+            artifact = Artifact(kind=kind, rows=[["relay-alpha-7f3c.top", "domain", "C2"]])
+            assert kept_network_values(artifact) == [("domain", "relay-alpha-7f3c.top")], kind
+
+    def test_a_descriptive_note_is_never_a_type_cell(self) -> None:
+        artifact = Artifact(
+            kind="iocs",
+            rows=[["C2 of the dropped file", "domain", "relay-alpha-7f3c.top"]],
+        )
+
+        assert kept_network_values(artifact) == [("domain", "relay-alpha-7f3c.top")]
+
+    def test_a_note_ending_in_a_non_network_type_word_drops_nothing(self) -> None:
+        artifact = Artifact(
+            kind="iocs",
+            rows=[["seen in the decoded string", "ip", f"{CONTACT}:443"]],
+        )
+
+        assert kept_network_values(artifact) == [("ip", CONTACT)]
+
     def test_a_row_whose_type_cell_is_a_file_keeps_nothing(self) -> None:
         artifact = Artifact(kind="endpoints", rows=[["file", "relay-alpha-7f3c.top"]])
 
