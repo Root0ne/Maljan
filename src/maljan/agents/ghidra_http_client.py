@@ -21,6 +21,7 @@ import httpx
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import create_model
 
+from maljan.agents.mcp_client import tool_error_marker
 from maljan.agents.output_shortening import narrowing_arguments
 from maljan.core.logger import logger
 
@@ -39,6 +40,31 @@ TRUNCATION_MARKER = "\n\n[OUTPUT TRUNCATED]"
 def truncation_target(limit: int) -> int:
     """How much of an answer a character cut keeps, so the marker fits the limit."""
     return max(0, int(limit) - len(TRUNCATION_MARKER))
+
+
+# How much of an error answer's own text a failure marker quotes.
+SERVER_WORDS_LIMIT = 300
+
+# What Ghidra says, in some builds as bare text, when a call needs a program
+# and none is current.
+NO_PROGRAM_LOADED = "No program loaded"
+
+
+def no_program_as_error(text: str, tool: str) -> str:
+    """``text``, or the failure marker for a bare "No program loaded" answer.
+
+    Ghidra answers a call made with no program current with HTTP 200. The
+    JSON form, ``{"error": "No program loaded."}``, is already a failed call
+    to the ledger (``tools.errors.error_parts``); a build that answers with the
+    bare sentence reached the ledger as a successful call whose output was
+    that sentence. It is handed on as the MCP client hands on a tool's error
+    reply, with the server's words as the detail. Any other answer is
+    returned exactly as it came.
+    """
+    stripped = text.strip()
+    if stripped.startswith(NO_PROGRAM_LOADED):
+        return tool_error_marker("tool_returned_error", tool, detail=stripped)
+    return text
 
 
 class GhidraHTTPClient:
@@ -190,6 +216,7 @@ class GhidraHTTPClient:
                 else:
                     query[pname] = kwargs[pname]
 
+        tool = path.lstrip("/").replace("/", "_")
         client = await self._get_http()
         try:
             if method == "POST":
@@ -199,17 +226,17 @@ class GhidraHTTPClient:
             else:
                 resp = await client.get(url, params=query)
             resp.raise_for_status()
-            output = resp.text
+            output = no_program_as_error(resp.text, tool)
         except httpx.HTTPStatusError as exc:
-            output = (
-                f'{{"tool_error": "http_status", "status": {exc.response.status_code}, '
-                f'"path": "{path}"}}'
+            output = tool_error_marker(
+                "http_status",
+                tool,
+                status=str(exc.response.status_code),
+                path=path,
+                detail=" ".join(exc.response.text.split())[:SERVER_WORDS_LIMIT],
             )
         except httpx.RequestError as exc:
-            output = (
-                f'{{"tool_error": "request_failed", "type": "{type(exc).__name__}", '
-                f'"path": "{path}"}}'
-            )
+            output = tool_error_marker("request_failed", tool, type=type(exc).__name__, path=path)
 
         if path == "/load_program":
             await self._activate_loaded_program(output)
