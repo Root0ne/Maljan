@@ -119,6 +119,13 @@
     "per_agent": "<data-keyed map>",
     "sentence": null,
     "total_tokens": null,
+    "unreported": [
+      {
+        "agent": null,
+        "call": null,
+        "model": null
+      }
+    ],
     "unreported_calls": null
   },
   "tool_latency": null,
