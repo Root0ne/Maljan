@@ -22,7 +22,9 @@ from __future__ import annotations
 import ipaddress
 import re
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
@@ -867,6 +869,28 @@ class ExtendedSTIXRenderer:
         A family id it does not hold is recorded as
         ``stix.evidence_ref_not_in_ledger`` and left out.
         """
+        with one_reading(report):
+            return self._render(
+                report,
+                base_bundle,
+                ledger=ledger,
+                corpus=corpus,
+                technique_sources=technique_sources,
+                technique_evidence=technique_evidence,
+                ledger_ids=ledger_ids,
+            )
+
+    def _render(
+        self,
+        report: MalwareReport,
+        base_bundle: Bundle | None = None,
+        *,
+        ledger: Any | None = None,
+        corpus: Any = None,
+        technique_sources: Any = None,
+        technique_evidence: Mapping[str, Sequence[str]] | None = None,
+        ledger_ids: Sequence[str] | None = None,
+    ) -> Bundle:
         objects: list[Any] = []
         self.unlinked = []
         self.declined = []
@@ -1097,11 +1121,11 @@ class ExtendedSTIXRenderer:
         #    integrity pass keeps whichever was queued first, and the one worth
         #    keeping is the one that carries the observation.
         if report.network is not None:
-            for ip in report.network.ips[:40]:
+            for ip in report.network.ips:
                 ip_ind = _indicator_for_ip(ip, report.verdict, report)
                 if ip_ind is not None:
                     _queue(ip_ind, _BAND_NETWORK, ip.source)
-            for url in report.network.urls[:40]:
+            for url in report.network.urls:
                 url_ind = _indicator_for_url(url, report)
                 if url_ind is not None:
                     # The source the publish rule was given, so the order and
@@ -1121,7 +1145,7 @@ class ExtendedSTIXRenderer:
                             by=url.source,
                         )
                     )
-            for domain in report.network.domains[:40]:
+            for domain in report.network.domains:
                 dom_ind = _indicator_for_domain(domain, report.verdict, report)
                 if dom_ind is not None:
                     _queue(dom_ind, _BAND_NETWORK, domain.source)
@@ -1835,7 +1859,8 @@ def indicator_publish_reason(
     verdict: Any = None,
     also_plain: str = "",
     unattributed: str = "",
-    named_by: str = "",
+    kept_by: str = "",
+    mentioned_by: str = "",
     in_published_url: str = "",
 ) -> str | None:
     """Why this run may publish one indicator of ``kind``, or ``None``.
@@ -1844,13 +1869,16 @@ def indicator_publish_reason(
     domain (:func:`published_url_hosts`). The domain follows that URL's
     decision: one live run published two C2 URLs and neither of their names,
     because the judge wrote URL indicators only and nothing carried a
-    published URL's host to a row of its own.
+    published URL's host to a row of its own. A well-known benign host does
+    not follow its URL: it is published only when a model kept the host itself.
 
     ``unattributed`` is why a sandbox row is not the sample's own observation
     — a flow the report does not attribute to the sample's process tree, a
-    well-known benign name the guest resolved — and ``named_by`` the models
-    that named the value (:func:`sandbox_row_kwargs`). Such a row is published
-    only when a model names it; the observation alone is the guest's traffic.
+    well-known benign name the guest resolved — and ``kept_by`` the models
+    that kept the value as an indicator (:func:`sandbox_row_kwargs`): an
+    analyst's artifact or the judge's indicator. Such a row is published only
+    when a model kept it; the observation alone is the guest's traffic, and a
+    claim that only mentions the value (``mentioned_by``) keeps nothing.
 
     One rule for every kind the platform mints, and every minting path asks it:
     the network block's own rows, the string rows that reach the bundle through
@@ -1883,16 +1911,16 @@ def indicator_publish_reason(
     if kind == "domain":
         if not host_is_public(value):
             return None
-        if in_published_url:
+        if in_published_url and not is_well_known_benign_host(value):
             return f"the host of {in_published_url}, which this run publishes"
-        if unattributed:
-            return _named_by_a_model(named_by)
+        if in_published_url or unattributed:
+            return _kept_by_a_model(kept_by)
         return corroboration_reason(source, reputation, value) or _emulation_admits(
             value, recovered, verdict
         )
     if kind == "ip":
         if unattributed and address_is_publishable(value, source):
-            return _named_by_a_model(named_by)
+            return _kept_by_a_model(kept_by)
         admitted = ip_corroboration_reason(value, source, reputation)
         if admitted or not address_is_publishable(value, source):
             return admitted
@@ -1946,8 +1974,13 @@ def published_url_hosts(report: Any) -> dict[str, tuple[str, str]]:
     The URLs of the network block the rule publishes, and the judge's URL
     values the rule publishes (source ``judge``), in that order; the first URL
     to carry a host is the one named. An address host is not a name and is
-    not carried: it is an ``ip`` row's to answer.
+    not carried: it is an ``ip`` row's to answer. Built once per reading
+    (:func:`one_reading`).
     """
+    return _memo(report, "url_hosts", lambda: _published_url_hosts(report))  # type: ignore[no-any-return]
+
+
+def _published_url_hosts(report: Any) -> dict[str, tuple[str, str]]:
     out: dict[str, tuple[str, str]] = {}
 
     def _carry(url: str, source: str) -> None:
@@ -1987,8 +2020,20 @@ def published_url_hosts(report: Any) -> dict[str, tuple[str, str]]:
     return out
 
 
-def _named_by_a_model(named_by: str) -> str | None:
-    return f"named by {named_by}" if named_by else None
+def _kept_by_a_model(kept_by: str) -> str | None:
+    return f"kept as an indicator by {kept_by}" if kept_by else None
+
+
+def not_kept_reason(why: str, mentioned_by: str = "") -> str:
+    """The ``no:`` a row waiting for a model reads, naming any claim that only mentioned it."""
+    said = f"no: {why}, and no model kept it as an indicator"
+    if mentioned_by:
+        said += f" ({mentioned_by} mentions it and does not keep it)"
+    return said
+
+
+# What the rule says of a well-known benign name a published URL carries.
+BENIGN_NAME_IN_A_URL = "a well-known benign name carried by a published URL"
 
 
 # Why a sandbox row is not the sample's own observation, as the rule reports it.
@@ -2000,7 +2045,7 @@ BENIGN_NAME_RESOLVED = "a well-known benign name the sandbox's guest resolved"
 
 
 def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
-    """``unattributed`` and ``named_by`` for one value's sandbox row, or nothing.
+    """``unattributed``, ``kept_by`` and ``mentioned_by`` for one value's sandbox row, or nothing.
 
     Asked of the report's network block. An address the sandbox saw is the
     sample's own observation when a flow to it came from the sample's process
@@ -2008,18 +2053,17 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
     elsewhere, or says nothing about which process made them — is the guest's
     traffic, and so is a well-known benign name a DNS lookup asked for (Windows
     resolves through its DNS service, never through the sample's tree, so a
-    name is judged by what it is). Either is published only when a model names
-    it: an analyst's artefact or claim, or the judge's indicator. The public
-    resolver and AS facts are stated in the reason.
+    name is judged by what it is). Either is published only when a model kept
+    it as an indicator: an analyst's artifact, or the judge's indicator. The
+    public resolver and AS facts are stated in the reason. Rows are found
+    through one index per report, so a table of any size is read once.
     """
     network = _field(report, "network")
     if network is None or kind not in ("ip", "domain"):
         return {}
-    key = str(value or "").strip().lower().rstrip(".")
+    key = _value_key(kind, value)
+    row = _network_index(report).get((kind, key))
     if kind == "ip":
-        row = next(
-            (r for r in _field(network, "ips") or [] if str(_field(r, "address")) == key), None
-        )
         if row is None or _field(row, "source") != "sandbox":
             return {}
         if _field(row, "sample_process_tree") is True:
@@ -2034,27 +2078,94 @@ def sandbox_row_kwargs(report: Any, kind: str, value: str) -> dict[str, str]:
         if _field(row, "asn"):
             why += f"; AS {_field(row, 'asn')}"
     else:
-        row = next(
-            (
-                r
-                for r in _field(network, "domains") or []
-                if str(_field(r, "fqdn") or "").strip().lower().rstrip(".") == key
-            ),
-            None,
-        )
         if row is None or _field(row, "source") != "sandbox":
             return {}
         if not is_well_known_benign_host(key):
             return {}
         why = BENIGN_NAME_RESOLVED
-    named = [str(by) for by in _field(row, "named_by") or []]
-    for indicator in _field(report, "judge_indicators") or []:
-        if str(_field(indicator, "kind") or "") == kind and (
-            str(_field(indicator, "value") or "").strip().lower().rstrip(".") == key
-        ):
-            named.append("the judge's indicator")
-            break
-    return {"unattributed": why, "named_by": ", ".join(dict.fromkeys(named))}
+    return {"unattributed": why, **kept_kwargs(report, kind, key, row)}
+
+
+def _value_key(kind: str, value: Any) -> str:
+    """One spelling of a value for lookups: an address canonical, a name lower-cased."""
+    text = str(value or "").strip()
+    if kind == "ip":
+        try:
+            return str(ipaddress.ip_address(text.strip("[]")))
+        except ValueError:
+            return text.lower()
+    return text.lower().rstrip(".")
+
+
+def kept_kwargs(report: Any, kind: str, key: str, row: Any = None) -> dict[str, str]:
+    """``kept_by`` and ``mentioned_by`` for one value: who kept it, whose claim only mentions it."""
+    kept = [str(by) for by in (_field(row, "kept_by") or [])] if row is not None else []
+    if (kind, key) in _judge_index(report):
+        kept.append("the judge's indicator")
+    mentioned = [str(by) for by in (_field(row, "mentioned_by") or [])] if row is not None else []
+    return {
+        "kept_by": ", ".join(dict.fromkeys(kept)),
+        "mentioned_by": ", ".join(dict.fromkeys(mentioned)),
+    }
+
+
+# One reading of a report's lookups at a time. The IOC table, the export and
+# the feed each ask the publish rule once per row, and every answer used to
+# rescan the network block and recompute every published URL's host — which
+# made a table of a few hundred rows take seconds. Inside ``one_reading`` each
+# lookup is built once per report; outside it, each is built per call.
+_READING: ContextVar[dict[str, Any] | None] = ContextVar("maljan_stix_reading", default=None)
+
+
+@contextmanager
+def one_reading(report: Any) -> Iterator[None]:
+    """Hold the report's lookups for the duration of one table, export or feed."""
+    token = _READING.set({"report": id(report)})
+    try:
+        yield
+    finally:
+        _READING.reset(token)
+
+
+def _memo(report: Any, name: str, build: Any) -> Any:
+    reading = _READING.get()
+    if reading is None or reading.get("report") != id(report):
+        return build()
+    if name not in reading:
+        reading[name] = build()
+    return reading[name]
+
+
+def _network_index(report: Any) -> dict[tuple[str, str], Any]:
+    """``{(kind, key): row}`` for the report's network block, first row of each value."""
+
+    def _build() -> dict[tuple[str, str], Any]:
+        network = _field(report, "network")
+        out: dict[tuple[str, str], Any] = {}
+        if network is None:
+            return out
+        for row in _field(network, "ips") or []:
+            out.setdefault(("ip", _value_key("ip", _field(row, "address"))), row)
+        for row in _field(network, "domains") or []:
+            out.setdefault(("domain", _value_key("domain", _field(row, "fqdn"))), row)
+        return out
+
+    return _memo(report, "network_index", _build)  # type: ignore[no-any-return]
+
+
+def _judge_index(report: Any) -> frozenset[tuple[str, str]]:
+    """The ``(kind, key)`` of every value the judge's indicators name."""
+
+    def _build() -> frozenset[tuple[str, str]]:
+        return frozenset(
+            (
+                str(_field(item, "kind") or ""),
+                _value_key(str(_field(item, "kind") or ""), _field(item, "value")),
+            )
+            for item in _field(report, "judge_indicators") or []
+        )
+
+    return _memo(report, "judge_index", _build)  # type: ignore[no-any-return]
 
 
 # What the rule writes for a value emulation recovered, before the entry id.
@@ -2251,7 +2362,7 @@ def emulation_kwargs(
     any) and ``verdict`` for a value only emulation recovered; ``also_plain``
     (the sweep's entry) for one the static sweep read too; nothing otherwise.
     The verdict is read as stated only when the judge gave it a confidence.
-    A sandbox row's ``unattributed`` and ``named_by`` (:func:`sandbox_row_kwargs`)
+    A sandbox row's ``unattributed``, ``kept_by`` and ``mentioned_by`` (:func:`sandbox_row_kwargs`)
     ride along, so every surface that asks the rule of a network value — the
     IOC table, the export, ``/iocs``, the judge's values — reads one decision.
     """
@@ -2261,9 +2372,14 @@ def emulation_kwargs(
         dict(sandbox_row_kwargs(report, kind, value)) if report is not None else {}
     )
     if kind == "domain" and report is not None:
-        carried_by = published_url_hosts(report).get(str(value or "").strip().lower().rstrip("."))
+        key = _value_key("domain", value)
+        carried_by = published_url_hosts(report).get(key)
         if carried_by:
             observed["in_published_url"] = carried_by[0]
+            if "kept_by" not in observed:
+                observed.update(
+                    kept_kwargs(report, "domain", key, _network_index(report).get(("domain", key)))
+                )
     found = emulation_record(report) if record is None else record
     key = str(value or "").strip().lower().rstrip(".")
     if key in found.plain:
@@ -2303,7 +2419,8 @@ def publish_answer(
     verdict: Any = None,
     also_plain: str = "",
     unattributed: str = "",
-    named_by: str = "",
+    kept_by: str = "",
+    mentioned_by: str = "",
     in_published_url: str = "",
 ) -> str:
     """The publish rule's answer for one row, as the report prints it.
@@ -2331,7 +2448,8 @@ def publish_answer(
         recovered=recovered,
         verdict=verdict,
         unattributed=unattributed,
-        named_by=named_by,
+        kept_by=kept_by,
+        mentioned_by=mentioned_by,
         in_published_url=in_published_url,
     ):
         return "yes"
@@ -2341,8 +2459,10 @@ def publish_answer(
         return "no: its host does not resolve outside the analysed network"
     if kind == "ip" and not address_is_publishable(text, source):
         return "no: not an address this run may publish"
+    if kind == "domain" and in_published_url and is_well_known_benign_host(text):
+        return not_kept_reason(f"{BENIGN_NAME_IN_A_URL} ({in_published_url})", mentioned_by)
     if unattributed and kind in ("ip", "domain"):
-        return f"no: {unattributed}, and no model named it"
+        return not_kept_reason(unattributed, mentioned_by)
     if kind == "email" and not email_is_publishable(text):
         return "no: not a mailbox at a host that could exist"
     if (
@@ -2394,11 +2514,11 @@ def judge_value_answer(report: Any, kind: str, value: str, corroborating: str) -
     text = str(value or "").strip()
     network = getattr(report, "network", None)
     emulated = emulation_kwargs(report, kind, text)
-    if emulated.get("unattributed"):
-        # The value is the judge's own: a model named it, which is what a
-        # sandbox row the observation alone does not publish waits for.
-        named = [by for by in str(emulated.get("named_by") or "").split(", ") if by]
-        emulated["named_by"] = ", ".join(dict.fromkeys([*named, "the judge's indicator"]))
+    if emulated.get("unattributed") or emulated.get("in_published_url"):
+        # The value is the judge's own: a model kept it, which is what a row
+        # the observation alone does not publish waits for.
+        kept = [by for by in str(emulated.get("kept_by") or "").split(", ") if by]
+        emulated["kept_by"] = ", ".join(dict.fromkeys([*kept, "the judge's indicator"]))
     if kind == "domain" and network is not None:
         for row in network.domains:
             if row.fqdn.strip().lower().rstrip(".") == text.lower().rstrip("."):

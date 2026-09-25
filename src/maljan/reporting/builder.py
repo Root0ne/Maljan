@@ -151,7 +151,9 @@ class MalwareReportBuilder:
         # analysts actually established, and each stays empty otherwise.
         static = static_from_ledger(self.evidence_ledger, self.isr_reports)
         dynamic = dynamic_from_ledger(self.evidence_ledger, self.isr_reports)
-        network = network_from_ledger(self.evidence_ledger, self.isr_reports)
+        network = network_from_ledger(
+            self.evidence_ledger, self.isr_reports, sandbox_report=self.sandbox_report
+        )
         persistence = persistence_from_ledger(self.evidence_ledger, self.isr_reports)
         cells, mappings = build_capability_matrix(
             stix_output=self.stix_output,
@@ -563,7 +565,15 @@ def build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     (:func:`~maljan.reporting.renderers.stix_renderer.publish_answer`), asked
     with the arguments ``/reports/{id}/iocs`` and the STIX export ask it with.
     Values are stored live; the human-readable renderings defang them by kind.
+    The report's lookups are built once for the whole table (``one_reading``).
     """
+    from maljan.reporting.renderers.stix_renderer import one_reading
+
+    with one_reading(report):
+        return _build_consolidated_iocs(report)
+
+
+def _build_consolidated_iocs(report: MalwareReport) -> list[ConsolidatedIOC]:
     from maljan.extractors.network_extractor import url_host
     from maljan.reporting.renderers.stix_renderer import (
         corroborating_values,

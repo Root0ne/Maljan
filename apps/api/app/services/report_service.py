@@ -12,6 +12,7 @@ from maljan.reporting.renderers.stix_renderer import (
     emulation_record,
     indicator_publish_reason,
     judge_indicator_rows,
+    one_reading,
     published_url_hosts,
 )
 from maljan.reporting.run_diff import RunRecord, diff_runs
@@ -614,93 +615,100 @@ class ReportService:
         # export reads it: a sandbox row's attribution, the models that named a
         # value and the published URLs whose hosts follow them.
         typed = _typed_report(mr)
-        identity = mr.get("identity") or {}
-        hashes = identity.get("hashes") or {}
-        for algo, value in hashes.items():
-            if not value or (kind and kind != "hash"):
-                continue
-            # The sample's own identity, established by the router rather than
-            # read out of the bytes: always published.
-            out.append({"kind": "hash", "value": f"{algo}:{value}", "source": "identity"})
-        if not kind or kind == "domain":
-            for dom in network.get("domains") or []:
-                out.append(
-                    {
-                        "kind": "domain",
-                        "value": dom.get("fqdn", ""),
-                        "is_suspicious": bool(dom.get("is_suspicious")),
-                        "notes": dom.get("reason"),
-                        # A name the sandbox resolved and a run of bytes shaped
-                        # like a hostname are not the same claim, and this feed
-                        # presented them identically.
-                        "source": dom.get("source"),
-                        "published": _publishable(
-                            "domain",
-                            dom.get("fqdn"),
-                            dom.get("source"),
-                            dom.get("reputation"),
-                            emulation_kwargs(typed, "domain", str(dom.get("fqdn") or ""), emulated),
-                        ),
-                    }
-                )
-        if not kind or kind == "ip":
-            for ip in network.get("ips") or []:
-                out.append(
-                    {
-                        "kind": "ip",
-                        "value": ip.get("address", ""),
-                        "is_suspicious": bool(ip.get("is_suspicious")),
-                        "source": ip.get("source"),
-                        "published": _publishable(
-                            "ip",
-                            ip.get("address"),
-                            ip.get("source"),
-                            ip.get("reputation"),
-                            emulation_kwargs(typed, "ip", str(ip.get("address") or ""), emulated),
-                        ),
-                    }
-                )
-        if not kind or kind == "url":
-            for url in network.get("urls") or []:
-                host = _url_host(url.get("url"))
-                out.append(
-                    {
-                        "kind": "url",
-                        "value": url.get("url", ""),
-                        "source": url.get("source"),
-                        # ``or "strings"`` exactly as the renderer reads it: a
-                        # URL row that records no source at all is the weakest
-                        # claim there is, and two readings of "unrecorded" is
-                        # how one surface publishes what the other withholds.
-                        "published": _publishable(
-                            "url",
-                            url.get("url"),
-                            url.get("source") or "strings",
-                            reputations.get(host),
-                            emulation_kwargs(typed, "url", str(url.get("url") or ""), emulated),
-                        ),
-                    }
-                )
-        # A fingerprint and a user agent are the sandbox's own observations of
-        # the traffic; there is no string sweep that produces one, so there is
-        # nothing for the publish rule to withhold.
-        for field, row_kind in (
-            ("user_agents", "user_agent"),
-            ("ja3_fingerprints", "ja3"),
-            ("ja3s_fingerprints", "ja3s"),
-        ):
-            if kind and kind != row_kind:
-                continue
-            for value in network.get(field) or []:
-                out.append({"kind": row_kind, "value": value, "source": "sandbox"})
-        _with_the_judge_s_values(out, mr, kind)
-        _with_the_hosts_of_published_urls(out, typed, kind)
-        rows = [row for row in out if row.get("value")]
-        wanted = str(include or "published").strip().lower()
-        if wanted == "all":
-            return rows
-        keep = wanted != "unpublished"
-        return [row for row in rows if bool(row.get("published", True)) is keep]
+        # One reading of the report for the whole feed: the rule asks the same
+        # lookups of every row, and they are built once.
+        with one_reading(typed):
+            identity = mr.get("identity") or {}
+            hashes = identity.get("hashes") or {}
+            for algo, value in hashes.items():
+                if not value or (kind and kind != "hash"):
+                    continue
+                # The sample's own identity, established by the router rather than
+                # read out of the bytes: always published.
+                out.append({"kind": "hash", "value": f"{algo}:{value}", "source": "identity"})
+            if not kind or kind == "domain":
+                for dom in network.get("domains") or []:
+                    out.append(
+                        {
+                            "kind": "domain",
+                            "value": dom.get("fqdn", ""),
+                            "is_suspicious": bool(dom.get("is_suspicious")),
+                            "notes": dom.get("reason"),
+                            # A name the sandbox resolved and a run of bytes shaped
+                            # like a hostname are not the same claim, and this feed
+                            # presented them identically.
+                            "source": dom.get("source"),
+                            "published": _publishable(
+                                "domain",
+                                dom.get("fqdn"),
+                                dom.get("source"),
+                                dom.get("reputation"),
+                                emulation_kwargs(
+                                    typed, "domain", str(dom.get("fqdn") or ""), emulated
+                                ),
+                            ),
+                        }
+                    )
+            if not kind or kind == "ip":
+                for ip in network.get("ips") or []:
+                    out.append(
+                        {
+                            "kind": "ip",
+                            "value": ip.get("address", ""),
+                            "is_suspicious": bool(ip.get("is_suspicious")),
+                            "source": ip.get("source"),
+                            "published": _publishable(
+                                "ip",
+                                ip.get("address"),
+                                ip.get("source"),
+                                ip.get("reputation"),
+                                emulation_kwargs(
+                                    typed, "ip", str(ip.get("address") or ""), emulated
+                                ),
+                            ),
+                        }
+                    )
+            if not kind or kind == "url":
+                for url in network.get("urls") or []:
+                    host = _url_host(url.get("url"))
+                    out.append(
+                        {
+                            "kind": "url",
+                            "value": url.get("url", ""),
+                            "source": url.get("source"),
+                            # ``or "strings"`` exactly as the renderer reads it: a
+                            # URL row that records no source at all is the weakest
+                            # claim there is, and two readings of "unrecorded" is
+                            # how one surface publishes what the other withholds.
+                            "published": _publishable(
+                                "url",
+                                url.get("url"),
+                                url.get("source") or "strings",
+                                reputations.get(host),
+                                emulation_kwargs(typed, "url", str(url.get("url") or ""), emulated),
+                            ),
+                        }
+                    )
+            # A fingerprint and a user agent are the sandbox's own observations of
+            # the traffic; there is no string sweep that produces one, so there is
+            # nothing for the publish rule to withhold.
+            for field, row_kind in (
+                ("user_agents", "user_agent"),
+                ("ja3_fingerprints", "ja3"),
+                ("ja3s_fingerprints", "ja3s"),
+            ):
+                if kind and kind != row_kind:
+                    continue
+                for value in network.get(field) or []:
+                    out.append({"kind": row_kind, "value": value, "source": "sandbox"})
+            _with_the_judge_s_values(out, mr, kind)
+            _with_the_hosts_of_published_urls(out, typed, kind)
+            rows = [row for row in out if row.get("value")]
+            wanted = str(include or "published").strip().lower()
+            if wanted == "all":
+                return rows
+            keep = wanted != "unpublished"
+            return [row for row in rows if bool(row.get("published", True)) is keep]
 
     async def get_malware_report_signature(
         self,

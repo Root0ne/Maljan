@@ -681,9 +681,18 @@ _DOMAIN_SOURCE_RANK: dict[str, int] = {"strings": 0, "analyst": 1, "sandbox": 2}
 
 
 def network_from_ledger(
-    ledger: list[LedgerEntry], isrs: dict[str, AgentISR] | None = None
+    ledger: list[LedgerEntry],
+    isrs: dict[str, AgentISR] | None = None,
+    sandbox_report: dict[str, Any] | None = None,
 ) -> NetworkIOCs | None:
     """``NetworkIOCs`` from the sandbox network tool and the IOC tools.
+
+    ``sandbox_report`` is the job's whole report. When it holds an observation
+    the sandbox rows are read from it, every row, rather than from the views a
+    model paged through: which process made a flow is a fact about the whole
+    report, and an address a paged view never showed is still an address the
+    sample's guest reached. Without it the ledger's views are read, and a page
+    of a view states no attribution but the sample's own.
 
     Domains are scored by the same assessor the DGA layer reads
     (``extractors.network_extractor``), so ``is_suspicious``, ``dga_score`` and
@@ -742,6 +751,7 @@ def network_from_ledger(
             domains[value] = domain
             network.domains.append(domain)
         elif kind == "ip":
+            value = address_key(value)
             known_ip = ips.get(value)
             if known_ip is not None:
                 # The same address from a second source, read the way a
@@ -749,11 +759,14 @@ def network_from_ledger(
                 if _DOMAIN_SOURCE_RANK[source] > _DOMAIN_SOURCE_RANK[known_ip.source or "strings"]:
                     known_ip.source = source
                 return
-            # The classes nothing could act on are out here, which is where
-            # they always were; a private address is kept when somebody watched
-            # the sample reach it, because that is lateral movement, and
-            # dropped when a string sweep produced it.
-            if not address_is_publishable(value, source):
+            # A run of digits only the string sweep produced, in a class nothing
+            # could act on, is not an address anybody saw and is left out. An
+            # address somebody watched is kept whatever its class, the way a
+            # watched reserved name is: the export refuses to publish it and
+            # the table says so, rather than the address vanishing.
+            if source == "strings" and not address_is_publishable(value, source):
+                return
+            if not _parses_as_an_address(value):
                 return
             created_ip = NetworkIP(address=value, source=source)
             ips[value] = created_ip
@@ -780,7 +793,7 @@ def network_from_ledger(
     attributed: dict[str, list[bool | None]] = {}
     host_facts: dict[str, dict[str, Any]] = {}
 
-    for _entry, data in _payloads(ledger, "sandbox_network"):
+    for data, whole in _sandbox_views(ledger, sandbox_report):
         for key in ("dns", "domains"):
             for row in data.get(key) or []:
                 _add("domain", _first_str(row, "request", "hostname", "domain", "name"), "sandbox")
@@ -789,7 +802,7 @@ def network_from_ledger(
         # though a string sweep had produced it, which is the weakest claim
         # there is and the one the publish rule holds back.
         for row in data.get("hosts") or []:
-            address = _first_str(row, "ip", "address", "host")
+            address = address_key(_first_str(row, "ip", "address", "host"))
             _add("ip", address, "sandbox")
             if isinstance(row, dict) and address:
                 host_facts.setdefault(address, {}).update(
@@ -797,10 +810,15 @@ def network_from_ledger(
                 )
         for key in ("tcp", "udp"):
             for row in data.get(key) or []:
-                address = _first_str(row, "dst", "ip", "address")
+                address = address_key(_first_str(row, "dst", "ip", "address"))
                 _add("ip", address, "sandbox")
                 if isinstance(row, dict) and address:
-                    attributed.setdefault(address, []).append(row.get(SAMPLE_TREE_KEY))
+                    stated = row.get(SAMPLE_TREE_KEY)
+                    # A page of a view cannot say that no flow to an address
+                    # came from the tree: the one that did may be on another.
+                    attributed.setdefault(address, []).append(
+                        stated if whole or stated is True else None
+                    )
         for row in data.get("http") or []:
             host = _first_str(row, "host", "hostname")
             _add("domain", host, "sandbox")
@@ -814,20 +832,21 @@ def network_from_ledger(
             if isinstance(row, dict):
                 _add(str(row.get("kind") or ""), str(row.get("value") or ""), "strings")
 
-    named: dict[tuple[str, str], list[str]] = {}
+    kept: dict[tuple[str, str], list[str]] = {}
     for artifact in _artifacts(isrs, "endpoints", "network", "iocs"):
         source = str(getattr(artifact, "source", "") or "").strip()
         by = f"an artifact of the {source} analyst" if source else "an analyst artifact"
         for row in _rows_of(artifact):
             if len(row) >= 2:
                 kind = row[0].strip().lower()
-                _add(kind, row[1], "analyst")
-                named_key = (kind, row[1].strip().lower().rstrip("."))
-                if by not in named.setdefault(named_key, []):
-                    named[named_key].append(by)
+                value = address_key(row[1]) if kind == "ip" else row[1]
+                _add(kind, value, "analyst")
+                kept_key = (kind, value.strip().lower().rstrip("."))
+                if by not in kept.setdefault(kept_key, []):
+                    kept[kept_key].append(by)
 
     _state_sandbox_facts(network, attributed, host_facts)
-    _state_who_named(network, named, isrs)
+    _state_who_kept(network, kept, isrs)
     return network if (network.domains or network.ips or network.urls) else None
 
 
@@ -859,15 +878,19 @@ def _state_sandbox_facts(
             ip.geo = str(facts["country_name"])
 
 
-def _state_who_named(
+def _state_who_kept(
     network: NetworkIOCs,
-    named: dict[tuple[str, str], list[str]],
+    kept: dict[tuple[str, str], list[str]],
     isrs: dict[str, AgentISR] | None,
 ) -> None:
-    """Which model named each address and name: an analyst's artefact, or its claim.
+    """Which model kept each address and name as an indicator, and which only mentioned it.
 
-    A claim names a value when its text holds it as a whole value, the rule
-    every other "this text holds that value" question here answers.
+    Kept is an analyst's artifact of endpoints, network values or IOCs: the
+    structured place an analyst puts what it holds to be infrastructure. A
+    claim holding the value in its text mentions it and keeps nothing: one
+    live run's analysts wrote two background addresses into claims calling
+    them noise, and reading a mention as a keep published what they discarded.
+    The judge sees every claim and keeps what it keeps in its own indicators.
     """
     from maljan.agents._indicator_denylists import whole_value_in
 
@@ -877,19 +900,78 @@ def _state_who_named(
         for c in getattr(isr, "claims", None) or []
     ]
 
-    def _who(kind: str, value: str) -> list[str]:
+    def _mentions(value: str) -> list[str]:
         key = value.strip().lower().rstrip(".")
-        out = list(named.get((kind, key), []))
-        for agent, text in claims:
-            by = f"a claim by the {agent} analyst"
-            if by not in out and whole_value_in(key, text):
-                out.append(by)
-        return out
+        return list(
+            dict.fromkeys(
+                f"a claim by the {agent} analyst"
+                for agent, text in claims
+                if whole_value_in(key, text)
+            )
+        )
 
     for ip in network.ips:
-        ip.named_by = _who("ip", ip.address)
+        ip.kept_by = list(kept.get(("ip", ip.address.lower()), []))
+        ip.mentioned_by = _mentions(ip.address)
     for domain in network.domains:
-        domain.named_by = _who("domain", domain.fqdn)
+        domain.kept_by = list(kept.get(("domain", domain.fqdn.lower().rstrip(".")), []))
+        domain.mentioned_by = _mentions(domain.fqdn)
+
+
+def _parses_as_an_address(value: str) -> bool:
+    import ipaddress
+
+    try:
+        ipaddress.ip_address(str(value).strip().strip("[]"))
+    except ValueError:
+        return False
+    return True
+
+
+def address_key(value: Any) -> str:
+    """An address as one spelling: an IP in its compressed lower-case form, anything else stripped.
+
+    A sandbox may write an IPv6 address in capitals and a model in lower case;
+    both are one address, and every lookup keyed on an address uses this form.
+    """
+    import ipaddress
+
+    text = str(value or "").strip()
+    try:
+        return str(ipaddress.ip_address(text.strip("[]")))
+    except ValueError:
+        return text
+
+
+def _sandbox_views(
+    ledger: list[LedgerEntry], sandbox_report: dict[str, Any] | None
+) -> list[tuple[dict[str, Any], bool]]:
+    """The sandbox network views to project, each with whether it is a whole view.
+
+    The job's report read whole when it holds an observation; otherwise every
+    ``sandbox_network`` answer in the ledger, a paged one marked as a page.
+    """
+    if isinstance(sandbox_report, dict) and sandbox_report:
+        from maljan.providers.sandbox_tools import sandbox_network
+
+        view = sandbox_network(sandbox_report)
+        if isinstance(view, dict) and not view.get("error"):
+            return [(view, True)]
+    views: list[tuple[dict[str, Any], bool]] = []
+    for entry, data in _payloads(ledger, "sandbox_network"):
+        args = entry.args if isinstance(entry.args, dict) else {}
+        paged = any(_as_int(args.get(k)) for k in ("offset", "limit")) or any(
+            str(k).endswith("_total") or k == "next_offset" for k in data
+        )
+        views.append((data, not paged))
+    return views
+
+
+def _as_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def network_from_sandbox_report(report: dict[str, Any] | None) -> NetworkIOCs | None:

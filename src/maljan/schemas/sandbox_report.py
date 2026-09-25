@@ -16,6 +16,7 @@ consumer can iterate a fresh ``SandboxReport()`` without a null check.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal, cast
 from urllib.parse import urlsplit
 
@@ -397,18 +398,41 @@ def _split_host_port(value: str) -> tuple[str, int | None]:
 SAMPLE_TREE_KEY = "sample_process_tree"
 
 
-def _is_the_sample(proc: dict[str, Any], sample: dict[str, Any]) -> bool:
-    """Whether a Triage process record is the submitted sample running.
+def _basename(path: str) -> str:
+    return re.split(r"[\\/]", path.strip().strip('"').strip("'"))[-1].lower()
 
-    Triage marks the process it started from the submission ``orig``; a report
-    without the mark names the sample in the process's image or command line,
-    by its digest or by the file name it was submitted under.
+
+def _named_files(proc: dict[str, Any]) -> set[str]:
+    """The file names a process record runs: its image, and each path its command line names.
+
+    Whole file names, never slices: a command line's first word and every
+    comma- or space-separated path in it (``rundll32.exe <dll>,#1`` runs the
+    DLL), each cut to its file name.
     """
-    if proc.get("orig") is True:
-        return True
-    text = f"{proc.get('image') or ''} {proc.get('cmd') or ''}".lower()
-    names = [str(sample.get(key) or "").strip().lower() for key in ("sha256", "target")]
-    return any(name and name in text for name in names)
+    names = {_basename(str(proc.get("image") or ""))}
+    for token in re.split(r"[\s,]+", str(proc.get("cmd") or "")):
+        cleaned = token.strip().strip('"').strip("'")
+        if cleaned:
+            names.add(_basename(cleaned))
+    return {name for name in names if name}
+
+
+def _is_the_sample(proc: dict[str, Any], sample: dict[str, Any]) -> bool:
+    """Whether a process record with no ``orig`` mark runs the submitted file.
+
+    A file name the process runs equals the name the sample was submitted
+    under, or is the sample's digest with an extension (a sandbox names the
+    staged copy by its hash). An equal name, never a contained one: a guest's
+    ``MicrosoftEdgeUpdate.exe`` is not a sample submitted as ``update.exe``.
+    """
+    target = _basename(str(sample.get("target") or ""))
+    digest = str(sample.get("sha256") or "").strip().lower()
+    for name in _named_files(proc):
+        if target and name == target:
+            return True
+        if digest and name.rsplit(".", 1)[0] == digest:
+            return True
+    return False
 
 
 def _sample_process_tree(
@@ -423,7 +447,12 @@ def _sample_process_tree(
     """
     processes = [p for p in task.get("processes") or [] if isinstance(p, dict)]
     parent = {p.get("procid"): p.get("procid_parent") for p in processes if p.get("procid")}
-    roots = {p.get("procid") for p in processes if p.get("procid") and _is_the_sample(p, sample)}
+    # Triage's own mark, when it gave one, is the answer and the only one; the
+    # file names are read only for a report that marks nothing.
+    marked = {p.get("procid") for p in processes if p.get("procid") and p.get("orig") is True}
+    roots = marked or {
+        p.get("procid") for p in processes if p.get("procid") and _is_the_sample(p, sample)
+    }
     tree: set[Any] = set()
     for procid in parent:
         seen: set[Any] = set()

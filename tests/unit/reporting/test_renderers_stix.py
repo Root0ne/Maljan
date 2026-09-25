@@ -120,7 +120,7 @@ class TestNetworkIndicators:
             sandbox_report={
                 "network": {
                     "dns": [{"request": "evil-c2.duckdns.org", "answers": []}],
-                    "tcp": [{"dst": "8.8.8.8", "dport": 443, "sample_process_tree": True}],
+                    "tcp": [{"dst": "185.220.101.9", "dport": 443, "sample_process_tree": True}],
                     "http": [
                         {
                             "host": "evil-c2.duckdns.org",
@@ -140,7 +140,7 @@ class TestNetworkIndicators:
     def test_ip_indicator_pattern(self, report: MalwareReport) -> None:
         bundle = ExtendedSTIXRenderer().render(report, base_bundle=None)
         indicators = [obj for obj in bundle.objects if isinstance(obj, Indicator)]
-        assert any("ipv4-addr:value = '8.8.8.8'" in ind.pattern for ind in indicators)
+        assert any("ipv4-addr:value = '185.220.101.9'" in ind.pattern for ind in indicators)
 
     def test_url_indicator_pattern(self, report: MalwareReport) -> None:
         bundle = ExtendedSTIXRenderer().render(report, base_bundle=None)

@@ -4,9 +4,11 @@ The entries are the shapes one paid run's ``evidence.json`` holds, trimmed, with
 neutral values: a Sigma pass over the sandbox's events whose one match names no
 technique, a sandbox network view listing a public resolver and one other
 address that no process record ties to the sample, FLOSS's decoded strings
-holding two C2 URLs, and a judge whose bundle carries those URLs and no domain.
-That run published both addresses as indicators and drafted rules over them,
-filed the Sigma rule's title as a Run key, and published neither URL's name.
+holding two C2 URLs, a judge whose bundle carries those URLs and no domain, and
+the two analyst claims of that run that name both addresses and call them
+noise. That run published both addresses as indicators and drafted rules over
+them, filed the Sigma rule's title as a Run key, and published neither URL's
+name. A claim mentioning an address keeps nothing, so both rows stay ``no:``.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ from maljan.schemas.isr_models import AgentISR, ClaimEvidence
 from maljan.schemas.stix_models import Bundle
 
 RESOLVER = "9.9.9.9"
-BACKGROUND = "185.199.108.153"
+BACKGROUND = "203.0.113.94"
 URLS = ("https://relay-alpha-7f3c.top/live/", "https://relay-beta-9d1e.com/live/")
 HOSTS = ("relay-alpha-7f3c.top", "relay-beta-9d1e.com")
 SIGMA_TITLE = "Utility Executed From An Unusual Drive"
@@ -150,9 +152,28 @@ def _isrs() -> dict[str, AgentISR]:
                     f"{URLS[1]}.",
                     evidence_ref="ev_0019",
                     confidence=0.8,
+                ),
+                ClaimEvidence(
+                    claim=f"The sandbox network view shows only {BACKGROUND}:80/tcp (Google) "
+                    f"and {RESOLVER}:53/udp (DNS). The C2 is therefore not positively observed.",
+                    evidence_ref="ev_0013",
+                    confidence=0.7,
+                ),
+            ],
+        ),
+        "static_qu1cksc0pe": AgentISR(
+            agent_id="static_qu1cksc0pe",
+            domain="static_qu1cksc0pe",
+            claims=[
+                ClaimEvidence(
+                    claim=f"the sandbox captured only a DNS request to {RESOLVER}:53 and a TCP "
+                    f"connection to {BACKGROUND}:80 (a Google address, typical of "
+                    "telemetry/OCSP noise)",
+                    evidence_ref="ev_0013",
+                    confidence=0.6,
                 )
             ],
-        )
+        ),
     }
 
 
@@ -201,7 +222,10 @@ class TestTheBackgroundAddresses:
 
         assert str(resolver.published).startswith("no: the sandbox report does not say")
         assert "public DNS resolver" in str(resolver.published)
-        assert str(resolver.published).endswith("and no model named it")
+        assert "no model kept it as an indicator" in str(resolver.published)
+        # The two claims that called it noise are named, and keep nothing.
+        assert "a claim by the network analyst" in str(resolver.published)
+        assert "a claim by the static_qu1cksc0pe analyst" in str(resolver.published)
         assert "public DNS resolver" in str(resolver.context)
         assert str(other.published).startswith("no:")
 
