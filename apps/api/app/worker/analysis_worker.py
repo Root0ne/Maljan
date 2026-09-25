@@ -3415,7 +3415,7 @@ async def _store_the_report(
         if claims:
             agent_confidence = sum(c.get("confidence", 0) for c in claims) / len(claims)
 
-        # D15+D16: derive lifecycle status from the analyst's text
+        # Derive lifecycle status from the analyst's text
         # report + claim shape so the UI can render "FAILED" /
         # "NO DATA" badges instead of synthesising a misleading
         # verdict from an empty payload.

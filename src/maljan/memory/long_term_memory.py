@@ -189,18 +189,21 @@ def build_stored_case(
 ) -> StoredCase:
     """Build a StoredCase from pipeline artifacts.
 
-    Convenience factory intended for use in app.py or pipeline nodes after
-    give_verdict() produces the final STIX bundle:
+    The judge node builds the case once its verdict is read, and holds it on
+    the container rather than storing it; the case is written by
+    ``ServiceContainer.remember_the_run`` once the job has completed, so a job
+    that fails after its judge leaves no case:
 
         from maljan.memory.long_term_memory import build_stored_case
 
-        case = build_stored_case(
+        container.pending_memory_case = build_stored_case(
             sample_id=sample_id,
             isr_reports=state["isr_reports"],
             stix_bundle_json=bundle.model_dump_json(),
-            malware_category=inferred_category,
+            malware_category=assessed_category,
         )
-        memory_store.store(case)
+        ...
+        container.remember_the_run()  # after the job is recorded as completed
 
     The summary_text is constructed by concatenating all claim text, evidence
     references, and technique IDs from every ISR report. This produces a
