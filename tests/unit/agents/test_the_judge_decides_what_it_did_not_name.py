@@ -27,7 +27,9 @@ from maljan.agents.judge_agent import (
 )
 from maljan.extractors.capability_matrix import (
     FINDING_ONLY_REASON,
+    NOT_ASKED_UNKNOWN_ID,
     build_capability_matrix,
+    judge_questions,
     techniques_for_the_judge,
 )
 from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
@@ -109,13 +111,29 @@ class _Llm:
         return MagicMock(content=answer)
 
 
-def _ask(*answers: Any, timed_out: bool = False) -> tuple[TechniqueReview | None, _Llm]:
+REPORTS = {"network": "The network analyst's report on the sample."}
+EVIDENCE = {
+    "ev_0012": "decoded routine: builds names from the current date",
+    "ev_0013": "resolver calls for each generated name",
+    "ev_0007": "OpenProcess on the credential store process",
+}
+
+
+def _ask(
+    *answers: Any, timed_out: bool = False, judge: JudgeAgent | None = None
+) -> tuple[TechniqueReview | None, _Llm]:
     llm = _Llm(*answers)
-    judge = JudgeAgent(llm=llm)  # type: ignore[arg-type]
+    if judge is None:
+        judge = JudgeAgent(llm=llm)  # type: ignore[arg-type]
+    else:
+        judge.llm = llm  # type: ignore[assignment]
     review = asyncio.run(
         judge.decide_techniques(
             _bundle(),
             _isrs(),
+            reports=REPORTS,
+            evidence_summary="EVIDENCE SUMMARY — the summary block",
+            evidence_texts=EVIDENCE,
             facts_block="=== PACK ===\nthe pack",
             run_state="the run state",
             verdict_timed_out=timed_out,
@@ -308,3 +326,159 @@ class TestTheJudgeNodeKeepsTheAnswer:
         kwargs = judge.decide_techniques.await_args.kwargs
         assert kwargs["verdict_timed_out"] is False
         assert kwargs["run_state"]
+        # What the verdict was drawn from goes with the question.
+        assert kwargs["reports"] == {"static": "static findings"}
+        assert "evidence_texts" in kwargs and "routed" in kwargs
+
+
+def _read(text: str) -> list[tuple[str, str, str]]:
+    return [
+        (d.technique_id, d.decision, d.reason)
+        for d in read_technique_answer(text, [LEFT_OUT, FINDING_ONLY])
+    ]
+
+
+class TestEachLineStandsAlone:
+    def test_reasonless_lines_one_after_another(self) -> None:
+        assert _read(f"{LEFT_OUT}: drop\n{FINDING_ONLY}: keep: shown") == [
+            (LEFT_OUT, "drop", ""),
+            (FINDING_ONLY, "keep", "shown"),
+        ]
+
+    def test_reasonless_lines_with_a_blank_line_between(self) -> None:
+        assert _read(f"{LEFT_OUT}: keep\n\n{FINDING_ONLY}: drop: absent") == [
+            (LEFT_OUT, "keep", ""),
+            (FINDING_ONLY, "drop", "absent"),
+        ]
+
+
+class TestTheAnswerShapes:
+    def test_the_json_array_asked_for(self) -> None:
+        answer = (
+            f'[{{"id": "{LEFT_OUT}", "decision": "drop", "reason": "no routine"}}, '
+            f'{{"id": "{FINDING_ONLY}", "decision": "keep", "reason": "the call is there"}}]'
+        )
+        assert _read(answer) == [
+            (LEFT_OUT, "drop", "no routine"),
+            (FINDING_ONLY, "keep", "the call is there"),
+        ]
+
+    def test_a_fenced_array_after_prose_that_cites_an_entry(self) -> None:
+        answer = (
+            "Looking at [ev_0012] again.\n```json\n"
+            f'[{{"id": "{LEFT_OUT}", "decision": "keep", "reason": "shown at [ev_0012]"}}]\n```'
+        )
+        assert _read(answer) == [(LEFT_OUT, "keep", "shown at [ev_0012]")]
+
+    def test_an_object_keyed_by_id_and_one_holding_decisions(self) -> None:
+        keyed = f'{{"{LEFT_OUT}": {{"decision": "drop", "reason": "weak"}}}}'
+        held = f'{{"decisions": [{{"id": "{LEFT_OUT}", "decision": "keep", "reason": "ok"}}]}}'
+        assert _read(keyed) == [(LEFT_OUT, "drop", "weak")]
+        assert _read(held) == [(LEFT_OUT, "keep", "ok")]
+
+    @pytest.mark.parametrize(
+        ("line", "reason"),
+        [
+            (f"| {LEFT_OUT} | drop | weak |", "weak"),
+            (f"{LEFT_OUT} (Domain Generation Algorithms): drop: no routine", "no routine"),
+            (f"**{LEFT_OUT} — Domain Generation Algorithms**: drop — no routine", "no routine"),
+            (f"- {LEFT_OUT} → drop", ""),
+            (f"{LEFT_OUT}: Decision: drop.", ""),
+        ],
+    )
+    def test_free_lines(self, line: str, reason: str) -> None:
+        assert _read(line) == [(LEFT_OUT, "drop", reason)]
+
+    def test_a_reasoning_block_is_not_the_answer(self) -> None:
+        answer = f"<think>{LEFT_OUT}: keep: maybe</think>\n{LEFT_OUT}: drop: nothing shows it"
+        assert _read(answer) == [(LEFT_OUT, "drop", "nothing shows it")]
+
+    def test_the_last_answer_for_an_id_wins(self) -> None:
+        answer = f"{LEFT_OUT}: keep: first thought\n{LEFT_OUT}: drop: on reflection"
+        assert _read(answer) == [(LEFT_OUT, "drop", "on reflection")]
+
+    def test_a_structured_answer_is_read_from_the_schema(self, monkeypatch) -> None:
+        from maljan.agents.judge_agent import TechniqueAnswer, TechniqueAnswerRow
+
+        parsed = TechniqueAnswer(
+            decisions=[TechniqueAnswerRow(id=LEFT_OUT, decision="drop", reason="schema")]
+        )
+
+        class _Structured:
+            async def ainvoke(self, messages: list[Any]) -> Any:
+                return {"raw": MagicMock(content="{}"), "parsed": parsed, "parsing_error": None}
+
+        judge = JudgeAgent(llm=MagicMock())
+        monkeypatch.setattr(judge, "_supports_structured_output", lambda: True)
+        judge.llm.with_structured_output = lambda *a, **k: _Structured()
+
+        review = asyncio.run(judge.decide_techniques(_bundle(), _isrs()))
+
+        assert review is not None
+        assert [(d.technique_id, d.decision, d.reason) for d in review.decisions] == [
+            (LEFT_OUT, "drop", "schema")
+        ]
+
+
+class TestTheQuestionShowsWhatItAsksAbout:
+    def test_the_reports_the_verdict_and_the_cited_entries_are_shown(self) -> None:
+        _review, llm = _ask(f"{LEFT_OUT}: keep: shown")
+
+        text = str(llm.calls[0][1].content)
+        assert REPORTS["network"] in text
+        assert "EVIDENCE SUMMARY — the summary block" in text
+        assert "YOUR VERDICT:" in text
+        assert f"TECHNIQUES YOUR BUNDLE CARRIES: {IN_BUNDLE}" in text
+        for entry_text in EVIDENCE.values():
+            assert entry_text in text
+
+    def test_the_system_text_says_what_is_shown(self) -> None:
+        for shown in ("reports", "verdict", "evidence entry"):
+            assert shown in TECHNIQUE_QUESTION_SYSTEM
+
+    def test_evidence_that_does_not_fit_is_shortened_said_and_recorded(self) -> None:
+        judge = JudgeAgent(llm=MagicMock())
+        judge._question_room = lambda fixed, cap: 60  # type: ignore[method-assign]
+
+        review, llm = _ask(f"{LEFT_OUT}: keep: shown", judge=judge)
+
+        text = str(llm.calls[0][1].content)
+        assert review is not None and review.shortened
+        assert review.shortened in text
+        assert EVIDENCE["ev_0012"] not in text
+
+    def test_the_room_is_the_window_less_the_cap_and_the_rest(self) -> None:
+        from types import SimpleNamespace
+
+        judge = JudgeAgent(llm=MagicMock())
+        budget = SimpleNamespace(
+            derives=True, chars_per_token=4, window=SimpleNamespace(tokens=1000)
+        )
+        judge._context_budget = lambda: budget  # type: ignore[method-assign]
+
+        assert judge._question_room(500, 200) == (1000 - 200) * 4 - 500
+
+    def test_no_learned_window_shows_everything_whole(self) -> None:
+        from maljan.agents.judge_agent import _fit_evidence
+
+        assert _fit_evidence(dict(EVIDENCE), None) == (dict(EVIDENCE), "")
+
+
+class TestWhatCannotBePublishedIsNotAsked:
+    def test_an_unknown_id_and_a_flagged_claim_are_recorded_not_asked(self) -> None:
+        isrs = _isrs()
+        isrs["network"].findings[0].technique_ids.append("T1999")
+        isrs["network"].claims[0].technique_id_valid = False
+
+        questions, not_asked = judge_questions(_bundle().model_dump(), isrs)
+
+        assert [q.technique_id for q in questions] == [FINDING_ONLY]
+        assert not_asked == {LEFT_OUT: NOT_ASKED_UNKNOWN_ID, "T1999": NOT_ASKED_UNKNOWN_ID}
+
+    def test_a_technique_the_platform_cannot_host_is_not_asked(self) -> None:
+        questions, not_asked = judge_questions(
+            _bundle().model_dump(), _isrs(), {"platform": "android", "file_type": "apk"}
+        )
+
+        assert FINDING_ONLY not in [q.technique_id for q in questions]
+        assert not_asked[FINDING_ONLY].startswith("not asked: ")

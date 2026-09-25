@@ -653,27 +653,37 @@ def technique_review(stix_output: dict[str, Any] | None) -> TechniqueReview | No
         return None
 
 
-def _bundle_technique_ids(stix_output: dict[str, Any] | None) -> set[str]:
+def bundle_technique_ids(stix_output: dict[str, Any] | None) -> set[str]:
     """Every technique id the judge's bundle carries, on an attack-pattern or an edge."""
     return {tid.upper() for tid in _judge_technique_ids(stix_output)} | {
         tid.upper() for tid, _c in _judge_relationship_rows(stix_output)
     }
 
 
-def techniques_for_the_judge(
-    stix_output: dict[str, Any] | None, isr_reports: dict[str, Any] | None
-) -> list[TechniqueQuestion]:
-    """The techniques to put to the judge after its verdict, in the order they were named.
+# Why a technique the judge's question would name is left out of it: the
+# report does not publish it whatever the judge says.
+NOT_ASKED_UNKNOWN_ID = "not asked: the ATT&CK catalogue has no entry for this id in any domain"
+
+
+def judge_questions(
+    stix_output: dict[str, Any] | None,
+    isr_reports: dict[str, Any] | None,
+    sample: dict[str, Any] | None = None,
+) -> tuple[list[TechniqueQuestion], dict[str, str]]:
+    """The techniques to put to the judge after its verdict, and the ones left out, with why.
 
     (a) Each technique an analyst claimed that the judge's bundle carries
     neither as an attack-pattern nor on an edge, and (b) each technique named
-    only on a finding — on no claim and not in the bundle. A claim whose id the
-    catalogue rejected is not asked about: the report does not publish it
-    whatever the judge says.
+    only on a finding — on no claim and not in the bundle; in the order they
+    were named. An id the catalogue rejects — on the claim's own flag or asked
+    here, as the matrix asks it — or one the routed sample cannot host is not
+    asked: the matrix keeps it out of the published list before any answer is
+    read. Those come back as ``{id: "not asked: <reason>"}``.
     """
-    in_bundle = _bundle_technique_ids(stix_output)
+    in_bundle = bundle_technique_ids(stix_output)
     questions: dict[str, TechniqueQuestion] = {}
     claimed: set[str] = set()
+    flagged: set[str] = set()
     for agent_name, isr in (isr_reports or {}).items():
         agent = str(getattr(isr, "agent_id", "") or agent_name)
         for claim in getattr(isr, "claims", None) or []:
@@ -681,7 +691,9 @@ def techniques_for_the_judge(
             if not tid or says_no_technique(tid):
                 continue
             claimed.add(tid)
-            if tid in in_bundle or not getattr(claim, "technique_id_valid", True):
+            if not getattr(claim, "technique_id_valid", True):
+                flagged.add(tid)
+            if tid in in_bundle:
                 continue
             evidence = str(getattr(claim, "evidence_ref", "") or "")
             questions.setdefault(tid, TechniqueQuestion(tid, "claimed")).mentions.append(
@@ -705,4 +717,22 @@ def techniques_for_the_judge(
                 questions.setdefault(tid, TechniqueQuestion(tid, "finding")).mentions.append(
                     (agent, text, ids)
                 )
-    return list(questions.values())
+    ids = list(questions)
+    unknown = flagged | _unknown_to_the_catalogue(ids)
+    out_of_scope = _out_of_scope(ids, sample)
+    not_asked: dict[str, str] = {}
+    for tid in ids:
+        if tid in unknown:
+            not_asked[tid] = NOT_ASKED_UNKNOWN_ID
+        elif out_of_scope.get(tid):
+            not_asked[tid] = f"not asked: {out_of_scope[tid]}"
+    return [q for tid, q in questions.items() if tid not in not_asked], not_asked
+
+
+def techniques_for_the_judge(
+    stix_output: dict[str, Any] | None,
+    isr_reports: dict[str, Any] | None,
+    sample: dict[str, Any] | None = None,
+) -> list[TechniqueQuestion]:
+    """The techniques :func:`judge_questions` puts to the judge."""
+    return judge_questions(stix_output, isr_reports, sample)[0]

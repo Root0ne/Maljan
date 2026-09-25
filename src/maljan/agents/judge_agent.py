@@ -31,11 +31,12 @@ import re
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, Field
 
 from maljan.agents.base_agent import (
     TOOL_LOOP_TURN_CALL,
@@ -441,6 +442,46 @@ _AGREEMENT_RE = re.compile(
 _EVIDENCE_SUMMARY_CHARS = 2000
 
 
+def verdict_reports_text(
+    reports: Mapping[str, str],
+    isr_reports: Mapping[str, AgentISR] | None,
+    evidence_summary: str = "",
+    degradation_note: str = "",
+) -> str:
+    """The analysts' reports as the verdict call is shown them.
+
+    One function for the verdict and the technique question asked after it,
+    so the question is asked over what the verdict was drawn from.
+    """
+    # Build compact reports to avoid context bloat.
+    # Full reports can exceed 15K tokens; we truncate each to ~500 chars
+    # and only keep ISR claims + the evidence summary.
+    report_parts: list[str] = []
+    for name, report in reports.items():
+        truncated = report[:500] + "..." if len(report) > 500 else report
+        report_parts.append(f"--- {name.upper()} ANALYST ---\n{truncated}")
+    reports_text = "\n\n".join(report_parts)
+
+    # Include ISR summaries (compact)
+    if isr_reports:
+        isr_block = "\n".join(
+            f"[{name}] domain={isr.domain} | "
+            f"claims={len(isr.claims)} | "
+            f"mean_conf={isr.mean_confidence:.2f}"
+            for name, isr in isr_reports.items()
+            if isr.claims
+        )
+        if isr_block:
+            reports_text += f"\n\n=== ISR SUMMARIES ===\n{isr_block}"
+
+    if evidence_summary:
+        reports_text = f"{reports_text}\n\n{evidence_summary[:_EVIDENCE_SUMMARY_CHARS]}"
+
+    if degradation_note:
+        reports_text = f"{reports_text}\n\n{degradation_note}"
+    return reports_text
+
+
 class JudgeVerdict(NamedTuple):
     """What ``give_verdict`` produced, and what was still wrong with it.
 
@@ -493,43 +534,67 @@ _NO_TOOLS_NEEDED = "No Threat Intelligence tools are needed for this run.\n"
 
 # The question asked once after the verdict about the techniques the verdict's
 # bundle does not carry: the ones an analyst claimed, and the ones named only on
-# a finding. The judge decides; with no answer nothing is withheld.
+# a finding. The judge decides; with no answer nothing is withheld. The system
+# text says exactly what the question shows.
 TECHNIQUE_QUESTION_SYSTEM = (
     "You are the Chief Malware Judge. Your verdict is given. The analysts named some "
     "techniques that your bundle does not carry, and some that appear only on an "
     "analyst's finding, which no check has asked about. You decide, for each one, "
-    "whether the report publishes it. This turn carries no tools: answer from the "
-    "reports, the pack and the evidence ids you are shown."
+    "whether the report publishes it. You are shown the run state and the pack, the "
+    "analysts' reports as your verdict call was shown them, your verdict and the "
+    "techniques your bundle carries, and for each technique the claims or findings "
+    "that name it with the text of every evidence entry they cite. This turn carries "
+    "no tools: decide from what is shown."
 )
-# The answer's form, which the reader of the answer parses line by line.
+# The answer's form: a JSON array the reader parses.
 TECHNIQUE_ANSWER_FORM = (
-    "For each technique above, answer one line in exactly this form:\n"
-    "<technique id>: keep: <reason>\n"
-    "<technique id>: drop: <reason>\n"
-    "Keep a technique the cited evidence shows the sample doing; drop one it does not, "
-    "and say why in the reason. A technique you leave unanswered is reported as it "
-    "would be without this question, marked as not confirmed by you."
+    "Answer with one JSON array and nothing else, one object per technique above:\n"
+    '[{"id": "<technique id>", "decision": "keep", "reason": "<why>"}]\n'
+    'The decision is "keep" or "drop". Keep a technique the evidence shown here shows '
+    "the sample doing; drop one it does not, and say why in the reason. A technique "
+    "you leave out is reported as it would be without this question, marked as not "
+    "confirmed by you."
 )
 # Why a technique question has no answer, for ``TechniqueReview.unanswered``.
 TECHNIQUE_QUESTION_NOT_ASKED = "not asked: the verdict call timed out"
-TECHNIQUE_ANSWER_UNREAD = "the answer named none of the techniques in the form asked"
-
-# One line of the answer: the id, keep or drop, and the reason after it.
-_TECHNIQUE_ANSWER_RE = re.compile(
-    r"^[\s*_`>#\-\d.)]*(T\d{4}(?:\.\d{3})?)\b[\s*_`]*[:\-\u2013\u2014=]+[\s*_`]*"
-    r"(keep|drop)\b[\s*_`]*[:\-\u2013\u2014,.;]*\s*(.*)$",
-    re.IGNORECASE | re.MULTILINE,
+TECHNIQUE_ANSWER_UNREAD = "the answer named none of the techniques in a form that could be read"
+# The notice put in the question when its evidence did not fit the window.
+EVIDENCE_SHORTENED_NOTICE = (
+    "NOTE: the evidence entries below did not fit this model's window whole. "
+    "{cut} of {total} were shortened to {width} characters each; a shortened entry "
+    "ends in …."
 )
 
+# An ATT&CK technique id where it stands in an answer.
+_TECHNIQUE_ID_RE = re.compile(r"(?<![A-Za-z0-9])(T\d{4}(?:\.\d{3})?)(?![0-9])", re.IGNORECASE)
+# The decision word after an id, on the same line.
+_DECISION_RE = re.compile(r"(?<![A-Za-z])(keep|kept|drop|dropped)(?![A-Za-z])", re.IGNORECASE)
+# How far after its id a decision word may stand and still be that id's: room
+# for the technique's name, a parenthesis, an arrow or a "Decision:" label.
+_DECISION_REACH = 100
+# What leads a line and what separates a decision from its reason: markdown
+# list and table marks, numbering, arrows, colons and dashes. Never a line break.
+_LINE_LEAD_RE = re.compile(r"^[ \t|*_`>#\-•]*(?:\d+[.)][ \t]*)?")
+_REASON_LEAD_RE = re.compile(r"^[ \t|*_`:\-–—→>=,.;)\]]*")
+# A model's reasoning block, which is not its answer.
+_THINK_RE = re.compile(r"<think>.*?(?:</think>|\Z)", re.IGNORECASE | re.DOTALL)
 
-def technique_question_text(questions: Sequence[Any]) -> str:
+
+def technique_question_text(
+    questions: Sequence[Any],
+    evidence: Mapping[str, str] | None = None,
+    *,
+    notice: str = "",
+) -> str:
     """The question's list of techniques and the answer's form, as the judge reads it.
 
     ``questions`` are ``capability_matrix.TechniqueQuestion`` rows; each is
     listed with every claim or finding that names it, in the analyst's words,
-    and the evidence ids it cites.
+    and the evidence ids it cites. ``evidence`` is the text shown for each id,
+    listed once under the techniques; ``notice`` says what was shortened.
     """
     lines = ["TECHNIQUES TO DECIDE"]
+    cited: list[str] = []
     for n, question in enumerate(questions, 1):
         where = (
             "claimed by an analyst and not in your bundle"
@@ -538,31 +603,213 @@ def technique_question_text(questions: Sequence[Any]) -> str:
         )
         lines.append(f"{n}. {question.technique_id} — {where}")
         for agent, text, ids in question.mentions:
-            cited = ", ".join(ids) if ids else "none cited"
-            lines.append(f"   - {agent}: {' '.join(str(text).split())} (evidence: {cited})")
+            shown = ", ".join(ids) if ids else "none cited"
+            lines.append(f"   - {agent}: {' '.join(str(text).split())} (evidence: {shown})")
+            cited.extend(i for i in ids if i not in cited)
+    if cited:
+        lines += ["", "EVIDENCE CITED"]
+        if notice:
+            lines.append(notice)
+        for entry_id in cited:
+            text = (evidence or {}).get(entry_id)
+            lines.append(
+                f"[{entry_id}]\n{text}" if text else f"[{entry_id}] (no text recorded in this run)"
+            )
     return "\n".join(lines) + "\n\n" + TECHNIQUE_ANSWER_FORM
 
 
-def read_technique_answer(text: str, asked: Sequence[str]) -> list[Any]:
-    """The decisions ``text`` states for the ``asked`` techniques, the first line per id.
+def _without_reasoning(text: str) -> str:
+    """``text`` with any ``<think>`` block taken out: the answer is what follows it."""
+    return _THINK_RE.sub("", str(text or ""))
 
-    Each reason is kept whole, as written. A line about a technique that was
-    not asked is not read.
+
+def _json_values(text: str) -> list[Any]:
+    """Every JSON array or object written in ``text``, outermost only, in order.
+
+    Read with the decoder at each opening bracket, so a bracketed id in the
+    prose before the answer does not hide it; an answer that reads as none is
+    given the repo's repair pass (``utils.json_cleaner.safe_parse_json``).
+    """
+    import json
+
+    from maljan.utils.json_cleaner import safe_parse_json
+
+    decoder = json.JSONDecoder()
+    values: list[Any] = []
+    index = 0
+    while index < len(text):
+        if text[index] not in "[{":
+            index += 1
+            continue
+        try:
+            value, after = decoder.raw_decode(text, index)
+        except ValueError:
+            index += 1
+            continue
+        values.append(value)
+        index = after
+    if not any(isinstance(v, list | dict) and v for v in values):
+        repaired = safe_parse_json(text)
+        if repaired is not None:
+            values.append(repaired)
+    return values
+
+
+def _json_rows(text: str) -> list[dict[str, Any]]:
+    """Each ``{id, decision, reason}`` object a JSON answer in ``text`` holds, in order.
+
+    An array of objects, an object holding one under ``decisions``, or an
+    object keyed by technique id; fenced or bare. The last JSON value that
+    reads as any of these is the answer.
+    """
+    found: list[dict[str, Any]] = []
+    for value in _json_values(text):
+        rows: list[dict[str, Any]] = []
+        if isinstance(value, dict) and isinstance(value.get("decisions"), list):
+            value = value["decisions"]
+        if isinstance(value, list):
+            rows = [row for row in value if isinstance(row, dict)]
+        elif isinstance(value, dict):
+            rows = [
+                {"id": key, **(item if isinstance(item, dict) else {"decision": item})}
+                for key, item in value.items()
+                if _TECHNIQUE_ID_RE.fullmatch(str(key).strip())
+            ]
+        if any(_row_decision(row) for row in rows):
+            found = rows
+    return found
+
+
+# A decision as the answer's record holds it.
+_Decision = Literal["keep", "drop"]
+
+
+def _row_decision(row: Mapping[str, Any]) -> tuple[str, _Decision, str] | None:
+    """``(id, keep|drop, reason)`` for one JSON row, or ``None`` when it states none."""
+    tid = ""
+    for key in ("id", "technique_id", "technique"):
+        match = _TECHNIQUE_ID_RE.search(str(row.get(key) or ""))
+        if match:
+            tid = match.group(1).upper()
+            break
+    word = _DECISION_RE.search(str(row.get("decision") or ""))
+    if not tid or not word:
+        return None
+    decision: _Decision = "keep" if word.group(1).lower() in ("keep", "kept") else "drop"
+    return tid, decision, str(row.get("reason") or "").strip()
+
+
+def _line_decision(line: str) -> tuple[str, _Decision, str] | None:
+    """``(id, keep|drop, reason)`` for one line of a free answer, or ``None``.
+
+    The line's first technique id, then the first decision word within reach
+    of it on the same line — past a technique name, a parenthesis, an arrow,
+    a table cell or a "Decision:" label — and the rest of the line as the
+    reason, without the separators before it or a table's closing bar.
+    """
+    body = _LINE_LEAD_RE.sub("", line)
+    tid = _TECHNIQUE_ID_RE.search(body)
+    if tid is None:
+        return None
+    rest = body[tid.end() :]
+    word = _DECISION_RE.search(rest[:_DECISION_REACH])
+    if word is None:
+        return None
+    reason = _REASON_LEAD_RE.sub("", rest[word.end() :]).strip()
+    reason = reason.rstrip(" \t|*_`").strip()
+    decision: _Decision = "keep" if word.group(1).lower() in ("keep", "kept") else "drop"
+    return tid.group(1).upper(), decision, reason
+
+
+# What the token ledger calls the question asked after the verdict.
+TECHNIQUE_QUESTION_CALL = "technique question"
+
+
+class TechniqueAnswerRow(BaseModel):
+    """One row of the judge's answer about a technique, as a schema asks for it."""
+
+    id: str
+    decision: str
+    reason: str = ""
+
+
+class TechniqueAnswer(BaseModel):
+    """The judge's answer about the techniques, for a provider with structured output."""
+
+    decisions: list[TechniqueAnswerRow] = Field(default_factory=list)
+
+
+def _structured_decisions(parsed: Any, asked: Sequence[str]) -> list[Any]:
+    """The decisions a structured answer states for the ``asked`` techniques, last per id."""
+    from maljan.schemas.stix_models import TechniqueDecision
+
+    rows = getattr(parsed, "decisions", None)
+    if not isinstance(rows, list):
+        return []
+    wanted = [str(t).upper() for t in asked]
+    found: dict[str, TechniqueDecision] = {}
+    for row in rows:
+        stated = _row_decision(row.model_dump() if isinstance(row, BaseModel) else dict(row))
+        if stated is None or stated[0] not in wanted:
+            continue
+        found.pop(stated[0], None)
+        found[stated[0]] = TechniqueDecision(
+            technique_id=stated[0], decision=stated[1], reason=stated[2]
+        )
+    return sorted(found.values(), key=lambda d: wanted.index(d.technique_id))
+
+
+def _fit_evidence(texts: dict[str, str], room: int | None) -> tuple[dict[str, str], str]:
+    """``texts`` whole when they fit ``room`` characters, else each cut to an equal share.
+
+    Returns the texts the question carries and the notice saying what was
+    shortened, ``""`` when nothing was. ``room`` of ``None`` is no window to
+    measure against: everything goes whole.
+    """
+    from maljan.utils.marked_cut import CUT_MARK, marked_cut
+
+    total = sum(len(t) for t in texts.values())
+    if room is None or total <= room or not texts:
+        return dict(texts), ""
+    width = max(0, int(room) // len(texts))
+    shown: dict[str, str] = {}
+    cut = 0
+    for entry_id, text in texts.items():
+        if len(text) <= width:
+            shown[entry_id] = text
+            continue
+        cut += 1
+        shown[entry_id] = (
+            marked_cut(text, width) if width > len(CUT_MARK) else f"{CUT_MARK} (no room left)"
+        )
+    notice = EVIDENCE_SHORTENED_NOTICE.format(cut=cut, total=len(texts), width=width)
+    return shown, notice
+
+
+def read_technique_answer(text: str, asked: Sequence[str]) -> list[Any]:
+    """The decisions ``text`` states for the ``asked`` techniques.
+
+    A reasoning block is taken out first. A JSON answer is read when there is
+    one; otherwise each line is read on its own. The last answer for an id
+    wins, since a model restates before it concludes. Each reason is kept
+    whole, as written, and a decision with no reason has an empty one. A
+    technique that was not asked is not read.
     """
     from maljan.schemas.stix_models import TechniqueDecision
 
+    body = _without_reasoning(text)
     wanted = {str(tid).upper() for tid in asked}
+    stated = [d for row in _json_rows(body) if (d := _row_decision(row)) is not None]
+    if not stated:
+        stated = [d for line in body.splitlines() if (d := _line_decision(line)) is not None]
     found: dict[str, TechniqueDecision] = {}
-    for match in _TECHNIQUE_ANSWER_RE.finditer(str(text or "")):
-        tid = match.group(1).upper()
-        if tid not in wanted or tid in found:
+    for tid, decision, reason in stated:
+        if tid not in wanted:
             continue
-        found[tid] = TechniqueDecision(
-            technique_id=tid,
-            decision="keep" if match.group(2).lower() == "keep" else "drop",
-            reason=match.group(3).strip(),
-        )
-    return list(found.values())
+        found.pop(tid, None)
+        found[tid] = TechniqueDecision(technique_id=tid, decision=decision, reason=reason)
+    order = [str(t).upper() for t in asked]
+    return sorted(found.values(), key=lambda d: order.index(d.technique_id))
 
 
 # The judge's system prompt. A module constant so that
@@ -1592,32 +1839,9 @@ class JudgeAgent(BudgetMeter):
         """
         self.logger.info("Formulating final malware verdict with MITRE ATT&CK mapping...")
 
-        # Build compact reports to avoid context bloat.
-        # Full reports can exceed 15K tokens; we truncate each to ~500 chars
-        # and only keep ISR claims + the evidence summary.
-        report_parts: list[str] = []
-        for name, report in reports.items():
-            truncated = report[:500] + "..." if len(report) > 500 else report
-            report_parts.append(f"--- {name.upper()} ANALYST ---\n{truncated}")
-        reports_text = "\n\n".join(report_parts)
-
-        # Include ISR summaries (compact)
-        if isr_reports:
-            isr_block = "\n".join(
-                f"[{name}] domain={isr.domain} | "
-                f"claims={len(isr.claims)} | "
-                f"mean_conf={isr.mean_confidence:.2f}"
-                for name, isr in isr_reports.items()
-                if isr.claims
-            )
-            if isr_block:
-                reports_text += f"\n\n=== ISR SUMMARIES ===\n{isr_block}"
-
-        if evidence_summary:
-            reports_text = f"{reports_text}\n\n{evidence_summary[:_EVIDENCE_SUMMARY_CHARS]}"
-
-        if degradation_note:
-            reports_text = f"{reports_text}\n\n{degradation_note}"
+        reports_text = verdict_reports_text(
+            reports, isr_reports, evidence_summary, degradation_note
+        )
 
         # Long-term memory — inject top-K similar past cases as
         # weighted priors. The block is bounded (~1.2 KB worst case for
@@ -1979,7 +2203,12 @@ class JudgeAgent(BudgetMeter):
         bundle: Bundle,
         isr_reports: dict[str, AgentISR] | None,
         *,
+        reports: Mapping[str, str] | None = None,
+        evidence_summary: str = "",
+        degradation_note: str = "",
+        evidence_texts: Mapping[str, str] | None = None,
         sample: Any = None,
+        routed: dict[str, Any] | None = None,
         facts_block: str = "",
         run_state: str = "",
         verdict_timed_out: bool = False,
@@ -1988,41 +2217,69 @@ class JudgeAgent(BudgetMeter):
 
         The techniques an analyst claimed that the bundle carries on no
         attack-pattern and no edge, and the ones named only on a finding, go to
-        the judge in one question — each with the claims or findings naming it
-        and their evidence ids — to keep or drop with a reason. Returns the
-        :class:`~maljan.schemas.stix_models.TechniqueReview`, or ``None`` when
-        there is nothing to ask. A question that times out or fails, or an
-        answer in no line of the form asked, is recorded as unanswered and
-        withholds nothing. Never raises.
+        the judge in one question to keep or drop with a reason. The question
+        shows what it asks the judge to decide from: the run state and the
+        pack, the analysts' reports as the verdict call was shown them
+        (:func:`verdict_reports_text`), the verdict and the techniques the
+        bundle carries, and each claim or finding naming a technique with the
+        text of every evidence entry it cites (``evidence_texts``). What does
+        not fit the judge's window is shortened, marked, said in the question
+        and recorded on the answer. ``routed`` is the routed platform and file
+        type: a technique the sample cannot host, or one the catalogue
+        rejects, is not asked about and is recorded as such.
+
+        Returns the :class:`~maljan.schemas.stix_models.TechniqueReview`, or
+        ``None`` when there is nothing to ask or record. A question that times
+        out or fails, or an answer in no form that can be read, is recorded as
+        unanswered and withholds nothing. Never raises.
 
         One tool-free call with the verdict's framing — the run state and the
-        pack leading its one human turn — and the verdict's sizing: the judge's
-        own timeout held to the model's measured pace for the judge's output
-        cap and this prompt.
+        pack leading its one human turn — and the verdict's sizing. A provider
+        with structured output is asked for the answer as a schema; any other
+        is asked for a JSON array and read tolerantly
+        (:func:`read_technique_answer`).
         """
-        from maljan.extractors.capability_matrix import techniques_for_the_judge
+        from maljan.extractors.capability_matrix import bundle_technique_ids, judge_questions
+        from maljan.pipeline.outcome import decide_from_bundle
         from maljan.schemas.stix_models import TechniqueReview
 
         try:
-            questions = techniques_for_the_judge(bundle.model_dump(), isr_reports)
+            dumped = bundle.model_dump()
+            questions, not_asked = judge_questions(dumped, isr_reports, routed)
         except Exception as exc:  # noqa: BLE001 — a question not built is none asked
             self.logger.warning("Judge technique question not built (%s).", type(exc).__name__)
             return None
         if not questions:
-            return None
+            return TechniqueReview(not_asked=not_asked) if not_asked else None
         asked = [q.technique_id for q in questions]
         if verdict_timed_out:
-            return TechniqueReview(asked=asked, unanswered=TECHNIQUE_QUESTION_NOT_ASKED)
+            return TechniqueReview(
+                asked=asked, unanswered=TECHNIQUE_QUESTION_NOT_ASKED, not_asked=not_asked
+            )
 
+        carried = sorted(bundle_technique_ids(dumped))
+        head = (
+            f"{_standing_blocks(run_state, facts_block)}"
+            f"{_identity_prefix(sample)}"
+            "Expert Reports:\n"
+            f"{verdict_reports_text(reports or {}, isr_reports, evidence_summary, degradation_note)}"
+            "\n\n"
+            f"YOUR VERDICT: {decide_from_bundle(bundle)}\n"
+            f"TECHNIQUES YOUR BUNDLE CARRIES: {', '.join(carried) if carried else 'none'}\n\n"
+        )
+        cited = list(dict.fromkeys(i for q in questions for _a, _t, ids in q.mentions for i in ids))
+        texts = {i: str((evidence_texts or {}).get(i) or "") for i in cited}
+        cap = judge_output_cap().tokens or None
+        bare = technique_question_text(questions, {i: "" for i in cited})
+        room = self._question_room(
+            len(TECHNIQUE_QUESTION_SYSTEM) + len(head) + len(bare), int(cap or 0)
+        )
+        texts, notice = _fit_evidence(texts, room)
+        if notice:
+            self.logger.warning("JudgeAgent technique question: %s", notice)
         messages: list[Any] = [
             SystemMessage(content=TECHNIQUE_QUESTION_SYSTEM),
-            HumanMessage(
-                content=(
-                    f"{_standing_blocks(run_state, facts_block)}"
-                    f"{_identity_prefix(sample)}"
-                    f"{technique_question_text(questions)}"
-                )
-            ),
+            HumanMessage(content=head + technique_question_text(questions, texts, notice=notice)),
         ]
         timeout = self._verdict_timeout(
             float(loop_limits("judge")[0]),
@@ -2038,43 +2295,85 @@ class JudgeAgent(BudgetMeter):
         from maljan.llm.fallback import restart_models
 
         restart_models(self.llm, loop_seconds=float(timeout), share=self._turn_share())
-        cap = judge_output_cap().tokens or None
+        structured = self._supports_structured_output()
 
-        async def _ask() -> Any:
+        async def _ask() -> tuple[Any, Any]:
+            if structured:
+                runnable = self.llm.with_structured_output(TechniqueAnswer, include_raw=True)
+                result = await retry_on_connection_error(
+                    lambda: runnable.ainvoke(messages),
+                    what="Judge technique question",
+                    log=self.logger,
+                )
+                if isinstance(result, dict) and "raw" in result:
+                    raw = result.get("raw")
+                    try:
+                        parsed = structured_answer(
+                            result,
+                            self.token_ledger,
+                            agent=str(self.name),
+                            model=self._model_label(),
+                            call=TECHNIQUE_QUESTION_CALL,
+                        )
+                    except Exception:  # noqa: BLE001 — the raw text is read instead
+                        parsed = None
+                    record_judge_response(getattr(self, "truncation_ledger", None), raw, cap=cap)
+                    return raw, parsed
+                return result, result
             answer = await retry_on_connection_error(
                 lambda: self.llm.ainvoke(messages),
                 what="Judge technique question",
                 log=self.logger,
             )
-            self._record_usage(answer, call="technique question")
+            self._record_usage(answer, call=TECHNIQUE_QUESTION_CALL)
             record_judge_response(getattr(self, "truncation_ledger", None), answer, cap=cap)
-            return answer
+            return answer, None
+
+        def _unanswered(reason: str) -> Any:
+            return TechniqueReview(
+                asked=asked, unanswered=reason, not_asked=not_asked, shortened=notice or None
+            )
 
         try:
-            answer = await run_on_agent_loop(_ask(), timeout, label="judge:techniques")
+            answer, parsed = await run_on_agent_loop(_ask(), timeout, label="judge:techniques")
         except TimeoutError:
             self.logger.error("JudgeAgent technique question timed out after %ds.", timeout)
-            return TechniqueReview(
-                asked=asked, unanswered=f"the question timed out after {timeout:.0f}s"
-            )
+            return _unanswered(f"the question timed out after {timeout:.0f}s")
         except Exception as exc:  # noqa: BLE001 — an unanswered question withholds nothing
             self.logger.error("JudgeAgent technique question failed (%s).", type(exc).__name__)
-            return TechniqueReview(
-                asked=asked, unanswered=f"the question failed ({type(exc).__name__})"
-            )
-        text = _answer_text(answer)
-        decisions = read_technique_answer(text, asked)
+            return _unanswered(f"the question failed ({type(exc).__name__})")
+        decisions = _structured_decisions(parsed, asked)
+        if not decisions:
+            decisions = read_technique_answer(_answer_text(answer), asked)
         self.logger.info(
             "JudgeAgent answered for %d of %d technique(s): %s",
             len(decisions),
             len(asked),
             ", ".join(f"{d.technique_id} {d.decision}" for d in decisions) or "none",
         )
+        if not decisions:
+            return _unanswered(TECHNIQUE_ANSWER_UNREAD)
         return TechniqueReview(
-            asked=asked,
-            decisions=decisions,
-            unanswered=None if decisions else TECHNIQUE_ANSWER_UNREAD,
+            asked=asked, decisions=decisions, not_asked=not_asked, shortened=notice or None
         )
+
+    def _question_room(self, fixed_chars: int, cap_tokens: int) -> int | None:
+        """How many characters of evidence text the technique question can carry, or ``None``.
+
+        The job's learned window, less the judge's output cap, in the budget's
+        own characters per token, less what the rest of the question weighs.
+        ``None`` when no window is learned: there is nothing to measure
+        against, and the evidence goes whole.
+        """
+        budget = self._context_budget()
+        if budget is None or not getattr(budget, "derives", False):
+            return None
+        try:
+            per_token = float(budget.chars_per_token)
+            room = int((int(budget.window.tokens) - int(cap_tokens)) * per_token)
+        except Exception:  # noqa: BLE001 — a budget that cannot say measures nothing
+            return None
+        return max(0, room - int(fixed_chars))
 
     def _bundle_from_response(
         self,

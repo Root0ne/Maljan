@@ -3725,10 +3725,23 @@ def make_judge_node(
                 _review = None
                 if inspect.iscoroutinefunction(getattr(type(judge), "decide_techniques", None)):
                     try:
+                        _entry_texts = _report_entry_texts(container, _ledger)
                         _review = await judge.decide_techniques(
                             verdict.bundle,
                             isr_reports,
+                            # What the verdict was drawn from, and the text of
+                            # each entry a claim or finding in question cites.
+                            reports=reports,
+                            evidence_summary=evidence_summary,
+                            degradation_note=degradation_note,
+                            evidence_texts=dict(getattr(_entry_texts, "texts", None) or {}),
                             sample=_sample_identity(state),
+                            # The routed minimum the matrix asks the platform
+                            # question with.
+                            routed={
+                                "platform": state.get("platform"),
+                                "file_type": state.get("file_type"),
+                            },
                             facts_block=pack_text(state, container),
                             run_state=render_run_state(state),
                             verdict_timed_out=VERDICT_TIMEOUT_CODE in _verdict_codes,

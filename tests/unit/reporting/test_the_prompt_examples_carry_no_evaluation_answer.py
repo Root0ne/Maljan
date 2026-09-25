@@ -29,6 +29,7 @@ import pytest
 from maljan.agents.base_agent import FINAL_ANSWER_NUDGE
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
+    EVIDENCE_SHORTENED_NOTICE,
     TECHNIQUE_ANSWER_FORM,
     TECHNIQUE_ANSWER_UNREAD,
     TECHNIQUE_QUESTION_NOT_ASKED,
@@ -59,7 +60,7 @@ from maljan.agents.tool_pinning import (
     UNREADABLE_FILLED_CAPTURE_REMEDIATION,
 )
 from maljan.analysis.pcap_summary import CaptureRead
-from maljan.extractors.capability_matrix import TechniqueQuestion
+from maljan.extractors.capability_matrix import NOT_ASKED_UNKNOWN_ID, TechniqueQuestion
 from maljan.pipeline import triage_pack
 from maljan.pipeline.nodes import (
     NO_SANDBOX_DATA_REASON,
@@ -323,7 +324,9 @@ PROMPTS: dict[str, str] = {
                 [
                     TechniqueQuestion("T1003", "claimed", [("a", "x", ["ev_0001"])]),
                     TechniqueQuestion("T1112", "finding", [("b", "y", [])]),
-                ]
+                ],
+                {"ev_0001": "entry text"},
+                notice=EVIDENCE_SHORTENED_NOTICE.format(cut=1, total=2, width=10),
             ),
         ]
     ),
@@ -335,6 +338,7 @@ PROMPTS: dict[str, str] = {
             judge_kept_note("r"),
             TECHNIQUE_QUESTION_NOT_ASKED,
             TECHNIQUE_ANSWER_UNREAD,
+            NOT_ASKED_UNKNOWN_ID,
         ]
     ),
     "analyst cut-at-cap question": analyst_cut_violation(

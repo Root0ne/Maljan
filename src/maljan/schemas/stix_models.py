@@ -620,6 +620,13 @@ class TechniqueReview(_SpecConformantModel):
     asked: list[str] = Field(default_factory=list)
     decisions: list[TechniqueDecision] = Field(default_factory=list)
     unanswered: str | None = None
+    # The techniques the question would have named and did not, each with
+    # "not asked: <reason>": an id the catalogue rejects or the sample cannot
+    # host, which the report does not publish whatever the answer.
+    not_asked: dict[str, str] = Field(default_factory=dict)
+    # The notice the question carried when its evidence did not fit the
+    # model's window whole, as the judge read it.
+    shortened: str | None = None
 
     def decision_for(self, technique_id: str) -> TechniqueDecision | None:
         """What the answer said of ``technique_id``, or ``None`` when it said nothing."""
