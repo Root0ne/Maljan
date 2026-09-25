@@ -8,6 +8,13 @@ change landed on `main`.
 
 ### Added
 
+- **The worker states the Ghidra samples path it uses.** One line at start,
+  `Ghidra samples path: <path> (<source>)`, with the source either
+  `GHIDRA_CONTAINER_SAMPLES_PATH` or the default.
+  [configuration.md](docs/configuration.md) and
+  [deployment.md](docs/deployment.md) say that the variable is the path INSIDE
+  the Ghidra container (`/data/samples` with the shipped Compose file) and name
+  the common mistake, the host directory.
 - **An all-tools team to import.** `docs/examples/profiles/all-tools.json` is a
   settings import document: the triage pack and triage; one static stage of
   three analysts on three tools (`static` on the sidecars, `all_tools_static_r2` on

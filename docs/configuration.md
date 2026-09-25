@@ -53,7 +53,19 @@ same contract in short form.
 | `AUTH_DISABLED_USER_ID` / `_EMAIL` / `_FULL_NAME` | no | seeded dev admin | Only read when the bypass is on. |
 | `SAMPLES_DIR` | no | `data/samples` | Host directory bind-mounted into the Ghidra container. |
 | `UPLOAD_TEMP_DIR` | no | `data/uploads/.tmp` | Scratch directory for uploads and worker tempfiles. |
-| `GHIDRA_CONTAINER_SAMPLES_PATH` | no | `/data/samples` | Must match the samples bind mount in `docker/docker-compose.yml`. |
+| `GHIDRA_CONTAINER_SAMPLES_PATH` | no | `/data/samples` | The samples directory as the Ghidra container sees it: the path INSIDE the container, the right-hand side of the samples bind mount (`../data/samples:/data/samples` in `docker/docker-compose.yml`). Not the host directory. |
+
+`GHIDRA_CONTAINER_SAMPLES_PATH` is the one path in this table that names a place
+inside another container. The worker copies each sample under `SAMPLES_DIR` on
+its own host and hands Ghidra the same file under this path, so it has to be
+where the Ghidra container sees that directory. The common mistake is setting
+it to the host directory (for example `/home/<user>/Maljan/data/samples`) when
+the worker runs outside Compose: Ghidra then answers every load with
+`File not found`, and the Ghidra agent stops with "Ghidra could not open the
+job's sample". With the shipped Compose file the value is `/data/samples`
+whether or not the worker itself runs in Compose. The worker states the value
+it uses, and whether it came from the environment or the default, in one line
+at start (`Ghidra samples path: ...`).
 
 One warning does not block startup: `COOKIE_SECURE` false outside debug, which
 means the refresh cookie crosses the wire unencrypted unless a trusted proxy
