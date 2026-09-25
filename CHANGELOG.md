@@ -2201,8 +2201,14 @@ change landed on `main`.
   of the team runs, and an agent that asked the stopped one reads a failed
   ask. The live feed keeps the variable's name in the sentence
   (`GHIDRA_CONTAINER_SAMPLES_PATH` is no longer read as a credential).
+  A load that got no answer from Ghidra (a connection that failed twice, a
+  5xx, a refused token) says so instead, naming Ghidra's address and
+  `core.static.ghidra.auth_token`, is retried once for a failed connection,
+  and is not remembered, so a Ghidra that comes back is asked again. The
+  failed entry of a pinned load records the path sent, and a stopped agent is
+  left out of the debate's rounds rather than failing each one.
 - **Every Ghidra error reply is a failed call on the ledger.** A bare
-  "No program loaded" answer and an HTTP error are handed on as JSON markers
+  "No program loaded" answer (the whole answer, case aside) and an HTTP error are handed on as JSON markers
   (`tool_error_marker`) with the server's words, the way the MCP client hands
   on an error reply, so the ledger files them `ok=false`; a
   `{"error": ...}` reply already was.

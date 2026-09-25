@@ -44,7 +44,8 @@ from maljan.core.exceptions import SampleNotOpened
 from maljan.pipeline.events import describe_exception
 from maljan.providers.static.ghidra import (
     GhidraStaticProvider,
-    load_error_words,
+    ghidra_not_answering,
+    load_failure,
     prepare_sample,
     sample_not_opened,
 )
@@ -117,6 +118,15 @@ class TestAGhidraErrorReplyIsAFailedCall:
         assert entry.ok is False
         assert "No program loaded." in (entry.error or "")
 
+    def test_an_answer_that_only_begins_with_the_sentence_is_kept(self) -> None:
+        from maljan.agents.ghidra_http_client import no_program_as_error
+
+        longer = "No program loaded. Loaded programs: none; open one with load_program."
+        assert no_program_as_error(longer, "t") == longer
+        assert json.loads(no_program_as_error("  no program loaded \n", "t"))["tool_error"] == (
+            "tool_returned_error"
+        )
+
     def test_an_http_error_is_json_the_ledger_reads(self) -> None:
         entry = _recorded(
             _client({"/list_exports": httpx.Response(401, text="Unauthorized")}), "list_exports"
@@ -135,13 +145,13 @@ class TestAGhidraErrorReplyIsAFailedCall:
 
 class TestWhatALoadAnswerSays:
     def test_a_program_is_no_error(self) -> None:
-        assert load_error_words(LOADED) is None
+        assert load_failure(LOADED) is None
 
     def test_an_error_is_its_words(self) -> None:
-        assert load_error_words(NOT_FOUND) == f"File not found: {HOST_PATH}"
+        assert load_failure(NOT_FOUND) == (f"File not found: {HOST_PATH}", True)
 
     def test_prose_is_not_read_as_a_failed_load(self) -> None:
-        assert load_error_words("There is no room left for a tool answer.") is None
+        assert load_failure("There is no room left for a tool answer.") is None
 
     def test_the_sentence_names_the_provider_the_words_and_the_check(self) -> None:
         said = str(sample_not_opened(f"File not found: {HOST_PATH}"))
@@ -172,10 +182,15 @@ class _Resp:
 
 
 class _HttpClient:
-    """Stands in for ``httpx.Client`` and records the Ghidra endpoints called."""
+    """Stands in for ``httpx.Client`` and records the Ghidra endpoints called.
 
-    def __init__(self, load_body: str) -> None:
+    ``failures`` are raised by the first loads, one each, before ``load_body``
+    is answered.
+    """
+
+    def __init__(self, load_body: str, failures: list[Exception] | None = None) -> None:
         self.load_body = load_body
+        self.failures = list(failures or [])
         self.paths: list[str] = []
 
     def __call__(self, **_kwargs: Any) -> _HttpClient:
@@ -189,11 +204,24 @@ class _HttpClient:
 
     def post(self, url: str, json: Any = None, params: Any = None) -> _Resp:  # noqa: A002
         self.paths.append(url.rsplit("/", 1)[-1])
+        if url.endswith("/load_program") and self.failures:
+            raise self.failures.pop(0)
         return _Resp(self.load_body if url.endswith("/load_program") else "{}")
 
     def get(self, url: str, params: Any = None) -> _Resp:
         self.paths.append(url.rsplit("/", 1)[-1])
         return _Resp('{"nodes": [], "edges": []}')
+
+
+def _refused() -> httpx.ConnectError:
+    return httpx.ConnectError("refused", request=httpx.Request("POST", "http://ghidra.invalid"))
+
+
+def _status(code: int) -> httpx.HTTPStatusError:
+    request = httpx.Request("POST", "http://ghidra.invalid/load_program")
+    return httpx.HTTPStatusError(
+        "bad", request=request, response=httpx.Response(code, request=request)
+    )
 
 
 def _settings(*, sink: bool = True) -> Any:
@@ -543,4 +571,129 @@ class TestTheFailureIsTheAgents:
         assert "/home/someone" not in report
         (message,) = [data for kind, data in published if kind == ev.AGENT_MESSAGE]
         assert message["status"] == "failed"
-        assert "network failed" in json.dumps(update, default=str)
+        from maljan.pipeline.nodes import SAMPLE_NOT_OPENED_REASON
+
+        (record,) = update["stage_results"].values()
+        assert record["agent_reasons"] == {"network": f"network {SAMPLE_NOT_OPENED_REASON}"}
+
+
+class TestAGhidraThatDidNotAnswer:
+    """No answer from Ghidra is its own failure: not the samples path, not remembered."""
+
+    def test_a_connection_is_asked_once_more_and_then_carries_on(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        http = _HttpClient(LOADED, failures=[_refused()])
+        monkeypatch.setattr("httpx.Client", http)
+        assert prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH) == ""
+        assert http.paths == ["load_program", "load_program", "switch_program"]
+
+    def test_two_failed_connections_name_the_address_and_not_the_samples_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("httpx.Client", _HttpClient(LOADED, failures=[_refused(), _refused()]))
+        provider = _provider()
+        with pytest.raises(SampleNotOpened) as stopped:
+            prepare_sample(_settings(), "ghidra", CONTAINER_PATH, provider=provider)
+        said = str(stopped.value)
+        assert said == (
+            "Ghidra at http://ghidra.invalid:80 did not answer the load of the job's sample "
+            "(ConnectError); check the Ghidra container is running at that address and "
+            "core.static.ghidra.auth_token matches its GHIDRA_MCP_AUTH_TOKEN"
+        )
+        assert "GHIDRA_CONTAINER_SAMPLES_PATH" not in said
+        assert provider.sample_failure(CONTAINER_PATH) is None
+
+    @pytest.mark.parametrize("code", [401, 403, 500, 503])
+    def test_an_http_error_is_not_retried_and_not_remembered(
+        self, code: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        http = _HttpClient(LOADED, failures=[_status(code)])
+        monkeypatch.setattr("httpx.Client", http)
+        provider = _provider()
+        with pytest.raises(SampleNotOpened) as stopped:
+            prepare_sample(_settings(), "ghidra", CONTAINER_PATH, provider=provider)
+        assert http.paths == ["load_program"]
+        assert f"HTTP {code}" in str(stopped.value)
+        assert provider.sample_failure(CONTAINER_PATH) is None
+
+    def test_a_ghidra_that_comes_back_is_asked_again(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        http = _HttpClient(LOADED, failures=[_status(503)])
+        monkeypatch.setattr("httpx.Client", http)
+        provider = _provider()
+        with pytest.raises(SampleNotOpened):
+            prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH, provider=provider)
+        assert (
+            prepare_sample(_settings(sink=False), "ghidra", CONTAINER_PATH, provider=provider) == ""
+        )
+
+    def test_the_published_form_keeps_the_address_host_and_the_setting(self) -> None:
+        published = describe_exception(ghidra_not_answering("http://localhost:8089", "HTTP 401"))
+        assert "Ghidra at http://localhost:8089" in published
+        assert "did not answer the load of the job's sample (HTTP 401)" in published
+        assert published.endswith(
+            "check the Ghidra container is running at that address and "
+            "core.static.ghidra.auth_token matches its GHIDRA_MCP_AUTH_TOKEN"
+        )
+
+    def test_a_transport_marker_on_the_pinned_load_is_not_remembered(self) -> None:
+        provider = _provider()
+        provider.pin_sample(CONTAINER_PATH)
+        marker = json.dumps(
+            {"tool_error": "request_failed", "tool": "load_program", "type": "ConnectError"}
+        )
+
+        async def load_program(file: str = "") -> str:
+            return marker
+
+        load = StructuredTool.from_function(
+            coroutine=load_program,
+            name="load_program",
+            description="load",
+            args_schema=_File,
+            infer_schema=False,
+        )
+        [pinned] = provider._pin_load_program_path([load])
+        with pytest.raises(SampleNotOpened) as stopped:
+            asyncio.run(pinned.coroutine(file="/invented.exe"))
+        assert "did not answer" in str(stopped.value)
+        assert provider.sample_failure() is None
+
+
+class TestTheLedgerRecordsWhatWasSent:
+    def test_the_failed_pinned_load_carries_the_held_path(self) -> None:
+        provider = _provider()
+        provider.pin_sample(CONTAINER_PATH)
+        calls: list[str] = []
+        [load, _count] = _ghidra_tools(provider, calls)
+        recorder = EvidenceRecorder("reverser", counter=EvidenceCounter())
+        [recorded] = record_tools([load], recorder)
+
+        with pytest.raises(SampleNotOpened):
+            asyncio.run(recorded.coroutine(file="/invented.exe"))
+
+        assert recorder.entries[-1].args == {"file": CONTAINER_PATH}
+
+
+class TestTheDebateLeavesAStoppedAgentOut:
+    def test_a_stopped_analyst_is_not_a_participant(self) -> None:
+        from maljan.pipeline.nodes import SAMPLE_NOT_OPENED_REASON, _debate_participants
+
+        class _Roster:
+            def analyst_keys(self) -> list[str]:
+                return ["static", "all_tools_reverser_ghidra", "network"]
+
+        state: Any = {
+            "stage_results": {
+                "static": {
+                    "ran": True,
+                    "agent_reasons": {
+                        "all_tools_reverser_ghidra": (
+                            f"all_tools_reverser_ghidra {SAMPLE_NOT_OPENED_REASON}"
+                        ),
+                        "static": "static failed",
+                    },
+                }
+            }
+        }
+        assert _debate_participants(_Roster(), None, state) == ["static", "network"]  # type: ignore[arg-type]

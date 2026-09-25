@@ -1743,6 +1743,24 @@ asked the stopped one reads a failed ask and carries on. Any Ghidra reply of
 the shape `{"error": ...}`, a bare "No program loaded" answer and an HTTP
 error are failed calls on the ledger in the server's words.
 
+A load that got no answer from Ghidra at all is a different failure and says
+so: "Ghidra at <scheme://host:port> did not answer the load of the job's
+sample (<the error or HTTP status>); check the Ghidra container is running at
+that address and core.static.ghidra.auth_token matches its
+GHIDRA_MCP_AUTH_TOKEN". A connection that failed is asked once more first; an
+HTTP error (a 5xx, a refused token) is not. Such a failure stops the agent the
+same way but is not remembered, so a Ghidra that comes back is asked again by
+the next loop. The failed ledger entry of a pinned load records the path the
+platform sent, not the one the model wrote. An agent stopped this way is
+recorded once, by its stage, with the reason "stopped: its static provider
+could not open the job's sample", and is left out of the debate's rounds.
+
+The load before the loop imports the sample into Ghidra once more than the
+model's own `load_program` does: about a second and a half and one more copy
+of the program in the container's memory for a small binary. Nothing closes
+the superseded copy yet; a large sample that shows memory growth is where
+that would be added.
+
 **A model that fails as a provider.** An agent's entry under `llm.agents` may
 name an ordered list of models (`fallbacks`), held as one model object
 (`maljan.llm.fallback.FallbackChatModel`). The next model is asked only when

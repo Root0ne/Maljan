@@ -53,7 +53,10 @@ class SampleNotOpened(AnalystError):
     failure may carry (``pipeline.events.describe_exception``, which scrubs
     any path in it). ``stopped_agent`` is the agent whose loop it ended, set
     by the first loop it passes through: an agent that asked this one for help
-    reads the failure as a failed ask and carries on.
+    reads the failure as a failed ask and carries on. ``sent_args`` are the
+    arguments the failed call was actually sent with, when the platform held
+    them to a path the model did not give, so the ledger records the call
+    that was made.
     """
 
     def __init__(self, sentence: str, *, provider: str = "") -> None:
@@ -61,6 +64,7 @@ class SampleNotOpened(AnalystError):
         self.provider = provider
         self.remediation = sentence
         self.stopped_agent: str | None = None
+        self.sent_args: dict[str, object] | None = None
 
 
 class LLMError(MaljanError):

@@ -860,12 +860,13 @@ def _record_tool(
         wall_clock: float,
         exc: Exception,
         repeated: str | None,
+        sent: dict[str, Any] | None = None,
     ) -> str:
         message = f"{type(exc).__name__}: {exc}"
         raw = _was_repaired(kwargs)
         entry = recorder.record(
             tool=name,
-            args=kwargs,
+            args=sent if sent is not None else kwargs,
             server=server,
             output=message,
             ok=False,
@@ -891,8 +892,10 @@ def _record_tool(
         call is. Then the exception goes on and ends this agent's loop — unless
         it already ended another agent's: an ask of an agent whose sample did
         not open is a failed ask for the agent that asked, which carries on.
+        The entry records the arguments the call was actually sent with when
+        the platform held them to its own path, not the ones the model wrote.
         """
-        stamped = _stamp_error(kwargs, started, wall_clock, exc, repeated)
+        stamped = _stamp_error(kwargs, started, wall_clock, exc, repeated, sent=exc.sent_args)
         if exc.stopped_agent in (None, recorder.agent):
             exc.stopped_agent = recorder.agent
             raise exc

@@ -101,7 +101,11 @@ from maljan.pipeline.validation import (
     validate_verdict_bundle,
 )
 from maljan.providers.base import STATIC_EVIDENCE_INSTRUCTIONS, absent_provider_fragment
-from maljan.providers.static.ghidra import GHIDRA_GUIDANCE, sample_not_opened
+from maljan.providers.static.ghidra import (
+    GHIDRA_GUIDANCE,
+    ghidra_not_answering,
+    sample_not_opened,
+)
 from maljan.providers.static.null import NullStaticProvider
 from maljan.providers.static.r2 import r2_error_reply
 from maljan.reporting.composer import (
@@ -446,6 +450,9 @@ PROMPTS: dict[str, str] = {
     ],
     "a Ghidra that could not open the job's sample, as an ask's caller reads it": str(
         sample_not_opened("File not found: /data/samples/.work/a.bin")
+    ),
+    "a Ghidra that gave no answer to the load, as an ask's caller reads it": str(
+        ghidra_not_answering("http://localhost:8089", "HTTP 401")
     ),
     "a Ghidra answer with no program current": no_program_as_error(
         "No program loaded.", "get_function_count"

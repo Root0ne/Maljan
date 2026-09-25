@@ -24,6 +24,7 @@ from pydantic import create_model
 from maljan.agents.mcp_client import tool_error_marker
 from maljan.agents.output_shortening import narrowing_arguments
 from maljan.core.logger import logger
+from maljan.tools.errors import SERVER_WORDS_LIMIT
 
 # What a character cut leaves behind, and the room kept back for it.
 #
@@ -42,12 +43,9 @@ def truncation_target(limit: int) -> int:
     return max(0, int(limit) - len(TRUNCATION_MARKER))
 
 
-# How much of an error answer's own text a failure marker quotes.
-SERVER_WORDS_LIMIT = 300
-
 # What Ghidra says, in some builds as bare text, when a call needs a program
-# and none is current.
-NO_PROGRAM_LOADED = "No program loaded"
+# and none is current. Matched as the whole answer, case aside.
+NO_PROGRAM_LOADED = "no program loaded"
 
 
 def no_program_as_error(text: str, tool: str) -> str:
@@ -58,11 +56,13 @@ def no_program_as_error(text: str, tool: str) -> str:
     to the ledger (``tools.errors.error_parts``); a build that answers with the
     bare sentence reached the ledger as a successful call whose output was
     that sentence. It is handed on as the MCP client hands on a tool's error
-    reply, with the server's words as the detail. Any other answer is
-    returned exactly as it came.
+    reply, with the server's words as the detail. Only an answer that is that
+    sentence and nothing else, trimmed and with or without its full stop; any
+    other answer, one that merely begins with it included, is returned exactly
+    as it came.
     """
     stripped = text.strip()
-    if stripped.startswith(NO_PROGRAM_LOADED):
+    if stripped.rstrip(".").strip().lower() == NO_PROGRAM_LOADED:
         return tool_error_marker("tool_returned_error", tool, detail=stripped)
     return text
 
