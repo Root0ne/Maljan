@@ -964,10 +964,13 @@ change landed on `main`.
   at its whole cap. `MIN_ANSWER_TOKENS` and its 8,192-token overshoot are gone.
   Calls in flight reserve their worst case until their cost is on the ledger,
   and a loop's turn keeps room for its closing answer. The verdict and report
-  calls are planned at the start of the job with their window allowance; the
-  reserve is the next planned call's worst case plus the expected charge of the
-  others at the job's cache-hit share (`run_summary.spend.reserve`), and a
-  planned call spends only above the share of the ones after it.
+  calls are planned at the start of the job with their window allowance and
+  output cap; the reserve keeps the verdict at what its admission demands, the
+  first report call uncached and the report calls after it at the job's
+  cache-hit share, measured only over calls that are not the first of their
+  conversation (the cached rate until one is), (`run_summary.spend.reserve`),
+  and a planned call spends only above the share of the ones after it. A call
+  is priced over its own request deadline.
   `run_summary.spend.prices_from` lists every rate a model's calls were priced
   at.
 - **Under a spend ceiling the composer and the narrative round use the manual
@@ -2239,8 +2242,8 @@ change landed on `main`.
   whole, the revision's ledger entries and budget rows are still kept, and the
   debate line names the analyst by its label with its real claim count: a
   25-character agent key was published as `***` inside the sentence. An agent
-  with no label and a key of 24 characters or more is named as the analyst of
-  its stage.
+  with no label and a key of 24 characters or more is named by its stage and
+  its place in it (reversing analyst 1 of 2), so no two agents are named alike.
 - **Numbered claims are read.** The claim parser reads `CLAIM 3:`,
   `CLAIM 4 (REVISED):` and `CLAIM 5 -` headings and claims written one after
   another with no `---` line between them; a revision written that way was

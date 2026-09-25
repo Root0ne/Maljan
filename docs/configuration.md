@@ -1133,8 +1133,9 @@ the job spent at least. Nothing is guessed.
 revision, mediation, verdict, report section and function summary — its output
 cap is held to what the spend it may use pays for at its model's output price,
 after its prompt priced as uncached input, both at the highest rate in force
-between now and the call's deadline (so a call sent across a window's edge
-never settles above its reservation). The call is refused only when that is
+between now and the call's own deadline — the deadline its caller gives it,
+else the whole-call deadline its request is sent with (so a call sent across a
+window's edge never settles above its reservation). The call is refused only when that is
 below the smallest answer it can give, measured per group: for a tool-loop turn
 the largest turn (reasoning and answer together) this job has measured of that
 model, for any other call the largest single-shot or verdict/report answer
@@ -1162,12 +1163,16 @@ allows it: its model's window less its report-stage output budget, from what is
 already known of the window. The reserve is derived from that plan and this
 job's own calls, with no fixed fraction:
 
-- the next planned call's worst case: its prompt as uncached input plus its
-  planned answer;
-- plus, for every other planned call, its expected charge: its prompt at this
-  job's measured cache-hit share for the model (cached input tokens over input
-  tokens, settled calls and running loops together; uncached until one is
-  measured) plus its planned answer.
+- the verdict: its prompt as uncached input plus the answer its admission
+  will demand (its configured cap until a single-shot answer is measured, then
+  the largest such answer), so what is kept for it is what it needs to be made;
+- the first report call: its prompt as uncached input plus the planned answer;
+- every report call after the first, which shares the first one's prefix: its
+  prompt at this job's cache-hit share for the model — cached input tokens over
+  input tokens, measured only over calls that were not the first of their
+  conversation (a tool loop's turns after its first), since a conversation's
+  first call has nothing cached to read — and at the model's cached rate while
+  no such share is measured, plus the planned answer.
 
 A planned call's prompt is the largest prompt of its own kind once one was
 sent; before that the verdict's is the largest single-shot prompt sent (a
