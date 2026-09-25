@@ -937,13 +937,25 @@ _DISPUTES_RE = re.compile(
 )
 
 
+# A claim's heading at the start of a line, as models number and mark it:
+# ``CLAIM:``, ``CLAIM 3:``, ``CLAIM 3 —``, ``**CLAIM 4 (REVISED):**``. Each one
+# opens a block of its own, so claims written one after another with no
+# ``---`` between them are read as the claims they are, not as the first one.
+_CLAIM_HEAD_RE = re.compile(
+    r"^[ \t>*_#]*CLAIM(?:[ \t]*#?\d+)?(?:[ \t]*\([^)\n]*\))?[ \t]*(?:\*\*)?[ \t]*"
+    r"(?::|—|–|-(?=\s))[ \t]*(?:\*\*)?[ \t]*",
+    flags=re.MULTILINE,
+)
+
+
 def _parse_claim_blocks(text: str) -> list[ClaimEvidence]:
     """Parse structured CLAIM/EVIDENCE/CONFIDENCE/TECHNIQUE blocks from LLM output.
 
-    Tolerates CRLF line endings and varying amounts of whitespace.
+    Tolerates CRLF line endings and varying amounts of whitespace, a numbered
+    or marked claim heading, and claims with no separator line between them.
     """
     claims: list[ClaimEvidence] = []
-    blocks = _BLOCK_SPLIT_RE.split(text)
+    blocks = _BLOCK_SPLIT_RE.split(_CLAIM_HEAD_RE.sub("\n---\nCLAIM: ", text))
     for block in blocks:
         block = block.strip()
         if not block or "CLAIM:" not in block:
