@@ -2208,7 +2208,9 @@ change landed on `main`.
   judge wrote the case from inside its node, so a failed job still taught the
   next run its verdict, and a judge that ran twice wrote it twice with two
   different categories. The judge now holds the case and the worker writes it
-  after the completed row is committed.
+  after the completed row is committed and the `completed` event is published.
+  The function hashes the judge files under its family in the attribution
+  corpus are held and written the same way, so a failed job files none.
 - **radare2's logged errors are failed calls.** r2mcp hands back what radare2
   logged inside a `<log>…</log>` envelope, and `<log> [ERROR] Cannot find
   function in 0x00003ce4 </log>` was recorded as a successful

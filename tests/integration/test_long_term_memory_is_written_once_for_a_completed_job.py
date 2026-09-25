@@ -1,4 +1,7 @@
-"""The judge's long-term-memory case is written once, and only for a job that completes.
+"""What the judge decides to remember is written once, and only for a job that completes.
+
+That is the long-term-memory case and the function hashes filed under the
+judge's family in the attribution corpus.
 
 The judge used to write the case from inside its node: a job that then failed
 still taught the next run its verdict, and a judge that ran twice wrote it
@@ -31,12 +34,37 @@ from tests.integration.test_worker_job_lifecycle import (  # noqa: F401 — fixt
 CASE = SimpleNamespace(sample_id="a" * 64, malware_category="loader", technique_ids=["T1105"])
 
 
+FUNCTIONS = [("h1", "sub_401000"), ("h2", "sub_402000")]
+
+
 class _Store:
+    """The memory store and the function-hash store, recording what each is given."""
+
     def __init__(self) -> None:
         self.stored: list[Any] = []
+        self.filed: list[tuple[str, str, list[tuple[str, str]]]] = []
+        # What the console had been told when the write happened.
+        self.published_before: list[str] = []
+        self.redis: Any = None
+
+    def _published(self) -> list[str]:
+        if self.redis is None:
+            return []
+        return [str(call.args[1]) for call in self.redis.publish.call_args_list]
 
     def store(self, case: Any) -> None:
+        self.published_before = self._published()
         self.stored.append(case)
+
+    def upsert_sample(self, sample_id: str, family: str, functions: Any) -> int:
+        self.filed.append((sample_id, family, list(functions)))
+        return len(functions)
+
+
+def _hold(container: Any, store: _Store) -> None:
+    """What the judge holds for a run whose family was grounded."""
+    container.pending_memory_case = CASE
+    container.pending_function_hashes = (store, "a" * 64, "loader", FUNCTIONS)
 
 
 @pytest.fixture
@@ -72,7 +100,7 @@ async def _run(ctx: dict[str, Any], job: Any, arun: Any) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_a_job_that_fails_after_its_judge_leaves_no_case(
+async def test_a_job_that_fails_after_its_judge_leaves_no_case_and_no_corpus_write(
     mock_ctx: dict[str, Any],  # noqa: F811
     mock_db_session: AsyncMock,  # noqa: F811
     store: _Store,
@@ -81,7 +109,7 @@ async def test_a_job_that_fails_after_its_judge_leaves_no_case(
     recorded = _answer_reads(mock_db_session, _reads(job, _make_sample()))
 
     async def _judge_then_fail(self: Any, **_: Any) -> dict[str, Any]:
-        self.container.pending_memory_case = CASE
+        _hold(self.container, store)
         self.failed_step = "node report"
         raise RuntimeError("after the judge")
 
@@ -90,21 +118,23 @@ async def test_a_job_that_fails_after_its_judge_leaves_no_case(
     assert result["status"] == "failed"
     assert [u["status"] for u in updates_in(recorded, "analysis_jobs")] == ["running", "failed"]
     assert store.stored == []
+    assert store.filed == []
 
 
 @pytest.mark.asyncio
-async def test_a_completed_job_writes_its_case_once(
+async def test_a_completed_job_writes_its_case_and_its_corpus_once(
     mock_ctx: dict[str, Any],  # noqa: F811
     mock_db_session: AsyncMock,  # noqa: F811
     store: _Store,
 ) -> None:
     job = _make_job()
     recorded = _answer_reads(mock_db_session, _reads(job, _make_sample()))
+    store.redis = mock_ctx["redis"]
     original = MaljanApp.arun
 
     async def _completes(self: Any, **kwargs: Any) -> dict[str, Any]:
         result = await original(self, **kwargs)
-        self.container.pending_memory_case = CASE
+        _hold(self.container, store)
         return result
 
     result = await _run(mock_ctx, job, _completes)
@@ -115,6 +145,9 @@ async def test_a_completed_job_writes_its_case_once(
         "completed",
     ]
     assert store.stored == [CASE]
+    assert store.filed == [("a" * 64, "loader", FUNCTIONS)]
+    # Announced first: a slow store never holds the completion back.
+    assert any('"completed"' in message for message in store.published_before)
 
 
 def test_the_case_is_written_once_and_a_failing_store_costs_nothing(

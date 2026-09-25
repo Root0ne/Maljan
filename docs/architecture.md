@@ -1908,13 +1908,15 @@ its embeddings are cached on disk; on the compose stack that cache is a named
 volume, because rebuilding it costs the judge node about a gigabyte of resident
 memory and a minute and a half on the first analysis.
 
-The case a run adds to long-term memory is built by the judge and written once,
-after the job is recorded as completed: the judge holds it on the container
-(`pending_memory_case`), and the worker, once the completed row is committed,
-calls `MaljanApp.remember_the_run`, as the command line does once its run
-returns. A job that fails after its judge — a later node, or the worker storing
-its report — leaves no case, so a verdict nobody kept does not reach the next
-run's few-shot prior block.
+The case a run adds to long-term memory, and the function hashes it files
+under the judge's family in the attribution corpus, are decided by the judge
+and written once, after the job is recorded as completed: the judge holds both
+on the container (`pending_memory_case`, `pending_function_hashes`), and the
+worker, once the completed row is committed and the `completed` event is
+published, calls `MaljanApp.remember_the_run`, as the command line does once
+its run returns. A job that fails after its judge — a later node, or the worker
+storing its report — leaves neither, so a verdict nobody kept does not reach
+the next run's few-shot prior block or its family matches.
 
 A cached vector records what produced it, and is reused only by the same
 thing. `maljan.memory.embeddings` has two backends — the sentence model and a

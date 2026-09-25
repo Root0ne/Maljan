@@ -410,6 +410,9 @@ class ServiceContainer:
         # the job completes (``remember_the_run``). A job that fails after its
         # judge leaves no entry behind.
         self.pending_memory_case: Any = None
+        # The function-hash corpus write the judge decided on, as
+        # ``(store, sample_id, family, functions)``, held for the same reason.
+        self.pending_function_hashes: Any = None
         self._sandbox_provider_cache: SandboxProvider | None = None
         self._static_provider_cache: dict[str, StaticProvider] = {}
         self._server_registry_cache: ServerRegistry | None = None
@@ -726,14 +729,20 @@ class ServiceContainer:
             return self._memory_store_cache
 
     def remember_the_run(self) -> bool:
-        """Store the case the judge built, now that the job has completed. Never raises.
+        """Write what the judge decided to remember, now that the job has completed.
 
-        The judge builds the case and this writes it, once: the caller calls
-        this only after the job is recorded as completed, so a job that fails
-        later — in a later node, or while the worker stores its report — leaves
-        no case teaching the next run a verdict nobody kept. Returns whether a
-        case was stored.
+        Never raises. The judge builds the long-term-memory case and picks the
+        family its function hashes are filed under; this writes both, once. The
+        caller calls it only after the job is recorded as completed, so a job
+        that fails later — in a later node, or while the worker stores its
+        report — leaves neither a case teaching the next run a verdict nobody
+        kept nor functions filed under that verdict's family. Returns whether
+        anything was written.
         """
+        wrote = self._remember_the_case()
+        return self._remember_the_function_hashes() or wrote
+
+    def _remember_the_case(self) -> bool:
         case, self.pending_memory_case = self.pending_memory_case, None
         if case is None:
             return False
@@ -749,6 +758,26 @@ class ServiceContainer:
             len(case.technique_ids),
         )
         return True
+
+    def _remember_the_function_hashes(self) -> bool:
+        held, self.pending_function_hashes = self.pending_function_hashes, None
+        if held is None:
+            return False
+        store, sample_id, family, functions = held
+        try:
+            written = int(store.upsert_sample(sample_id, family, functions) or 0)
+        except Exception as exc:  # noqa: BLE001 — the corpus never costs a completed job
+            logger.warning(
+                "Function-hash corpus write failed (%s). The completed job is unaffected.", exc
+            )
+            return False
+        logger.info(
+            "Function-hash corpus: filed %d function(s) of '%s' under %s.",
+            written,
+            str(sample_id)[:16],
+            family,
+        )
+        return written > 0
 
     def get_sandbox_provider(self) -> SandboxProvider:
         """The configured sandbox adapter, or the mock one in mock mode.

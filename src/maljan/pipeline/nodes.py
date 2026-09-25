@@ -4177,9 +4177,18 @@ def make_judge_node(
                         )
                         # Write side: only persist under a grounded family so an
                         # UNKNOWN verdict cannot pollute the attribution corpus.
+                        # Held, not written: the corpus learns this sample once
+                        # the job has completed (``remember_the_run``), so a job
+                        # that fails after its judge files nothing under a
+                        # family nobody kept.
                         _family = _assessed_family(bundle)
                         if _family:
-                            _fh_store.upsert_sample(_sample_id, _family, _funcs)
+                            container.pending_function_hashes = (
+                                _fh_store,
+                                _sample_id,
+                                _family,
+                                list(_funcs),
+                            )
             except Exception as _e:
                 logger.warning("Function-hash attribution skipped (%s). Verdict unaffected.", _e)
 
