@@ -115,4 +115,8 @@ def to_cape_shaped_dict(report: SandboxReport) -> dict[str, Any]:
         rendered["channels"] = {name: list(rows) for name, rows in report.channels.items()}
     if report.network.pcap_local_path:
         rendered["network"]["pcap_local_path"] = report.network.pcap_local_path
+    # How long the sandbox ran the sample, where its report says: under CAPE's
+    # own ``info.duration``, the key a CAPE report carries it under.
+    if report.run_seconds is not None:
+        rendered["info"] = {"duration": int(report.run_seconds)}
     return rendered

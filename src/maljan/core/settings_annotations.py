@@ -1667,7 +1667,20 @@ ANNOTATIONS.update(
             "title": "Triage timeout (s)",
             "description": (
                 "Maximum seconds to wait for a Triage analysis to reach the reported "
-                "state, queueing behind other tenants included."
+                "state, queueing behind other tenants included. With a run time set "
+                "below, it must be longer than that run time: the wait covers the run "
+                "and Triage's processing of it."
+            ),
+            "applies_when": _SANDBOX_TRIAGE,
+        },
+        "sandbox.triage.analysis_seconds": {
+            "title": "Triage run time (s)",
+            "description": (
+                "How long the Triage VM runs the sample, sent with the submission as "
+                "defaults.timeout. Empty, the default, sends nothing and Triage's own "
+                "default applies. A value the account does not allow is refused by Triage, "
+                "and the submission error quotes its words. The run summary states the run "
+                "time Triage reports for the task."
             ),
             "applies_when": _SANDBOX_TRIAGE,
         },

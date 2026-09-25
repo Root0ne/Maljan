@@ -3005,6 +3005,11 @@ class SandboxTriageConfig(BaseModel):
     file type, so an APK reaches an Android profile rather than the Windows
     one every other sample uses. ``timeout_seconds`` is generous because a
     Triage run queues behind other tenants' work.
+
+    ``analysis_seconds`` is how long the Triage VM runs the sample, sent as
+    the submission's ``defaults.timeout``; unset, nothing is sent and Triage's
+    own default applies. ``timeout_seconds`` is how long this platform polls
+    for the finished report, so it must be longer than the run it waits for.
     """
 
     base_url: str = "https://tria.ge/api/v0"
@@ -3014,6 +3019,17 @@ class SandboxTriageConfig(BaseModel):
     timeout_seconds: Annotated[int, Field(ge=1)] = 900
     poll_interval_seconds: Annotated[int, Field(ge=1)] = 15
     fetch_pcap: bool = True
+    analysis_seconds: Annotated[int, Field(ge=1)] | None = None
+
+    @model_validator(mode="after")
+    def _the_poll_outlasts_the_run(self) -> "SandboxTriageConfig":
+        if self.analysis_seconds is not None and self.timeout_seconds <= self.analysis_seconds:
+            raise ValueError(
+                f"sandbox.triage.timeout_seconds ({self.timeout_seconds}) must be longer than "
+                f"sandbox.triage.analysis_seconds ({self.analysis_seconds}): the poll waits "
+                "for the sample's run and for Triage to process it into a report"
+            )
+        return self
 
 
 class SandboxUploadConfig(BaseModel):

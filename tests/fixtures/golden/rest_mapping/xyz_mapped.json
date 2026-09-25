@@ -164,6 +164,7 @@
   "registry": [
     "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\svc"
   ],
+  "run_seconds": null,
   "screenshots": [],
   "signatures": [
     {

@@ -829,6 +829,9 @@ class RunSummary:
     # ran, or the report is a recorded fixture. ``None`` when a sandbox
     # observed the run, which needs no sentence.
     sandbox: dict[str, str] | None = None
+    # How long the sandbox ran the sample, in seconds, as its report says
+    # (``info.duration``); ``None`` where it says nothing.
+    sandbox_run_seconds: int | None = None
     # Each model's measured generation rate and each per-call timeout it
     # produced (``llm.generation_rate.GenerationRates.snapshot``). ``None`` on
     # a run that measured no answer and sized no call.
@@ -867,6 +870,14 @@ class RunSummary:
             f"**STIX objects**: {self.stix_object_count}  ",
             f"**Elapsed**: {self.elapsed_seconds:.1f}s  ",
             *([f"**Sandbox**: {self.sandbox['statement']}  "] if self.sandbox else []),
+            *(
+                [
+                    f"**Sandbox run time**: {self.sandbox_run_seconds} s, as the sandbox "
+                    "reported it for the task  "
+                ]
+                if self.sandbox_run_seconds is not None
+                else []
+            ),
             *stage_duration_lines(self.stages),
             *tool_latency_lines(self.tool_latency),
             "",
@@ -1212,6 +1223,8 @@ class RunSummary:
             "tool_latency": dict(self.tool_latency) if self.tool_latency else None,
             "sandbox": dict(self.sandbox) if self.sandbox else None,
         }
+        if self.sandbox_run_seconds is not None:
+            result["sandbox_run_seconds"] = self.sandbox_run_seconds
 
         if self.validation:
             result["validation"] = {
@@ -1323,6 +1336,7 @@ class RunSummaryBuilder:
         self._stages: list[dict[str, Any]] = []
         self._triage: dict[str, Any] | None = None
         self._sandbox: dict[str, str] | None = None
+        self._sandbox_run_seconds: int | None = None
         self._nudge: dict[str, Any] | None = None
         self._budget: dict[str, Any] | None = None
         self._tool_latency: dict[str, Any] | None = None
@@ -1452,6 +1466,16 @@ class RunSummaryBuilder:
             None
             if found.status == OBSERVED
             else {"status": found.status, "statement": found.statement}
+        )
+        info = report.get("info") if isinstance(report, dict) else None
+        duration = info.get("duration") if isinstance(info, dict) else None
+        self._sandbox_run_seconds = (
+            int(duration)
+            if found.status == OBSERVED
+            and isinstance(duration, int | float)
+            and not isinstance(duration, bool)
+            and duration > 0
+            else None
         )
         return self
 
@@ -1796,6 +1820,7 @@ class RunSummaryBuilder:
             budget=self._budget,
             tool_latency=self._tool_latency,
             sandbox=self._sandbox,
+            sandbox_run_seconds=self._sandbox_run_seconds,
             generation=self._generation,
             spend=self._spend,
         )

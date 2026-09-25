@@ -156,6 +156,9 @@ class SandboxReport(BaseModel):
     screenshots: list[dict[str, Any]] = Field(default_factory=list)
     cti: dict[str, Any] = Field(default_factory=dict)
     unavailable: list[str] = Field(default_factory=list)
+    # How long the sandbox ran the sample, in seconds, as its own report says;
+    # ``None`` where it says nothing (never the time this platform asked for).
+    run_seconds: int | None = None
     # True when no sandbox ran at all and this report stands in for one. A real
     # run that observed nothing is not synthetic: its emptiness is a finding.
     synthetic: bool = Field(default=False)
@@ -653,5 +656,25 @@ def triage_overview_to_sandbox_report(
         screenshots=[],
         cti={"family": _as_str_list(analysis.get("family")), "score": analysis.get("score")},
         unavailable=list(TriageSandboxProvider.UNAVAILABLE),
+        run_seconds=_triage_run_seconds(overview),
         raw=overview,
     )
+
+
+def _triage_run_seconds(overview: dict[str, Any]) -> int | None:
+    """How long Triage ran the sample: its behavioural tasks' ``timeout``, when they agree.
+
+    The overview lists each task with the run time it was given. ``None`` when
+    no behavioural task carries one, or when two carry different ones: one
+    figure for the run would then be a figure the report does not state.
+    """
+    tasks = overview.get("tasks")
+    rows = list(tasks.values()) if isinstance(tasks, dict) else tasks
+    seen: set[int] = set()
+    for task in rows if isinstance(rows, list) else []:
+        if not isinstance(task, dict) or str(task.get("kind") or "") != "behavioral":
+            continue
+        value = task.get("timeout")
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            seen.add(value)
+    return seen.pop() if len(seen) == 1 else None
