@@ -1871,6 +1871,11 @@ def label_of(container: ServiceContainer, key: str) -> str:
     try:
         from maljan.agents.composition import display_name
 
+        definition = container.config.agents.definitions.get(key)
+        # A label is words; anything else a stand-in configuration hands back
+        # is not one, and the key stands (``display_name``'s rule otherwise).
+        if not isinstance(getattr(definition, "label", ""), str):
+            return str(key)
         return display_name(container.config, key)
     except Exception:  # noqa: BLE001 — a name is never worth a node
         return str(key)
