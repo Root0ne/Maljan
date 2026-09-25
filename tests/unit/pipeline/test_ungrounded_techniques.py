@@ -254,15 +254,17 @@ class TestTheEvidenceLineKeepsItsId:
             assert re.fullmatch(r"y+(\[ev_\d{4}\])?…( \[ev_\d{4}\])*", stored), (pad, stored)
             assert stored.count("ev_0007") == 1, (pad, stored)
 
-    def test_the_ids_written_back_are_bounded(self) -> None:
+    def test_every_id_the_cut_removed_is_written_back(self) -> None:
+        """An id is the citation: a claim that loses one cites less than its
+        analyst did, and the judge's question reads its entries from here."""
         from maljan.agents.base_agent import evidence_ref_text
 
         line = "x" * 200 + " ".join(f"[ev_{n:04d}]" for n in range(1, 60))
 
         stored = evidence_ref_text(line)
 
-        assert len(stored) <= 200 + 40
-        assert "ev_0001" in stored
+        for n in range(1, 60):
+            assert stored.count(f"ev_{n:04d}") == 1, n
 
     def test_an_id_before_the_cut_is_not_written_twice(self) -> None:
         evidence = "[ev_0002] " + "the import table lists VirtualAllocEx " * 6
@@ -306,7 +308,7 @@ class TestTheAnalystIsAskedOnce:
         agent._truncate_input = lambda text, *a, **k: text  # type: ignore[method-assign]
         agent._capture_findings = lambda text: text  # type: ignore[method-assign]
 
-        def _invoke(turns: Any, timeout: int) -> Any:
+        def _invoke(turns: Any, timeout: int, **_: Any) -> Any:
             return MagicMock(content=agent._answers.pop(0))
 
         agent._invoke_llm_with_timeout = _invoke  # type: ignore[method-assign]

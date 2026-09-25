@@ -566,12 +566,23 @@ EVIDENCE_SHORTENED_NOTICE = (
 )
 
 # An ATT&CK technique id where it stands in an answer.
-_TECHNIQUE_ID_RE = re.compile(r"(?<![A-Za-z0-9])(T\d{4}(?:\.\d{3})?)(?![0-9])", re.IGNORECASE)
-# The decision word after an id, on the same line.
-_DECISION_RE = re.compile(r"(?<![A-Za-z])(keep|kept|drop|dropped)(?![A-Za-z])", re.IGNORECASE)
-# How far after its id a decision word may stand and still be that id's: room
-# for the technique's name, a parenthesis, an arrow or a "Decision:" label.
-_DECISION_REACH = 100
+# A sub-technique written with a slash is the same id: read, and written
+# back with its dot (``_technique_id``).
+_TECHNIQUE_ID_RE = re.compile(r"(?<![A-Za-z0-9])(T\d{4}(?:[./]\d{3})?)(?![0-9])", re.IGNORECASE)
+# A decision word standing on its own. ``kept``/``dropped`` are read only in
+# the decision position, straight after the id's separator: elsewhere they are
+# words of the reason ("the second stage is dropped to disk").
+_DECISION_RE = re.compile(r"(?<![A-Za-z'])(keep|drop)(?![A-Za-z'])", re.IGNORECASE)
+# The separator after an id (and any name written after it) that the decision
+# follows: a colon, a table bar, a dash or an arrow, never a line break.
+_ID_SEPARATOR_RE = re.compile(r"[:|=\u2013\u2014\u2192]|->|[ \t]-[ \t]")
+# The decision in the decision position: past markup and an optional
+# "Decision:" label, the whole word.
+_DECISION_AT_RE = re.compile(
+    r"^[ \t*_`>]*(?:decision[ \t*_`]*[:\-\u2013\u2014][ \t*_`]*)?"
+    r"(keep|kept|drop|dropped)(?![A-Za-z'])",
+    re.IGNORECASE,
+)
 # What leads a line and what separates a decision from its reason: markdown
 # list and table marks, numbering, arrows, colons and dashes. Never a line break.
 _LINE_LEAD_RE = re.compile(r"^[ \t|*_`>#\-•]*(?:\d+[.)][ \t]*)?")
@@ -580,9 +591,73 @@ _REASON_LEAD_RE = re.compile(r"^[ \t|*_`:\-–—→>=,.;)\]]*")
 _THINK_RE = re.compile(r"<think>.*?(?:</think>|\Z)", re.IGNORECASE | re.DOTALL)
 
 
+class QuestionEvidence(NamedTuple):
+    """One cited entry as the technique question shows it."""
+
+    text: str
+    tool: str = ""
+    # The run holds only part of this entry's answer.
+    partial: bool = False
+    # The stored output was blanked and this is the run's lower-cased search copy.
+    lowered: bool = False
+
+
+# What an entry's heading says when what is shown is not the whole answer as stored.
+PARTIAL_ENTRY_MARK = "incomplete: this run holds only part of this entry's answer"
+LOWERED_ENTRY_MARK = "the stored output was not kept; this is the run's lower-cased search copy"
+NO_ENTRY_TEXT = "(no text recorded in this run)"
+
+# The labels the question's head writes before its technique list.
+QUESTION_REPORTS_LABEL = "Expert Reports:"
+QUESTION_VERDICT_LABEL = "YOUR VERDICT:"
+QUESTION_CARRIED_LABEL = "TECHNIQUES YOUR BUNDLE CARRIES:"
+
+
+def technique_question_head(reports_text: str, verdict: str, carried: Sequence[str]) -> str:
+    """What the question shows before its list: the reports, the verdict, the carried ids."""
+    return (
+        f"{QUESTION_REPORTS_LABEL}\n{reports_text}\n\n"
+        f"{QUESTION_VERDICT_LABEL} {verdict}\n"
+        f"{QUESTION_CARRIED_LABEL} {', '.join(carried) if carried else 'none'}\n\n"
+    )
+
+
+def question_evidence(ledger: Iterable[Any], corpus: Any = None) -> dict[str, QuestionEvidence]:
+    """Each ledger entry as the technique question shows it, keyed by its lower-cased id.
+
+    The output as stored, in its own case; where the byte budget blanked it,
+    the run's search copy, which is lower-cased and says so. An entry the
+    ledger records as trimmed is marked incomplete. Never raises.
+    """
+    shown: dict[str, QuestionEvidence] = {}
+    for entry in ledger or ():
+        written = str(getattr(entry, "id", "") or "").strip()
+        if not written:
+            continue
+        text = str(getattr(entry, "output", "") or "")
+        lowered = False
+        if not text and corpus is not None:
+            try:
+                text = str(corpus.text_for(written) or "")
+            except Exception:  # noqa: BLE001 — no copy is no text
+                text = ""
+            lowered = bool(text)
+        shown[written.lower()] = QuestionEvidence(
+            text=text,
+            tool=str(getattr(entry, "tool", "") or ""),
+            partial=bool(getattr(entry, "truncated", False)),
+            lowered=lowered,
+        )
+    return shown
+
+
+def _as_evidence(value: Any) -> QuestionEvidence:
+    return value if isinstance(value, QuestionEvidence) else QuestionEvidence(str(value or ""))
+
+
 def technique_question_text(
     questions: Sequence[Any],
-    evidence: Mapping[str, str] | None = None,
+    evidence: Mapping[str, Any] | None = None,
     *,
     notice: str = "",
 ) -> str:
@@ -590,9 +665,13 @@ def technique_question_text(
 
     ``questions`` are ``capability_matrix.TechniqueQuestion`` rows; each is
     listed with every claim or finding that names it, in the analyst's words,
-    and the evidence ids it cites. ``evidence`` is the text shown for each id,
-    listed once under the techniques; ``notice`` says what was shortened.
+    and the evidence ids it cites. ``evidence`` is what is shown for each id
+    (text, or :class:`QuestionEvidence`), looked up whatever the case the id
+    was cited in, and listed once under the techniques with the tool behind
+    it and a mark when it is not the whole answer as stored; ``notice`` says
+    what was shortened.
     """
+    shown = {str(k).lower(): _as_evidence(v) for k, v in (evidence or {}).items()}
     lines = ["TECHNIQUES TO DECIDE"]
     cited: list[str] = []
     for n, question in enumerate(questions, 1):
@@ -603,18 +682,30 @@ def technique_question_text(
         )
         lines.append(f"{n}. {question.technique_id} — {where}")
         for agent, text, ids in question.mentions:
-            shown = ", ".join(ids) if ids else "none cited"
-            lines.append(f"   - {agent}: {' '.join(str(text).split())} (evidence: {shown})")
-            cited.extend(i for i in ids if i not in cited)
+            listed = ", ".join(ids) if ids else "none cited"
+            lines.append(f"   - {agent}: {' '.join(str(text).split())} (evidence: {listed})")
+            cited.extend(i.lower() for i in ids if i.lower() not in cited)
     if cited:
         lines += ["", "EVIDENCE CITED"]
         if notice:
             lines.append(notice)
         for entry_id in cited:
-            text = (evidence or {}).get(entry_id)
-            lines.append(
-                f"[{entry_id}]\n{text}" if text else f"[{entry_id}] (no text recorded in this run)"
-            )
+            entry = shown.get(entry_id)
+            if entry is None or not entry.text:
+                lines.append(f"[{entry_id}] {NO_ENTRY_TEXT}")
+                continue
+            marks = [
+                m
+                for m, on in (
+                    (PARTIAL_ENTRY_MARK, entry.partial),
+                    (LOWERED_ENTRY_MARK, entry.lowered),
+                )
+                if on
+            ]
+            heading = f"[{entry_id}]" + (f" ({entry.tool})" if entry.tool else "")
+            if marks:
+                heading += " — " + "; ".join(marks)
+            lines.append(f"{heading}\n{entry.text}")
     return "\n".join(lines) + "\n\n" + TECHNIQUE_ANSWER_FORM
 
 
@@ -673,9 +764,9 @@ def _json_rows(text: str) -> list[dict[str, Any]]:
             rows = [
                 {"id": key, **(item if isinstance(item, dict) else {"decision": item})}
                 for key, item in value.items()
-                if _TECHNIQUE_ID_RE.fullmatch(str(key).strip())
+                if _TECHNIQUE_ID_RE.fullmatch(str(key).strip().replace("/", "."))
             ]
-        if any(_row_decision(row) for row in rows):
+        if any(_TECHNIQUE_ID_RE.search(str(row.get(k) or "")) for row in rows for k in _ID_KEYS):
             found = rows
     return found
 
@@ -684,41 +775,70 @@ def _json_rows(text: str) -> list[dict[str, Any]]:
 _Decision = Literal["keep", "drop"]
 
 
+def _technique_id(match: re.Match[str]) -> str:
+    """The id a match names, upper-cased and with a sub-technique's dot."""
+    return match.group(1).upper().replace("/", ".")
+
+
+def _as_decision(word: str) -> _Decision:
+    return "keep" if word.lower() in ("keep", "kept") else "drop"
+
+
+# The keys a JSON row may name its technique under.
+_ID_KEYS = ("id", "technique_id", "technique")
+
+
 def _row_decision(row: Mapping[str, Any]) -> tuple[str, _Decision, str] | None:
-    """``(id, keep|drop, reason)`` for one JSON row, or ``None`` when it states none."""
+    """``(id, keep|drop, reason)`` for one JSON row, or ``None`` when it states none.
+
+    The ``decision`` field is read as one whole word — keep, drop, kept or
+    dropped — and anything else ("do not keep; drop") states no decision.
+    """
     tid = ""
-    for key in ("id", "technique_id", "technique"):
+    for key in _ID_KEYS:
         match = _TECHNIQUE_ID_RE.search(str(row.get(key) or ""))
         if match:
-            tid = match.group(1).upper()
+            tid = _technique_id(match)
             break
-    word = _DECISION_RE.search(str(row.get("decision") or ""))
-    if not tid or not word:
+    word = str(row.get("decision") or "").strip().strip(".").strip()
+    if not tid or word.lower() not in ("keep", "kept", "drop", "dropped"):
         return None
-    decision: _Decision = "keep" if word.group(1).lower() in ("keep", "kept") else "drop"
-    return tid, decision, str(row.get("reason") or "").strip()
+    return tid, _as_decision(word), str(row.get("reason") or "").strip()
 
 
 def _line_decision(line: str) -> tuple[str, _Decision, str] | None:
     """``(id, keep|drop, reason)`` for one line of a free answer, or ``None``.
 
-    The line's first technique id, then the first decision word within reach
-    of it on the same line — past a technique name, a parenthesis, an arrow,
-    a table cell or a "Decision:" label — and the rest of the line as the
-    reason, without the separators before it or a table's closing bar.
+    The line's first technique id, then its decision from the decision
+    position: the word straight after the first separator that follows the id
+    (past a technique name, markup or a "Decision:" label), and failing that
+    the last standalone keep or drop on the line — never a word inside the
+    reason that follows the decision. The reason is the rest of the line after
+    the decision, without its separators or a table's closing bar, and the
+    text before the decision when nothing follows it.
     """
     body = _LINE_LEAD_RE.sub("", line)
     tid = _TECHNIQUE_ID_RE.search(body)
     if tid is None:
         return None
     rest = body[tid.end() :]
-    word = _DECISION_RE.search(rest[:_DECISION_REACH])
-    if word is None:
-        return None
-    reason = _REASON_LEAD_RE.sub("", rest[word.end() :]).strip()
-    reason = reason.rstrip(" \t|*_`").strip()
-    decision: _Decision = "keep" if word.group(1).lower() in ("keep", "kept") else "drop"
-    return tid.group(1).upper(), decision, reason
+    separator = _ID_SEPARATOR_RE.search(rest)
+    at = _DECISION_AT_RE.match(rest[separator.end() :]) if separator else None
+    if separator is not None and at is not None:
+        end = separator.end() + at.end(1)
+        word = at.group(1)
+        before = ""
+    else:
+        standalone = list(_DECISION_RE.finditer(rest))
+        if not standalone:
+            return None
+        start, end, word = standalone[-1].start(1), standalone[-1].end(1), standalone[-1].group(1)
+        # A decision the line ends on: what came before it is the reason.
+        before = rest[separator.end() if separator is not None else 0 : start]
+    reason = _REASON_LEAD_RE.sub("", rest[end:]).strip().rstrip(" \t|*_`").strip()
+    if not reason:
+        reason = before.strip(" \t|*_`:;,.-\u2013\u2014\u2192>")
+    return _technique_id(tid), _as_decision(word), reason
 
 
 # What the token ledger calls the question asked after the verdict.
@@ -743,12 +863,16 @@ def _structured_decisions(parsed: Any, asked: Sequence[str]) -> list[Any]:
     """The decisions a structured answer states for the ``asked`` techniques, last per id."""
     from maljan.schemas.stix_models import TechniqueDecision
 
-    rows = getattr(parsed, "decisions", None)
+    rows = (
+        parsed.get("decisions") if isinstance(parsed, dict) else getattr(parsed, "decisions", None)
+    )
     if not isinstance(rows, list):
         return []
     wanted = [str(t).upper() for t in asked]
     found: dict[str, TechniqueDecision] = {}
     for row in rows:
+        if not isinstance(row, BaseModel | dict):
+            continue
         stated = _row_decision(row.model_dump() if isinstance(row, BaseModel) else dict(row))
         if stated is None or stated[0] not in wanted:
             continue
@@ -757,6 +881,19 @@ def _structured_decisions(parsed: Any, asked: Sequence[str]) -> list[Any]:
             technique_id=stated[0], decision=stated[1], reason=stated[2]
         )
     return sorted(found.values(), key=lambda d: wanted.index(d.technique_id))
+
+
+def _tool_call_arguments(raw: Any) -> Any:
+    """The arguments of the first tool call an answer made, or ``None``.
+
+    A provider that answers a schema by function calling leaves ``content``
+    empty and the answer in the call's arguments.
+    """
+    for call in list(getattr(raw, "tool_calls", None) or []):
+        args = call.get("args") if isinstance(call, dict) else getattr(call, "args", None)
+        if isinstance(args, dict):
+            return args
+    return None
 
 
 def _fit_evidence(texts: dict[str, str], room: int | None) -> tuple[dict[str, str], str]:
@@ -799,8 +936,12 @@ def read_technique_answer(text: str, asked: Sequence[str]) -> list[Any]:
 
     body = _without_reasoning(text)
     wanted = {str(tid).upper() for tid in asked}
-    stated = [d for row in _json_rows(body) if (d := _row_decision(row)) is not None]
-    if not stated:
+    rows = _json_rows(body)
+    if rows:
+        # A JSON answer is read as JSON only: a row whose decision is not one
+        # word states none, and the JSON's own lines are not read again.
+        stated = [d for row in rows if (d := _row_decision(row)) is not None]
+    else:
         stated = [d for line in body.splitlines() if (d := _line_decision(line)) is not None]
     found: dict[str, TechniqueDecision] = {}
     for tid, decision, reason in stated:
@@ -2261,25 +2402,33 @@ class JudgeAgent(BudgetMeter):
         head = (
             f"{_standing_blocks(run_state, facts_block)}"
             f"{_identity_prefix(sample)}"
-            "Expert Reports:\n"
-            f"{verdict_reports_text(reports or {}, isr_reports, evidence_summary, degradation_note)}"
-            "\n\n"
-            f"YOUR VERDICT: {decide_from_bundle(bundle)}\n"
-            f"TECHNIQUES YOUR BUNDLE CARRIES: {', '.join(carried) if carried else 'none'}\n\n"
+            + technique_question_head(
+                verdict_reports_text(
+                    reports or {}, isr_reports, evidence_summary, degradation_note
+                ),
+                str(decide_from_bundle(bundle)),
+                carried,
+            )
         )
-        cited = list(dict.fromkeys(i for q in questions for _a, _t, ids in q.mentions for i in ids))
-        texts = {i: str((evidence_texts or {}).get(i) or "") for i in cited}
+        known = {str(k).lower(): _as_evidence(v) for k, v in (evidence_texts or {}).items()}
+        cited = list(
+            dict.fromkeys(i.lower() for q in questions for _a, _t, ids in q.mentions for i in ids)
+        )
+        entries = {i: known.get(i, QuestionEvidence("")) for i in cited}
         cap = judge_output_cap().tokens or None
-        bare = technique_question_text(questions, {i: "" for i in cited})
+        bare = technique_question_text(
+            questions, {i: e._replace(text="") for i, e in entries.items()}
+        )
         room = self._question_room(
             len(TECHNIQUE_QUESTION_SYSTEM) + len(head) + len(bare), int(cap or 0)
         )
-        texts, notice = _fit_evidence(texts, room)
+        texts, notice = _fit_evidence({i: e.text for i, e in entries.items()}, room)
         if notice:
             self.logger.warning("JudgeAgent technique question: %s", notice)
+        fitted = {i: e._replace(text=texts[i]) for i, e in entries.items()}
         messages: list[Any] = [
             SystemMessage(content=TECHNIQUE_QUESTION_SYSTEM),
-            HumanMessage(content=head + technique_question_text(questions, texts, notice=notice)),
+            HumanMessage(content=head + technique_question_text(questions, fitted, notice=notice)),
         ]
         timeout = self._verdict_timeout(
             float(loop_limits("judge")[0]),
@@ -2299,27 +2448,41 @@ class JudgeAgent(BudgetMeter):
 
         async def _ask() -> tuple[Any, Any]:
             if structured:
-                runnable = self.llm.with_structured_output(TechniqueAnswer, include_raw=True)
-                result = await retry_on_connection_error(
-                    lambda: runnable.ainvoke(messages),
-                    what="Judge technique question",
-                    log=self.logger,
-                )
-                if isinstance(result, dict) and "raw" in result:
-                    raw = result.get("raw")
-                    try:
-                        parsed = structured_answer(
-                            result,
-                            self.token_ledger,
-                            agent=str(self.name),
-                            model=self._model_label(),
-                            call=TECHNIQUE_QUESTION_CALL,
+                try:
+                    runnable = self.llm.with_structured_output(TechniqueAnswer, include_raw=True)
+                    result = await retry_on_connection_error(
+                        lambda: runnable.ainvoke(messages),
+                        what="Judge technique question",
+                        log=self.logger,
+                    )
+                except (TimeoutError, asyncio.CancelledError):
+                    raise
+                except Exception as exc:  # noqa: BLE001 — refused schema: asked once in text
+                    self.logger.warning(
+                        "JudgeAgent technique question: the schema was refused (%s); asking "
+                        "for the answer in text.",
+                        type(exc).__name__,
+                    )
+                else:
+                    if isinstance(result, dict) and "raw" in result:
+                        raw = result.get("raw")
+                        try:
+                            parsed = structured_answer(
+                                result,
+                                self.token_ledger,
+                                agent=str(self.name),
+                                model=self._model_label(),
+                                call=TECHNIQUE_QUESTION_CALL,
+                            )
+                        except Exception:  # noqa: BLE001 — the call's own arguments are read
+                            parsed = _tool_call_arguments(raw)
+                        record_judge_response(
+                            getattr(self, "truncation_ledger", None), raw, cap=cap
                         )
-                    except Exception:  # noqa: BLE001 — the raw text is read instead
-                        parsed = None
-                    record_judge_response(getattr(self, "truncation_ledger", None), raw, cap=cap)
-                    return raw, parsed
-                return result, result
+                        return raw, parsed
+                    # An answer in no shape the ledger reads is still a call.
+                    self._record_usage(result, call=TECHNIQUE_QUESTION_CALL)
+                    return result, result
             answer = await retry_on_connection_error(
                 lambda: self.llm.ainvoke(messages),
                 what="Judge technique question",

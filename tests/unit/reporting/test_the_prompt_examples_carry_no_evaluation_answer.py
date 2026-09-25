@@ -30,10 +30,14 @@ from maljan.agents.base_agent import FINAL_ANSWER_NUDGE
 from maljan.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
     EVIDENCE_SHORTENED_NOTICE,
+    LOWERED_ENTRY_MARK,
+    NO_ENTRY_TEXT,
+    PARTIAL_ENTRY_MARK,
     TECHNIQUE_ANSWER_FORM,
     TECHNIQUE_ANSWER_UNREAD,
     TECHNIQUE_QUESTION_NOT_ASKED,
     TECHNIQUE_QUESTION_SYSTEM,
+    technique_question_head,
     technique_question_text,
     verdict_cut_violation,
 )
@@ -74,6 +78,7 @@ from maljan.pipeline.validation import (
     absence_claim_violation,
     analyst_cut_violation,
     claim_does_not_describe_violation,
+    gate_removed_note,
     misstated_entry_contents,
     repeated_item_violations,
     section_cut_violation,
@@ -331,6 +336,11 @@ PROMPTS: dict[str, str] = {
         ]
     ),
     "judge technique answer form": TECHNIQUE_ANSWER_FORM,
+    "judge technique question head": technique_question_head("r", "Suspicious", ["T1112"]),
+    "judge technique question entry marks": " ".join(
+        [PARTIAL_ENTRY_MARK, LOWERED_ENTRY_MARK, NO_ENTRY_TEXT]
+    ),
+    "analyst question naming the claims the gate set aside": gate_removed_note(["x"]),
     "judge technique notes": " ".join(
         [
             JUDGE_UNCONFIRMED_TECHNIQUE_MARKER,

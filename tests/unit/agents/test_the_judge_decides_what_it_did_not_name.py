@@ -24,6 +24,7 @@ from maljan.agents.judge_agent import (
     TECHNIQUE_QUESTION_SYSTEM,
     JudgeAgent,
     read_technique_answer,
+    technique_question_text,
 )
 from maljan.extractors.capability_matrix import (
     FINDING_ONLY_REASON,
@@ -482,3 +483,139 @@ class TestWhatCannotBePublishedIsNotAsked:
 
         assert FINDING_ONLY not in [q.technique_id for q in questions]
         assert not_asked[FINDING_ONLY].startswith("not asked: ")
+
+
+class TestTheDecisionIsReadFromItsPosition:
+    def test_a_decision_word_inside_the_reason_is_not_the_decision(self) -> None:
+        line = "T1105 — the second stage is dropped to disk by the loader; keep"
+
+        assert [
+            (d.technique_id, d.decision, d.reason) for d in read_technique_answer(line, ["T1105"])
+        ] == [("T1105", "keep", "the second stage is dropped to disk by the loader")]
+
+    def test_a_negated_word_before_the_decision_is_not_the_decision(self) -> None:
+        line = f"{LEFT_OUT}: I would not keep this; drop — nothing shows it"
+
+        assert _read(line) == [(LEFT_OUT, "drop", "nothing shows it")]
+
+    def test_a_json_decision_that_is_not_one_word_states_none(self) -> None:
+        answer = f'[{{"id": "{LEFT_OUT}", "decision": "do not keep; drop", "reason": "x"}}]'
+
+        assert _read(answer) == []
+
+    def test_kept_and_dropped_count_only_in_the_decision_position(self) -> None:
+        assert _read(f"{LEFT_OUT}: dropped: gone") == [(LEFT_OUT, "drop", "gone")]
+        assert _read(f"{LEFT_OUT} was kept by the analyst; drop") == [
+            (LEFT_OUT, "drop", "was kept by the analyst")
+        ]
+
+    def test_a_slash_written_sub_technique_is_the_same_id(self) -> None:
+        assert _read(f"{LEFT_OUT.replace('.', '/')}: drop: x") == [(LEFT_OUT, "drop", "x")]
+        assert _read(f'{{"{LEFT_OUT.replace(".", "/")}": "keep"}}') == [(LEFT_OUT, "keep", "")]
+
+
+class TestTheEvidenceIsShownAsStored:
+    def test_stored_case_the_tool_and_the_marks(self) -> None:
+        from types import SimpleNamespace
+
+        from maljan.agents.judge_agent import (
+            LOWERED_ENTRY_MARK,
+            PARTIAL_ENTRY_MARK,
+            question_evidence,
+        )
+
+        ledger = [
+            SimpleNamespace(
+                id="ev_0012", output="Key HKCU\\Run = C:\\A.exe", tool="reg", truncated=True
+            ),
+            SimpleNamespace(id="ev_0013", output="", tool="dns", truncated=False),
+        ]
+        corpus = SimpleNamespace(
+            text_for=lambda entry_id: "resolver copy" if entry_id == "ev_0013" else ""
+        )
+
+        shown = question_evidence(ledger, corpus)
+        text = technique_question_text(
+            techniques_for_the_judge(_bundle().model_dump(), _isrs()), shown
+        )
+
+        assert "[ev_0012] (reg) — " + PARTIAL_ENTRY_MARK + "\nKey HKCU\\Run = C:\\A.exe" in text
+        assert "[ev_0013] (dns) — " + LOWERED_ENTRY_MARK + "\nresolver copy" in text
+
+    def test_an_id_cited_in_capitals_finds_its_entry(self) -> None:
+        isrs = _isrs()
+        isrs["network"].findings[0].evidence_ids = ["EV_0007"]
+
+        text = technique_question_text(
+            techniques_for_the_judge(_bundle().model_dump(), isrs), {"ev_0007": "OpenProcess"}
+        )
+
+        assert "[ev_0007]\nOpenProcess" in text
+        assert "no text recorded" not in text.split("[ev_0007]")[1][:40]
+
+
+class TestTheStructuredPathsEdges:
+    def _judge(self, monkeypatch, structured: Any, plain: Any = None) -> tuple[JudgeAgent, list]:
+        asked: list[str] = []
+
+        class _Model:
+            def with_structured_output(self, *a: Any, **k: Any) -> Any:
+                return structured
+
+            async def ainvoke(self, messages: list[Any]) -> Any:
+                asked.append("text")
+                return MagicMock(content=plain)
+
+        judge = JudgeAgent(llm=_Model())  # type: ignore[arg-type]
+        monkeypatch.setattr(judge, "_supports_structured_output", lambda: True)
+        return judge, asked
+
+    def test_a_function_call_answer_is_read_from_its_arguments(self, monkeypatch) -> None:
+        from langchain_core.messages import AIMessage
+
+        raw = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "TechniqueAnswer",
+                    "args": {"decisions": [{"id": LEFT_OUT, "decision": "drop", "reason": "r"}]},
+                    "id": "c1",
+                }
+            ],
+        )
+
+        class _Structured:
+            async def ainvoke(self, messages: list[Any]) -> Any:
+                return {"raw": raw, "parsed": None, "parsing_error": ValueError("no")}
+
+        judge, _asked = self._judge(monkeypatch, _Structured())
+        review = asyncio.run(judge.decide_techniques(_bundle(), _isrs()))
+
+        assert review is not None
+        assert [(d.technique_id, d.decision) for d in review.decisions] == [(LEFT_OUT, "drop")]
+
+    def test_a_refused_schema_is_asked_once_in_text(self, monkeypatch) -> None:
+        class _Refused:
+            async def ainvoke(self, messages: list[Any]) -> Any:
+                raise ValueError("400: response_format is not supported")
+
+        judge, asked = self._judge(monkeypatch, _Refused(), plain=f"{LEFT_OUT}: keep: shown")
+        review = asyncio.run(judge.decide_techniques(_bundle(), _isrs()))
+
+        assert asked == ["text"]
+        assert review is not None
+        assert [(d.technique_id, d.decision) for d in review.decisions] == [(LEFT_OUT, "keep")]
+
+    def test_an_answer_in_another_shape_is_still_a_call_on_the_ledger(self, monkeypatch) -> None:
+        from maljan.core.token_ledger import TokenLedger
+
+        class _Bare:
+            async def ainvoke(self, messages: list[Any]) -> Any:
+                return MagicMock(content="")
+
+        judge, _asked = self._judge(monkeypatch, _Bare())
+        judge.token_ledger = TokenLedger()
+
+        asyncio.run(judge.decide_techniques(_bundle(), _isrs()))
+
+        assert judge.token_ledger.snapshot()["llm_calls"] == 1

@@ -118,7 +118,7 @@ class TestAnAnalystsPrompt:
         agent._system_prompt = lambda _default, tools=None: "You are a static analyst."  # type: ignore[method-assign]
         sent: list[list[Any]] = []
 
-        def _capture(turns: list[Any], timeout: int) -> AIMessage:
+        def _capture(turns: list[Any], timeout: int, **_: Any) -> AIMessage:
             sent.append(list(turns))
             return AIMessage(content=REPORT)
 

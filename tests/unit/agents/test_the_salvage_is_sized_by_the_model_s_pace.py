@@ -220,7 +220,7 @@ class TestTheSalvageAtThisPace:
     def test_a_failed_salvage_says_how_it_ended(self) -> None:
         agent = _Analyst(_Rates(WRITES, READS))
 
-        def _times_out(messages: list, timeout: float) -> str:
+        def _times_out(messages: list, timeout: float, **_: Any) -> str:
             raise TimeoutError("llm:static exceeded hard cap of 423s")
 
         agent._invoke_llm_with_timeout = _times_out  # type: ignore[method-assign]

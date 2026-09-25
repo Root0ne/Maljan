@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from concurrent.futures import CancelledError as _FuturesCancelled
 from concurrent.futures import Future as _ConcurrentFuture
 from concurrent.futures import TimeoutError as _FuturesTimeout
@@ -88,25 +88,6 @@ SYNTHETIC_TURN_KEY = "maljan_synthetic_turn"
 # What the token ledger calls one model turn of a tool loop, for a call that
 # reported no usage.
 TOOL_LOOP_TURN_CALL = "tool loop turn"
-
-
-@contextlib.contextmanager
-def labelled_call(agent: Any, label: str) -> Iterator[None]:
-    """Name the model calls made inside the block, for the token ledger.
-
-    An attribute rather than an argument, so an agent stand-in whose
-    ``_invoke_llm_with_timeout`` takes no label still answers the call.
-    """
-    before = getattr(agent, "_call_label", None)
-    try:
-        agent._call_label = label
-    except Exception:  # noqa: BLE001 — an agent that cannot be named is not
-        yield
-        return
-    try:
-        yield
-    finally:
-        agent._call_label = before
 
 
 def is_model_turn(message: Any) -> bool:
@@ -1321,9 +1302,6 @@ def evidence_ref_width() -> int:
     )
 
 
-# How many dropped ids are written back after the evidence field's cut.
-_EVIDENCE_REF_IDS = 3
-
 # The start of an id the cut sliced through, at the end of the kept text: any
 # prefix of ``[ev_NNNN``, from the bare bracket up to a whole id whose closing
 # bracket was cut, and the space before it. The whole id is written back.
@@ -1337,9 +1315,9 @@ def evidence_ref_text(evidence_text: str) -> str:
     (``evidence_ref_width``), and the claim format asks for the id at
     the end of a line whose front is prose, so on a long line the cut lands on
     the one part the run can check. Any id the cut dropped is written back
-    after it, in the order the model wrote it, up to a few: the field is what
-    the report prints and what long-term memory embeds, and the width should
-    bound it. An id the cut sliced through is removed from
+    after it, in the order the model wrote it — every one: an id is the
+    citation, and a claim that loses one cites less than its analyst did. An
+    id the cut sliced through is removed from
     the kept text, since the whole id follows.
 
     The cut is marked (``utils.marked_cut.CUT_MARK``) where the kept text ends.
@@ -1355,7 +1333,7 @@ def evidence_ref_text(evidence_text: str) -> str:
         found
         for found in dict.fromkeys(f.lower() for f in ENTRY_ID_RE.findall(evidence_text))
         if found not in still_there
-    ][:_EVIDENCE_REF_IDS]
+    ]
     if not dropped:
         return kept
     return f"{kept} {' '.join(f'[{found}]' for found in dropped)}"
@@ -4372,15 +4350,15 @@ class BaseAnalyst(BudgetMeter, ABC):
             "sized_by": "window" if paced is None or window_budget <= paced else "pace",
         }
         try:
-            with labelled_call(self, "step-cap salvage"):
-                answer = self._invoke_llm_with_timeout(
-                    self._with_current_run_state(
-                        with_question(tool_free_turns(trimmed), str(directive.content)),
-                        None,
-                        remaining,
-                    ),
+            answer = self._invoke_llm_with_timeout(
+                self._with_current_run_state(
+                    with_question(tool_free_turns(trimmed), str(directive.content)),
+                    None,
                     remaining,
-                )
+                ),
+                remaining,
+                what="step-cap salvage",
+            )
         except Exception as exc:  # noqa: BLE001 - best-effort salvage
             self.logger.error(
                 "%s forced synthesis failed: %s (%s)",
@@ -4494,7 +4472,7 @@ class BaseAnalyst(BudgetMeter, ABC):
                 else asyncio.to_thread(llm.invoke, messages)
             )
             response = await asyncio.wait_for(call, timeout=float(timeout))
-            self._record_usage(response, call=str(getattr(self, "_call_label", "") or what))
+            self._record_usage(response, call=what)
             return str(response.content)
 
         _t0 = _time.monotonic()
@@ -4817,8 +4795,9 @@ class BaseAnalyst(BudgetMeter, ABC):
             )
         )
         try:
-            with labelled_call(self, "forced synthesis"):
-                text = self._invoke_llm_with_timeout(messages, _SYNTHESIS_MIN_SECONDS)
+            text = self._invoke_llm_with_timeout(
+                messages, _SYNTHESIS_MIN_SECONDS, what="forced synthesis"
+            )
         except Exception as exc:  # noqa: BLE001 — a salvage that fails leaves the failure
             self.logger.error(
                 "%s: synthesis from the answered asks failed: %s",
@@ -5316,13 +5295,11 @@ class BaseAnalyst(BudgetMeter, ABC):
                 return first.pop()
             # The block moves to the retry's own question, the last message,
             # and the turn that carried it before is sent as it was written.
-            with labelled_call(self, "validation retry"):
-                return self._invoke_llm_with_timeout(
-                    frame_messages(
-                        turns, run_state=str(getattr(self, "run_state_block", "") or "")
-                    ),
-                    left,
-                )
+            return self._invoke_llm_with_timeout(
+                frame_messages(turns, run_state=str(getattr(self, "run_state_block", "") or "")),
+                left,
+                what="validation retry",
+            )
 
         def _parse(answer: Any) -> AgentISR:
             if isinstance(answer, _PriorAnswer):

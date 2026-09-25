@@ -3725,7 +3725,12 @@ def make_judge_node(
                 _review = None
                 if inspect.iscoroutinefunction(getattr(type(judge), "decide_techniques", None)):
                     try:
-                        _entry_texts = _report_entry_texts(container, _ledger)
+                        from maljan.agents.judge_agent import question_evidence
+
+                        try:
+                            _corpus = container.get_evidence_corpus()
+                        except Exception:  # noqa: BLE001 — the stored outputs stand alone
+                            _corpus = None
                         _review = await judge.decide_techniques(
                             verdict.bundle,
                             isr_reports,
@@ -3734,7 +3739,7 @@ def make_judge_node(
                             reports=reports,
                             evidence_summary=evidence_summary,
                             degradation_note=degradation_note,
-                            evidence_texts=dict(getattr(_entry_texts, "texts", None) or {}),
+                            evidence_texts=question_evidence(_ledger, _corpus),
                             sample=_sample_identity(state),
                             # The routed minimum the matrix asks the platform
                             # question with.
