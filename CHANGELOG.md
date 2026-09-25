@@ -2068,7 +2068,11 @@ change landed on `main`.
   `mentioned_by`. A sandbox address the sample's tree did not make, and a
   well-known benign name the guest resolved, is published only when a model
   keeps it as an indicator (an analyst's artifact, or the judge's indicator);
-  a claim that mentions it keeps nothing and is named in the reason. Otherwise
+  a claim that mentions it keeps nothing and is named in the reason. An
+  artifact is read tolerantly — any network-named kind or type-named row, type
+  aliases, either column order, an address with its port or in IPv6 bracket
+  form, a URL's host — and the judge's URL indicator keeps its host; the
+  analysts' findings block states the `endpoints` row shape. Otherwise
   the IOC table carries it as `no: <reason>, and no model kept it as an
   indicator`, and the STIX bundle, `/iocs` and the YARA, Sigma and Suricata
   drafts read that answer. **Upgrading:** CAPE, REST and mock reports carry no
@@ -2082,7 +2086,10 @@ change landed on `main`.
   the judge's bundle and neither host.
 - **Nothing cuts the sandbox views or the export.** The sandbox tools answer
   every row unless a caller pages them (`offset`, `limit`, with the total and
-  the next offset stated), where they cut every view at 200 rows. The STIX
+  the next offset stated), where they cut every view at 200 rows, and their
+  answers go through the same guardrail and context-budget charge as an MCP
+  tool's, so a large view is shortened with a notice naming `offset` and
+  `limit` rather than filling the window. The STIX
   export carries every value the publish rule publishes — every `yes` row of
   the IOC table — with no total cap, no band ranking that drops, no cap on
   file names and no slice of the network block or the string rows. An address

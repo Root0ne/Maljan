@@ -2057,6 +2057,10 @@ def kept_kwargs(report: Any, kind: str, key: str, row: Any = None) -> dict[str, 
     kept = [str(by) for by in (_field(row, "kept_by") or [])] if row is not None else []
     if (kind, key) in _judge_index(report):
         kept.append("the judge's indicator")
+    elif (kind, key) in _judge_url_hosts(report) and not is_well_known_benign_host(key):
+        # A well-known host a URL carries is kept only as itself (a CDN's
+        # name is not the sample's C2 because a URL on it was).
+        kept.append("the judge's URL indicator")
     mentioned = [str(by) for by in (_field(row, "mentioned_by") or [])] if row is not None else []
     return {
         "kept_by": ", ".join(dict.fromkeys(kept)),
@@ -2121,6 +2125,32 @@ def _judge_index(report: Any) -> frozenset[tuple[str, str]]:
         )
 
     return _memo(report, "judge_index", _build)  # type: ignore[no-any-return]
+
+
+def _judge_url_hosts(report: Any) -> frozenset[tuple[str, str]]:
+    """The ``(kind, key)`` of the host — address or name — of every URL the judge kept.
+
+    A URL the judge kept keeps its host: the address or the name in it is the
+    infrastructure the judge pointed at.
+    """
+
+    def _build() -> frozenset[tuple[str, str]]:
+        out: set[tuple[str, str]] = set()
+        for item in _field(report, "judge_indicators") or []:
+            if str(_field(item, "kind") or "") != "url":
+                continue
+            host = url_host(str(_field(item, "value") or ""))
+            if not host:
+                continue
+            try:
+                ipaddress.ip_address(host.strip("[]"))
+            except ValueError:
+                out.add(("domain", _value_key("domain", host)))
+            else:
+                out.add(("ip", _value_key("ip", host.strip("[]"))))
+        return frozenset(out)
+
+    return _memo(report, "judge_url_hosts", _build)  # type: ignore[no-any-return]
 
 
 # What the rule writes for a value emulation recovered, before the entry id.

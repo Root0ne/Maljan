@@ -833,21 +833,170 @@ def network_from_ledger(
                 _add(str(row.get("kind") or ""), str(row.get("value") or ""), "strings")
 
     kept: dict[tuple[str, str], list[str]] = {}
-    for artifact in _artifacts(isrs, "endpoints", "network", "iocs"):
+    for artifact in (
+        a for isr in (isrs or {}).values() for a in getattr(isr, "artifacts", None) or []
+    ):
         source = str(getattr(artifact, "source", "") or "").strip()
         by = f"an artifact of the {source} analyst" if source else "an analyst artifact"
-        for row in _rows_of(artifact):
-            if len(row) >= 2:
-                kind = row[0].strip().lower()
-                value = address_key(row[1]) if kind == "ip" else row[1]
-                _add(kind, value, "analyst")
-                kept_key = (kind, value.strip().lower().rstrip("."))
-                if by not in kept.setdefault(kept_key, []):
-                    kept[kept_key].append(by)
+        for kind, value in kept_network_values(artifact):
+            _add(kind, value, "analyst")
+            kept_key = (kind, value.strip().lower().rstrip("."))
+            if by not in kept.setdefault(kept_key, []):
+                kept[kept_key].append(by)
 
     _state_sandbox_facts(network, attributed, host_facts)
     _state_who_kept(network, kept, isrs)
     return network if (network.domains or network.ips or network.urls) else None
+
+
+# The words an artifact's kind carries when it holds network values, and the
+# words a row's first cell names its value's type by. Read tolerantly: a model
+# writes "ipv4" as readily as "ip", a C2 table as readily as "endpoints", and
+# an address with its port; a value it kept is kept however it was written.
+# Matched against the kind's words, a word starting with one of the first
+# set or equal to one of the second: "network_iocs" and "c2_endpoints" hold
+# network values, "scripts" and "zip_members" do not.
+_NETWORK_ARTIFACT_WORDS = (
+    "endpoint",
+    "network",
+    "ioc",
+    "indicator",
+    "c2",
+    "host",
+    "domain",
+    "url",
+    "address",
+    "contact",
+    "infra",
+    "beacon",
+    "server",
+)
+_NETWORK_ARTIFACT_TOKENS = frozenset({"ip", "ips", "ipv4", "ipv6", "cnc"})
+_TYPE_ALIASES = {
+    "ip": "ip",
+    "ipv4": "ip",
+    "ipv6": "ip",
+    "address": "ip",
+    "ip_address": "ip",
+    "ip address": "ip",
+    "addr": "ip",
+    "domain": "domain",
+    "host": "domain",
+    "hostname": "domain",
+    "fqdn": "domain",
+    "domain name": "domain",
+    "url": "url",
+    "uri": "url",
+}
+# A name whose last label is a file's extension is a file, not a host.
+_FILE_LABELS = frozenset(
+    {
+        "exe",
+        "dll",
+        "sys",
+        "bat",
+        "cmd",
+        "ps1",
+        "vbs",
+        "js",
+        "dat",
+        "bin",
+        "txt",
+        "log",
+        "tmp",
+        "ini",
+        "cfg",
+        "json",
+        "xml",
+        "lnk",
+        "scr",
+        "ocx",
+        "drv",
+        "msi",
+        "jar",
+    }
+)
+_HOST_PORT_RE = re.compile(r"^\[?([0-9a-fA-F:.]+?)\]?:(\d{1,5})$")
+
+
+def kept_network_values(artifact: Any) -> list[tuple[str, str]]:
+    """The addresses, names and URLs an analyst's artifact keeps, each as ``(kind, value)``.
+
+    Every cell of an artifact whose kind names network values, in any column
+    order; for any other artifact, the rows whose first cell names a network
+    type. A cell is read by what it parses as: a URL (and its host, address or
+    name, beside it), an address with or without its port, or a name. A type
+    word in a cell is the row's hint, never a value.
+    """
+    kind = str(getattr(artifact, "kind", "") or "").strip().lower()
+    networkish = any(
+        token.startswith(_NETWORK_ARTIFACT_WORDS) or token in _NETWORK_ARTIFACT_TOKENS
+        for token in re.split(r"[^a-z0-9]+", kind)
+    )
+    rows = _rows_of(artifact)
+    single = getattr(artifact, "value", None)
+    if not rows and single and networkish:
+        rows = [[str(single)]]
+    out: list[tuple[str, str]] = []
+    for row in rows:
+        hint = _TYPE_ALIASES.get(row[0].strip().lower()) if row else None
+        if not networkish and hint is None:
+            continue
+        for cell in row:
+            if cell.strip().lower() in _TYPE_ALIASES:
+                continue
+            for found in _cell_values(cell, hint):
+                if found not in out:
+                    out.append(found)
+    return out
+
+
+def _cell_values(cell: str, hint: str | None) -> list[tuple[str, str]]:
+    """What one cell holds: a URL and its host, an address, or a name; nothing otherwise."""
+    from maljan.extractors.network_extractor import (
+        host_is_public,
+        is_well_known_benign_host,
+        url_host,
+    )
+
+    text = str(cell or "").strip().strip("'\"`")
+    if not text or " " in text:
+        return []
+    if "://" in text:
+        host = url_host(text)
+        out = [("url", text)]
+        as_address = _address_of(host) if host else ""
+        if as_address:
+            out.append(("ip", as_address))
+        elif host and not is_well_known_benign_host(host):
+            # A well-known host is kept only as itself, never through a URL on it.
+            out.append(("domain", host))
+        return out
+    as_address = _address_of(text)
+    if as_address:
+        return [("ip", as_address)]
+    name = text.lower().rstrip(".")
+    if ":" in name:
+        name = name.rsplit(":", 1)[0] if name.rsplit(":", 1)[1].isdigit() else name
+    if hint == "domain":
+        # Named a domain by the row itself: kept as written, a private-use
+        # name included, and the export's own rule answers whether it publishes.
+        return [("domain", name)] if "." in name else []
+    if "." not in name or not host_is_public(name):
+        return []
+    if name.rsplit(".", 1)[-1] in _FILE_LABELS:
+        return []
+    return [("domain", name)]
+
+
+def _address_of(text: str) -> str:
+    """``text`` as a canonical address, with a port or brackets taken off, or ``""``."""
+    candidate = text.strip()
+    match = _HOST_PORT_RE.match(candidate)
+    if match and (candidate.startswith("[") or candidate.count(":") == 1):
+        candidate = match.group(1)
+    candidate = candidate.strip("[]")
+    return address_key(candidate) if _parses_as_an_address(candidate) else ""
 
 
 def _state_sandbox_facts(

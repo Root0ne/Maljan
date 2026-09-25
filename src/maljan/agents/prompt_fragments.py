@@ -149,13 +149,22 @@ def format_fragment(file_type: str, platform: str) -> str:
 # the only thing the negotiation runs on. What it loses is the table: the
 # report can only print an import list, a permission set or an endpoint list
 # if some analyst says it saw one.
+# How an analyst keeps a network value as an indicator. The platform publishes
+# a sandbox address the sample's tree did not make only when a model keeps it,
+# and reads the artifact tolerantly; this is the shape it asks for.
+ENDPOINTS_ROW_SHAPE = (
+    "A network endpoint you hold to be the sample's infrastructure is an artifact of "
+    'kind "endpoints" whose rows are ["ip", address], ["domain", name] or ["url", url]; '
+    "an address or a name you only mention in a claim is not kept as an indicator."
+)
+
 FINDINGS_BLOCK_FRAGMENT = (
     "\n\nAfter your findings, you may append one fenced block labelled "
     "maljan-findings containing JSON with two optional keys.\n"
     '"artifacts" is a list of the concrete things you established — hashes, '
     "imports, permissions, IOCs, processes, persistence entries, network "
     "endpoints. Each has a kind, a label, either a value or columns plus rows, "
-    "and evidence_ids naming the tool results you read them from.\n"
+    "and evidence_ids naming the tool results you read them from. " + ENDPOINTS_ROW_SHAPE + "\n"
     '"findings" is a list of your conclusions: a title, a detail, optional '
     "technique_ids, a confidence between 0 and 1, and evidence_ids.\n"
     "Every tool result you were shown starts with its id in brackets, for "

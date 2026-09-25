@@ -30,6 +30,7 @@ from maljan.agents.base_agent import FINAL_ANSWER_NUDGE
 from maljan.agents.judge_agent import COMPACT_BUNDLE_RULES, verdict_cut_violation
 from maljan.agents.network_analyst import NO_PACKET_TOOL_LINE, OTHER_TOOLS_THEN_ANALYZE
 from maljan.agents.prompt_fragments import (
+    ENDPOINTS_ROW_SHAPE,
     NO_TOOLS_STATEMENT,
     TOOL_FREE_TURN_STATEMENT,
     tools_statement,
@@ -396,6 +397,7 @@ PROMPTS: dict[str, str] = {
     "capture read statement": CaptureRead(
         packets_read=10, packets_in_capture=12, limit=10
     ).statement(),
+    "analyst findings block's endpoints row shape": ENDPOINTS_ROW_SHAPE,
     "capture refusal remediations": " ".join(
         [
             NO_CAPTURE_REMEDIATION.format(argument="pcap_path"),

@@ -173,7 +173,9 @@ def _with_the_hosts_of_published_urls(out: list[dict], typed: Any, kind: str | N
         )
 
 
-def _with_the_judge_s_values(out: list[dict], mr: dict, kind: str | None) -> None:
+def _with_the_judge_s_values(
+    out: list[dict], mr: dict, kind: str | None, typed: Any = None
+) -> None:
     """Add the values the judge's indicators name, each with the one rule's answer.
 
     The export asks the publish rule of every judge indicator before it carries
@@ -182,14 +184,17 @@ def _with_the_judge_s_values(out: list[dict], mr: dict, kind: str | None) -> Non
     a value the export declined is withheld here too and one it carries is
     published. A value the feed already has a row for keeps its row: its answer
     is the same one. Rows are added in place; a stored report the model cannot
-    read adds none, and says so in the log.
+    read adds none, and says so in the log. ``typed`` is the report as the
+    feed's one reading already holds it, so the rule's lookups are the ones
+    that reading built rather than a second set per value.
     """
     if not mr.get("judge_indicators"):
         return
     try:
         from maljan.reporting.models import MalwareReport
 
-        judged = judge_indicator_rows(MalwareReport.model_validate(mr))
+        report = typed if isinstance(typed, MalwareReport) else MalwareReport.model_validate(mr)
+        judged = judge_indicator_rows(report)
     except Exception as exc:  # noqa: BLE001 — a feed answers, and says what broke
         logger.error(
             "the judge's indicator values could not be asked the publish rule; none is "
@@ -701,7 +706,7 @@ class ReportService:
                     continue
                 for value in network.get(field) or []:
                     out.append({"kind": row_kind, "value": value, "source": "sandbox"})
-            _with_the_judge_s_values(out, mr, kind)
+            _with_the_judge_s_values(out, mr, kind, typed)
             _with_the_hosts_of_published_urls(out, typed, kind)
             rows = [row for row in out if row.get("value")]
             wanted = str(include or "published").strip().lower()

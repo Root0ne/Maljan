@@ -2425,11 +2425,24 @@ is assembled from what the run gathered rather than recomputed beside it:
   **CAPE, REST and mock reports carry no process on a flow**, so every address
   they record is unattributed and is published only when a model keeps it. The
   network block is projected from the job's whole report, never from a paged
-  view, and an address somebody watched is kept whatever its class and answered
+  view; the in-process sandbox views answer every row and page on request, and
+  their answers go through the MCP toolkit's own guardrail
+  (`ServerRegistry.answer_sizer`: the job's limit and ledger, the context
+  budget charged, a JSON answer shortened as a document whose notice names
+  `offset` and `limit`), and an address somebody watched is kept whatever its class and answered
   with `no:` when it cannot be published. The sandbox view marks public DNS
   resolvers, and the network block carries the attribution, the resolver fact,
-  `kept_by` (an analyst's artifact of endpoints, network values or IOCs) and
-  `mentioned_by` (an analyst's claim holding the value). The publish rule
+  `kept_by` and `mentioned_by` (an analyst's claim holding the value). A value
+  is kept by an analyst's artifact read tolerantly
+  (`ledger_projection.kept_network_values`): every cell of an artifact whose
+  kind names network values (`endpoints`, `network`, `iocs`, `c2`,
+  `network_iocs` and the like) or of a row whose first cell names a type (`ip`,
+  `ipv4`, `ipv6`, `address`, `domain`, `host`, `hostname`, `fqdn`, `url`,
+  `uri`), in either column order, an address with its port or in IPv6 bracket
+  form, and a URL together with its host. The judge's URL indicator keeps its
+  host the same way. A well-known benign host is kept only as itself, never
+  through a URL on it. `FINDINGS_BLOCK_FRAGMENT` states the shape it asks for
+  (`ENDPOINTS_ROW_SHAPE`). The publish rule
   (`stix_renderer.sandbox_row_kwargs`, asked through `emulation_kwargs` by the
   table, the export, `/iocs` and the judge's values alike) holds back a
   sandbox address the tree did not make, and a well-known benign name the
