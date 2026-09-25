@@ -215,8 +215,9 @@ ANNOTATIONS: dict[str, Annotation] = {
     "llm.max_spend_usd_per_job": {
         "title": "Spend ceiling per job (USD)",
         "description": (
-            "The most one job may spend on its models, in US dollars: a hard bound, nothing "
-            "is sent that could pass it. Empty, the default, is no ceiling. A call counts "
+            "The most one job may spend on its models, in US dollars: a hard bound against "
+            "the platform's prompt estimate (characters over three), nothing is sent that "
+            "could pass it by that measure. Empty, the default, is no ceiling. A call counts "
             "what it was charged: the cost its provider reported with the answer, else its "
             "reported usage (cached input, input and output tokens) at the rates in force "
             "when it was sent, from llm.model_prices first, then the vendored model table, "
@@ -1673,8 +1674,9 @@ ANNOTATIONS.update(
             "description": (
                 "Maximum seconds to wait for a Triage analysis to reach the reported "
                 "state, queueing behind other tenants included. With a run time set "
-                "below, it must be longer than that run time: the wait covers the run "
-                "and Triage's processing of it."
+                "below, it must be longer than that run time and also cover Triage's "
+                "processing of the run into a report; no margin for the processing is "
+                "guessed, so leave room for it."
             ),
             "applies_when": _SANDBOX_TRIAGE,
         },
@@ -1684,8 +1686,8 @@ ANNOTATIONS.update(
                 "How long the Triage VM runs the sample, sent with the submission as "
                 "defaults.timeout. Empty, the default, sends nothing and Triage's own "
                 "default applies. A value the account does not allow is refused by Triage, "
-                "and the submission error quotes its words. The run summary states the run "
-                "time Triage reports for the task."
+                "and the submission error quotes its words. The run summary states the "
+                "run-time limit Triage set for the task."
             ),
             "applies_when": _SANDBOX_TRIAGE,
         },

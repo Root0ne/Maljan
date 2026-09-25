@@ -156,9 +156,11 @@ class SandboxReport(BaseModel):
     screenshots: list[dict[str, Any]] = Field(default_factory=list)
     cti: dict[str, Any] = Field(default_factory=dict)
     unavailable: list[str] = Field(default_factory=list)
-    # How long the sandbox ran the sample, in seconds, as its own report says;
-    # ``None`` where it says nothing (never the time this platform asked for).
-    run_seconds: int | None = None
+    # The run-time limit the sandbox set for the task, in seconds, as its own
+    # report says (Triage's task ``timeout``): the limit, not a measured
+    # duration, and never the value this platform asked for. ``None`` where the
+    # report says nothing.
+    run_limit_seconds: int | None = None
     # True when no sandbox ran at all and this report stands in for one. A real
     # run that observed nothing is not synthetic: its emptiness is a finding.
     synthetic: bool = Field(default=False)
@@ -656,17 +658,18 @@ def triage_overview_to_sandbox_report(
         screenshots=[],
         cti={"family": _as_str_list(analysis.get("family")), "score": analysis.get("score")},
         unavailable=list(TriageSandboxProvider.UNAVAILABLE),
-        run_seconds=_triage_run_seconds(overview),
+        run_limit_seconds=_triage_run_limit(overview),
         raw=overview,
     )
 
 
-def _triage_run_seconds(overview: dict[str, Any]) -> int | None:
-    """How long Triage ran the sample: its behavioural tasks' ``timeout``, when they agree.
+def _triage_run_limit(overview: dict[str, Any]) -> int | None:
+    """The run-time limit Triage set for the task: its behavioural tasks' ``timeout``.
 
-    The overview lists each task with the run time it was given. ``None`` when
-    no behavioural task carries one, or when two carry different ones: one
-    figure for the run would then be a figure the report does not state.
+    The overview lists each task with the run-time limit it was given, not how
+    long it ran. ``None`` when no behavioural task carries one, or when two
+    carry different ones: one figure for the run would then be a figure the
+    report does not state.
     """
     tasks = overview.get("tasks")
     rows = list(tasks.values()) if isinstance(tasks, dict) else tasks

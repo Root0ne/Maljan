@@ -695,6 +695,11 @@ def spend_lines(spend: Any) -> list[str]:
     return lines
 
 
+def _sandbox_name(provider: str) -> str:
+    """A sandbox provider's name as a reader knows it."""
+    return {"triage": "Triage", "cape2": "CAPE", "cuckoo": "Cuckoo"}.get(provider, provider)
+
+
 def tool_latency_lines(latency: Any) -> list[str]:
     """What each agent's tool calls cost, and which single call cost the most.
 
@@ -829,9 +834,9 @@ class RunSummary:
     # ran, or the report is a recorded fixture. ``None`` when a sandbox
     # observed the run, which needs no sentence.
     sandbox: dict[str, str] | None = None
-    # How long the sandbox ran the sample, in seconds, as its report says
-    # (``info.duration``); ``None`` where it says nothing.
-    sandbox_run_seconds: int | None = None
+    # The run-time limit the sandbox set for the task, and which sandbox set
+    # it (``run_limit`` in the report); ``None`` where its report says nothing.
+    sandbox_run_limit: dict[str, Any] | None = None
     # Each model's measured generation rate and each per-call timeout it
     # produced (``llm.generation_rate.GenerationRates.snapshot``). ``None`` on
     # a run that measured no answer and sized no call.
@@ -872,10 +877,10 @@ class RunSummary:
             *([f"**Sandbox**: {self.sandbox['statement']}  "] if self.sandbox else []),
             *(
                 [
-                    f"**Sandbox run time**: {self.sandbox_run_seconds} s, as the sandbox "
-                    "reported it for the task  "
+                    f"**Sandbox run-time limit**: {self.sandbox_run_limit['seconds']} s, "
+                    f"the run-time limit {self.sandbox_run_limit['set_by']} set for the task  "
                 ]
-                if self.sandbox_run_seconds is not None
+                if self.sandbox_run_limit
                 else []
             ),
             *stage_duration_lines(self.stages),
@@ -1223,8 +1228,8 @@ class RunSummary:
             "tool_latency": dict(self.tool_latency) if self.tool_latency else None,
             "sandbox": dict(self.sandbox) if self.sandbox else None,
         }
-        if self.sandbox_run_seconds is not None:
-            result["sandbox_run_seconds"] = self.sandbox_run_seconds
+        if self.sandbox_run_limit:
+            result["sandbox_run_limit"] = dict(self.sandbox_run_limit)
 
         if self.validation:
             result["validation"] = {
@@ -1336,7 +1341,7 @@ class RunSummaryBuilder:
         self._stages: list[dict[str, Any]] = []
         self._triage: dict[str, Any] | None = None
         self._sandbox: dict[str, str] | None = None
-        self._sandbox_run_seconds: int | None = None
+        self._sandbox_run_limit: dict[str, Any] | None = None
         self._nudge: dict[str, Any] | None = None
         self._budget: dict[str, Any] | None = None
         self._tool_latency: dict[str, Any] | None = None
@@ -1467,14 +1472,18 @@ class RunSummaryBuilder:
             if found.status == OBSERVED
             else {"status": found.status, "statement": found.statement}
         )
-        info = report.get("info") if isinstance(report, dict) else None
-        duration = info.get("duration") if isinstance(info, dict) else None
-        self._sandbox_run_seconds = (
-            int(duration)
+        limit = report.get("run_limit") if isinstance(report, dict) else None
+        seconds = limit.get("seconds") if isinstance(limit, dict) else None
+        self._sandbox_run_limit = (
+            {
+                "seconds": int(seconds),
+                "set_by": _sandbox_name(str(limit.get("set_by") or "the sandbox")),
+            }
             if found.status == OBSERVED
-            and isinstance(duration, int | float)
-            and not isinstance(duration, bool)
-            and duration > 0
+            and isinstance(limit, dict)
+            and isinstance(seconds, int)
+            and not isinstance(seconds, bool)
+            and seconds > 0
             else None
         )
         return self
@@ -1820,7 +1829,7 @@ class RunSummaryBuilder:
             budget=self._budget,
             tool_latency=self._tool_latency,
             sandbox=self._sandbox,
-            sandbox_run_seconds=self._sandbox_run_seconds,
+            sandbox_run_limit=self._sandbox_run_limit,
             generation=self._generation,
             spend=self._spend,
         )

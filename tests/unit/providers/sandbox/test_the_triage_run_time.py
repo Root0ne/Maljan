@@ -5,7 +5,7 @@ at 180 s: nothing was sent as the run time, so Triage's own default applied.
 ``sandbox.triage.analysis_seconds`` is sent as the submission's
 ``defaults.timeout`` when set, and nothing is sent when it is not; the polling
 deadline must outlast it; a refusal is surfaced in Triage's words; and the run
-summary states the run time Triage reports for the task.
+summary states the run-time limit Triage set for the task.
 """
 
 from __future__ import annotations
@@ -102,16 +102,19 @@ class TestTheRunTimeTriageReports:
 
     def test_is_read_from_the_behavioural_tasks(self) -> None:
         report = triage_overview_to_sandbox_report(self._overview())
-        assert report.run_seconds == 150
+        assert report.run_limit_seconds == 150
 
     def test_two_tasks_that_disagree_state_none(self) -> None:
         overview = self._overview()
         first = next(iter(overview["tasks"].values()))
         first["timeout"] = 300
-        assert triage_overview_to_sandbox_report(overview).run_seconds is None
+        assert triage_overview_to_sandbox_report(overview).run_limit_seconds is None
 
     def test_the_run_summary_states_it(self) -> None:
         view = to_cape_shaped_dict(triage_overview_to_sandbox_report(self._overview()))
         summary = RunSummaryBuilder(start_time=0.0).set_sandbox(view).build()
-        assert summary.to_dict()["sandbox_run_seconds"] == 150
-        assert "**Sandbox run time**: 150 s, as the sandbox reported it" in summary.to_markdown()
+        assert summary.to_dict()["sandbox_run_limit"] == {"seconds": 150, "set_by": "Triage"}
+        assert (
+            "**Sandbox run-time limit**: 150 s, the run-time limit Triage set for the task"
+            in summary.to_markdown()
+        )
