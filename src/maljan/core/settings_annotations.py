@@ -1495,9 +1495,12 @@ ANNOTATIONS.update(
         "static.r2.binary_path": {
             "title": "radare2 MCP binary",
             "description": (
-                "Executable that serves the radare2 MCP tools, looked up on PATH "
-                "when it is a bare name. The provider's connection test reports "
-                "clearly when it is missing."
+                "Executable that serves the radare2 MCP tools. A path is used as it "
+                "is; a bare name is looked up on the worker's PATH, then where "
+                "r2pm -ci r2mcp installs it (R2PM_BINDIR, R2PM_PREFIX/bin, then "
+                "radare2/prefix/bin under the user's data directory). The "
+                "connection test and a run that cannot find it both name every "
+                "place looked."
             ),
             "applies_when": _STATIC_R2,
             "probe": "r2",
