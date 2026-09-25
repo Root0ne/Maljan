@@ -10,9 +10,9 @@ change landed on `main`.
 
 - **An all-tools team to import.** `docs/examples/profiles/all-tools.json` is a
   settings import document: the triage pack and triage; one static stage of
-  three analysts on three tools (`static` on the sidecars, `static_r2` on
-  radare2 with the analysis and knowledge servers, `static_qu1cksc0pe` on the
-  `qu1cksc0pe` server); `reverser_ghidra`, the seeded reverser prompt on
+  three analysts on three tools (`static` on the sidecars, `all_tools_static_r2` on
+  radare2 with the analysis and knowledge servers, `all_tools_qu1cksc0pe` on the
+  `qu1cksc0pe` server); `all_tools_reverser_ghidra`, the seeded reverser prompt on
   Ghidra; detonation, network, debate, verdict and report. A test validates it
   as the import endpoint does and resolves every agent against stub servers
   and a stub Ghidra. [configuration.md](docs/configuration.md) says how to
@@ -31,7 +31,6 @@ change landed on `main`.
   variables:** `GHIDRA_JAVA_OPTS`, `GHIDRA_MEM_LIMIT` (memory and swap) and
   `GHIDRA_RESTART`, defaulting to `-Xmx4g -XX:+UseG1GC`, `6g` and
   `unless-stopped`.
-
 - **An operator's spend ceiling.** `llm.max_spend_usd_per_job` (no default:
   none) and `llm.model_prices` (empty) price every recorded call from its
   provider-reported cached input, input and output tokens at the answering
@@ -938,7 +937,6 @@ change landed on `main`.
   definition with no `tools` key gets the list of its role's seed (`static`,
   `dynamic`, `network`, `report`, `lead`); a list that is present, empty
   included, is kept as written.
-
 - **No agent loop has a default step or time limit.** `react_agent_max_steps`
   (was 10) and `react_agent_timeout` (was 180 s) are empty, the deprecated
   `react_agent_*_overrides` maps ship empty (were static 40 steps / 1,500 s,
@@ -2193,7 +2191,6 @@ change landed on `main`.
   `reverser_custom` with every reference rewritten.
 - **A degrading static provider that did not attach was a log line only.** It
   is now a degradation reason on the run summary, with its remedy.
-
 - **A model call's whole-call deadline is that call failing, not the loop's
   clock.** In a loop with no time limit a lone model that ran past it ended
   the analyst with "exceeded hard cap of none" and its gathered evidence
@@ -5091,8 +5088,8 @@ change landed on `main`.
 **Importing the all-tools team.** The document holds two whole-map settings,
 and an import replaces what it names, so merge it into an export first (the
 `jq` line is in [configuration.md](docs/configuration.md), *An all-tools
-team*). Your own `static_r2`, `static_qu1cksc0pe` or `reverser_ghidra`, if you
-have one under that key, is replaced by the document's; nothing else is. A job
+team*). Its agents are all keyed `all_tools_*` and its team `all_tools`, so
+none of your own definitions or teams is replaced. A job
 naming a team with an agent on Ghidra is now refused while Ghidra is not
 answering — start it before submitting.
 

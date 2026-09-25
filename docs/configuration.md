@@ -429,7 +429,7 @@ names each agent, the provider and its address as scheme and host:
 ```
 A static provider this team needs is not ready, and a run without it fails when
 that agent starts. Start it, switch it on or correct its address, or choose a
-team that does not need it. agent 'reverser_ghidra' needs static provider
+team that does not need it. agent 'all_tools_reverser_ghidra' needs static provider
 'ghidra' at http://ghidra-mcp:8089, which is not ready: ConnectError: ...
 ```
 
@@ -1527,9 +1527,9 @@ its provider even when that is not the deployment's global one.
 `docs/examples/profiles/all-tools.json` is a team to import rather than one
 that ships: the triage pack and `triage`; one `static` stage of three analysts
 on three tools — `static` (the analysis, knowledge and VirusTotal servers, on
-the global provider), `static_r2` (`static_provider: "r2"` with the analysis
-and knowledge servers) and `static_qu1cksc0pe` (a generic agent on the
-`qu1cksc0pe` server); `reversing` with `reverser_ghidra`, the seeded reverser
+the global provider), `all_tools_static_r2` (`static_provider: "r2"` with the analysis
+and knowledge servers) and `all_tools_qu1cksc0pe` (a generic agent on the
+`qu1cksc0pe` server); `reversing` with `all_tools_reverser_ghidra`, the seeded reverser
 prompt on `static_provider: "ghidra"`; `dynamic` when there is a sandbox
 report; `network` when there is a capture or a sandbox report; then `debate`,
 `verdict` and `report`. The later stages depend on every earlier analysis
@@ -1538,8 +1538,8 @@ stage and read their findings (`inject_upstream: findings`).
 It is a settings import document (`maljan-settings/1`) holding
 `core.agents.definitions` and `core.agents.profiles`. Each of those is one
 setting holding a whole map, and an import replaces what it names, so merge the
-document into your own export first — the document's entries win, yours are
-kept:
+document into your own export first. The document's keys are all `all_tools_*`
+(the team is `all_tools`), so it adds entries and replaces none of yours:
 
 ```bash
 curl -s http://localhost:8000/api/v1/settings/export \

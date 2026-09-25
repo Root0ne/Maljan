@@ -232,7 +232,7 @@ class TestTheDocument:
     def test_the_settings_api_accepts_it(self) -> None:
         validated = validate_agent_map(dict(_document()["values"]), STORED)
         assert TEAM in validated[AGENT_PROFILES_KEY]
-        for key in ("static_r2", "static_qu1cksc0pe", "reverser_ghidra"):
+        for key in ("all_tools_static_r2", "all_tools_qu1cksc0pe", "all_tools_reverser_ghidra"):
             assert key in validated[AGENT_DEFINITIONS_KEY]
 
     def test_the_stages_are_the_team_the_run_needs(self, ghidra_url: str) -> None:
@@ -249,16 +249,16 @@ class TestTheDocument:
             "report",
         ]
         by_key = {stage.key: stage for stage in team.stages}
-        assert by_key["static"].agents == ["static", "static_r2", "static_qu1cksc0pe"]
-        assert by_key["reversing"].agents == ["reverser_ghidra"]
+        assert by_key["static"].agents == ["static", "all_tools_static_r2", "all_tools_qu1cksc0pe"]
+        assert by_key["reversing"].agents == ["all_tools_reverser_ghidra"]
         assert by_key["reversing"].inject_upstream == "findings"
         assert by_key["network"].when == "has_pcap or has_sandbox_report"
 
     def test_the_reverser_is_the_seeded_one_on_ghidra(self, ghidra_url: str) -> None:
         """The document carries the seeded prompt verbatim, so the two cannot drift."""
         definitions = _settings(ghidra_url).agents.definitions
-        assert definitions["reverser_ghidra"].prompt == REVERSER_PROMPT
-        assert definitions["reverser_ghidra"].static_provider == "ghidra"
+        assert definitions["all_tools_reverser_ghidra"].prompt == REVERSER_PROMPT
+        assert definitions["all_tools_reverser_ghidra"].static_provider == "ghidra"
 
     def test_every_provider_the_run_opens_is_mirrored_for(self, ghidra_url: str) -> None:
         settings = _settings(ghidra_url)
@@ -269,7 +269,7 @@ class TestTheDocument:
             for key in reachable_agents(settings, named)
             if reads_static_provider(settings.agents.definitions.get(key))
         }
-        assert opens == {"static", "static_r2", "reverser_ghidra"}
+        assert opens == {"static", "all_tools_static_r2", "all_tools_reverser_ghidra"}
 
 
 class TestEveryAgentResolves:
@@ -280,7 +280,7 @@ class TestEveryAgentResolves:
         assert resolved.degradation_reasons == ()
 
     def test_the_r2_clone_reads_r2_and_two_sidecars(self, container: _Container) -> None:
-        resolved = _resolve(container, "static_r2")
+        resolved = _resolve(container, "all_tools_static_r2")
         assert _servers(resolved) == {"analysis", "knowledge"}
         assert resolved.static_provider_id == "r2"
         # The class opens r2 when it runs; resolution describes it as expected.
@@ -288,7 +288,7 @@ class TestEveryAgentResolves:
         assert "load_program" not in resolved.prompt
 
     def test_the_qu1cksc0pe_analyst_reads_its_server_only(self, container: _Container) -> None:
-        resolved = _resolve(container, "static_qu1cksc0pe")
+        resolved = _resolve(container, "all_tools_qu1cksc0pe")
         assert {tool.name for tool in resolved.tools} == {
             "qu1cksc0pe_read",
             "qu1cksc0pe_search",
@@ -296,7 +296,7 @@ class TestEveryAgentResolves:
         assert resolved.degradation_reasons == ()
 
     def test_the_reverser_gets_ghidra_s_tools_and_its_workflow(self, container: _Container) -> None:
-        resolved = _resolve(container, "reverser_ghidra")
+        resolved = _resolve(container, "all_tools_reverser_ghidra")
         names = {tool.name for tool in resolved.tools}
         assert {"load_program", "decompile_function", "get_xrefs_to"} <= names
         assert {"knowledge_read", "virustotal_read"} <= names
@@ -309,13 +309,13 @@ class TestEveryAgentResolves:
     def test_the_reverser_on_r2_would_get_r2_s_workflow_instead(
         self, container: _Container
     ) -> None:
-        container.config.agents.definitions["reverser_ghidra"].static_provider = "r2"
+        container.config.agents.definitions["all_tools_reverser_ghidra"].static_provider = "r2"
         r2 = container.get_static_provider("r2")
         r2.get_tools = lambda: [  # type: ignore[method-assign]
             StructuredTool.from_function(func=lambda: "ok", name="open_file", description="o")
         ]
         r2.open = lambda job: None  # type: ignore[method-assign]
-        resolved = _resolve(container, "reverser_ghidra")
+        resolved = _resolve(container, "all_tools_reverser_ghidra")
         assert "open_file" in {tool.name for tool in resolved.tools}
         assert R2StaticProvider.R2_PROMPT_FRAGMENT in resolved.prompt
         assert GHIDRA_WORKFLOW not in resolved.prompt
