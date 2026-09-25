@@ -86,6 +86,21 @@ describe("one list from the two endpoints", () => {
     );
     expect(rows.map((r) => r.id)).toEqual(["job-1", "job-7"]);
     expect(rows[1].status).toBe("completed");
+    expect(rows[1].incompleteReason).toBeNull();
+  });
+
+  it("marks a report a failed job kept, joined or on its own", () => {
+    const note = "This report was built and the run failed after it: node judge raised X.";
+    const joined = analysisRows(
+      [job({ status: "failed" })],
+      [report({ incomplete_reason: note })],
+    );
+    expect(joined[0].status).toBe("failed");
+    expect(joined[0].incompleteReason).toBe(note);
+
+    const alone = analysisRows([], [report({ incomplete_reason: note })]);
+    expect(alone[0].status).toBe("failed");
+    expect(alone[0].incompleteReason).toBe(note);
   });
 
   it("orders the whole list newest first, however the rows were built", () => {

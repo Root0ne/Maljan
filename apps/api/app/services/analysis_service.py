@@ -259,11 +259,14 @@ class AnalysisService:
         )
         status_counts: dict[str, int] = {row[0]: int(row[1]) for row in status_result.all()}
 
-        # Verdict distribution (from reports of user's jobs)
+        # Verdict distribution, over completed jobs only, as the average
+        # duration and the tool usage are. A failed job can keep the report it
+        # built (marked incomplete); ``jobs_by_status`` counts that job as
+        # failed, and its verdict is not a completed run's verdict.
         verdict_result = await self.db.execute(
             select(AnalysisReport.verdict, func.count())
             .join(AnalysisJob, AnalysisReport.job_id == AnalysisJob.id)
-            .where(AnalysisJob.created_by == user.id)
+            .where(AnalysisJob.created_by == user.id, AnalysisJob.status == "completed")
             .group_by(AnalysisReport.verdict)
         )
         verdict_counts: dict[str, int] = {row[0]: int(row[1]) for row in verdict_result.all()}

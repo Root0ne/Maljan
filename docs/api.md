@@ -116,7 +116,13 @@ A job that failed after its report was built has that report, served by the
 same routes. Its `incomplete_reason` is one sentence saying where the run
 failed, the exception's class and the error id, and the same sentence is among
 its degradation reasons; the job itself stays `failed`. A report of a run that
-completed has `incomplete_reason: null`.
+completed has `incomplete_reason: null`. `GET /reports` carries the same field
+on each list item. The `stix`, `iocs`, `signatures/{kind}` and `mitre` routes
+serve a kept report's content as it was built, with nothing added to the
+exported bundle: the mark is on the report, its degradation reasons and the
+list item. The dashboard's `verdict_distribution` counts completed jobs only,
+like its average duration and its tool usage; a failed job that kept its
+report is counted under `jobs_by_status.failed` and not by its verdict.
 
 `stix` serves the exported bundle. `stix?source=judge` serves the judge's own
 bundle beside it, as `{"bundle": …, "labels": {…}}`: the bundle as the pipeline

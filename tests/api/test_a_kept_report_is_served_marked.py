@@ -105,3 +105,57 @@ def test_the_rendered_report_says_it_is_incomplete() -> None:
         }
     )
     assert NOTE in MarkdownRenderer().render(report)
+
+
+@pytest.mark.asyncio
+async def test_the_report_list_carries_the_mark() -> None:
+    from unittest.mock import AsyncMock
+
+    from app.services.report_service import ReportService
+
+    def _listed(reason: str | None) -> Any:
+        row = _row(reason)
+        row.created_at = None
+        row.job = SimpleNamespace(sample=SimpleNamespace(original_filename="a.exe"))
+        return row
+
+    count = MagicMock()
+    count.scalar.return_value = 2
+    page = MagicMock()
+    page.scalars.return_value.all.return_value = [_listed(NOTE), _listed(None)]
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[count, page])
+
+    listed = await ReportService(db).list_reports(user=MagicMock(id=uuid.uuid4()))
+
+    assert [item["incomplete_reason"] for item in listed["items"]] == [NOTE, None]
+
+
+@pytest.mark.asyncio
+async def test_the_verdict_distribution_counts_completed_jobs_only() -> None:
+    """A failed job's kept verdict is not a completed run's verdict.
+
+    ``jobs_by_status`` counts that job as failed; the distribution beside it
+    is read over completed jobs, as the average duration and the tool usage
+    are.
+    """
+    from unittest.mock import AsyncMock
+
+    from app.services.analysis_service import AnalysisService
+
+    statements: list[Any] = []
+
+    async def _execute(statement: Any) -> Any:
+        statements.append(statement)
+        result = MagicMock()
+        result.scalar.return_value = 0
+        result.all.return_value = []
+        return result
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=_execute)
+    await AnalysisService(db).get_user_stats(MagicMock(id=uuid.uuid4()))
+
+    verdict = next(s for s in statements if "analysis_reports.verdict" in str(s))
+    compiled = verdict.compile(compile_kwargs={"literal_binds": True})
+    assert "analysis_jobs.status = 'completed'" in str(compiled)

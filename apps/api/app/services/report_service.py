@@ -330,6 +330,9 @@ class ReportService:
                     "created_at": report.created_at.isoformat() if report.created_at else None,
                     "techniques_count": len(mitre) if isinstance(mitre, list) else 0,
                     "findings_count": len(findings),
+                    # A report kept from a job that failed after it was built
+                    # says so in the list too; ``None`` for a completed run.
+                    "incomplete_reason": report.incomplete_reason,
                 }
             )
 

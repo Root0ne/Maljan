@@ -85,6 +85,9 @@ export interface ReportSummaryDTO {
   created_at: string;
   techniques_count: number;
   findings_count: number;
+  /** Set on a report kept from a run that failed after the report was built:
+   *  where the run failed and the error id. Absent or `null` otherwise. */
+  incomplete_reason?: string | null;
 }
 
 export interface AgentFindingDTO {
