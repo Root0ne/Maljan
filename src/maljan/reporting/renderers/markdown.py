@@ -1693,6 +1693,10 @@ class MarkdownRenderer:
         unresolved = [row for row in (validation.get("unresolved") or []) if isinstance(row, dict)]
         exports = [row for row in unresolved if str(row.get("code", "")).startswith("stix.")]
         others = [row for row in unresolved if row not in exports]
+        # A question the producer answered as it allows is not left unresolved:
+        # it is listed after the count, marked, and not counted in it.
+        answered = [row for row in others if row.get("answered")]
+        others = [row for row in others if row not in answered]
         if validation:
             not_run = validation.get("not_run") or []
             lines.append(
@@ -1710,7 +1714,14 @@ class MarkdownRenderer:
                         f"{row.get('message') or ''}"
                     )
                 )
-            if others:
+            for row in answered:
+                lines.append(
+                    _item(
+                        f"`{row.get('code', '')}` ({row.get('agent', '')}) (answered): "
+                        f"{row.get('message') or ''}"
+                    )
+                )
+            if others or answered:
                 lines.append("")
         if exports:
             lines.extend(["**Export decisions:**", ""])

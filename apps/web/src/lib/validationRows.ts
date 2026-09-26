@@ -55,11 +55,25 @@ export interface ValidationRow {
    *  strings on the Python side, so the flag travels as `"true"` and the
    *  absence of the key is the other answer. */
   advisory?: boolean | string;
+  /** The producer was asked and answered as the question allows, so the row
+   *  records its answer and is not a finding left unfixed. A string on the
+   *  wire (`"true"`), like `advisory`. */
+  answered?: boolean | string;
 }
 
 /** Whether the platform declined to act on this row. */
 export function isAdvisory(row: { advisory?: boolean | string }): boolean {
   return row.advisory === true || row.advisory === "true";
+}
+
+/** Whether the producer answered this row's question as the question allows. */
+export function isAnswered(row: { answered?: boolean | string }): boolean {
+  return row.answered === true || row.answered === "true";
+}
+
+/** The Run record's colour for a row: muted for an answered question, orange otherwise. */
+export function validationRowClass(row: ValidationRow): string {
+  return isAnswered(row) ? "text-text-muted" : "text-status-orange";
 }
 
 /** Whether this row records what the export left out rather than what a producer kept. */
@@ -73,6 +87,11 @@ export function validationRowText(row: ValidationRow): string {
   // whole record, so it wrote the row down and dropped nothing for it. Read as
   // "left unfixed" it accused a producer of ignoring a correction it was right
   // to ignore.
+  // The producer's answer to a question it was asked, which is what the
+  // question allowed: not something it left unfixed.
+  if (isAnswered(row)) {
+    return `answered by ${row.agent} — ${row.code}: ${row.message}`;
+  }
   if (isAdvisory(row)) {
     return `noted for ${row.agent}, nothing dropped — ${row.code}: ${row.message}`;
   }

@@ -794,6 +794,7 @@ def _hand_over_the_record(caller: Any, callee: Any, *, still_running: bool = Tru
                 message=message,
                 path=str(row.get("path", "")),
                 advisory=bool(row.get("advisory")),
+                answered=bool(row.get("answered")),
                 route=route,
                 sentence=sentence,
             )

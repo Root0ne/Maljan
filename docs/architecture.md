@@ -1259,7 +1259,10 @@ were, the analyst is asked once in its validation turn
 leave a peer's it disputes under it. Asked and kept there, the headings are
 the analyst's answer: the validation record holds it ("Asked, the analyst kept
 N CLAIM heading(s) under its DISPUTES section; they are not read as its own
-claims"), logged at info, and the run is not marked degraded for it. An answer
+claims"), logged at info, and the run is not marked degraded for it. The row
+carries `"answered": "true"`: the report lists it marked "(answered)" and
+leaves it out of the count of findings left unresolved, and the console draws
+it muted. An answer
 in force the question was never put to (a nudged answer, a validation turn not
 asked for want of time, a path with no validation turn) is stated as a
 degradation reason apart from `claims_unread_reason` ("wrote N claim

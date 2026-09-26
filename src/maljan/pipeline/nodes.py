@@ -478,6 +478,9 @@ def _violations_from_rows(rows: Any) -> list[Violation]:
                     # anything may act on it; rebuilt without the flag, an
                     # advisory absence would come back as a reason to drop.
                     advisory=bool(row.get("advisory")),
+                    # And an answered question stays one, rather than coming
+                    # back as a finding left unfixed.
+                    answered=bool(row.get("answered")),
                 )
             )
     return out

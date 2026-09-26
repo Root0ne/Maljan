@@ -133,6 +133,12 @@ class Violation:
     # found where no turn was left to ask on. A row that says the producer
     # "kept" something when asked is only true of a row that was asked.
     asked: bool = True
+    # A question the producer was asked and answered as the question allows,
+    # recorded as what it answered rather than as something it left unfixed:
+    # an analyst that keeps a peer's claim under its DISPUTES section when
+    # asked has done what the question told it. Carried as ``"answered":
+    # "true"`` like ``advisory``, and left out of a report's unresolved count.
+    answered: bool = False
     # What the finding is about, by a fact that survives the retry: the
     # technique a credit names, the malware object's name. Two answers of one
     # judge number their objects afresh, and an answer to a credit question
@@ -157,6 +163,7 @@ class Violation:
             "sentence": self.sentence,
             "route": ROUTE_SEPARATOR.join(self.route),
             **({} if self.asked else {"asked": "false"}),
+            **({"answered": "true"} if self.answered else {}),
             **({"subject": self.subject} if self.subject else {}),
         }
 
@@ -208,6 +215,7 @@ class ValidationTally:
                 "message": v.message,
                 **({"advisory": "true"} if v.advisory else {}),
                 **({} if asked and v.asked else {"asked": "false"}),
+                **({"answered": "true"} if v.answered else {}),
                 **({"subject": v.subject} if v.subject else {}),
             }
             for v in violations
@@ -305,6 +313,7 @@ def claims_kept_under_disputes_finding(count: int) -> Violation:
             f"Asked, the analyst kept {int(count)} CLAIM heading(s) under its DISPUTES section; "
             "they are not read as its own claims."
         ),
+        answered=True,
     )
 
 
@@ -5770,6 +5779,9 @@ def validation_metrics(
                 # And whether the producer was ever shown it: a finding the
                 # answer to the last retry raised first was never a question.
                 **({} if violation.asked else {"asked": "false"}),
+                # And whether it was answered as the question allows, which is
+                # not a finding left unfixed.
+                **({"answered": "true"} if violation.answered else {}),
                 **({"subject": violation.subject} if violation.subject else {}),
             }
         )

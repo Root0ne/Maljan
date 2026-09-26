@@ -2262,8 +2262,9 @@ change landed on `main`.
   and claims under it are recorded when none of the answer's own was read;
   beside the answer's own claims, the analyst is asked once whether they are
   its own (`isr.claims_under_disputes`). Kept there when asked, they are the
-  analyst's answer, recorded in the validation findings and not a
-  degradation; an answer the question was never put to says so as a
+  analyst's answer, recorded in the validation findings as answered (listed
+  "(answered)", not counted as left unresolved, drawn muted in the console)
+  and not a degradation; an answer the question was never put to says so as a
   degradation reason. The reason is kept on the answer and carried only for
   the answers in force.
 - **A technique line is one id, or it is kept whole and asked about.**
