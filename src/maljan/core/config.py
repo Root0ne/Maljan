@@ -1292,6 +1292,8 @@ FORMER_SEED_PROMPT_DIGESTS: dict[str, frozenset[str]] = {
             "3f843ad560c68f70869031d79e600cad9ef9a3f77468efb41cbeb67d23f6be60",
             "3e0c00643b9359a348bfcdd9f9947d80b49395218351befdf292c4a962919afc",
             "6a73348166297c3296f6f829727799b5929c4ec55049e281edb44b7f6b810267",
+            "486bffd12746ef38cdd4bcdc94413e03584a5009abb2e4f5bfde6a6d6d3e2875",
+            "f0add93b08ffd9897fdb84d80f16f8b956681e28c2c3fbce8276f2746c6388b7",
         }
     ),
     "triage": frozenset(
