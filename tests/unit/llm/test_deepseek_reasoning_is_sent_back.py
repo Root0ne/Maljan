@@ -227,7 +227,11 @@ class TestOnlyWhereItIsAskedFor:
         from maljan.llm import openai_provider
 
         model = _model(_DeepSeek())
-        parent = type(model).__mro__[1]
+        # The class the passback subclasses, under the one that answers every call.
+        passback = next(
+            c for c in type(model).__mro__ if c in openai_provider._REASONING_CLASSES.values()
+        )
+        parent = passback.__mro__[1]
         said = AIMessage(content="x", additional_kwargs={"reasoning_content": THOUGHT})
 
         def _one_message(*_a: Any, **_k: Any) -> dict[str, Any]:
