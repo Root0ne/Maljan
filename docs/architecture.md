@@ -313,11 +313,14 @@ published as the negotiation's final confidence.
 
 A single local model server has one slot, and fanning out three analysts onto
 it produces queue thrash rather than speed; a hosted API serves each request on
-its own. `auto` tells them apart per job (`pipeline/analyst_mode.py`): Ollama,
-or an OpenAI-compatible server at a local address, runs the analysts one after
-another unless its llama.cpp `/props` reports more than one slot; anything else
-runs them in parallel. The revision round follows the same mode, and the run
-summary's `profile.analyst_mode` says which it was and why.
+its own. `auto` tells them apart per job (`pipeline/analyst_mode.py`), on a
+thread before the job is built: Ollama, or an OpenAI-compatible host that is or
+resolves to a local address (or is a name only a local resolver answers, like
+`host.docker.internal`), runs the analysts one after another unless its
+llama.cpp `/props` reports more than one slot; a host that resolves only to
+public addresses runs them in parallel; one that does not resolve runs them one
+after another. A revision round follows the stages it revises, and the run
+summary's `profile.analyst_mode` says what every stage and round ran in and why.
 
 ### The triage pack
 

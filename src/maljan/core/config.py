@@ -450,13 +450,14 @@ class LLMConfig(BaseModel):
     # Whether the analysts of a stage that sets no run mode of its own, and the
     # revision round, run at once or one after another. Three values:
     #
-    # * ``"auto"`` (the default) decides per job from what the platform knows
-    #   about the models the analysts call (``pipeline.analyst_mode``): a
-    #   hosted API serves requests concurrently, so they run in parallel; a
-    #   runtime on this machine or network (Ollama, or an OpenAI-compatible
-    #   server at a loopback, link-local or private address) runs them one at
-    #   a time, unless it is a llama.cpp server whose ``/props`` reports more
-    #   than one slot. The mode and why are logged and in the run summary.
+    # * ``"auto"`` (the default) decides per job from the endpoints of the
+    #   models the analysts call (``pipeline.analyst_mode``): a host that
+    #   resolves only to public addresses is a hosted API and runs them in
+    #   parallel; Ollama, or a host that is or resolves to a local address or
+    #   is a name only a local resolver answers, runs them one at a time
+    #   unless its llama.cpp ``/props`` reports more than one slot; a host that
+    #   does not resolve runs them one at a time. The mode and why are logged
+    #   and in the run summary.
     # * ``"true"`` always runs them in parallel.
     # * ``"false"`` always runs them one after another.
     #

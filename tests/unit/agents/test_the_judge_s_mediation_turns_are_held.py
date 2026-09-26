@@ -2,8 +2,9 @@
 
 The mediation loop handed the bare model to the ReAct executor, which bound the
 tools itself; nothing could set a turn's cap, so every mediation turn was
-admitted only at its whole cap. Run 4 refused one at 0.12 USD spendable for
-exactly that ("its model takes no cap of its own per call"). The model is now
+admitted only at its whole cap. A 2.00 USD DeepSeek run refused one with 0.12
+USD spendable for exactly that ("its model takes no cap of its own per call").
+The model is now
 bound to its tools before the executor sees it, and each turn's held cap is
 set on that binding.
 """

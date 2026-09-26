@@ -1235,7 +1235,14 @@ fraction:
   move the report's plan), else its largest tool-loop turn. It is also the
   smallest answer a report call's admission demands, so what is kept for a
   report call is what makes it. With no answer measured the reserve is not
-  sized.
+  sized;
+- each kind also keeps its validation retries (the correction turn a
+  validation loop sends when an answer breaks a rule): one per planned call
+  until a call of the kind is made, then `(retries + 1) / (calls + 1)` of this
+  job's own count for the kind, so a call whose retry has not been asked yet
+  is never planned without one. A retry is planned with the answer it corrects
+  in its prompt. The rows say how many retries are kept and from what
+  (`retries`, `retries_from`, `retry_prompt_tokens`).
 
 Each row of `run_summary.spend.reserve` also states its expected charge
 (`expected_usd`): the first call of a kind with its prompt uncached, and the
@@ -1252,15 +1259,21 @@ an unplanned retry spends only what is left above the plan.
 `run_summary.spend.reserve` shows the derivation, row by row, as it stood when
 the summary was written.
 
-*A refusal is not exhaustion.* A call the ceiling refuses is not sent, its
-refusal is logged with its numbers and counted (`run_summary.spend.refused_calls`),
-and its caller takes its salvage path: a tool loop whose next turn is refused
-ends its tool phase and its agent writes its answer from what it gathered, and
-the budget record says which call was refused. The job goes on while a call of
-any kind it makes — each at the smallest prompt it has sent, with its own cap —
-would still be admitted: a mediation turn refused at its whole cap does not
-stop the revisions after it. The spend is *exhausted* when the ceiling is
-reached, or when a refusal leaves nothing else that fits. From then on every
+*A refusal is not exhaustion.* A call that does not fit only because other
+calls in flight hold their worst case — a parallel analyst's turn held to what
+was left — waits for them to settle, since they usually settle far below what
+they reserved, for as long as its own deadline allows. A call the ceiling
+refuses is not sent, its refusal is logged with its numbers and counted
+(`run_summary.spend.refused_calls`), and its caller takes its salvage path: a
+tool loop whose next turn is refused ends its tool phase and its agent writes
+its answer from what it gathered, and the budget record says which call was
+refused. The job goes on while a call of any kind made since the latest stage
+began — each at the smallest prompt it was sent with, with its own cap — would
+still be admitted: a mediation turn refused at its whole cap does not stop the
+revisions after it. A refusal made while other calls are in flight never
+exhausts the spend; the question is asked again once none is. The spend is
+*exhausted* when the ceiling is reached, or when, with no call in flight, a
+refusal leaves nothing else that fits. From then on every
 gate reads it, `run_summary.spend` says `exhausted` with when and why, no
 further negotiation round, chunk or tool loop is started, an ask is refused,
 every running tool loop ends its tool phase and its agent writes its answer
@@ -1554,38 +1567,54 @@ pipeline → Teams) is an ordered list of stages. Each stage is:
 
 `core.llm.parallel_analysts` is `auto` (the default), `true` or `false`. It
 decides how the agents of every analysis stage whose own `mode` is unset run —
-all at once, or one after another — and how the debate's revision round runs
-its analysts. A stage whose `mode` is set keeps it, whatever this key says.
+all at once, or one after another. A stage whose `mode` is set keeps it,
+whatever this key says. A debate's revision round runs the way the stages it
+revises run: in parallel only when every one of them does.
 
 - `true` always runs them in parallel; `false` always runs them one after
   another.
-- `auto` is decided per job from the models the analysts call (every model an
-  analyst may call, its fallbacks included). A model served by Ollama, or by an
-  OpenAI-compatible server at a loopback, link-local or private address, is a
-  runtime on one machine and is taken to serve one request at a time — unless
-  it is a llama.cpp server whose `/props` reports `total_slots` above one. Any
-  other endpoint is a hosted API and serves requests concurrently — unless its
-  `/props` reports exactly one slot. The slot count is read from the `/props`
-  answer the context-window probe already asks for; no request is added. One
-  model taken to serve one request at a time makes the whole job sequential,
-  because concurrent analysts on a single-slot server clobber each other's
-  per-slot state and every step re-processes its prompt. A mock job runs its
-  analysts one after another.
+- `auto` is decided per job from the endpoints of the models the analysts call
+  (every model an analyst may call, its fallbacks included):
+  - a model served by Ollama is a runtime on one machine, taken to serve one
+    request at a time;
+  - an OpenAI-compatible endpoint's host is resolved. A loopback, private,
+    link-local or shared-range (`100.64.0.0/10`) address — written as one, or
+    what the name resolves to (a compose service name, a Tailscale name) — and
+    a name only a local resolver answers (`localhost`, `*.local`,
+    `*.internal`, `host.docker.internal`, `host.containers.internal`) is a
+    local server. Its `/props` is asked for `total_slots` (the request the
+    context-window probe makes anyway): more than one slot runs the analysts
+    in parallel; one slot, or no answer, one after another;
+  - a host that resolves only to public addresses is a hosted API and runs
+    them in parallel, unless its `/props` reports exactly one slot;
+  - a host that does not resolve runs them one after another: it could not be
+    told whether the endpoint is hosted;
+  - the Anthropic and Gemini APIs are hosted.
 
-The job logs the mode it chose and why (`Analysts run in parallel: …`), and
-`run_summary.profile.analyst_mode` carries `mode`, `setting` and `reason`. An
-unset stage that cannot run in parallel in its team — a debate hands over to
-exactly one node, and a parallel stage of two agents is two nodes — runs one
-after another, and the log says why.
+  One model taken to serve one request at a time makes the whole job
+  sequential, because concurrent analysts on a single-slot server clobber
+  each other's per-slot state and every step re-processes its prompt. The
+  worker resolves the mode on a thread before it builds the job. A mock job
+  runs its analysts one after another.
+
+The job logs the mode and the fact that decided it (`Analysts run in parallel
+by default for this job: …`), then one line per analysis stage and per
+revision round saying what it runs in and why: set on the stage, the job's
+mode, a debate hands over to it (an unset stage a debate hands over to stays
+one node, because a parallel stage of two agents is two nodes), or the mode of
+the stages it revises. `run_summary.profile.analyst_mode` carries `mode`,
+`setting` and `reason`, and `stages`: `{stage, round, mode, from}` per
+analysis stage (`round: analysis`) and per debate (`round: revision`).
 
 A stored `true` or `false` (a JSON boolean) keeps its meaning. Stages used to
 be written with `sequential` whether or not anybody chose it; the database
 revision `20261002000000` takes that word off every analysis stage, so the
 stage follows the job, except where `core.llm.parallel_analysts` is stored
 `true` (there a `sequential` stage was running one after another while the key
-said parallel, and it is left as written). A team still derived from its
-analyst list is rebuilt from the key on every load and is not touched. Pick
-`sequential` on a stage card to pin a stage.
+said parallel, and it is left as written). It logs each team and stage it
+rewrote at WARNING. A team still derived from its analyst list is rebuilt from
+the key on every load and is not touched. Pick `sequential` on a stage card to
+pin a stage.
 
 ### Checking a team before it is saved
 

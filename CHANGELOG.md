@@ -974,30 +974,40 @@ change landed on `main`.
 
 - **Analysts run in parallel on a hosted API and one after another on a
   single-slot local server, decided per job.** `llm.parallel_analysts` is now
-  `auto` (the default), `true` or `false`. `auto` reads the models the
-  analysts call: Ollama, or an OpenAI-compatible server at a loopback,
-  link-local or private address, runs them one after another unless its
-  llama.cpp `/props` reports more than one slot (read from the answer the
-  window probe already asks for); any other endpoint runs them in parallel;
-  one single-slot model makes the whole job sequential. The mode and its
-  reason are logged and in `run_summary.profile.analyst_mode`. A stage's own
-  `mode` wins; `StageDefinition.mode` is unset by default and an unset
-  analysis stage follows the job, as does the revision round (an unset stage a
-  debate hands over to stays one node). The console's run-mode selector has an
-  `auto` choice. In the DeepSeek runs every stage ran its agents one after
-  another although the API serves requests concurrently.
-- **The reserve for the verdict and the report is the tail's real size.** Each
-  planned call is kept at what its admission demands, at the prompt it will be
-  sent (the largest of its kind, else the largest single-shot prompt, else a
-  conversation's opening prompt, bounded by the window allowance, which alone
-  is used only before any prompt was sent) and at the answer this job measured
-  (the verdict's largest single-shot answer; a report call's mean report or
-  other single-shot answer, which is also the smallest answer its admission
-  demands). Each row of `run_summary.spend.reserve` adds `expected_usd`, its
-  charge at the measured cache-hit share. Run 4 kept 0.90 USD of a 2.00 USD
-  ceiling for a tail that costs about 0.3; the same shape now keeps about 0.34
-  and every planned call is made on it.
-
+  `auto` (the default), `true` or `false`. `auto` resolves each analyst
+  model's endpoint on a thread before the job is built: Ollama, and an
+  OpenAI-compatible host that is a loopback, private, link-local or
+  shared-range address (written or resolved) or a name only a local resolver
+  answers (`host.docker.internal` and its kin), runs them one after another
+  unless its llama.cpp `/props` reports more than one slot; a host that
+  resolves only to public addresses runs them in parallel; a host that does
+  not resolve runs them one after another, saying it could not be told
+  whether it is hosted. One such model makes the whole job sequential. The
+  mode, the fact that decided it, and what every analysis stage and every
+  revision round ran in (set on the stage, the job's, one node for a debate
+  handover, or the stages a revision revises) are logged and in
+  `run_summary.profile.analyst_mode`. A stage's own `mode` wins;
+  `StageDefinition.mode` is unset by default and an unset analysis stage
+  follows the job. A revision round follows the stages it revises. The
+  console's run-mode selector has an `auto` choice. In a 2.00 USD DeepSeek
+  run every stage ran its agents one after another although the API serves
+  requests concurrently.
+- **The reserve for the verdict and the report is the tail's real size, retries
+  included.** Each planned call is kept at what its admission demands, at the
+  prompt it will be sent (the largest of its kind, else the largest
+  single-shot prompt, else a conversation's opening prompt, bounded by the
+  window allowance, which alone is used only before any prompt was sent) and
+  at the answer this job measured (the verdict's largest single-shot answer;
+  a report call's mean report or other single-shot answer, which is also the
+  smallest answer its admission demands). Each also keeps its validation
+  retries: one per planned call until a call of its kind is made, then
+  `(retries + 1) / (calls + 1)` of this job's own count; a retry is planned
+  with the answer it corrects in its prompt. Each row of
+  `run_summary.spend.reserve` adds `retries`, `retries_from`,
+  `retry_prompt_tokens` and `expected_usd`, its charge at the measured
+  cache-hit share. A 2.00 USD DeepSeek run kept 0.90 USD for a tail of 27
+  calls costing about 0.42; the same shape now keeps about 0.72 at the
+  revision round, and all 27 calls are made on it.
 - **The reverser reaches every branch of a dispatcher it finds.** The seeded
   reverser prompt, and the example team's reverser, ask of a switch or a table
   over command or message ids that each branch's handler be decompiled or
@@ -2290,18 +2300,20 @@ change landed on `main`.
 ### Fixed
 
 - **One refused call no longer ends the job.** A refusal used to latch the
-  spend as exhausted: in run 4 one mediation turn refused at its whole cap
-  stopped every revision after it with 0.12 USD still spendable. A refusal is
-  now recorded (`run_summary.spend.refused_calls`, and the run summary's spend
-  lines) and its caller takes its salvage path; the spend is exhausted only
-  when the ceiling is reached or no call of any kind the job makes, at the
-  smallest prompt it has sent, would still be admitted.
+  spend as exhausted: in a 2.00 USD DeepSeek run one mediation turn refused at
+  its whole cap stopped every revision after it with 0.12 USD still
+  spendable. A refusal is now recorded (`run_summary.spend.refused_calls`,
+  and the run summary's spend lines) and its caller takes its salvage path. A
+  call that does not fit only because other calls in flight hold their worst
+  case waits for them to settle, for as long as its own deadline allows. The
+  spend is exhausted only when the ceiling is reached, or when, with no call
+  in flight, no call of any kind made since the latest stage began would
+  still be admitted at the smallest prompt it was sent with.
 - **The judge's mediation turns are held like an analyst's.** The mediation
   loop handed the bare model to the ReAct executor, which bound the tools
   itself, so no turn could be held and each was admitted only at its whole
   cap. The model is bound to its tools before the loop and each turn's held
   cap is set on that binding.
-
 - **An indicator the static decoder read stands where FLOSS's would.** The
   publish record (`emulated_strings`) reads `decode_string_blobs` results as
   a second source of hidden text the platform recovered: each domain, address
@@ -5434,23 +5446,31 @@ change landed on `main`.
 ### Upgrading
 
 **Analysts run in parallel on a hosted API.** `llm.parallel_analysts` is `auto`
-by default. A deployment that never set it and calls a hosted API now runs its
-analysts, and the revision round, in parallel; one on Ollama or a single-slot
-local llama.cpp server keeps running them one after another. A stored `true` or
-`false` keeps its meaning. The database revision `20261002000000` takes the
-`sequential` the old default wrote off every analysis stage of a written team,
-so the stage follows the job, except where `llm.parallel_analysts` is stored
-`true`; pick `sequential` on a stage card to pin a stage. Consumers of stage
-documents should read a missing or `null` `mode` as "follows the job", and
-`run_summary.profile` may carry `analyst_mode`.
+by default. A deployment that never set it and calls a host resolving only to
+public addresses now runs its analysts, and the revision round, in parallel;
+one on Ollama, on a local address or name (`host.docker.internal`, a compose
+service name) or on a host that does not resolve keeps running them one after
+another unless the server's `/props` reports more than one slot. A stored
+`true` or `false` keeps its meaning. The database revision `20261002000000`
+takes the `sequential` the old default wrote off every analysis stage of a
+written team, so the stage follows the job, except where
+`llm.parallel_analysts` is stored `true`; it names each team and stage it
+rewrote at WARNING, and `sequential` picked on a stage card pins a stage
+again. Consumers of stage documents should read a missing or `null` `mode` as
+"follows the job", and `run_summary.profile` may carry `analyst_mode` with a
+`stages` list.
 
 **Spend.** The ceiling still has no default: an unset
 `llm.max_spend_usd_per_job` is no ceiling, and nothing is held or refused for
 spend. With one set, a refused call no longer exhausts the spend by itself
-(`run_summary.spend.exhausted` means nothing more fits, or the ceiling was
-reached), `run_summary.spend` may carry `refused_calls`, each reserve row
-carries `expected_usd`, and the reserve is smaller and follows this job's own
-call sizes, so the tool phases keep more of the ceiling.
+(`run_summary.spend.exhausted` means nothing more fits with no call in
+flight, or the ceiling was reached), a call may wait for calls in flight to
+settle before it is made, `run_summary.spend` may carry `refused_calls`, and
+each reserve row carries `retries`, `retries_from`, `retry_prompt_tokens` and
+`expected_usd`. The reserve follows this job's own call sizes and plans the
+tail's validation retries; before any single-shot answer is measured it holds
+the verdict at its whole cap with one retry, and it shrinks as calls are
+measured.
 
 **The spend ceiling.** `llm.max_spend_usd_per_job` is now a hard bound and
 counts the charged price: the same ceiling allows about twice the work it did
