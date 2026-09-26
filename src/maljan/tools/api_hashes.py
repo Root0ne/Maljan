@@ -12,7 +12,12 @@ The data, both vendored under ``data/``:
 * ``windows_export_names_v1.json`` — the named exports of common Windows DLLs,
   generated from the Wine project's DLL spec files by
   ``scripts/knowledge/build_windows_export_names.py`` (the file records the
-  release tag and each spec's URL and sha256). No DLL binary is read or shipped.
+  release tag and each spec's URL and sha256, and the license the names are
+  held under). No DLL binary is read or shipped. The same file carries the
+  module-name set: each DLL's own file name with and without ``.dll``, in lower
+  and in upper case, which a resolver that walks the loaded-module list hashes
+  to find a module before its exports. Every reading names the set it came
+  from (``set``: ``exports`` or ``modules``).
 * ``api_hash_algorithms_v1.json`` — the algorithms, each a primitive
   implemented here (``crc32``, ``ror13``, ``djb2``, ``fnv1a32``) with the
   encoding, the case folding, the terminator and, for the forms that add a
@@ -166,11 +171,25 @@ def load_algorithms(path: str = DEFAULT_ALGORITHMS) -> tuple[dict[str, Any], ...
     return tuple(dict(entry) for entry in document.get("algorithms") or [])
 
 
+# The two name sets a value is looked up in, as each reading names its own.
+EXPORTS = "exports"
+MODULES = "modules"
+
+
 @lru_cache(maxsize=16)
 def _table(algorithm_ids: tuple[str, ...], names_path: str, algorithms_path: str) -> dict[int, Any]:
-    """Every (algorithm, name, dll) reading of every hash value, keyed by the value."""
-    names = load_export_names(names_path).get("dlls") or {}
-    table: dict[int, dict[tuple[str, str], list[str]]] = {}
+    """Every (algorithm, name set, name, dll) reading of every hash value, keyed by the value.
+
+    The exported function names of each DLL, and the module names — the DLLs'
+    own file names in the spellings the data lists — which a resolver that
+    walks the loaded-module list hashes to find the module before its exports.
+    The algorithms that add a module hash to a function hash already take the
+    module name in; module names alone are hashed under every other one.
+    """
+    document = load_export_names(names_path)
+    names = document.get("dlls") or {}
+    modules = (document.get("modules") or {}).get("names") or []
+    table: dict[int, dict[tuple[str, str, str], list[str]]] = {}
     for algorithm in load_algorithms(algorithms_path):
         if algorithm["id"] not in algorithm_ids:
             continue
@@ -185,15 +204,21 @@ def _table(algorithm_ids: tuple[str, ...], names_path: str, algorithms_path: str
                 else:
                     value = plain[name] = hash_name(algorithm, name)
                 readings = table.setdefault(value, {})
-                readings.setdefault((algorithm["id"], name), []).append(dll)
+                readings.setdefault((algorithm["id"], EXPORTS, name), []).append(dll)
+        if per_module:
+            continue
+        for module in modules:
+            readings = table.setdefault(hash_name(algorithm, str(module)), {})
+            readings.setdefault((algorithm["id"], MODULES, str(module)), [])
     return table
 
 
 def _readings(table: dict[int, Any], value: int) -> list[dict[str, Any]]:
+    """Each reading: the algorithm, the name set, the name and, for an export, its DLLs."""
     found = table.get(value) or {}
     return [
-        {"algorithm": algorithm, "name": name, "dlls": list(dlls)}
-        for (algorithm, name), dlls in found.items()
+        {"algorithm": algorithm, "set": name_set, "name": name, "dlls": list(dlls)}
+        for (algorithm, name_set, name), dlls in found.items()
     ]
 
 
@@ -379,6 +404,9 @@ def resolve_api_hashes(
             "dlls": len(dlls),
             "names": sum(len(v) for v in dlls.values()),
             "source": str(names.get("source") or ""),
+            "license": str(names.get("license") or ""),
+            "modules": len((names.get("modules") or {}).get("names") or []),
+            "modules_source": str((names.get("modules") or {}).get("source") or ""),
         },
         "candidates": (
             {"given": len(values) + len(unreadable)}

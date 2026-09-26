@@ -1943,13 +1943,18 @@ def _hash_place(place: dict[str, Any]) -> str:
     return f"{where} (in {function})" if function else where
 
 
+def _hash_reading(reading: dict[str, Any]) -> str:
+    """``kernel32.dll!Name [algorithm]``, or ``module kernel32.dll [algorithm]``."""
+    if reading.get("set") == "modules":
+        return f"module {reading.get('name')} [{reading.get('algorithm')}]"
+    dlls = "/".join(str(d) for d in reading.get("dlls") or [])
+    return f"{dlls}!{reading.get('name')} [{reading.get('algorithm')}]"
+
+
 def _hash_item(row: dict[str, Any]) -> str:
     """``0x1a2b3c4d = kernel32.dll!Name [algorithm] @ 0x1200 (in 0x1180)``."""
     readings = " | ".join(
-        f"{'/'.join(str(d) for d in reading.get('dlls') or [])}!{reading.get('name')} "
-        f"[{reading.get('algorithm')}]"
-        for reading in row.get("readings") or []
-        if isinstance(reading, dict)
+        _hash_reading(reading) for reading in row.get("readings") or [] if isinstance(reading, dict)
     )
     places = [p for p in row.get("occurrences") or [] if isinstance(p, dict)]
     head = _detail().list_head
@@ -1999,13 +2004,14 @@ def _resolved_hashes(data: dict[str, Any], max_chars: int | None = None) -> str:
         else ""
     )
     if not rows:
-        return f"no value the file holds names a Windows function ({looked}){lone_said}"
+        return f"no value the file holds names a Windows function or module ({looked}){lone_said}"
     head = (
-        f"{_n(total)} values the file holds name Windows functions ({looked}, "
-        f"{len(data.get('algorithms') or [])} algorithms over {_n(names.get('names'))} names "
-        f"of {_n(names.get('dlls'))} DLLs){lone_said}; each as value = DLL!name [algorithm] "
-        "@ the offsets from the image base where the value stands (in the function the "
-        "file's table puts around it)"
+        f"{_n(total)} values the file holds name Windows functions or modules ({looked}, "
+        f"{len(data.get('algorithms') or [])} algorithms over {_n(names.get('names'))} "
+        f"function names of {_n(names.get('dlls'))} DLLs and {_n(names.get('modules'))} "
+        f"module names){lone_said}; each as value = DLL!name [algorithm] or module name "
+        "[algorithm] @ the offsets from the image base where the value stands (in the "
+        "function the file's table puts around it)"
     )
 
     def _line(shown: int) -> str:

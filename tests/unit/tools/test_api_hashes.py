@@ -182,6 +182,44 @@ class TestAScan:
         ]
 
 
+class TestModuleNames:
+    """A resolver that walks the loaded-module list hashes the module's name too."""
+
+    def test_a_module_name_hash_is_named_from_the_module_set(self, tmp_path: Path) -> None:
+        wide = zlib.crc32("user32.dll".encode("utf-16-le"))
+        upper = zlib.crc32("ADVAPI32.DLL".encode("utf-16-le"))
+        image = SyntheticPE(functions=[(TEXT_RVA, TEXT_RVA + 0x100)])
+        image.put("text", 0x20, b"\x3d" + struct.pack("<I", wide))
+        image.put("text", 0x30, b"\x3d" + struct.pack("<I", upper))
+        answer = resolve_api_hashes(_write(tmp_path, image))
+        rows = {row["value"]: row for row in answer["hits"]}
+        user32 = rows[f"{wide:#010x}"]["readings"]
+        assert {
+            "algorithm": "crc32_utf16le",
+            "set": "modules",
+            "name": "user32.dll",
+            "dlls": [],
+        } in (user32)
+        assert any(
+            r["set"] == "modules"
+            and r["name"] == "ADVAPI32.DLL"
+            and r["algorithm"] == "crc32_utf16le"
+            for r in rows[f"{upper:#010x}"]["readings"]
+        )
+        assert rows[f"{wide:#010x}"]["occurrences"][0]["function"] == hex(TEXT_RVA)
+
+    def test_every_reading_names_its_set(self, tmp_path: Path) -> None:
+        image, _ = _image_with_hashes()
+        answer = resolve_api_hashes(_write(tmp_path, image))
+        assert {r["set"] for row in answer["hits"] for r in row["readings"]} <= {
+            "exports",
+            "modules",
+        }
+        assert answer["names"]["modules"] > 0
+        assert "file names" in answer["names"]["modules_source"]
+        assert "LGPL" in answer["names"]["license"]
+
+
 class TestValuesTheCallerGives:
     def test_each_is_resolved_or_said_unresolved(self, tmp_path: Path) -> None:
         image, values = _image_with_hashes()

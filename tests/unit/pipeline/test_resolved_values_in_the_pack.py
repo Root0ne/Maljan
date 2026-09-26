@@ -142,10 +142,21 @@ class TestTheLines:
         assert "one decode_string_blobs call away at offset" in cut
         assert "3 more decodings no code refers to" in cut
 
+    def test_a_module_name_reads_as_one(self) -> None:
+        row = {
+            "value": "0x00000001",
+            "readings": [
+                {"algorithm": "a", "set": "modules", "name": "one.dll", "dlls": []},
+                {"algorithm": "b", "set": "exports", "name": "Two", "dlls": ["x.dll"]},
+            ],
+            "occurrences": [],
+        }
+        assert triage_pack._hash_item(row) == "0x00000001 = module one.dll [a] | x.dll!Two [b]"
+
     def test_nothing_found_is_said_in_a_line_of_its_own(self) -> None:
         assert triage_pack._resolved_hashes(
             {"hits": [], "total": 0, "candidates": {"scanned": 9}}
-        ).startswith("no value the file holds names a Windows function")
+        ).startswith("no value the file holds names a Windows function or module")
         assert triage_pack._decoded_blobs({"results": [], "total": 0}).startswith(
             "no encoded text found"
         )

@@ -18,7 +18,9 @@ change landed on `main`.
   records the tag and each spec's sha256), and the algorithms are data
   (`data/api_hash_algorithms_v1.json`: CRC-32 of the ASCII and UTF-16LE name,
   ror13 with and without the module-name addition, djb2, FNV-1a, case-folded
-  variants). Values the caller gives, or the push/mov/cmp immediates in code
+  variants), over function names and a module-name set (each DLL's file name
+  with and without `.dll`, lower and upper case); each reading names its set.
+  Values the caller gives, or the push/mov/cmp immediates in code
   and the aligned values in data; every reading of a value and every place it
   stands, with the start of the function the x64 function table puts around
   it; a value whose algorithm resolves nothing else is a `lone_hits` row.
