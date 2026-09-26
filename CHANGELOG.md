@@ -948,6 +948,11 @@ change landed on `main`.
 
 ### Changed
 
+- **The reverser reaches every branch of a dispatcher it finds.** The seeded
+  reverser prompt, and the example team's reverser, ask of a switch or a table
+  over command or message ids that each branch's handler be decompiled or
+  listed as not reached with the reason, one line per id with the handler's
+  address.
 - **The spend ceiling counts what a call was charged and is a hard bound**
   against the platform's prompt estimate (characters over three). A call is
   settled at the cost its provider reported with the answer, else at the rates
@@ -2233,6 +2238,48 @@ change landed on `main`.
   `MALJAN_FLOSS_PATH` to a missing file unless a test names a build.
 
 ### Fixed
+
+- **Every claim an analyst begins is read, or the run says it was not.** The
+  base analyst's reader split an answer only on `---` lines and kept the first
+  `CLAIM:` of each block, so claims separated by blank lines were read as one:
+  a revision of 13 claims and an answer of 21 each became one, silently. Every
+  path now reads claims through one reader (`base_agent.read_claim_blocks`),
+  which splits at every claim heading, plain, numbered or marked
+  (`agents/claim_headings.py`), and counts the headings the model began
+  against the claims read. Claims begun and not read (a block the reader could
+  not split, one the static, dynamic and network analysts' stricter reading
+  turns away for want of an EVIDENCE line) are logged and recorded as a
+  degradation reason naming the analyst and both numbers; a block that stated
+  no confidence is counted apart and asked about, as before.
+- **No OpenAI-compatible request sends a tool call without its reply.** A turn
+  whose call had arguments cut mid-string kept that call in
+  `invalid_tool_calls`, which the tool node does not run and the OpenAI client
+  still writes into the turn's `tool_calls`; DeepSeek answered the next
+  request of a revision loop with 400 ("An assistant message with 'tool_calls'
+  must be followed by tool messages …") and the analyst was lost for the
+  round. Every request on the `openai` provider now completes such a call with
+  a tool reply saying it was not run, in the turn's call order, after
+  DeepSeek's reasoning passback. The call stays in the turn as the model wrote
+  it.
+- **A guest's desktop process is not the sample.** Where Triage's `orig` mark
+  and the submitted file's name (or digest) both name processes, the sample is
+  the processes both name; a process only the mark named (a desktop process
+  that ran none of the sample's files and descends from none of its
+  processes) is outside the tree. Its flows are refused by the one publish
+  rule unless a model keeps the address, and the `no:` names the process that
+  made them (`… outside the sample's process tree (StartMenuExperienceHost.exe
+  (procid 105))`), as does the IOC table's context; STIX, `/iocs`, YARA,
+  Suricata and Sigma read that one answer. A mark disjoint from every named
+  process still stands.
+- **Each model call is paired with its own admission.** The guard over model
+  calls counted any admission before a call, so one covered any number of
+  calls after it. It now pairs calls one to one in source order (two branches
+  of one choice are one call; a call in a loop needs an admission in the same
+  loop's body), and the judge's technique question in text, asked after a
+  refused schema, is admitted on its own.
+- **A stage-named analyst's debate line reads as a place:** "from analyst 2 of
+  3 in the analysis stage", where it read "from the analysis analyst 2 of 3
+  layer".
 
 - **A revision that is not made leaves the analyst's answer in force.** A
   revision that failed (a refusal by the spend ceiling among them), wrote no

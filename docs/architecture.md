@@ -1225,6 +1225,18 @@ and the run's degradation reasons naming it ("analyst answers kept as prose,
 …"). A CLAIM block that states no confidence, or one that is not a number, is
 not a claim either: it is counted and asked about
 (`isr.claim_without_confidence`), where the parsers used to write 0.5.
+Every path that reads claims reads them through one reader,
+`base_agent.read_claim_blocks`: it splits an answer at every claim heading
+(`CLAIM:`, `CLAIM 3:`, `**CLAIM 4 (REVISED):**`, `CLAIM 5 -`; the rule is
+`agents/claim_headings.py`) where a block can begin, and at the model's own
+`---` lines, so claims written one after another with blank lines between them
+are each read. The static, dynamic and network analysts read it with an
+EVIDENCE line required; the base analyst's path records a block without one as
+unsourced. Each read counts the claim headings the answer began before its
+DISPUTES section against the claims it read and the blocks that stated no
+confidence; what is left is claims begun and not read, which is logged and
+recorded as a degradation reason naming the analyst, the round and both
+numbers.
 Every validation turn after a loop gets what that loop left of its time, not
 a fresh budget, and is not asked when that cannot hold one answer at the pace
 the loop measured (its final-answer reserve); what it would have asked is then
@@ -2598,11 +2610,18 @@ is assembled from what the run gathered rather than recomputed beside it:
   The Triage mapping carries each flow's `procid`, `pid` and AS facts into its
   tcp/udp row and states `sample_process_tree`: true when the flow's process
   is the sample or a descendant of it through `procid_parent`, false when the
-  report names another process, absent when it does not say. The sample is the
-  process Triage marks `orig` and only that one; a report that marks none
-  names it by a file the process runs whose name equals the submitted name, or
-  is the sample's digest with an extension — equal, never contained, so a
-  guest's `MicrosoftEdgeUpdate.exe` is not a sample submitted as `update.exe`.
+  report names another process, absent when it does not say. The sample's
+  processes are read from two facts: the processes Triage marks `orig`, and
+  the processes that run a file whose name equals the submitted name or is the
+  sample's digest with an extension — equal, never contained, so a guest's
+  `MicrosoftEdgeUpdate.exe` is not a sample submitted as `update.exe`. Where
+  both name processes, the sample is the processes both name, so a guest
+  desktop process the mark alone names is outside the tree; where the two are
+  disjoint the mark stands (a guest process can carry the submitted name), and
+  where only one names any, it does. A flow outside the tree carries the image
+  of the process that made it (`process`), the address's row states those
+  processes (`outside_processes`, as `<image> (procid N)`), and the publish
+  rule's `no:` and the IOC table's context name them.
   **CAPE, REST and mock reports carry no process on a flow**, so every address
   they record is unattributed and is published only when a model keeps it. The
   network block is projected from the job's whole report, never from a paged
