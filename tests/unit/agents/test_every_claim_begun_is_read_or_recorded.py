@@ -30,9 +30,8 @@ FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "claims"
 REVISION = (FIXTURES / "blank_line_separated_revision.txt").read_text(encoding="utf-8")
 FINAL_ISR = (FIXTURES / "blank_line_separated_final_isr.txt").read_text(encoding="utf-8")
 
-# The second claim is written where the first has no CONFIDENCE line yet, so
-# the reader takes it into the first claim's block.
-MALFORMED = (
+# The second claim is written where the first has no CONFIDENCE line yet.
+UNCLOSED = (
     "CLAIM 1: The loader resolves its imports by hash.\n"
     "EVIDENCE: [ev_0002]\n"
     "\n"
@@ -62,9 +61,13 @@ def test_blank_line_separated_claims_are_all_read_by_both_readings(text: str, co
 
 
 def test_the_revision_keeps_the_techniques_of_its_later_claims() -> None:
-    techniques = [c.technique_id for c in read_claim_blocks(REVISION).claims]
+    claims = read_claim_blocks(REVISION).claims
+    techniques = [c.technique_id for c in claims]
     assert techniques[:3] == ["T1218.011", "T1027.007", "T1027.005"]
     assert "T1070" in techniques and "T1620" in techniques
+    # "TECHNIQUE: T1055, T1106" claims two: neither is read, the line is kept whole.
+    (both,) = [c for c in claims if c.technique_line]
+    assert (both.technique_id, both.technique_line) == (None, "T1055, T1106")
     # The DISPUTES section after the last claim is not read as a claim.
     assert not any("DISPUTED" in c.claim for c in read_claim_blocks(REVISION).claims)
 
@@ -76,9 +79,30 @@ def test_the_base_analyst_path_reads_every_claim_and_records_nothing() -> None:
     assert analyst.truncation_ledger.claims_unread == []
 
 
+# A block whose heading was written and whose claim was not: an answer cut there.
+MALFORMED = (
+    "CLAIM 1: The loader resolves its imports by hash.\n"
+    "EVIDENCE: [ev_0002]\n"
+    "CONFIDENCE: 0.7\n"
+    "TECHNIQUE: NONE\n"
+    "\n"
+    "**CLAIM 2:**\n"
+)
+
+
+def test_a_claim_never_carries_the_next_claim_s_fields() -> None:
+    read = read_claim_blocks(UNCLOSED)
+    (claim,) = read.claims
+    assert claim.claim == "The beacon sleeps 180 seconds before its first request."
+    assert (claim.confidence, claim.evidence_ref) == (0.8, "[ev_0003]")
+    # The first stated no confidence: counted and asked about, not given the next one's.
+    assert (read.begun, read.without_confidence, read.unread) == (2, 1, 0)
+
+
 def test_a_malformed_block_is_a_recorded_shortfall(caplog: pytest.LogCaptureFixture) -> None:
     read = read_claim_blocks(MALFORMED)
     assert (read.begun, len(read.claims), read.unread) == (2, 1, 1)
+    assert read.claims[0].confidence == 0.7
 
     analyst = _analyst()
     with caplog.at_level(logging.WARNING, logger="test.claims"):
@@ -132,3 +156,81 @@ def test_the_cut_answer_question_counts_claims_by_the_same_heading_rule() -> Non
 def test_a_claim_quoted_under_disputes_is_not_counted() -> None:
     text = "CLAIM: own\nEVIDENCE: e\nCONFIDENCE: 0.9\n\nDISPUTES:\nCLAIM 3: a peer's\n"
     assert count_claims_begun(text) == 1
+
+
+def test_a_claim_after_disputes_and_a_separator_is_not_read_as_the_analyst_s() -> None:
+    text = (
+        "CLAIM: own\nEVIDENCE: e\nCONFIDENCE: 0.9\n\nDISPUTES:\n---\n"
+        "CLAIM: the peer says x\nEVIDENCE: e\nCONFIDENCE: 0.8\n"
+    )
+    read = read_claim_blocks(text)
+    assert [c.claim for c in read.claims] == ["own"]
+    assert read.begun == 1
+
+
+@pytest.mark.parametrize("marker", ["- ", "+ ", "1. ", "2) ", "* "])
+def test_list_marker_headings_are_read_and_counted(marker: str) -> None:
+    text = "".join(
+        f"{marker}CLAIM: finding {n}\n{marker}EVIDENCE: [ev_000{n}]\n{marker}CONFIDENCE: 0.6\n\n"
+        for n in (1, 2)
+    )
+    read = read_claim_blocks(text)
+    assert [c.claim for c in read.claims] == ["finding 1", "finding 2"]
+    assert [c.evidence_ref for c in read.claims] == ["[ev_0001]", "[ev_0002]"]
+    assert (read.begun, read.unread) == (2, 0)
+    assert len(_parse_claim_blocks(text)) == 2
+
+
+def test_a_numbered_only_answer_is_a_report() -> None:
+    from maljan.agents.base_agent import answer_is_isr
+
+    text = "CLAIM 1: one\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.5\n\n**CLAIM 2 (REVISED):** two"
+    assert "CLAIM:" not in text
+    assert answer_is_isr(text)
+
+
+def test_a_technique_the_analyst_rejects_is_not_read_as_claimed() -> None:
+    claims = read_claim_blocks(FINAL_ISR).claims
+    packing = claims[2]
+    assert packing.claim.startswith("Producer/build")
+    assert packing.technique_id is None
+    assert packing.technique_line == "T1027.002 not supported"
+    # Every other qualified or several-id line is kept as written, none cut to its first id.
+    lines = [c.technique_line for c in claims if c.technique_line]
+    assert "T1027.005 (rule-asserted); T1140" in lines
+    assert all(c.technique_id is None for c in claims if c.technique_line)
+
+
+@pytest.mark.parametrize(
+    ("line", "technique", "kept"),
+    [
+        ("T1055", "T1055", None),
+        ("t1055.012", "T1055.012", None),
+        ("**T1105**", "T1105", None),
+        ("NONE", None, None),
+        ("—", None, None),
+        ("-", None, None),
+        ("T1027.002 not supported", None, "T1027.002 not supported"),
+        ("T1055 (unproven)", None, "T1055 (unproven)"),
+        ("T1055, T1106", None, "T1055, T1106"),
+        ("T1105; T1620 (candidate)", None, "T1105; T1620 (candidate)"),
+    ],
+)
+def test_a_technique_line_is_one_id_none_or_kept_whole(
+    line: str, technique: str | None, kept: str | None
+) -> None:
+    (claim,) = read_claim_blocks(
+        f"CLAIM: x\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.5\nTECHNIQUE: {line}\n"
+    ).claims
+    assert (claim.technique_id, claim.technique_line) == (technique, kept)
+
+
+def test_a_kept_technique_line_is_asked_about_once() -> None:
+    from maljan.pipeline.validation import TECHNIQUE_LINE_UNREAD_CODE, parse_violations
+
+    isr = _analyst()._text_to_isr(
+        "CLAIM: x\nEVIDENCE: [ev_0001]\nCONFIDENCE: 0.5\nTECHNIQUE: T1055, T1106\n", 0
+    )
+    (question,) = [v for v in parse_violations(isr) if v.code == TECHNIQUE_LINE_UNREAD_CODE]
+    assert '"T1055, T1106"' in question.message
+    assert "one claim per technique" in question.message

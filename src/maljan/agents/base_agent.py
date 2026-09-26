@@ -32,7 +32,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
 
-from maljan.agents.claim_headings import claims_headed, count_claims_begun
+from maljan.agents.claim_headings import LINE_PREFIX, claims_headed, count_claims_begun
 from maljan.agents.prompt_fragments import CLAIM_FORMAT_FRAGMENT
 from maljan.core.config import get_settings
 from maljan.core.exceptions import AgentLoopCancelled, AnalystError, SampleNotOpened
@@ -1107,7 +1107,7 @@ def answer_is_isr(text: str) -> bool:
 
     if not text or not text.strip():
         return False
-    return "CLAIM:" in text or has_findings_block(text)
+    return "CLAIM:" in text or count_claims_begun(text) > 0 or has_findings_block(text)
 
 
 def nudge_turns(msgs: list) -> tuple[list, bool]:
@@ -1378,13 +1378,39 @@ def describe_exception_for_log(exc: BaseException) -> str:
 # (``read_claim_blocks``), the one reader every path that reads claims uses.
 _BLOCK_SPLIT_RE = re.compile(r"(?:^|\r?\n)\s*-{3,}\s*(?:\r?\n|$)", flags=re.MULTILINE)
 _BLOCK_CLAIM_RE = re.compile(
-    r"CLAIM:\s*(.+?)(?=\s*\n\s*(?:EVIDENCE|CONFIDENCE|TECHNIQUE):|\Z)", re.DOTALL
+    r"CLAIM:\s*(.+?)(?=\s*\n" + LINE_PREFIX + r"(?:EVIDENCE|CONFIDENCE|TECHNIQUE):|\Z)",
+    re.DOTALL,
 )
 _BLOCK_EVIDENCE_RE = re.compile(
-    r"EVIDENCE:\s*(.+?)(?=\s*\n\s*(?:CONFIDENCE|TECHNIQUE):|\Z)", re.DOTALL
+    r"EVIDENCE:\s*(.+?)(?=\s*\n" + LINE_PREFIX + r"(?:CONFIDENCE|TECHNIQUE):|\Z)", re.DOTALL
 )
 _BLOCK_CONFIDENCE_RE = re.compile(r"CONFIDENCE:\s*([\d.]+)")
-_BLOCK_TECHNIQUE_RE = re.compile(r"TECHNIQUE:\s*(T\d{4}(?:\.\d{3})?|NONE)", re.IGNORECASE)
+# The whole TECHNIQUE line as written: one id is a claimed technique, and
+# anything more (a qualifier, a negation, a second id) is the analyst's line,
+# kept and asked about rather than read for the first id in it.
+_BLOCK_TECHNIQUE_LINE_RE = re.compile(r"TECHNIQUE:[ \t]*([^\n]*)", re.IGNORECASE)
+_ONE_TECHNIQUE_RE = re.compile(r"T\d{4}(?:\.\d{3})?", re.IGNORECASE)
+# What a TECHNIQUE line says to claim none.
+_NO_TECHNIQUE = frozenset({"", "NONE", "—", "–", "-"})
+
+
+def read_technique_line(line: str) -> tuple[str | None, str | None]:
+    """``(technique_id, unread line)`` for one claim's TECHNIQUE line as written.
+
+    Exactly one id, and nothing else, is the claimed technique; ``NONE`` or a
+    dash claims none. Anything else — words after an id ("T1027.002 not
+    supported"), a qualifier ("T1055 (unproven)"), several ids ("T1055,
+    T1106") — claims no technique the reader could name without deciding what
+    the words mean, so no id is read and the line is returned as written, for
+    the validation turn to ask about (``isr.technique_line_unread``).
+    """
+    text = str(line or "").strip()
+    bare = text.strip("*`_ ").rstrip(".").strip()
+    if bare.upper() in _NO_TECHNIQUE:
+        return None, None
+    if _ONE_TECHNIQUE_RE.fullmatch(bare):
+        return bare.upper(), None
+    return None, text
 
 
 # Model tool-call scaffolding, which is not prose and is never a finding.
@@ -1593,16 +1619,14 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
             without_confidence += 1
             continue
 
-        technique_id: str | None = None
-        technique_match = _BLOCK_TECHNIQUE_RE.search(block)
-        if technique_match:
-            raw_tid = technique_match.group(1).upper()
-            # Kept as written. Whether the id is real, retired or a
-            # placeholder is ``attck.unknown_id``'s question, asked with
-            # feedback and recorded; a parser that dropped it here would be
-            # the silent rewrite this pipeline does not do.
-            if raw_tid != "NONE":
-                technique_id = raw_tid
+        # One id is kept as written. Whether it is real, retired or a
+        # placeholder is ``attck.unknown_id``'s question, asked with feedback
+        # and recorded; a line that is more than one id is kept whole and
+        # asked about, never cut to its first id.
+        technique_match = _BLOCK_TECHNIQUE_LINE_RE.search(block)
+        technique_id, technique_line = read_technique_line(
+            technique_match.group(1) if technique_match else ""
+        )
 
         claims.append(
             ClaimEvidence(
@@ -1612,6 +1636,7 @@ def read_claim_blocks(text: str, *, require_evidence: bool = False) -> ClaimRead
                 evidence_ref=evidence_ref_text(evidence_text),
                 confidence=confidence,
                 technique_id=technique_id,
+                technique_line=technique_line,
             )
         )
     return ClaimRead(

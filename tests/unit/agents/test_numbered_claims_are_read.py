@@ -61,10 +61,17 @@ def test_a_word_that_begins_with_claim_is_not_a_heading() -> None:
     assert [c.claim for c in _parse_claim_blocks(text)] == ["one"]
 
 
-def test_a_claim_heading_inside_evidence_does_not_split_the_block() -> None:
+def test_a_claim_heading_inside_evidence_opens_its_own_block() -> None:
+    # The first claim keeps no confidence it did not state; the line that reads
+    # as a heading is its own block, with the CONFIDENCE written under it.
+    from maljan.agents.base_agent import read_claim_blocks
+
     text = "CLAIM 1: one\nEVIDENCE: first line\nCLAIM 2 - see also ev_0002\nCONFIDENCE: 0.8"
-    (claim,) = _parse_claim_blocks(text)
-    assert claim.claim == "one" and claim.confidence == 0.8
+    read = read_claim_blocks(text)
+    assert [(c.claim, c.confidence) for c in read.claims] == [("see also ev_0002", 0.8)]
+    assert read.without_confidence == 1 and read.unread == 0
+    # The stricter reading wants an EVIDENCE line on each: neither block is its claim.
+    assert _parse_claim_blocks(text) == []
 
 
 def test_a_peer_claim_quoted_under_disputes_is_not_this_analyst_s() -> None:

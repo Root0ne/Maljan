@@ -270,6 +270,24 @@ UNGROUNDED_TECHNIQUE_CODE = "isr.ungrounded_technique"
 # is still unread after it is recorded.
 UNPARSED_ANSWER_CODE = "isr.unparsed_answer"
 CLAIM_WITHOUT_CONFIDENCE_CODE = "isr.claim_without_confidence"
+# A claim whose TECHNIQUE line is more than one id or NONE. No id is read
+# from it, and the analyst is asked once for one id per claim.
+TECHNIQUE_LINE_UNREAD_CODE = "isr.technique_line_unread"
+
+
+def technique_line_violation(lines: list[str]) -> Violation:
+    """What an analyst is asked about TECHNIQUE lines no single id could be read from."""
+    shown = "; ".join(f'"{safe_finding_value(line)}"' for line in lines)
+    return Violation(
+        code=TECHNIQUE_LINE_UNREAD_CODE,
+        message=(
+            f"{len(lines)} claim(s) have a TECHNIQUE line that is not one technique id or "
+            f"NONE, so no technique is read from them: {shown}. Give each claim one "
+            "technique id, or NONE when it claims none; a claim that holds several "
+            "techniques is written as one claim per technique."
+        ),
+    )
+
 
 _UNPARSED_ANSWER_MESSAGE = (
     "Your answer has no CLAIM block that can be read, so it carries no claim and "
@@ -300,6 +318,13 @@ def parse_violations(isr: Any) -> list[Violation]:
         declined = int(getattr(isr, "blocks_without_confidence", 0) or 0)
     except (TypeError, ValueError):
         declined = 0
+    lines = [
+        str(getattr(claim, "technique_line", "") or "")
+        for claim in getattr(isr, "claims", None) or []
+        if getattr(claim, "technique_line", None)
+    ]
+    if lines:
+        found.append(technique_line_violation(lines))
     if declined:
         found.append(
             Violation(

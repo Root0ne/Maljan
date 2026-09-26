@@ -100,6 +100,7 @@ from maljan.pipeline.validation import (
     misstated_entry_contents,
     repeated_item_violations,
     section_cut_violation,
+    technique_line_violation,
     ungrounded_capabilities,
     validate_verdict_bundle,
 )
@@ -514,6 +515,9 @@ PROMPTS: dict[str, str] = {
         ]
     ),
     "the reply a tool call that was not run is sent with": NO_REPLY_RECORDED,
+    "analyst question for technique lines no single id was read from": technique_line_violation(
+        ["T1000 (candidate)", "T1001, T1002"]
+    ).message,
     "the degradation reason for claims begun and not read": claims_unread_sentence(
         "reverser", ClaimRead(claims=[], without_confidence=1, begun=4), 2
     ),
