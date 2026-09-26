@@ -226,32 +226,44 @@ text stays with the turn in the loop's conversation and is not published. The
 cap goes out as `max_tokens` on each request, so a cap bound for one call
 reaches DeepSeek as the model's own does.
 
-Under every `compat` value, and on every other provider, no request sends a
-tool call without its reply. A turn can hold a call no tool ran (its arguments
-were cut inside a string, so the call stays in `invalid_tool_calls`, which the
-loop's tool node does not run and the OpenAI client still writes into the
-turn's `tool_calls`), and every provider's API refuses a history with a call
-left unanswered: DeepSeek answers 400, Anthropic wants each `tool_use` block
-answered by a `tool_result` block at the front of the next user turn, and
-Gemini wants as many `functionResponse` parts as the model turn has
-`functionCall` parts. Each request is completed as it is sent, in the
+On every provider the pipeline builds its models from (`openai` under every
+`compat` value and through either OpenAI API, `anthropic`, `gemini` and
+`ollama`), no request sends a tool call without its reply. A turn can hold a
+call no tool ran (its arguments were cut inside a string, so the call stays in
+`invalid_tool_calls`, which the loop's tool node does not run and the OpenAI
+client still writes into the request), and every provider's API refuses a
+history with a call left unanswered: DeepSeek answers 400, the Responses API
+wants a `function_call_output` for every `function_call`, Anthropic wants each
+`tool_use` block answered by a `tool_result` block at the front of the next
+user turn, and Gemini wants as many `functionResponse` parts as the model turn
+has `functionCall` parts. Each request is completed as it is sent, in the
 provider's own message shape (`maljan.llm.tool_replies`): a call with no reply
-gets one saying no reply was recorded (and, for a call whose arguments did not
-parse, that it was not run), and a warning says how many.
+anywhere in the conversation gets one saying no reply was recorded (and, for a
+call whose arguments did not parse, that it was not run), and a warning says
+how many.
 
 | Provider | Where the reply goes |
 |---|---|
-| `openai` (every `compat`) | a `tool` message after the turn; the turn's tool messages are put in the order of its calls, after DeepSeek's reasoning passback |
-| `ollama` | the same `tool` message, in the shape the Ollama client writes its own |
+| `openai`, chat completions (every `compat`) | a `tool` message after the turn; the turn's tool messages are put in the order of its calls, after DeepSeek's reasoning passback |
+| `openai`, Responses API (a model the client sends there: a `codex` or `pro` model, or `reasoning`, `include`, `text`, `truncation` or `context_management` set) | a `function_call_output` item right after the run of call and output items the call stands in, in call order; a call counts as answered wherever its output stands |
+| `ollama` | the same `tool` message as chat completions, in the shape the Ollama client writes its own |
 | `anthropic` | a `tool_result` block at the front of the next user turn, after the results it already has and before its text; a turn with no user turn after it gets one holding only the replies |
-| `gemini` | a tool reply in the conversation before the client serializes it, so its `functionResponse` stands in the call's place: Gemini's parts carry no id and pair by name and order |
+| `gemini` | a tool reply in the conversation before the client serializes it, placed so the turn's `functionResponse` parts come out in call order: Gemini's parts carry no id and pair by name and order. A call counts as answered when any tool reply in the conversation carries its id, the client's own rule, so a request the client already builds right is sent unchanged |
+
+A reply that was recorded is never said missing. Chat completions, Ollama and
+Anthropic pair a call only with the replies right after its turn, so a reply
+recorded further on, where it answers no call of the turn it follows, is moved
+to its call (an Anthropic user turn it leaves empty is left out; the API joins
+the turns around it), and the warning says how many were moved.
 
 The Anthropic, Gemini and Ollama clients do not write a call whose arguments
 did not parse into the request at all, so there it needs no reply; a
 `tool_use` block the turn itself holds is answered like any other, and said
 not run when its input did not parse. The call stays in the turn as the model
 wrote it, a history that is already well formed is sent as it was, and the
-loop's own conversation is not changed.
+loop's own conversation is not changed. The one model built outside the
+providers, the evaluation harness's frontier comparison arm
+(`core/frontier.py`), is a plain OpenAI client and is not completed.
 
 `llm.openai.compat`, like every `llm.openai` setting, is global: it applies to
 every model built on the `openai` provider, per-agent entries and fallbacks at

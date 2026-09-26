@@ -2296,22 +2296,28 @@ change landed on `main`.
   `T1055, T1106` as T1055 alone. A line that is more than one id or `NONE`
   now claims no id, is kept on the claim as `technique_line`, and the
   analyst is asked once for one id per claim (`isr.technique_line_unread`).
-- **No request sends a tool call without its reply, on any provider.** A turn
-  whose call had arguments cut mid-string kept that call in
-  `invalid_tool_calls`, which the tool node does not run and the OpenAI client
-  still writes into the turn's `tool_calls`; DeepSeek answered the next
-  request of a revision loop with 400 ("An assistant message with 'tool_calls'
-  must be followed by tool messages …") and the analyst was lost for the
-  round. Anthropic (a `tool_use` needs a `tool_result` at the front of the
-  next user turn) and Gemini (a `functionCall` needs a `functionResponse`)
-  refuse a call left unanswered the same way. One module
+- **No request sends a tool call without its reply, on any provider the
+  pipeline builds its models from.** A turn whose call had arguments cut
+  mid-string kept that call in `invalid_tool_calls`, which the tool node does
+  not run and the OpenAI client still writes into the request; DeepSeek
+  answered the next request of a revision loop with 400 ("An assistant message
+  with 'tool_calls' must be followed by tool messages …") and the analyst was
+  lost for the round. The Responses API (a `function_call` needs a
+  `function_call_output`), Anthropic (a `tool_use` needs a `tool_result` at the
+  front of the next user turn) and Gemini (a `functionCall` needs a
+  `functionResponse`) refuse a call left unanswered the same way. One module
   (`maljan.llm.tool_replies`) now completes every provider's request in its
-  own shape: a call with no reply gets one saying no reply was recorded, and
-  that it was not run when its arguments did not parse, in the turn's call
-  order — after DeepSeek's reasoning passback on `openai`, as a `tool_result`
-  block on `anthropic`, as a tool reply the Gemini client pairs with the right
-  call, and as a `tool` message on `ollama`. The call stays in the turn as the
-  model wrote it, and a well-formed history is sent as it was.
+  own shape: a call with no reply anywhere in the conversation gets one saying
+  no reply was recorded, and that it was not run when its arguments did not
+  parse, in the turn's call order — after DeepSeek's reasoning passback on
+  `openai` chat completions, as a `function_call_output` item on the
+  Responses API, as a `tool_result` block on `anthropic`, as a tool reply the
+  Gemini client pairs with the right call, and as a `tool` message on
+  `ollama`. A reply that was recorded is never said missing: where a chat
+  shape needs it right after its turn and it stands further on, it is moved
+  to its call. The call stays in the turn as the model wrote it, and a
+  well-formed history is sent as it was. The evaluation harness's frontier
+  comparison arm, built outside the providers, is not completed.
 - **A guest's desktop process is not the sample.** Where Triage's `orig` mark
   and the submitted file's own process tree (its name or digest) disagree
   about a process, the flow's attribution is absent rather than `true`; where
