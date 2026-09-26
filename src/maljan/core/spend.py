@@ -39,10 +39,14 @@ worst case — its prompt and its held cap — until it returns and its cost is 
 the ledger, so calls running at the same time never spend the same remainder
 twice.
 
-**One refusal is not the end of the job.** A refused call is recorded and its
-caller takes its salvage path; the spend is exhausted only when no further
-call of any kind this job makes — each at the smallest prompt it has sent and
-with its own cap — would still be admitted, or when the ceiling is reached.
+**One refusal is not the end of the job.** A call that does not fit only
+because other calls in flight hold their worst case waits for them to settle
+(they usually settle far below it), for as long as its own deadline allows. A
+refused call is recorded and its caller takes its salvage path; the spend is
+exhausted only when the ceiling is reached, or when, with no call in flight,
+no call of any kind made since the latest stage began
+(:meth:`SpendMeter.begin_stage`) — each at the smallest prompt it was sent
+with and its own cap — would still be admitted.
 
 **The reserve for the verdict and the report.** A job plans its verdict call
 and its report calls (:meth:`SpendMeter.plan_tail`) and keeps aside, for each
@@ -62,7 +66,11 @@ from the window:
 * a report call's answer is the mean answer of the report calls measured of
   its model once one returned, and before that the mean answer of its other
   single-shot calls (the verdict left out), else its largest tool-loop turn;
-  with no answer measured the reserve is not sized.
+  with no answer measured the reserve is not sized;
+* each kind keeps its validation retries (a retry is a call made inside
+  :func:`validation_retry`): one per planned call until a call of the kind
+  is made, then ``(retries + 1) / (calls + 1)`` of this job's own count for
+  the kind, each planned with the answer it corrects in its prompt.
 
 Each row of the derivation also carries its expected charge: the first call of
 a kind with its prompt uncached and the ones after it at this job's measured
@@ -86,9 +94,12 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import re
 import threading
+import time
 from collections.abc import Callable, Iterator, Mapping
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -133,6 +144,25 @@ _HHMM = re.compile(r"\A([01]\d|2[0-3]):([0-5]\d)\Z")
 
 class SpendCeilingStop(Exception):
     """A model call the operator's spend ceiling does not admit, in the words the run records."""
+
+
+# Set while a validation loop sends its correction turn: the call admitted
+# then is a retry of the call before it, counted apart from first calls.
+_RETRYING: ContextVar[bool] = ContextVar("maljan_spend_retrying", default=False)
+
+# How long a call waiting for other calls' reservations to settle sleeps
+# between looks, at most; a settling call wakes it sooner.
+_WAIT_SLICE_SECONDS = 1.0
+
+
+@contextlib.contextmanager
+def validation_retry() -> Iterator[None]:
+    """Mark the calls made inside the block as a validation loop's retry."""
+    token = _RETRYING.set(True)
+    try:
+        yield
+    finally:
+        _RETRYING.reset(token)
 
 
 def _meter_of(ledger: Any) -> SpendMeter | None:
@@ -531,6 +561,8 @@ class SpendMeter:
     ) -> None:
         self.ceiling_usd = None if ceiling_usd is None else float(ceiling_usd)
         self._lock = threading.Lock()
+        # Woken whenever a reservation goes, for a call waiting on one.
+        self._drained = threading.Condition(self._lock)
         self._clock = clock or (lambda: datetime.now(UTC))
         self._operator: dict[str, Price] = {}
         for key, row in (prices or {}).items():
@@ -580,6 +612,14 @@ class SpendMeter:
         self._kinds: dict[str, dict[str, Any]] = {}
         # How many calls the ceiling refused.
         self._refused = 0
+        # A refusal made while other calls held reservations: whether anything
+        # still fits is asked again once none is outstanding.
+        self._pending_check: str | None = None
+        # The stage count so far; a kind of call counts as still planned only
+        # when it was made in the current stage.
+        self._generation = 0
+        # First calls and validation retries admitted, per kind of call.
+        self._calls_made: dict[str, list[int]] = {}
 
     @classmethod
     def from_settings(cls, cfg: Any) -> SpendMeter:
@@ -763,6 +803,8 @@ class SpendMeter:
                 self._in_flight[key] = total
                 self._loop_inputs[key] = inputs
                 self._reserved.pop(key, None)
+                self._drained.notify_all()
+            self._after_drain()
         except Exception as exc:  # noqa: BLE001 — telemetry never costs a run
             logger.debug("in-flight spend not noted (%s).", exc)
 
@@ -778,11 +820,31 @@ class SpendMeter:
                 sums[0] += total
                 sums[1] += cached
             self._reserved.pop(key, None)
+            self._drained.notify_all()
+        self._after_drain()
 
     def release(self, slot: Any) -> None:
         """The call reserved under ``slot`` has returned and its cost is on the ledger."""
         with self._lock:
             self._reserved.pop(slot, None)
+            self._drained.notify_all()
+        self._after_drain()
+
+    def begin_stage(self) -> None:
+        """A stage of the job has started: the kinds of call made before it are not planned now."""
+        with self._lock:
+            self._generation += 1
+
+    def _after_drain(self) -> None:
+        """A refusal made while calls were in flight is looked at again once none is."""
+        with self._lock:
+            said = self._pending_check
+            if said is None or self._reserved or self._exhausted is not None:
+                return
+            self._pending_check = None
+            fits = self._another_fits_locked(self._clock())
+        if not fits:
+            self._exhaust("a refusal", said)
 
     def spent(self) -> float:
         """What the job has spent: settled calls and the turns of running loops."""
@@ -894,13 +956,34 @@ class SpendMeter:
             return cap, f"{said}, bounded by its cap of {cap:,}"
         return tokens, said
 
+    def _planned_retries_locked(self, kind: str, firsts: int) -> tuple[int, str]:
+        """How many validation retries the ``firsts`` planned calls of ``kind`` are given.
+
+        One per planned call until a call of the kind was made; then at this
+        job's own rate for the kind, counted with that first assumed retry —
+        ``(retries + 1) / (first calls + 1)`` — so a call whose own retry has
+        not been asked yet is never planned without one.
+        """
+        made, retried = self._calls_made.get(kind, [0, 0])
+        if firsts <= 0:
+            return 0, ""
+        if made <= 0:
+            return firsts, "one per planned call (none of its kind made yet)"
+        planned = math.ceil(firsts * (retried + 1) / (made + 1) - 1e-9)
+        return planned, (
+            f"{retried} retr{'y' if retried == 1 else 'ies'} measured over {made} {kind} "
+            "call(s), counted with the one retry assumed before any was made"
+        )
+
     def _reserve_locked(
-        self, now: datetime, taking: str = ""
+        self, now: datetime, taking: str = "", retrying: bool = False
     ) -> tuple[float, list[dict[str, Any]]]:
         """The reserve kept for the planned calls still to come, and its derivation.
 
-        ``taking`` is the kind of a planned call being admitted now: its own
-        planned share is not in the reserve it is admitted against.
+        ``taking`` is the kind of a planned call being admitted now, and
+        ``retrying`` whether it is a validation retry: its own planned share
+        is not in the reserve it is admitted against. A first call being
+        admitted leaves its own possible retry planned.
 
         Each planned call is kept at what its admission will demand — its
         prompt as uncached input and its planned answer — so the reserve is
@@ -916,9 +999,11 @@ class SpendMeter:
             if kind not in self._tail:
                 continue
             model, count, allowed, cap = self._tail[kind]
-            if kind == taking and count > 0:
+            retried_for = count
+            if kind == taking and not retrying and count > 0:
                 count -= 1
-            if count <= 0:
+            retries, retries_said = self._planned_retries_locked(kind, retried_for)
+            if count <= 0 and retries <= 0:
                 continue
             row_price = self.price_of(model)
             if row_price is None:
@@ -936,15 +1021,21 @@ class SpendMeter:
                 else (share * price.cached + (1 - share) * price.input)
             )
             demand = (prompt * price.input + answer * price.output) / MILLION
-            usd = demand * count
+            # A retry is sent with the answer it corrects in its prompt.
+            retry_prompt = prompt + answer
+            retry_demand = (retry_prompt * price.input + answer * price.output) / MILLION
+            usd = demand * count + retry_demand * retries
             first_sent = bool(self._largest_prompt.get(f"tail:{kind}", 0)) or kind == taking
-            expected = sum(
-                (
-                    prompt * (price.input if index == 0 and not first_sent else later_rate)
-                    + answer * price.output
+            expected = (
+                sum(
+                    (
+                        prompt * (price.input if index == 0 and not first_sent else later_rate)
+                        + answer * price.output
+                    )
+                    / MILLION
+                    for index in range(count)
                 )
-                / MILLION
-                for index in range(count)
+                + retries * (retry_prompt * later_rate + answer * price.output) / MILLION
             )
             total += usd
             rows.append(
@@ -963,6 +1054,9 @@ class SpendMeter:
                         if share is None
                         else "calls after the first of their conversation"
                     ),
+                    "retries": retries,
+                    "retries_from": retries_said,
+                    "retry_prompt_tokens": retry_prompt,
                     "usd": round(usd, 6),
                     "expected_usd": round(expected, 6),
                 }
@@ -1002,6 +1096,8 @@ class SpendMeter:
         slot: Any,
         holdable: bool,
         now: datetime,
+        count_reserved: bool = True,
+        retrying: bool = False,
     ) -> _Decision:
         decision = _Decision(name)
         decision.cap = cap
@@ -1012,9 +1108,11 @@ class SpendMeter:
             return decision
         if price is None:
             return decision
-        others = sum(v for k, v in self._reserved.items() if k is not slot)
+        others = (
+            sum(v for k, v in self._reserved.items() if k is not slot) if count_reserved else 0.0
+        )
         committed = self._settled + sum(self._in_flight.values()) + others
-        reserve = self._reserve_locked(now, taking=kind if tail else "")[0]
+        reserve = self._reserve_locked(now, taking=kind if tail else "", retrying=retrying)[0]
         available = float(self.ceiling_usd or 0.0) - committed - reserve
         input_cost = prompt_tokens * price.input / MILLION
         minimum, minimum_said = self._minimum_locked(kind, name, cap)
@@ -1138,31 +1236,67 @@ class SpendMeter:
         prompt_tokens = -(-max(0, int(prompt_chars)) // CHARS_PER_TOKEN)
         cap = max(0, int(cap_tokens or 0))
         name = _clean(model) or "the model"
-        now = self._clock()
-        price = self._admission_price(model, now, deadline_s)
-        # Latched here as well, so a call admitted after the ceiling was
-        # reached is read against the latch.
-        self.reached()
-        with self._lock:
-            self._note_kind_locked(kind, model, prompt_tokens, cap, holdable, deadline_s)
-            decision = self._decide_locked(
-                kind=kind,
-                name=name,
-                price=price,
-                prompt_tokens=prompt_tokens,
-                cap=cap,
-                slot=slot,
-                holdable=holdable,
-                now=now,
-            )
-            if not decision.refused:
-                key = self._prompt_key(kind)
-                if prompt_tokens > self._largest_prompt.get(key, 0):
-                    self._largest_prompt[key] = prompt_tokens
-                if kind in TAIL_KINDS and kind in self._tail and self._tail[kind][1] > 0:
-                    self._tail[kind][1] -= 1
-                if slot is not None and price is not None:
-                    self._reserved[slot] = decision.reservation
+        retrying = _RETRYING.get()
+        # A call that does not fit only because other calls in flight hold
+        # their worst case waits for them to settle — most settle far below
+        # it — for as long as its own deadline allows.
+        waits_until = time.monotonic() + (_default_deadline() if deadline_s is None else deadline_s)
+        noted = False
+        while True:
+            now = self._clock()
+            price = self._admission_price(model, now, deadline_s)
+            # Latched here as well, so a call admitted after the ceiling was
+            # reached is read against the latch.
+            self.reached()
+            with self._lock:
+                if not noted:
+                    self._note_kind_locked(kind, model, prompt_tokens, cap, holdable, deadline_s)
+                    noted = True
+                decision = self._decide_locked(
+                    kind=kind,
+                    name=name,
+                    price=price,
+                    prompt_tokens=prompt_tokens,
+                    cap=cap,
+                    slot=slot,
+                    holdable=holdable,
+                    now=now,
+                    retrying=retrying,
+                )
+                others_in_flight = any(k is not slot for k in self._reserved)
+                if decision.refused and others_in_flight:
+                    unreserved = self._decide_locked(
+                        kind=kind,
+                        name=name,
+                        price=price,
+                        prompt_tokens=prompt_tokens,
+                        cap=cap,
+                        slot=slot,
+                        holdable=holdable,
+                        now=now,
+                        count_reserved=False,
+                        retrying=retrying,
+                    )
+                    left = waits_until - time.monotonic()
+                    if not unreserved.refused and left > 0:
+                        self._drained.wait(timeout=min(left, _WAIT_SLICE_SECONDS))
+                        continue
+                if not decision.refused:
+                    key = self._prompt_key(kind)
+                    if prompt_tokens > self._largest_prompt.get(key, 0):
+                        self._largest_prompt[key] = prompt_tokens
+                    made = self._calls_made.setdefault(kind, [0, 0])
+                    made[1 if retrying else 0] += 1
+                    if (
+                        not retrying
+                        and kind in TAIL_KINDS
+                        and kind in self._tail
+                        and self._tail[kind][1] > 0
+                    ):
+                        self._tail[kind][1] -= 1
+                    if slot is not None and price is not None:
+                        self._reserved[slot] = decision.reservation
+            break
         if decision.refused:
             said = f"a {kind} call of {name} was not made: {decision.refused}"
             with self._lock:
@@ -1231,23 +1365,25 @@ class SpendMeter:
                 "cap": cap,
                 "holdable": holdable,
                 "deadline": deadline_s,
+                "generation": self._generation,
             }
             return
         if prompt_tokens < row["prompt"]:
             row["prompt"] = prompt_tokens
         row["model"], row["cap"], row["deadline"] = model, cap, deadline_s
         row["holdable"] = bool(row["holdable"] or holdable)
+        row["generation"] = self._generation
 
     def _another_fits_locked(self, now: datetime) -> bool:
         """Whether a call of any kind this job makes would still be admitted.
 
-        Each kind is asked at the smallest prompt it was sent with, its cap and
-        its own holdability, against what is left after the reserve. The
-        verdict, the report and a loop's closing answer are left out: they are
-        made after exhaustion too.
+        Each kind still planned — made in the current stage — is asked at the
+        smallest prompt it was sent with, its cap and its own holdability,
+        against what is left after the reserve. The verdict, the report and a
+        loop's closing answer are left out: they are made after exhaustion too.
         """
         for kind, row in self._kinds.items():
-            if kind in AFTER_EXHAUSTION_KINDS:
+            if kind in AFTER_EXHAUSTION_KINDS or row.get("generation") != self._generation:
                 continue
             price = self._admission_price(str(row["model"]), now, row["deadline"])
             decision = self._decide_locked(
@@ -1265,9 +1401,21 @@ class SpendMeter:
         return False
 
     def _exhaust_if_nothing_fits(self, said: str, now: datetime) -> None:
-        """After a refusal: latch the exhaustion only when no further call of any kind fits."""
+        """After a refusal: latch the exhaustion only when no further call of any kind fits.
+
+        Never while other calls hold reservations: what they reserved is their
+        worst case, and what they settle at is usually far below it. The
+        question is asked again once none is outstanding (:meth:`_after_drain`).
+        """
         with self._lock:
             if self._exhausted is not None:
+                return
+            if self._reserved:
+                self._pending_check = said
+                logger.info(
+                    "spend ceiling: that call was refused while other calls were in flight; "
+                    "whether anything still fits is asked again once they settle."
+                )
                 return
             fits = self._another_fits_locked(now)
         if fits:

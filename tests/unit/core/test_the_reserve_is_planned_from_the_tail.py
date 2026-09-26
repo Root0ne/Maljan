@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 import pytest
 from langchain_core.messages import AIMessage
 
-from maljan.core.spend import LOOP_TURN_CALL, SpendCeilingStop, SpendMeter
+from maljan.core.spend import LOOP_TURN_CALL, SpendCeilingStop, SpendMeter, validation_retry
 from maljan.llm.context_window import CHARS_PER_TOKEN
 
 FLASH = "deepseek-flash"
@@ -145,18 +145,22 @@ class TestTheFirstCallsOfAJob:
             )
         assert meter.exhausted() is False
         reserve = meter.snapshot()["reserve_usd"]
-        # The plan with no share measured: the verdict at what its admission
-        # demands, the first report call uncached and the rest at the cached rate.
-        assert reserve < 0.60
-        assert reserve == pytest.approx(
-            _a_long_paid_run(FRIDAY_OFF_PEAK).snapshot()["reserve_usd"],
-            abs=0.10,
-        )
+        # With no single-shot answer measured the verdict is planned at its
+        # whole cap, and every planned call with one validation retry: the
+        # largest the plan is, and the tool phases still keep most of the
+        # ceiling.
+        assert reserve < 0.80
+        assert 2.00 - reserve > 1.20
 
     def test_at_the_peak_rate_the_plan_still_leaves_the_tool_phases_the_most(self) -> None:
         meter = SpendMeter(2.00, clock=lambda: FRIDAY_PEAK)
         _plan(meter)
         meter.settle({"input_tokens": 20_000, "output_tokens": 3_000}, FLASH, LOOP_TURN_CALL)
+        # Once a single-shot answer is measured (a validation retry of 46k
+        # prompt tokens and a 9k answer), the plan stops counting on the
+        # verdict's whole cap.
+        meter.settle({"input_tokens": 46_000, "output_tokens": 9_000}, FLASH)
+        meter._largest_prompt["single"] = 46_000
         assert 2.00 - meter.snapshot()["reserve_usd"] >= LONG_RUN_LOOPS_PEAK
 
 
@@ -194,20 +198,28 @@ class TestAPlannedCallSpendsItsOwnShare:
         meter = SpendMeter(1.0, prices, table={})
         meter.settle({"input_tokens": 0, "output_tokens": 10_000}, "m")  # 0.10 spent
         meter.plan_tail({"verdict": ("m", 1, 1_000), "report": ("m", 1, 1_000)})
-        # The report's planned share: 10,000 answer tokens at 10 USD a million.
+        # Kept: the verdict's own validation retry, the report call and its
+        # retry, 10,000 answer tokens at 10 USD a million each.
         held = meter.admit(kind="verdict", model="m", prompt_chars=0, cap_tokens=393_216)
-        assert held is not None and abs(held - 80_000) <= 1  # 0.90 left less 0.10 kept
+        assert held is not None and abs(held - 60_000) <= 1  # 0.90 left less 0.30 kept
         said = meter.snapshot()["held_calls"][-1]
         assert "being kept for the other planned verdict and report calls" in said
 
-    def test_an_unplanned_retry_spends_only_what_is_left_above_the_plan(self) -> None:
+    def test_a_planned_retry_is_made_and_an_unplanned_call_spends_only_above_the_plan(
+        self,
+    ) -> None:
         prices = {"m": {"input_usd_per_mtok": 0.0, "output_usd_per_mtok": 10.0}}
-        meter = SpendMeter(0.45, prices, table={})
+        meter = SpendMeter(0.75, prices, table={})
         meter.settle({"input_tokens": 0, "output_tokens": 10_000}, "m")  # 0.10 spent
         meter.plan_tail({"verdict": ("m", 1, 1_000), "report": ("m", 2, 1_000)})
         meter.admit(kind="verdict", model="m", prompt_chars=0, cap_tokens=10_000)
-        meter.settle({"input_tokens": 0, "output_tokens": 10_000}, "m")  # 0.20 spent
-        # A second verdict call is not planned: the two reports' 0.20 stay kept.
+        meter.settle({"input_tokens": 0, "output_tokens": 10_000}, "m", "verdict")  # 0.20
+        # The verdict's validation retry was planned: it is made.
+        with validation_retry():
+            assert meter.admit(kind="verdict", model="m", prompt_chars=0, cap_tokens=10_000) is None
+        meter.settle({"input_tokens": 0, "output_tokens": 10_000}, "m", "verdict")  # 0.30
+        # A third verdict call is planned by nothing: the two reports and their
+        # retries, 0.40, stay kept.
         with pytest.raises(SpendCeilingStop, match="other planned verdict and report calls"):
             meter.admit(kind="verdict", model="m", prompt_chars=0, cap_tokens=10_000)
         assert meter.admit(kind="report", model="m", prompt_chars=0, cap_tokens=10_000) is None

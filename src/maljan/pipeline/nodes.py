@@ -1969,7 +1969,17 @@ def claims_source(container: ServiceContainer, key: str, stage: Any) -> str:
 
 
 def announce_started(container: ServiceContainer, stage: Any) -> None:
-    """``stage_started``, from the one node of the stage that announces it."""
+    """``stage_started``, from the one node of the stage that announces it.
+
+    The spend meter hears it too: the kinds of call it asks "does anything
+    still fit" of are the ones made since the latest stage began.
+    """
+    meter = _spend_meter(container)
+    if meter is not None:
+        try:
+            meter.begin_stage()
+        except Exception as exc:  # noqa: BLE001 — telemetry never costs a stage
+            logger.debug("the spend meter did not hear the stage start (%s).", exc)
     emit(
         container.event_sink,
         "stage_started",

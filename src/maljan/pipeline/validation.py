@@ -38,6 +38,7 @@ from maljan.analysis.corroboration import corroboration_row as corroboration_row
 from maljan.analysis.corroboration import corroboration_sources as corroboration_sources
 from maljan.analysis.technique_ids import MITRE_ATTACK_SOURCES, TECHNIQUE_ID_EXACT_RE
 from maljan.core.logger import logger
+from maljan.core.spend import validation_retry
 from maljan.pipeline.events import (
     VALIDATION_RESOLVED,
     VALIDATION_RETRIED,
@@ -5673,7 +5674,9 @@ async def retry_with_feedback[T](
         shown.extend(violations)
         turns = following
         retries += 1
-        answer = await run(turns)
+        # Counted as a retry by the spend meter, which plans the tail's.
+        with validation_retry():
+            answer = await run(turns)
         parsed = parse(answer)
         violations = _collect(parsed, validators)
     if feed is not None:
@@ -5729,7 +5732,8 @@ def retry_with_feedback_sync[T](
         keep_answer = not any(v.code in drop_answer_for for v in violations)
         turns = _with_feedback(turns, answer, violations, keep_answer=keep_answer, closing=closing)
         retries += 1
-        answer = run(turns)
+        with validation_retry():
+            answer = run(turns)
         parsed = parse(answer)
         violations = _collect(parsed, validators)
     if retries and keep is not None:
