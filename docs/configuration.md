@@ -1244,6 +1244,19 @@ fraction:
   in its prompt. The rows say how many retries are kept and from what
   (`retries`, `retries_from`, `retry_prompt_tokens`).
 
+*Before anything is measured the reserve is at its largest.* Until a
+single-shot answer has been measured, the verdict is kept at its whole
+configured output cap, and until a verdict call has been made, with one retry
+at that cap as well: the verdict's cap is kept twice. On `deepseek-flash`
+(a 393,216-token cap) that is about 0.47 USD at the off-peak rate and about
+0.94 USD at the peak rate, before any report call is counted. Early tool-loop
+turns spend only above it, so under a low ceiling at peak rates the first
+turns are held short or refused until the first single-shot answer (a
+revision, a chunk) is measured; the reserve then shrinks to what this job's
+calls measure. A ceiling well above twice the verdict's cap at peak rates, or
+an operator-set `llm.judge_max_tokens` that caps the verdict, avoids it. With
+no ceiling none of this applies.
+
 Each row of `run_summary.spend.reserve` also states its expected charge
 (`expected_usd`): the first call of a kind with its prompt uncached, and the
 ones after it, which share its prefix, at this job's cache-hit share for the
