@@ -6272,7 +6272,7 @@ class BaseAnalyst(BudgetMeter, ABC):
         record = getattr(ledger, "record_claims_unread", None)
         if callable(record):
             try:
-                record(sentence)
+                record(sentence, self.name, int(revision_round))
             except Exception as exc:  # noqa: BLE001 — a record never costs an analysis
                 self.logger.debug("%s: the unread claims were not recorded (%s).", self.name, exc)
 

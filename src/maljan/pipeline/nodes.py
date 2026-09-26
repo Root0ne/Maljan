@@ -1866,6 +1866,26 @@ def stage_key_of(stage: Any, default: str) -> str:
 ROOM_SPEAKER = "pipeline"
 
 
+def claims_unread_in_force(
+    recorded: Sequence[tuple[str, int, str]], isr_reports: Mapping[str, Any]
+) -> list[str]:
+    """The unread-claims reasons of each analyst's answer in force, in the order recorded.
+
+    A reason is about one answer, an analyst's in one round. When the answer
+    in force is another round's, the reason is no longer about the findings
+    the run carries, and it is left to the log. An analyst with no answer in
+    the reports keeps every reason recorded for it.
+    """
+    out: list[str] = []
+    for agent, revision_round, sentence in recorded:
+        isr = isr_reports.get(agent)
+        if isr is not None and int(getattr(isr, "revision_round", 0) or 0) != int(revision_round):
+            continue
+        if sentence not in out:
+            out.append(str(sentence))
+    return out
+
+
 def label_of(container: ServiceContainer, key: str) -> str:
     """The label an operator gave this agent, or its key. Never raises."""
     try:
@@ -3859,12 +3879,16 @@ def make_judge_node(
                     if str(reason) not in _degradation_reasons
                 )
             # An analyst answer whose claims were begun and not all read: the
-            # findings the run carries are fewer than the analyst wrote.
+            # findings the run carries are fewer than the analyst wrote. Only
+            # for the answer in force; a round a later answer replaced is in
+            # the log.
             with suppress(Exception):
                 _degradation_reasons.extend(
-                    str(reason)
-                    for reason in container.get_truncation_ledger().claims_unread
-                    if str(reason) not in _degradation_reasons
+                    reason
+                    for reason in claims_unread_in_force(
+                        container.get_truncation_ledger().claims_unread_by, isr_reports
+                    )
+                    if reason not in _degradation_reasons
                 )
             if _failed_analysts:
                 _degradation_reasons.append(f"analyst failures: {', '.join(_failed_analysts)}")

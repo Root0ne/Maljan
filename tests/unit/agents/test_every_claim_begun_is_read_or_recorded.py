@@ -234,3 +234,23 @@ def test_a_kept_technique_line_is_asked_about_once() -> None:
     (question,) = [v for v in parse_violations(isr) if v.code == TECHNIQUE_LINE_UNREAD_CODE]
     assert '"T1055, T1106"' in question.message
     assert "one claim per technique" in question.message
+
+
+def test_only_the_answer_in_force_carries_its_unread_claims_reason() -> None:
+    from maljan.pipeline.nodes import claims_unread_in_force
+    from maljan.schemas.isr_models import AgentISR
+
+    analyst = _analyst()
+    analyst._text_to_isr(MALFORMED, revision_round=0)
+    analyst._text_to_isr(REVISION, revision_round=2)
+    recorded = analyst.truncation_ledger.claims_unread_by
+    assert [(agent, rnd) for agent, rnd, _ in recorded] == [("reverser", 0)]
+
+    later = {"reverser": AgentISR(agent_id="reverser", domain="static", revision_round=2)}
+    assert claims_unread_in_force(recorded, later) == []
+    # Still in the run's record of every read, and in the log.
+    assert len(analyst.truncation_ledger.claims_unread) == 1
+
+    same = {"reverser": AgentISR(agent_id="reverser", domain="static", revision_round=0)}
+    assert claims_unread_in_force(recorded, same) == [recorded[0][2]]
+    assert claims_unread_in_force(recorded, {}) == [recorded[0][2]]

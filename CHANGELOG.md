@@ -2249,8 +2249,16 @@ change landed on `main`.
   against the claims read. Claims begun and not read (a block the reader could
   not split, one the static, dynamic and network analysts' stricter reading
   turns away for want of an EVIDENCE line) are logged and recorded as a
-  degradation reason naming the analyst and both numbers; a block that stated
-  no confidence is counted apart and asked about, as before.
+  degradation reason naming the analyst and both numbers, for the answer in
+  force; a block that stated no confidence is counted apart and asked about,
+  as before. Every heading opens a block, so a claim is never read with the
+  next claim's CONFIDENCE, TECHNIQUE or EVIDENCE; list-marker headings count;
+  nothing after DISPUTES is read.
+- **A technique line is one id, or it is kept whole and asked about.**
+  `TECHNIQUE: T1027.002 not supported` was read as a claim of T1027.002, and
+  `T1055, T1106` as T1055 alone. A line that is more than one id or `NONE`
+  now claims no id, is kept on the claim as `technique_line`, and the
+  analyst is asked once for one id per claim (`isr.technique_line_unread`).
 - **No OpenAI-compatible request sends a tool call without its reply.** A turn
   whose call had arguments cut mid-string kept that call in
   `invalid_tool_calls`, which the tool node does not run and the OpenAI client
