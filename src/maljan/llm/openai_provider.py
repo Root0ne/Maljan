@@ -581,8 +581,12 @@ def with_answered_tool_calls(chat_class: Any) -> Any:
         if written:
             logger.warning(
                 "openai provider: %d tool call(s) in the history had no reply; each is sent "
-                "with a reply saying it was not run.",
+                "with a reply saying so (%d of them with arguments that did not parse, said "
+                "not run).",
                 written,
+                sum(
+                    1 for m in answered if isinstance(m, dict) and m.get("content") == NOT_RUN_REPLY
+                ),
             )
             payload["messages"] = answered
         return payload
